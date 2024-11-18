@@ -41,7 +41,7 @@ cat <<EOT
 
 <div class="card">
 <h2>Camera Controls</h2>
-<img id="snapshot" src="http://$ipadd:3000/preview.jpeg"/>
+<img id="snapshot" style="max-width:98%" src="http://$ipadd:3000/preview.jpeg"/>
 <br>
 <br>
 <button onclick="window.location.href='webui?token=$token&command=ptzinit'" id="home">Init_PTZ</button>
