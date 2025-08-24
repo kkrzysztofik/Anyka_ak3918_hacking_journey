@@ -1,5 +1,5 @@
-# Place in /etc/jffs2/
-These are the files that go in `/etc/jffs2/`
+# Place in /data/
+These are the files that go in `/data/`
 
 # Settings
 

@@ -1,17 +1,19 @@
 #!/bin/sh
 
-if [[ -f /etc/jffs2/www/index.html ]]; then
-    source /etc/jffs2/www/cgi-bin/header
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+
+if [ -f /data/www/index.html ]; then
+  . /data/www/cgi-bin/header
 else
-    source /mnt/anyka_hack/web_interface/www/cgi-bin/header
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/header
 fi
-if [[ -f /tmp/token.txt ]] && [[ "$token" == "$(readline 1 /tmp/token.txt)" ]]; then
+if [ -f /tmp/token.txt ] && [ "$token" = "$(readline 1 /tmp/token.txt)" ]; then
 #import settings
-source /etc/jffs2/gergesettings.txt
+. /data/gergesettings.txt
 
 select_sensor=""
-for i in $(ls /usr/modules/sensor*.ko); do
-  if [[ "$i" == "$sensor_kern_module" ]]; then
+for i in $(ls /usr/modules/sensor*.ko 2>/dev/null); do
+  if [ "$i" = "$sensor_kern_module" ]; then
     select_sensor="$select_sensor<OPTION SELECTED>$i"
   else
     select_sensor="$select_sensor<OPTION>$i"
@@ -19,19 +21,20 @@ for i in $(ls /usr/modules/sensor*.ko); do
 done
 
 image_upside_down=$(echo "$extra_args" | grep ' -u')
-if [[ ${#image_upside_down} -gt 1 ]]; then
+if [ "$(expr length "$image_upside_down")" -gt 1 ]; then
   image_upside_down=1
 else
   image_upside_down=0
 fi
 
-if [[ ${extra_args:3:1} -gt 1 ]] && [[ ${extra_args:3:1} -lt 4 ]]; then
+third_char=$(echo "$extra_args" | cut -c4)
+if [ "$third_char" -gt 1 ] && [ "$third_char" -lt 4 ]; then
   ir_invert=1
 else
   ir_invert=0
 fi
 
-if [[ ${extra_args:3:1} -gt 2 ]]; then
+if [ "$third_char" -gt 2 ]; then
   day_night_invert=1
 else
   day_night_invert=0
@@ -96,9 +99,9 @@ Preview image_width <br>
 <input type="text" name="image_width" size=40 value="$image_width"><br><br>
 Preview image_height <br>
 <input type="text" name="image_height" size=40 value="$image_height"><br><br>
-Upside Down image (rotate 180 degrees) <input type="checkbox" name="image_upside_down" value="1" $(if [ 1 == $image_upside_down ]; then echo 'checked'; fi)><br><br>
-Day/Night mode invert (black&white vs colour image) <input type="checkbox" name="day_night_invert" value="1" $(if [ 1 == $day_night_invert ]; then echo 'checked'; fi)><br><br>
-IR filter invert (image looks pink if set wrong) <input type="checkbox" name="ir_invert" value="1" $(if [ 1 == $ir_invert ]; then echo 'checked'; fi)><br><br>
+Upside Down image (rotate 180 degrees) <input type="checkbox" name="image_upside_down" value="1" $( [ 1 = "$image_upside_down" ] && echo 'checked' )><br><br>
+Day/Night mode invert (black&white vs colour image) <input type="checkbox" name="day_night_invert" value="1" $( [ 1 = "$day_night_invert" ] && echo 'checked' )><br><br>
+IR filter invert (image looks pink if set wrong) <input type="checkbox" name="ir_invert" value="1" $( [ 1 = "$ir_invert" ] && echo 'checked' )><br><br>
 <input type="submit" class="button" value="Save"></form>
 </div>
 
@@ -119,6 +122,12 @@ ptz_daemon camera movement [default 1] <input type="checkbox" name="run_ptz_daem
 Invert camera movement <input type="checkbox" name="ptz_invert" value="1" $(if [ 1 == $ptz_invert ]; then echo 'checked'; fi)><br>
 Home the camera ptz at bootup [default 0] <input type="checkbox" name="ptz_init_on_boot" value="1" $(if [ 1 == $ptz_init_on_boot ]; then echo 'checked'; fi)><br>
 Libre-Anyka-App (RTSP, snapshot and motion trigger recording) [default 1] <input type="checkbox" name="run_libre_anyka" value="1" $(if [ 1 == $run_libre_anyka ]; then echo 'checked'; fi)><br>
+FTP (File Transfer Protocol) [default 1] <input type="checkbox" name="run_ftp" value="1" $( [ 1 = "$run_ftp" ] && echo 'checked' )><br>
+Telnet [default 1] <input type="checkbox" name="run_telnet" value="1" $( [ 1 = "$run_telnet" ] && echo 'checked' )><br>
+ptz_daemon camera movement [default 1] <input type="checkbox" name="run_ptz_daemon" value="1" $( [ 1 = "$run_ptz_daemon" ] && echo 'checked' )><br>
+Invert camera movement <input type="checkbox" name="ptz_invert" value="1" $( [ 1 = "$ptz_invert" ] && echo 'checked' )><br>
+Home the camera ptz at bootup [default 0] <input type="checkbox" name="ptz_init_on_boot" value="1" $( [ 1 = "$ptz_init_on_boot" ] && echo 'checked' )><br>
+Libre-Anyka-App (RTSP, snapshot and motion trigger recording) [default 1] <input type="checkbox" name="run_libre_anyka" value="1" $( [ 1 = "$run_libre_anyka" ] && echo 'checked' )><br>
 Motion recording in seconds [default 0 to disable] <input type="text" name="md_record_sec" value="$md_record_sec" size=3 maxlength=3><br>
 <input type="submit" class="button" value="Save"></form>
 </div>
@@ -131,6 +140,8 @@ Motion recording in seconds [default 0 to disable] <input type="text" name="md_r
 <h2>Advanced</h2>
 This camera has modified rootfs that does not launch anyka_ipc <input type="checkbox" name="rootfs_modified" value="1" $(if [ 1 == $rootfs_modified ]; then echo 'checked'; fi)><br>
 Run anyka_ipc [default 0] <input type="checkbox" name="run_ipc" value="1" $(if [ 1 == $run_ipc ]; then echo 'checked'; fi)><br><br>
+This camera has modified rootfs that does not launch anyka_ipc <input type="checkbox" name="rootfs_modified" value="1" $( [ 1 = "$rootfs_modified" ] && echo 'checked' )><br>
+Run anyka_ipc [default 0] <input type="checkbox" name="run_ipc" value="1" $( [ 1 = "$run_ipc" ] && echo 'checked' )><br><br>
 <input type="submit" class="button" value="Save"></form>
 </div>
 
@@ -140,9 +151,9 @@ Run anyka_ipc [default 0] <input type="checkbox" name="run_ipc" value="1" $(if [
 </html>
 EOT
 else
-    if [[ -f /etc/jffs2/www/index.html ]]; then
-        source /etc/jffs2/www/cgi-bin/footer
-    else
-        source /mnt/anyka_hack/web_interface/www/cgi-bin/footer
-    fi
+  if [ -f /data/www/index.html ]; then
+    . /data/www/cgi-bin/footer
+  else
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/footer
+  fi
 fi

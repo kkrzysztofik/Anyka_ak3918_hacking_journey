@@ -1,19 +1,21 @@
-#!/bin/bash
+#!/bin/sh
 
 readline() {
   linetoread=$1
   file=$2
-  sed $linetoread'q;d' $file
+  sed ${linetoread}q;d $file
 }
 #https://www.freecodecamp.org/news/url-encoded-characters-reference/
 QUERY_STRING="${QUERY_STRING//&/ }"
 query_out=""
 for element in $QUERY_STRING; do
-  splitelement="${element//%/ %}"
+  splitelement=$(echo "$element" | sed 's/%/ %/g')
   for i in $splitelement; do
-    #query_out="$query_out"
-    if [[ ${i:0:1} == "%" ]]; then
-      query_out="$query_out"$(printf "\x${i:1:2}")$(echo -n "${i:3}")
+    firstchar=$(echo "$i" | cut -c1)
+    if [ "$firstchar" = "%" ]; then
+      hex=$(echo "$i" | cut -c2-3)
+      rest=$(echo "$i" | cut -c4-)
+      query_out="$query_out"$(printf "\x$hex")"$rest"
     else
       query_out="$query_out$i"
     fi
@@ -23,7 +25,7 @@ done
 QUERY_STRING="$query_out"
 
 for i in $QUERY_STRING; do
-  eval $i
+  eval "$i"
 done
 
 

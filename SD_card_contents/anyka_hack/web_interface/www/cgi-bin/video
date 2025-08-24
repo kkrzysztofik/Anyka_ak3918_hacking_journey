@@ -1,13 +1,15 @@
 #!/bin/sh
 #
 
-if [[ -f /etc/jffs2/www/index.html ]]; then
-    source /etc/jffs2/www/cgi-bin/header
+    [ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+
+if [ -f /data/www/index.html ]; then
+    . /data/www/cgi-bin/header
 else
-    source /mnt/anyka_hack/web_interface/www/cgi-bin/header
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/header
 fi
-if [[ -f /tmp/token.txt ]] && [[ "$token" == "$(readline 1 /tmp/token.txt)" ]]; then
-if [[ "$scan" == "true" ]]; then
+if [ -f /tmp/token.txt ] && [ "$token" = "$(readline 1 /tmp/token.txt)" ]; then
+if [ "$scan" = "true" ]; then
 sh /mnt/anyka_hack/ffmpeg/wrap_mp4.sh
 cat <<EOT
 <html>
@@ -54,9 +56,9 @@ cat <<EOT
 EOT
 fi
 else
-    if [[ -f /etc/jffs2/www/index.html ]]; then
-        source /etc/jffs2/www/cgi-bin/footer
+    if [ -f /data/www/index.html ]; then
+        . /data/www/cgi-bin/footer
     else
-        source /mnt/anyka_hack/web_interface/www/cgi-bin/footer
+        . /mnt/anyka_hack/web_interface/www/cgi-bin/footer
     fi
 fi

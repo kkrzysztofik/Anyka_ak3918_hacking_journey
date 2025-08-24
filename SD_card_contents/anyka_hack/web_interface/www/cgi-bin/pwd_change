@@ -1,20 +1,23 @@
 #!/bin/sh
 
-if [[ -f /etc/jffs2/www/index.html ]]; then
-    source /etc/jffs2/www/cgi-bin/header
+
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+
+if [ -f /data/www/index.html ]; then
+  . /data/www/cgi-bin/header
 else
-    source /mnt/anyka_hack/web_interface/www/cgi-bin/header
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/header
 fi
-if [[ -f /tmp/token.txt ]] && [[ "$token" == "$(readline 1 /tmp/token.txt)" ]]; then
+if [ -f /tmp/token.txt ] && [ "$token" = "$(readline 1 /tmp/token.txt)" ]; then
 
 message_banner=""
-if [[ ${#webui_password} -gt 3 ]]; then
-  if [[ "$webui_password" == "$webui_conf_password" ]]; then
+if [ "$(expr length "$webui_password")" -gt 3 ]; then
+  if [ "$webui_password" = "$webui_conf_password" ]; then
     message_banner="<div class=\"banner\">Password change success<br><br><button onclick=\"window.location.href='login'\">Return to Login</button></div>"
-    random="$(dd if=/dev/urandom bs=30 count=1)"
-    salt=$random$RANDOM
-    echo "$salt$webui_password" | md5sum >/etc/jffs2/webui.hash
-    echo "$salt">>/etc/jffs2/webui.hash
+    random_hex=$(head -c 16 /dev/urandom | hexdump -v -e '1/1 "%02x"')
+    salt=${random_hex}${RANDOM}
+    echo "${salt}${webui_password}" | md5sum >/data/webui.hash
+    echo "$salt" >>/data/webui.hash
   else
     message_banner="<div class=\"banner\">Passwords too short or do not match!<br><br><button onclick=\"window.location.href='webui?token=$token'\"> Back </button></div>"
   fi
@@ -41,9 +44,9 @@ $message_banner
 EOT
 
 else
-    if [[ -f /etc/jffs2/www/index.html ]]; then
-        source /etc/jffs2/www/cgi-bin/footer
-    else
-        source /mnt/anyka_hack/web_interface/www/cgi-bin/footer
-    fi
+  if [ -f /data/www/index.html ]; then
+    . /data/www/cgi-bin/footer
+  else
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/footer
+  fi
 fi

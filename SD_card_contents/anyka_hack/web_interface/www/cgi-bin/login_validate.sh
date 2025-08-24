@@ -1,17 +1,13 @@
 #!/bin/sh
-#
-readline() {
-  linetoread=$1
-  file=$2
-  sed $linetoread'q;d' $file
-}
+# Login validation script
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
 
 echo "Content-type: text/html"
 echo ""
-creds=`echo "$QUERY_STRING" | awk '{split($0,array,"&")} END{print array[1]}' | awk '{split($0,array,"=")} END{print array[2]}'`
-if [[ "$(echo $(readline 2 /etc/jffs2/webui.hash)$creds | md5sum )" == "$(readline 1 /etc/jffs2/webui.hash)" ]]; then
-random="$(dd if=/dev/urandom bs=100 count=1)"
-token=`echo $random$RANDOM | sed 's/[^0-9a-zA-Z]*//g'`;
+creds=$(echo "$QUERY_STRING" | awk '{split($0,a,"&")} END{print a[1]}' | awk '{split($0,a,"=")} END{print a[2]}')
+hash_input="$(readline 2 /data/webui.hash)$creds"
+if [ "$(echo $hash_input | md5sum )" = "$(readline 1 /data/webui.hash)" ]; then
+token=$(rand_token)
 cat <<EOT
 <html>
     <head>
@@ -25,9 +21,9 @@ EOT
 echo "$token">/tmp/token.txt
 
 else
-    if [[ -f /etc/jffs2/www/index.html ]]; then
-        source /etc/jffs2/www/cgi-bin/footer
+    if [ -f /data/www/index.html ]; then
+        . /data/www/cgi-bin/footer
     else
-        source /mnt/anyka_hack/web_interface/www/cgi-bin/footer
+        . /mnt/anyka_hack/web_interface/www/cgi-bin/footer
     fi
 fi

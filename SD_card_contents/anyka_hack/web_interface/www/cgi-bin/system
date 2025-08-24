@@ -1,16 +1,18 @@
 #!/bin/sh
 
-if [[ -f /etc/jffs2/www/index.html ]]; then
-    source /etc/jffs2/www/cgi-bin/header
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+
+if [ -f /data/www/index.html ]; then
+  . /data/www/cgi-bin/header
 else
-    source /mnt/anyka_hack/web_interface/www/cgi-bin/header
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/header
 fi
-if [[ -f /tmp/token.txt ]] && [[ "$token" == "$(readline 1 /tmp/token.txt)" ]]; then
+if [ -f /tmp/token.txt ] && [ "$token" = "$(readline 1 /tmp/token.txt)" ]; then
 
 #import settings
-source /etc/jffs2/gergesettings.txt
+. /data/gergesettings.txt
 
-if [[ "$command" == "reboot" ]]; then
+if [ "$command" = "reboot" ]; then
   reboot
 fi
 
@@ -19,7 +21,7 @@ ipadd=`ip route get 1 | awk '{print $NF;exit}'`
 uptime=`uptime`
 storage_info="<table style=\"margin: 0px auto\"><tr>"
 table_string=$(df -h | head -n 1)
-table_string="${table_string//Mounted on/Mounted_on}"
+table_string="$(echo "$table_string" | sed 's/Mounted on/Mounted_on/g')"
 for i in $table_string; do
   storage_info="$storage_info<th>$i</th>"
 done
@@ -30,7 +32,7 @@ for i in $table_string; do
 done
 storage_info="$storage_info</tr>"
 table_string=$(df -h | grep mmcblk0)
-if [[ ${#table_string} -gt 3 ]]; then
+if [ "$(expr length "$table_string")" -gt 3 ]; then
   storage_info="$storage_info<tr>"
   for i in $table_string; do
     storage_info="$storage_info<th>$i</th>"
@@ -88,9 +90,9 @@ $storage_info
 EOT
 
 else
-    if [[ -f /etc/jffs2/www/index.html ]]; then
-        source /etc/jffs2/www/cgi-bin/footer
-    else
-        source /mnt/anyka_hack/web_interface/www/cgi-bin/footer
-    fi
+  if [ -f /data/www/index.html ]; then
+    . /data/www/cgi-bin/footer
+  else
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/footer
+  fi
 fi

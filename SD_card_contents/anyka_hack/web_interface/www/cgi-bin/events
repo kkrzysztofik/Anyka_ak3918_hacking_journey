@@ -1,26 +1,28 @@
 #!/bin/sh
 
-if [[ -f /etc/jffs2/www/index.html ]]; then
-    source /etc/jffs2/www/cgi-bin/header
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+
+if [ -f /data/www/index.html ]; then
+  . /data/www/cgi-bin/header
 else
-    source /mnt/anyka_hack/web_interface/www/cgi-bin/header
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/header
 fi
-if [[ -f /tmp/token.txt ]] && [[ "$token" == "$(readline 1 /tmp/token.txt)" ]]; then
+if [ -f /tmp/token.txt ] && [ "$token" = "$(readline 1 /tmp/token.txt)" ]; then
 #import settings
-source /etc/jffs2/gergesettings.txt
+. /data/gergesettings.txt
 message_banner=""
 
-if [[ -f /mnt/anyka_hack/web_interface/www/index.html ]]; then
-  if [[ $md_record_sec == 0 ]]; then
+if [ -f /mnt/anyka_hack/web_interface/www/index.html ]; then
+  if [ "$md_record_sec" = 0 ]; then
     message_banner="<div class=\"banner\">Motion recording is disabled!<br><br><button onclick=\"window.location.href='settings?token=$token'\">Turn on in Settings</button></div>"
   fi
 
   filelist="<div class=\"card\"><h2>Recorded Events</h2><table style=\"margin: 0px auto\"><tr>"
-  videofiles=$(ls /mnt/anyka_hack/web_interface/www/video/*.mp4)
+  videofiles=$(ls /mnt/anyka_hack/web_interface/www/video/*.mp4 2>/dev/null)
 
   for i in $videofiles; do
-    filename="${i//.mp4/}"
-    filename="${filename##*/}"
+    filename=$(echo "$i" | sed 's/\.mp4$//')
+    filename=$(basename "$filename")
     filelist="$filelist<tr><th>$filename.mp4</th>"
     filelist="$filelist<th><button onclick=\"window.location.href='video?token=$token&file=$filename'\">View Event</button></th>"
     filelist="$filelist<th><button onclick=\"window.location.href='del_video.sh?token=$token&file=$filename'\">Delete</button></th></tr>"
@@ -59,9 +61,9 @@ $filelist
 </html>
 EOT
 else
-    if [[ -f /etc/jffs2/www/index.html ]]; then
-        source /etc/jffs2/www/cgi-bin/footer
-    else
-        source /mnt/anyka_hack/web_interface/www/cgi-bin/footer
-    fi
+  if [ -f /data/www/index.html ]; then
+    . /data/www/cgi-bin/footer
+  else
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/footer
+  fi
 fi

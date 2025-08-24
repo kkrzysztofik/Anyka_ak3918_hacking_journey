@@ -1,27 +1,45 @@
 #! /bin/sh
 
-restart_process()
-{
-  echo 'restarting snapshot service...'
+LOG_FILE=snapshot_daemon.log
+
+# Initialize log directories if available
+[ -f /mnt/anyka_hack/init_logs.sh ] && . /mnt/anyka_hack/init_logs.sh
+
+# Source common utilities
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+
+restart_process() {
+  log INFO 'Restarting snapshot service'
   export LD_LIBRARY_PATH=/mnt/anyka_hack/snapshot/lib
-  /mnt/anyka_hack/snapshot/ak_snapshot
-}
+  /mnt/anyka_hack/snapshot/ak_snapshot &
+  #! /bin/sh
 
-check_process_health()
-{
-  myresult=$( top -n 1 | grep snapshot | grep -v grep | grep -v daemon )
-  echo $myresult
-  if [[ ${#myresult} -lt 5 ]]; then
-    restart_process
-  fi
-}
+  LOG_FILE=snapshot_daemon.log
+  [ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
 
-#load kernel modules for camera
-insmod /usr/modules/sensor_h63.ko
-insmod /usr/modules/akcamera.ko
-insmod /usr/modules/ak_info_dump.ko
+  restart_process() {
+    log INFO 'Restarting snapshot process'
+    export LD_LIBRARY_PATH=/mnt/anyka_hack/snapshot/lib
+    /mnt/anyka_hack/snapshot/ak_snapshot &
+    log INFO "ak_snapshot pid=$!"
+  }
 
-while [ 1 ]; do
-  check_process_health
-  sleep 5
-done
+  check_process_health() {
+    myresult=$( top -n 1 | grep snapshot | grep -v grep | grep -v daemon )
+    log DEBUG "snapshot check: ${myresult}"
+    if [ ${#myresult} -lt 5 ]; then
+      restart_process
+    fi
+  }
+
+  # Load sensor configuration
+  [ -f /data/gergesettings.txt ] && . /data/gergesettings.txt
+  sensor_module="${sensor_kern_module:-/data/sensor/sensor_gc1084.ko}"
+  
+  # load kernel modules for camera
+  load_camera_modules "$sensor_module"
+
+  while true; do
+    check_process_health
+    sleep 5
+  done

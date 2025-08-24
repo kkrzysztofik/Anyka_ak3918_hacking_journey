@@ -1,15 +1,16 @@
 #!/bin/sh
-#
+# Delete video handler
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
 
-if [[ -f /etc/jffs2/www/index.html ]]; then
-    source /etc/jffs2/www/cgi-bin/header
+if [ -f /data/www/index.html ]; then
+  . /data/www/cgi-bin/header
 else
-    source /mnt/anyka_hack/web_interface/www/cgi-bin/header
+  . /mnt/anyka_hack/web_interface/www/cgi-bin/header
 fi
-if [[ -f /tmp/token.txt ]] && [[ "$token" == "$(readline 1 /tmp/token.txt)" ]]; then
+if [ -f /tmp/token.txt ] && [ "$token" = "$(readline 1 /tmp/token.txt)" ]; then
 
 content=""
-if [[ "$undo" == "$file" ]]; then
+if [ "$undo" = "$file" ]; then
   mv /mnt/video_encode/delete.bak /mnt/video_encode/$file.h264
   mv /mnt/anyka_hack/web_interface/www/video/delete.bak /mnt/anyka_hack/web_interface/www/video/$file.mp4
   content="$file.mp4 has been restored.<br><br>"
@@ -53,9 +54,9 @@ $content
 </html>
 EOT
 else
-    if [[ -f /etc/jffs2/www/index.html ]]; then
-        source /etc/jffs2/www/cgi-bin/footer
-    else
-        source /mnt/anyka_hack/web_interface/www/cgi-bin/footer
-    fi
+  if [ -f /data/www/index.html ]; then
+    . /data/www/cgi-bin/footer
+  else
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/footer
+  fi
 fi

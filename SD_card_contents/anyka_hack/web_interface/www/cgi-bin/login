@@ -9,10 +9,10 @@ readline() {
 echo "Content-type: text/html"
 echo ""
 
-if ! [[ -f /etc/jffs2/webui.hash ]]; then
+if [ ! -f /data/webui.hash ]; then
   salt=$RANDOM
-  echo $salt'webui' | md5sum >/etc/jffs2/webui.hash
-  echo $salt>>/etc/jffs2/webui.hash
+  echo "$salt"'webui' | md5sum >/data/webui.hash
+  echo "$salt" >>/data/webui.hash
 fi
 
 cat <<EOT

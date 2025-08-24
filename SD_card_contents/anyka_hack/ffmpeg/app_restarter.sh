@@ -1,29 +1,43 @@
 #!/bin/sh
 
-source /etc/jffs2/gergesettings.txt
+LOG_FILE=ffmpeg_restarter.log
+
+# Initialize log directories if available
+[ -f /mnt/anyka_hack/init_logs.sh ] && . /mnt/anyka_hack/init_logs.sh
+
+# Source common utilities
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+
+[ -f /data/gergesettings.txt ] && . /data/gergesettings.txt || log WARN "Missing settings file"
 
 restart_app() {
-  if [[ -f /usr/bin/ptz_daemon_dyn ]]; then #use installed version if available
+  log INFO 'Attempting to (re)start libre_anyka_app'
+  if [ -f /usr/bin/ptz_daemon_dyn ]; then
     SD_detect=$(mount | grep mmcblk0p1)
-    if [[ ${#SD_detect} == 0 ]]; then
-      md_record_sec=0 #disable recording if SD card is not mounted
+    if [ ${#SD_detect} -eq 0 ]; then
+      md_record_sec=0 # disable recording if SD card is not mounted
+      log WARN 'SD card not mounted; disabling recording'
     fi
-    libre_anyka_app -w $image_width -h $image_height -m $md_record_sec $extra_args &
+    libre_anyka_app -w "$image_width" -h "$image_height" -m "$md_record_sec" $extra_args &
   else
     /mnt/anyka_hack/libre_anyka_app/run_libre_anyka_app.sh &
   fi
+  log INFO "Restart issued pid=$!"
 }
 
 check_app() {
   appnum=$(top -n 1 | grep libre_anyka_app | grep -v 'grep')
   ffmpegnum=$(top -n 1 | grep wrap_mp4.sh | grep -v 'grep')
-  if [[ ${#appnum} == 0 ]] && [[ ${#ffmpegnum} == 0 ]]; then
+  if [ ${#appnum} -eq 0 ] && [ ${#ffmpegnum} -eq 0 ]; then
+    log WARN 'libre_anyka_app and wrap_mp4.sh not detected; restarting'
     restart_app
+  else
+    log DEBUG 'Processes healthy'
   fi
 }
 
-if [[ $run_libre_anyka == 1 ]]; then
-  while [ 1 ]; do
+if [ "${run_libre_anyka:-0}" -eq 1 ]; then
+  while true; do
     check_app
     sleep 20
   done

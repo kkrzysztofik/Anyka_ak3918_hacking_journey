@@ -1,14 +1,16 @@
 #!/bin/sh
 #
-if [[ -f /etc/jffs2/www/index.html ]]; then
-    source /etc/jffs2/www/cgi-bin/header
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+
+if [ -f /data/www/index.html ]; then
+    . /data/www/cgi-bin/header
 else
-    source /mnt/anyka_hack/web_interface/www/cgi-bin/header
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/header
 fi
-if [[ -f /tmp/token.txt ]] && [[ "$token" == "$(readline 1 /tmp/token.txt)" ]]; then
-source /etc/jffs2/gergesettings.txt
+if [ -f /tmp/token.txt ] && [ "$token" = "$(readline 1 /tmp/token.txt)" ]; then
+. /data/gergesettings.txt
 ipadd=`ip route get 1 | awk '{print $NF;exit}'`
-if [[ "$ptz_invert" == 1 ]]; then
+if [ "$ptz_invert" = 1 ]; then
   right='l'
   left='r'
   up='d'
@@ -124,9 +126,9 @@ EOT
   echo "left_down" > /tmp/ptz.daemon
  fi
 else
-    if [[ -f /etc/jffs2/www/index.html ]]; then
-        source /etc/jffs2/www/cgi-bin/footer
+    if [ -f /data/www/index.html ]; then
+        . /data/www/cgi-bin/footer
     else
-        source /mnt/anyka_hack/web_interface/www/cgi-bin/footer
+        . /mnt/anyka_hack/web_interface/www/cgi-bin/footer
     fi
 fi

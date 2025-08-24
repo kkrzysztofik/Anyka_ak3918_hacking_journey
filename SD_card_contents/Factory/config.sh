@@ -1,13 +1,34 @@
 #! /bin/sh
-telnetd &
-if ! [[ -f /etc/jffs2/gergehack.sh ]]; then
-  #not installed yet, so copy it
-  cp /mnt/anyka_hack/gergehack.sh /etc/jffs2/gergehack.sh
+
+# Factory startup configuration script.
+# Improved with logging & idempotent operations.
+
+LOG_FILE=factory_config.log
+
+# Initialize log directories first
+[ -f /mnt/anyka_hack/init_logs.sh ] && . /mnt/anyka_hack/init_logs.sh
+
+# Source common utilities (which also ensures log directory)
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+
+log INFO "Starting factory config initialization"
+
+# Start telnet (optional) on non-standard port if not already running
+if ! pgrep -f 'telnetd.*-p 24' >/dev/null 2>&1; then
+  telnetd -p 24 -l /bin/sh &
+  log INFO "Started telnetd on port 24"
+else
+  log DEBUG "telnetd already running"
 fi
 
-if ! [[ -f /etc/jffs2/gergesettings.txt ]]; then
-  #not installed yet, so copy it
-  cp /mnt/anyka_hack/gergesettings.txt /etc/jffs2/gergesettings.txt
+if [ ! -f /data/gergehack.sh ]; then
+  cp /mnt/anyka_hack/gergehack.sh /data/gergehack.sh 2>/dev/null && log INFO "Installed gergehack.sh" || log WARN "Failed to copy gergehack.sh"
 fi
-#gergedaemon and time_zone are not needed for the SD exploit
-/etc/jffs2/gergehack.sh
+
+if [ ! -f /data/gergesettings.txt ]; then
+  cp /mnt/anyka_hack/gergesettings.txt /data/gergesettings.txt 2>/dev/null && log INFO "Installed gergesettings.txt" || log WARN "Failed to copy gergesettings.txt"
+fi
+
+log INFO "Launching gergehack"
+/data/gergehack.sh >> /mnt/logs/gergehack.log 2>&1 &
+log INFO "Factory config complete"

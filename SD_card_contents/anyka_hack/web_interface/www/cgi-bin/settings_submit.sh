@@ -1,12 +1,13 @@
 #!/bin/sh
-#
+# Settings submission handler with improved modularization.
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
 
-if [[ -f /etc/jffs2/www/index.html ]]; then
-    source /etc/jffs2/www/cgi-bin/header
+if [ -f /data/www/index.html ]; then
+  . /data/www/cgi-bin/header
 else
-    source /mnt/anyka_hack/web_interface/www/cgi-bin/header
+  . /mnt/anyka_hack/web_interface/www/cgi-bin/header
 fi
-if [[ -f /tmp/token.txt ]] && [[ "$token" == "$(readline 1 /tmp/token.txt)" ]]; then
+if [ -f /tmp/token.txt ] && [ "$token" = "$(readline 1 /tmp/token.txt)" ]; then
 cat <<EOT
 <!DOCTYPE html>
 <html>
@@ -40,24 +41,24 @@ EOT
 check1=$(echo $QUERY_STRING | grep day_night_invert)
 check2=$(echo $QUERY_STRING | grep ir_invert)
 check3=$(echo $QUERY_STRING | grep image_upside_down)
-if [[ ${#check1} -gt 1 ]] && [[ ${#check2} -gt 1 ]] && [[ ${#check3} -gt 1 ]]; then
-  if [[ $day_night_invert == 1 ]]; then
+if [ "$(expr length "$check1")" -gt 1 ] && [ "$(expr length "$check2")" -gt 1 ] && [ "$(expr length "$check3")" -gt 1 ]; then
+  if [ "$day_night_invert" = 1 ]; then
     #3-4
-    if [[ $ir_invert == 1 ]]; then
+  if [ "$ir_invert" = 1 ]; then
       extra_args="-i 3"
     else
       extra_args="-i 4"
     fi
   else
     #1-2
-    if [[ $ir_invert == 1 ]]; then
+  if [ "$ir_invert" = 1 ]; then
       extra_args="-i 2"
     else
       extra_args="-i 1"
     fi
   fi
 
-  if [[ $image_upside_down == 1 ]]; then
+  if [ "$image_upside_down" = 1 ]; then
     extra_args="\"$extra_args -u\""
   else
     extra_args="\"$extra_args\""
@@ -66,35 +67,35 @@ if [[ ${#check1} -gt 1 ]] && [[ ${#check2} -gt 1 ]] && [[ ${#check3} -gt 1 ]]; t
 fi
 
 linecount=1
-#cp /etc/jffs2/gergesettings.txt data.txt
-echo -n "" >data.tmp
-linecountlimit=$(wc -l < /etc/jffs2/gergesettings.txt)
+echo -n "" > data.tmp
+linecountlimit=$(wc -l < /data/gergesettings.txt)
 while [ $linecount -le $linecountlimit ]; do
-    line=$(readline $linecount /etc/jffs2/gergesettings.txt)
-    line=$(echo "$line" | awk '{$1=$1};1')
-    #if comment
-    if [[ ${line:0:1} == '#' ]] || [[ ${#line} -lt 1 ]]; then
-      #echo 'comment '"$line"
-      echo "$line" >>data.tmp
+  line=$(readline $linecount /data/gergesettings.txt)
+  line=$(echo "$line" | awk '{$1=$1};1')
+  firstchar=$(echo "$line" | cut -c1)
+  linelen=$(expr length "$line")
+  if [ "$firstchar" = "#" ] || [ "$linelen" -lt 1 ]; then
+    echo "$line" >> data.tmp
+  else
+    parameter="${line%%=*}"
+    inquery=$(echo $QUERY_STRING | grep "$parameter=")
+    if [ "$(expr length "$inquery")" -gt 1 ]; then
+      eval_val=$(eval 'echo "$'"$parameter"'" )
+      echo "$parameter=$eval_val" >> data.tmp
     else
-      parameter="${line%%=*}"
-      inquery=$(echo $QUERY_STRING | grep "$parameter=")
-      if [[ ${#inquery} -gt 1 ]]; then
-        echo "$parameter=$(eval 'echo $'$parameter)" >>data.tmp
-      else
-        echo "$line" >>data.tmp
-      fi
+      echo "$line" >> data.tmp
     fi
-    let linecount+=1
+  fi
+  linecount=$(expr $linecount + 1)
 done
-cp data.tmp /etc/jffs2/gergesettings.txt
-if [[ -f /mnt/anyka_hack/gergesettings.txt ]]; then
+cp data.tmp /data/gergesettings.txt
+if [ -f /mnt/anyka_hack/gergesettings.txt ]; then
   cp data.tmp /mnt/anyka_hack/gergesettings.txt
 fi
 else
-    if [[ -f /etc/jffs2/www/index.html ]]; then
-        source /etc/jffs2/www/cgi-bin/footer
-    else
-        source /mnt/anyka_hack/web_interface/www/cgi-bin/footer
-    fi
+  if [ -f /data/www/index.html ]; then
+    . /data/www/cgi-bin/footer
+  else
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/footer
+  fi
 fi
