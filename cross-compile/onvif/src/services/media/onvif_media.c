@@ -9,7 +9,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "onvif_media.h"
-#include "onvif_config.h"
+#include "config.h"
 #include "network_utils.h"
 
 /* Static media profiles */

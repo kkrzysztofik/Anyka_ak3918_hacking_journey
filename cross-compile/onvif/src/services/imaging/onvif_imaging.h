@@ -1,4 +1,7 @@
-/* onvif_imaging.h - ONVIF Imaging service header */
+/**
+ * @file onvif_imaging.h
+ * @brief ONVIF Imaging service API: brightness/contrast etc + day/night logic.
+ */
 
 #ifndef ONVIF_IMAGING_H
 #define ONVIF_IMAGING_H
@@ -17,6 +20,7 @@ enum ir_led_mode {
     IR_LED_AUTO = 2
 };
 
+/** Auto day/night switching configuration */
 struct auto_daynight_config {
     enum day_night_mode mode;
     int day_to_night_threshold;     /* Luminance threshold to switch to night mode */
@@ -27,6 +31,7 @@ struct auto_daynight_config {
     int enable_auto_switching;      /* Enable automatic day/night switching */
 };
 
+/** Imaging tuning parameters exposed via ONVIF */
 struct imaging_settings {
     int brightness;                 /* Brightness level (-100 to 100) */
     int contrast;                   /* Contrast level (-100 to 100) */
@@ -36,19 +41,19 @@ struct imaging_settings {
     struct auto_daynight_config daynight;
 };
 
-int onvif_imaging_init(void *vi_handle);
-void onvif_imaging_cleanup(void);
-int onvif_imaging_get_settings(struct imaging_settings *settings);
-int onvif_imaging_set_settings(const struct imaging_settings *settings);
-int onvif_imaging_set_day_night_mode(enum day_night_mode mode);
-int onvif_imaging_get_day_night_mode(void);
-int onvif_imaging_set_irled_mode(enum ir_led_mode mode);
-int onvif_imaging_get_irled_status(void);
-int onvif_imaging_set_flip_mirror(int flip, int mirror);
-int onvif_imaging_set_auto_config(const struct auto_daynight_config *config);
-int onvif_imaging_get_auto_config(struct auto_daynight_config *config);
-int onvif_imaging_get_imaging_settings(char *response, int response_size);
-int onvif_imaging_set_imaging_settings(const char *request, char *response, int response_size);
-int onvif_imaging_get_options(char *response, int response_size);
+int onvif_imaging_init(void *vi_handle); /**< Initialize imaging module with VI handle (nullable). */
+void onvif_imaging_cleanup(void);        /**< Release imaging resources. */
+int onvif_imaging_get_settings(struct imaging_settings *settings); /**< Fetch current settings. */
+int onvif_imaging_set_settings(const struct imaging_settings *settings); /**< Apply settings. */
+int onvif_imaging_set_day_night_mode(enum day_night_mode mode); /**< Force day/night mode. */
+int onvif_imaging_get_day_night_mode(void); /**< Query current forced/auto mode. */
+int onvif_imaging_set_irled_mode(enum ir_led_mode mode); /**< Set IR LED mode. */
+int onvif_imaging_get_irled_status(void); /**< Get IR LED status/level. */
+int onvif_imaging_set_flip_mirror(int flip, int mirror); /**< Configure image flip/mirror. */
+int onvif_imaging_set_auto_config(const struct auto_daynight_config *config); /**< Persist auto config. */
+int onvif_imaging_get_auto_config(struct auto_daynight_config *config); /**< Retrieve auto config. */
+int onvif_imaging_get_imaging_settings(char *response, int response_size); /**< SOAP: GetImagingSettings. */
+int onvif_imaging_set_imaging_settings(const char *request, char *response, int response_size); /**< SOAP: SetImagingSettings. */
+int onvif_imaging_get_options(char *response, int response_size); /**< SOAP: GetOptions. */
 
 #endif

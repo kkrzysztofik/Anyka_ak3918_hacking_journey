@@ -1,3 +1,7 @@
+/**
+ * @file onvif_media.h
+ * @brief ONVIF Media service structures & retrieval APIs.
+ */
 #ifndef ONVIF_MEDIA_H
 #define ONVIF_MEDIA_H
 
@@ -131,15 +135,15 @@ struct media_profile {
     } ptz;
 };
 
-int onvif_media_get_profiles(struct media_profile **profile_list, int *count);
-int onvif_media_get_profile(const char *profile_token, struct media_profile *profile);
-int onvif_media_get_video_sources(struct video_source **sources, int *count);
-int onvif_media_get_audio_sources(struct audio_source **sources, int *count);
-int onvif_media_get_video_source_configurations(struct video_source_configuration **configs, int *count);
-int onvif_media_get_video_encoder_configurations(struct video_encoder_configuration **configs, int *count);
-int onvif_media_get_audio_source_configurations(struct audio_source_configuration **configs, int *count);
-int onvif_media_get_audio_encoder_configurations(struct audio_encoder_configuration **configs, int *count);
-int onvif_media_get_stream_uri(const char *profile_token, const char *protocol, struct stream_uri *uri);
-int onvif_media_get_snapshot_uri(const char *profile_token, struct stream_uri *uri);
+int onvif_media_get_profiles(struct media_profile **profile_list, int *count); /**< Enumerate media profiles. */
+int onvif_media_get_profile(const char *profile_token, struct media_profile *profile); /**< Get single profile. */
+int onvif_media_get_video_sources(struct video_source **sources, int *count); /**< Enumerate video sources. */
+int onvif_media_get_audio_sources(struct audio_source **sources, int *count); /**< Enumerate audio sources. */
+int onvif_media_get_video_source_configurations(struct video_source_configuration **configs, int *count); /**< Get video source configs. */
+int onvif_media_get_video_encoder_configurations(struct video_encoder_configuration **configs, int *count); /**< Video encoder configs. */
+int onvif_media_get_audio_source_configurations(struct audio_source_configuration **configs, int *count); /**< Audio source configs. */
+int onvif_media_get_audio_encoder_configurations(struct audio_encoder_configuration **configs, int *count); /**< Audio encoder configs. */
+int onvif_media_get_stream_uri(const char *profile_token, const char *protocol, struct stream_uri *uri); /**< Build stream URI. */
+int onvif_media_get_snapshot_uri(const char *profile_token, struct stream_uri *uri); /**< Build snapshot URI. */
 
 #endif

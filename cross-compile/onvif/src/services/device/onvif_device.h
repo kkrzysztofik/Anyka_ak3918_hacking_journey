@@ -1,3 +1,7 @@
+/**
+ * @file onvif_device.h
+ * @brief ONVIF Device service data structures and API surface.
+ */
 #ifndef ONVIF_DEVICE_H
 #define ONVIF_DEVICE_H
 
@@ -72,13 +76,13 @@ struct device_service {
     } version;
 };
 
-int onvif_device_get_device_information(struct device_info *info);
-int onvif_device_get_capabilities(struct device_capabilities *caps);
-int onvif_device_get_system_date_time(struct system_date_time *dt);
-int onvif_device_set_system_date_time(const struct system_date_time *dt);
-int onvif_device_get_dns(struct dns_information *dns);
-int onvif_device_get_network_interfaces(struct network_interface *interfaces, int *count);
-int onvif_device_get_network_protocols(struct network_protocol *protocols, int *count);
-int onvif_device_get_services(struct device_service *services, int *count);
+int onvif_device_get_device_information(struct device_info *info); /**< Populate device identification fields. */
+int onvif_device_get_capabilities(struct device_capabilities *caps); /**< Report supported services. */
+int onvif_device_get_system_date_time(struct system_date_time *dt); /**< Retrieve system time. */
+int onvif_device_set_system_date_time(const struct system_date_time *dt); /**< Set system time. */
+int onvif_device_get_dns(struct dns_information *dns); /**< Get DNS settings. */
+int onvif_device_get_network_interfaces(struct network_interface *interfaces, int *count); /**< Enumerate NICs. */
+int onvif_device_get_network_protocols(struct network_protocol *protocols, int *count); /**< Enumerate protocols & ports. */
+int onvif_device_get_services(struct device_service *services, int *count); /**< List device services and versions. */
 
 #endif

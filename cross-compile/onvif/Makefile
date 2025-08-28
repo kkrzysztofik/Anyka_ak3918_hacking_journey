@@ -9,16 +9,16 @@ INCLUDES=include src src/services src/adapters src/utils src/server src/tools
 SRCS := \
 	src/main/onvifd.c \
 	src/adapters/ptz_adapter.c \
-	src/utils/onvif_config.c \
-	src/utils/rtsp_utils.c \
+	src/utils/config.c \
 	src/services/device/onvif_device.c \
 	src/services/media/onvif_media.c \
 	src/services/ptz/onvif_ptz.c \
 	src/services/imaging/onvif_imaging.c \
-	src/utils/imaging_config.c \
 	src/server/http_server.c \
 	src/server/rtsp_server.c \
-	src/utils/network_utils.c
+	src/server/ws_discovery.c \
+	src/utils/network_utils.c \
+	src/utils/utils.c
 
 .PHONY = all clean
 

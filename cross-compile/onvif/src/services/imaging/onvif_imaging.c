@@ -7,7 +7,8 @@
 #include <time.h>
 #include <pthread.h>
 #include "onvif_imaging.h"
-#include "imaging_config.h"
+#include "config.h"
+#include "constants.h"
 #include "ak_common.h"
 #include "ak_drv_irled.h"
 #include "ak_vi.h"
@@ -48,12 +49,13 @@ int onvif_imaging_init(void *vi_handle) {
     g_imaging_settings.daynight.ir_led_level = DEFAULT_IRLED_LEVEL;
     g_imaging_settings.daynight.enable_auto_switching = 1;
     
-    // Load settings from configuration file
-    if (imaging_config_load(&g_imaging_settings) != 0) { 
-        imaging_config_load_defaults(&g_imaging_settings);
-        ak_print_notice("Loaded default imaging settings\n");
+    // Pull imaging settings from application config (already loaded in main)
+    const struct application_config *ucfg = config_get();
+    if (ucfg) {
+        g_imaging_settings = ucfg->imaging;
+    ak_print_notice("Loaded imaging settings from application config\n");
     } else {
-        ak_print_notice("Loaded imaging settings from config\n");
+    ak_print_notice("Application config not loaded; using defaults\n");
     }
     
     // Initialize auto day/night configuration
@@ -67,7 +69,9 @@ int onvif_imaging_init(void *vi_handle) {
     g_auto_config.enable_auto_switching = 1;
     
     // Load auto configuration
-    imaging_config_load_auto("/etc/jffs2/ankya_cfg.ini", &g_auto_config); 
+    if (ucfg) {
+        g_auto_config = ucfg->auto_daynight;
+    }
     
     // Initialize IR LED driver
     struct ak_drv_irled_hw_param irled_param;
@@ -214,9 +218,9 @@ int onvif_imaging_set_settings(const struct imaging_settings *settings) {
     // Update day/night configuration
     g_imaging_settings.daynight = settings->daynight;
     
-    // Save settings to configuration
+    // Save settings to configuration (imaging section)
     if (ret == 0) {
-        imaging_config_save(&g_imaging_settings);
+        config_save_imaging(&g_imaging_settings);
         ak_print_notice("Imaging settings updated successfully\n");
     }
     
@@ -355,8 +359,8 @@ int onvif_imaging_set_auto_config(const struct auto_daynight_config *config) {
     g_auto_config = *config;
     g_imaging_settings.daynight = *config;
     
-    // Save auto configuration
-    imaging_config_save_auto("/etc/jffs2/ankya_cfg.ini", &g_auto_config);
+    // Save auto configuration section
+    config_save_auto_daynight(&g_auto_config);
     ak_print_notice("Auto day/night configuration updated\n");
     
     pthread_mutex_unlock(&g_imaging_mutex);
@@ -409,25 +413,9 @@ int onvif_imaging_get_imaging_settings(char *response, int response_size) {
     int sharpness_onvif = sharpness_vpss * 2;
     int hue_onvif = hue_vpss * 180 / 50;
     
-    // Create XML response
-    snprintf(response, response_size,
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-        "<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\" "
-        "xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\" "
-        "xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
-        "<s:Body>"
-        "<trt:GetImagingSettingsResponse>"
-        "<trt:ImagingSettings>"
-        "<tt:Brightness>%d</tt:Brightness>"
-        "<tt:Contrast>%d</tt:Contrast>"
-        "<tt:Saturation>%d</tt:Saturation>"
-        "<tt:Sharpness>%d</tt:Sharpness>"
-        "<tt:ColorSaturation>%d</tt:ColorSaturation>"
-        "</trt:ImagingSettings>"
-        "</trt:GetImagingSettingsResponse>"
-        "</s:Body>"
-        "</s:Envelope>",
-        brightness_onvif, contrast_onvif, saturation_onvif, sharpness_onvif, hue_onvif);
+    // Create XML response using template
+    snprintf(response, response_size, ONVIF_SOAP_IMAGING_GET_SETTINGS_RESPONSE,
+             brightness_onvif, contrast_onvif, saturation_onvif, sharpness_onvif, hue_onvif);
     
     pthread_mutex_unlock(&g_imaging_mutex);
     return 0;
@@ -511,25 +499,9 @@ int onvif_imaging_set_imaging_settings(const char *request, char *response, int 
     
     // Create response
     if (ret == 0) {
-        snprintf(response, response_size,
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-            "<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\" "
-            "xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\">"
-            "<s:Body>"
-            "<trt:SetImagingSettingsResponse/>"
-            "</s:Body>"
-            "</s:Envelope>");
+    snprintf(response, response_size, ONVIF_SOAP_IMAGING_SET_SETTINGS_OK);
     } else {
-        snprintf(response, response_size,
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-            "<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\">"
-            "<s:Body>"
-            "<s:Fault>"
-            "<s:Code><s:Value>s:Receiver</s:Value></s:Code>"
-            "<s:Reason><s:Text>Failed to set imaging settings</s:Text></s:Reason>"
-            "</s:Fault>"
-            "</s:Body>"
-            "</s:Envelope>");
+    snprintf(response, response_size, ONVIF_SOAP_IMAGING_SET_SETTINGS_FAIL);
     }
     
     return ret;
@@ -541,24 +513,8 @@ int onvif_imaging_get_options(char *response, int response_size) {
         return -1;
     }
     
-    // Create XML response with imaging capability ranges
-    snprintf(response, response_size,
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-        "<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\" "
-        "xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\" "
-        "xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
-        "<s:Body>"
-        "<trt:GetImagingOptionsResponse>"
-        "<trt:ImagingOptions>"
-        "<tt:Brightness><tt:Min>-100</tt:Min><tt:Max>100</tt:Max></tt:Brightness>"
-        "<tt:Contrast><tt:Min>-100</tt:Min><tt:Max>100</tt:Max></tt:Contrast>"
-        "<tt:Saturation><tt:Min>-100</tt:Min><tt:Max>100</tt:Max></tt:Saturation>"
-        "<tt:Sharpness><tt:Min>-100</tt:Min><tt:Max>100</tt:Max></tt:Sharpness>"
-        "<tt:ColorSaturation><tt:Min>-180</tt:Min><tt:Max>180</tt:Max></tt:ColorSaturation>"
-        "</trt:ImagingOptions>"
-        "</trt:GetImagingOptionsResponse>"
-        "</s:Body>"
-        "</s:Envelope>");
+    // Create XML response with imaging capability ranges using template
+    snprintf(response, response_size, ONVIF_SOAP_IMAGING_GET_OPTIONS_RESPONSE);
     
     return 0;
 }

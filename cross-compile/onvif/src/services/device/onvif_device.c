@@ -10,7 +10,7 @@
 #include <time.h>
 #include <sys/utsname.h>
 #include "onvif_device.h"
-#include "onvif_config.h"
+#include "config.h"
 
 /* Device information constants */
 #define DEVICE_MANUFACTURER    "Anyka"

@@ -1,4 +1,7 @@
-/* network_utils.c - small helpers for IP/URL */
+/**
+ * @file network_utils.c
+ * @brief Implementation of small helpers for IP / hostname / URL composition.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +17,12 @@
 // Add missing function declarations
 extern int gethostname(char *name, size_t len);
 
+/**
+ * @brief Get primary (wlan0) IPv4 address.
+ * @param ip_str Output buffer for dotted quad.
+ * @param ip_str_size Size of buffer.
+ * @return 0 on success, -1 on error (buffer may contain fallback).
+ */
 int get_local_ip_address(char *ip_str, size_t ip_str_size) {
     struct ifaddrs *ifaddrs_ptr = NULL; 
     struct ifaddrs *ifa = NULL; 
@@ -26,21 +35,22 @@ int get_local_ip_address(char *ip_str, size_t ip_str_size) {
     
     if (getifaddrs(&ifaddrs_ptr) == -1) return -1; 
     
-    for (ifa = ifaddrs_ptr; ifa != NULL; ifa = ifa->ifa_next) { 
-        if (!ifa->ifa_addr) continue; 
-        if (ifa->ifa_addr->sa_family == AF_INET) { 
-            if (strncmp(ifa->ifa_name, "lo", 2) == 0) continue; 
-            addr_ptr = &((struct sockaddr_in*)ifa->ifa_addr)->sin_addr; 
-            inet_ntop(AF_INET, addr_ptr, ip_str, ip_str_size); 
-            if (strncmp(ifa->ifa_name, "eth", 3) == 0 || strncmp(ifa->ifa_name, "wlan", 4) == 0 || strncmp(ifa->ifa_name, "en", 2) == 0) 
-                break; 
-        } 
-    } 
+    for (ifa = ifaddrs_ptr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr) continue;
+        if (ifa->ifa_addr->sa_family != AF_INET) continue;
+        if (strncmp(ifa->ifa_name, "wlan0", 5) != 0) continue; /* only consider wlan0 */
+        addr_ptr = &((struct sockaddr_in*)ifa->ifa_addr)->sin_addr;
+        inet_ntop(AF_INET, addr_ptr, ip_str, ip_str_size);
+        break; /* stop after wlan0 found */
+    }
     
     if (ifaddrs_ptr) freeifaddrs(ifaddrs_ptr); 
     return 0; 
 }
 
+/**
+ * @brief Retrieve system hostname (fallback provided on failure).
+ */
 int get_device_hostname(char *hostname, size_t hostname_size) {
     if (!hostname || hostname_size == 0) return -1;
     
@@ -55,6 +65,9 @@ int get_device_hostname(char *hostname, size_t hostname_size) {
     return 0;
 }
 
+/**
+ * @brief Construct a device URL from components.
+ */
 int build_device_url(const char *protocol, int port, const char *path, char *url, size_t url_size) {
     char ip_str[64];
     

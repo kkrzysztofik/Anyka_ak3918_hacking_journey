@@ -1,3 +1,13 @@
+/**
+ * @file rtsp_server.h
+ * @brief Internal RTSP/RTP streaming server for H.264 (and optional audio).
+ *
+ * Provides a lightweight RTSP implementation sufficient for basic
+ * DESCRIBE/SETUP/PLAY control and unicast RTP streaming over UDP or
+ * TCP-interleaved (planned). Each client session is represented by
+ * an rtsp_session_t and tracked in the rtsp_server instance. Video
+ * frames are pulled from the Anyka video input / encoder pipeline.
+ */
 #ifndef RTSP_SERVER_H
 #define RTSP_SERVER_H
 
@@ -108,6 +118,7 @@ typedef struct rtsp_session {
     struct rtsp_session *next;
 } rtsp_session_t;
 
+/** Video stream encoding configuration */
 typedef struct {
     int width;
     int height;
@@ -119,6 +130,7 @@ typedef struct {
     int br_mode;
 } video_config_t;
 
+/** Audio stream encoding configuration */
 typedef struct {
     int sample_rate;        /* Sample rate (8000, 16000, 44100, etc.) */
     int channels;           /* Number of channels (1 for mono, 2 for stereo) */
@@ -127,6 +139,7 @@ typedef struct {
     int bitrate;            /* Audio bitrate for AAC */
 } audio_config_t;
 
+/** Full stream config passed when creating server */
 typedef struct {
     char stream_path[64];
     char stream_name[64];
@@ -177,9 +190,32 @@ struct rtsp_server {
 
 typedef struct rtsp_server rtsp_server_t;
 
+/**
+ * @brief Allocate and initialize a server instance (not started).
+ * @param config Desired stream configuration (copied internally).
+ * @return Opaque server pointer or NULL on failure.
+ */
 rtsp_server_t *rtsp_server_create(rtsp_stream_config_t *config);
+
+/**
+ * @brief Start the accept / encoding threads.
+ * @param server Instance created via rtsp_server_create.
+ * @return 0 on success, negative error code otherwise.
+ */
 int rtsp_server_start(rtsp_server_t *server);
+
+/**
+ * @brief Stop all threads and close client sessions (server reusable after start again).
+ * @param server Server instance.
+ * @return 0 on success, negative error code.
+ */
 int rtsp_server_stop(rtsp_server_t *server);
+
+/**
+ * @brief Destroy server and free all memory.
+ * @param server Server instance (may be NULL).
+ * @return 0 always; provided for symmetry.
+ */
 int rtsp_server_destroy(rtsp_server_t *server);
 
 #endif

@@ -3,12 +3,14 @@
 #include "ptz_adapter.h"
 #include "ak_drv_ptz.h"
 #include <time.h>
+#include "utils.h"
 #include "ak_common.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
 
 static pthread_mutex_t ptz_lock = PTHREAD_MUTEX_INITIALIZER;
 static int ptz_initialized = 0;
@@ -96,7 +98,7 @@ int ptz_adapter_absolute_move(int pan_deg, int tilt_deg, int speed) {
         /* Wait for movement to complete */
         enum ptz_status h_status, v_status;
         do {
-            usleep(5000); /* 5ms delay */
+            sleep_us(5000); /* 5ms delay */
             ak_drv_ptz_get_status(PTZ_DEV_H, &h_status);
             ak_drv_ptz_get_status(PTZ_DEV_V, &v_status);
         } while ((h_status != PTZ_INIT_OK) || (v_status != PTZ_INIT_OK));
@@ -145,7 +147,7 @@ int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg, int speed) 
     /* Wait for movement to complete */
     if (ret == 0) {
         do {
-            usleep(5000); /* 5ms delay */
+            sleep_us(5000); /* 5ms delay */
             ak_drv_ptz_get_status(PTZ_DEV_H, &h_status);
             ak_drv_ptz_get_status(PTZ_DEV_V, &v_status);
         } while ((h_status != PTZ_INIT_OK) || (v_status != PTZ_INIT_OK));
