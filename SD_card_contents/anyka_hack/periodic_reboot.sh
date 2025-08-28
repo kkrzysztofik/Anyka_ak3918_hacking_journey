@@ -30,7 +30,8 @@ fi
 
 INTERVAL_SEC=${REBOOT_INTERVAL_SEC:-21600} # 6 hours
 JITTER_MAX_SEC=${REBOOT_JITTER_MAX_SEC:-0}
-PID_FILE=/tmp/periodic_reboot.pid
+PID_FILE=/mnt/tmp/periodic_reboot.pid
+mkdir -p /mnt/tmp 2>/dev/null || true
 
 # Prevent duplicate instances
 if [ -f "$PID_FILE" ]; then
@@ -80,6 +81,12 @@ while true; do
   while [ "$remaining" -gt 0 ]; do
     chunk=300
     [ "$remaining" -lt $chunk ] && chunk=$remaining
+    # Log progress: INFO every hour boundary and for last 5 minutes, DEBUG otherwise
+    if [ "$remaining" -le 300 ] 2>/dev/null || [ $((remaining % 3600)) -eq 0 ] 2>/dev/null; then
+      log INFO "Reboot countdown: remaining=${remaining}s next_sleep=${chunk}s"
+    else
+      log DEBUG "Reboot countdown: remaining=${remaining}s next_sleep=${chunk}s"
+    fi
     sleep $chunk || true
     remaining=$((remaining - chunk))
   done

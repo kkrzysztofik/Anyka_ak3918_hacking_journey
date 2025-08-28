@@ -38,10 +38,11 @@ if [ "${run_telnet:-1}" -eq 0 ]; then
 fi
 
 # check duplicate process
-if [ -f /tmp/exploit.txt ]; then
+mkdir -p /mnt/tmp 2>/dev/null || true
+if [ -f /mnt/tmp/exploit.txt ]; then
   log WARN 'gergehack already running'
 else
-  echo "exploit" > /tmp/exploit.txt
+  echo "exploit" > /mnt/tmp/exploit.txt
   ensure_mounted_sd
   log INFO '_________________________________'
   log INFO '|       Gerge Hacked This       |'
@@ -84,7 +85,7 @@ else
     fi
     if [ "${ptz_init_on_boot:-0}" -eq 1 ]; then
       sleep 10
-      echo "init_ptz" > /tmp/ptz.daemon
+      echo "init_ptz" > /mnt/tmp/ptz.daemon
     fi
   fi
   if [ "${run_web_interface:-0}" -eq 1 ]; then
@@ -110,14 +111,33 @@ else
 
   # Start lightweight system monitor if available (logs CPU and free memory every minute)
   if [ -f /mnt/anyka_hack/sys_monitor.sh ]; then
-    if [ -f /tmp/sys_monitor.pid ] && kill -0 "$(cat /tmp/sys_monitor.pid)" 2>/dev/null; then
-      log DEBUG "sys_monitor already running pid=$(cat /tmp/sys_monitor.pid)"
+    if [ -f /mnt/tmp/sys_monitor.pid ] && kill -0 "$(cat /mnt/tmp/sys_monitor.pid)" 2>/dev/null; then
+      log DEBUG "sys_monitor already running pid=$(cat /mnt/tmp/sys_monitor.pid)"
     else
       /mnt/anyka_hack/sys_monitor.sh >> /mnt/logs/sys_monitor.log 2>&1 &
       log INFO "Started sys_monitor.sh"
     fi
   else
     log DEBUG "sys_monitor.sh not present on SD"
+  fi
+
+  # Start periodic reboot helper (optional) if enabled and script present.
+  # Requires variables (optional) in gergesettings.txt:
+  #   enable_periodic_reboot=1            # master switch
+  #   periodic_reboot_minutes=720         # interval in minutes (default 720 = 12h)
+  if [ "${enable_periodic_reboot:-0}" -eq 1 ]; then
+    if [ -f /mnt/anyka_hack/periodic_reboot.sh ]; then
+      if [ -f /mnt/tmp/periodic_reboot.pid ] && kill -0 "$(cat /mnt/tmp/periodic_reboot.pid)" 2>/dev/null; then
+        log DEBUG "periodic_reboot already running pid=$(cat /mnt/tmp/periodic_reboot.pid)"
+      else
+        REBOOT_INTERVAL_MIN=${periodic_reboot_minutes:-720}
+        /mnt/anyka_hack/periodic_reboot.sh "$REBOOT_INTERVAL_MIN" >> /mnt/logs/periodic_reboot.log 2>&1 &
+  echo $! > /mnt/tmp/periodic_reboot.pid
+        log INFO "Started periodic_reboot.sh interval=${REBOOT_INTERVAL_MIN}m"
+      fi
+    else
+      log WARN "periodic_reboot.sh not present on SD (enable_periodic_reboot=1)"
+    fi
   fi
   if [ "${run_ipc:-1}" -eq 0 ] && [ "${rootfs_modified:-0}" -eq 0 ]; then
     while true; do

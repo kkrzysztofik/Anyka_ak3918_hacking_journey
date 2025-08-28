@@ -7,7 +7,7 @@ if [ -f /data/www/index.html ]; then
 else
     . /mnt/anyka_hack/web_interface/www/cgi-bin/header
 fi
-if [ -f /tmp/token.txt ] && [ "$token" = "$(readline 1 /tmp/token.txt)" ]; then
+if [ -f /mnt/tmp/token.txt ] && [ "$token" = "$(readline 1 /mnt/tmp/token.txt)" ]; then
 . /data/gergesettings.txt
 ipadd=`ip route get 1 | awk '{print $NF;exit}'`
 if [ "$ptz_invert" = 1 ]; then
@@ -90,40 +90,40 @@ setInterval(function() { document.getElementById("snapshot").src = "http://$ipad
 EOT
 
  if [ "$command" = "irinit" ]; then
-  echo "init_ir" > /tmp/ptz.daemon
+    echo "init_ir" > /mnt/tmp/ptz.daemon
  fi
  if [ "$command" = "iron" ]; then
-  echo "set_ir_cut 1" > /tmp/ptz.daemon
+    echo "set_ir_cut 1" > /mnt/tmp/ptz.daemon
  fi
  if [ "$command" = "iroff" ]; then
-  echo "set_ir_cut 0" > /tmp/ptz.daemon
+    echo "set_ir_cut 0" > /mnt/tmp/ptz.daemon
  fi
  if [ "$command" = "ptzinit" ]; then
-  echo "init_ptz" > /tmp/ptz.daemon
+    echo "init_ptz" > /mnt/tmp/ptz.daemon
  fi
  if [ "$command" = "ptzu" ]; then
-  echo "up" > /tmp/ptz.daemon
+    echo "up" > /mnt/tmp/ptz.daemon
  fi
  if [ "$command" = "ptzd" ]; then
-  echo "down" > /tmp/ptz.daemon
+    echo "down" > /mnt/tmp/ptz.daemon
  fi
  if [ "$command" = "ptzl" ]; then
-  echo "left" > /tmp/ptz.daemon
+    echo "left" > /mnt/tmp/ptz.daemon
  fi
  if [ "$command" = "ptzr" ]; then
-  echo "right" > /tmp/ptz.daemon
+    echo "right" > /mnt/tmp/ptz.daemon
  fi
  if [ "$command" = "ptzru" ]; then
-  echo "right_up" > /tmp/ptz.daemon
+    echo "right_up" > /mnt/tmp/ptz.daemon
  fi
  if [ "$command" = "ptzrd" ]; then
-  echo "right_down" > /tmp/ptz.daemon
+    echo "right_down" > /mnt/tmp/ptz.daemon
  fi
  if [ "$command" = "ptzlu" ]; then
-  echo "left_up" > /tmp/ptz.daemon
+    echo "left_up" > /mnt/tmp/ptz.daemon
  fi
  if [ "$command" = "ptzld" ]; then
-  echo "left_down" > /tmp/ptz.daemon
+    echo "left_down" > /mnt/tmp/ptz.daemon
  fi
 else
     if [ -f /data/www/index.html ]; then

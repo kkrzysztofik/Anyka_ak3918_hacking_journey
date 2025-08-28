@@ -19,17 +19,17 @@ md_record_sec=0
 extra_args="-i 4 -u"
 
 #NTP time server (can be router IP or url)
-time_source=192.168.11.1
+time_source=0.ubuntu.pool.ntp.org
 #NTP uses GMT 0 so the offset below is used for time zones
-time_zone=GMT-02:00
+time_zone=GMT+01:00
 
 #WIFI
-wifi_ssid=MyWifi
-wifi_password=MyPassword
+wifi_ssid=W11-CAM
+wifi_password=ZimnaWodka
 
 #if this camera has modified rootfs that does not launch anyka_ipc [default 0]
-rootfs_modified=1
+rootfs_modified=0
 #camera image sensor kernel module
-sensor_kern_module=/usr/modules/sensor_h63.ko
+sensor_kern_module=/data/sensor/sensor_gc1084.ko
 #terminate the ipc watchdog and anyka_ipc if not needed [default 0]
 run_ipc=0

@@ -18,7 +18,8 @@ cat <<EOT
     </body>
 </html>
 EOT
-echo "$token">/tmp/token.txt
+mkdir -p /mnt/tmp 2>/dev/null || true
+echo "$token">/mnt/tmp/token.txt
 
 else
     if [ -f /data/www/index.html ]; then

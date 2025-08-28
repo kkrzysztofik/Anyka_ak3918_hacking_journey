@@ -5,6 +5,8 @@
 
 SCRIPT_NAME="$(basename "$0")"
 LOG_DIR=/mnt/logs
+TMP_DIR=/mnt/tmp
+mkdir -p "$TMP_DIR" 2>/dev/null || true
 
 # Ensure log directory exists with proper error handling
 ensure_log_dir() {
@@ -13,8 +15,8 @@ ensure_log_dir() {
       printf '%s [INFO] [%s] Created log directory %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date)" "$SCRIPT_NAME" "$LOG_DIR" >> "$LOG_DIR/directory_creation.log" 2>/dev/null || true
     else
       # Fallback: try to write to /tmp if /mnt/logs fails
-      LOG_DIR=/tmp/logs
-      mkdir -p "$LOG_DIR" 2>/dev/null || LOG_DIR=/tmp
+  LOG_DIR=/mnt/tmp/logs
+  mkdir -p "$LOG_DIR" 2>/dev/null || LOG_DIR=/mnt/tmp
     fi
   fi
 }

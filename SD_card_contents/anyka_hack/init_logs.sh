@@ -4,8 +4,9 @@
 # This script should be called early in the boot process to ensure consistent logging
 
 MAIN_LOG_DIR=/mnt/logs
-FALLBACK_LOG_DIR=/tmp/logs
-FALLBACK_BASE_DIR=/tmp
+FALLBACK_LOG_DIR=/mnt/tmp/logs
+FALLBACK_BASE_DIR=/mnt/tmp
+mkdir -p /mnt/tmp 2>/dev/null || true
 
 init_log_directories() {
   # Try to create the main log directory first

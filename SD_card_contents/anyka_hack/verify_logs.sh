@@ -33,7 +33,7 @@ fi
 # Check fallback directories
 echo
 echo "Checking fallback directories..."
-for dir in "/tmp/logs" "/tmp"; do
+for dir in "/mnt/tmp/logs" "/mnt/tmp"; do
   if [ -d "$dir" ]; then
     echo "✓ Fallback directory exists: $dir"
     [ -w "$dir" ] && echo "✓ Fallback directory is writable: $dir" || echo "✗ Fallback directory not writable: $dir"

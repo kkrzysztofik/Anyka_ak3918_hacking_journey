@@ -7,7 +7,7 @@ if [ -f /data/www/index.html ]; then
 else
   . /mnt/anyka_hack/web_interface/www/cgi-bin/header
 fi
-if [ -f /tmp/token.txt ] && [ "$token" = "$(readline 1 /tmp/token.txt)" ]; then
+if [ -f /mnt/tmp/token.txt ] && [ "$token" = "$(readline 1 /mnt/tmp/token.txt)" ]; then
 
 content=""
 if [ "$undo" = "$file" ]; then
