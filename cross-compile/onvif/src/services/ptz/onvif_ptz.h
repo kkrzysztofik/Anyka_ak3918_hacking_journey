@@ -1,0 +1,103 @@
+#ifndef ONVIF_PTZ_H
+#define ONVIF_PTZ_H
+
+enum ptz_move_status {
+    PTZ_MOVE_IDLE = 0,
+    PTZ_MOVE_MOVING = 1,
+    PTZ_MOVE_UNKNOWN = 2
+};
+
+struct ptz_vector_2d {
+    float x;
+    float y;
+};
+
+struct ptz_vector {
+    struct ptz_vector_2d pan_tilt;
+    float zoom;
+    char space[128];
+};
+
+struct ptz_speed {
+    struct ptz_vector_2d pan_tilt;
+    float zoom;
+};
+
+struct ptz_status {
+    struct ptz_vector position;
+    struct {
+        enum ptz_move_status pan_tilt;
+        enum ptz_move_status zoom;
+    } move_status;
+    char error[256];
+    char utc_time[32];
+};
+
+struct ptz_space {
+    char uri[128];
+    struct {
+        float min;
+        float max;
+    } x_range;
+    struct {
+        float min;
+        float max;
+    } y_range;
+};
+
+struct ptz_node {
+    char token[32];
+    char name[64];
+    struct {
+        struct ptz_space absolute_pan_tilt_position_space;
+        struct ptz_space absolute_zoom_position_space;
+        struct ptz_space relative_pan_tilt_translation_space;
+        struct ptz_space relative_zoom_translation_space;
+        struct ptz_space continuous_pan_tilt_velocity_space;
+        struct ptz_space continuous_zoom_velocity_space;
+    } supported_ptz_spaces;
+    int maximum_number_of_presets;
+    int home_supported;
+    char auxiliary_commands[256];
+};
+
+struct ptz_configuration_ex {
+    char token[32];
+    char name[64];
+    int use_count;
+    char node_token[32];
+    struct ptz_space default_absolute_pan_tilt_position_space;
+    struct ptz_space default_absolute_zoom_position_space;
+    struct ptz_space default_relative_pan_tilt_translation_space;
+    struct ptz_space default_relative_zoom_translation_space;
+    struct ptz_space default_continuous_pan_tilt_velocity_space;
+    struct ptz_space default_continuous_zoom_velocity_space;
+    struct ptz_speed default_ptz_speed;
+    int default_ptz_timeout;
+    struct {
+        struct ptz_space range;
+    } pan_tilt_limits;
+    struct {
+        struct ptz_space range;
+    } zoom_limits;
+};
+
+struct ptz_preset {
+    char token[64];
+    char name[64];
+    struct ptz_vector ptz_position;
+};
+
+int onvif_ptz_get_node(const char *node_token, struct ptz_node *node);
+int onvif_ptz_get_configuration(const char *config_token, struct ptz_configuration_ex *config);
+int onvif_ptz_get_status(const char *profile_token, struct ptz_status *status);
+int onvif_ptz_absolute_move(const char *profile_token, const struct ptz_vector *position, const struct ptz_speed *speed);
+int onvif_ptz_relative_move(const char *profile_token, const struct ptz_vector *translation, const struct ptz_speed *speed);
+int onvif_ptz_continuous_move(const char *profile_token, const struct ptz_speed *velocity, int timeout);
+int onvif_ptz_stop(const char *profile_token, int pan_tilt, int zoom);
+int onvif_ptz_goto_home_position(const char *profile_token, const struct ptz_speed *speed);
+int onvif_ptz_set_preset(const char *profile_token, const char *preset_name, char *preset_token, size_t token_size);
+int onvif_ptz_goto_preset(const char *profile_token, const char *preset_token, const struct ptz_speed *speed);
+int onvif_ptz_remove_preset(const char *profile_token, const char *preset_token);
+
+#endif
