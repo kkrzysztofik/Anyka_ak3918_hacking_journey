@@ -1,16 +1,118 @@
-#! /bin/sh
-# Simple system monitor: logs CPU usage and free memory every minute
+#!/bin/sh
+#
+# sys_monitor.sh - System resource monitoring utility
+#
+# Description:
+#   Monitors system resources including CPU usage, memory, load average,
+#   process count, and disk space. Logs metrics every minute to help
+#   identify performance issues and resource constraints.
+#
+# Usage:
+#   ./sys_monitor.sh
+#   or call from gergehack.sh as background service
+#
+# Environment Variables:
+#   DEBUG       - Enable debug logging when set to 1 (default: 0)
+#   LOG_DIR     - Override log directory (default: /mnt/logs)
+#   LOG_FILE    - Override log file name (default: sys_monitor.log)
+#
+# Metrics Collected:
+#   - CPU usage percentage (calculated from /proc/stat)
+#   - Free memory in KB (MemAvailable or MemFree)
+#   - Load average (1-minute)
+#   - Process count (numeric PIDs in /proc)
+#   - Disk space for key mount points (/mnt, /tmp, /data, /etc/jffs2, /)
+#
+# Features:
+#   - Robust error handling for missing /proc files
+#   - Conditional debug logging to reduce log volume
+#   - PID file management to prevent duplicates
+#   - Graceful signal handling and cleanup
+#   - Fallback mechanisms for log directory access
+#
+# Dependencies:
+#   - init_logs.sh (sourced automatically)
+#   - /proc filesystem for system metrics
+#   - awk, head, wc, ls, df utilities
+#   - /mnt/tmp directory for temporary files
+#
+# Author: Anyka Hack Project
+# Version: 2.0
+# Last Modified: $(date '+%Y-%m-%d')
 
-# Initialize log directories if available
-[ -f /mnt/anyka_hack/init_logs.sh ] && . /mnt/anyka_hack/init_logs.sh
+# =============================================================================
+# GLOBAL VARIABLES AND CONFIGURATION
+# =============================================================================
 
 LOG_DIR=${LOG_DIR:-/mnt/logs}
 LOG_FILE=${LOG_FILE:-sys_monitor.log}
 
-# Debug function to help troubleshoot
+# =============================================================================
+# FUNCTION DEFINITIONS
+# =============================================================================
+
+# Debug function to help troubleshoot (only logs if DEBUG=1)
 debug_log() {
-  echo "$(date '+%Y-%m-%d %H:%M:%S') [DEBUG] $*" >> "$LOG_DIR/$LOG_FILE"
+  if [ "${DEBUG:-0}" = "1" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [DEBUG] $*" >> "$LOG_DIR/$LOG_FILE"
+  fi
 }
+
+cleanup() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] sys_monitor stopping pid=$$" >> "$LOG_DIR/$LOG_FILE"
+  rm -f /mnt/tmp/sys_monitor.pid /mnt/tmp/cpu1.$$ /mnt/tmp/cpu2.$$ 2>/dev/null
+  exit 0
+}
+
+# Calculate CPU usage percentage
+calculate_cpu_usage() {
+  local cpu1_file="$1"
+  local cpu2_file="$2"
+  
+  if [ ! -f "$cpu1_file" ] || [ ! -f "$cpu2_file" ]; then
+    debug_log "CPU sample files missing"
+    echo "0.0"
+    return 1
+  fi
+  
+  # Extract CPU times from /proc/stat (user, nice, system, idle, iowait, irq, softirq, steal)
+  local cpu1_times=$(awk '{for(i=2;i<=NF;i++) total+=$i; idle=$5; print total,idle; exit}' "$cpu1_file" 2>/dev/null)
+  local cpu2_times=$(awk '{for(i=2;i<=NF;i++) total+=$i; idle=$5; print total,idle; exit}' "$cpu2_file" 2>/dev/null)
+  
+  if [ -z "$cpu1_times" ] || [ -z "$cpu2_times" ]; then
+    debug_log "Failed to extract CPU times"
+    echo "0.0"
+    return 1
+  fi
+  
+  local total1=$(echo "$cpu1_times" | cut -d' ' -f1)
+  local idle1=$(echo "$cpu1_times" | cut -d' ' -f2)
+  local total2=$(echo "$cpu2_times" | cut -d' ' -f1)
+  local idle2=$(echo "$cpu2_times" | cut -d' ' -f2)
+  
+  if [ -z "$total1" ] || [ -z "$idle1" ] || [ -z "$total2" ] || [ -z "$idle2" ]; then
+    debug_log "Invalid CPU time values"
+    echo "0.0"
+    return 1
+  fi
+  
+  local total_diff=$((total2 - total1))
+  local idle_diff=$((idle2 - idle1))
+  
+  if [ "$total_diff" -gt 0 ]; then
+    local cpu_usage=$(( (total_diff - idle_diff) * 100 / total_diff ))
+    echo "$cpu_usage.0"
+  else
+    echo "0.0"
+  fi
+}
+
+# =============================================================================
+# EXECUTION SECTION
+# =============================================================================
+
+# Initialize log directories if available
+[ -f /mnt/anyka_hack/init_logs.sh ] && . /mnt/anyka_hack/init_logs.sh
 
 # Ensure preferred log dir exists (attempt creation if missing)
 if [ ! -d "$LOG_DIR" ]; then
@@ -42,14 +144,10 @@ for proc_file in /proc/stat /proc/meminfo /proc/loadavg /proc/mounts; do
   fi
 done
 
-cleanup() {
-  echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] sys_monitor stopping pid=$$" >> "$LOG_DIR/$LOG_FILE"
-  rm -f /mnt/tmp/sys_monitor.pid /mnt/tmp/cpu1.$$ /mnt/tmp/cpu2.$$ 2>/dev/null
-  exit 0
-}
-
+# Set up signal handlers
 trap cleanup INT TERM EXIT
 
+# Create temporary directory and PID file
 mkdir -p /mnt/tmp 2>/dev/null || true
 echo $$ > /mnt/tmp/sys_monitor.pid
 debug_log "PID file created: /mnt/tmp/sys_monitor.pid"
@@ -76,12 +174,12 @@ fi
 debug_log "Entering main monitoring loop..."
 
 while true; do
-  debug_log "Starting monitoring cycle..."
+  debug_log "Starting monitoring cycle"
   
-  # take two samples one second apart to compute recent CPU usage
+  # Take two samples one second apart to compute recent CPU usage
   if ! head -n1 /proc/stat > /mnt/tmp/cpu1.$$ 2>/dev/null; then
-    debug_log "ERROR: Failed to read /proc/stat (first sample)"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to read /proc/stat" >> "$LOG_DIR/$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to read /proc/stat (first sample)" >> "$LOG_DIR/$LOG_FILE"
+    debug_log "Failed to read /proc/stat (first sample)"
     sleep 60
     continue
   fi
@@ -89,49 +187,46 @@ while true; do
   sleep 1
   
   if ! head -n1 /proc/stat > /mnt/tmp/cpu2.$$ 2>/dev/null; then
-    debug_log "ERROR: Failed to read /proc/stat (second sample)"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to read /proc/stat" >> "$LOG_DIR/$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] Failed to read /proc/stat (second sample)" >> "$LOG_DIR/$LOG_FILE"
+    debug_log "Failed to read /proc/stat (second sample)"
     rm -f /mnt/tmp/cpu1.$$
     sleep 60
     continue
   fi
 
-  # Simplified CPU calculation (busybox awk friendly)
-  # Reads two snapshots of /proc/stat first line and computes non-idle percentage
-  cpu_pct=$(awk 'NR==FNR { for(i=2;i<=NF;i++) t1+=$i; i1=$5; next } { for(i=2;i<=NF;i++) t2+=$i; i2=$5 } END { td=t2-t1; id=i2-i1; if (td>0) { printf("%.1f", (td-id)/td*100); } else { print "0.0" } }' /mnt/tmp/cpu1.$$ /mnt/tmp/cpu2.$$ 2>/dev/null)
+  # Calculate CPU usage percentage
+  local cpu_pct=$(calculate_cpu_usage /mnt/tmp/cpu1.$$ /mnt/tmp/cpu2.$$)
   
-  if [ -z "$cpu_pct" ]; then
-    cpu_pct="0.0"
-    debug_log "CPU calculation failed, using 0.0"
+  if [ -z "$cpu_pct" ] || [ "$cpu_pct" = "0.0" ]; then
+    debug_log "CPU calculation failed or returned 0.0"
   fi
 
-  # get free memory in KB (prefer MemAvailable, fallback to MemFree)
-  # Memory free (prefer MemAvailable else MemFree) — explicit field match improves busybox reliability
-  mem_kb=$(awk '($1=="MemAvailable:"){print $2; found=1; exit} ($1=="MemFree:" && !found){mf=$2} END{ if(!found){ if(mf) print mf; else print 0 } }' /proc/meminfo 2>/dev/null)
+  # Get free memory in KB (prefer MemAvailable, fallback to MemFree)
+  local mem_kb=$(awk '($1=="MemAvailable:"){print $2; found=1; exit} ($1=="MemFree:" && !found){mf=$2} END{ if(!found){ if(mf) print mf; else print 0 } }' /proc/meminfo 2>/dev/null)
   if [ -z "$mem_kb" ]; then 
     mem_kb=0
     debug_log "Memory calculation failed, using 0"
   fi
 
-  # load average (first field)
-  loadavg=$(awk '{print $1; exit}' /proc/loadavg 2>/dev/null)
+  # Load average (first field)
+  local loadavg=$(awk '{print $1; exit}' /proc/loadavg 2>/dev/null)
   if [ -z "$loadavg" ]; then 
     loadavg="0.00"
     debug_log "Load average read failed, using 0.00"
   fi
 
-  # process count (count numeric entries in /proc) - simplified for busybox
-  proc_count=$(ls -1 /proc 2>/dev/null | grep '^[0-9][0-9]*$' | wc -l 2>/dev/null)
+  # Process count (count numeric entries in /proc) - simplified for busybox
+  local proc_count=$(ls -1 /proc 2>/dev/null | grep '^[0-9][0-9]*$' | wc -l 2>/dev/null)
   if [ -z "$proc_count" ]; then 
     proc_count=0
     debug_log "Process count failed, using 0"
   fi
 
   # Simplified mount space check - now includes /mnt /tmp /data /etc/jffs2 and root
-  mounts_free=""
+  local mounts_free=""
   for mp in /mnt /tmp /data /etc/jffs2 /; do
     if [ -d "$mp" ]; then
-      free_kb=$(df -k "$mp" 2>/dev/null | awk 'NR==2 {print $4; exit}')
+      local free_kb=$(df -k "$mp" 2>/dev/null | awk 'NR==2 {print $4; exit}')
       if [ -n "$free_kb" ] && [ "$free_kb" -gt 0 ] 2>/dev/null; then
         if [ -z "$mounts_free" ]; then
           mounts_free="${mp}=${free_kb}"
@@ -147,20 +242,20 @@ while true; do
     debug_log "Mount space check failed"
   fi
 
-  ts="$(date '+%Y-%m-%d %H:%M:%S')"
+  local ts="$(date '+%Y-%m-%d %H:%M:%S')"
   # Individual explicit free space metrics for key persistent areas (0 if missing)
-  data_free_kb=$(echo "$mounts_free" | tr ',' '\n' | awk -F'=| ' '/\/data=/{print $2; found=1; exit} END{if(!found) print 0}')
-  jffs2_free_kb=$(echo "$mounts_free" | tr ',' '\n' | awk -F'=| ' '/\/etc\/jffs2=/{print $2; found=1; exit} END{if(!found) print 0}')
+  local data_free_kb=$(echo "$mounts_free" | tr ',' '\n' | awk -F'=| ' '/\/data=/{print $2; found=1; exit} END{if(!found) print 0}')
+  local jffs2_free_kb=$(echo "$mounts_free" | tr ',' '\n' | awk -F'=| ' '/\/etc\/jffs2=/{print $2; found=1; exit} END{if(!found) print 0}')
 
-  log_line="$ts [INFO] CPU=${cpu_pct}% FREE_MEM_KB=${mem_kb} LOADAVG=${loadavg} PROC_COUNT=${proc_count} DATA_FREE_KB=${data_free_kb} JFFS2_FREE_KB=${jffs2_free_kb} MOUNTS_FREE=${mounts_free}"
+  local log_line="$ts [INFO] CPU=${cpu_pct}% FREE_MEM_KB=${mem_kb} LOADAVG=${loadavg} PROC_COUNT=${proc_count} DATA_FREE_KB=${data_free_kb} JFFS2_FREE_KB=${jffs2_free_kb} MOUNTS_FREE=${mounts_free}"
   
   echo "$log_line" >> "$LOG_DIR/$LOG_FILE"
-  debug_log "Logged metrics successfully"
+  debug_log "Metrics logged successfully"
   
   # Clean up temp files
   rm -f /mnt/tmp/cpu1.$$ /mnt/tmp/cpu2.$$ 2>/dev/null
 
-  # sleep remaining time to make interval ~60s (we already slept 1s during sampling)
-  debug_log "Sleeping for 59 seconds..."
+  # Sleep remaining time to make interval ~60s (we already slept 1s during sampling)
+  debug_log "Sleeping for 59 seconds"
   sleep 59
 done

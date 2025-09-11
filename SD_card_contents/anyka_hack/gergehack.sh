@@ -1,6 +1,390 @@
-#! /bin/sh
+#!/bin/sh
+#
+# gergehack.sh - Main orchestration script for Anyka camera hacking
+#
+# Description:
+#   This is the main entry point for the anyka_hack system. It orchestrates
+#   the startup of various services including WiFi configuration, PTZ daemon,
+#   web interface, ONVIF server, and Libre Anyka application.
+#
+# Usage:
+#   ./gergehack.sh
+#   or source from rc.local or similar startup script
+#
+# Dependencies:
+#   - common.sh (sourced automatically)
+#   - init_logs.sh (sourced automatically)
+#   - gergesettings.txt configuration file
+#
+# Configuration:
+#   All configuration is read from /data/gergesettings.txt with fallback
+#   to /mnt/anyka_hack/gergesettings.txt. See gergesettings.txt for available
+#   configuration options.
+#
+# Services Started:
+#   - WiFi management and credential updates
+#   - PTZ daemon (if enabled)
+#   - Web interface (legacy or ONVIF)
+#   - ONVIF server (if enabled)
+#   - Libre Anyka application (if enabled)
+#   - System monitoring (if available)
+#   - Periodic reboot (if enabled)
+#
+# Process Management:
+#   - Uses PID files to prevent duplicate instances
+#   - Automatic service restart on failure
+#   - Graceful error handling and logging
+#
+# Author: Anyka Hack Project
+# Version: 2.0
+# Last Modified: $(date '+%Y-%m-%d')
 
-LOG_FILE=gergehack.log
+# =============================================================================
+# GLOBAL VARIABLES AND CONFIGURATION
+# =============================================================================
+
+LOG_FILE="gergehack.log"
+CFG_FILE="/etc/jffs2/anyka_cfg.ini"
+
+# PTZ daemon configuration
+PTZ_INIT_DELAY_SEC=10
+PTZ_DAEMON_FILE="/mnt/tmp/ptz.daemon"
+
+# =============================================================================
+# FUNCTION DEFINITIONS
+# =============================================================================
+
+input_wifi_creds() {
+  log INFO "Updating WiFi credentials"
+  
+  # Validate required configuration variables
+  if ! validate_required_vars wifi_ssid wifi_password; then
+    log ERROR "WiFi credentials not properly configured"
+    return 1
+  fi
+  
+  # Validate configuration file exists
+  if ! validate_file_exists "$CFG_FILE" "configuration file"; then
+    return 1
+  fi
+  
+  local line_number=1
+  local line_count=$(wc -l < "$CFG_FILE" 2>/dev/null || echo 0)
+  local new_config_file="/mnt/anyka_hack/anyka_cfg.ini"
+  
+  # Create new configuration file
+  : > "$new_config_file" || {
+    log ERROR "Failed to create new configuration file: $new_config_file"
+    return 1
+  }
+  
+  while [ $line_number -le "$line_count" ]; do
+    local line=$(readline $line_number "$CFG_FILE")
+    case "$line" in
+      ssid*) 
+        log DEBUG "Set SSID line $line_number"
+        echo "ssid = $wifi_ssid" >> "$new_config_file" || {
+          log ERROR "Failed to write SSID to new config file"
+          return 1
+        }
+        ;;
+      password*) 
+        log DEBUG "Set password line $line_number"
+        echo "password = $wifi_password" >> "$new_config_file" || {
+          log ERROR "Failed to write password to new config file"
+          return 1
+        }
+        ;;
+      *) 
+        echo "$line" >> "$new_config_file" || {
+          log ERROR "Failed to write line $line_number to new config file"
+          return 1
+        }
+        ;;
+    esac
+    line_number=$((line_number + 1))
+  done
+  
+  # Backup original configuration
+  if ! mv "$CFG_FILE" "$CFG_FILE.old" 2>/dev/null; then
+    log WARN "Could not backup original configuration file"
+  fi
+  
+  # Install new configuration
+  if ! safe_copy "$new_config_file" "$CFG_FILE" "WiFi configuration"; then
+    # Try to restore backup if copy failed
+    if [ -f "$CFG_FILE.old" ]; then
+      mv "$CFG_FILE.old" "$CFG_FILE" 2>/dev/null || log ERROR "Failed to restore backup configuration"
+    fi
+    return 1
+  fi
+  
+  log INFO "WiFi credentials updated successfully"
+  return 0
+}
+
+# Update settings from SD card if available
+update_settings_from_sd() {
+  local src_file="/mnt/anyka_hack/gergesettings.txt"
+  local dest_file="/data/gergesettings.txt"
+  
+  if [ ! -f "$src_file" ]; then
+    log DEBUG "Source settings file not found: $src_file"
+    return 0
+  fi
+  
+  if [ ! -f "$dest_file" ]; then
+    log DEBUG "Destination settings file not found: $dest_file"
+    return 0
+  fi
+  
+  if ! diff "$src_file" "$dest_file" >/dev/null 2>&1; then
+    log INFO "Settings differ, updating from SD"
+    if safe_copy "$src_file" "$dest_file" "settings file"; then
+      log INFO "Settings updated successfully, rebooting"
+      sync 2>/dev/null || true
+      reboot
+    else
+      log ERROR "Failed to update settings file"
+      return 1
+    fi
+  else
+    log DEBUG "Settings files are identical"
+  fi
+  return 0
+}
+
+# Update gergehack script from SD card if available
+update_script_from_sd() {
+  local src_file="/mnt/anyka_hack/gergehack.sh"
+  local dest_file="/data/gergehack.sh"
+  
+  if [ ! -f "$src_file" ]; then
+    log DEBUG "Source script file not found: $src_file"
+    return 0
+  fi
+  
+  if [ ! -f "$dest_file" ]; then
+    log DEBUG "Destination script file not found: $dest_file"
+    return 0
+  fi
+  
+  if ! diff "$src_file" "$dest_file" >/dev/null 2>&1; then
+    log INFO "Script differs, updating from SD"
+    if safe_copy "$src_file" "$dest_file" "gergehack script"; then
+      log INFO "Script updated successfully, rebooting"
+      sync 2>/dev/null || true
+      reboot
+    else
+      log ERROR "Failed to update script file"
+      return 1
+    fi
+  else
+    log DEBUG "Script files are identical"
+  fi
+  return 0
+}
+
+# Check if WiFi credentials need updating
+check_wifi_credentials() {
+  local current_ssid=$(grep '^ssid' "$CFG_FILE" 2>/dev/null | sed 's/ //g' | cut -d'=' -f2)
+  local current_pass=$(grep '^password' "$CFG_FILE" 2>/dev/null | sed 's/ //g' | cut -d'=' -f2)
+  
+  if [ -z "$current_ssid" ] || [ -z "$current_pass" ]; then
+    log WARN "Could not read current WiFi credentials from $CFG_FILE"
+    return 1
+  fi
+  
+  if [ "$current_ssid" != "$wifi_ssid" ] || [ "$current_pass" != "$wifi_password" ]; then
+    log INFO "WiFi credentials need updating (current: $current_ssid, new: $wifi_ssid)"
+    return 0
+  else
+    log DEBUG "WiFi credentials are up to date"
+    return 1
+  fi
+}
+
+# PTZ daemon functions
+start_ptz_daemon() {
+  log INFO "Starting PTZ daemon"
+  
+  if [ -f /usr/bin/ptz_daemon_dyn ]; then
+    if ptz_daemon_dyn &; then
+      log INFO "PTZ daemon started (pid=$!)"
+      return 0
+    else
+      log ERROR "Failed to start PTZ daemon"
+      return 1
+    fi
+  elif [ -f /mnt/anyka_hack/ptz/run_ptz.sh ]; then
+    if /mnt/anyka_hack/ptz/run_ptz.sh &; then
+      log INFO "PTZ daemon started via script (pid=$!)"
+      return 0
+    else
+      log ERROR "Failed to start PTZ daemon via script"
+      return 1
+    fi
+  else
+    log ERROR "PTZ daemon script not found: /mnt/anyka_hack/ptz/run_ptz.sh"
+    return 1
+  fi
+}
+
+initialize_ptz() {
+  if [ "${ptz_init_on_boot:-0}" -eq 1 ]; then
+    log INFO "PTZ initialization enabled, waiting ${PTZ_INIT_DELAY_SEC}s"
+    sleep $PTZ_INIT_DELAY_SEC
+    if echo "init_ptz" > "$PTZ_DAEMON_FILE" 2>/dev/null; then
+      log INFO "PTZ initialization command sent"
+      return 0
+    else
+      log ERROR "Failed to send PTZ initialization command"
+      return 1
+    fi
+  fi
+  return 0
+}
+
+# Web interface functions
+start_web_interface() {
+  log INFO "Starting web interface"
+  
+  if [ ! -f /mnt/anyka_hack/web_interface/www/index.html ]; then
+    log WARN "Web interface files not found, using fallback"
+    busybox httpd -p 80 -h /data/www &
+    return 0
+  fi
+  
+  if [ "${use_onvif_web_interface:-0}" -eq 1 ] && [ -f /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh ]; then
+    log INFO "Starting ONVIF web interface"
+    if /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh &; then
+      log INFO "ONVIF web interface started (pid=$!)"
+      return 0
+    else
+      log ERROR "Failed to start ONVIF web interface"
+      return 1
+    fi
+  else
+    log INFO "Starting legacy web interface"
+    if /mnt/anyka_hack/web_interface/start_web_interface.sh &; then
+      log INFO "Legacy web interface started (pid=$!)"
+      return 0
+    else
+      log ERROR "Failed to start legacy web interface"
+      return 1
+    fi
+  fi
+}
+
+# ONVIF server functions
+start_onvif_server() {
+  log INFO "Starting ONVIF server"
+  
+  if [ -f /mnt/anyka_hack/onvif/onvifd ]; then
+    if /mnt/anyka_hack/onvif/run_onvifd.sh &; then
+      log INFO "ONVIF server started (pid=$!)"
+      return 0
+    else
+      log ERROR "Failed to start ONVIF server"
+      return 1
+    fi
+  else
+    log WARN "ONVIF server binary not found at /mnt/anyka_hack/onvif/onvifd"
+    return 1
+  fi
+}
+
+# Libre Anyka functions
+start_libre_anyka() {
+  log INFO "Starting Libre Anyka"
+  
+  # Check SD card mount status
+  local sd_detect=$(mount | grep mmcblk0p1)
+  if [ ${#sd_detect} -eq 0 ]; then
+    md_record_sec=0 # disable recording if SD card is not mounted
+    log WARN "SD card not mounted; disabling recording"
+  fi
+  
+  if [ -f /usr/bin/ptz_daemon_dyn ]; then
+    if libre_anyka_app -w "$image_width" -h "$image_height" -m "$md_record_sec" $extra_args &; then
+      log INFO "Libre Anyka started (pid=$!)"
+      return 0
+    else
+      log ERROR "Failed to start Libre Anyka"
+      return 1
+    fi
+  else
+    if [ -f /mnt/anyka_hack/libre_anyka_app/run_libre_anyka_app.sh ]; then
+      if /mnt/anyka_hack/libre_anyka_app/run_libre_anyka_app.sh &; then
+        log INFO "Libre Anyka started via script (pid=$!)"
+        return 0
+      else
+        log ERROR "Failed to start Libre Anyka via script"
+        return 1
+      fi
+    else
+      log ERROR "Libre Anyka script not found"
+      return 1
+    fi
+  fi
+}
+
+# Monitoring functions
+start_system_monitor() {
+  local pid_file="/mnt/tmp/sys_monitor.pid"
+  local log_file="/mnt/logs/sys_monitor.log"
+  
+  if [ ! -f /mnt/anyka_hack/sys_monitor.sh ]; then
+    debug_log "sys_monitor.sh not present on SD"
+    return 0
+  fi
+  
+  if is_process_running "$pid_file" "sys_monitor"; then
+    return 0
+  fi
+  
+  if /mnt/anyka_hack/sys_monitor.sh >> "$log_file" 2>&1 &; then
+    echo $! > "$pid_file"
+    log INFO "Started sys_monitor.sh (pid=$!)"
+    return 0
+  else
+    log ERROR "Failed to start sys_monitor.sh"
+    return 1
+  fi
+}
+
+start_periodic_reboot() {
+  local pid_file="/mnt/tmp/periodic_reboot.pid"
+  local log_file="/mnt/logs/periodic_reboot.log"
+  
+  if [ "${enable_periodic_reboot:-0}" -ne 1 ]; then
+    debug_log "Periodic reboot disabled"
+    return 0
+  fi
+  
+  if [ ! -f /mnt/anyka_hack/periodic_reboot.sh ]; then
+    log WARN "periodic_reboot.sh not present on SD (enable_periodic_reboot=1)"
+    return 1
+  fi
+  
+  if is_process_running "$pid_file" "periodic_reboot"; then
+    return 0
+  fi
+  
+  local reboot_interval_min=${periodic_reboot_minutes:-720}
+  if /mnt/anyka_hack/periodic_reboot.sh "$reboot_interval_min" >> "$log_file" 2>&1 &; then
+    echo $! > "$pid_file"
+    log INFO "Started periodic_reboot.sh interval=${reboot_interval_min}m (pid=$!)"
+    return 0
+  else
+    log ERROR "Failed to start periodic_reboot.sh"
+    return 1
+  fi
+}
+
+# =============================================================================
+# EXECUTION SECTION
+# =============================================================================
 
 # Initialize log directories first
 [ -f /mnt/anyka_hack/init_logs.sh ] && . /mnt/anyka_hack/init_logs.sh
@@ -8,155 +392,87 @@ LOG_FILE=gergehack.log
 # Source common utilities
 [ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
 
-# import settings
-[ -f /data/gergesettings.txt ] && . /data/gergesettings.txt || log WARN "Missing /data/gergesettings.txt; proceeding with defaults"
+# Import settings with validation
+if [ -f /data/gergesettings.txt ]; then
+  . /data/gergesettings.txt
+  validate_configuration "/data/gergesettings.txt" "wifi_ssid wifi_password time_zone"
+else
+  log WARN "Missing /data/gergesettings.txt; proceeding with defaults"
+fi
 
-cfgfile=/etc/jffs2/anyka_cfg.ini
+# Validate system state
+validate_system_state
 
-input_wifi_creds() {
-  log INFO 'Updating WiFi credentials'
-  i=1
-  linecountlimit=$(wc -l < "$cfgfile" 2>/dev/null || echo 0)
-  newcredfile=/mnt/anyka_hack/anyka_cfg.ini
-  : > "$newcredfile"
-  while [ $i -le "$linecountlimit" ]; do
-    line=$(readline $i "$cfgfile")
-    case "$line" in
-      ssid*) log DEBUG "Set SSID line $i"; echo "ssid = $wifi_ssid" >> "$newcredfile" ;;
-      password*) log DEBUG "Set password line $i"; echo "password = $wifi_password" >> "$newcredfile" ;;
-      *) echo "$line" >> "$newcredfile" ;;
-    esac
-    i=$((i+1))
-  done
-  mv "$cfgfile" "$newcredfile.old" 2>/dev/null
-  cp "$newcredfile" "$cfgfile" 2>/dev/null || log ERROR "Failed to update $cfgfile"
-}
-
+# Disable telnet if configured
 if [ "${run_telnet:-1}" -eq 0 ]; then
-  # telnet is started by rc.local or time_zone.sh
   killall telnetd 2>/dev/null && log INFO "Disabled telnetd" || log DEBUG "telnetd not running"
 fi
 
-# check duplicate process
+# Check for duplicate process
 mkdir -p /mnt/tmp 2>/dev/null || true
 if [ -f /mnt/tmp/exploit.txt ]; then
-  log WARN 'gergehack already running'
+  log WARN "gergehack already running"
 else
   echo "exploit" > /mnt/tmp/exploit.txt
   ensure_mounted_sd
-  log INFO '_________________________________'
-  log INFO '|       Gerge Hacked This       |'
-  log INFO '---------------------------------'
-  #get new settings from SD card if available
-  if [ -f /mnt/anyka_hack/gergesettings.txt ] && [ -f /data/gergesettings.txt ]; then
-    if ! diff /mnt/anyka_hack/gergesettings.txt /data/gergesettings.txt >/dev/null 2>&1; then
-      log INFO 'Updating settings from SD and rebooting'
-      cp /mnt/anyka_hack/gergesettings.txt /data/gergesettings.txt && reboot
-    fi
-  fi
-  if [ -f /mnt/anyka_hack/gergehack.sh ] && [ -f /data/gergehack.sh ]; then
-    if ! diff /mnt/anyka_hack/gergehack.sh /data/gergehack.sh >/dev/null 2>&1; then
-      log INFO 'Updating gergehack from SD and rebooting'
-      cp /mnt/anyka_hack/gergehack.sh /data/gergehack.sh && reboot
-    fi
-  fi
-  setssid=$(grep '^ssid' "$cfgfile" | sed 's/ //g') #get ssid line and remove spaces
-  setpass=$(grep '^password' "$cfgfile" | sed 's/ //g') #get password line and remove spaces
-  setssid=${setssid##*=} #keep the part after the =
-  setpass=${setpass##*=} #keep the part after the =
-  if [ "$setssid" != "$wifi_ssid" ] || [ "$setpass" != "$wifi_password" ]; then
+  log INFO "_________________________________"
+  log INFO "|       Gerge Hacked This       |"
+  log INFO "---------------------------------"
+  
+  # Perform updates
+  update_settings_from_sd
+  update_script_from_sd
+  
+  # Check and update WiFi credentials
+  if check_wifi_credentials; then
     input_wifi_creds
   fi
-  log INFO 'Start network service'
+  
+  # Start network service
+  log INFO "Start network service"
   /usr/sbin/wifi_manage.sh start 2>/dev/null || log WARN "wifi_manage failed"
   ntpd -n -N -p "$time_source" &
   export TZ="$time_zone"
+  
+  # Disable FTP if configured
   if [ "${run_ftp:-1}" -eq 0 ]; then
     killall tcpsvd 2>/dev/null && log INFO "Disabled FTP service" || log DEBUG "FTP service not running"
   fi
-  # load kernel modules for camera
+  
+  # Load kernel modules for camera
   load_camera_modules "$sensor_kern_module"
+  
+  # Start services based on configuration
   if [ "${run_ptz_daemon:-0}" -eq 1 ]; then
-    log INFO 'Start PTZ'
-    if [ -f /usr/bin/ptz_daemon_dyn ]; then
-      ptz_daemon_dyn &
-    else
-      /mnt/anyka_hack/ptz/run_ptz.sh &
-    fi
-    if [ "${ptz_init_on_boot:-0}" -eq 1 ]; then
-      sleep 10
-      echo "init_ptz" > /mnt/tmp/ptz.daemon
-    fi
+    start_ptz_daemon
+    initialize_ptz
   fi
+  
   if [ "${run_web_interface:-0}" -eq 1 ]; then
-    log INFO 'Start web interface'
-    if [ -f /mnt/anyka_hack/web_interface/www/index.html ]; then
-      # Use ONVIF web interface if enabled and available, otherwise use legacy
-      if [ "${use_onvif_web_interface:-0}" -eq 1 ] && [ -f /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh ]; then
-        log INFO 'Starting ONVIF web interface'
-        /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh &
-      else
-        log INFO 'Starting legacy web interface'
-        /mnt/anyka_hack/web_interface/start_web_interface.sh &
-      fi
-    else
-      busybox httpd -p 80 -h /data/www &
-    fi
+    start_web_interface
   fi
+  
   if [ "${run_onvif_server:-0}" -eq 1 ]; then
-    log INFO 'Start ONVIF server'
-    if [ -f /mnt/anyka_hack/onvif/onvifd ]; then
-      /mnt/anyka_hack/onvif/run_onvifd.sh &
-    else
-      log WARN "ONVIF server binary not found at /mnt/anyka_hack/onvif/onvifd"
-    fi
+    start_onvif_server
   fi
+  
   if [ "${run_libre_anyka:-0}" -eq 1 ]; then
-    log INFO 'Start Libre Anyka'
-    if [ -f /usr/bin/ptz_daemon_dyn ]; then
-      SD_detect=$(mount | grep mmcblk0p1)
-      if [ ${#SD_detect} -eq 0 ]; then
-        md_record_sec=0 # disable recording if SD card is not mounted
-      fi
-      libre_anyka_app -w "$image_width" -h "$image_height" -m "$md_record_sec" $extra_args &
-    else
-      /mnt/anyka_hack/libre_anyka_app/run_libre_anyka_app.sh &
-    fi
+    start_libre_anyka
   fi
-
-  # Start lightweight system monitor if available (logs CPU and free memory every minute)
-  if [ -f /mnt/anyka_hack/sys_monitor.sh ]; then
-    if [ -f /mnt/tmp/sys_monitor.pid ] && kill -0 "$(cat /mnt/tmp/sys_monitor.pid)" 2>/dev/null; then
-      log DEBUG "sys_monitor already running pid=$(cat /mnt/tmp/sys_monitor.pid)"
-    else
-      /mnt/anyka_hack/sys_monitor.sh >> /mnt/logs/sys_monitor.log 2>&1 &
-      log INFO "Started sys_monitor.sh"
-    fi
-  else
-    log DEBUG "sys_monitor.sh not present on SD"
-  fi
-
-  # Start periodic reboot helper (optional) if enabled and script present.
-  # Requires variables (optional) in gergesettings.txt:
-  #   enable_periodic_reboot=1            # master switch
-  #   periodic_reboot_minutes=720         # interval in minutes (default 720 = 12h)
-  if [ "${enable_periodic_reboot:-0}" -eq 1 ]; then
-    if [ -f /mnt/anyka_hack/periodic_reboot.sh ]; then
-      if [ -f /mnt/tmp/periodic_reboot.pid ] && kill -0 "$(cat /mnt/tmp/periodic_reboot.pid)" 2>/dev/null; then
-        log DEBUG "periodic_reboot already running pid=$(cat /mnt/tmp/periodic_reboot.pid)"
-      else
-        REBOOT_INTERVAL_MIN=${periodic_reboot_minutes:-720}
-        /mnt/anyka_hack/periodic_reboot.sh "$REBOOT_INTERVAL_MIN" >> /mnt/logs/periodic_reboot.log 2>&1 &
-  echo $! > /mnt/tmp/periodic_reboot.pid
-        log INFO "Started periodic_reboot.sh interval=${REBOOT_INTERVAL_MIN}m"
-      fi
-    else
-      log WARN "periodic_reboot.sh not present on SD (enable_periodic_reboot=1)"
-    fi
-  fi
+  
+  # Start monitoring services
+  start_system_monitor
+  start_periodic_reboot
+  
+  # Report service status
+  report_service_status "sys_monitor" "/mnt/tmp/sys_monitor.pid" "/mnt/logs/sys_monitor.log"
+  report_service_status "periodic_reboot" "/mnt/tmp/periodic_reboot.pid" "/mnt/logs/periodic_reboot.log"
+  
   if [ "${run_ipc:-1}" -eq 0 ] && [ "${rootfs_modified:-0}" -eq 0 ]; then
+    log INFO "IPC disabled and rootfs not modified, entering maintenance mode"
     while true; do
       sleep 30
     done
   fi
 fi
+

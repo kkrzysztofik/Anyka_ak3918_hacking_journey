@@ -193,6 +193,4 @@ void platform_sleep_ms(uint32_t milliseconds);
 void platform_sleep_us(uint32_t microseconds);
 uint64_t platform_get_time_ms(void);
 
-
-
 #endif /* ONVIF_PLATFORM_H */
