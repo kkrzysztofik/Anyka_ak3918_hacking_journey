@@ -1,0 +1,286 @@
+#!/bin/sh
+#
+# ONVIF PTZ Presets management for Anyka AK3918 camera
+# Provides preset storage, recall, and management via ONVIF
+#
+
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+
+if [ -f /data/www/index.html ]; then
+    . /data/www/cgi-bin/header
+else
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/header
+fi
+
+if [ -f /mnt/tmp/token.txt ] && [ "$token" = "$(readline 1 /mnt/tmp/token.txt)" ]; then
+ipadd=`ip route get 1 | awk '{print $NF;exit}'`
+onvif_port=8080
+
+# Function to get PTZ presets
+get_presets() {
+    local soap_request="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">
+<soap:Header/>
+<soap:Body>
+<tptz:GetPresets>
+<tptz:ProfileToken>MainProfile</tptz:ProfileToken>
+</tptz:GetPresets>
+</soap:Body>
+</soap:Envelope>"
+
+    echo "$soap_request" | curl -s -X POST \
+        -H "Content-Type: application/soap+xml; charset=utf-8" \
+        -H "SOAPAction: \"http://www.onvif.org/ver20/ptz/wsdl/GetPresets\"" \
+        -d @- \
+        "http://$ipadd:$onvif_port/onvif/ptz_service"
+}
+
+# Function to set PTZ preset
+set_preset() {
+    local preset_token="$1"
+    local soap_request="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">
+<soap:Header/>
+<soap:Body>
+<tptz:SetPreset>
+<tptz:ProfileToken>MainProfile</tptz:ProfileToken>
+<tptz:PresetToken>$preset_token</tptz:PresetToken>
+</tptz:SetPreset>
+</soap:Body>
+</soap:Envelope>"
+
+    echo "$soap_request" | curl -s -X POST \
+        -H "Content-Type: application/soap+xml; charset=utf-8" \
+        -H "SOAPAction: \"http://www.onvif.org/ver20/ptz/wsdl/SetPreset\"" \
+        -d @- \
+        "http://$ipadd:$onvif_port/onvif/ptz_service"
+}
+
+# Function to goto PTZ preset
+goto_preset() {
+    local preset_token="$1"
+    local soap_request="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">
+<soap:Header/>
+<soap:Body>
+<tptz:GotoPreset>
+<tptz:ProfileToken>MainProfile</tptz:ProfileToken>
+<tptz:PresetToken>$preset_token</tptz:PresetToken>
+</tptz:GotoPreset>
+</soap:Body>
+</soap:Envelope>"
+
+    echo "$soap_request" | curl -s -X POST \
+        -H "Content-Type: application/soap+xml; charset=utf-8" \
+        -H "SOAPAction: \"http://www.onvif.org/ver20/ptz/wsdl/GotoPreset\"" \
+        -d @- \
+        "http://$ipadd:$onvif_port/onvif/ptz_service"
+}
+
+# Function to remove PTZ preset
+remove_preset() {
+    local preset_token="$1"
+    local soap_request="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">
+<soap:Header/>
+<soap:Body>
+<tptz:RemovePreset>
+<tptz:ProfileToken>MainProfile</tptz:ProfileToken>
+<tptz:PresetToken>$preset_token</tptz:PresetToken>
+</tptz:RemovePreset>
+</soap:Body>
+</soap:Envelope>"
+
+    echo "$soap_request" | curl -s -X POST \
+        -H "Content-Type: application/soap+xml; charset=utf-8" \
+        -H "SOAPAction: \"http://www.onvif.org/ver20/ptz/wsdl/RemovePreset\"" \
+        -d @- \
+        "http://$ipadd:$onvif_port/onvif/ptz_service"
+}
+
+# Handle preset commands
+case "$command" in
+    "set_preset")
+        if [ -n "$preset_token" ]; then
+            set_preset "$preset_token"
+        fi
+        ;;
+    "goto_preset")
+        if [ -n "$preset_token" ]; then
+            goto_preset "$preset_token"
+        fi
+        ;;
+    "remove_preset")
+        if [ -n "$preset_token" ]; then
+            remove_preset "$preset_token"
+        fi
+        ;;
+esac
+
+cat <<EOT
+<!DOCTYPE html>
+<html>
+<head>
+<title>ONVIF PTZ Presets</title>
+<link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="topnav">
+  <a href="/cgi-bin/webui_onvif?token=$token">Home</a>
+  <a href="/cgi-bin/onvif_imaging?token=$token">Imaging</a>
+  <a class="active" href="/cgi-bin/onvif_presets?token=$token">Presets</a>
+  <a href="/cgi-bin/settings?token=$token">Settings</a>
+  <a href="/cgi-bin/system?token=$token">System</a>
+  <a href="/cgi-bin/events?token=$token">Events</a>
+  <a href="/cgi-bin/login">Exit</a>
+</div>
+<section>
+
+<div class="card">
+<h2>PTZ Presets Management</h2>
+
+<div style="display: flex; gap: 10px; margin-bottom: 20px;">
+<button onclick="setPreset('Preset1')">Store Position 1</button>
+<button onclick="setPreset('Preset2')">Store Position 2</button>
+<button onclick="setPreset('Preset3')">Store Position 3</button>
+<button onclick="setPreset('Preset4')">Store Position 4</button>
+<button onclick="setPreset('Preset5')">Store Position 5</button>
+</div>
+
+<div style="display: flex; gap: 10px; margin-bottom: 20px;">
+<button onclick="gotoPreset('Preset1')">Go to Position 1</button>
+<button onclick="gotoPreset('Preset2')">Go to Position 2</button>
+<button onclick="gotoPreset('Preset3')">Go to Position 3</button>
+<button onclick="gotoPreset('Preset4')">Go to Position 4</button>
+<button onclick="gotoPreset('Preset5')">Go to Position 5</button>
+</div>
+
+<div style="display: flex; gap: 10px; margin-bottom: 20px;">
+<button onclick="removePreset('Preset1')" style="background-color: #ff6b6b;">Remove Position 1</button>
+<button onclick="removePreset('Preset2')" style="background-color: #ff6b6b;">Remove Position 2</button>
+<button onclick="removePreset('Preset3')" style="background-color: #ff6b6b;">Remove Position 3</button>
+<button onclick="removePreset('Preset4')" style="background-color: #ff6b6b;">Remove Position 4</button>
+<button onclick="removePreset('Preset5')" style="background-color: #ff6b6b;">Remove Position 5</button>
+</div>
+
+<br>
+<img id="preview" style="max-width:98%; border: 1px solid #ccc;" src="http://$ipadd:3000/preview.jpeg"/>
+</div>
+
+<div class="card">
+<h2>Instructions</h2>
+<ol>
+<li>Use the PTZ controls on the <a href="/cgi-bin/webui_onvif?token=$token">main page</a> to position the camera</li>
+<li>Click "Store Position X" to save the current camera position</li>
+<li>Click "Go to Position X" to move the camera to a saved position</li>
+<li>Click "Remove Position X" to delete a saved position</li>
+</ol>
+</div>
+
+</section>
+
+<script>
+function setPreset(presetToken) {
+    if (confirm('Store current position as ' + presetToken + '?')) {
+        var form = document.createElement('form');
+        form.method = 'get';
+        form.action = 'onvif_presets';
+        
+        var tokenInput = document.createElement('input');
+        tokenInput.type = 'hidden';
+        tokenInput.name = 'token';
+        tokenInput.value = '$token';
+        form.appendChild(tokenInput);
+        
+        var commandInput = document.createElement('input');
+        commandInput.type = 'hidden';
+        commandInput.name = 'command';
+        commandInput.value = 'set_preset';
+        form.appendChild(commandInput);
+        
+        var presetInput = document.createElement('input');
+        presetInput.type = 'hidden';
+        presetInput.name = 'preset_token';
+        presetInput.value = presetToken;
+        form.appendChild(presetInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function gotoPreset(presetToken) {
+    var form = document.createElement('form');
+    form.method = 'get';
+    form.action = 'onvif_presets';
+    
+    var tokenInput = document.createElement('input');
+    tokenInput.type = 'hidden';
+    tokenInput.name = 'token';
+    tokenInput.value = '$token';
+    form.appendChild(tokenInput);
+    
+    var commandInput = document.createElement('input');
+    commandInput.type = 'hidden';
+    commandInput.name = 'command';
+    commandInput.value = 'goto_preset';
+    form.appendChild(commandInput);
+    
+    var presetInput = document.createElement('input');
+    presetInput.type = 'hidden';
+    presetInput.name = 'preset_token';
+    presetInput.value = presetToken;
+    form.appendChild(presetInput);
+    
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function removePreset(presetToken) {
+    if (confirm('Remove ' + presetToken + '? This action cannot be undone.')) {
+        var form = document.createElement('form');
+        form.method = 'get';
+        form.action = 'onvif_presets';
+        
+        var tokenInput = document.createElement('input');
+        tokenInput.type = 'hidden';
+        tokenInput.name = 'token';
+        tokenInput.value = '$token';
+        form.appendChild(tokenInput);
+        
+        var commandInput = document.createElement('input');
+        commandInput.type = 'hidden';
+        commandInput.name = 'command';
+        commandInput.value = 'remove_preset';
+        form.appendChild(commandInput);
+        
+        var presetInput = document.createElement('input');
+        presetInput.type = 'hidden';
+        presetInput.name = 'preset_token';
+        presetInput.value = presetToken;
+        form.appendChild(presetInput);
+        
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+// Update preview every 2 seconds
+setInterval(function() { 
+    document.getElementById("preview").src = "http://$ipadd:3000/preview.jpeg?" + new Date().getTime(); 
+}, 2000);
+</script>
+
+</body>
+</html>
+EOT
+
+else
+    if [ -f /data/www/index.html ]; then
+        . /data/www/cgi-bin/footer
+    else
+        . /mnt/anyka_hack/web_interface/www/cgi-bin/footer
+    fi
+fi

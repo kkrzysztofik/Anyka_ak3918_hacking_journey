@@ -1,0 +1,228 @@
+#!/bin/sh
+#
+# ONVIF-based web interface for Anyka AK3918 camera
+# This replaces the legacy ptz_daemon and libre_anyka_app integration
+#
+
+[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+
+if [ -f /data/www/index.html ]; then
+    . /data/www/cgi-bin/header
+else
+    . /mnt/anyka_hack/web_interface/www/cgi-bin/header
+fi
+
+if [ -f /mnt/tmp/token.txt ] && [ "$token" = "$(readline 1 /mnt/tmp/token.txt)" ]; then
+. /data/gergesettings.txt
+ipadd=`ip route get 1 | awk '{print $NF;exit}'`
+onvif_port=8080
+
+# PTZ direction mapping (same as original)
+if [ "$ptz_invert" = 1 ]; then
+  right='l'
+  left='r'
+  up='d'
+  down='u'
+else
+  right='r'
+  left='l'
+  up='u'
+  down='d'
+fi
+
+# Function to send ONVIF PTZ commands
+send_onvif_ptz() {
+    local action="$1"
+    local pan_speed="${2:-0.5}"
+    local tilt_speed="${3:-0.5}"
+    
+    # Create SOAP request for PTZ RelativeMove
+    local soap_request="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\" xmlns:tt=\"http://www.onvif.org/ver10/schema\">
+<soap:Header/>
+<soap:Body>
+<tptz:RelativeMove>
+<tptz:ProfileToken>MainProfile</tptz:ProfileToken>
+<tptz:Translation>
+<tt:PanTilt x=\"$pan_speed\" y=\"$tilt_speed\"/>
+</tptz:Translation>
+<tptz:Speed>
+<tt:PanTilt x=\"$pan_speed\" y=\"$tilt_speed\"/>
+</tptz:Speed>
+</tptz:RelativeMove>
+</soap:Body>
+</soap:Envelope>"
+
+    # Send HTTP POST request to ONVIF server
+    echo "$soap_request" | curl -s -X POST \
+        -H "Content-Type: application/soap+xml; charset=utf-8" \
+        -H "SOAPAction: \"http://www.onvif.org/ver20/ptz/wsdl/RelativeMove\"" \
+        -d @- \
+        "http://$ipadd:$onvif_port/onvif/ptz_service" > /dev/null
+}
+
+# Function to stop PTZ movement
+stop_ptz() {
+    local soap_request="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">
+<soap:Header/>
+<soap:Body>
+<tptz:Stop>
+<tptz:ProfileToken>MainProfile</tptz:ProfileToken>
+<tptz:PanTilt>true</tptz:PanTilt>
+<tptz:Zoom>true</tptz:Zoom>
+</tptz:Stop>
+</tptz:Stop>
+</soap:Body>
+</soap:Envelope>"
+
+    echo "$soap_request" | curl -s -X POST \
+        -H "Content-Type: application/soap+xml; charset=utf-8" \
+        -H "SOAPAction: \"http://www.onvif.org/ver20/ptz/wsdl/Stop\"" \
+        -d @- \
+        "http://$ipadd:$onvif_port/onvif/ptz_service" > /dev/null
+}
+
+# Handle PTZ commands
+case "$command" in
+    "ptzinit")
+        # Initialize PTZ - send stop command to ensure clean state
+        stop_ptz
+        ;;
+    "ptzu")
+        send_onvif_ptz "up" 0 0.5
+        ;;
+    "ptzd")
+        send_onvif_ptz "down" 0 -0.5
+        ;;
+    "ptzl")
+        send_onvif_ptz "left" -0.5 0
+        ;;
+    "ptzr")
+        send_onvif_ptz "right" 0.5 0
+        ;;
+    "ptzru")
+        send_onvif_ptz "right_up" 0.5 0.5
+        ;;
+    "ptzrd")
+        send_onvif_ptz "right_down" 0.5 -0.5
+        ;;
+    "ptzlu")
+        send_onvif_ptz "left_up" -0.5 0.5
+        ;;
+    "ptzld")
+        send_onvif_ptz "left_down" -0.5 -0.5
+        ;;
+    "ptzstop")
+        stop_ptz
+        ;;
+esac
+
+cat <<EOT
+<!DOCTYPE html>
+<html>
+<head>
+<title>Camera - ONVIF WebUI</title>
+<link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="topnav">
+  <a class="active" href="/cgi-bin/webui_onvif?token=$token">Home</a>
+  <a href="/cgi-bin/onvif_imaging?token=$token">Imaging</a>
+  <a href="/cgi-bin/onvif_presets?token=$token">Presets</a>
+  <a href="/cgi-bin/settings?token=$token">Settings</a>
+  <a href="/cgi-bin/system?token=$token">System</a>
+  <a href="/cgi-bin/events?token=$token">Events</a>
+  <a href="/cgi-bin/login">Exit</a>
+  <a href="/cgi-bin/legacy/webui?token=$token" style="float: right; background-color: #666;">Legacy Interface</a>
+</div>
+<section>
+
+<div class="card">
+<h2>Camera Controls (ONVIF)</h2>
+<img id="snapshot" style="max-width:98%" src="http://$ipadd:3000/preview.jpeg"/>
+<br>
+<br>
+<button onclick="window.location.href='webui_onvif?token=$token&command=ptzinit'" id="home">Init_PTZ</button>
+<button onclick="window.location.href='webui_onvif?token=$token&command=ptzstop'" id="stop">Stop_PTZ</button>
+<br>
+<br>
+<table style="margin: 0px auto;">
+    <tr align="center">
+        <td><button onclick="window.location.href='webui_onvif?token=$token&command=ptz$left$up'">&#11017;</button></td>
+        <td><button onclick="window.location.href='webui_onvif?token=$token&command=ptz$up'">&#11014;</button></td>
+        <td><button onclick="window.location.href='webui_onvif?token=$token&command=ptz$right$up'">&#11016;</button></td>
+    </tr>
+    <tr align="center">
+        <td><button onclick="window.location.href='webui_onvif?token=$token&command=ptz$left'">&#11013;</button></td>
+        <td>PTZ</td>
+        <td><button onclick="window.location.href='webui_onvif?token=$token&command=ptz$right'">&#10145;</button></td>
+    </tr>
+    <tr align="center">
+        <td><button onclick="window.location.href='webui_onvif?token=$token&command=ptz$left$down'">&#11019;</button></td>
+        <td><button onclick="window.location.href='webui_onvif?token=$token&command=ptz$down'">&#11015;</button></td>
+        <td><button onclick="window.location.href='webui_onvif?token=$token&command=ptz$right$down'">&#11018;</button></td>
+    </tr>
+</table>
+<br>
+</div>
+
+<div class="card">
+<h2>Endpoints</h2>
+RTSP stream Main: rtsp://$ipadd:554/vs0
+<br>
+RTSP stream Sub: rtsp://$ipadd:554/vs1
+<br>
+Snapshot: http://$ipadd:3000/snapshot.jpeg
+<br>
+ONVIF Device: http://$ipadd:$onvif_port/onvif/device_service
+<br>
+ONVIF PTZ: http://$ipadd:$onvif_port/onvif/ptz_service
+<br>
+ONVIF Media: http://$ipadd:$onvif_port/onvif/media_service
+<br>
+</div>
+
+<div class="card">
+<h2>ONVIF Status</h2>
+<div id="onvif_status">
+<script>
+// Check ONVIF server status
+fetch('http://$ipadd:$onvif_port/onvif/device_service', {
+    method: 'POST',
+    headers: {
+        'Content-Type': 'application/soap+xml; charset=utf-8',
+        'SOAPAction': 'http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation'
+    },
+    body: '<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><soap:Header/><soap:Body><tds:GetDeviceInformation/></soap:Body></soap:Envelope>'
+})
+.then(response => response.text())
+.then(data => {
+    document.getElementById('onvif_status').innerHTML = '<span style="color: green;">✓ ONVIF Server Online</span>';
+})
+.catch(error => {
+    document.getElementById('onvif_status').innerHTML = '<span style="color: red;">✗ ONVIF Server Offline</span>';
+});
+</script>
+</div>
+</div>
+
+</section>
+
+<script>
+setInterval(function() { document.getElementById("snapshot").src = "http://$ipadd:3000/" + Math.round(Math.random()*100000) + ".jpeg"; }, 300);
+</script>
+
+</body>
+</html>
+EOT
+
+else
+    if [ -f /data/www/index.html ]; then
+        . /data/www/cgi-bin/footer
+    else
+        . /mnt/anyka_hack/web_interface/www/cgi-bin/footer
+    fi
+fi

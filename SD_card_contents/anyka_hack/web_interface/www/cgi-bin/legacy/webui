@@ -26,23 +26,24 @@ cat <<EOT
 <!DOCTYPE html>
 <html>
 <head>
-<title>Camera - WebUI</title>
+<title>Camera - Legacy WebUI</title>
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <div class="topnav">
-  <a class="active" href="/cgi-bin/webui?token=$token">Home</a>
-  <a href="/cgi-bin/settings?token=$token">Settings</a>
-  <a href="/cgi-bin/system?token=$token">System</a>
-  <a href="/cgi-bin/events?token=$token">Events</a>
-  <a href="/cgi-bin/login">Exit</a>
+  <a class="active" href="/cgi-bin/legacy/webui?token=$token">Home</a>
+  <a href="/cgi-bin/legacy/settings?token=$token">Settings</a>
+  <a href="/cgi-bin/legacy/system?token=$token">System</a>
+  <a href="/cgi-bin/legacy/events?token=$token">Events</a>
+  <a href="/cgi-bin/legacy/login">Exit</a>
+  <a href="/cgi-bin/webui_onvif?token=$token" style="float: right; background-color: #4CAF50;">ONVIF Interface</a>
 </div>
 <section>
 
 <div class="card">
-<h2>Camera Controls</h2>
+<h2>Camera Controls (Legacy)</h2>
 <img id="snapshot" style="max-width:98%" src="http://$ipadd:3000/preview.jpeg"/>
 <br>
 <br>
@@ -77,6 +78,20 @@ RTSP stream Sub: rtsp://$ipadd:554/vs1
 <br>
 Snapshot: http://$ipadd:3000/snapshot.jpeg
 <br>
+</div>
+
+<div class="card">
+<h2>Interface Options</h2>
+<a href="/cgi-bin/webui_onvif?token=$token" style="color: #4CAF50; font-weight: bold; font-size: 18px;">→ Try ONVIF Interface (Recommended)</a>
+<br><br>
+The ONVIF interface provides:
+<ul>
+<li>Advanced PTZ controls with ONVIF protocol</li>
+<li>Imaging parameter adjustments (brightness, contrast, saturation)</li>
+<li>PTZ preset management</li>
+<li>Real-time service status monitoring</li>
+<li>Better integration with surveillance software</li>
+</ul>
 </div>
 
 </section>

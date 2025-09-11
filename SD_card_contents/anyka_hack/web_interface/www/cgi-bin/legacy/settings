@@ -44,23 +44,24 @@ cat <<EOT
 <!DOCTYPE html>
 <html>
 <head>
-<title>Camera - WebUI</title>
+<title>Camera - Legacy WebUI Settings</title>
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <div class="topnav">
-  <a href="/cgi-bin/webui?token=$token">Home</a>
-  <a class="active" href="/cgi-bin/settings?token=$token">Settings</a>
-  <a href="/cgi-bin/system?token=$token">System</a>
-  <a href="/cgi-bin/events?token=$token">Events</a>
-  <a href="/cgi-bin/login">Exit</a>
+  <a href="/cgi-bin/legacy/webui?token=$token">Home</a>
+  <a class="active" href="/cgi-bin/legacy/settings?token=$token">Settings</a>
+  <a href="/cgi-bin/legacy/system?token=$token">System</a>
+  <a href="/cgi-bin/legacy/events?token=$token">Events</a>
+  <a href="/cgi-bin/legacy/login">Exit</a>
+  <a href="/cgi-bin/webui_onvif?token=$token" style="float: right; background-color: #4CAF50;">ONVIF Interface</a>
 </div>
 
 <section>
 <div class="card">
-<form action="/cgi-bin/pwd_change">
+<form action="/cgi-bin/legacy/pwd_change">
 <input type="hidden" NAME="token" value="$token">
 <h2>WebUI Password</h2>
 new password<br>
@@ -72,7 +73,7 @@ confirm password<br>
 </div>
 
 <div class="card">
-<form action="/cgi-bin/settings_submit.sh">
+<form action="/cgi-bin/legacy/settings_submit.sh">
 <input type="hidden" NAME="token" value="$token">
 <h2>Network & Time</h2>
 wifi_ssid <br>
@@ -88,7 +89,7 @@ time_zone <br>
 </div>
 
 <div class="card">
-<form action="/cgi-bin/settings_submit.sh">
+<form action="/cgi-bin/legacy/settings_submit.sh">
 <input type="hidden" NAME="token" value="$token">
 <input type="hidden" NAME="ir_invert" value="0">
 <input type="hidden" NAME="day_night_invert" value="0">
@@ -106,7 +107,7 @@ IR filter invert (image looks pink if set wrong) <input type="checkbox" name="ir
 </div>
 
 <div class="card">
-<form action="/cgi-bin/settings_submit.sh">
+<form action="/cgi-bin/legacy/settings_submit.sh">
 <input type="hidden" NAME="token" value="$token">
 <input type="hidden" NAME="run_ftp" value="0">
 <input type="hidden" NAME="run_telnet" value="0">
@@ -122,29 +123,20 @@ ptz_daemon camera movement [default 1] <input type="checkbox" name="run_ptz_daem
 Invert camera movement <input type="checkbox" name="ptz_invert" value="1" $(if [ 1 == $ptz_invert ]; then echo 'checked'; fi)><br>
 Home the camera ptz at bootup [default 0] <input type="checkbox" name="ptz_init_on_boot" value="1" $(if [ 1 == $ptz_init_on_boot ]; then echo 'checked'; fi)><br>
 Libre-Anyka-App (RTSP, snapshot and motion trigger recording) [default 1] <input type="checkbox" name="run_libre_anyka" value="1" $(if [ 1 == $run_libre_anyka ]; then echo 'checked'; fi)><br>
-FTP (File Transfer Protocol) [default 1] <input type="checkbox" name="run_ftp" value="1" $( [ 1 = "$run_ftp" ] && echo 'checked' )><br>
-Telnet [default 1] <input type="checkbox" name="run_telnet" value="1" $( [ 1 = "$run_telnet" ] && echo 'checked' )><br>
-ptz_daemon camera movement [default 1] <input type="checkbox" name="run_ptz_daemon" value="1" $( [ 1 = "$run_ptz_daemon" ] && echo 'checked' )><br>
-Invert camera movement <input type="checkbox" name="ptz_invert" value="1" $( [ 1 = "$ptz_invert" ] && echo 'checked' )><br>
-Home the camera ptz at bootup [default 0] <input type="checkbox" name="ptz_init_on_boot" value="1" $( [ 1 = "$ptz_init_on_boot" ] && echo 'checked' )><br>
-Libre-Anyka-App (RTSP, snapshot and motion trigger recording) [default 1] <input type="checkbox" name="run_libre_anyka" value="1" $( [ 1 = "$run_libre_anyka" ] && echo 'checked' )><br>
 Motion recording in seconds [default 0 to disable] <input type="text" name="md_record_sec" value="$md_record_sec" size=3 maxlength=3><br>
 <input type="submit" class="button" value="Save"></form>
 </div>
 
 <div class="card">
-<form action="/cgi-bin/settings_submit.sh">
+<form action="/cgi-bin/legacy/settings_submit.sh">
 <input type="hidden" NAME="token" value="$token">
 <input type="hidden" NAME="rootfs_modified" value="0">
 <input type="hidden" NAME="run_ipc" value="0">
 <h2>Advanced</h2>
 This camera has modified rootfs that does not launch anyka_ipc <input type="checkbox" name="rootfs_modified" value="1" $(if [ 1 == $rootfs_modified ]; then echo 'checked'; fi)><br>
 Run anyka_ipc [default 0] <input type="checkbox" name="run_ipc" value="1" $(if [ 1 == $run_ipc ]; then echo 'checked'; fi)><br><br>
-This camera has modified rootfs that does not launch anyka_ipc <input type="checkbox" name="rootfs_modified" value="1" $( [ 1 = "$rootfs_modified" ] && echo 'checked' )><br>
-Run anyka_ipc [default 0] <input type="checkbox" name="run_ipc" value="1" $( [ 1 = "$run_ipc" ] && echo 'checked' )><br><br>
 <input type="submit" class="button" value="Save"></form>
 </div>
-
 
 </section>
 </body>

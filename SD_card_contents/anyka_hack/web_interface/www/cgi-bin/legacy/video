@@ -14,10 +14,10 @@ sh /mnt/anyka_hack/ffmpeg/wrap_mp4.sh
 cat <<EOT
 <html>
     <head>
-        <meta http-equiv="refresh" content="0; url=/cgi-bin/events?token=$token" />
+        <meta http-equiv="refresh" content="0; url=/cgi-bin/legacy/events?token=$token" />
     </head>
     <body>
-        <a href="/cgi-bin/events?token=$token">WebUI</a>
+        <a href="/cgi-bin/legacy/events?token=$token">Legacy WebUI</a>
     </body>
 </html>
 EOT
@@ -26,18 +26,19 @@ cat <<EOT
 <!DOCTYPE html>
 <html>
 <head>
-<title>Camera - WebUI</title>
+<title>Camera - Legacy WebUI</title>
 <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4//8/AAX+Av7czFnnAAAAAElFTkSuQmCC">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <div class="topnav">
-  <a href="/cgi-bin/webui?token=$token">Home</a>
-  <a href="/cgi-bin/settings?token=$token">Settings</a>
-  <a href="/cgi-bin/system?token=$token">System</a>
-  <a class="active" href="/cgi-bin/events?token=$token">Events</a>
-  <a href="/cgi-bin/login">Exit</a>
+  <a href="/cgi-bin/legacy/webui?token=$token">Home</a>
+  <a href="/cgi-bin/legacy/settings?token=$token">Settings</a>
+  <a href="/cgi-bin/legacy/system?token=$token">System</a>
+  <a class="active" href="/cgi-bin/legacy/events?token=$token">Events</a>
+  <a href="/cgi-bin/legacy/login">Exit</a>
+  <a href="/cgi-bin/webui_onvif?token=$token" style="float: right; background-color: #4CAF50;">ONVIF Interface</a>
 </div>
 
 <section>
