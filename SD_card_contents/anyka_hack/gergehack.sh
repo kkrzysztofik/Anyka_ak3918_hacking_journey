@@ -91,9 +91,24 @@ else
   if [ "${run_web_interface:-0}" -eq 1 ]; then
     log INFO 'Start web interface'
     if [ -f /mnt/anyka_hack/web_interface/www/index.html ]; then
-      /mnt/anyka_hack/web_interface/start_web_interface.sh &
+      # Use ONVIF web interface if enabled and available, otherwise use legacy
+      if [ "${use_onvif_web_interface:-0}" -eq 1 ] && [ -f /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh ]; then
+        log INFO 'Starting ONVIF web interface'
+        /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh &
+      else
+        log INFO 'Starting legacy web interface'
+        /mnt/anyka_hack/web_interface/start_web_interface.sh &
+      fi
     else
       busybox httpd -p 80 -h /data/www &
+    fi
+  fi
+  if [ "${run_onvif_server:-0}" -eq 1 ]; then
+    log INFO 'Start ONVIF server'
+    if [ -f /mnt/anyka_hack/onvif/onvifd ]; then
+      /mnt/anyka_hack/onvif/run_onvifd.sh &
+    else
+      log WARN "ONVIF server binary not found at /mnt/anyka_hack/onvif/onvifd"
     fi
   fi
   if [ "${run_libre_anyka:-0}" -eq 1 ]; then
