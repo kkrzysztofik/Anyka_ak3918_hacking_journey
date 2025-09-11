@@ -1,81 +1,296 @@
 # Anyka_ak3918_hacking_journey
 
-My attempt at reverse engineering and making use of a Chinese junk camera
+Reverse engineering and hacking journey for Chinese IP cameras based on Anyka AK3918 SoC
 
-# Summary
-This is a simplified README with the latest features, to see the hacking process and more development details go to the [old readme version](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/hack_process).
+## Credits
 
-### Working features
-- RTSP stream (720p on http://IP:554/vs0)
-- BMP snapshot (up to 720p) on port 3000
-- JPEG snapshot
-- H264 video recording (no mp4 yet, but ffmpeg converts it)
-- Audio playback
-- Audio recording to mp3
-- PTZ movement
-- IR shutter
-- combined web interface with ptz and IR on port 80
-- Motion detection
+This project was originally developed by **Gerge** (https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey) and has been continued with additional improvements and fixes. The original work involved extensive reverse engineering of the Anyka AK3918 platform and development of custom firmware and applications.
 
-The camera can now be connected to a video recorder or monitor software such as MotionEye.
+## Recent Updates
 
-# Quick Start SD card hack
+- **Docker Cross-Compilation Environment**: Added Docker-based cross-compilation setup for easier development on Windows and other platforms
+- **ONVIF Implementation**: Complete ONVIF server implementation with PTZ, imaging, and media services
+- **Code Quality Improvements**: Fixed compilation errors, improved code structure, and enhanced error handling
+- **Build System**: Streamlined build process with proper Makefiles and build scripts
+- **Web Interface Reorganization**: Separated ONVIF and legacy interfaces for better organization and user experience
 
-This hack runs only when the SD card is inserted leaving the camera unmodified. It is beginner friendly, and requires zero coding/terminal skills. See more [here](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/SD_card_contents/Factory)
+## Summary
+
+This is a simplified README with the latest features. For detailed hacking process and development information, see the [hack process documentation](hack_process/README.md).
+
+### Working Features
+- **RTSP stream** (720p on http://IP:554/vs0)
+- **BMP snapshot** (up to 720p) on port 3000
+- **JPEG snapshot**
+- **H264 video recording** (no mp4 yet, but ffmpeg converts it)
+- **Audio playback**
+- **Audio recording to mp3**
+- **PTZ movement**
+- **IR shutter**
+- **Combined web interface** with PTZ and IR on port 80
+- **ONVIF web interface** with advanced PTZ, imaging, and preset controls
+- **Motion detection**
+- **ONVIF server** with full PTZ, imaging, and media services
+- **Docker cross-compilation** environment for easy development
+
+The camera can now be connected to a video recorder or monitor software such as MotionEye, and supports standard ONVIF protocols for integration with professional surveillance systems.
+
+# Development Environment
+
+## Docker Cross-Compilation (Recommended)
+
+For easy development on Windows and other platforms, a Docker-based cross-compilation environment is provided:
+
+```bash
+# Build the Docker image
+cd cross-compile
+./docker-build.sh  # Linux/Mac
+# or
+.\docker-build.ps1  # Windows PowerShell
+
+# Compile the ONVIF server
+docker run --rm -v ${PWD}:/workspace anyka-cross-compile make -C /workspace/onvif
+
+# Interactive development shell
+docker run -it --rm -v ${PWD}:/workspace anyka-cross-compile
+```
+
+The Docker environment includes:
+- Ubuntu 16.04 base with 32-bit library support
+- Pre-installed Anyka ARM toolchain
+- All necessary build dependencies
+- Cross-compilation ready for AK3918 target
+
+## Traditional Setup
+
+For the original Ubuntu 16.04 setup, see the [hack process documentation](hack_process/README.md).
+
+# Quick Start SD Card Hack
+
+This hack runs only when the SD card is inserted leaving the camera unmodified. It is beginner friendly, and requires zero coding/terminal skills. See more [here](SD_card_contents/Factory)
 
 It is unlikely that this can cause any harm to your camera as the system remains original, but no matter how small the risk it is never zero (unless you have the exact same camera). Try any of these hacks at your own risk.
 
-The SD card hack is a safe way to test compatability with the camera and to see if all features are working.
+The SD card hack is a safe way to test compatibility with the camera and to see if all features are working.
 
-# Permanent Hack
-This part is optional. Make sure everything works with the SD card hack first before you do this.
-The SD hack should launch telnet. Connect with `telnet IP` (user: root, no password)
+# Web Interface
 
-- `[root@anyka /mnt]$ cat /dev/mtdblock4 > /mnt/mtdblock4.bin`
-- Compare your rootfs `mtdblock4.bin` on the SD card with the one in this repo (`diff file1 file2`), if it is the same you can just use the prepared `newroot.sqsh4` and skip to updating.
-- `unsquashfs mtdblock4.bin` (if not installed `sudo apt install squashfs-tools`) this unpacks to `squashfs-root` folder
-- Modify `/etc/init.d/rc.local` to not launch `/usr/sbin/service.sh` and `/usr/sbin/camera.sh`, instead add a line `/etc/jffs2/gergehack.sh`
-- `mksquashfs squashfs-root newroot.sqsh4 -b 131072 -comp xz -Xdict-size 100%` and copy that newly packed `newroot.sqsh4` to your SD card
-- Install the modified rootfs with `[root@anyka /mnt]$ updater local A=/mnt/newroot.sqsh4`
+The project includes two web interfaces with clear separation and easy switching between them.
 
-more detailed process log [here](http://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/newroot/updater.txt)
+## Web Interface Structure
 
-After the rootfs is modified, power off the camera and take out the SD card. Adjust the settings `rootfs_modified=1`. The settings will be applied using the [update](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/SD_card_contents/anyka_hack) of the script from `anyka_hack` folder.
+```
+www/cgi-bin/
+├── header                    # Common header for all interfaces
+├── footer                    # Common footer for all interfaces
+├── webui_onvif              # Main ONVIF interface (recommended)
+├── onvif_imaging            # ONVIF imaging controls
+├── onvif_presets            # ONVIF PTZ preset management
+└── legacy/                  # Legacy web UI implementation
+    ├── webui                # Original web interface
+    ├── events               # Event management
+    ├── login                # Login page
+    ├── login_validate.sh    # Login validation
+    ├── settings             # Settings page
+    ├── settings_submit.sh   # Settings submission
+    ├── system               # System information
+    ├── video                # Video playback
+    ├── del_video.sh         # Video deletion
+    └── pwd_change           # Password change
+```
 
-Enjoy a fully private camera.
+## Interface Comparison
 
-# Info Links
+### ONVIF Interface (Recommended)
+- **Location**: `/cgi-bin/webui_onvif`
+- **Features**:
+  - ONVIF protocol compliance
+  - Advanced PTZ controls
+  - Imaging parameter adjustment
+  - PTZ preset management
+  - Real-time service status
+  - Better integration with surveillance software
 
-These are a the most important links here (this is where 99% of the info and resources come from):
+### Legacy Interface
+- **Location**: `/cgi-bin/legacy/webui`
+- **Features**:
+  - Original ptz_daemon integration
+  - libre_anyka_app integration
+  - Basic PTZ controls
+  - Event management
+  - Settings configuration
 
-https://github.com/helloworld-spec/qiwen/tree/main/anycloud39ev300 (explanation in chinese, good reference)
+## Navigation
 
-https://github.com/ricardojlrufino/anyka_v380ipcam_experiments/tree/master (ak_snapshot original)
+### Main Entry Point
+- **URL**: `http://[CAMERA_IP]/`
+- **Behavior**: Redirects to ONVIF interface by default
+- **Options**: Provides links to both interfaces
 
-https://github.com/kuhnchris/IOT-ANYKA-PTZdaemon (ptz daemon original)
+### ONVIF Interface Navigation
+- Home → Imaging → Presets → Settings → System → Events
+- Includes link to Legacy Interface
 
-https://github.com/MuhammedKalkan/Anyka-Camera-Firmware (Muhammed's RTSP app + library, and more discussions)
+### Legacy Interface Navigation
+- Home → Settings → System → Events
+- Includes link to ONVIF Interface
 
-https://github.com/e27-camera-hack/E27-Camera-Hack/discussions/1 (discussion where most of this was worked on)
+## Access URLs
 
+### ONVIF Interface
+- Main: `http://[CAMERA_IP]/cgi-bin/webui_onvif`
+- Imaging: `http://[CAMERA_IP]/cgi-bin/onvif_imaging`
+- Presets: `http://[CAMERA_IP]/cgi-bin/onvif_presets`
 
-# APPS and Available Functions
-This is not a complete list. This is only the best feature list. The [old readme version](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/hack_process) was too long, but it has everything not listed here.
+### Legacy Interface
+- Main: `http://[CAMERA_IP]/cgi-bin/legacy/webui`
+- Events: `http://[CAMERA_IP]/cgi-bin/legacy/events`
+- Settings: `http://[CAMERA_IP]/cgi-bin/legacy/settings`
+- System: `http://[CAMERA_IP]/cgi-bin/legacy/system`
 
-### Web Interface
+# ONVIF Server
+
+A complete ONVIF server implementation with:
+
+## Features
+
+### Device Management
+- Device information, capabilities, and discovery
+- WS-Discovery for automatic device discovery on the network
+
+### Media Services
+- Video stream configuration and management
+- RTSP streaming with H.264 video and audio
+
+### PTZ Services
+- Pan-tilt-zoom control with preset management
+- Relative and absolute movement commands
+- Preset storage and recall (up to 5 positions)
+
+### Imaging Services
+- Brightness, contrast, and saturation adjustment
+- Real-time parameter adjustment
+- Quick preset configurations
+
+## Architecture
+
+The ONVIF web interface communicates with the ONVIF server using HTTP POST requests with SOAP XML payloads:
+
+```
+Web Browser → CGI Script → HTTP POST → ONVIF Server → Hardware
+```
+
+### ONVIF Services Used
+
+1. **PTZ Service** (`/onvif/ptz_service`)
+   - `RelativeMove`: Move camera in specified direction
+   - `Stop`: Stop all camera movement
+   - `SetPreset`: Store current position as preset
+   - `GotoPreset`: Move to saved preset position
+   - `RemovePreset`: Delete saved preset
+
+2. **Imaging Service** (`/onvif/imaging_service`)
+   - `GetImagingSettings`: Retrieve current imaging parameters
+   - `SetImagingSettings`: Apply new imaging parameters
+
+3. **Device Service** (`/onvif/device_service`)
+   - `GetDeviceInformation`: Check server status and capabilities
+
+## Installation
+
+1. **Copy ONVIF Server**: Ensure `onvifd` binary is compiled and available at `/mnt/anyka_hack/onvif/onvifd`
+
+2. **Copy Web Interface**: The web interface files are already included in the SD card contents
+
+3. **Start Services**: Use the provided startup script:
+   ```bash
+   /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh
+   ```
+
+4. **Access Interface**: Open browser to `http://[CAMERA_IP]`
+
+## Configuration
+
+The ONVIF server uses the configuration file at `/etc/jffs2/anyka_cfg.ini`:
+
+```ini
+[global]
+user = admin
+secret = admin
+
+[onvif]
+enabled = 1
+http_port = 8080
+
+[ptz]
+invert_directions = 0
+max_pan_speed = 1.0
+max_tilt_speed = 1.0
+
+[imaging]
+default_brightness = 0
+default_contrast = 0
+default_saturation = 0
+```
+
+Both interfaces share the same configuration files:
+- `/data/gergesettings.txt`: Main settings
+- `/mnt/tmp/token.txt`: Authentication token
+
+## Current Status
+- ✅ **Compilation**: All projects compile successfully with Docker environment
+- ✅ **Basic ONVIF**: Device discovery, media, and PTZ services working
+- ⚠️ **RTSP Streaming**: Basic implementation complete, some protocol compliance issues remain
+- ⚠️ **Security**: No authentication implemented (as noted in original design)
+- 🔧 **Known Issues**: See [REVIEW.md](REVIEW.md) for detailed technical analysis and improvement suggestions
+
+## Dependencies
+
+- **ONVIF Server**: Must be running on port 8080 (configurable)
+- **Snapshot Service**: For live camera preview (port 3000)
+- **Busybox HTTPD**: For web server functionality
+- **curl**: For HTTP requests to ONVIF server
+
+## Advantages over Legacy Interface
+
+1. **Standard Protocol**: Uses industry-standard ONVIF protocol
+2. **Better Integration**: Compatible with ONVIF-compliant software
+3. **More Features**: Imaging controls and preset management
+4. **Real-time Status**: Live monitoring of service status
+5. **Future-proof**: Easily extensible with additional ONVIF services
+
+## Troubleshooting
+
+### ONVIF Server Not Responding
+- Check if `onvifd` process is running: `ps | grep onvifd`
+- Verify port 8080 is not blocked: `netstat -ln | grep 8080`
+- Check configuration file: `/etc/jffs2/anyka_cfg.ini`
+
+### PTZ Controls Not Working
+- Ensure PTZ hardware is properly initialized
+- Check ONVIF server logs for errors
+- Verify profile token is correct (default: "MainProfile")
+
+### Imaging Controls Not Working
+- Check if imaging service is enabled in ONVIF server
+- Verify video source token is correct
+- Ensure camera supports imaging adjustments
+
+# Legacy Applications
+
+## Legacy Web Interface
 
 I created a combined web interface using the features from `ptz_daemon`, `libre_anyka_app`, and `busybox httpd`. The webpage is based on [another Chinese camera hack for Goke processors](https://github.com/dc35956/gk7102-hack).
 
-![web_interface](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/raw/branch/main/Images/web_interface.png)
+![web_interface](Images/web_interface.png)
 
 With the most recent update of webui the interface is a lot nicer and has all settings and features of the camera available without needing to edit config files manually.
 
-![web_interface](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/raw/branch/main/Images/web_interface_settings.png)
+![web_interface](Images/web_interface_settings.png)
 
 **Note: the WebUI has a login process using md5 password hash and a token, but this is not secure by any means. Do not expose to the internet!**
 
-
-### Libre Anyka App
+## Libre Anyka App
 
 This is an app in development aimed to combine most features of the camera and make it small enough to run from flash without the SD card.
 
@@ -88,61 +303,29 @@ Currently contains features:
 Does not have:
 - sound (only RTSP stream has sound)
 
-More info about the [app](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/SD_card_contents/anyka_hack/libre_anyka_app) and [source](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/cross-compile/libre_anyka_app).
+More info about the [app](SD_card_contents/anyka_hack/libre_anyka_app) and [source](cross-compile/libre_anyka_app).
 
 **Note: the RTSP stream and snapshots are not protected by password. Do not expose to the internet!**
 
+## SSH
 
-### SSH
-[Dropbear](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/SD_card_contents/anyka_hack/dropbear) can give ssh access if telnet is not your preference.
+[Dropbear](SD_card_contents/anyka_hack/dropbear) can give ssh access if telnet is not your preference.
 
+## Play Sound
 
-### Play Sound
 **Extracted from camera.**
 
-More info about the [app](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/SD_card_contents/anyka_hack/ak_adec_demo)
+More info about the [app](SD_card_contents/anyka_hack/ak_adec_demo)
 
+## Record Sound
 
-### Record Sound
 **mp3 recording works.**
 
-More info about the [app](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/SD_card_contents/anyka_hack/aenc_demo) and [source](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/cross-compile/aenc_demo).
+More info about the [app](SD_card_contents/anyka_hack/aenc_demo) and [source](cross-compile/aenc_demo).
 
-# Permanent system hack level 2
-Make sure everything works with the SD card hack first before you do this.
 
-The permanent hack listed above simply disables the original anyka_ipc and runs the contents of the SD card instead. What if you wish to run the camera without and SD card?
+## Setup without SD
 
-It is possible to fit the essential applications into the system flash, but the `root` and `usr` partitions need significant modification to free up space.
-
-### Root FS modification
-in camera `/dev/mtdblock4`
-
-In the root filesystem replace `/bin/busybox` with the one in `web_interface` on the SD card. This will add `httpd` functionality for the webUI (and some other features).
-The rootfs must fit within 1MiB (compressed size on flash), so because busybox is now larger I moved `/lib/libstdc++.so.6.0.19` and `/lib/libstdc++.so.6.0.19-gdb.py` to `/usr/lib/` and created symlinks to it instead. After compressing into squashfs again, the [`busyroot.sqsh4`](http://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/newroot) can be installed, but because the `libstdc++` library is still missing some apps will crash.
-
-**TLDR**
-- copy [`busyroot.sqsh4`](http://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/newroot) to SD card
-- install it with `updater local A=/mnt/busyroot.sqsh4`
-- reboot
-
-### User FS modification
-in camera `/dev/mtdblock5`
-
-Remove the old `anyka_ipc` and `cloudAPI` from `/usr/bin`, delete all libraries in `/usr/lib` (replace with app libs from SD and the `libstdc++` files moved from rootfs).
-From `/usr/modules` delete `atbm603x_wifi_usb.ko`, `g_file_storage.ko`, `g_mass_storage.ko`, `ssv6x5x-sw.bin`, `ssv6x5x.ko`, `udc.ko` and `usbburn.ko`. Optionally the camera sensor modules except the installed sensor can also be deleted (I left them in to keep compatability with other cameras). The `/usr/share/audio_file` can also be removed, `/usr/local/` can be cleared out, finally in `/usr/sbin` keep only the simlinks, `default.script`, `station_connect.sh`, `wifi_driver.sh`, `wifi_manage.sh`, `wifi_run.sh` and `wifi_station.sh`.
-
-Copy `libre_anyka_app` and `ptz_daemon_dyn` to `/usr/bin`.
-
-Finally the [busyusr.sqsh4] partition is now ready to install. After this cleaning, the size is less than half of the original 4.5MiB meaning there is a lot more space to add things later.
-
-**TLDR**
-- make sure your camera is compatible (Realtek 8188 wifi, and gc1034, gc1054, gc1084, h62 or h63 sensor)
-- copy [`busyusr.sqsh4`](http://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/newroot) to SD card
-- install it with `updater local B=/mnt/busyusr.sqsh4`
-- reboot
-
-### Setup without SD
 After the root and usr partitions are modified with the desired apps, the following steps are needed to get it working:
 
 copy the webpage www folder to `/etc/jffs2/www` for httpd to serve from flash
@@ -154,3 +337,36 @@ This gives the following functions without SD card running on the camera:
 - usual ftp, telnet functions, and ntp time sync
 - RTSP stream and snapshots for UI with libre_anyka_app
 - ptz movement
+
+# Info Links
+
+These are the most important links here (this is where 99% of the info and resources come from):
+
+https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey
+
+https://github.com/helloworld-spec/qiwen/tree/main/anycloud39ev300 (explanation in chinese, good reference)
+
+https://github.com/ricardojlrufino/anyka_v380ipcam_experiments/tree/master (ak_snapshot original)
+
+https://github.com/kuhnchris/IOT-ANYKA-PTZdaemon (ptz daemon original)
+
+https://github.com/MuhammedKalkan/Anyka-Camera-Firmware (Muhammed's RTSP app + library, and more discussions)
+
+https://github.com/e27-camera-hack/E27-Camera-Hack/discussions/1 (discussion where most of this was worked on)
+
+# Development
+
+To modify the web interface:
+
+1. **Edit CGI Scripts**: Modify the shell scripts in `www/cgi-bin/`
+2. **Update SOAP Requests**: Modify the XML payloads for ONVIF requests
+3. **Add New Features**: Create new CGI scripts for additional ONVIF services
+4. **Test Changes**: Use the startup script to test modifications
+
+## Future Enhancements
+
+- **Authentication**: Add ONVIF authentication support
+- **More Presets**: Increase preset storage capacity
+- **Advanced Imaging**: Add more imaging parameters (sharpness, white balance, etc.)
+- **Recording Controls**: Add video recording start/stop controls
+- **Event Handling**: Add motion detection and event management
