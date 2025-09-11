@@ -4,10 +4,12 @@ CC=${PREFIX}gcc
 CPP=${PREFIX}g++
 CFLAGS=-std=c99 -D_POSIX_C_SOURCE=199309L
 LINKERFLAG=-L./lib -lakuio -lakispsdk -lakv_encode -lplat_common -lplat_thread -lplat_vi -lplat_vpss -lplat_ipcsrv -lplat_venc_cb -lmpi_venc -lakstreamenc -lpthread -lakae -lakaudiocodec -lakmedia -lakv_encode -lapp_net -lapp_rtsp -lmpi_aed -lmpi_aenc -lplat_ai -lplat_drv -lm
-INCLUDES=include src src/services src/adapters src/utils src/server src/tools
+INCLUDES=include src src/services src/adapters src/utils src/server src/tools src/hal
 
 SRCS := \
 	src/main/onvifd.c \
+	src/hal/hal_anyka.c \
+	src/hal/hal_ptz_anyka.c \
 	src/adapters/ptz_adapter.c \
 	src/utils/config.c \
 	src/services/device/onvif_device.c \

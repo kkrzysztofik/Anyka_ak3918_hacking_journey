@@ -43,6 +43,17 @@ int get_local_ip_address(char *ip_str, size_t ip_str_size) {
         inet_ntop(AF_INET, addr_ptr, ip_str, ip_str_size);
         break; /* stop after wlan0 found */
     }
+    if (!ifa) {
+        /* Fallback: first non-loopback IPv4 */
+        for (ifa = ifaddrs_ptr; ifa != NULL; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_addr) continue;
+            if (ifa->ifa_addr->sa_family != AF_INET) continue;
+            if (strcmp(ifa->ifa_name, "lo") == 0) continue;
+            addr_ptr = &((struct sockaddr_in*)ifa->ifa_addr)->sin_addr;
+            inet_ntop(AF_INET, addr_ptr, ip_str, ip_str_size);
+            break;
+        }
+    }
     
     if (ifaddrs_ptr) freeifaddrs(ifaddrs_ptr); 
     return 0; 

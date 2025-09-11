@@ -10,6 +10,7 @@
 #include <signal.h>
 
 #include "rtsp_server.h"
+#include "../utils/network_utils.h"
 #include "ak_common.h"
 #include "ak_thread.h"
 #include "ak_vi.h"
@@ -55,6 +56,81 @@ static int rtsp_init_audio_rtp_session(rtsp_session_t *session);
 static void rtsp_cleanup_audio_rtp_session(rtsp_session_t *session);
 static int rtsp_send_rtp_packet(rtsp_session_t *session, const uint8_t *data, size_t len, bool marker);
 static int rtsp_send_audio_rtp_packet(rtsp_session_t *session, const uint8_t *data, size_t len, bool marker, int payload_type);
+static int rtsp_send_interleaved(int sockfd, uint8_t channel, const uint8_t *payload, size_t payload_len);
+
+/* ---------------------- Helpers: Base64 + H.264 SPS/PPS extraction ---------------------- */
+static const char b64_tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static void base64_encode(const uint8_t *in, size_t in_len, char *out, size_t out_size) {
+    size_t i = 0, o = 0; if (!in || !out || out_size == 0) return; 
+    while (i + 2 < in_len && o + 4 < out_size) {
+        uint32_t v = (in[i] << 16) | (in[i+1] << 8) | in[i+2];
+        out[o++] = b64_tbl[(v >> 18) & 0x3F];
+        out[o++] = b64_tbl[(v >> 12) & 0x3F];
+        out[o++] = b64_tbl[(v >> 6) & 0x3F];
+        out[o++] = b64_tbl[v & 0x3F];
+        i += 3;
+    }
+    if (i + 1 < in_len && o + 4 < out_size) {
+        uint32_t v = (in[i] << 16) | (in[i+1] << 8);
+        out[o++] = b64_tbl[(v >> 18) & 0x3F];
+        out[o++] = b64_tbl[(v >> 12) & 0x3F];
+        out[o++] = b64_tbl[(v >> 6) & 0x3F];
+        out[o++] = '=';
+    } else if (i < in_len && o + 4 < out_size) {
+        uint32_t v = (in[i] << 16);
+        out[o++] = b64_tbl[(v >> 18) & 0x3F];
+        out[o++] = b64_tbl[(v >> 12) & 0x3F];
+        out[o++] = '=';
+        out[o++] = '=';
+    }
+    if (o < out_size) out[o] = '\0'; else out[out_size-1] = '\0';
+}
+
+static void h264_extract_sps_pps(rtsp_server_t *server, const uint8_t *buf, size_t len) {
+    if (!server || !buf || len < 5) return;
+    size_t i = 0;
+    while (i + 4 < len) {
+        // find start code
+        size_t sc = i;
+        int sc_len = 0;
+        if (buf[sc] == 0x00 && buf[sc+1] == 0x00 && buf[sc+2] == 0x01) { sc_len = 3; }
+        else if (i + 5 < len && buf[sc] == 0x00 && buf[sc+1] == 0x00 && buf[sc+2] == 0x00 && buf[sc+3] == 0x01) { sc_len = 4; }
+        if (!sc_len) { i++; continue; }
+        size_t nal_start = sc + sc_len;
+        if (nal_start >= len) break;
+        uint8_t nalh = buf[nal_start];
+        uint8_t nal_type = nalh & 0x1F;
+        // find next start code
+        size_t j = nal_start + 1;
+        while (j + 3 < len) {
+            if (buf[j] == 0x00 && buf[j+1] == 0x00 && (buf[j+2] == 0x01 || (j + 3 < len && buf[j+2] == 0x00 && buf[j+3] == 0x01))) {
+                break;
+            }
+            j++;
+        }
+        size_t nal_end = j;
+        if (nal_type == 7 && server->h264_sps_b64[0] == '\0') {
+            base64_encode(buf + nal_start, nal_end - nal_start, server->h264_sps_b64, sizeof(server->h264_sps_b64));
+        } else if (nal_type == 8 && server->h264_pps_b64[0] == '\0') {
+            base64_encode(buf + nal_start, nal_end - nal_start, server->h264_pps_b64, sizeof(server->h264_pps_b64));
+        }
+        if (server->h264_sps_b64[0] && server->h264_pps_b64[0]) return;
+        i = j;
+    }
+}
+
+static int rtsp_send_interleaved(int sockfd, uint8_t channel, const uint8_t *payload, size_t payload_len)
+{
+    if (!payload || payload_len == 0) return -1;
+    uint8_t header[4];
+    header[0] = 0x24; // '$'
+    header[1] = channel;
+    header[2] = (uint8_t)((payload_len >> 8) & 0xFF);
+    header[3] = (uint8_t)(payload_len & 0xFF);
+    if (send(sockfd, header, 4, 0) < 0) return -1;
+    if (send(sockfd, payload, payload_len, 0) < 0) return -1;
+    return (int)payload_len;
+}
 
 /**
  * Create RTSP server
@@ -382,7 +458,10 @@ static void* rtsp_accept_thread(void *arg)
         
         // Add to sessions list
         pthread_mutex_lock(&server->sessions_mutex);
+        session->server = server;
+        session->prev = NULL;
         session->next = server->sessions;
+        if (server->sessions) server->sessions->prev = session;
         server->sessions = session;
         server->sessions_count++;
         pthread_mutex_unlock(&server->sessions_mutex);
@@ -480,6 +559,16 @@ static void* rtsp_session_thread(void *arg)
     
     rtsp_cleanup_rtp_session(session);
     
+    // Unlink from sessions list (no free here; stop() will free)
+    if (session->server) {
+        rtsp_server_t *server = session->server;
+        pthread_mutex_lock(&server->sessions_mutex);
+        if (session->prev) session->prev->next = session->next; else server->sessions = session->next;
+        if (session->next) session->next->prev = session->prev;
+        server->sessions_count--;
+        pthread_mutex_unlock(&server->sessions_mutex);
+    }
+    
     ak_print_notice("RTSP session thread finished for client %s:%d\n", 
                     inet_ntoa(session->addr.sin_addr), ntohs(session->addr.sin_port));
     
@@ -534,25 +623,33 @@ static int rtsp_handle_request(rtsp_session_t *session, const char *request)
             strncpy(session->uri, uri, sizeof(session->uri) - 1);
             session->uri[sizeof(session->uri) - 1] = '\0';
             
-            // Generate SDP
+            // Generate SDP (include minimal H264 fmtp)
             char sdp[2048];
+            rtsp_server_t *srv = NULL;
+            if (session && session->server) srv = session->server;
+            const char *sps = (srv && srv->h264_sps_b64[0]) ? srv->h264_sps_b64 : NULL;
+            const char *pps = (srv && srv->h264_pps_b64[0]) ? srv->h264_pps_b64 : NULL;
+            char fmtp_line[512];
+            if (sps && pps) snprintf(fmtp_line, sizeof(fmtp_line), "a=fmtp:%d packetization-mode=1;profile-level-id=42001e;sprop-parameter-sets=%s,%s\r\n", RTP_PT_H264, sps, pps);
+            else snprintf(fmtp_line, sizeof(fmtp_line), "a=fmtp:%d packetization-mode=1;profile-level-id=42001e\r\n", RTP_PT_H264);
+            char ip_str[64]; get_local_ip_address(ip_str, sizeof(ip_str));
             if (session->audio_enabled) {
                 // SDP with both video and audio
                 snprintf(sdp, sizeof(sdp),
                     "v=0\r\n"
                     "o=- %u %u IN IP4 0.0.0.0\r\n"
                     "s=RTSP Session\r\n"
-                    "c=IN IP4 0.0.0.0\r\n"
+                    "c=IN IP4 %s\r\n"
                     "t=0 0\r\n"
                     "m=video 0 RTP/AVP %d\r\n"
                     "a=rtpmap:%d H264/90000\r\n"
-                    "a=fmtp:%d profile-level-id=42001e\r\n"
+                    "%s"
                     "a=control:track0\r\n"
                     "m=audio 0 RTP/AVP %d\r\n"
                     "a=rtpmap:%d PCMA/8000\r\n"
                     "a=control:track1\r\n",
-                    (uint32_t)time(NULL), (uint32_t)time(NULL),
-                    RTP_PT_H264, RTP_PT_H264, RTP_PT_H264,
+                    (uint32_t)time(NULL), (uint32_t)time(NULL), ip_str,
+                    RTP_PT_H264, fmtp_line,
                     RTP_PT_PCMA, RTP_PT_PCMA);
             } else {
                 // SDP with video only
@@ -560,14 +657,14 @@ static int rtsp_handle_request(rtsp_session_t *session, const char *request)
                     "v=0\r\n"
                     "o=- %u %u IN IP4 0.0.0.0\r\n"
                     "s=RTSP Session\r\n"
-                    "c=IN IP4 0.0.0.0\r\n"
+                    "c=IN IP4 %s\r\n"
                     "t=0 0\r\n"
                     "m=video 0 RTP/AVP %d\r\n"
                     "a=rtpmap:%d H264/90000\r\n"
-                    "a=fmtp:%d profile-level-id=42001e\r\n"
+                    "%s"
                     "a=control:track0\r\n",
-                    (uint32_t)time(NULL), (uint32_t)time(NULL),
-                    RTP_PT_H264, RTP_PT_H264, RTP_PT_H264);
+                    (uint32_t)time(NULL), (uint32_t)time(NULL), ip_str,
+                    RTP_PT_H264, fmtp_line);
             }
                 
             char headers[512];
@@ -588,19 +685,53 @@ static int rtsp_handle_request(rtsp_session_t *session, const char *request)
             // Check if this is for audio track (track1) or video track (track0)
             bool is_audio_track = strstr(request, "track1") != NULL;
             
+            // Parse client_port from Transport
+            uint16_t client_rtp_port = 0, client_rtcp_port = 0;
+            const char *cp = strstr(transport_line, "client_port=");
+            // Detect TCP interleaved and channels
+            bool interleaved = strstr(transport_line, "RTP/AVP/TCP") || strstr(transport_line, "interleaved=");
+            int ch_rtp = 0, ch_rtcp = 1;
+            const char *ich = strstr(transport_line, "interleaved=");
+            if (ich) {
+                ich += strlen("interleaved=");
+                ch_rtp = atoi(ich);
+                const char *dash2 = strchr(ich, '-');
+                if (dash2) ch_rtcp = atoi(dash2+1); else ch_rtcp = ch_rtp + 1;
+            }
+            if (cp) {
+                cp += strlen("client_port=");
+                client_rtp_port = (uint16_t)atoi(cp);
+                const char *dash = strchr(cp, '-');
+                if (dash) client_rtcp_port = (uint16_t)atoi(dash + 1);
+                if (!client_rtcp_port) client_rtcp_port = client_rtp_port + 1;
+            }
+            
             if (is_audio_track) {
                 // Setup audio RTP session
                 if (rtsp_init_audio_rtp_session(session) < 0) {
                     return rtsp_send_response(session, RTSP_INTERNAL_ERROR, NULL, NULL);
                 }
+                if (interleaved) {
+                    session->audio_rtp_session.transport = RTP_TRANSPORT_TCP;
+                    session->audio_rtp_session.tcp_channel_rtp = ch_rtp;
+                    session->audio_rtp_session.tcp_channel_rtcp = ch_rtcp;
+                } else if (client_rtp_port) {
+                    session->audio_rtp_session.client_rtp_addr.sin_port = htons(client_rtp_port);
+                    session->audio_rtp_session.client_rtcp_addr.sin_port = htons(client_rtcp_port);
+                }
                 
                 char headers[512];
-                snprintf(headers, sizeof(headers),
-                    "Transport: RTP/AVP;unicast;client_port=%d-%d;server_port=%d-%d\r\n"
-                    "Session: %s\r\n",
-                    session->audio_rtp_session.rtp_port, session->audio_rtp_session.rtcp_port,
-                    session->audio_rtp_session.rtp_port, session->audio_rtp_session.rtcp_port,
-                    session->session_id);
+                if (interleaved) {
+                    snprintf(headers, sizeof(headers),
+                        "Transport: RTP/AVP/TCP;unicast;interleaved=%d-%d\r\nSession: %s\r\n",
+                        ch_rtp, ch_rtcp, session->session_id);
+                } else {
+                    snprintf(headers, sizeof(headers),
+                        "Transport: RTP/AVP;unicast;client_port=%d-%d;server_port=%d-%d\r\nSession: %s\r\n",
+                        session->audio_rtp_session.rtp_port, session->audio_rtp_session.rtcp_port,
+                        session->audio_rtp_session.rtp_port, session->audio_rtp_session.rtcp_port,
+                        session->session_id);
+                }
                     
                 return rtsp_send_response(session, RTSP_OK, headers, NULL);
             } else {
@@ -608,16 +739,29 @@ static int rtsp_handle_request(rtsp_session_t *session, const char *request)
                 if (rtsp_init_rtp_session(session) < 0) {
                     return rtsp_send_response(session, RTSP_INTERNAL_ERROR, NULL, NULL);
                 }
+                if (interleaved) {
+                    session->rtp_session.transport = RTP_TRANSPORT_TCP;
+                    session->rtp_session.tcp_channel_rtp = ch_rtp;
+                    session->rtp_session.tcp_channel_rtcp = ch_rtcp;
+                } else if (client_rtp_port) {
+                    session->rtp_session.client_addr.sin_port = htons(client_rtp_port);
+                    session->rtp_session.client_rtcp_addr.sin_port = htons(client_rtcp_port);
+                }
                 
                 session->state = RTSP_STATE_READY;
                 
                 char headers[512];
-                snprintf(headers, sizeof(headers),
-                    "Transport: RTP/AVP;unicast;client_port=%d-%d;server_port=%d-%d\r\n"
-                    "Session: %s\r\n",
-                    session->rtp_session.rtp_port, session->rtp_session.rtcp_port,
-                    session->rtp_session.rtp_port, session->rtp_session.rtcp_port,
-                    session->session_id);
+                if (interleaved) {
+                    snprintf(headers, sizeof(headers),
+                        "Transport: RTP/AVP/TCP;unicast;interleaved=%d-%d\r\nSession: %s\r\n",
+                        ch_rtp, ch_rtcp, session->session_id);
+                } else {
+                    snprintf(headers, sizeof(headers),
+                        "Transport: RTP/AVP;unicast;client_port=%d-%d;server_port=%d-%d\r\nSession: %s\r\n",
+                        session->rtp_session.rtp_port, session->rtp_session.rtcp_port,
+                        session->rtp_session.rtp_port, session->rtp_session.rtcp_port,
+                        session->session_id);
+                }
                     
                 return rtsp_send_response(session, RTSP_OK, headers, NULL);
             }
@@ -630,8 +774,15 @@ static int rtsp_handle_request(rtsp_session_t *session, const char *request)
             
             session->state = RTSP_STATE_PLAYING;
             
-            char headers[256];
-            snprintf(headers, sizeof(headers), "Session: %s\r\n", session->session_id);
+            char headers[512];
+            if (session->audio_enabled) {
+                snprintf(headers, sizeof(headers), "Session: %s\r\nRTP-Info: url=%s/track0;seq=%u;rtptime=%u,url=%s/track1;seq=%u;rtptime=%u\r\n",
+                         session->session_id, session->uri, session->rtp_session.seq_num, session->rtp_session.timestamp,
+                         session->uri, session->audio_rtp_session.sequence, session->audio_rtp_session.timestamp);
+            } else {
+                snprintf(headers, sizeof(headers), "Session: %s\r\nRTP-Info: url=%s/track0;seq=%u;rtptime=%u\r\n",
+                         session->session_id, session->uri, session->rtp_session.seq_num, session->rtp_session.timestamp);
+            }
             
             return rtsp_send_response(session, RTSP_OK, headers, NULL);
         }
@@ -656,6 +807,16 @@ static int rtsp_handle_request(rtsp_session_t *session, const char *request)
             rtsp_send_response(session, RTSP_OK, headers, NULL);
             session->active = false;
             return 0;
+        }
+        case RTSP_METHOD_GET_PARAMETER: {
+            char headers[256];
+            snprintf(headers, sizeof(headers), "Session: %s\r\n", session->session_id);
+            return rtsp_send_response(session, RTSP_OK, headers, NULL);
+        }
+        case RTSP_METHOD_SET_PARAMETER: {
+            char headers[256];
+            snprintf(headers, sizeof(headers), "Session: %s\r\n", session->session_id);
+            return rtsp_send_response(session, RTSP_OK, headers, NULL);
         }
         
         default:
@@ -908,9 +1069,7 @@ static void rtsp_cleanup_audio_rtp_session(rtsp_session_t *session)
  */
 static int rtsp_send_rtp_packet(rtsp_session_t *session, const uint8_t *data, size_t len, bool marker)
 {
-    if (session->rtp_session.rtp_sockfd < 0 || !data || len == 0) {
-        return -1;
-    }
+    if (!data || len == 0) return -1;
     
     uint8_t rtp_packet[RTSP_RTP_BUFFER_SIZE];
     uint8_t *rtp_header = rtp_packet;
@@ -934,10 +1093,15 @@ static int rtsp_send_rtp_packet(rtsp_session_t *session, const uint8_t *data, si
     size_t payload_len = (len <= RTSP_RTP_BUFFER_SIZE - 12) ? len : RTSP_RTP_BUFFER_SIZE - 12;
     memcpy(rtp_payload, data, payload_len);
     
-    // Send packet
-    ssize_t sent = sendto(session->rtp_session.rtp_sockfd, rtp_packet, 12 + payload_len, 0,
-                         (struct sockaddr*)&session->rtp_session.client_addr,
-                         sizeof(session->rtp_session.client_addr));
+    ssize_t sent = -1;
+    if (session->rtp_session.transport == RTP_TRANSPORT_TCP) {
+        sent = rtsp_send_interleaved(session->sockfd, (uint8_t)session->rtp_session.tcp_channel_rtp, rtp_packet, 12 + payload_len);
+    } else {
+        if (session->rtp_session.rtp_sockfd < 0) return -1;
+        sent = sendto(session->rtp_session.rtp_sockfd, rtp_packet, 12 + payload_len, 0,
+                      (struct sockaddr*)&session->rtp_session.client_addr,
+                      sizeof(session->rtp_session.client_addr));
+    }
     
     if (sent < 0) {
         ak_print_error("Failed to send RTP packet: %s\n", strerror(errno));
@@ -955,9 +1119,7 @@ static int rtsp_send_rtp_packet(rtsp_session_t *session, const uint8_t *data, si
  */
 static int rtsp_send_audio_rtp_packet(rtsp_session_t *session, const uint8_t *data, size_t len, bool marker, int payload_type)
 {
-    if (session->audio_rtp_session.rtp_sockfd < 0 || !data || len == 0) {
-        return -1;
-    }
+    if (!data || len == 0) return -1;
     
     uint8_t rtp_packet[RTSP_RTP_BUFFER_SIZE];
     uint8_t *rtp_header = rtp_packet;
@@ -981,10 +1143,15 @@ static int rtsp_send_audio_rtp_packet(rtsp_session_t *session, const uint8_t *da
     size_t payload_len = (len <= RTSP_RTP_BUFFER_SIZE - 12) ? len : RTSP_RTP_BUFFER_SIZE - 12;
     memcpy(rtp_payload, data, payload_len);
     
-    // Send packet
-    ssize_t sent = sendto(session->audio_rtp_session.rtp_sockfd, rtp_packet, 12 + payload_len, 0,
-                         (struct sockaddr*)&session->audio_rtp_session.client_rtp_addr,
-                         sizeof(session->audio_rtp_session.client_rtp_addr));
+    ssize_t sent = -1;
+    if (session->audio_rtp_session.transport == RTP_TRANSPORT_TCP) {
+        sent = rtsp_send_interleaved(session->sockfd, (uint8_t)session->audio_rtp_session.tcp_channel_rtp, rtp_packet, 12 + payload_len);
+    } else {
+        if (session->audio_rtp_session.rtp_sockfd < 0) return -1;
+        sent = sendto(session->audio_rtp_session.rtp_sockfd, rtp_packet, 12 + payload_len, 0,
+                      (struct sockaddr*)&session->audio_rtp_session.client_rtp_addr,
+                      sizeof(session->audio_rtp_session.client_rtp_addr));
+    }
     
     if (sent < 0) {
         ak_print_error("Failed to send audio RTP packet: %s\n", strerror(errno));
@@ -1015,6 +1182,11 @@ static void* rtsp_encoder_thread(void *arg)
             continue;
         }
         
+        // Attempt to extract SPS/PPS from keyframes once
+        if (!server->h264_sps_b64[0] || !server->h264_pps_b64[0]) {
+            h264_extract_sps_pps(server, stream.data, stream.len);
+        }
+
         // Send to all playing clients
         pthread_mutex_lock(&server->sessions_mutex);
         rtsp_session_t *session = server->sessions;
@@ -1025,22 +1197,33 @@ static void* rtsp_encoder_thread(void *arg)
                 size_t remaining = stream.len;
                 
                 while (remaining > 0) {
-                    // Find next NAL unit
-                    size_t nal_len = remaining;
-                    bool marker = true; // Mark last packet of frame
-                    
-                    if (nal_len > RTSP_RTP_BUFFER_SIZE - 12) {
-                        nal_len = RTSP_RTP_BUFFER_SIZE - 12;
-                        marker = false;
-                    }
-                    
-                    int sent = rtsp_send_rtp_packet(session, data, nal_len, marker);
-                    if (sent > 0) {
-                        data += sent;
-                        remaining -= sent;
-                        server->bytes_sent += sent;
+                    // Basic FU-A fragmentation for large frames (treat full frame as one NAL)
+                    const size_t max_payload = RTSP_RTP_BUFFER_SIZE - 12 - 2; // FU-A header 2 bytes
+                    if (remaining <= max_payload) {
+                        int sent = rtsp_send_rtp_packet(session, data, remaining, true);
+                        if (sent > 0) { server->bytes_sent += sent; remaining = 0; }
+                        else break;
                     } else {
-                        break;
+                        // Construct FU-A per RFC 6184
+                        uint8_t nal_header = data[0];
+                        uint8_t fu_indicator = (nal_header & 0xE0) | 28; // FU-A type 28
+                        uint8_t nal_type = nal_header & 0x1F;
+                        const uint8_t *payload = data + 1;
+                        size_t payload_left = remaining - 1;
+                        bool start = true;
+                        while (payload_left > 0) {
+                            size_t chun = payload_left > (max_payload) ? (max_payload) : payload_left;
+                            uint8_t fu_header = (start ? 0x80 : 0x00) | (payload_left == chun ? 0x40 : 0x00) | nal_type; // S/E bits
+                            uint8_t pkt[RTSP_RTP_BUFFER_SIZE];
+                            pkt[0] = fu_indicator; pkt[1] = fu_header;
+                            memcpy(pkt + 2, payload, chun);
+                            bool marker = (payload_left == chun);
+                            int sent = rtsp_send_rtp_packet(session, pkt, chun + 2, marker);
+                            if (sent <= 0) break;
+                            server->bytes_sent += sent;
+                            payload += chun; payload_left -= chun; start = false;
+                        }
+                        remaining = 0;
                     }
                 }
             }

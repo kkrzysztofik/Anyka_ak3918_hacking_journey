@@ -24,12 +24,13 @@
 #include "ws_discovery.h"
 #include "ak_vi.h"
 #include "ak_venc.h"
+#include "hal/hal.h"
 
 static volatile int running = 1;
 /* Primary (main) and secondary (sub) RTSP servers */
 static rtsp_server_t *rtsp_server_main = NULL;
 static rtsp_server_t *rtsp_server_sub = NULL;
-static void *vi_handle = NULL;
+static hal_vi_handle_t vi_handle = NULL;
 
 /* ---------------------------- Utility / Lifecycle ------------------------- */
 /**
@@ -53,10 +54,7 @@ static void stop_rtsp_servers(void){
  */
 static void full_cleanup(void){
     stop_rtsp_servers();
-    if (vi_handle) {
-        ak_vi_close(vi_handle);
-        vi_handle = NULL;
-    }
+    if (vi_handle) { hal_vi_close(vi_handle); vi_handle = NULL; }
     ws_discovery_stop();
     http_server_stop();
     onvif_imaging_cleanup();
@@ -117,14 +115,13 @@ static rtsp_server_t *create_and_start_rtsp(rtsp_stream_config_t *cfg, const cha
  */
 static void init_video_and_streams(void){
     printf("Initializing video input...\n");
-    vi_handle = ak_vi_open(VIDEO_DEV0);
-    if (!vi_handle){
+    if (hal_vi_open(&vi_handle) != 0){
         fprintf(stderr, "warning: failed to open video input, RTSP streaming disabled\n");
         return;
     }
 
-    struct video_resolution resolution;
-    ak_vi_get_sensor_resolution(vi_handle, &resolution);
+    struct hal_video_resolution resolution;
+    hal_vi_get_sensor_resolution(vi_handle, &resolution);
     printf("Video input initialized: %dx%d\n", resolution.width, resolution.height);
 
     /* Main (/vs0) */
@@ -166,7 +163,7 @@ static void init_video_and_streams(void){
  * @brief Start imaging, HTTP server, and WS-Discovery (non-fatal if some fail).
  */
 static void start_optional_services(const struct application_config *cfg){
-    if (onvif_imaging_init(NULL) != 0)
+    if (onvif_imaging_init(vi_handle) != 0)
         fprintf(stderr, "warning: failed to initialize imaging service\n");
     if (http_server_start(cfg->onvif.http_port) != 0) {
         fprintf(stderr, "failed to start HTTP server on port %d\n", cfg->onvif.http_port);

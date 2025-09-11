@@ -44,8 +44,14 @@ int config_load(struct application_config *cfg, const char *config_file){
     cfg->auto_daynight = cfg->imaging.daynight; /* mirror defaults */
     fp = fopen(config_file, "r");
     if (!fp){
-        fprintf(stderr, "warning: could not open %s: %s (using defaults)\n", config_file, strerror(errno));
-        return -1;
+        /* try alternate filename used in repo */
+        if (strcmp(config_file, ONVIF_CONFIG_FILE) == 0) {
+            fp = fopen("/etc/jffs2/anyka_cfg.ini", "r");
+        }
+        if (!fp){
+            fprintf(stderr, "warning: could not open %s: %s (using defaults)\n", config_file, strerror(errno));
+            return -1;
+        }
     }
     while (fgets(line,sizeof(line),fp)){
         trim(line); if(!line[0] || line[0]=='#' || line[0]==';') continue;

@@ -8,6 +8,7 @@
  *  - Request parsing is rudimentary: reads into fixed buffer, searches for action tokens.
  */
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,8 +25,8 @@
 #include "../services/ptz/onvif_ptz.h"
 #include "../services/imaging/onvif_imaging.h"
 
-#define MAX_REQUEST_SIZE 8192
-#define MAX_RESPONSE_SIZE 16384
+#define MAX_REQUEST_SIZE 32768
+#define MAX_RESPONSE_SIZE 32768
 
 static int server_running = 0;
 static int server_socket = -1;
@@ -41,19 +42,26 @@ static void *server_thread_func(void *arg) {
         int client = accept(server_socket, NULL, NULL); 
         if (client < 0) continue; 
         
-        char request[MAX_REQUEST_SIZE]; 
-        ssize_t n = recv(client, request, sizeof(request)-1, 0); 
-        if (n <= 0) { 
-            close(client); 
-            continue; 
-        } 
-        
-        request[n] = '\0'; 
-        char method[16], path[256], version[16]; 
-        if (sscanf(request, "%15s %255s %15s", method, path, version) != 3) { 
-            close(client); 
-            continue; 
-        } 
+        char request[MAX_REQUEST_SIZE]; size_t received_total = 0;
+        // Read headers first
+        while (received_total < sizeof(request) - 1) {
+            ssize_t n = recv(client, request + received_total, sizeof(request) - 1 - received_total, 0);
+            if (n <= 0) break; received_total += (size_t)n; request[received_total] = '\0';
+            if (strstr(request, "\r\n\r\n")) break;
+        }
+        if (received_total == 0) { close(client); continue; }
+        char method[16], path[256], version[16];
+        if (sscanf(request, "%15s %255s %15s", method, path, version) != 3) { close(client); continue; }
+        // Parse Content-Length
+        size_t content_length = 0; const char *cl = strcasestr(request, "Content-Length:");
+        if (cl) { cl += 15; while (*cl==' '||*cl=='\t') cl++; content_length = (size_t)atoi(cl); }
+        const char *hdr_end = strstr(request, "\r\n\r\n"); size_t header_len = hdr_end ? (size_t)(hdr_end - request + 4) : received_total;
+        size_t have_body = received_total > header_len ? received_total - header_len : 0;
+        // Read remaining body if any
+        while (have_body < content_length && received_total < sizeof(request) - 1) {
+            ssize_t n = recv(client, request + received_total, sizeof(request) - 1 - received_total, 0);
+            if (n <= 0) break; received_total += (size_t)n; have_body += (size_t)n; request[received_total] = '\0';
+        }
         
         if (strcmp(method, "POST") == 0) {
             char response[MAX_RESPONSE_SIZE];
@@ -136,6 +144,24 @@ static void *server_thread_func(void *arg) {
                 if (onvif_media_get_snapshot_uri(profile_token, &uri) == 0) {
                     snprintf(response, sizeof(response), ONVIF_SOAP_MEDIA_GET_SNAPSHOT_URI_RESPONSE, uri.uri, uri.timeout);
                     handled = 1;
+                }
+            }
+
+            /* Imaging service */
+            if (!handled && strstr(path, "/imaging_service")) {
+                char response_buf[MAX_RESPONSE_SIZE];
+                if (strstr(request, "GetImagingSettings")) {
+                    if (onvif_imaging_get_imaging_settings(response_buf, sizeof(response_buf)) == 0) {
+                        strncpy(response, response_buf, sizeof(response)-1); response[sizeof(response)-1]='\0'; handled = 1;
+                    }
+                } else if (strstr(request, "SetImagingSettings")) {
+                    if (onvif_imaging_set_imaging_settings(request + header_len, response_buf, sizeof(response_buf)) == 0) {
+                        strncpy(response, response_buf, sizeof(response)-1); response[sizeof(response)-1]='\0'; handled = 1;
+                    }
+                } else if (strstr(request, "GetOptions") || strstr(request, "GetImagingOptions")) {
+                    if (onvif_imaging_get_options(response_buf, sizeof(response_buf)) == 0) {
+                        strncpy(response, response_buf, sizeof(response)-1); response[sizeof(response)-1]='\0'; handled = 1;
+                    }
                 }
             }
 

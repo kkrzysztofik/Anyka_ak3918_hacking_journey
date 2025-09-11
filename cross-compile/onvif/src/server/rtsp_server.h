@@ -75,6 +75,9 @@ struct rtp_session {
     struct sockaddr_in client_rtp_addr;
     struct sockaddr_in client_rtcp_addr;
     struct sockaddr_in client_addr;  /* Alias for client_rtp_addr */
+    /* TCP interleaved channels when transport == RTP_TRANSPORT_TCP */
+    int tcp_channel_rtp;
+    int tcp_channel_rtcp;
 };
 
 /* Audio RTP session structure */
@@ -89,6 +92,8 @@ struct audio_rtp_session {
     int transport;
     struct sockaddr_in client_rtp_addr;
     struct sockaddr_in client_rtcp_addr;
+    int tcp_channel_rtp;
+    int tcp_channel_rtcp;
 };
 
 /* RTSP session structure */
@@ -116,6 +121,8 @@ typedef struct rtsp_session {
     
     /* Linked list */
     struct rtsp_session *next;
+    struct rtsp_session *prev;
+    struct rtsp_server *server; /* back-pointer */
 } rtsp_session_t;
 
 /** Video stream encoding configuration */
@@ -186,6 +193,10 @@ struct rtsp_server {
     uint64_t bytes_sent;
     uint64_t frames_sent;
     uint64_t audio_frames_sent;
+
+    /* H.264 parameter sets (base64) learned at runtime */
+    char h264_sps_b64[256];
+    char h264_pps_b64[256];
 };
 
 typedef struct rtsp_server rtsp_server_t;
