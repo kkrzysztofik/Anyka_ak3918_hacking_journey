@@ -41,6 +41,7 @@ static int discovery_socket = -1;
 static pthread_t discovery_thread;
 static int g_http_port = 8080;
 static char g_endpoint_uuid[80] = {0}; /* urn:uuid:... */
+static pthread_mutex_t g_endpoint_uuid_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Announcement interval (seconds) for periodic Hello re-broadcast */
 #define HELLO_INTERVAL 300
@@ -137,7 +138,9 @@ static void *discovery_loop(void *arg){
 
         char buf[MAX_UDP_SIZE];
         srand((unsigned)time(NULL));
+        pthread_mutex_lock(&g_endpoint_uuid_mutex);
         if (!g_endpoint_uuid[0]) build_endpoint_uuid();
+        pthread_mutex_unlock(&g_endpoint_uuid_mutex);
         time_t last_hello = 0;
         send_hello(); /* initial announcement */
     while (discovery_running) {

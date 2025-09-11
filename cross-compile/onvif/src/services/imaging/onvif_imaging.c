@@ -10,11 +10,11 @@
 #include "config.h"
 #include "constants.h"
 #include "ak_common.h"
-#include "hal/hal.h"
+#include "platform.h"
 
 static struct auto_daynight_config g_auto_config;
 static struct imaging_settings g_imaging_settings;
-static hal_vi_handle_t g_vi_handle = NULL;
+static platform_vi_handle_t g_vi_handle = NULL;
 static pthread_mutex_t g_imaging_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int g_imaging_initialized = 0;
 
@@ -51,9 +51,9 @@ int onvif_imaging_init(void *vi_handle) {
     const struct application_config *ucfg = config_get();
     if (ucfg) {
         g_imaging_settings = ucfg->imaging;
-    ak_print_notice("Loaded imaging settings from application config\n");
+    platform_log_notice("Loaded imaging settings from application config\n");
     } else {
-    ak_print_notice("Application config not loaded; using defaults\n");
+    platform_log_notice("Application config not loaded; using defaults\n");
     }
     
     // Initialize auto day/night configuration
@@ -72,16 +72,16 @@ int onvif_imaging_init(void *vi_handle) {
     }
     
     // Initialize IR LED driver via HAL
-    if (hal_irled_init(g_auto_config.ir_led_level) != 0) {
-        ak_print_error("Failed to initialize IR LED driver\n");
+    if (platform_irled_init(g_auto_config.ir_led_level) != 0) {
+        platform_log_error("Failed to initialize IR LED driver\n");
     } else {
-        ak_print_notice("IR LED driver initialized with level %d\n", g_auto_config.ir_led_level);
+        platform_log_notice("IR LED driver initialized with level %d\n", g_auto_config.ir_led_level);
         
         // Set initial IR LED mode
         if (g_auto_config.ir_led_mode == IR_LED_ON) {
-            hal_irled_set_mode(1);
+            platform_irled_set_mode(1);
         } else if (g_auto_config.ir_led_mode == IR_LED_OFF) {
-            hal_irled_set_mode(0);
+            platform_irled_set_mode(0);
         }
     }
     
@@ -89,37 +89,37 @@ int onvif_imaging_init(void *vi_handle) {
     if (g_vi_handle) {
         // Set brightness
         int brightness_vpss = g_imaging_settings.brightness / 2;
-        hal_vpss_effect_set(g_vi_handle, HAL_VPSS_EFFECT_BRIGHTNESS, brightness_vpss);
+        platform_vpss_effect_set(g_vi_handle, PLATFORM_VPSS_EFFECT_BRIGHTNESS, brightness_vpss);
         
         // Set contrast
         int contrast_vpss = g_imaging_settings.contrast / 2;
-        hal_vpss_effect_set(g_vi_handle, HAL_VPSS_EFFECT_CONTRAST, contrast_vpss);
+        platform_vpss_effect_set(g_vi_handle, PLATFORM_VPSS_EFFECT_CONTRAST, contrast_vpss);
         
         // Set saturation
         int saturation_vpss = g_imaging_settings.saturation / 2;
-        hal_vpss_effect_set(g_vi_handle, HAL_VPSS_EFFECT_SATURATION, saturation_vpss);
+        platform_vpss_effect_set(g_vi_handle, PLATFORM_VPSS_EFFECT_SATURATION, saturation_vpss);
         
         // Set sharpness
         int sharpness_vpss = g_imaging_settings.sharpness / 2;
-        hal_vpss_effect_set(g_vi_handle, HAL_VPSS_EFFECT_SHARPNESS, sharpness_vpss);
+        platform_vpss_effect_set(g_vi_handle, PLATFORM_VPSS_EFFECT_SHARPNESS, sharpness_vpss);
         
         // Set hue
         int hue_vpss = g_imaging_settings.hue * 50 / 180;
-        hal_vpss_effect_set(g_vi_handle, HAL_VPSS_EFFECT_HUE, hue_vpss);
+        platform_vpss_effect_set(g_vi_handle, PLATFORM_VPSS_EFFECT_HUE, hue_vpss);
         
-        ak_print_notice("Applied imaging settings to VPSS\n");
+        platform_log_notice("Applied imaging settings to VPSS\n");
     }
     
     // Initialize auto day/night mode if enabled
     if (g_auto_config.enable_auto_switching) {
-        ak_print_notice("Auto day/night mode enabled (thresholds: %d/%d)\n", 
+        platform_log_notice("Auto day/night mode enabled (thresholds: %d/%d)\n", 
                        g_auto_config.day_to_night_threshold, 
                        g_auto_config.night_to_day_threshold);
     }
     
     g_imaging_initialized = 1; 
     pthread_mutex_unlock(&g_imaging_mutex); 
-    ak_print_notice("ONVIF Imaging service initialized successfully\n"); 
+    platform_log_notice("ONVIF Imaging service initialized successfully\n"); 
     return 0; 
 }
 
@@ -127,21 +127,21 @@ void onvif_imaging_cleanup(void) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (g_imaging_initialized) {
         g_imaging_initialized = 0;
-        ak_print_notice("ONVIF Imaging service cleaned up\n");
+        platform_log_notice("ONVIF Imaging service cleaned up\n");
     }
     pthread_mutex_unlock(&g_imaging_mutex);
 }
 
 int onvif_imaging_get_settings(struct imaging_settings *settings) {
     if (!settings) {
-        ak_print_error("Invalid parameters\n");
+        platform_log_error("Invalid parameters\n");
         return -1;
     }
     
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        ak_print_error("Imaging service not initialized\n");
+        platform_log_error("Imaging service not initialized\n");
         return -1;
     }
     
@@ -152,14 +152,14 @@ int onvif_imaging_get_settings(struct imaging_settings *settings) {
 
 int onvif_imaging_set_settings(const struct imaging_settings *settings) {
     if (!settings) {
-        ak_print_error("Invalid parameters\n");
+        platform_log_error("Invalid parameters\n");
         return -1;
     }
     
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        ak_print_error("Imaging service not initialized\n");
+        platform_log_error("Imaging service not initialized\n");
         return -1;
     }
     
@@ -167,8 +167,8 @@ int onvif_imaging_set_settings(const struct imaging_settings *settings) {
     
     // Set brightness (VPSS effect range: -50 to 50, ONVIF range: -100 to 100)
     int brightness_vpss = settings->brightness / 2;
-    if (hal_vpss_effect_set(g_vi_handle, HAL_VPSS_EFFECT_BRIGHTNESS, brightness_vpss) != 0) {
-        ak_print_error("Failed to set brightness\n");
+    if (platform_vpss_effect_set(g_vi_handle, PLATFORM_VPSS_EFFECT_BRIGHTNESS, brightness_vpss) != 0) {
+        platform_log_error("Failed to set brightness\n");
         ret = -1;
     } else {
         g_imaging_settings.brightness = settings->brightness;
@@ -176,8 +176,8 @@ int onvif_imaging_set_settings(const struct imaging_settings *settings) {
     
     // Set contrast (VPSS effect range: -50 to 50, ONVIF range: -100 to 100)
     int contrast_vpss = settings->contrast / 2;
-    if (hal_vpss_effect_set(g_vi_handle, HAL_VPSS_EFFECT_CONTRAST, contrast_vpss) != 0) {
-        ak_print_error("Failed to set contrast\n");
+    if (platform_vpss_effect_set(g_vi_handle, PLATFORM_VPSS_EFFECT_CONTRAST, contrast_vpss) != 0) {
+        platform_log_error("Failed to set contrast\n");
         ret = -1;
     } else {
         g_imaging_settings.contrast = settings->contrast;
@@ -185,8 +185,8 @@ int onvif_imaging_set_settings(const struct imaging_settings *settings) {
     
     // Set saturation (VPSS effect range: -50 to 50, ONVIF range: -100 to 100)
     int saturation_vpss = settings->saturation / 2;
-    if (hal_vpss_effect_set(g_vi_handle, HAL_VPSS_EFFECT_SATURATION, saturation_vpss) != 0) {
-        ak_print_error("Failed to set saturation\n");
+    if (platform_vpss_effect_set(g_vi_handle, PLATFORM_VPSS_EFFECT_SATURATION, saturation_vpss) != 0) {
+        platform_log_error("Failed to set saturation\n");
         ret = -1;
     } else {
         g_imaging_settings.saturation = settings->saturation;
@@ -194,8 +194,8 @@ int onvif_imaging_set_settings(const struct imaging_settings *settings) {
     
     // Set sharpness (VPSS effect range: -50 to 50, ONVIF range: -100 to 100)
     int sharpness_vpss = settings->sharpness / 2;
-    if (hal_vpss_effect_set(g_vi_handle, HAL_VPSS_EFFECT_SHARPNESS, sharpness_vpss) != 0) {
-        ak_print_error("Failed to set sharpness\n");
+    if (platform_vpss_effect_set(g_vi_handle, PLATFORM_VPSS_EFFECT_SHARPNESS, sharpness_vpss) != 0) {
+        platform_log_error("Failed to set sharpness\n");
         ret = -1;
     } else {
         g_imaging_settings.sharpness = settings->sharpness;
@@ -203,8 +203,8 @@ int onvif_imaging_set_settings(const struct imaging_settings *settings) {
     
     // Set hue (VPSS effect range: -50 to 50, ONVIF range: -180 to 180)
     int hue_vpss = settings->hue * 50 / 180;
-    if (hal_vpss_effect_set(g_vi_handle, HAL_VPSS_EFFECT_HUE, hue_vpss) != 0) {
-        ak_print_error("Failed to set hue\n");
+    if (platform_vpss_effect_set(g_vi_handle, PLATFORM_VPSS_EFFECT_HUE, hue_vpss) != 0) {
+        platform_log_error("Failed to set hue\n");
         ret = -1;
     } else {
         g_imaging_settings.hue = settings->hue;
@@ -216,7 +216,7 @@ int onvif_imaging_set_settings(const struct imaging_settings *settings) {
     // Save settings to configuration (imaging section)
     if (ret == 0) {
         config_save_imaging(&g_imaging_settings);
-        ak_print_notice("Imaging settings updated successfully\n");
+        platform_log_notice("Imaging settings updated successfully\n");
     }
     
     pthread_mutex_unlock(&g_imaging_mutex);
@@ -227,33 +227,33 @@ int onvif_imaging_set_day_night_mode(enum day_night_mode mode) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        ak_print_error("Imaging service not initialized\n");
+        platform_log_error("Imaging service not initialized\n");
         return -1;
     }
     
     int ret = 0;
-    enum hal_daynight_mode vi_mode;
+    platform_daynight_mode_t vi_mode;
     
     switch (mode) {
         case DAY_NIGHT_DAY:
-            vi_mode = HAL_DAYNIGHT_DAY;
+            vi_mode = PLATFORM_DAYNIGHT_DAY;
             break;
         case DAY_NIGHT_NIGHT:
-            vi_mode = HAL_DAYNIGHT_NIGHT;
+            vi_mode = PLATFORM_DAYNIGHT_NIGHT;
             break;
         case DAY_NIGHT_AUTO:
         default:
             // For auto mode, we'll use day mode by default and let the auto switching handle it
-            vi_mode = HAL_DAYNIGHT_DAY;
+            vi_mode = PLATFORM_DAYNIGHT_DAY;
             break;
     }
     
-    if (hal_vi_switch_day_night(g_vi_handle, vi_mode) != 0) {
-        ak_print_error("Failed to switch day/night mode\n");
+    if (platform_vi_switch_day_night(g_vi_handle, vi_mode) != 0) {
+        platform_log_error("Failed to switch day/night mode\n");
         ret = -1;
     } else {
         g_imaging_settings.daynight.mode = mode;
-        ak_print_notice("Day/night mode set to %d\n", mode);
+        platform_log_notice("Day/night mode set to %d\n", mode);
     }
     
     pthread_mutex_unlock(&g_imaging_mutex);
@@ -264,7 +264,7 @@ int onvif_imaging_get_day_night_mode(void) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        ak_print_error("Imaging service not initialized\n");
+        platform_log_error("Imaging service not initialized\n");
         return -1;
     }
     
@@ -277,35 +277,35 @@ int onvif_imaging_set_irled_mode(enum ir_led_mode mode) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        ak_print_error("Imaging service not initialized\n");
+        platform_log_error("Imaging service not initialized\n");
         return -1;
     }
     
     int ret = 0;
     switch (mode) {
         case IR_LED_OFF:
-            hal_irled_set_mode(0);
+            platform_irled_set_mode(0);
             break;
         case IR_LED_ON:
-            hal_irled_set_mode(1);
+            platform_irled_set_mode(1);
             break;
         case IR_LED_AUTO:
         default:
             // For auto mode, we'll enable it by default and let the auto day/night control it
-            hal_irled_set_mode(2);
+            platform_irled_set_mode(2);
             break;
     }
     g_imaging_settings.daynight.ir_led_mode = mode;
-    ak_print_notice("IR LED mode set to %d\n", mode);
+    platform_log_notice("IR LED mode set to %d\n", mode);
     
     pthread_mutex_unlock(&g_imaging_mutex);
     return ret;
 }
 
 int onvif_imaging_get_irled_status(void) {
-    int status = hal_irled_get_status();
+    int status = platform_irled_get_status();
     if (status < 0) {
-        ak_print_error("Failed to get IR LED status\n");
+        platform_log_error("Failed to get IR LED status\n");
         return 0; // Return off if we can't determine status
     }
     return status;
@@ -315,15 +315,15 @@ int onvif_imaging_set_flip_mirror(int flip, int mirror) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        ak_print_error("Imaging service not initialized\n");
+        platform_log_error("Imaging service not initialized\n");
         return -1;
     }
     
-    int ret = hal_vi_set_flip_mirror(g_vi_handle, flip, mirror);
+    int ret = platform_vi_set_flip_mirror(g_vi_handle, flip, mirror);
     if (ret != 0) {
-        ak_print_error("Failed to set flip/mirror: flip=%d, mirror=%d\n", flip, mirror);
+        platform_log_error("Failed to set flip/mirror: flip=%d, mirror=%d\n", flip, mirror);
     } else {
-        ak_print_notice("Flip/mirror set: flip=%d, mirror=%d\n", flip, mirror);
+        platform_log_notice("Flip/mirror set: flip=%d, mirror=%d\n", flip, mirror);
     }
     
     pthread_mutex_unlock(&g_imaging_mutex);
@@ -332,14 +332,14 @@ int onvif_imaging_set_flip_mirror(int flip, int mirror) {
 
 int onvif_imaging_set_auto_config(const struct auto_daynight_config *config) {
     if (!config) {
-        ak_print_error("Invalid parameters\n");
+        platform_log_error("Invalid parameters\n");
         return -1;
     }
     
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        ak_print_error("Imaging service not initialized\n");
+        platform_log_error("Imaging service not initialized\n");
         return -1;
     }
     
@@ -348,7 +348,7 @@ int onvif_imaging_set_auto_config(const struct auto_daynight_config *config) {
     
     // Save auto configuration section
     config_save_auto_daynight(&g_auto_config);
-    ak_print_notice("Auto day/night configuration updated\n");
+    platform_log_notice("Auto day/night configuration updated\n");
     
     pthread_mutex_unlock(&g_imaging_mutex);
     return 0;
@@ -356,14 +356,14 @@ int onvif_imaging_set_auto_config(const struct auto_daynight_config *config) {
 
 int onvif_imaging_get_auto_config(struct auto_daynight_config *config) {
     if (!config) {
-        ak_print_error("Invalid parameters\n");
+        platform_log_error("Invalid parameters\n");
         return -1;
     }
     
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        ak_print_error("Imaging service not initialized\n");
+        platform_log_error("Imaging service not initialized\n");
         return -1;
     }
     
@@ -374,24 +374,24 @@ int onvif_imaging_get_auto_config(struct auto_daynight_config *config) {
 
 int onvif_imaging_get_imaging_settings(char *response, int response_size) {
     if (!response || response_size <= 0) {
-        ak_print_error("Invalid parameters\n");
+        platform_log_error("Invalid parameters\n");
         return -1;
     }
     
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        ak_print_error("Imaging service not initialized\n");
+        platform_log_error("Imaging service not initialized\n");
         return -1;
     }
     
     // Get current VPSS effect values
     int brightness_vpss = 0, contrast_vpss = 0, saturation_vpss = 0, sharpness_vpss = 0, hue_vpss = 0;
-    hal_vpss_effect_get(g_vi_handle, HAL_VPSS_EFFECT_BRIGHTNESS, &brightness_vpss);
-    hal_vpss_effect_get(g_vi_handle, HAL_VPSS_EFFECT_CONTRAST, &contrast_vpss);
-    hal_vpss_effect_get(g_vi_handle, HAL_VPSS_EFFECT_SATURATION, &saturation_vpss);
-    hal_vpss_effect_get(g_vi_handle, HAL_VPSS_EFFECT_SHARPNESS, &sharpness_vpss);
-    hal_vpss_effect_get(g_vi_handle, HAL_VPSS_EFFECT_HUE, &hue_vpss);
+    platform_vpss_effect_get(g_vi_handle, PLATFORM_VPSS_EFFECT_BRIGHTNESS, &brightness_vpss);
+    platform_vpss_effect_get(g_vi_handle, PLATFORM_VPSS_EFFECT_CONTRAST, &contrast_vpss);
+    platform_vpss_effect_get(g_vi_handle, PLATFORM_VPSS_EFFECT_SATURATION, &saturation_vpss);
+    platform_vpss_effect_get(g_vi_handle, PLATFORM_VPSS_EFFECT_SHARPNESS, &sharpness_vpss);
+    platform_vpss_effect_get(g_vi_handle, PLATFORM_VPSS_EFFECT_HUE, &hue_vpss);
     
     // Convert VPSS values back to ONVIF range
     int brightness_onvif = brightness_vpss * 2;
@@ -410,7 +410,7 @@ int onvif_imaging_get_imaging_settings(char *response, int response_size) {
 
 int onvif_imaging_set_imaging_settings(const char *request, char *response, int response_size) {
     if (!request || !response || response_size <= 0) {
-        ak_print_error("Invalid parameters\n");
+        platform_log_error("Invalid parameters\n");
         return -1;
     }
     
@@ -496,7 +496,7 @@ int onvif_imaging_set_imaging_settings(const char *request, char *response, int 
 
 int onvif_imaging_get_options(char *response, int response_size) {
     if (!response || response_size <= 0) {
-        ak_print_error("Invalid parameters\n");
+        platform_log_error("Invalid parameters\n");
         return -1;
     }
     

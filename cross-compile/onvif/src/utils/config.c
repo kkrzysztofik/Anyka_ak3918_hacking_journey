@@ -85,6 +85,21 @@ int config_load(struct application_config *cfg, const char *config_file){
 
 const struct application_config *config_get(void){ return g_config_loaded ? &g_config : NULL; }
 
-int config_save_imaging(const struct imaging_settings *s){ if(!s) return -1; /* rewrite imaging section only */
-    FILE *fp = fopen(ONVIF_CONFIG_FILE, "a"); if(!fp) return -1; fprintf(fp,"\n[imaging]\nbrightness=%d\ncontrast=%d\nsaturation=%d\nsharpness=%d\nhue=%d\n", s->brightness,s->contrast,s->saturation,s->sharpness,s->hue); fclose(fp); return 0; }
-int config_save_auto_daynight(const struct auto_daynight_config *c){ if(!c) return -1; FILE *fp=fopen(ONVIF_CONFIG_FILE,"a"); if(!fp) return -1; fprintf(fp,"\n[autoir]\nauto_day_night_enable=%d\nday_night_mode=%d\nday_to_night_lum=%d\nnight_to_day_lum=%d\nlock_time=%d\n", c->enable_auto_switching,c->mode,c->day_to_night_threshold,c->night_to_day_threshold,c->lock_time_seconds); fclose(fp); return 0; }
+int config_save_imaging(const struct imaging_settings *s){ 
+    if(!s) return -1; 
+    FILE *fp = fopen(ONVIF_CONFIG_FILE, "a"); 
+    if(!fp) return -1; 
+    int ret = fprintf(fp,"\n[imaging]\nbrightness=%d\ncontrast=%d\nsaturation=%d\nsharpness=%d\nhue=%d\n", 
+                     s->brightness,s->contrast,s->saturation,s->sharpness,s->hue); 
+    fclose(fp); 
+    return (ret < 0) ? -1 : 0; 
+}
+int config_save_auto_daynight(const struct auto_daynight_config *c){ 
+    if(!c) return -1; 
+    FILE *fp=fopen(ONVIF_CONFIG_FILE,"a"); 
+    if(!fp) return -1; 
+    int ret = fprintf(fp,"\n[autoir]\nauto_day_night_enable=%d\nday_night_mode=%d\nday_to_night_lum=%d\nnight_to_day_lum=%d\nlock_time=%d\n", 
+                     c->enable_auto_switching,c->mode,c->day_to_night_threshold,c->night_to_day_threshold,c->lock_time_seconds); 
+    fclose(fp); 
+    return (ret < 0) ? -1 : 0; 
+}

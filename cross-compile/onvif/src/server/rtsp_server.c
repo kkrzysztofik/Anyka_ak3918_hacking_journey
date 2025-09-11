@@ -11,6 +11,7 @@
 
 #include "rtsp_server.h"
 #include "../utils/network_utils.h"
+#include "../platform/platform.h"
 #include "ak_common.h"
 #include "ak_thread.h"
 #include "ak_vi.h"
@@ -37,6 +38,7 @@
 
 /* Global session counter for generating session IDs */
 static uint32_t g_session_counter = 1;
+static pthread_mutex_t g_session_counter_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Forward declarations */
 static void* rtsp_accept_thread(void *arg);
@@ -138,13 +140,13 @@ static int rtsp_send_interleaved(int sockfd, uint8_t channel, const uint8_t *pay
 rtsp_server_t* rtsp_server_create(rtsp_stream_config_t *config)
 {
     if (!config) {
-        ak_print_error("Invalid config parameter\n");
+        platform_log_error("Invalid config parameter\n");
         return NULL;
     }
     
     rtsp_server_t *server = calloc(1, sizeof(rtsp_server_t));
     if (!server) {
-        ak_print_error("Failed to allocate server memory\n");
+        platform_log_error("Failed to allocate server memory\n");
         return NULL;
     }
     
@@ -153,7 +155,7 @@ rtsp_server_t* rtsp_server_create(rtsp_stream_config_t *config)
     
     // Initialize mutex
     if (pthread_mutex_init(&server->sessions_mutex, NULL) != 0) {
-        ak_print_error("Failed to initialize sessions mutex\n");
+        platform_log_error("Failed to initialize sessions mutex\n");
         free(server);
         return NULL;
     }
@@ -170,7 +172,7 @@ rtsp_server_t* rtsp_server_create(rtsp_stream_config_t *config)
     server->audio_encoder_initialized = false;
     server->audio_frames_sent = 0;
     
-    ak_print_notice("RTSP server created for stream: %s on port %d (Audio: %s)\n", 
+    platform_log_notice("RTSP server created for stream: %s on port %d (Audio: %s)\n", 
                     config->stream_path, config->port, 
                     config->audio_enabled ? "enabled" : "disabled");
     
@@ -183,26 +185,26 @@ rtsp_server_t* rtsp_server_create(rtsp_stream_config_t *config)
 int rtsp_server_start(rtsp_server_t *server)
 {
     if (!server) {
-        ak_print_error("Invalid server parameter\n");
+        platform_log_error("Invalid server parameter\n");
         return -1;
     }
     
     if (server->running) {
-        ak_print_warning("RTSP server already running\n");
+        platform_log_warning("RTSP server already running\n");
         return 0;
     }
     
     // Create listening socket
     server->listen_sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (server->listen_sockfd < 0) {
-        ak_print_error("Failed to create listening socket: %s\n", strerror(errno));
+        platform_log_error("Failed to create listening socket: %s\n", strerror(errno));
         return -1;
     }
     
     // Set socket options
     int opt = 1;
     if (setsockopt(server->listen_sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-        ak_print_warning("Failed to set SO_REUSEADDR: %s\n", strerror(errno));
+        platform_log_warning("Failed to set SO_REUSEADDR: %s\n", strerror(errno));
     }
     
     // Bind socket
@@ -213,7 +215,7 @@ int rtsp_server_start(rtsp_server_t *server)
     addr.sin_port = htons(server->config.port);
     
     if (bind(server->listen_sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        ak_print_error("Failed to bind socket to port %d: %s\n", 
+        platform_log_error("Failed to bind socket to port %d: %s\n", 
                        server->config.port, strerror(errno));
         close(server->listen_sockfd);
         server->listen_sockfd = -1;
@@ -222,7 +224,7 @@ int rtsp_server_start(rtsp_server_t *server)
     
     // Start listening
     if (listen(server->listen_sockfd, RTSP_MAX_CLIENTS) < 0) {
-        ak_print_error("Failed to listen on socket: %s\n", strerror(errno));
+        platform_log_error("Failed to listen on socket: %s\n", strerror(errno));
         close(server->listen_sockfd);
         server->listen_sockfd = -1;
         return -1;
@@ -230,7 +232,7 @@ int rtsp_server_start(rtsp_server_t *server)
     
     // Setup video encoder
     if (rtsp_setup_encoder(server) < 0) {
-        ak_print_error("Failed to setup video encoder\n");
+        platform_log_error("Failed to setup video encoder\n");
         close(server->listen_sockfd);
         server->listen_sockfd = -1;
         return -1;
@@ -239,8 +241,9 @@ int rtsp_server_start(rtsp_server_t *server)
     // Setup audio encoder if enabled
     if (server->config.audio_enabled) {
         if (rtsp_setup_audio_encoder(server) < 0) {
-            ak_print_error("Failed to setup audio encoder\n");
+            platform_log_error("Failed to setup audio encoder\n");
             rtsp_cleanup_encoder(server);
+            rtsp_cleanup_audio_encoder(server);
             close(server->listen_sockfd);
             server->listen_sockfd = -1;
             return -1;
@@ -251,7 +254,7 @@ int rtsp_server_start(rtsp_server_t *server)
     
     // Start accept thread
     if (pthread_create(&server->accept_thread, NULL, rtsp_accept_thread, server) != 0) {
-        ak_print_error("Failed to create accept thread: %s\n", strerror(errno));
+        platform_log_error("Failed to create accept thread: %s\n", strerror(errno));
         server->running = false;
         rtsp_cleanup_encoder(server);
         close(server->listen_sockfd);
@@ -261,7 +264,7 @@ int rtsp_server_start(rtsp_server_t *server)
     
     // Start encoder thread
     if (pthread_create(&server->encoder_thread, NULL, rtsp_encoder_thread, server) != 0) {
-        ak_print_error("Failed to create encoder thread: %s\n", strerror(errno));
+        platform_log_error("Failed to create encoder thread: %s\n", strerror(errno));
         server->running = false;
         pthread_cancel(server->accept_thread);
         rtsp_cleanup_encoder(server);
@@ -276,7 +279,7 @@ int rtsp_server_start(rtsp_server_t *server)
     // Start audio thread if enabled
     if (server->config.audio_enabled) {
         if (pthread_create(&server->audio_thread, NULL, rtsp_audio_thread, server) != 0) {
-            ak_print_error("Failed to create audio thread: %s\n", strerror(errno));
+            platform_log_error("Failed to create audio thread: %s\n", strerror(errno));
             server->running = false;
             pthread_cancel(server->accept_thread);
             pthread_cancel(server->encoder_thread);
@@ -288,7 +291,7 @@ int rtsp_server_start(rtsp_server_t *server)
         }
     }
     
-    ak_print_notice("RTSP server started on port %d, stream: %s\n", 
+    platform_log_notice("RTSP server started on port %d, stream: %s\n", 
                     server->config.port, server->config.stream_path);
     
     return 0;
@@ -303,7 +306,7 @@ int rtsp_server_stop(rtsp_server_t *server)
         return 0;
     }
     
-    ak_print_notice("Stopping RTSP server...\n");
+    platform_log_notice("Stopping RTSP server...\n");
     
     server->running = false;
     
@@ -349,7 +352,7 @@ int rtsp_server_stop(rtsp_server_t *server)
         rtsp_cleanup_audio_encoder(server);
     }
     
-    ak_print_notice("RTSP server stopped\n");
+    platform_log_notice("RTSP server stopped\n");
     
     return 0;
 }
@@ -410,7 +413,7 @@ static void* rtsp_accept_thread(void *arg)
 {
     rtsp_server_t *server = (rtsp_server_t*)arg;
     
-    ak_print_notice("RTSP accept thread started\n");
+    platform_log_notice("RTSP accept thread started\n");
     
     while (server->running) {
         struct sockaddr_in client_addr;
@@ -421,18 +424,18 @@ static void* rtsp_accept_thread(void *arg)
         
         if (client_sockfd < 0) {
             if (server->running) {
-                ak_print_error("Failed to accept client connection: %s\n", strerror(errno));
+                platform_log_error("Failed to accept client connection: %s\n", strerror(errno));
             }
             continue;
         }
         
-        ak_print_notice("New RTSP client connected from %s:%d\n", 
+        platform_log_notice("New RTSP client connected from %s:%d\n", 
                         inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
         
         // Create new session
         rtsp_session_t *session = calloc(1, sizeof(rtsp_session_t));
         if (!session) {
-            ak_print_error("Failed to allocate session memory\n");
+            platform_log_error("Failed to allocate session memory\n");
             close(client_sockfd);
             continue;
         }
@@ -442,13 +445,18 @@ static void* rtsp_accept_thread(void *arg)
         session->state = RTSP_STATE_INIT;
         session->active = true;
         session->audio_enabled = server->config.audio_enabled; // Initialize audio support based on server config
-        snprintf(session->session_id, sizeof(session->session_id), "%u", g_session_counter++);
+        // Thread-safe session ID generation
+        pthread_mutex_lock(&g_session_counter_mutex);
+        uint32_t session_id = g_session_counter++;
+        pthread_mutex_unlock(&g_session_counter_mutex);
+        snprintf(session->session_id, sizeof(session->session_id), "%u", session_id);
         
         // Allocate buffers
         session->recv_buffer = malloc(RTSP_BUFFER_SIZE);
         session->send_buffer = malloc(RTSP_BUFFER_SIZE);
         if (!session->recv_buffer || !session->send_buffer) {
-            ak_print_error("Failed to allocate session buffers\n");
+            platform_log_error("Failed to allocate session buffers\n");
+            // Clean up any successfully allocated buffers
             if (session->recv_buffer) free(session->recv_buffer);
             if (session->send_buffer) free(session->send_buffer);
             free(session);
@@ -468,7 +476,7 @@ static void* rtsp_accept_thread(void *arg)
         
         // Start session thread
         if (pthread_create(&session->thread, NULL, rtsp_session_thread, session) != 0) {
-            ak_print_error("Failed to create session thread: %s\n", strerror(errno));
+            platform_log_error("Failed to create session thread: %s\n", strerror(errno));
             
             // Remove from list and cleanup
             pthread_mutex_lock(&server->sessions_mutex);
@@ -493,7 +501,7 @@ static void* rtsp_accept_thread(void *arg)
         }
     }
     
-    ak_print_notice("RTSP accept thread finished\n");
+    platform_log_notice("RTSP accept thread finished\n");
     return NULL;
 }
 /**
@@ -503,7 +511,7 @@ static void* rtsp_session_thread(void *arg)
 {
     rtsp_session_t *session = (rtsp_session_t*)arg;
     
-    ak_print_notice("RTSP session thread started for client %s:%d\n", 
+    platform_log_notice("RTSP session thread started for client %s:%d\n", 
                     inet_ntoa(session->addr.sin_addr), ntohs(session->addr.sin_port));
     
     session->recv_pos = 0;
@@ -516,7 +524,7 @@ static void* rtsp_session_thread(void *arg)
         
         if (received <= 0) {
             if (received < 0 && errno != ECONNRESET) {
-                ak_print_error("Failed to receive data: %s\n", strerror(errno));
+                platform_log_error("Failed to receive data: %s\n", strerror(errno));
             }
             break;
         }
@@ -531,7 +539,7 @@ static void* rtsp_session_thread(void *arg)
             
             // Handle the request
             if (rtsp_handle_request(session, session->recv_buffer) < 0) {
-                ak_print_error("Failed to handle RTSP request\n");
+                platform_log_error("Failed to handle RTSP request\n");
                 break;
             }
             
@@ -546,7 +554,7 @@ static void* rtsp_session_thread(void *arg)
         
         // Prevent buffer overflow
         if (session->recv_pos >= RTSP_BUFFER_SIZE - 1) {
-            ak_print_warning("RTSP receive buffer overflow, resetting\n");
+            platform_log_warning("RTSP receive buffer overflow, resetting\n");
             session->recv_pos = 0;
         }
     }
@@ -569,7 +577,7 @@ static void* rtsp_session_thread(void *arg)
         pthread_mutex_unlock(&server->sessions_mutex);
     }
     
-    ak_print_notice("RTSP session thread finished for client %s:%d\n", 
+    platform_log_notice("RTSP session thread finished for client %s:%d\n", 
                     inet_ntoa(session->addr.sin_addr), ntohs(session->addr.sin_port));
     
     return NULL;
@@ -587,7 +595,7 @@ static int rtsp_handle_request(rtsp_session_t *session, const char *request)
     }
     
     if (!line_end) {
-        ak_print_error("Invalid RTSP request format\n");
+        platform_log_error("Invalid RTSP request format\n");
         return rtsp_send_response(session, RTSP_BAD_REQUEST, NULL, NULL);
     }
     
@@ -859,7 +867,7 @@ static int rtsp_send_response(rtsp_session_t *session, int code, const char *hea
     
     ssize_t sent = send(session->sockfd, response, len, 0);
     if (sent < 0) {
-        ak_print_error("Failed to send RTSP response: %s\n", strerror(errno));
+        platform_log_error("Failed to send RTSP response: %s\n", strerror(errno));
         return -1;
     }
     
@@ -888,7 +896,7 @@ static int rtsp_parse_method(const char *line)
 static int rtsp_setup_encoder(rtsp_server_t *server)
 {
     if (!server->vi_handle) {
-        ak_print_error("Video input handle not set\n");
+        platform_log_error("Video input handle not set\n");
         return -1;
     }
     
@@ -912,14 +920,14 @@ static int rtsp_setup_encoder(rtsp_server_t *server)
     // Open encoder
     server->venc_handle = ak_venc_open(&enc_param);
     if (!server->venc_handle) {
-        ak_print_error("Failed to open video encoder\n");
+        platform_log_error("Failed to open video encoder\n");
         return -1;
     }
     
     // Request stream
     server->stream_handle = ak_venc_request_stream(server->vi_handle, server->venc_handle);
     if (!server->stream_handle) {
-        ak_print_error("Failed to request video stream\n");
+        platform_log_error("Failed to request video stream\n");
         ak_venc_close(server->venc_handle);
         server->venc_handle = NULL;
         return -1;
@@ -927,7 +935,7 @@ static int rtsp_setup_encoder(rtsp_server_t *server)
     
     server->encoder_initialized = true;
     
-    ak_print_notice("Video encoder initialized: %dx%d @ %d fps, %d kbps\n",
+    platform_log_notice("Video encoder initialized: %dx%d @ %d fps, %d kbps\n",
                     enc_param.width, enc_param.height, enc_param.fps, 
                     server->config.video_config.bitrate);
     
@@ -970,14 +978,14 @@ static int rtsp_init_rtp_session(rtsp_session_t *session)
     // Create RTP socket
     session->rtp_session.rtp_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (session->rtp_session.rtp_sockfd < 0) {
-        ak_print_error("Failed to create RTP socket: %s\n", strerror(errno));
+        platform_log_error("Failed to create RTP socket: %s\n", strerror(errno));
         return -1;
     }
     
     // Create RTCP socket
     session->rtp_session.rtcp_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (session->rtp_session.rtcp_sockfd < 0) {
-        ak_print_error("Failed to create RTCP socket: %s\n", strerror(errno));
+        platform_log_error("Failed to create RTCP socket: %s\n", strerror(errno));
         close(session->rtp_session.rtp_sockfd);
         session->rtp_session.rtp_sockfd = -1;
         return -1;
@@ -1024,14 +1032,14 @@ static int rtsp_init_audio_rtp_session(rtsp_session_t *session)
     // Create audio RTP socket
     session->audio_rtp_session.rtp_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (session->audio_rtp_session.rtp_sockfd < 0) {
-        ak_print_error("Failed to create audio RTP socket: %s\n", strerror(errno));
+        platform_log_error("Failed to create audio RTP socket: %s\n", strerror(errno));
         return -1;
     }
     
     // Create audio RTCP socket
     session->audio_rtp_session.rtcp_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (session->audio_rtp_session.rtcp_sockfd < 0) {
-        ak_print_error("Failed to create audio RTCP socket: %s\n", strerror(errno));
+        platform_log_error("Failed to create audio RTCP socket: %s\n", strerror(errno));
         close(session->audio_rtp_session.rtp_sockfd);
         session->audio_rtp_session.rtp_sockfd = -1;
         return -1;
@@ -1104,7 +1112,7 @@ static int rtsp_send_rtp_packet(rtsp_session_t *session, const uint8_t *data, si
     }
     
     if (sent < 0) {
-        ak_print_error("Failed to send RTP packet: %s\n", strerror(errno));
+        platform_log_error("Failed to send RTP packet: %s\n", strerror(errno));
         return -1;
     }
     
@@ -1154,7 +1162,7 @@ static int rtsp_send_audio_rtp_packet(rtsp_session_t *session, const uint8_t *da
     }
     
     if (sent < 0) {
-        ak_print_error("Failed to send audio RTP packet: %s\n", strerror(errno));
+        platform_log_error("Failed to send audio RTP packet: %s\n", strerror(errno));
         return -1;
     }
     
@@ -1172,7 +1180,7 @@ static void* rtsp_encoder_thread(void *arg)
     rtsp_server_t *server = (rtsp_server_t*)arg;
     struct video_stream stream;
     
-    ak_print_notice("RTSP encoder thread started\n");
+    platform_log_notice("RTSP encoder thread started\n");
     
     while (server->running && server->encoder_initialized) {
         // Get encoded frame
@@ -1247,7 +1255,7 @@ static void* rtsp_encoder_thread(void *arg)
         ak_venc_release_stream(server->stream_handle, &stream);
     }
     
-    ak_print_notice("RTSP encoder thread finished\n");
+    platform_log_notice("RTSP encoder thread finished\n");
     return NULL;
 }
 
@@ -1264,13 +1272,13 @@ static int rtsp_setup_audio_encoder(rtsp_server_t *server)
     
     server->ai_handle = ak_ai_open(&ai_param);
     if (!server->ai_handle) {
-        ak_print_error("Failed to open audio input\n");
+        platform_log_error("Failed to open audio input\n");
         return -1;
     }
     
     int ret = ak_ai_start_capture(server->ai_handle);
     if (ret != 0) {
-        ak_print_error("Failed to start audio capture: %d\n", ret);
+        platform_log_error("Failed to start audio capture: %d\n", ret);
         ak_ai_close(server->ai_handle);
         server->ai_handle = NULL;
         return -1;
@@ -1285,7 +1293,7 @@ static int rtsp_setup_audio_encoder(rtsp_server_t *server)
     
     server->aenc_handle = ak_aenc_open(&aenc_param);
     if (!server->aenc_handle) {
-        ak_print_error("Failed to open audio encoder\n");
+        platform_log_error("Failed to open audio encoder\n");
         ak_ai_stop_capture(server->ai_handle);
         ak_ai_close(server->ai_handle);
         server->ai_handle = NULL;
@@ -1294,7 +1302,7 @@ static int rtsp_setup_audio_encoder(rtsp_server_t *server)
     
     server->audio_encoder_initialized = true;
     
-    ak_print_notice("Audio encoder initialized (rate: %d, channels: %d, codec: %d)\n",
+    platform_log_notice("Audio encoder initialized (rate: %d, channels: %d, codec: %d)\n",
                     server->config.audio_config.sample_rate,
                     server->config.audio_config.channels,
                     server->config.audio_config.codec_type);
@@ -1321,7 +1329,7 @@ static void rtsp_cleanup_audio_encoder(rtsp_server_t *server)
             server->ai_handle = NULL;
         }
         
-        ak_print_notice("Audio encoder cleanup completed\n");
+        platform_log_notice("Audio encoder cleanup completed\n");
     }
 }
 
@@ -1333,7 +1341,7 @@ static void* rtsp_audio_thread(void *arg)
     rtsp_server_t *server = (rtsp_server_t*)arg;
     struct frame audio_frame;
     
-    ak_print_notice("RTSP audio thread started\n");
+    platform_log_notice("RTSP audio thread started\n");
     
     while (server->running && server->audio_encoder_initialized) {
         // Get audio frame from AI
@@ -1398,6 +1406,6 @@ static void* rtsp_audio_thread(void *arg)
         ak_ai_release_frame(server->ai_handle, &audio_frame);
     }
     
-    ak_print_notice("RTSP audio thread finished\n");
+    platform_log_notice("RTSP audio thread finished\n");
     return NULL;
 }

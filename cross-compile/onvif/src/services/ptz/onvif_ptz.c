@@ -11,6 +11,7 @@
 #include <math.h>
 #include <time.h>
 #include "onvif_ptz.h"
+#include "platform.h"
 #include "ptz_adapter.h"
 
 /* PTZ Node configuration */
@@ -60,24 +61,24 @@ static int preset_count = 0;
 
 /* Convert ONVIF normalized coordinates to device degrees */
 static int normalize_to_degrees_pan(float normalized_value) {
-    /* Convert from [-1, 1] to [0, 360] */
-    return (int)((normalized_value + 1.0) * 180.0);
+    /* Convert from [-1, 1] to [-180, 180] */
+    return (int)(normalized_value * 180.0);
 }
 
 static int normalize_to_degrees_tilt(float normalized_value) {
-    /* Convert from [-1, 1] to [0, 180] */
-    return (int)((normalized_value + 1.0) * 90.0);
+    /* Convert from [-1, 1] to [-90, 90] */
+    return (int)(normalized_value * 90.0);
 }
 
 /* Convert device degrees to ONVIF normalized coordinates */
 static float degrees_to_normalize_pan(int degrees) {
-    /* Convert from [0, 360] to [-1, 1] */
-    return (degrees / 180.0) - 1.0;
+    /* Convert from [-180, 180] to [-1, 1] */
+    return (float)degrees / 180.0;
 }
 
 static float degrees_to_normalize_tilt(int degrees) {
-    /* Convert from [0, 180] to [-1, 1] */
-    return (degrees / 90.0) - 1.0;
+    /* Convert from [-90, 90] to [-1, 1] */
+    return (float)degrees / 90.0;
 }
 
 /* Convert ONVIF normalized velocity to driver speed */

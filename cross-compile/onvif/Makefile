@@ -2,16 +2,16 @@ export PATH := $(PATH):/opt/arm-anykav200-crosstool/usr/bin
 PREFIX=arm-anykav200-linux-uclibcgnueabi-
 CC=${PREFIX}gcc
 CPP=${PREFIX}g++
-CFLAGS=-std=c99 -D_POSIX_C_SOURCE=199309L
+CFLAGS=-std=c99 -D_POSIX_C_SOURCE=199309L -DANYKA_PLATFORM=1
 LINKERFLAG=-L./lib -lakuio -lakispsdk -lakv_encode -lplat_common -lplat_thread -lplat_vi -lplat_vpss -lplat_ipcsrv -lplat_venc_cb -lmpi_venc -lakstreamenc -lpthread -lakae -lakaudiocodec -lakmedia -lakv_encode -lapp_net -lapp_rtsp -lmpi_aed -lmpi_aenc -lplat_ai -lplat_drv -lm
-INCLUDES=include src src/services src/adapters src/utils src/server src/tools src/hal
+INCLUDES=include src src/services src/adapters src/utils src/server src/tools src/platform
 
 SRCS := \
 	src/main/onvifd.c \
-	src/hal/hal_anyka.c \
-	src/hal/hal_ptz_anyka.c \
+	src/platform/platform_anyka.c \
 	src/adapters/ptz_adapter.c \
 	src/utils/config.c \
+	src/utils/resource_cleanup.c \
 	src/services/device/onvif_device.c \
 	src/services/media/onvif_media.c \
 	src/services/ptz/onvif_ptz.c \

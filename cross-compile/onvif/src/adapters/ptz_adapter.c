@@ -1,7 +1,7 @@
 /* ptz_adapter.c - Proper PTZ adapter implementation using Anyka SDK */
 
 #include "ptz_adapter.h"
-#include "hal/hal_ptz.h"
+#include "platform.h"
 #include <time.h>
 #include "utils.h"
 #include "ak_common.h"
@@ -23,16 +23,16 @@ int ptz_adapter_init(void) {
     int ret = 0;
     pthread_mutex_lock(&ptz_lock);
     if (!ptz_initialized) {
-        ret = hal_ptz_open();
+        ret = platform_ptz_init();
         if (ret == 0) {
             /* Initialize PTZ with proper motor parameters */
-            hal_ptz_set_degree(350, 130);
-            hal_ptz_check_self();
+            platform_ptz_set_degree(350, 130);
+            platform_ptz_check_self();
             
             /* Reset to center position */
             current_pan_pos = 0;
             current_tilt_pos = 0;
-            hal_ptz_turn_to_pos(current_pan_pos, current_tilt_pos);
+            platform_ptz_move_to_position(current_pan_pos, current_tilt_pos);
             
             ptz_initialized = 1;
             printf("PTZ adapter initialized successfully\n");
@@ -47,7 +47,7 @@ int ptz_adapter_init(void) {
 int ptz_adapter_shutdown(void) {
     pthread_mutex_lock(&ptz_lock);
     if (ptz_initialized) {
-        hal_ptz_close();
+        platform_ptz_cleanup();
         ptz_initialized = 0;
     }
     pthread_mutex_unlock(&ptz_lock);
@@ -63,8 +63,8 @@ int ptz_adapter_get_status(struct ptz_device_status *status) {
         return -1;
     }
     
-    int h = hal_ptz_get_step_pos(HAL_PTZ_AXIS_H);
-    int v = hal_ptz_get_step_pos(HAL_PTZ_AXIS_V);
+    int h = platform_ptz_get_step_position(PLATFORM_PTZ_AXIS_PAN);
+    int v = platform_ptz_get_step_position(PLATFORM_PTZ_AXIS_TILT);
     
     status->h_pos_deg = h;
     status->v_pos_deg = v;
@@ -90,18 +90,18 @@ int ptz_adapter_absolute_move(int pan_deg, int tilt_deg, int speed) {
     
     printf("PTZ absolute move to pan=%d, tilt=%d\n", pan_deg, tilt_deg);
     
-    int ret = hal_ptz_turn_to_pos(pan_deg, tilt_deg);
+    int ret = platform_ptz_move_to_position(pan_deg, tilt_deg);
     if (ret == 0) {
         current_pan_pos = pan_deg;
         current_tilt_pos = tilt_deg;
         
         /* Wait for movement to complete */
-        enum hal_ptz_status h_status, v_status;
+        platform_ptz_status_t h_status, v_status;
         do {
             sleep_us(5000); /* 5ms delay */
-            hal_ptz_get_status(HAL_PTZ_AXIS_H, &h_status);
-            hal_ptz_get_status(HAL_PTZ_AXIS_V, &v_status);
-        } while ((h_status != HAL_PTZ_STATUS_OK) || (v_status != HAL_PTZ_STATUS_OK));
+            platform_ptz_get_status(PLATFORM_PTZ_AXIS_PAN, &h_status);
+            platform_ptz_get_status(PLATFORM_PTZ_AXIS_TILT, &v_status);
+        } while ((h_status != PLATFORM_PTZ_STATUS_OK) || (v_status != PLATFORM_PTZ_STATUS_OK));
     }
     
     pthread_mutex_unlock(&ptz_lock);
@@ -118,37 +118,37 @@ int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg, int speed) 
     printf("PTZ relative move pan_delta=%d, tilt_delta=%d\n", pan_delta_deg, tilt_delta_deg);
     
     int ret = 0;
-    enum hal_ptz_status h_status, v_status;
+    platform_ptz_status_t h_status, v_status;
     
     /* Horizontal movement - based on akipc implementation with step size 16 */
     if (pan_delta_deg != 0) {
-        enum hal_ptz_turn_direction dir = (pan_delta_deg > 0) ? HAL_PTZ_TURN_LEFT : HAL_PTZ_TURN_RIGHT;
+        platform_ptz_direction_t dir = (pan_delta_deg > 0) ? PLATFORM_PTZ_DIRECTION_LEFT : PLATFORM_PTZ_DIRECTION_RIGHT;
         int steps = simple_abs(pan_delta_deg);
         if (steps > 16) steps = 16; /* Limit step size like in akipc */
         
-        ret = hal_ptz_turn(dir, steps);
+        ret = platform_ptz_turn(dir, steps);
         if (ret == 0) {
-            current_pan_pos += (dir == HAL_PTZ_TURN_LEFT) ? steps : -steps;
+            current_pan_pos += (dir == PLATFORM_PTZ_DIRECTION_LEFT) ? steps : -steps;
         }
     }
     
     /* Vertical movement - based on akipc implementation with step size 8 */
     if (tilt_delta_deg != 0) {
-        enum hal_ptz_turn_direction dir = (tilt_delta_deg > 0) ? HAL_PTZ_TURN_DOWN : HAL_PTZ_TURN_UP;
+        platform_ptz_direction_t dir = (tilt_delta_deg > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
         int steps = simple_abs(tilt_delta_deg);
         if (steps > 8) steps = 8; /* Limit step size like in akipc */
         
-        ret |= hal_ptz_turn(dir, steps);
-        if (ret == 0) current_tilt_pos += (dir == HAL_PTZ_TURN_DOWN) ? steps : -steps;
+        ret |= platform_ptz_turn(dir, steps);
+        if (ret == 0) current_tilt_pos += (dir == PLATFORM_PTZ_DIRECTION_DOWN) ? steps : -steps;
     }
     
     /* Wait for movement to complete */
     if (ret == 0) {
         do {
             sleep_us(5000); /* 5ms delay */
-            hal_ptz_get_status(HAL_PTZ_AXIS_H, &h_status);
-            hal_ptz_get_status(HAL_PTZ_AXIS_V, &v_status);
-        } while ((h_status != HAL_PTZ_STATUS_OK) || (v_status != HAL_PTZ_STATUS_OK));
+            platform_ptz_get_status(PLATFORM_PTZ_AXIS_PAN, &h_status);
+            platform_ptz_get_status(PLATFORM_PTZ_AXIS_TILT, &v_status);
+        } while ((h_status != PLATFORM_PTZ_STATUS_OK) || (v_status != PLATFORM_PTZ_STATUS_OK));
     }
     
     pthread_mutex_unlock(&ptz_lock);
@@ -162,17 +162,17 @@ int ptz_adapter_continuous_move(int pan_vel, int tilt_vel, int timeout_s) {
         return -1;
     }
     
-    if (pan_vel > 0) hal_ptz_set_speed(HAL_PTZ_AXIS_H, pan_vel);
-    if (tilt_vel > 0) hal_ptz_set_speed(HAL_PTZ_AXIS_V, tilt_vel);
+    if (pan_vel > 0) platform_ptz_set_speed(PLATFORM_PTZ_AXIS_PAN, pan_vel);
+    if (tilt_vel > 0) platform_ptz_set_speed(PLATFORM_PTZ_AXIS_TILT, tilt_vel);
     
     if (pan_vel != 0) {
-        enum hal_ptz_turn_direction dir = (pan_vel > 0) ? HAL_PTZ_TURN_RIGHT : HAL_PTZ_TURN_LEFT;
-        hal_ptz_turn(dir, 360);
+        platform_ptz_direction_t dir = (pan_vel > 0) ? PLATFORM_PTZ_DIRECTION_RIGHT : PLATFORM_PTZ_DIRECTION_LEFT;
+        platform_ptz_turn(dir, 360);
     }
     
     if (tilt_vel != 0) {
-        enum hal_ptz_turn_direction dir = (tilt_vel > 0) ? HAL_PTZ_TURN_DOWN : HAL_PTZ_TURN_UP;
-        hal_ptz_turn(dir, 180);
+        platform_ptz_direction_t dir = (tilt_vel > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
+        platform_ptz_turn(dir, 180);
     }
     
     pthread_mutex_unlock(&ptz_lock);
@@ -189,10 +189,10 @@ int ptz_adapter_stop(void) {
     printf("PTZ stop all movement\n");
     
     /* Stop all directions of movement */
-    hal_ptz_turn_stop(HAL_PTZ_TURN_LEFT);
-    hal_ptz_turn_stop(HAL_PTZ_TURN_RIGHT);
-    hal_ptz_turn_stop(HAL_PTZ_TURN_UP);
-    hal_ptz_turn_stop(HAL_PTZ_TURN_DOWN);
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_LEFT);
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_RIGHT);
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_UP);
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
     
     pthread_mutex_unlock(&ptz_lock);
     return 0;
@@ -226,7 +226,7 @@ int ptz_adapter_goto_preset(int id) {
     int ret = -1;
     switch (id) {
         case 1: /* Home position */
-            ret = hal_ptz_turn_to_pos(0, 0);
+            ret = platform_ptz_move_to_position(0, 0);
             if (ret == 0) {
                 current_pan_pos = 0;
                 current_tilt_pos = 0;

@@ -21,6 +21,7 @@
 #include "http_server.h"
 #include "../utils/constants.h"
 #include "../services/device/onvif_device.h"
+#include "platform.h"
 #include "../services/media/onvif_media.h"
 #include "../services/ptz/onvif_ptz.h"
 #include "../services/imaging/onvif_imaging.h"
@@ -43,10 +44,17 @@ static void *server_thread_func(void *arg) {
         if (client < 0) continue; 
         
         char request[MAX_REQUEST_SIZE]; size_t received_total = 0;
-        // Read headers first
+        // Read headers first with bounds checking
         while (received_total < sizeof(request) - 1) {
             ssize_t n = recv(client, request + received_total, sizeof(request) - 1 - received_total, 0);
-            if (n <= 0) break; received_total += (size_t)n; request[received_total] = '\0';
+            if (n <= 0) break; 
+            received_total += (size_t)n; 
+            if (received_total >= sizeof(request) - 1) {
+                platform_log_error("HTTP request too large, closing connection\n");
+                close(client); 
+                continue;
+            }
+            request[received_total] = '\0';
             if (strstr(request, "\r\n\r\n")) break;
         }
         if (received_total == 0) { close(client); continue; }
@@ -57,10 +65,18 @@ static void *server_thread_func(void *arg) {
         if (cl) { cl += 15; while (*cl==' '||*cl=='\t') cl++; content_length = (size_t)atoi(cl); }
         const char *hdr_end = strstr(request, "\r\n\r\n"); size_t header_len = hdr_end ? (size_t)(hdr_end - request + 4) : received_total;
         size_t have_body = received_total > header_len ? received_total - header_len : 0;
-        // Read remaining body if any
+        // Read remaining body if any with bounds checking
         while (have_body < content_length && received_total < sizeof(request) - 1) {
             ssize_t n = recv(client, request + received_total, sizeof(request) - 1 - received_total, 0);
-            if (n <= 0) break; received_total += (size_t)n; have_body += (size_t)n; request[received_total] = '\0';
+            if (n <= 0) break; 
+            received_total += (size_t)n; 
+            have_body += (size_t)n; 
+            if (received_total >= sizeof(request) - 1) {
+                platform_log_error("HTTP request body too large, closing connection\n");
+                close(client); 
+                continue;
+            }
+            request[received_total] = '\0';
         }
         
         if (strcmp(method, "POST") == 0) {
