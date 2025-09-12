@@ -7,13 +7,13 @@
 #include <time.h>
 #include <pthread.h>
 #include "onvif_imaging.h"
-#include "config.h"
-#include "constants_clean.h"
-#include "platform.h"
-#include "../utils/xml_utils.h"
-#include "../utils/logging_utils.h"
-#include "../utils/error_handling.h"
-#include "../common/onvif_types.h"
+#include "utils/config.h"
+#include "utils/constants_clean.h"
+#include "platform/platform.h"
+#include "utils/xml_utils.h"
+#include "utils/logging_utils.h"
+#include "utils/error_handling.h"
+#include "common/onvif_types.h"
 
 static struct auto_daynight_config g_auto_config;
 static struct imaging_settings g_imaging_settings;

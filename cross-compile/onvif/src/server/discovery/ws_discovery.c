@@ -14,9 +14,9 @@
 #include <unistd.h>
 
 #include "ws_discovery.h"
-#include "network_utils.h"
-#include "constants_clean.h"
-#include "platform.h"
+#include "utils/network_utils.h"
+#include "utils/constants_clean.h"
+#include "platform/platform.h"
 
 /* Some stripped uClibc headers may omit ip_mreq; provide minimal fallback */
 #ifndef IP_ADD_MEMBERSHIP

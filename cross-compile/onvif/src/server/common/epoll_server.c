@@ -4,10 +4,10 @@
  */
 
 #include "epoll_server.h"
-#include "connection_manager.h"
-#include "thread_pool.h"
-#include "buffer_pool.h"
-#include "platform.h"
+#include "server/common/connection_manager.h"
+#include "server/common/thread_pool.h"
+#include "server/common/buffer_pool.h"
+#include "platform/platform.h"
 #include <sys/epoll.h>
 #include <fcntl.h>
 #include <unistd.h>

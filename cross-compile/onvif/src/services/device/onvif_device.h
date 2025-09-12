@@ -5,8 +5,8 @@
 #ifndef ONVIF_DEVICE_H
 #define ONVIF_DEVICE_H
 
-#include "../common/onvif_types.h"
-#include "../common/onvif_request.h"
+#include "common/onvif_types.h"
+#include "common/onvif_request.h"
 
 struct device_info {
     char manufacturer[64];

@@ -6,10 +6,9 @@
 #include <ctype.h>
 #include <errno.h>
 #include "config.h"
-#include "../platform/platform.h"
-
+#include "platform/platform.h"
 #include "constants_clean.h"
-#include "../common/onvif_imaging_types.h"
+#include "common/onvif_imaging_types.h"
 
 static struct application_config g_config; /* singleton */
 static struct imaging_settings g_imaging_settings;

@@ -4,7 +4,7 @@
  */
 
 #include "xml_utils.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include "memory_debug.h"
 #include <stdio.h>
 #include <stdlib.h>

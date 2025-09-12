@@ -4,8 +4,8 @@
  */
 
 #include "http_onvif_adapter.h"
-#include "../../common/onvif_types.h"
-#include "../../utils/logging_utils.h"
+#include "common/onvif_types.h"
+#include "utils/logging_utils.h"
 #include <stdlib.h>
 #include <string.h>
 

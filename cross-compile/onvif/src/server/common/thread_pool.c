@@ -4,8 +4,8 @@
  */
 
 #include "thread_pool.h"
-#include "connection_manager.h"
-#include "platform.h"
+#include "server/common/connection_manager.h"
+#include "platform/platform.h"
 #include <stdlib.h>
 #include <pthread.h>
 

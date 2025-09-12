@@ -10,7 +10,7 @@
 #ifndef ONVIF_SERVICE_MANAGER_H
 #define ONVIF_SERVICE_MANAGER_H
 
-#include "platform.h"
+#include "platform/platform.h"
 
 /**
  * @brief Initialize all ONVIF services

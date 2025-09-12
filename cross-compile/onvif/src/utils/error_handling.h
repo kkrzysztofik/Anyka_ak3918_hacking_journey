@@ -6,7 +6,7 @@
 #ifndef ONVIF_ERROR_HANDLING_H
 #define ONVIF_ERROR_HANDLING_H
 
-#include "platform.h"
+#include "platform/platform.h"
 
 /* Standardized return codes */
 #define ONVIF_SUCCESS         0

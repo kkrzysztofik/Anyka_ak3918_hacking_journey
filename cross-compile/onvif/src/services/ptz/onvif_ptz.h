@@ -5,8 +5,8 @@
 #ifndef ONVIF_PTZ_H
 #define ONVIF_PTZ_H
 
-#include "../common/onvif_types.h"
-#include "../common/onvif_request.h"
+#include "common/onvif_types.h"
+#include "common/onvif_request.h"
 
 enum ptz_move_status {
     PTZ_MOVE_IDLE = 0,

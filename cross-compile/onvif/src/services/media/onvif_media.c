@@ -9,13 +9,13 @@
 #include <string.h>
 #include <stdlib.h>
 #include "onvif_media.h"
-#include "config.h"
-#include "network_utils.h"
-#include "../utils/xml_utils.h"
-#include "../utils/logging_utils.h"
-#include "../utils/error_handling.h"
-#include "../utils/constants_clean.h"
-#include "../common/onvif_types.h"
+#include "utils/config.h"
+#include "utils/network_utils.h"
+#include "utils/xml_utils.h"
+#include "utils/logging_utils.h"
+#include "utils/error_handling.h"
+#include "utils/constants_clean.h"
+#include "common/onvif_types.h"
 
 /* Static media profiles */
 static struct media_profile profiles[] = {

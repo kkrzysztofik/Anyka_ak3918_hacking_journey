@@ -5,8 +5,8 @@
 #ifndef ONVIF_MEDIA_H
 #define ONVIF_MEDIA_H
 
-#include "../common/onvif_types.h"
-#include "../common/onvif_request.h"
+#include "common/onvif_types.h"
+#include "common/onvif_request.h"
 
 struct stream_uri {
     char uri[256];

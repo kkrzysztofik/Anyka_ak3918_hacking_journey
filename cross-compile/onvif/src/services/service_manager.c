@@ -6,7 +6,7 @@
 #include "service_manager.h"
 #include "services/ptz/onvif_ptz.h"
 #include "services/imaging/onvif_imaging.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include <stdio.h>
 
 static bool g_services_initialized = false;

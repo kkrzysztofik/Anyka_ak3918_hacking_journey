@@ -16,7 +16,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <netinet/in.h>
-#include "platform.h"
+#include "platform/platform.h"
 
 // Remove conflicting macro definitions
 // The actual values will be taken from the Anyka SDK headers

@@ -11,11 +11,11 @@
 #include <math.h>
 #include <time.h>
 #include "onvif_ptz.h"
-#include "platform.h"
-#include "../utils/xml_utils.h"
-#include "../utils/logging_utils.h"
-#include "../utils/error_handling.h"
-#include "../common/onvif_types.h"
+#include "platform/platform.h"
+#include "utils/xml_utils.h"
+#include "utils/logging_utils.h"
+#include "utils/error_handling.h"
+#include "common/onvif_types.h"
 
 /* PTZ Node configuration */
 static struct ptz_node ptz_node = {

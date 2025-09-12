@@ -7,9 +7,9 @@
 #define ONVIF_IMAGING_H
 
 #include <stdint.h>
-#include "../common/onvif_types.h"
-#include "../common/onvif_request.h"
-#include "../common/onvif_imaging_types.h"
+#include "common/onvif_types.h"
+#include "common/onvif_request.h"
+#include "common/onvif_imaging_types.h"
 
 int onvif_imaging_init(void *vi_handle); /**< Initialize imaging module with VI handle (nullable). */
 void onvif_imaging_cleanup(void);        /**< Release imaging resources. */

@@ -7,7 +7,7 @@
  */
 
 #include "rtsp_server.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -4,7 +4,7 @@
  */
 
 #include "memory_debug.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 

@@ -11,13 +11,13 @@
 #include <sys/utsname.h>
 #include <stdlib.h>
 #include "onvif_device.h"
-#include "config.h"
-#include "../utils/response_buffer.h"
-#include "../utils/xml_utils.h"
-#include "../utils/logging_utils.h"
-#include "../utils/error_handling.h"
-#include "../utils/constants_clean.h"
-#include "../common/onvif_types.h"
+#include "utils/config.h"
+#include "utils/response_buffer.h"
+#include "utils/xml_utils.h"
+#include "utils/logging_utils.h"
+#include "utils/error_handling.h"
+#include "utils/constants_clean.h"
+#include "common/onvif_types.h"
 
 /* Device information constants */
 #define DEVICE_MANUFACTURER    "Anyka"

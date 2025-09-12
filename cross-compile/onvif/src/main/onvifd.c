@@ -15,7 +15,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <string.h>
-#include "config.h"
+#include "utils/config.h"
 #include "services/service_manager.h"
 #include "server/http/http_server.h"
 #include "utils/memory_debug.h"
@@ -23,7 +23,6 @@
 #include "server/discovery/ws_discovery.h"
 #include "utils/error_handling.h"
 #include "common/onvif_imaging_types.h"
-
 #include "utils/constants_clean.h"
 
 static volatile int running = 1;

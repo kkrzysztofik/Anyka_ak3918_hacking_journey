@@ -4,7 +4,7 @@ CC=${PREFIX}gcc
 CPP=${PREFIX}g++
 CFLAGS=-std=c99 -D_POSIX_C_SOURCE=199309L -DANYKA_PLATFORM=1 -Os -fno-builtin -fno-stack-protector -Wl,--hash-style=sysv
 LINKERFLAG=-L./lib -Wl,--gc-sections -lakuio -lakispsdk -lakv_encode -lplat_common -lplat_thread -lplat_vi -lplat_vpss -lplat_ipcsrv -lplat_venc_cb -lmpi_venc -lakstreamenc -lpthread -lakae -lakaudiocodec -lakmedia -lakv_encode -lapp_net -lapp_rtsp -lmpi_aed -lmpi_aenc -lplat_ai -lplat_drv -lm
-INCLUDES=include src src/common src/platform src/utils
+INCLUDES=include src
 
 # Output directory for all build artifacts
 OUT_DIR=out

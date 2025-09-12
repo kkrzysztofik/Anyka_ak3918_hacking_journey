@@ -9,7 +9,7 @@
 #ifndef RESPONSE_BUFFER_H
 #define RESPONSE_BUFFER_H
 
-#include "../common/onvif_request.h"
+#include "common/onvif_request.h"
 #include <stddef.h>
 
 /**

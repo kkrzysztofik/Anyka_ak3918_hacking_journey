@@ -4,7 +4,7 @@
  */
 
 #include "buffer_pool.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include <stdlib.h>
 #include <pthread.h>
 

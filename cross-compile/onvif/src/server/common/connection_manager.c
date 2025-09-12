@@ -4,7 +4,7 @@
  */
 
 #include "connection_manager.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>

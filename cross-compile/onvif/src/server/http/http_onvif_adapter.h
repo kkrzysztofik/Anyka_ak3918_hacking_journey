@@ -10,7 +10,7 @@
 #define HTTP_ONVIF_ADAPTER_H
 
 #include "http_parser.h"
-#include "../../common/onvif_request.h"
+#include "common/onvif_request.h"
 
 /**
  * @brief Convert HTTP request to ONVIF request

@@ -4,7 +4,7 @@
  */
 
 #include "logging_utils.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include <stdio.h>
 #include <string.h>
 

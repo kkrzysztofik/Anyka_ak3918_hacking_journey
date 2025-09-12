@@ -4,9 +4,8 @@
  */
 
 #include "response_buffer.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include "memory_debug.h"
-
 #include "constants_clean.h"
 #include <stdlib.h>
 #include <string.h>
