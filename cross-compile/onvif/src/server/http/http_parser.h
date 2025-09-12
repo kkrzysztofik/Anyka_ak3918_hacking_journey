@@ -55,8 +55,6 @@ int send_http_response(int client, const http_response_t *response);
 http_response_t create_http_200_response(const char *body, size_t body_length, const char *content_type);
 http_response_t create_http_404_response(void);
 
-/* Utility functions */
-int safe_strncpy(char *dest, const char *src, size_t dest_size);
-int safe_strncat(char *dest, const char *src, size_t dest_size);
+/* Utility functions - now using centralized safe_string.h */
 
 #endif /* HTTP_PARSER_H */

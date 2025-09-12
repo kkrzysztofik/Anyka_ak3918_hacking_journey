@@ -6,6 +6,10 @@
 #include "xml_utils.h"
 #include "platform/platform.h"
 #include "memory_debug.h"
+#include "utils/safe_string.h"
+#include "utils/error_context.h"
+#include "utils/memory_manager.h"
+#include "utils/unified_soap_generator.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -117,22 +121,9 @@ void xml_soap_fault_response(char *response, size_t response_size,
         return;
     }
     
-    snprintf(response, response_size, 
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-        "  <soap:Body>\n"
-        "    <soap:Fault>\n"
-        "      <soap:Code>\n"
-        "        <soap:Value>%s</soap:Value>\n"
-        "      </soap:Code>\n"
-        "      <soap:Reason>\n"
-        "        <soap:Text>%s</soap:Text>\n"
-        "      </soap:Reason>\n"
-        "    </soap:Fault>\n"
-        "  </soap:Body>\n"
-        "</soap:Envelope>", 
-        fault_code ? fault_code : "soap:Receiver", 
-        fault_string ? fault_string : "Internal error");
+    soap_generate_fault(response, response_size, 
+                       fault_code ? fault_code : "soap:Receiver", 
+                       fault_string ? fault_string : "Internal error");
 }
 
 void xml_soap_success_response(char *response, size_t response_size, 

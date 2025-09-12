@@ -7,6 +7,7 @@
 
 #include "common/onvif_types.h"
 #include "common/onvif_request.h"
+#include "utils/centralized_config.h"
 
 struct device_info {
     char manufacturer[64];
@@ -87,6 +88,27 @@ int onvif_device_get_dns(struct dns_information *dns); /**< Get DNS settings. */
 int onvif_device_get_network_interfaces(struct network_interface *interfaces, int *count); /**< Enumerate NICs. */
 int onvif_device_get_network_protocols(struct network_protocol *protocols, int *count); /**< Enumerate protocols & ports. */
 int onvif_device_get_services(struct device_service *services, int *count); /**< List device services and versions. */
-int onvif_device_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response); /**< Handle ONVIF device service requests. */
+/* Device service functions */
+
+/**
+ * @brief Initialize device service
+ * @param config Centralized configuration
+ * @return 0 on success, negative error code on failure
+ */
+int onvif_device_init(centralized_config_t *config);
+
+/**
+ * @brief Handle ONVIF device service requests
+ * @param action Action type
+ * @param request Request structure
+ * @param response Response structure
+ * @return 0 on success, negative error code on failure
+ */
+int onvif_device_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response);
+
+/**
+ * @brief Clean up device service
+ */
+void onvif_device_cleanup(void);
 
 #endif

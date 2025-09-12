@@ -23,6 +23,7 @@
 #include "services/ptz/onvif_ptz.h"
 #include "services/imaging/onvif_imaging.h"
 #include "utils/network_utils.h"
+#include "utils/response_helpers.h"
 #include "utils/constants_clean.h"
 #include "utils/xml_utils.h"
 #include "utils/logging_utils.h"
@@ -38,16 +39,6 @@
 #include <fcntl.h>
 #include <strings.h>
 
-/* Fallback implementations for missing functions */
-#ifndef strnlen
-static size_t strnlen(const char *s, size_t maxlen) {
-    size_t len = 0;
-    while (len < maxlen && s[len] != '\0') {
-        len++;
-    }
-    return len;
-}
-#endif
 
 #ifndef strcasestr
 static char *strcasestr(const char *haystack, const char *needle) {

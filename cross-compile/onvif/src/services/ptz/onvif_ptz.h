@@ -7,6 +7,7 @@
 
 #include "common/onvif_types.h"
 #include "common/onvif_request.h"
+#include "utils/centralized_config.h"
 
 enum ptz_move_status {
     PTZ_MOVE_IDLE = 0,
@@ -132,5 +133,19 @@ int ptz_adapter_continuous_move(int pan_vel, int tilt_vel, int timeout_s); /**< 
 int ptz_adapter_stop(void); /**< Stop any motion (pan & tilt). */
 int ptz_adapter_set_preset(const char *name, int id); /**< Store current position as preset id with optional name. */
 int ptz_adapter_goto_preset(int id); /**< Move to a previously stored preset id. */
+
+/* PTZ service functions */
+
+/**
+ * @brief Initialize PTZ service
+ * @param config Centralized configuration
+ * @return 0 on success, negative error code on failure
+ */
+int onvif_ptz_init(centralized_config_t *config);
+
+/**
+ * @brief Clean up PTZ service
+ */
+void onvif_ptz_cleanup(void);
 
 #endif

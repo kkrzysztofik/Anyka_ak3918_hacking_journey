@@ -7,6 +7,7 @@
 
 #include "common/onvif_types.h"
 #include "common/onvif_request.h"
+#include "utils/centralized_config.h"
 
 struct stream_uri {
     char uri[256];
@@ -149,5 +150,19 @@ int onvif_media_get_audio_encoder_configurations(struct audio_encoder_configurat
 int onvif_media_get_stream_uri(const char *profile_token, const char *protocol, struct stream_uri *uri); /**< Build stream URI. */
 int onvif_media_get_snapshot_uri(const char *profile_token, struct stream_uri *uri); /**< Build snapshot URI. */
 int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response); /**< Handle ONVIF media service requests. */
+
+/* Media service functions */
+
+/**
+ * @brief Initialize media service
+ * @param config Centralized configuration
+ * @return 0 on success, negative error code on failure
+ */
+int onvif_media_init(centralized_config_t *config);
+
+/**
+ * @brief Clean up media service
+ */
+void onvif_media_cleanup(void);
 
 #endif

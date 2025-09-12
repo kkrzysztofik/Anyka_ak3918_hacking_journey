@@ -17,9 +17,12 @@
 #include "utils/logging_utils.h"
 #include "utils/error_handling.h"
 #include "utils/constants_clean.h"
-#include "utils/soap_helpers.h"
+#include "utils/unified_soap_generator.h"
+#include "utils/safe_string.h"
+#include "utils/memory_manager.h"
 #include "utils/response_helpers.h"
 #include "utils/service_handler.h"
+#include "utils/centralized_config.h"
 #include "common/onvif_types.h"
 
 /* Device information constants */
@@ -212,171 +215,259 @@ int onvif_device_get_services(struct device_service *services, int *count) {
 /* XML parsing helpers - now using xml_utils module */
 
 
-/**
- * @brief Internal device service handler
- */
-static int device_service_handler(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
-    // Use response buffer management for automatic cleanup
-    response_buffer_t resp_buf;
-    if (response_buffer_init(&resp_buf, response) != 0) {
-        return ONVIF_ERROR;
-    }
-    response->body_length = 0;
-    
-    switch (action) {
-        case ONVIF_ACTION_GET_CAPABILITIES: {
-            struct device_capabilities caps;
-            if (onvif_device_get_capabilities(&caps) == 0) {
-                char caps_xml[ONVIF_XML_BUFFER_SIZE];
-                snprintf(caps_xml, sizeof(caps_xml),
-                    "<tds:Capabilities>\n"
-                    "  <tt:Analytics XAddr=\"http://[IP]:8080/onvif/analytics_service\" "
-                    "AnalyticsModuleSupport=\"%s\" RuleSupport=\"%s\" "
-                    "CellBasedSceneDescriptionSupported=\"%s\" "
-                    "MulticastSupport=\"%s\" />\n"
-                    "  <tt:Device XAddr=\"http://[IP]:8080/onvif/device_service\" "
-                    "Network=\"%s\" System=\"%s\" IO=\"%s\" Security=\"%s\" />\n"
-                    "  <tt:Events XAddr=\"http://[IP]:8080/onvif/event_service\" "
-                    "WSPullPointSupport=\"%s\" WSSubscriptionPolicySupport=\"%s\" "
-                    "WSPausableSubscriptionManagerInterfaceSupport=\"%s\" />\n"
-                    "  <tt:Imaging XAddr=\"http://[IP]:8080/onvif/imaging_service\" />\n"
-                    "  <tt:Media XAddr=\"http://[IP]:8080/onvif/media_service\" "
-                    "StreamingCapabilities=\"%s\" />\n"
-                    "  <tt:PTZ XAddr=\"http://[IP]:8080/onvif/ptz_service\" />\n"
-                    "</tds:Capabilities>",
-                    caps.has_analytics ? "true" : "false",
-                    caps.has_analytics ? "true" : "false", 
-                    caps.has_analytics ? "true" : "false",
-                    caps.has_analytics ? "true" : "false",
-                    caps.has_device ? "true" : "false",
-                    caps.has_device ? "true" : "false",
-                    caps.has_device ? "true" : "false", 
-                    caps.has_device ? "true" : "false",
-                    caps.has_events ? "true" : "false",
-                    caps.has_events ? "true" : "false",
-                    caps.has_events ? "true" : "false",
-                    caps.has_media ? "true" : "false");
-                
-                onvif_response_device_success(response, "GetCapabilities", caps_xml);
-            } else {
-                onvif_response_soap_fault(response, "soap:Receiver", "Failed to get capabilities");
-            }
-            break;
-        }
-        
-        case ONVIF_ACTION_GET_DEVICE_INFORMATION: {
-            struct device_info info;
-            if (onvif_device_get_device_information(&info) == 0) {
-                char info_xml[ONVIF_XML_BUFFER_SIZE];
-                snprintf(info_xml, sizeof(info_xml),
-                    "<tds:Manufacturer>%s</tds:Manufacturer>\n"
-                    "<tds:Model>%s</tds:Model>\n"
-                    "<tds:FirmwareVersion>%s</tds:FirmwareVersion>\n"
-                    "<tds:SerialNumber>%s</tds:SerialNumber>\n"
-                    "<tds:HardwareId>%s</tds:HardwareId>",
-                    info.manufacturer, info.model, info.firmware_version,
-                    info.serial_number, info.hardware_id);
-                
-                onvif_response_device_success(response, "GetDeviceInformation", info_xml);
-            } else {
-                onvif_response_soap_fault(response, "soap:Receiver", "Failed to get device information");
-            }
-            break;
-        }
-        
-        case ONVIF_ACTION_GET_SYSTEM_DATE_AND_TIME: {
-            struct system_date_time dt;
-            if (onvif_device_get_system_date_time(&dt) == 0) {
-                char dt_xml[ONVIF_XML_BUFFER_SIZE];
-                snprintf(dt_xml, sizeof(dt_xml),
-                    "<tds:SystemDateAndTime>\n"
-                    "  <tt:DateTimeType>%s</tt:DateTimeType>\n"
-                    "  <tt:DaylightSavings>%s</tt:DaylightSavings>\n"
-                    "  <tt:TimeZone>\n"
-                    "    <tt:TZ xmlns:tt=\"http://www.onvif.org/ver10/schema\">%s%02d:%02d</tt:TZ>\n"
-                    "  </tt:TimeZone>\n"
-                    "  <tt:UTCDateTime>\n"
-                    "    <tt:Time xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
-                    "      <tt:Hour>%d</tt:Hour>\n"
-                    "      <tt:Minute>%d</tt:Minute>\n"
-                    "      <tt:Second>%d</tt:Second>\n"
-                    "    </tt:Time>\n"
-                    "    <tt:Date xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
-                    "      <tt:Year>%d</tt:Year>\n"
-                    "      <tt:Month>%d</tt:Month>\n"
-                    "      <tt:Day>%d</tt:Day>\n"
-                    "    </tt:Date>\n"
-                    "  </tt:UTCDateTime>\n"
-                    "  <tt:LocalDateTime>\n"
-                    "    <tt:Time xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
-                    "      <tt:Hour>%d</tt:Hour>\n"
-                    "      <tt:Minute>%d</tt:Minute>\n"
-                    "      <tt:Second>%d</tt:Second>\n"
-                    "    </tt:Time>\n"
-                    "    <tt:Date xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
-                    "      <tt:Year>%d</tt:Year>\n"
-                    "      <tt:Month>%d</tt:Month>\n"
-                    "      <tt:Day>%d</tt:Day>\n"
-                    "    </tt:Date>\n"
-                    "  </tt:LocalDateTime>\n"
-                    "</tds:SystemDateAndTime>",
-                    dt.date_time_type ? "NTP" : "Manual",
-                    dt.daylight_savings ? "true" : "false",
-                    dt.time_zone.tz_hour >= 0 ? "+" : "",
-                    dt.time_zone.tz_hour, dt.time_zone.tz_minute,
-                    dt.utc_date_time.hour, dt.utc_date_time.minute, dt.utc_date_time.second,
-                    dt.utc_date_time.year, dt.utc_date_time.month, dt.utc_date_time.day,
-                    dt.local_date_time.hour, dt.local_date_time.minute, dt.local_date_time.second,
-                    dt.local_date_time.year, dt.local_date_time.month, dt.local_date_time.day);
-                
-                onvif_response_device_success(response, "GetSystemDateAndTime", dt_xml);
-            } else {
-                onvif_response_soap_fault(response, "soap:Receiver", "Failed to get system date and time");
-            }
-            break;
-        }
-        
-        case ONVIF_ACTION_GET_SERVICES: {
-            struct device_service services[10];
-            int count = 0;
-            if (onvif_device_get_services(services, &count) == 0) {
-                char services_xml[2048];
-                strcpy(services_xml, "<tds:Service>\n");
-                
-                for (int i = 0; i < count; i++) {
-                    char service_xml[512];
-                    snprintf(service_xml, sizeof(service_xml),
-                        "  <tt:Namespace>%s</tt:Namespace>\n"
-                        "  <tt:XAddr>%s</tt:XAddr>\n"
-                        "  <tt:Version>\n"
-                        "    <tt:Major>%d</tt:Major>\n"
-                        "    <tt:Minor>%d</tt:Minor>\n"
-                        "  </tt:Version>\n",
-                        services[i].namespace, services[i].xaddr,
-                        services[i].version.major, services[i].version.minor);
-                    strcat(services_xml, service_xml);
-                }
-                strcat(services_xml, "</tds:Service>");
-                
-                onvif_response_device_success(response, "GetServices", services_xml);
-            } else {
-                onvif_response_soap_fault(response, "soap:Receiver", "Failed to get services");
-            }
-            break;
-        }
-        
-        default:
-            onvif_handle_unsupported_action(response);
-            break;
-    }
-    
-    // Response buffer will be automatically cleaned up when it goes out of scope
-    return response->body_length;
+
+/* Refactored device service implementation */
+
+// Service handler instance
+static service_handler_t g_device_handler;
+static int g_handler_initialized = 0;
+
+// Action handlers
+static int handle_get_capabilities(const service_handler_config_t *config,
+                                  const onvif_request_t *request,
+                                  onvif_response_t *response,
+                                  xml_builder_t *xml_builder) {
+  if (!config || !response || !xml_builder) {
+    return ONVIF_ERROR_INVALID;
+  }
+  
+  // Build capabilities XML using XML builder
+  xml_builder_start_element(xml_builder, "tds:Capabilities", NULL);
+  
+  // Analytics capabilities
+  xml_builder_self_closing_element(xml_builder, "tt:Analytics",
+    "XAddr", "http://[IP]:8080/onvif/analytics_service",
+    "AnalyticsModuleSupport", dev_caps.has_analytics ? "true" : "false",
+    "RuleSupport", dev_caps.has_analytics ? "true" : "false",
+    "CellBasedSceneDescriptionSupported", dev_caps.has_analytics ? "true" : "false",
+    "MulticastSupport", dev_caps.has_analytics ? "true" : "false",
+    NULL);
+  
+  // Device capabilities
+  xml_builder_self_closing_element(xml_builder, "tt:Device",
+    "XAddr", "http://[IP]:8080/onvif/device_service",
+    "Network", dev_caps.has_device ? "true" : "false",
+    "System", dev_caps.has_device ? "true" : "false",
+    "IO", dev_caps.has_device ? "true" : "false",
+    "Security", dev_caps.has_device ? "true" : "false",
+    NULL);
+  
+  // Events capabilities
+  xml_builder_self_closing_element(xml_builder, "tt:Events",
+    "XAddr", "http://[IP]:8080/onvif/event_service",
+    "WSPullPointSupport", dev_caps.has_events ? "true" : "false",
+    "WSSubscriptionPolicySupport", dev_caps.has_events ? "true" : "false",
+    "WSPausableSubscriptionManagerInterfaceSupport", dev_caps.has_events ? "true" : "false",
+    NULL);
+  
+  // Imaging capabilities
+  xml_builder_self_closing_element(xml_builder, "tt:Imaging",
+    "XAddr", "http://[IP]:8080/onvif/imaging_service",
+    NULL);
+  
+  // Media capabilities
+  xml_builder_self_closing_element(xml_builder, "tt:Media",
+    "XAddr", "http://[IP]:8080/onvif/media_service",
+    "StreamingCapabilities", dev_caps.has_media ? "true" : "false",
+    NULL);
+  
+  // PTZ capabilities
+  xml_builder_self_closing_element(xml_builder, "tt:PTZ",
+    "XAddr", "http://[IP]:8080/onvif/ptz_service",
+    NULL);
+  
+  xml_builder_end_element(xml_builder, "tds:Capabilities");
+  
+  // Generate success response
+  const char *xml_content = xml_builder_get_string(xml_builder);
+  return service_handler_generate_success(&g_device_handler, "GetCapabilities", xml_content, response);
 }
 
-/**
- * @brief Handle ONVIF device service requests
- */
+static int handle_get_device_information(const service_handler_config_t *config,
+                                        const onvif_request_t *request,
+                                        onvif_response_t *response,
+                                        xml_builder_t *xml_builder) {
+  if (!config || !response || !xml_builder) {
+    return ONVIF_ERROR_INVALID;
+  }
+  
+  // Get device information from configuration if available
+  char manufacturer[64] = DEVICE_MANUFACTURER;
+  char model[64] = DEVICE_MODEL;
+  char firmware_version[32] = DEVICE_FIRMWARE_VER;
+  char serial_number[64] = DEVICE_SERIAL;
+  char hardware_id[32] = DEVICE_HARDWARE_ID;
+  
+  // Try to get from configuration
+  service_handler_get_config_value(&g_device_handler, CONFIG_SECTION_DEVICE,
+                                            "manufacturer", manufacturer, CONFIG_TYPE_STRING);
+  service_handler_get_config_value(&g_device_handler, CONFIG_SECTION_DEVICE,
+                                            "model", model, CONFIG_TYPE_STRING);
+  service_handler_get_config_value(&g_device_handler, CONFIG_SECTION_DEVICE,
+                                            "firmware_version", firmware_version, CONFIG_TYPE_STRING);
+  service_handler_get_config_value(&g_device_handler, CONFIG_SECTION_DEVICE,
+                                            "serial_number", serial_number, CONFIG_TYPE_STRING);
+  service_handler_get_config_value(&g_device_handler, CONFIG_SECTION_DEVICE,
+                                            "hardware_id", hardware_id, CONFIG_TYPE_STRING);
+  
+  // Build device information XML
+  xml_builder_element_with_text(xml_builder, "tds:Manufacturer", manufacturer, NULL);
+  xml_builder_element_with_text(xml_builder, "tds:Model", model, NULL);
+  xml_builder_element_with_text(xml_builder, "tds:FirmwareVersion", firmware_version, NULL);
+  xml_builder_element_with_text(xml_builder, "tds:SerialNumber", serial_number, NULL);
+  xml_builder_element_with_text(xml_builder, "tds:HardwareId", hardware_id, NULL);
+  
+  // Generate success response
+  const char *xml_content = xml_builder_get_string(xml_builder);
+  return service_handler_generate_success(&g_device_handler, "GetDeviceInformation", xml_content, response);
+}
+
+static int handle_get_system_date_time(const service_handler_config_t *config,
+                                      const onvif_request_t *request,
+                                      onvif_response_t *response,
+                                      xml_builder_t *xml_builder) {
+  if (!config || !response || !xml_builder) {
+    return ONVIF_ERROR_INVALID;
+  }
+  
+  time_t now = time(NULL);
+  struct tm *tm_info = localtime(&now);
+  
+  // Build system date and time XML
+  xml_builder_start_element(xml_builder, "tds:SystemDateAndTime", NULL);
+  
+  xml_builder_element_with_text(xml_builder, "tt:DateTimeType", "Manual", NULL);
+  xml_builder_element_with_text(xml_builder, "tt:DaylightSavings", "false", NULL);
+  
+  // Time zone
+  xml_builder_start_element(xml_builder, "tt:TimeZone", NULL);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:TZ", "+00:00");
+  xml_builder_end_element(xml_builder, "tt:TimeZone");
+  
+  // UTC date time
+  xml_builder_start_element(xml_builder, "tt:UTCDateTime", NULL);
+  
+  // Time
+  xml_builder_start_element(xml_builder, "tt:Time", NULL);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Hour", "%d", tm_info->tm_hour);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Minute", "%d", tm_info->tm_min);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Second", "%d", tm_info->tm_sec);
+  xml_builder_end_element(xml_builder, "tt:Time");
+  
+  // Date
+  xml_builder_start_element(xml_builder, "tt:Date", NULL);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Year", "%d", tm_info->tm_year + 1900);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Month", "%d", tm_info->tm_mon + 1);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Day", "%d", tm_info->tm_mday);
+  xml_builder_end_element(xml_builder, "tt:Date");
+  
+  xml_builder_end_element(xml_builder, "tt:UTCDateTime");
+  
+  // Local date time (same as UTC for simplicity)
+  xml_builder_start_element(xml_builder, "tt:LocalDateTime", NULL);
+  
+  // Time
+  xml_builder_start_element(xml_builder, "tt:Time", NULL);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Hour", "%d", tm_info->tm_hour);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Minute", "%d", tm_info->tm_min);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Second", "%d", tm_info->tm_sec);
+  xml_builder_end_element(xml_builder, "tt:Time");
+  
+  // Date
+  xml_builder_start_element(xml_builder, "tt:Date", NULL);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Year", "%d", tm_info->tm_year + 1900);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Month", "%d", tm_info->tm_mon + 1);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Day", "%d", tm_info->tm_mday);
+  xml_builder_end_element(xml_builder, "tt:Date");
+  
+  xml_builder_end_element(xml_builder, "tt:LocalDateTime");
+  
+  xml_builder_end_element(xml_builder, "tds:SystemDateAndTime");
+  
+  // Generate success response
+  const char *xml_content = xml_builder_get_string(xml_builder);
+  return service_handler_generate_success(&g_device_handler, "GetSystemDateAndTime", xml_content, response);
+}
+
+static int handle_get_services(const service_handler_config_t *config,
+                              const onvif_request_t *request,
+                              onvif_response_t *response,
+                              xml_builder_t *xml_builder) {
+  if (!config || !response || !xml_builder) {
+    return ONVIF_ERROR_INVALID;
+  }
+  
+  // Get HTTP port from configuration
+  int http_port = 8080;
+  service_handler_get_config_value(&g_device_handler, CONFIG_SECTION_ONVIF,
+                                            "http_port", &http_port, CONFIG_TYPE_INT);
+  
+  // Build services XML
+  xml_builder_start_element(xml_builder, "tds:Service", NULL);
+  
+  // Device Service
+  xml_builder_start_element(xml_builder, "tt:Namespace", NULL);
+  xml_builder_raw_content(xml_builder, "http://www.onvif.org/ver10/device/wsdl");
+  xml_builder_end_element(xml_builder, "tt:Namespace");
+  
+  xml_builder_start_element(xml_builder, "tt:XAddr", NULL);
+  xml_builder_formatted_content(xml_builder, "http://[IP]:%d/onvif/device_service", http_port);
+  xml_builder_end_element(xml_builder, "tt:XAddr");
+  
+  xml_builder_start_element(xml_builder, "tt:Version", NULL);
+  xml_builder_element_with_text(xml_builder, "tt:Major", "2", NULL);
+  xml_builder_element_with_text(xml_builder, "tt:Minor", "5", NULL);
+  xml_builder_end_element(xml_builder, "tt:Version");
+  
+  xml_builder_end_element(xml_builder, "tds:Service");
+  
+  // Generate success response
+  const char *xml_content = xml_builder_get_string(xml_builder);
+  return service_handler_generate_success(&g_device_handler, "GetServices", xml_content, response);
+}
+
+// Action definitions
+static const service_action_def_t device_actions[] = {
+  {ONVIF_ACTION_GET_CAPABILITIES, "GetCapabilities", handle_get_capabilities, 0},
+  {ONVIF_ACTION_GET_DEVICE_INFORMATION, "GetDeviceInformation", handle_get_device_information, 0},
+  {ONVIF_ACTION_GET_SYSTEM_DATE_AND_TIME, "GetSystemDateAndTime", handle_get_system_date_time, 0},
+  {ONVIF_ACTION_GET_SERVICES, "GetServices", handle_get_services, 0}
+};
+
+int onvif_device_init(centralized_config_t *config) {
+  if (g_handler_initialized) {
+    return ONVIF_SUCCESS;
+  }
+  
+  service_handler_config_t handler_config = {
+    .service_type = ONVIF_SERVICE_DEVICE,
+    .service_name = "Device",
+    .config = config,
+    .enable_validation = 1,
+    .enable_logging = 1
+  };
+  
+  int result = service_handler_init(&g_device_handler, &handler_config,
+                                             device_actions, sizeof(device_actions) / sizeof(device_actions[0]));
+  
+  if (result == ONVIF_SUCCESS) {
+    g_handler_initialized = 1;
+  }
+  
+  return result;
+}
+
 int onvif_device_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
-    return onvif_handle_service_request(action, request, response, device_service_handler);
+  if (!g_handler_initialized) {
+    return ONVIF_ERROR;
+  }
+  
+  return service_handler_handle_request(&g_device_handler, action, request, response);
+}
+
+void onvif_device_cleanup(void) {
+  if (g_handler_initialized) {
+    service_handler_cleanup(&g_device_handler);
+    g_handler_initialized = 0;
+  }
 }

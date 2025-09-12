@@ -15,10 +15,15 @@
 #include "utils/logging_utils.h"
 #include "utils/error_handling.h"
 #include "utils/constants_clean.h"
-#include "utils/soap_helpers.h"
+#include "utils/unified_soap_generator.h"
 #include "utils/response_helpers.h"
 #include "utils/service_handler.h"
+#include "utils/xml_builder.h"
+#include "utils/common_error_handling.h"
+#include "utils/centralized_config.h"
 #include "common/onvif_types.h"
+#include "utils/safe_string.h"
+#include "utils/memory_manager.h"
 
 /* Static media profiles */
 static struct media_profile profiles[] = {
@@ -381,7 +386,10 @@ static int media_service_handler(onvif_action_type_t action, const onvif_request
             int count = 0;
             if (onvif_media_get_profiles(&profiles, &count) == 0) {
                 char profiles_xml[ONVIF_RESPONSE_BUFFER_SIZE];
-                strcpy(profiles_xml, "<trt:Profiles>\n");
+                if (safe_strcpy(profiles_xml, sizeof(profiles_xml), "<trt:Profiles>\n") != 0) {
+                    onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for profiles XML");
+                    break;
+                }
                 
                 for (int i = 0; i < count; i++) {
                     char profile_xml[ONVIF_XML_BUFFER_SIZE];
@@ -454,9 +462,15 @@ static int media_service_handler(onvif_action_type_t action, const onvif_request
                         profiles[i].ptz.default_relative_zoom_translation_space,
                         profiles[i].ptz.default_continuous_pan_tilt_velocity_space,
                         profiles[i].ptz.default_continuous_zoom_velocity_space);
-                    strcat(profiles_xml, profile_xml);
+                    if (safe_strcat(profiles_xml, sizeof(profiles_xml), profile_xml) != 0) {
+                        onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for profiles XML");
+                        break;
+                    }
                 }
-                strcat(profiles_xml, "</trt:Profiles>");
+                if (safe_strcat(profiles_xml, sizeof(profiles_xml), "</trt:Profiles>") != 0) {
+                    onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for profiles XML");
+                    break;
+                }
                 
                 onvif_response_media_success(response, "GetProfiles", profiles_xml);
             } else {
@@ -470,7 +484,10 @@ static int media_service_handler(onvif_action_type_t action, const onvif_request
             int count = 0;
             if (onvif_media_get_video_sources(&sources, &count) == 0) {
                 char sources_xml[ONVIF_RESPONSE_BUFFER_SIZE];
-                strcpy(sources_xml, "<trt:VideoSources>\n");
+                if (safe_strcpy(sources_xml, sizeof(sources_xml), "<trt:VideoSources>\n") != 0) {
+                    onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for sources XML");
+                    break;
+                }
                 
                 for (int i = 0; i < count; i++) {
                     char source_xml[ONVIF_XML_BUFFER_SIZE];
@@ -491,9 +508,15 @@ static int media_service_handler(onvif_action_type_t action, const onvif_request
                         sources[i].resolution.width, sources[i].resolution.height,
                         sources[i].imaging.brightness, sources[i].imaging.color_saturation,
                         sources[i].imaging.contrast, sources[i].imaging.sharpness);
-                    strcat(sources_xml, source_xml);
+                    if (safe_strcat(sources_xml, sizeof(sources_xml), source_xml) != 0) {
+                        onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for sources XML");
+                        break;
+                    }
                 }
-                strcat(sources_xml, "</trt:VideoSources>");
+                if (safe_strcat(sources_xml, sizeof(sources_xml), "</trt:VideoSources>") != 0) {
+                    onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for sources XML");
+                    break;
+                }
                 
                 onvif_response_media_success(response, "GetVideoSources", sources_xml);
             } else {
@@ -579,4 +602,152 @@ static int media_service_handler(onvif_action_type_t action, const onvif_request
  */
 int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
     return onvif_handle_service_request(action, request, response, media_service_handler);
+}
+
+/* Refactored media service implementation */
+
+// Service handler instance
+static service_handler_t g_media_handler;
+static int g_handler_initialized = 0;
+
+// Action handlers
+static int handle_get_profiles(const service_handler_config_t *config,
+                              const onvif_request_t *request,
+                              onvif_response_t *response,
+                              xml_builder_t *xml_builder) {
+  if (!config || !response || !xml_builder) {
+    return ONVIF_ERROR_INVALID;
+  }
+  
+  // Build profiles XML using XML builder
+  xml_builder_start_element(xml_builder, "trt:Profiles", NULL);
+  
+  for (int i = 0; i < 2; i++) {
+    xml_builder_start_element(xml_builder, "tt:Profile", "token", profiles[i].token, NULL);
+    
+    xml_builder_element_with_text(xml_builder, "tt:Name", profiles[i].name, NULL);
+    xml_builder_element_with_formatted_text(xml_builder, "tt:Fixed", "%s", profiles[i].fixed ? "true" : "false");
+    
+    // Video source
+    xml_builder_start_element(xml_builder, "tt:VideoSource", "token", profiles[i].video_source.source_token, NULL);
+    xml_builder_start_element(xml_builder, "tt:Bounds", NULL);
+    xml_builder_element_with_formatted_text(xml_builder, "tt:width", "%d", profiles[i].video_source.bounds.width);
+    xml_builder_element_with_formatted_text(xml_builder, "tt:height", "%d", profiles[i].video_source.bounds.height);
+    xml_builder_element_with_formatted_text(xml_builder, "tt:x", "%d", profiles[i].video_source.bounds.x);
+    xml_builder_element_with_formatted_text(xml_builder, "tt:y", "%d", profiles[i].video_source.bounds.y);
+    xml_builder_end_element(xml_builder, "tt:Bounds");
+    xml_builder_end_element(xml_builder, "tt:VideoSource");
+    
+    // Video encoder
+    xml_builder_start_element(xml_builder, "tt:VideoEncoder", "token", profiles[i].video_encoder.token, NULL);
+    xml_builder_element_with_text(xml_builder, "tt:Name", profiles[i].video_encoder.encoding, NULL);
+    xml_builder_element_with_text(xml_builder, "tt:Encoding", profiles[i].video_encoder.encoding, NULL);
+    
+    xml_builder_start_element(xml_builder, "tt:Resolution", NULL);
+    xml_builder_element_with_formatted_text(xml_builder, "tt:Width", "%d", profiles[i].video_encoder.resolution.width);
+    xml_builder_element_with_formatted_text(xml_builder, "tt:Height", "%d", profiles[i].video_encoder.resolution.height);
+    xml_builder_end_element(xml_builder, "tt:Resolution");
+    
+    xml_builder_element_with_formatted_text(xml_builder, "tt:Quality", "%.1f", profiles[i].video_encoder.quality);
+    xml_builder_element_with_formatted_text(xml_builder, "tt:FrameRateLimit", "%d", profiles[i].video_encoder.framerate_limit);
+    xml_builder_element_with_formatted_text(xml_builder, "tt:EncodingInterval", "%d", profiles[i].video_encoder.encoding_interval);
+    xml_builder_element_with_formatted_text(xml_builder, "tt:BitrateLimit", "%d", profiles[i].video_encoder.bitrate_limit);
+    xml_builder_element_with_formatted_text(xml_builder, "tt:GovLength", "%d", profiles[i].video_encoder.gov_length);
+    
+    xml_builder_end_element(xml_builder, "tt:VideoEncoder");
+    
+    xml_builder_end_element(xml_builder, "tt:Profile");
+  }
+  
+  xml_builder_end_element(xml_builder, "trt:Profiles");
+  
+  // Generate success response
+  const char *xml_content = xml_builder_get_string(xml_builder);
+  return service_handler_generate_success(&g_media_handler, "GetProfiles", xml_content, response);
+}
+
+static int handle_get_stream_uri(const service_handler_config_t *config,
+                                const onvif_request_t *request,
+                                onvif_response_t *response,
+                                xml_builder_t *xml_builder) {
+  if (!config || !response || !xml_builder) {
+    return ONVIF_ERROR_INVALID;
+  }
+  
+  // Parse profile token and protocol from request
+  char profile_token[32] = "MainProfile";
+  char protocol[16] = "RTSP";
+  
+  // Simple XML parsing for required parameters
+  char *profile_start = strstr(request->body, "<ProfileToken>");
+  if (profile_start) {
+    char *profile_end = strstr(profile_start, "</ProfileToken>");
+    if (profile_end) {
+      size_t len = profile_end - (profile_start + 13);
+      if (len < sizeof(profile_token)) {
+        strncpy(profile_token, profile_start + 13, len);
+        profile_token[len] = '\0';
+      }
+    }
+  }
+  
+  char *protocol_start = strstr(request->body, "<Protocol>");
+  if (protocol_start) {
+    char *protocol_end = strstr(protocol_start, "</Protocol>");
+    if (protocol_end) {
+      size_t len = protocol_end - (protocol_start + 10);
+      if (len < sizeof(protocol)) {
+        strncpy(protocol, protocol_start + 10, len);
+        protocol[len] = '\0';
+      }
+    }
+  }
+  
+  // Build stream URI XML
+  xml_builder_start_element(xml_builder, "trt:MediaUri", NULL);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Uri", "rtsp://[IP]:554/vs0");
+  xml_builder_element_with_formatted_text(xml_builder, "tt:InvalidAfterConnect", "false");
+  xml_builder_element_with_formatted_text(xml_builder, "tt:InvalidAfterReboot", "false");
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Timeout", "PT60S");
+  xml_builder_end_element(xml_builder, "trt:MediaUri");
+  
+  // Generate success response
+  const char *xml_content = xml_builder_get_string(xml_builder);
+  return service_handler_generate_success(&g_media_handler, "GetStreamUri", xml_content, response);
+}
+
+// Action definitions
+static const service_action_def_t media_actions[] = {
+  {ONVIF_ACTION_GET_PROFILES, "GetProfiles", handle_get_profiles, 0},
+  {ONVIF_ACTION_GET_STREAM_URI, "GetStreamUri", handle_get_stream_uri, 1}
+};
+
+int onvif_media_init(centralized_config_t *config) {
+  if (g_handler_initialized) {
+    return ONVIF_SUCCESS;
+  }
+  
+  service_handler_config_t handler_config = {
+    .service_type = ONVIF_SERVICE_MEDIA,
+    .service_name = "Media",
+    .config = config,
+    .enable_validation = 1,
+    .enable_logging = 1
+  };
+  
+  int result = service_handler_init(&g_media_handler, &handler_config,
+                                   media_actions, sizeof(media_actions) / sizeof(media_actions[0]));
+  
+  if (result == ONVIF_SUCCESS) {
+    g_handler_initialized = 1;
+  }
+  
+  return result;
+}
+
+void onvif_media_cleanup(void) {
+  if (g_handler_initialized) {
+    service_handler_cleanup(&g_media_handler);
+    g_handler_initialized = 0;
+  }
 }

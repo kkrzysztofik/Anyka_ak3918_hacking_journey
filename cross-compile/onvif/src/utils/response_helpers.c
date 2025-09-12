@@ -4,7 +4,7 @@
  */
 
 #include "response_helpers.h"
-#include "soap_helpers.h"
+#include "unified_soap_generator.h"
 #include "utils/error_handling.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,7 +73,10 @@ int onvif_response_soap_fault(onvif_response_t *response, const char *fault_code
     return ONVIF_ERROR_INVALID;
   }
   
-  soap_fault_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, fault_code, fault_string);
+  int result = soap_generate_fault(response->body, ONVIF_RESPONSE_BUFFER_SIZE, fault_code, fault_string);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
   response->body_length = strlen(response->body);
   
   return ONVIF_SUCCESS;
@@ -84,7 +87,10 @@ int onvif_response_device_success(onvif_response_t *response, const char *action
     return ONVIF_ERROR_INVALID;
   }
   
-  soap_device_success_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, action, body_content);
+  int result = soap_generate_success(response->body, ONVIF_RESPONSE_BUFFER_SIZE, ONVIF_SERVICE_DEVICE, action, body_content);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
   response->body_length = strlen(response->body);
   
   return ONVIF_SUCCESS;
@@ -95,7 +101,10 @@ int onvif_response_media_success(onvif_response_t *response, const char *action,
     return ONVIF_ERROR_INVALID;
   }
   
-  soap_media_success_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, action, body_content);
+  int result = soap_generate_success(response->body, ONVIF_RESPONSE_BUFFER_SIZE, ONVIF_SERVICE_MEDIA, action, body_content);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
   response->body_length = strlen(response->body);
   
   return ONVIF_SUCCESS;
@@ -106,7 +115,10 @@ int onvif_response_ptz_success(onvif_response_t *response, const char *action, c
     return ONVIF_ERROR_INVALID;
   }
   
-  soap_ptz_success_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, action, body_content);
+  int result = soap_generate_success(response->body, ONVIF_RESPONSE_BUFFER_SIZE, ONVIF_SERVICE_PTZ, action, body_content);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
   response->body_length = strlen(response->body);
   
   return ONVIF_SUCCESS;
@@ -117,7 +129,10 @@ int onvif_response_imaging_success(onvif_response_t *response, const char *actio
     return ONVIF_ERROR_INVALID;
   }
   
-  soap_imaging_success_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, action, body_content);
+  int result = soap_generate_success(response->body, ONVIF_RESPONSE_BUFFER_SIZE, ONVIF_SERVICE_IMAGING, action, body_content);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
   response->body_length = strlen(response->body);
   
   return ONVIF_SUCCESS;

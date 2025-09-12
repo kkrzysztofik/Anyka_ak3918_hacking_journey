@@ -10,6 +10,7 @@
 #include "common/onvif_types.h"
 #include "common/onvif_request.h"
 #include "common/onvif_imaging_types.h"
+#include "utils/centralized_config.h"
 
 int onvif_imaging_init(void *vi_handle); /**< Initialize imaging module with VI handle (nullable). */
 void onvif_imaging_cleanup(void);        /**< Release imaging resources. */
@@ -26,5 +27,19 @@ int onvif_imaging_get_imaging_settings(char *response, int response_size); /**< 
 int onvif_imaging_set_imaging_settings(const char *request, char *response, int response_size); /**< SOAP: SetImagingSettings. */
 int onvif_imaging_get_options(char *response, int response_size); /**< SOAP: GetOptions. */
 int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response); /**< Handle ONVIF imaging service requests. */
+
+/* Imaging service functions */
+
+/**
+ * @brief Initialize imaging service
+ * @param config Centralized configuration
+ * @return 0 on success, negative error code on failure
+ */
+int onvif_imaging_service_init(centralized_config_t *config);
+
+/**
+ * @brief Clean up imaging service
+ */
+void onvif_imaging_service_cleanup(void);
 
 #endif

@@ -16,10 +16,15 @@
 #include "utils/xml_utils.h"
 #include "utils/logging_utils.h"
 #include "utils/error_handling.h"
-#include "utils/soap_helpers.h"
+#include "utils/unified_soap_generator.h"
 #include "utils/response_helpers.h"
 #include "utils/service_handler.h"
+#include "utils/xml_builder.h"
+#include "utils/common_error_handling.h"
+#include "utils/centralized_config.h"
 #include "common/onvif_types.h"
+#include "utils/safe_string.h"
+#include "utils/memory_manager.h"
 
 /* PTZ Node configuration */
 static struct ptz_node ptz_node = {
@@ -28,33 +33,33 @@ static struct ptz_node ptz_node = {
     .supported_ptz_spaces = {
         .absolute_pan_tilt_position_space = {
             .uri = "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
-            .x_range = {-180.0, 180.0},
-            .y_range = {-90.0, 90.0}
+            .x_range = {.min = -180.0, .max = 180.0},
+            .y_range = {.min = -90.0, .max = 90.0}
         },
         .absolute_zoom_position_space = {
             .uri = "",
-            .x_range = {0.0, 0.0},
-            .y_range = {0.0, 0.0}
+            .x_range = {.min = 0.0, .max = 0.0},
+            .y_range = {.min = 0.0, .max = 0.0}
         },
         .relative_pan_tilt_translation_space = {
             .uri = "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace",
-            .x_range = {-180.0, 180.0},
-            .y_range = {-90.0, 90.0}
+            .x_range = {.min = -180.0, .max = 180.0},
+            .y_range = {.min = -90.0, .max = 90.0}
         },
         .relative_zoom_translation_space = {
             .uri = "",
-            .x_range = {0.0, 0.0},
-            .y_range = {0.0, 0.0}
+            .x_range = {.min = 0.0, .max = 0.0},
+            .y_range = {.min = 0.0, .max = 0.0}
         },
         .continuous_pan_tilt_velocity_space = {
             .uri = "http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace",
-            .x_range = {-1.0, 1.0},
-            .y_range = {-1.0, 1.0}
+            .x_range = {.min = -1.0, .max = 1.0},
+            .y_range = {.min = -1.0, .max = 1.0}
         },
         .continuous_zoom_velocity_space = {
             .uri = "",
-            .x_range = {0.0, 0.0},
-            .y_range = {0.0, 0.0}
+            .x_range = {.min = 0.0, .max = 0.0},
+            .y_range = {.min = 0.0, .max = 0.0}
         }
     },
     .maximum_number_of_presets = 10,
@@ -178,7 +183,7 @@ int onvif_ptz_get_status(const char *profile_token, struct ptz_status *status) {
     status->move_status.zoom = PTZ_MOVE_IDLE;
     
     /* Error status */
-    strcpy(status->error, "");
+    safe_strcpy(status->error, sizeof(status->error), "");
     
     /* UTC time - simplified */
     time_t now = time(NULL);
@@ -419,7 +424,7 @@ static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t
                 position.pan_tilt.x = atof(x_str);
                 position.pan_tilt.y = atof(y_str);
                 position.zoom = 0.0;
-                strcpy(position.space, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace");
+                safe_strcpy(position.space, sizeof(position.space), "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace");
                 
                 if (onvif_ptz_absolute_move(profile_token, &position, NULL) == 0) {
                     onvif_response_ptz_success(response, "AbsoluteMove", "");
@@ -446,7 +451,7 @@ static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t
                 translation.pan_tilt.x = atof(x_str);
                 translation.pan_tilt.y = atof(y_str);
                 translation.zoom = 0.0;
-                strcpy(translation.space, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace");
+                safe_strcpy(translation.space, sizeof(translation.space), "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace");
                 
                 if (onvif_ptz_relative_move(profile_token, &translation, NULL) == 0) {
                     snprintf(response->body, 4096,
@@ -459,11 +464,11 @@ static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t
                         "</soap:Envelope>");
                     response->body_length = strlen(response->body);
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to execute relative move");
+                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to execute relative move");
                     response->body_length = strlen(response->body);
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing required parameters");
+                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing required parameters");
                 response->body_length = strlen(response->body);
             }
             
@@ -498,11 +503,11 @@ static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t
                         "</soap:Envelope>");
                     response->body_length = strlen(response->body);
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to execute continuous move");
+                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to execute continuous move");
                     response->body_length = strlen(response->body);
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing required parameters");
+                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing required parameters");
                 response->body_length = strlen(response->body);
             }
             
@@ -533,11 +538,11 @@ static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t
                         "</soap:Envelope>");
                     response->body_length = strlen(response->body);
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to stop PTZ");
+                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to stop PTZ");
                     response->body_length = strlen(response->body);
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing ProfileToken");
+                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing ProfileToken");
                 response->body_length = strlen(response->body);
             }
             
@@ -555,11 +560,14 @@ static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t
                 int count = 0;
                 if (onvif_ptz_get_presets(profile_token, &presets, &count) == 0) {
                     char presets_xml[2048];
-                    strcpy(presets_xml, "<tptz:Preset>\n");
+                    if (safe_strcpy(presets_xml, sizeof(presets_xml), "<tptz:Preset>\n") != 0) {
+                        onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for presets XML");
+                        break;
+                    }
                     
                     for (int i = 0; i < count; i++) {
                         char preset_xml[256];
-                        snprintf(preset_xml, sizeof(preset_xml),
+                        if (safe_sprintf(preset_xml, sizeof(preset_xml),
                             "  <tt:Preset token=\"%s\">\n"
                             "    <tt:Name>%s</tt:Name>\n"
                             "    <tt:PTZPosition>\n"
@@ -570,10 +578,19 @@ static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t
                             presets[i].token, presets[i].name,
                             presets[i].ptz_position.pan_tilt.x, presets[i].ptz_position.pan_tilt.y,
                             presets[i].ptz_position.space,
-                            presets[i].ptz_position.zoom, presets[i].ptz_position.space);
-                        strcat(presets_xml, preset_xml);
+                            presets[i].ptz_position.zoom, presets[i].ptz_position.space) < 0) {
+                            onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for preset XML");
+                            break;
+                        }
+                        if (safe_strcat(presets_xml, sizeof(presets_xml), preset_xml) != 0) {
+                            onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for presets XML");
+                            break;
+                        }
                     }
-                    strcat(presets_xml, "</tptz:Preset>");
+                    if (safe_strcat(presets_xml, sizeof(presets_xml), "</tptz:Preset>") != 0) {
+                        onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for presets XML");
+                        break;
+                    }
                     
                     snprintf(response->body, 4096,
                         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -586,11 +603,11 @@ static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t
                         "</soap:Envelope>", presets_xml);
                     response->body_length = strlen(response->body);
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get presets");
+                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to get presets");
                     response->body_length = strlen(response->body);
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing ProfileToken");
+                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing ProfileToken");
                 response->body_length = strlen(response->body);
             }
             
@@ -620,11 +637,11 @@ static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t
                         "</soap:Envelope>", preset_xml);
                     response->body_length = strlen(response->body);
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to set preset");
+                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to set preset");
                     response->body_length = strlen(response->body);
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing required parameters");
+                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing required parameters");
                 response->body_length = strlen(response->body);
             }
             
@@ -649,11 +666,11 @@ static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t
                         "</soap:Envelope>");
                     response->body_length = strlen(response->body);
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to goto preset");
+                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to goto preset");
                     response->body_length = strlen(response->body);
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing required parameters");
+                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing required parameters");
                 response->body_length = strlen(response->body);
             }
             
@@ -675,6 +692,165 @@ static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t
  */
 int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
     return onvif_handle_service_request(action, request, response, ptz_service_handler);
+}
+
+/* Refactored PTZ service implementation */
+
+// Service handler instance
+static service_handler_t g_ptz_handler;
+static int g_handler_initialized = 0;
+
+// Action handlers
+static int handle_get_nodes(const service_handler_config_t *config,
+                           const onvif_request_t *request,
+                           onvif_response_t *response,
+                           xml_builder_t *xml_builder) {
+  if (!config || !response || !xml_builder) {
+    return ONVIF_ERROR_INVALID;
+  }
+  
+  // Build PTZ nodes XML using XML builder
+  xml_builder_start_element(xml_builder, "tptz:PTZNode", NULL);
+  
+  xml_builder_element_with_text(xml_builder, "tt:Name", ptz_node.name, NULL);
+  xml_builder_element_with_text(xml_builder, "tt:SupportedPTZSpaces", "true", NULL);
+  
+  // Supported spaces
+  xml_builder_start_element(xml_builder, "tt:SupportedSpaces", NULL);
+  
+  // Absolute position space
+  xml_builder_start_element(xml_builder, "tt:AbsolutePanTiltPositionSpace", NULL);
+  xml_builder_element_with_text(xml_builder, "tt:URI", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.uri, NULL);
+  xml_builder_start_element(xml_builder, "tt:XRange", NULL);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Min", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.min);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Max", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.max);
+  xml_builder_end_element(xml_builder, "tt:XRange");
+  xml_builder_start_element(xml_builder, "tt:YRange", NULL);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Min", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.min);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Max", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.max);
+  xml_builder_end_element(xml_builder, "tt:YRange");
+  xml_builder_end_element(xml_builder, "tt:AbsolutePanTiltPositionSpace");
+  
+  // Absolute zoom position space
+  xml_builder_start_element(xml_builder, "tt:AbsoluteZoomPositionSpace", NULL);
+  xml_builder_element_with_text(xml_builder, "tt:URI", ptz_node.supported_ptz_spaces.absolute_zoom_position_space.uri, NULL);
+  xml_builder_start_element(xml_builder, "tt:XRange", NULL);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Min", "%.1f", ptz_node.supported_ptz_spaces.absolute_zoom_position_space.x_range.min);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Max", "%.1f", ptz_node.supported_ptz_spaces.absolute_zoom_position_space.x_range.max);
+  xml_builder_end_element(xml_builder, "tt:XRange");
+  xml_builder_end_element(xml_builder, "tt:AbsoluteZoomPositionSpace");
+  
+  xml_builder_end_element(xml_builder, "tt:SupportedSpaces");
+  
+  // Maximum number of presets
+  xml_builder_element_with_formatted_text(xml_builder, "tt:MaximumNumberOfPresets", "%d", ptz_node.maximum_number_of_presets);
+  
+  // Home supported
+  xml_builder_element_with_formatted_text(xml_builder, "tt:HomeSupported", "%s", ptz_node.home_supported ? "true" : "false");
+  
+  xml_builder_end_element(xml_builder, "tptz:PTZNode");
+  
+  // Generate success response
+  const char *xml_content = xml_builder_get_string(xml_builder);
+  return service_handler_generate_success(&g_ptz_handler, "GetNodes", xml_content, response);
+}
+
+static int handle_absolute_move(const service_handler_config_t *config,
+                               const onvif_request_t *request,
+                               onvif_response_t *response,
+                               xml_builder_t *xml_builder) {
+  if (!config || !response || !xml_builder) {
+    return ONVIF_ERROR_INVALID;
+  }
+  
+  // Parse profile token from request
+  char profile_token[32] = "MainProfile";
+  char *profile_start = strstr(request->body, "<ProfileToken>");
+  if (profile_start) {
+    char *profile_end = strstr(profile_start, "</ProfileToken>");
+    if (profile_end) {
+      size_t len = profile_end - (profile_start + 13);
+      if (len < sizeof(profile_token)) {
+        strncpy(profile_token, profile_start + 13, len);
+        profile_token[len] = '\0';
+      }
+    }
+  }
+  
+  // Parse position from request
+  float pan = 0.0f, tilt = 0.0f, zoom = 0.0f;
+  char *pan_start = strstr(request->body, "<Pan>");
+  if (pan_start) {
+    char *pan_end = strstr(pan_start, "</Pan>");
+    if (pan_end) {
+      sscanf(pan_start + 5, "%f", &pan);
+    }
+  }
+  
+  char *tilt_start = strstr(request->body, "<Tilt>");
+  if (tilt_start) {
+    char *tilt_end = strstr(tilt_start, "</Tilt>");
+    if (tilt_end) {
+      sscanf(tilt_start + 6, "%f", &tilt);
+    }
+  }
+  
+  char *zoom_start = strstr(request->body, "<Zoom>");
+  if (zoom_start) {
+    char *zoom_end = strstr(zoom_start, "</Zoom>");
+    if (zoom_end) {
+      sscanf(zoom_start + 6, "%f", &zoom);
+    }
+  }
+  
+  // Execute PTZ movement
+  int result = ptz_adapter_absolute_move((int)pan, (int)tilt, 50);
+  
+  if (result == ONVIF_SUCCESS) {
+    // Generate success response
+    const char *xml_content = xml_builder_get_string(xml_builder);
+    return service_handler_generate_success(&g_ptz_handler, "AbsoluteMove", xml_content, response);
+  } else {
+    return service_handler_generate_error(&g_ptz_handler, "AbsoluteMove",
+                                        ERROR_PATTERN_INTERNAL_ERROR,
+                                        "Failed to execute PTZ movement", response);
+  }
+}
+
+// Action definitions
+static const service_action_def_t ptz_actions[] = {
+  {ONVIF_ACTION_GET_CONFIGURATIONS, "GetConfigurations", handle_get_nodes, 0},
+  {ONVIF_ACTION_ABSOLUTE_MOVE, "AbsoluteMove", handle_absolute_move, 1}
+};
+
+int onvif_ptz_init(centralized_config_t *config) {
+  if (g_handler_initialized) {
+    return ONVIF_SUCCESS;
+  }
+  
+  service_handler_config_t handler_config = {
+    .service_type = ONVIF_SERVICE_PTZ,
+    .service_name = "PTZ",
+    .config = config,
+    .enable_validation = 1,
+    .enable_logging = 1
+  };
+  
+  int result = service_handler_init(&g_ptz_handler, &handler_config,
+                                   ptz_actions, sizeof(ptz_actions) / sizeof(ptz_actions[0]));
+  
+  if (result == ONVIF_SUCCESS) {
+    g_handler_initialized = 1;
+  }
+  
+  return result;
+}
+
+void onvif_ptz_cleanup(void) {
+  if (g_handler_initialized) {
+    service_handler_cleanup(&g_ptz_handler);
+    g_handler_initialized = 0;
+  }
 }
 
 /* ============================================================================

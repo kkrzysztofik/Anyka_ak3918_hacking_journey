@@ -8,6 +8,9 @@
 #include "config.h"
 #include "platform/platform.h"
 #include "constants_clean.h"
+#include "utils/safe_string.h"
+#include "utils/error_context.h"
+#include "utils/memory_manager.h"
 #include "common/onvif_imaging_types.h"
 
 static struct application_config g_config; /* singleton */
@@ -18,8 +21,8 @@ static int g_config_loaded = 0;
 static void set_core_defaults(struct onvif_settings *s){
     s->enabled = 1;
     s->http_port = ONVIF_HTTP_PORT_DEFAULT;
-    strcpy(s->username, "admin");
-    strcpy(s->password, "admin");
+    safe_strcpy(s->username, sizeof(s->username), "admin");
+    safe_strcpy(s->password, sizeof(s->password), "admin");
 }
 
 static void set_imaging_defaults(struct imaging_settings *cfg){

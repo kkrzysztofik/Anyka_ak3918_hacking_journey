@@ -13,9 +13,12 @@
 #include "utils/xml_utils.h"
 #include "utils/logging_utils.h"
 #include "utils/error_handling.h"
-#include "utils/soap_helpers.h"
+#include "utils/unified_soap_generator.h"
 #include "utils/response_helpers.h"
 #include "utils/service_handler.h"
+#include "utils/xml_builder.h"
+#include "utils/common_error_handling.h"
+#include "utils/centralized_config.h"
 #include "common/onvif_types.h"
 
 static struct auto_daynight_config g_auto_config;
@@ -682,4 +685,166 @@ static int imaging_service_handler(onvif_action_type_t action, const onvif_reque
  */
 int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
     return onvif_handle_service_request(action, request, response, imaging_service_handler);
+}
+
+/* Refactored imaging service implementation */
+
+// Service handler instance
+static service_handler_t g_imaging_handler;
+static int g_handler_initialized = 0;
+
+// Action handlers
+static int handle_get_imaging_settings(const service_handler_config_t *config,
+                                      const onvif_request_t *request,
+                                      onvif_response_t *response,
+                                      xml_builder_t *xml_builder) {
+  if (!config || !response || !xml_builder) {
+    return ONVIF_ERROR_INVALID;
+  }
+  
+  // Parse video source token from request
+  char video_source_token[32] = "VideoSource0";
+  char *token_start = strstr(request->body, "<VideoSourceToken>");
+  if (token_start) {
+    char *token_end = strstr(token_start, "</VideoSourceToken>");
+    if (token_end) {
+      size_t len = token_end - (token_start + 17);
+      if (len < sizeof(video_source_token)) {
+        strncpy(video_source_token, token_start + 17, len);
+        video_source_token[len] = '\0';
+      }
+    }
+  }
+  
+  // Get current imaging settings
+  struct imaging_settings settings;
+  int result = onvif_imaging_get_settings(&settings);
+  
+  if (result != ONVIF_SUCCESS) {
+    return service_handler_generate_error(&g_imaging_handler, "GetImagingSettings",
+                                        ERROR_PATTERN_INTERNAL_ERROR,
+                                        "Failed to get imaging settings", response);
+  }
+  
+  // Build imaging settings XML using XML builder
+  xml_builder_start_element(xml_builder, "timg:ImagingSettings", NULL);
+  
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Brightness", "%d", settings.brightness);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:ColorSaturation", "%d", settings.saturation);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Contrast", "%d", settings.contrast);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Sharpness", "%d", settings.sharpness);
+  xml_builder_element_with_formatted_text(xml_builder, "tt:Hue", "%d", settings.hue);
+  
+  xml_builder_end_element(xml_builder, "timg:ImagingSettings");
+  
+  // Generate success response
+  const char *xml_content = xml_builder_get_string(xml_builder);
+  return service_handler_generate_success(&g_imaging_handler, "GetImagingSettings", xml_content, response);
+}
+
+static int handle_set_imaging_settings(const service_handler_config_t *config,
+                                      const onvif_request_t *request,
+                                      onvif_response_t *response,
+                                      xml_builder_t *xml_builder) {
+  if (!config || !response || !xml_builder) {
+    return ONVIF_ERROR_INVALID;
+  }
+  
+  // Parse video source token from request
+  char video_source_token[32] = "VideoSource0";
+  char *token_start = strstr(request->body, "<VideoSourceToken>");
+  if (token_start) {
+    char *token_end = strstr(token_start, "</VideoSourceToken>");
+    if (token_end) {
+      size_t len = token_end - (token_start + 17);
+      if (len < sizeof(video_source_token)) {
+        strncpy(video_source_token, token_start + 17, len);
+        video_source_token[len] = '\0';
+      }
+    }
+  }
+  
+  // Parse imaging settings from request
+  struct imaging_settings settings = g_imaging_settings; // Start with current settings
+  
+  char *brightness_start = strstr(request->body, "<Brightness>");
+  if (brightness_start) {
+    char *brightness_end = strstr(brightness_start, "</Brightness>");
+    if (brightness_end) {
+      sscanf(brightness_start + 12, "%d", &settings.brightness);
+    }
+  }
+  
+  char *contrast_start = strstr(request->body, "<Contrast>");
+  if (contrast_start) {
+    char *contrast_end = strstr(contrast_start, "</Contrast>");
+    if (contrast_end) {
+      sscanf(contrast_start + 10, "%d", &settings.contrast);
+    }
+  }
+  
+  char *saturation_start = strstr(request->body, "<ColorSaturation>");
+  if (saturation_start) {
+    char *saturation_end = strstr(saturation_start, "</ColorSaturation>");
+    if (saturation_end) {
+      sscanf(saturation_start + 17, "%d", &settings.saturation);
+    }
+  }
+  
+  char *sharpness_start = strstr(request->body, "<Sharpness>");
+  if (sharpness_start) {
+    char *sharpness_end = strstr(sharpness_start, "</Sharpness>");
+    if (sharpness_end) {
+      sscanf(sharpness_start + 11, "%d", &settings.sharpness);
+    }
+  }
+  
+  // Apply settings
+  int result = onvif_imaging_set_settings(&settings);
+  
+  if (result == ONVIF_SUCCESS) {
+    // Generate success response
+    const char *xml_content = xml_builder_get_string(xml_builder);
+    return service_handler_generate_success(&g_imaging_handler, "SetImagingSettings", xml_content, response);
+  } else {
+    return service_handler_generate_error(&g_imaging_handler, "SetImagingSettings",
+                                        ERROR_PATTERN_INTERNAL_ERROR,
+                                        "Failed to set imaging settings", response);
+  }
+}
+
+// Action definitions
+static const service_action_def_t imaging_actions[] = {
+  {ONVIF_ACTION_GET_IMAGING_SETTINGS, "GetImagingSettings", handle_get_imaging_settings, 1},
+  {ONVIF_ACTION_SET_IMAGING_SETTINGS, "SetImagingSettings", handle_set_imaging_settings, 1}
+};
+
+int onvif_imaging_service_init(centralized_config_t *config) {
+  if (g_handler_initialized) {
+    return ONVIF_SUCCESS;
+  }
+  
+  service_handler_config_t handler_config = {
+    .service_type = ONVIF_SERVICE_IMAGING,
+    .service_name = "Imaging",
+    .config = config,
+    .enable_validation = 1,
+    .enable_logging = 1
+  };
+  
+  int result = service_handler_init(&g_imaging_handler, &handler_config,
+                                   imaging_actions, sizeof(imaging_actions) / sizeof(imaging_actions[0]));
+  
+  if (result == ONVIF_SUCCESS) {
+    g_handler_initialized = 1;
+  }
+  
+  return result;
+}
+
+void onvif_imaging_service_cleanup(void) {
+  if (g_handler_initialized) {
+    service_handler_cleanup(&g_imaging_handler);
+    g_handler_initialized = 0;
+  }
 }

@@ -18,6 +18,9 @@
 #include "ak_global.h"
 #include "ak_thread.h"
 #include "list.h"
+#include "utils/safe_string.h"
+#include "utils/error_context.h"
+#include "utils/memory_manager.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -132,6 +135,12 @@ platform_result_t platform_init(void) {
         return PLATFORM_SUCCESS;
     }
     
+    // Initialize memory manager
+    if (memory_manager_init() != 0) {
+        platform_log_error("Failed to initialize memory manager\n");
+        return PLATFORM_ERROR;
+    }
+    
     g_platform_initialized = true;
     platform_log_info("Unified platform abstraction initialized for Anyka\n");
     return PLATFORM_SUCCESS;
@@ -154,6 +163,9 @@ void platform_cleanup(void) {
     g_ai_handle = NULL;
     g_aenc_handle = NULL;
     g_platform_initialized = false;
+    
+    // Cleanup memory manager
+    memory_manager_cleanup();
 }
 
 /* Video Input (VI) functions */

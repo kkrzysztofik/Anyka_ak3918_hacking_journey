@@ -5,6 +5,7 @@
 
 #include "http_parser.h"
 #include "platform/platform.h"
+#include "utils/safe_string.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,43 +49,7 @@ static char *strcasestr(const char *haystack, const char *needle) {
 #define MAX_VERSION_LEN 15
 #define MAX_CONTENT_LENGTH 262144  // 256KB max content length
 
-/**
- * @brief Safe string copy with bounds checking and null termination
- * @param dest Destination buffer
- * @param src Source string
- * @param dest_size Size of destination buffer
- * @return 0 on success, -1 on error
- */
-int safe_strncpy(char *dest, const char *src, size_t dest_size) {
-    if (!dest || !src || dest_size == 0) return -1;
-    
-    size_t src_len = strnlen(src, dest_size - 1);
-    if (src_len >= dest_size) return -1;
-    
-    memcpy(dest, src, src_len);
-    dest[src_len] = '\0';
-    return 0;
-}
-
-/**
- * @brief Safe string concatenation with bounds checking
- * @param dest Destination buffer
- * @param src Source string
- * @param dest_size Size of destination buffer
- * @return 0 on success, -1 on error
- */
-int safe_strncat(char *dest, const char *src, size_t dest_size) {
-    if (!dest || !src || dest_size == 0) return -1;
-    
-    size_t dest_len = strnlen(dest, dest_size - 1);
-    size_t src_len = strnlen(src, dest_size - dest_len - 1);
-    
-    if (dest_len + src_len >= dest_size) return -1;
-    
-    memcpy(dest + dest_len, src, src_len);
-    dest[dest_len + src_len] = '\0';
-    return 0;
-}
+/* Safe string functions are now provided by utils/safe_string.h */
 
 /**
  * @brief Validate content length value

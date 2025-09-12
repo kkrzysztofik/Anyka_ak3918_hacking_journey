@@ -16,6 +16,13 @@ SRCS := \
 	src/utils/resource_cleanup.c \
 	src/utils/response_buffer.c \
 	src/utils/memory_debug.c \
+	src/utils/safe_string.c \
+	src/utils/error_context.c \
+	src/utils/memory_manager.c \
+	src/utils/unified_soap_generator.c \
+	src/utils/centralized_config.c \
+	src/utils/xml_builder.c \
+	src/utils/common_error_handling.c \
 	src/services/service_manager.c \
 	src/services/device/onvif_device.c \
 	src/services/media/onvif_media.c \
@@ -38,7 +45,6 @@ SRCS := \
 	src/utils/network_utils.c \
 	src/utils/xml_utils.c \
 	src/utils/logging_utils.c \
-	src/utils/soap_helpers.c \
 	src/utils/response_helpers.c \
 	src/utils/service_handler.c
 

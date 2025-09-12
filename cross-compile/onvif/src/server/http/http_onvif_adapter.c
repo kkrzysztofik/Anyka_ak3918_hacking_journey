@@ -7,6 +7,9 @@
 #include "common/onvif_types.h"
 #include "utils/logging_utils.h"
 #include "utils/response_helpers.h"
+#include "utils/safe_string.h"
+#include "utils/error_context.h"
+#include "utils/memory_manager.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -37,7 +40,10 @@ int http_to_onvif_request(const http_request_t *http_req, onvif_request_t *onvif
             if (onvif_req->body) free(onvif_req->body);
             return -1;
         }
-        strcpy(onvif_req->headers, http_req->headers);
+        if (safe_strcpy(onvif_req->headers, sizeof(onvif_req->headers), http_req->headers) != 0) {
+            if (onvif_req->body) free(onvif_req->body);
+            return -1;
+        }
         onvif_req->headers_length = headers_len;
     }
     
@@ -80,7 +86,10 @@ int onvif_to_http_response(const onvif_response_t *onvif_resp, http_response_t *
             if (http_resp->body) free(http_resp->body);
             return -1;
         }
-        strcpy(http_resp->content_type, onvif_resp->content_type);
+        if (safe_strcpy(http_resp->content_type, sizeof(http_resp->content_type), onvif_resp->content_type) != 0) {
+            if (http_resp->body) free(http_resp->body);
+            return -1;
+        }
     }
     
     return 0;

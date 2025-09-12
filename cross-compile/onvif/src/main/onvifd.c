@@ -23,6 +23,9 @@
 #include "server/discovery/ws_discovery.h"
 #include "utils/error_handling.h"
 #include "common/onvif_imaging_types.h"
+#include "utils/safe_string.h"
+#include "utils/error_context.h"
+#include "utils/memory_manager.h"
 #include "utils/constants_clean.h"
 
 static volatile int running = 1;
@@ -58,6 +61,7 @@ static void full_cleanup(void){
     http_server_stop();
     onvif_services_cleanup();
     memory_debug_cleanup();
+    memory_manager_cleanup();
 }
 
 /**
@@ -125,8 +129,8 @@ static void init_video_and_streams(void){
 
     /* Main (/vs0) */
     rtsp_stream_config_t main_cfg; memset(&main_cfg, 0, sizeof(main_cfg));
-    strcpy(main_cfg.stream_path, "/vs0");
-    strcpy(main_cfg.stream_name, "main");
+    safe_strcpy(main_cfg.stream_path, sizeof(main_cfg.stream_path), "/vs0");
+    safe_strcpy(main_cfg.stream_name, sizeof(main_cfg.stream_name), "main");
     main_cfg.port = 554; main_cfg.enabled = true; main_cfg.vi_handle = vi_handle;
     main_cfg.video_config.width  = (resolution.width  > 1920) ? 1920 : resolution.width;
     main_cfg.video_config.height = (resolution.height > 1080) ? 1080 : resolution.height;
@@ -138,8 +142,8 @@ static void init_video_and_streams(void){
 
     /* Sub (/vs1) */
     rtsp_stream_config_t sub_cfg; memset(&sub_cfg, 0, sizeof(sub_cfg));
-    strcpy(sub_cfg.stream_path, "/vs1");
-    strcpy(sub_cfg.stream_name, "sub");
+    safe_strcpy(sub_cfg.stream_path, sizeof(sub_cfg.stream_path), "/vs1");
+    safe_strcpy(sub_cfg.stream_name, sizeof(sub_cfg.stream_name), "sub");
     sub_cfg.port = 554; sub_cfg.enabled = true; sub_cfg.vi_handle = vi_handle;
     int target_w = main_cfg.video_config.width / 2;
     int target_h = main_cfg.video_config.height / 2;
@@ -180,6 +184,12 @@ int main(int argc, char **argv){
 
     signal(SIGINT, sigint_handler);
 
+    /* Initialize memory manager */
+    if (memory_manager_init() != 0) {
+        platform_log_error("Failed to initialize memory manager\n");
+        return 1;
+    }
+    
     /* Initialize memory debugging */
     if (memory_debug_init() != 0) {
         platform_log_warning("warning: failed to initialize memory debugging\n");
