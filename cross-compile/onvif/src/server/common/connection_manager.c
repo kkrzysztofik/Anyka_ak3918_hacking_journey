@@ -13,7 +13,7 @@
 
 /* Global connection list */
 connection_t *g_connections = NULL;
-void *g_connections_mutex = NULL;
+pthread_mutex_t g_connections_mutex;
 
 /* Timeout constants */
 #define CONNECTION_TIMEOUT_MS 30000  // 30 seconds
@@ -34,15 +34,9 @@ uint64_t get_time_ms(void) {
  * @return 0 on success, -1 on error
  */
 int connection_manager_init(void) {
-    g_connections_mutex = malloc(sizeof(pthread_mutex_t));
-    if (!g_connections_mutex) {
-        platform_log_error("Failed to allocate connections mutex\n");
-        return -1;
-    }
-    
-    if (pthread_mutex_init((pthread_mutex_t*)g_connections_mutex, NULL) != 0) {
+    // Use static mutex instead of dynamic allocation
+    if (pthread_mutex_init(&g_connections_mutex, NULL) != 0) {
         platform_log_error("Failed to initialize connections mutex\n");
-        free(g_connections_mutex);
         return -1;
     }
     
@@ -54,21 +48,17 @@ int connection_manager_init(void) {
  * @brief Cleanup connection manager
  */
 void connection_manager_cleanup(void) {
-    if (g_connections_mutex) {
-        pthread_mutex_lock((pthread_mutex_t*)g_connections_mutex);
-        connection_t *conn = g_connections;
-        while (conn) {
-            connection_t *next = conn->next;
-            connection_destroy(conn);
-            conn = next;
-        }
-        g_connections = NULL;
-        pthread_mutex_unlock((pthread_mutex_t*)g_connections_mutex);
-        
-        pthread_mutex_destroy((pthread_mutex_t*)g_connections_mutex);
-        free(g_connections_mutex);
-        g_connections_mutex = NULL;
+    pthread_mutex_lock(&g_connections_mutex);
+    connection_t *conn = g_connections;
+    while (conn) {
+        connection_t *next = conn->next;
+        connection_destroy(conn);
+        conn = next;
     }
+    g_connections = NULL;
+    pthread_mutex_unlock(&g_connections_mutex);
+    
+    pthread_mutex_destroy(&g_connections_mutex);
 }
 
 /**
@@ -141,15 +131,15 @@ int connection_is_timed_out(connection_t *conn) {
  * @param conn Connection to add
  */
 void connection_add_to_list(connection_t *conn) {
-    if (!conn || !g_connections_mutex) return;
+    if (!conn) return;
     
-    pthread_mutex_lock((pthread_mutex_t*)g_connections_mutex);
+    pthread_mutex_lock(&g_connections_mutex);
     conn->next = g_connections;
     if (g_connections) {
         g_connections->prev = conn;
     }
     g_connections = conn;
-    pthread_mutex_unlock((pthread_mutex_t*)g_connections_mutex);
+    pthread_mutex_unlock(&g_connections_mutex);
 }
 
 /**
@@ -157,9 +147,9 @@ void connection_add_to_list(connection_t *conn) {
  * @param conn Connection to remove
  */
 void connection_remove_from_list(connection_t *conn) {
-    if (!conn || !g_connections_mutex) return;
+    if (!conn) return;
     
-    pthread_mutex_lock((pthread_mutex_t*)g_connections_mutex);
+    pthread_mutex_lock(&g_connections_mutex);
     if (conn->prev) {
         conn->prev->next = conn->next;
     } else {
@@ -168,16 +158,14 @@ void connection_remove_from_list(connection_t *conn) {
     if (conn->next) {
         conn->next->prev = conn->prev;
     }
-    pthread_mutex_unlock((pthread_mutex_t*)g_connections_mutex);
+    pthread_mutex_unlock(&g_connections_mutex);
 }
 
 /**
  * @brief Cleanup timed out connections
  */
 void connection_cleanup_timed_out(void) {
-    if (!g_connections_mutex) return;
-    
-    pthread_mutex_lock((pthread_mutex_t*)g_connections_mutex);
+    pthread_mutex_lock(&g_connections_mutex);
     
     connection_t *conn = g_connections;
     while (conn) {
@@ -190,5 +178,5 @@ void connection_cleanup_timed_out(void) {
         conn = next;
     }
     
-    pthread_mutex_unlock((pthread_mutex_t*)g_connections_mutex);
+    pthread_mutex_unlock(&g_connections_mutex);
 }

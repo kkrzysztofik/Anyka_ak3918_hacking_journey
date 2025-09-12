@@ -18,10 +18,13 @@
 #include "config.h"
 #include "services/service_manager.h"
 #include "server/http/http_server.h"
+#include "utils/memory_debug.h"
 #include "server/rtsp/rtsp_server.h"
 #include "server/discovery/ws_discovery.h"
-#include "constants.h"
-#include "platform.h"
+#include "utils/error_handling.h"
+#include "common/onvif_imaging_types.h"
+
+#include "utils/constants_clean.h"
 
 static volatile int running = 1;
 /* Primary (main) and secondary (sub) RTSP servers */
@@ -55,6 +58,7 @@ static void full_cleanup(void){
     ws_discovery_stop();
     http_server_stop();
     onvif_services_cleanup();
+    memory_debug_cleanup();
 }
 
 /**
@@ -73,15 +77,15 @@ static void sigint_handler(int sig){
  * @brief Print service endpoint URLs for user convenience.
  */
 static void print_endpoints(const struct application_config *cfg){
-    printf("ONVIF daemon started successfully on port %d\n", cfg->onvif.http_port);
-    printf("Device services available at:\n");
-    printf("  Device:  http://[IP]:%d/onvif/device_service\n", cfg->onvif.http_port);
-    printf("  Media:   http://[IP]:%d/onvif/media_service\n", cfg->onvif.http_port);
-    printf("  PTZ:     http://[IP]:%d/onvif/ptz_service\n", cfg->onvif.http_port);
-    printf("  Imaging: http://[IP]:%d/onvif/imaging_service\n", cfg->onvif.http_port);
-    if (rtsp_server_main) printf("  RTSP Stream (main): rtsp://[IP]:554/vs0\n");
-    if (rtsp_server_sub)  printf("  RTSP Stream (sub):  rtsp://[IP]:554/vs1\n");
-    printf("Press Ctrl-C to stop.\n");
+    platform_log_notice("ONVIF daemon started successfully on port %d\n", cfg->onvif.http_port);
+    platform_log_notice("Device services available at:\n");
+    platform_log_notice("  Device:  http://[IP]:%d/onvif/device_service\n", cfg->onvif.http_port);
+    platform_log_notice("  Media:   http://[IP]:%d/onvif/media_service\n", cfg->onvif.http_port);
+    platform_log_notice("  PTZ:     http://[IP]:%d/onvif/ptz_service\n", cfg->onvif.http_port);
+    platform_log_notice("  Imaging: http://[IP]:%d/onvif/imaging_service\n", cfg->onvif.http_port);
+    if (rtsp_server_main) platform_log_notice("  RTSP Stream (main): rtsp://[IP]:554/vs0\n");
+    if (rtsp_server_sub)  platform_log_notice("  RTSP Stream (sub):  rtsp://[IP]:554/vs1\n");
+    platform_log_notice("Press Ctrl-C to stop.\n");
 }
 
 /* Configure and start an RTSP server given a prepared config struct */
@@ -94,11 +98,11 @@ static void print_endpoints(const struct application_config *cfg){
 static rtsp_server_t *create_and_start_rtsp(rtsp_stream_config_t *cfg, const char *label){
     rtsp_server_t *srv = rtsp_server_create(cfg);
     if (!srv){
-        fprintf(stderr, "warning: failed to create %s RTSP server\n", label);
+        platform_log_warning("warning: failed to create %s RTSP server\n", label);
         return NULL;
     }
     if (rtsp_server_start(srv) != 0){
-        fprintf(stderr, "warning: failed to start %s RTSP stream\n", label);
+        platform_log_warning("warning: failed to start %s RTSP stream\n", label);
         rtsp_server_destroy(srv);
         return NULL;
     }
@@ -110,15 +114,15 @@ static rtsp_server_t *create_and_start_rtsp(rtsp_stream_config_t *cfg, const cha
  * @brief Initialize video input and launch main + sub RTSP streams if possible.
  */
 static void init_video_and_streams(void){
-    printf("Initializing video input...\n");
+    platform_log_info("Initializing video input...\n");
     if (platform_vi_open(&vi_handle) != 0){
-        fprintf(stderr, "warning: failed to open video input, RTSP streaming disabled\n");
+        platform_log_warning("warning: failed to open video input, RTSP streaming disabled\n");
         return;
     }
 
     platform_video_resolution_t resolution;
     platform_vi_get_sensor_resolution(vi_handle, &resolution);
-    printf("Video input initialized: %dx%d\n", resolution.width, resolution.height);
+    platform_log_info("Video input initialized: %dx%d\n", resolution.width, resolution.height);
 
     /* Main (/vs0) */
     rtsp_stream_config_t main_cfg; memset(&main_cfg, 0, sizeof(main_cfg));
@@ -131,7 +135,7 @@ static void init_video_and_streams(void){
     main_cfg.video_config.gop_size = 50; main_cfg.video_config.profile = PLATFORM_PROFILE_MAIN;
     main_cfg.video_config.codec_type = PLATFORM_H264_ENC_TYPE; main_cfg.video_config.br_mode = PLATFORM_BR_MODE_CBR;
     rtsp_server_main = create_and_start_rtsp(&main_cfg, "main");
-    if (rtsp_server_main) printf("RTSP main stream started: rtsp://[IP]:554/vs0\n");
+    if (rtsp_server_main) platform_log_notice("RTSP main stream started: rtsp://[IP]:554/vs0\n");
 
     /* Sub (/vs1) */
     rtsp_stream_config_t sub_cfg; memset(&sub_cfg, 0, sizeof(sub_cfg));
@@ -149,7 +153,7 @@ static void init_video_and_streams(void){
     sub_cfg.video_config.codec_type = PLATFORM_H264_ENC_TYPE; sub_cfg.video_config.br_mode = PLATFORM_BR_MODE_CBR;
     rtsp_server_sub = create_and_start_rtsp(&sub_cfg, "sub");
     if (rtsp_server_sub){
-        printf("RTSP sub stream started: rtsp://[IP]:554/vs1 (%dx%d @ %dfps %dkbps)\n",
+        platform_log_notice("RTSP sub stream started: rtsp://[IP]:554/vs1 (%dx%d @ %dfps %dkbps)\n",
                sub_cfg.video_config.width, sub_cfg.video_config.height,
                sub_cfg.video_config.fps, sub_cfg.video_config.bitrate);
     }
@@ -160,16 +164,16 @@ static void init_video_and_streams(void){
  */
 static void start_optional_services(const struct application_config *cfg){
     if (onvif_services_init(vi_handle) != 0)
-        fprintf(stderr, "warning: failed to initialize ONVIF services\n");
+        platform_log_warning("warning: failed to initialize ONVIF services\n");
     if (http_server_start(cfg->onvif.http_port) != 0) {
-        fprintf(stderr, "failed to start HTTP server on port %d\n", cfg->onvif.http_port);
+        platform_log_error("failed to start HTTP server on port %d\n", cfg->onvif.http_port);
         full_cleanup();
         exit(1);
     }
     if (ws_discovery_start(cfg->onvif.http_port) != 0)
-        fprintf(stderr, "warning: WS-Discovery failed to start\n");
+        platform_log_warning("warning: WS-Discovery failed to start\n");
     else
-        printf("WS-Discovery responder active (multicast %s:%d)\n", "239.255.255.250", 3702);
+        platform_log_notice("WS-Discovery responder active (multicast %s:%d)\n", "239.255.255.250", 3702);
 }
 
 int main(int argc, char **argv){
@@ -177,19 +181,24 @@ int main(int argc, char **argv){
 
     signal(SIGINT, sigint_handler);
 
+    /* Initialize memory debugging */
+    if (memory_debug_init() != 0) {
+        platform_log_warning("warning: failed to initialize memory debugging\n");
+    }
+
     /* Load configuration */
     if (config_load(&cfg, ONVIF_CONFIG_FILE) != 0) {
-        fprintf(stderr, "warning: failed to read config at %s\n", ONVIF_CONFIG_FILE);
-        fprintf(stderr, "warning: using default configuration (embedded)\n");
+        platform_log_warning("warning: failed to read config at %s\n", ONVIF_CONFIG_FILE);
+        platform_log_warning("warning: using default configuration (embedded)\n");
     }
     if (!cfg.onvif.enabled) {
-        printf("ONVIF service is disabled in configuration\n");
+        platform_log_notice("ONVIF service is disabled in configuration\n");
         return 0;
     }
 
-    printf("Starting ONVIF daemon...\n");
-    printf("Configuration: port=%d, user=%s (imaging.brightness=%d)\n",
-           cfg.onvif.http_port, cfg.onvif.username, cfg.imaging.brightness);
+    platform_log_notice("Starting ONVIF daemon...\n");
+    platform_log_notice("Configuration: port=%d, user=%s (imaging.brightness=%d)\n",
+           cfg.onvif.http_port, cfg.onvif.username, cfg.imaging->brightness);
 
 
     init_video_and_streams(); /* Non-fatal on failure */
@@ -198,8 +207,8 @@ int main(int argc, char **argv){
 
     while (running) sleep(1);
 
-    printf("Shutting down ONVIF daemon...\n");
+    platform_log_notice("Shutting down ONVIF daemon...\n");
     full_cleanup();
-    printf("ONVIF daemon exited\n");
+    platform_log_notice("ONVIF daemon exited\n");
     return 0;
 }

@@ -19,6 +19,7 @@
 #define ONVIF_ERROR_TIMEOUT  -7
 #define ONVIF_ERROR_NOT_FOUND -8
 #define ONVIF_ERROR_ALREADY_EXISTS -9
+#define ONVIF_ERROR_NOT_SUPPORTED -10
 
 /* Error handling macros */
 #define ONVIF_CHECK_NULL(ptr) \

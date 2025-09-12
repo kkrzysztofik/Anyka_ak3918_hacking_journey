@@ -11,9 +11,10 @@
 #include "onvif_media.h"
 #include "config.h"
 #include "network_utils.h"
-#include "../server/http/http_parser.h"
 #include "../utils/xml_utils.h"
 #include "../utils/logging_utils.h"
+#include "../utils/error_handling.h"
+#include "../utils/constants_clean.h"
 #include "../common/onvif_types.h"
 
 /* Static media profiles */
@@ -97,37 +98,41 @@ static struct media_profile profiles[] = {
 #define PROFILE_COUNT 2
 
 int onvif_media_get_profiles(struct media_profile **profile_list, int *count) {
-    if (!profile_list || !count) return -1;
+    ONVIF_CHECK_NULL(profile_list);
+    ONVIF_CHECK_NULL(count);
     
     *profile_list = profiles;
     *count = PROFILE_COUNT;
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_media_get_profile(const char *profile_token, struct media_profile *profile) {
-    if (!profile_token || !profile) return -1;
+    ONVIF_CHECK_NULL(profile_token);
+    ONVIF_CHECK_NULL(profile);
     
     for (int i = 0; i < PROFILE_COUNT; i++) {
         if (strcmp(profiles[i].token, profile_token) == 0) {
             *profile = profiles[i];
-            return 0;
+            return ONVIF_SUCCESS;
         }
     }
-    return -1;
+    return ONVIF_ERROR_NOT_FOUND;
 }
 
 int onvif_media_create_profile(const char *name, const char *token, struct media_profile *profile) {
-    if (!name || !token || !profile) return -1;
+    ONVIF_CHECK_NULL(name);
+    ONVIF_CHECK_NULL(token);
+    ONVIF_CHECK_NULL(profile);
     
     /* For simplicity, don't support dynamic profile creation */
-    return -1;
+    return ONVIF_ERROR_NOT_SUPPORTED;
 }
 
 int onvif_media_delete_profile(const char *profile_token) {
-    if (!profile_token) return -1;
+    ONVIF_CHECK_NULL(profile_token);
     
     /* For simplicity, don't support profile deletion */
-    return -1;
+    return ONVIF_ERROR_NOT_SUPPORTED;
 }
 
 int onvif_media_get_video_sources(struct video_source **sources, int *count) {
@@ -145,11 +150,12 @@ int onvif_media_get_video_sources(struct video_source **sources, int *count) {
         }
     };
     
-    if (!sources || !count) return -1;
+    ONVIF_CHECK_NULL(sources);
+    ONVIF_CHECK_NULL(count);
     
     *sources = video_sources;
     *count = 1;
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_media_get_audio_sources(struct audio_source **sources, int *count) {
@@ -160,11 +166,12 @@ int onvif_media_get_audio_sources(struct audio_source **sources, int *count) {
         }
     };
     
-    if (!sources || !count) return -1;
+    ONVIF_CHECK_NULL(sources);
+    ONVIF_CHECK_NULL(count);
     
     *sources = audio_sources;
     *count = 1;
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_media_get_video_source_configurations(struct video_source_configuration **configs, int *count) {
@@ -178,11 +185,12 @@ int onvif_media_get_video_source_configurations(struct video_source_configuratio
         }
     };
     
-    if (!configs || !count) return -1;
+    ONVIF_CHECK_NULL(configs);
+    ONVIF_CHECK_NULL(count);
     
     *configs = video_configs;
     *count = 1;
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_media_get_video_encoder_configurations(struct video_encoder_configuration **configs, int *count) {
@@ -229,11 +237,12 @@ int onvif_media_get_video_encoder_configurations(struct video_encoder_configurat
         }
     };
     
-    if (!configs || !count) return -1;
+    ONVIF_CHECK_NULL(configs);
+    ONVIF_CHECK_NULL(count);
     
     *configs = video_enc_configs;
     *count = 2;
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_media_get_audio_source_configurations(struct audio_source_configuration **configs, int *count) {
@@ -246,11 +255,12 @@ int onvif_media_get_audio_source_configurations(struct audio_source_configuratio
         }
     };
     
-    if (!configs || !count) return -1;
+    ONVIF_CHECK_NULL(configs);
+    ONVIF_CHECK_NULL(count);
     
     *configs = audio_configs;
     *count = 1;
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_media_get_audio_encoder_configurations(struct audio_encoder_configuration **configs, int *count) {
@@ -272,15 +282,18 @@ int onvif_media_get_audio_encoder_configurations(struct audio_encoder_configurat
         }
     };
     
-    if (!configs || !count) return -1;
+    ONVIF_CHECK_NULL(configs);
+    ONVIF_CHECK_NULL(count);
     
     *configs = audio_enc_configs;
     *count = 1;
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_media_get_stream_uri(const char *profile_token, const char *protocol, struct stream_uri *uri) {
-    if (!profile_token || !protocol || !uri) return -1;
+    ONVIF_CHECK_NULL(profile_token);
+    ONVIF_CHECK_NULL(protocol);
+    ONVIF_CHECK_NULL(uri);
     
     /* Find the profile */
     struct media_profile *profile = NULL;
@@ -291,53 +304,54 @@ int onvif_media_get_stream_uri(const char *profile_token, const char *protocol, 
         }
     }
     
-    if (!profile) return -1;
+    ONVIF_CHECK_NULL(profile);
     
     /* Generate RTSP URI based on profile */
     if (strcmp(protocol, "RTSP") == 0 || strcmp(protocol, "RTP-Unicast") == 0) {
         if (strcmp(profile_token, "MainProfile") == 0) {
-            build_device_url("rtsp", 554, "/vs0", uri->uri, sizeof(uri->uri));
+            build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_MAIN_STREAM_PATH, uri->uri, sizeof(uri->uri));
         } else if (strcmp(profile_token, "SubProfile") == 0) {
-            build_device_url("rtsp", 554, "/vs1", uri->uri, sizeof(uri->uri));
+            build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_SUB_STREAM_PATH, uri->uri, sizeof(uri->uri));
         } else {
-            build_device_url("rtsp", 554, "/vs0", uri->uri, sizeof(uri->uri));
+            build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_MAIN_STREAM_PATH, uri->uri, sizeof(uri->uri));
         }
         
         uri->invalid_after_connect = 0;
         uri->invalid_after_reboot = 0;
         uri->timeout = 60;
-        return 0;
+        return ONVIF_SUCCESS;
     }
     
-    return -1;
+    return ONVIF_ERROR_NOT_FOUND;
 }
 
 int onvif_media_get_snapshot_uri(const char *profile_token, struct stream_uri *uri) {
-    if (!profile_token || !uri) return -1;
+    ONVIF_CHECK_NULL(profile_token);
+    ONVIF_CHECK_NULL(uri);
     
     /* Generate snapshot URI */
-    build_device_url("http", 3000, "/snapshot.bmp", uri->uri, sizeof(uri->uri));
+    build_device_url("http", ONVIF_SNAPSHOT_PORT_DEFAULT, SNAPSHOT_PATH, uri->uri, sizeof(uri->uri));
     uri->invalid_after_connect = 0;
     uri->invalid_after_reboot = 0;
     uri->timeout = 60;
     
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_media_start_multicast_streaming(const char *profile_token) {
-    if (!profile_token) return -1;
+    ONVIF_CHECK_NULL(profile_token);
     
     /* TODO: Implement multicast streaming */
-    printf("StartMulticastStreaming for profile %s (not implemented)\n", profile_token);
-    return -1;
+    platform_log_info("StartMulticastStreaming for profile %s (not implemented)\n", profile_token);
+    return ONVIF_ERROR_NOT_FOUND;
 }
 
 int onvif_media_stop_multicast_streaming(const char *profile_token) {
-    if (!profile_token) return -1;
+    ONVIF_CHECK_NULL(profile_token);
     
     /* TODO: Implement multicast streaming */
-    printf("StopMulticastStreaming for profile %s (not implemented)\n", profile_token);
-    return -1;
+    platform_log_info("StopMulticastStreaming for profile %s (not implemented)\n", profile_token);
+    return ONVIF_ERROR_NOT_FOUND;
 }
 
 /* SOAP XML generation helpers */
@@ -378,15 +392,15 @@ static void soap_success_response(char *response, size_t response_size, const ch
  */
 int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
     if (!request || !response) {
-        return -1;
+        return ONVIF_ERROR_NOT_FOUND;
     }
     
     // Initialize response structure
     response->status_code = 200;
     response->content_type = "application/soap+xml";
-    response->body = malloc(4096);
+    response->body = malloc(ONVIF_RESPONSE_BUFFER_SIZE);
     if (!response->body) {
-        return -1;
+        return ONVIF_ERROR_NOT_FOUND;
     }
     response->body_length = 0;
     
@@ -395,11 +409,11 @@ int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t
             struct media_profile *profiles = NULL;
             int count = 0;
             if (onvif_media_get_profiles(&profiles, &count) == 0) {
-                char profiles_xml[4096];
+                char profiles_xml[ONVIF_RESPONSE_BUFFER_SIZE];
                 strcpy(profiles_xml, "<trt:Profiles>\n");
                 
                 for (int i = 0; i < count; i++) {
-                    char profile_xml[1024];
+                    char profile_xml[ONVIF_XML_BUFFER_SIZE];
                     snprintf(profile_xml, sizeof(profile_xml),
                         "  <trt:Profile token=\"%s\" fixed=\"%s\">\n"
                         "    <tt:Name>%s</tt:Name>\n"
@@ -473,7 +487,7 @@ int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t
                 }
                 strcat(profiles_xml, "</trt:Profiles>");
                 
-                snprintf(response->body, 4096, 
+                snprintf(response->body, ONVIF_RESPONSE_BUFFER_SIZE, 
                     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                     "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
                     "  <soap:Body>\n"
@@ -484,7 +498,7 @@ int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t
                     "</soap:Envelope>", profiles_xml);
                 response->body_length = strlen(response->body);
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get profiles");
+                soap_fault_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, SOAP_FAULT_RECEIVER, "Failed to get profiles");
                 response->body_length = strlen(response->body);
             }
             break;
@@ -494,11 +508,11 @@ int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t
             struct video_source *sources = NULL;
             int count = 0;
             if (onvif_media_get_video_sources(&sources, &count) == 0) {
-                char sources_xml[2048];
+                char sources_xml[ONVIF_RESPONSE_BUFFER_SIZE];
                 strcpy(sources_xml, "<trt:VideoSources>\n");
                 
                 for (int i = 0; i < count; i++) {
-                    char source_xml[512];
+                    char source_xml[ONVIF_XML_BUFFER_SIZE];
                     snprintf(source_xml, sizeof(source_xml),
                         "  <tt:VideoSource token=\"%s\">\n"
                         "    <tt:Resolution>\n"
@@ -520,7 +534,7 @@ int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t
                 }
                 strcat(sources_xml, "</trt:VideoSources>");
                 
-                snprintf(response->body, 4096,
+                snprintf(response->body, ONVIF_RESPONSE_BUFFER_SIZE,
                     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                     "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
                     "  <soap:Body>\n"
@@ -531,7 +545,7 @@ int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t
                     "</soap:Envelope>", sources_xml);
                 response->body_length = strlen(response->body);
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get video sources");
+                soap_fault_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, SOAP_FAULT_RECEIVER, "Failed to get video sources");
                 response->body_length = strlen(response->body);
             }
             break;

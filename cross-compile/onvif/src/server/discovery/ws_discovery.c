@@ -15,12 +15,8 @@
 
 #include "ws_discovery.h"
 #include "network_utils.h"
-#include "constants.h"
+#include "constants_clean.h"
 #include "platform.h"
-
-#define WS_DISCOVERY_PORT 3702
-#define WS_DISCOVERY_ADDR "239.255.255.250"
-#define MAX_UDP_SIZE 4096
 
 /* Some stripped uClibc headers may omit ip_mreq; provide minimal fallback */
 #ifndef IP_ADD_MEMBERSHIP
@@ -39,16 +35,15 @@ struct ip_mreq {
 static int discovery_running = 0;
 static int discovery_socket = -1;
 static pthread_t discovery_thread;
-static int g_http_port = 8080;
-static char g_endpoint_uuid[80] = {0}; /* urn:uuid:... */
+static int g_http_port = ONVIF_HTTP_PORT_DEFAULT;
+static char g_endpoint_uuid[ONVIF_MAX_XADDR_LEN] = {0}; /* urn:uuid:... */
 static pthread_mutex_t g_endpoint_uuid_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Announcement interval (seconds) for periodic Hello re-broadcast */
-#define HELLO_INTERVAL 300
 
 /* Derive a pseudo-MAC from hostname (avoids platform ifreq dependency) */
 static void derive_pseudo_mac(unsigned char mac[6]) {
-    char host[128];
+        char host[ONVIF_MAX_SERVICE_NAME_LEN];
     if (get_device_hostname(host, sizeof(host)) != 0) {
         strcpy(host, "anyka");
     }
@@ -89,22 +84,22 @@ static void send_multicast(const char *payload) {
         if (sock < 0) return;
         struct sockaddr_in addr; memset(&addr,0,sizeof(addr));
         addr.sin_family = AF_INET;
-        addr.sin_port = htons(WS_DISCOVERY_PORT);
-        addr.sin_addr.s_addr = inet_addr(WS_DISCOVERY_ADDR);
+        addr.sin_port = htons(ONVIF_WS_DISCOVERY_PORT);
+        addr.sin_addr.s_addr = inet_addr(ONVIF_WS_DISCOVERY_MULTICAST);
         sendto(sock, payload, strlen(payload), 0, (struct sockaddr*)&addr, sizeof(addr));
         close(sock);
 }
 
 static void send_hello(void) {
         char ip[64]; char msg_id[64]; get_ip(ip,sizeof(ip)); gen_msg_uuid(msg_id,sizeof(msg_id));
-        char xml[1024];
+        char xml[ONVIF_XML_BUFFER_SIZE];
     snprintf(xml, sizeof(xml), WSD_HELLO_TEMPLATE, msg_id, g_endpoint_uuid, ip, g_http_port);
         send_multicast(xml);
 }
 
 static void send_bye(void) {
         char ip[64]; char msg_id[64]; get_ip(ip,sizeof(ip)); gen_msg_uuid(msg_id,sizeof(msg_id));
-        char xml[768];
+        char xml[ONVIF_XML_BUFFER_SIZE];
     snprintf(xml, sizeof(xml), WSD_BYE_TEMPLATE, msg_id, g_endpoint_uuid);
         send_multicast(xml);
 }
@@ -115,7 +110,7 @@ static void *discovery_loop(void *arg){
     memset(&local_addr, 0, sizeof(local_addr));
     local_addr.sin_family = AF_INET;
     local_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    local_addr.sin_port = htons(WS_DISCOVERY_PORT);
+    local_addr.sin_port = htons(ONVIF_WS_DISCOVERY_PORT);
 
     discovery_socket = socket(AF_INET, SOCK_DGRAM, 0);
     if (discovery_socket < 0) {
@@ -130,13 +125,13 @@ static void *discovery_loop(void *arg){
         close(discovery_socket); discovery_socket=-1; discovery_running=0; return NULL;
     }
     struct ip_mreq mreq; 
-    mreq.imr_multiaddr.s_addr = inet_addr(WS_DISCOVERY_ADDR);
+    mreq.imr_multiaddr.s_addr = inet_addr(ONVIF_WS_DISCOVERY_MULTICAST);
     mreq.imr_interface.s_addr = htonl(INADDR_ANY);
     if (setsockopt(discovery_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq))<0) {
         perror("wsd mcast join");
     }
 
-        char buf[MAX_UDP_SIZE];
+        char buf[ONVIF_RESPONSE_BUFFER_SIZE];
         srand((unsigned)time(NULL));
         pthread_mutex_lock(&g_endpoint_uuid_mutex);
         if (!g_endpoint_uuid[0]) build_endpoint_uuid();
@@ -154,12 +149,12 @@ static void *discovery_loop(void *arg){
                 if (strstr(buf, "Probe")) {
                         char msg_id[64]; gen_msg_uuid(msg_id,sizeof(msg_id));
                         char ip[64]; get_ip(ip,sizeof(ip));
-                        char response[1024];
+                        char response[ONVIF_RESPONSE_BUFFER_SIZE];
                         snprintf(response, sizeof(response), WSD_PROBE_MATCH_TEMPLATE, msg_id, g_endpoint_uuid, ip, g_http_port);
                         sendto(discovery_socket, response, strlen(response), 0, (struct sockaddr*)&src, slen);
                 }
                 time_t now = time(NULL);
-                if (now - last_hello >= HELLO_INTERVAL) { send_hello(); last_hello = now; }
+                if (now - last_hello >= WSD_HELLO_INTERVAL_SECONDS) { send_hello(); last_hello = now; }
     }
     if (discovery_socket>=0) { close(discovery_socket); discovery_socket=-1; }
     return NULL;

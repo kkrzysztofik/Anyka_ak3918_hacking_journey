@@ -8,11 +8,11 @@
 #include <pthread.h>
 #include "onvif_imaging.h"
 #include "config.h"
-#include "constants.h"
+#include "constants_clean.h"
 #include "platform.h"
-#include "../server/http/http_parser.h"
 #include "../utils/xml_utils.h"
 #include "../utils/logging_utils.h"
+#include "../utils/error_handling.h"
 #include "../common/onvif_types.h"
 
 static struct auto_daynight_config g_auto_config;
@@ -30,7 +30,7 @@ int onvif_imaging_init(void *vi_handle) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex); 
-        return 0; 
+        return ONVIF_SUCCESS; 
     } 
     
     g_vi_handle = vi_handle; 
@@ -53,7 +53,9 @@ int onvif_imaging_init(void *vi_handle) {
     // Pull imaging settings from application config (already loaded in main)
     const struct application_config *ucfg = config_get();
     if (ucfg) {
-        g_imaging_settings = ucfg->imaging;
+        if (ucfg->imaging) {
+            memcpy(&g_imaging_settings, ucfg->imaging, sizeof(struct imaging_settings));
+        }
     log_config_updated("imaging settings");
     } else {
     platform_log_notice("Application config not loaded; using defaults\n");
@@ -71,7 +73,9 @@ int onvif_imaging_init(void *vi_handle) {
     
     // Load auto configuration
     if (ucfg) {
-        g_auto_config = ucfg->auto_daynight;
+        if (ucfg->auto_daynight) {
+            memcpy(&g_auto_config, ucfg->auto_daynight, sizeof(struct auto_daynight_config));
+        }
     }
     
     // Initialize IR LED driver via HAL
@@ -123,7 +127,7 @@ int onvif_imaging_init(void *vi_handle) {
     g_imaging_initialized = 1; 
     pthread_mutex_unlock(&g_imaging_mutex); 
     log_service_init_success("Imaging"); 
-    return 0; 
+    return ONVIF_SUCCESS; 
 }
 
 void onvif_imaging_cleanup(void) {
@@ -138,32 +142,32 @@ void onvif_imaging_cleanup(void) {
 int onvif_imaging_get_settings(struct imaging_settings *settings) {
     if (!settings) {
         log_invalid_parameters("onvif_imaging_get_settings");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
         log_service_not_initialized("Imaging");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     *settings = g_imaging_settings;
     pthread_mutex_unlock(&g_imaging_mutex);
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_imaging_set_settings(const struct imaging_settings *settings) {
     if (!settings) {
         platform_log_error("Invalid parameters\n");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
         log_service_not_initialized("Imaging");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     int ret = 0;
@@ -231,7 +235,7 @@ int onvif_imaging_set_day_night_mode(enum day_night_mode mode) {
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
         log_service_not_initialized("Imaging");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     int ret = 0;
@@ -268,7 +272,7 @@ int onvif_imaging_get_day_night_mode(void) {
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
         log_service_not_initialized("Imaging");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     enum day_night_mode mode = g_imaging_settings.daynight.mode;
@@ -281,7 +285,7 @@ int onvif_imaging_set_irled_mode(enum ir_led_mode mode) {
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
         log_service_not_initialized("Imaging");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     int ret = 0;
@@ -309,7 +313,7 @@ int onvif_imaging_get_irled_status(void) {
     int status = platform_irled_get_status();
     if (status < 0) {
         platform_log_error("Failed to get IR LED status\n");
-        return 0; // Return off if we can't determine status
+        return ONVIF_SUCCESS; // Return off if we can't determine status
     }
     return status;
 }
@@ -319,7 +323,7 @@ int onvif_imaging_set_flip_mirror(int flip, int mirror) {
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
         log_service_not_initialized("Imaging");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     int ret = platform_vi_set_flip_mirror(g_vi_handle, flip, mirror);
@@ -336,14 +340,14 @@ int onvif_imaging_set_flip_mirror(int flip, int mirror) {
 int onvif_imaging_set_auto_config(const struct auto_daynight_config *config) {
     if (!config) {
         platform_log_error("Invalid parameters\n");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
         log_service_not_initialized("Imaging");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     g_auto_config = *config;
@@ -354,38 +358,38 @@ int onvif_imaging_set_auto_config(const struct auto_daynight_config *config) {
     platform_log_notice("Auto day/night configuration updated\n");
     
     pthread_mutex_unlock(&g_imaging_mutex);
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_imaging_get_auto_config(struct auto_daynight_config *config) {
     if (!config) {
         platform_log_error("Invalid parameters\n");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
         log_service_not_initialized("Imaging");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     *config = g_auto_config;
     pthread_mutex_unlock(&g_imaging_mutex);
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_imaging_get_imaging_settings(char *response, int response_size) {
     if (!response || response_size <= 0) {
         platform_log_error("Invalid parameters\n");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
         log_service_not_initialized("Imaging");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     // Get current VPSS effect values
@@ -408,13 +412,13 @@ int onvif_imaging_get_imaging_settings(char *response, int response_size) {
              brightness_onvif, contrast_onvif, saturation_onvif, sharpness_onvif, hue_onvif);
     
     pthread_mutex_unlock(&g_imaging_mutex);
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_imaging_set_imaging_settings(const char *request, char *response, int response_size) {
     if (!request || !response || response_size <= 0) {
         platform_log_error("Invalid parameters\n");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     // Simple XML parsing - in a real implementation, you'd use a proper XML parser
@@ -500,13 +504,13 @@ int onvif_imaging_set_imaging_settings(const char *request, char *response, int 
 int onvif_imaging_get_options(char *response, int response_size) {
     if (!response || response_size <= 0) {
         platform_log_error("Invalid parameters\n");
-        return -1;
+        return ONVIF_ERROR;
     }
     
     // Create XML response with imaging capability ranges using template
     snprintf(response, response_size, ONVIF_SOAP_IMAGING_GET_OPTIONS_RESPONSE);
     
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 /* SOAP XML generation helpers */
@@ -547,7 +551,7 @@ static void soap_success_response(char *response, size_t response_size, const ch
  */
 int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
     if (!request || !response) {
-        return -1;
+        return ONVIF_ERROR;
     }
     
     // Initialize response structure
@@ -555,7 +559,7 @@ int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request
     response->content_type = "application/soap+xml";
     response->body = malloc(4096);
     if (!response->body) {
-        return -1;
+        return ONVIF_ERROR;
     }
     response->body_length = 0;
     

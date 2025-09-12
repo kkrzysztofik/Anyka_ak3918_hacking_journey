@@ -14,9 +14,27 @@
  * @param start_tag The opening tag (e.g., "<tds:Manufacturer>")
  * @param end_tag The closing tag (e.g., "</tds:Manufacturer>")
  * @return Allocated string containing the value, or NULL on failure
- * @note Caller must free the returned string
+ * @note Caller must free the returned string using xml_value_free()
  */
 char* xml_extract_value(const char *xml, const char *start_tag, const char *end_tag);
+
+/**
+ * @brief Extract XML value to pre-allocated buffer (no dynamic allocation)
+ * @param xml The XML string to parse
+ * @param start_tag The opening tag
+ * @param end_tag The closing tag
+ * @param buffer Pre-allocated buffer to store the value
+ * @param buffer_size Size of the buffer
+ * @return 0 on success, -1 on error
+ */
+int xml_extract_value_safe(const char *xml, const char *start_tag, const char *end_tag, 
+                          char *buffer, size_t buffer_size);
+
+/**
+ * @brief Free XML value allocated by xml_extract_value
+ * @param value The value to free
+ */
+void xml_value_free(char *value);
 
 /**
  * @brief Generate SOAP fault response

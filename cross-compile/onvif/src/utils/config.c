@@ -6,14 +6,19 @@
 #include <ctype.h>
 #include <errno.h>
 #include "config.h"
-#include "constants.h"
+#include "../platform/platform.h"
+
+#include "constants_clean.h"
+#include "../common/onvif_imaging_types.h"
 
 static struct application_config g_config; /* singleton */
+static struct imaging_settings g_imaging_settings;
+static struct auto_daynight_config g_auto_daynight_config;
 static int g_config_loaded = 0;
 
 static void set_core_defaults(struct onvif_settings *s){
     s->enabled = 1;
-    s->http_port = 8080;
+    s->http_port = ONVIF_HTTP_PORT_DEFAULT;
     strcpy(s->username, "admin");
     strcpy(s->password, "admin");
 }
@@ -25,7 +30,7 @@ static void set_imaging_defaults(struct imaging_settings *cfg){
     cfg->daynight.night_to_day_threshold = 70;
     cfg->daynight.lock_time_seconds = 5;
     cfg->daynight.ir_led_mode = IR_LED_AUTO;
-    cfg->daynight.ir_led_level = 80;
+    cfg->daynight.ir_led_level = IRLED_LEVEL_DEFAULT;
     cfg->daynight.enable_auto_switching = 1;
 }
 
@@ -40,8 +45,10 @@ int config_load(struct application_config *cfg, const char *config_file){
     FILE *fp; char line[512]; char section[128]=""; char key[128], value[256]; char *eq;
     if (!cfg || !config_file) return -1;
     set_core_defaults(&cfg->onvif);
-    set_imaging_defaults(&cfg->imaging);
-    cfg->auto_daynight = cfg->imaging.daynight; /* mirror defaults */
+    set_imaging_defaults(&g_imaging_settings);
+    cfg->imaging = &g_imaging_settings;
+    cfg->auto_daynight = &g_auto_daynight_config;
+    *cfg->auto_daynight = g_imaging_settings.daynight; /* mirror defaults */
     fp = fopen(config_file, "r");
     if (!fp){
         /* try alternate filename used in repo */
@@ -49,7 +56,7 @@ int config_load(struct application_config *cfg, const char *config_file){
             fp = fopen("/etc/jffs2/anyka_cfg.ini", "r");
         }
         if (!fp){
-            fprintf(stderr, "warning: could not open %s: %s (using defaults)\n", config_file, strerror(errno));
+            platform_log_warning("warning: could not open %s: %s (using defaults)\n", config_file, strerror(errno));
             return -1;
         }
     }
@@ -64,18 +71,18 @@ int config_load(struct application_config *cfg, const char *config_file){
             else if (key_eq(key,"http_port") || key_eq(key,"port")) cfg->onvif.http_port = atoi(value);
         }
         if (key_eq(section,"imaging")){
-            if (key_eq(key,"brightness")) cfg->imaging.brightness = atoi(value);
-            else if (key_eq(key,"contrast")) cfg->imaging.contrast = atoi(value);
-            else if (key_eq(key,"saturation")) cfg->imaging.saturation = atoi(value);
-            else if (key_eq(key,"sharpness")) cfg->imaging.sharpness = atoi(value);
-            else if (key_eq(key,"hue")) cfg->imaging.hue = atoi(value);
+            if (key_eq(key,"brightness")) cfg->imaging->brightness = atoi(value);
+            else if (key_eq(key,"contrast")) cfg->imaging->contrast = atoi(value);
+            else if (key_eq(key,"saturation")) cfg->imaging->saturation = atoi(value);
+            else if (key_eq(key,"sharpness")) cfg->imaging->sharpness = atoi(value);
+            else if (key_eq(key,"hue")) cfg->imaging->hue = atoi(value);
         }
         if (key_eq(section,"autoir")){
-            if (key_eq(key,"auto_day_night_enable")) cfg->auto_daynight.enable_auto_switching = atoi(value);
-            else if (key_eq(key,"day_night_mode")) { int m=atoi(value); if(m==0) cfg->auto_daynight.mode=DAY_NIGHT_AUTO; else if(m==1) cfg->auto_daynight.mode=DAY_NIGHT_DAY; else if(m==2) cfg->auto_daynight.mode=DAY_NIGHT_NIGHT; }
-            else if (key_eq(key,"day_to_night_lum") || key_eq(key,"day_to_night_threshold")) cfg->auto_daynight.day_to_night_threshold = atoi(value);
-            else if (key_eq(key,"night_to_day_lum") || key_eq(key,"night_to_day_threshold")) cfg->auto_daynight.night_to_day_threshold = atoi(value);
-            else if (key_eq(key,"lock_time") || key_eq(key,"lock_time_seconds")) cfg->auto_daynight.lock_time_seconds = atoi(value);
+            if (key_eq(key,"auto_day_night_enable")) cfg->auto_daynight->enable_auto_switching = atoi(value);
+            else if (key_eq(key,"day_night_mode")) { int m=atoi(value); if(m==0) cfg->auto_daynight->mode=DAY_NIGHT_AUTO; else if(m==1) cfg->auto_daynight->mode=DAY_NIGHT_DAY; else if(m==2) cfg->auto_daynight->mode=DAY_NIGHT_NIGHT; }
+            else if (key_eq(key,"day_to_night_lum") || key_eq(key,"day_to_night_threshold")) cfg->auto_daynight->day_to_night_threshold = atoi(value);
+            else if (key_eq(key,"night_to_day_lum") || key_eq(key,"night_to_day_threshold")) cfg->auto_daynight->night_to_day_threshold = atoi(value);
+            else if (key_eq(key,"lock_time") || key_eq(key,"lock_time_seconds")) cfg->auto_daynight->lock_time_seconds = atoi(value);
         }
     }
     fclose(fp);
@@ -87,19 +94,35 @@ const struct application_config *config_get(void){ return g_config_loaded ? &g_c
 
 int config_save_imaging(const struct imaging_settings *s){ 
     if(!s) return -1; 
-    FILE *fp = fopen(ONVIF_CONFIG_FILE, "a"); 
-    if(!fp) return -1; 
+    FILE *fp = fopen(ONVIF_CONFIG_FILE_DEFAULT, "a"); 
+    if(!fp) {
+        platform_log_error("Failed to open config file for writing: %s\n", ONVIF_CONFIG_FILE_DEFAULT);
+        return -1; 
+    }
     int ret = fprintf(fp,"\n[imaging]\nbrightness=%d\ncontrast=%d\nsaturation=%d\nsharpness=%d\nhue=%d\n", 
                      s->brightness,s->contrast,s->saturation,s->sharpness,s->hue); 
     fclose(fp); 
-    return (ret < 0) ? -1 : 0; 
+    if (ret < 0) {
+        platform_log_error("Failed to write imaging settings to config file\n");
+        return -1;
+    }
+    platform_log_info("Imaging settings saved to config file\n");
+    return 0; 
 }
 int config_save_auto_daynight(const struct auto_daynight_config *c){ 
     if(!c) return -1; 
-    FILE *fp=fopen(ONVIF_CONFIG_FILE,"a"); 
-    if(!fp) return -1; 
+    FILE *fp=fopen(ONVIF_CONFIG_FILE_DEFAULT,"a"); 
+    if(!fp) {
+        platform_log_error("Failed to open config file for writing: %s\n", ONVIF_CONFIG_FILE_DEFAULT);
+        return -1; 
+    }
     int ret = fprintf(fp,"\n[autoir]\nauto_day_night_enable=%d\nday_night_mode=%d\nday_to_night_lum=%d\nnight_to_day_lum=%d\nlock_time=%d\n", 
                      c->enable_auto_switching,c->mode,c->day_to_night_threshold,c->night_to_day_threshold,c->lock_time_seconds); 
     fclose(fp); 
-    return (ret < 0) ? -1 : 0; 
+    if (ret < 0) {
+        platform_log_error("Failed to write auto day/night settings to config file\n");
+        return -1;
+    }
+    platform_log_info("Auto day/night settings saved to config file\n");
+    return 0; 
 }

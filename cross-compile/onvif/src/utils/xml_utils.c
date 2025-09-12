@@ -5,10 +5,44 @@
 
 #include "xml_utils.h"
 #include "platform.h"
+#include "memory_debug.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * @brief XML value with automatic cleanup
+ */
+typedef struct {
+    char *value;
+    int owned;
+} xml_value_t;
+
+/**
+ * @brief Initialize XML value with automatic cleanup
+ */
+static int xml_value_init(xml_value_t *val, char *value, int owned) {
+    if (!val) return -1;
+    val->value = value;
+    val->owned = owned;
+    return 0;
+}
+
+/**
+ * @brief Cleanup XML value
+ */
+static void xml_value_cleanup(xml_value_t *val) {
+    if (!val) return;
+    if (val->value && val->owned) {
+        free(val->value);
+    }
+    val->value = NULL;
+    val->owned = 0;
+}
+
+/**
+ * @brief Extract XML value with automatic memory management
+ */
 char* xml_extract_value(const char *xml, const char *start_tag, const char *end_tag) {
     if (!xml || !start_tag || !end_tag) {
         return NULL;
@@ -26,7 +60,7 @@ char* xml_extract_value(const char *xml, const char *start_tag, const char *end_
     }
     
     size_t len = end - start;
-    char *value = malloc(len + 1);
+    char *value = MEMORY_DEBUG_MALLOC(len + 1);
     if (!value) {
         platform_log_error("Failed to allocate memory for XML value extraction\n");
         return NULL;
@@ -35,6 +69,46 @@ char* xml_extract_value(const char *xml, const char *start_tag, const char *end_
     strncpy(value, start, len);
     value[len] = '\0';
     return value;
+}
+
+/**
+ * @brief Extract XML value to pre-allocated buffer (no dynamic allocation)
+ */
+int xml_extract_value_safe(const char *xml, const char *start_tag, const char *end_tag, 
+                          char *buffer, size_t buffer_size) {
+    if (!xml || !start_tag || !end_tag || !buffer || buffer_size == 0) {
+        return -1;
+    }
+    
+    char *start = strstr(xml, start_tag);
+    if (!start) {
+        return -1;
+    }
+    
+    start += strlen(start_tag);
+    char *end = strstr(start, end_tag);
+    if (!end) {
+        return -1;
+    }
+    
+    size_t len = end - start;
+    if (len >= buffer_size) {
+        platform_log_error("XML value too long for buffer (%zu >= %zu)\n", len, buffer_size - 1);
+        return -1;
+    }
+    
+    strncpy(buffer, start, len);
+    buffer[len] = '\0';
+    return 0;
+}
+
+/**
+ * @brief Free XML value (for compatibility with existing code)
+ */
+void xml_value_free(char *value) {
+    if (value) {
+        MEMORY_DEBUG_FREE(value);
+    }
 }
 
 void xml_soap_fault_response(char *response, size_t response_size, 

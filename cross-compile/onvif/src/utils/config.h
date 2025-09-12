@@ -10,7 +10,8 @@
 #define APPLICATION_CONFIG_H
 
 /* Forward declarations for imaging structures */
-#include "../services/imaging/onvif_imaging.h" /* brings imaging_settings & auto_daynight_config */
+struct imaging_settings;
+struct auto_daynight_config;
 
 /* Core ONVIF daemon settings */
 struct onvif_settings {
@@ -23,8 +24,8 @@ struct onvif_settings {
 /* Full application configuration */
 struct application_config {
     struct onvif_settings onvif;                 /* core ONVIF settings */
-    struct imaging_settings imaging;            /* imaging tuning */
-    struct auto_daynight_config auto_daynight;  /* day/night auto thresholds */
+    struct imaging_settings *imaging;            /* imaging tuning */
+    struct auto_daynight_config *auto_daynight;  /* day/night auto thresholds */
 };
 
 /**

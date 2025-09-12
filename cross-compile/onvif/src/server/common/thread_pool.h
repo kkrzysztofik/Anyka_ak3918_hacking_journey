@@ -10,6 +10,7 @@
 #define THREAD_POOL_H
 
 #include <stdint.h>
+#include <pthread.h>
 
 /* Thread pool configuration */
 #define THREAD_POOL_SIZE 8
@@ -21,9 +22,9 @@ typedef struct thread_pool thread_pool_t;
 
 /* Thread pool structure */
 struct thread_pool {
-    void *threads[THREAD_POOL_SIZE]; // pthread_t array
-    void *queue_mutex; // pthread_mutex_t
-    void *queue_cond;  // pthread_cond_t
+    pthread_t threads[THREAD_POOL_SIZE];
+    pthread_mutex_t queue_mutex;
+    pthread_cond_t queue_cond;
     connection_t *work_queue;
     int shutdown;
     int active_threads;

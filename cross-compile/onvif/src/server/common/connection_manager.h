@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <pthread.h>
 
 /* Connection states */
 typedef enum {
@@ -53,6 +54,6 @@ uint64_t get_time_ms(void);
 
 /* Global connection list management */
 extern connection_t *g_connections;
-extern void *g_connections_mutex; // pthread_mutex_t
+extern pthread_mutex_t g_connections_mutex;
 
 #endif /* CONNECTION_MANAGER_H */

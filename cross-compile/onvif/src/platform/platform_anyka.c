@@ -621,42 +621,92 @@ int platform_config_get_int(const char *section, const char *key, int default_va
 /* Logging functions */
 int platform_log_error(const char *format, ...) {
     va_list args;
+    char buffer[1024];
     va_start(args, format);
-    int ret = ak_print(LOG_LEVEL_ERROR, "\n%s", format);
+    int len = vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    return ret;
+    
+    if (len >= sizeof(buffer)) {
+        // Truncated, add ellipsis
+        buffer[sizeof(buffer) - 4] = '.';
+        buffer[sizeof(buffer) - 3] = '.';
+        buffer[sizeof(buffer) - 2] = '.';
+        buffer[sizeof(buffer) - 1] = '\0';
+    }
+    
+    return ak_print(LOG_LEVEL_ERROR, "\n%s", buffer);
 }
 
 int platform_log_warning(const char *format, ...) {
     va_list args;
+    char buffer[1024];
     va_start(args, format);
-    int ret = ak_print(LOG_LEVEL_WARNING, "\n%s", format);
+    int len = vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    return ret;
+    
+    if (len >= sizeof(buffer)) {
+        // Truncated, add ellipsis
+        buffer[sizeof(buffer) - 4] = '.';
+        buffer[sizeof(buffer) - 3] = '.';
+        buffer[sizeof(buffer) - 2] = '.';
+        buffer[sizeof(buffer) - 1] = '\0';
+    }
+    
+    return ak_print(LOG_LEVEL_WARNING, "\n%s", buffer);
 }
 
 int platform_log_notice(const char *format, ...) {
     va_list args;
+    char buffer[1024];
     va_start(args, format);
-    int ret = ak_print(LOG_LEVEL_NOTICE, "%s", format);
+    int len = vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    return ret;
+    
+    if (len >= sizeof(buffer)) {
+        // Truncated, add ellipsis
+        buffer[sizeof(buffer) - 4] = '.';
+        buffer[sizeof(buffer) - 3] = '.';
+        buffer[sizeof(buffer) - 2] = '.';
+        buffer[sizeof(buffer) - 1] = '\0';
+    }
+    
+    return ak_print(LOG_LEVEL_NOTICE, "%s", buffer);
 }
 
 int platform_log_info(const char *format, ...) {
     va_list args;
+    char buffer[1024];
     va_start(args, format);
-    int ret = ak_print(LOG_LEVEL_INFO, "%s", format);
+    int len = vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    return ret;
+    
+    if (len >= sizeof(buffer)) {
+        // Truncated, add ellipsis
+        buffer[sizeof(buffer) - 4] = '.';
+        buffer[sizeof(buffer) - 3] = '.';
+        buffer[sizeof(buffer) - 2] = '.';
+        buffer[sizeof(buffer) - 1] = '\0';
+    }
+    
+    return ak_print(LOG_LEVEL_INFO, "%s", buffer);
 }
 
 int platform_log_debug(const char *format, ...) {
     va_list args;
+    char buffer[1024];
     va_start(args, format);
-    int ret = ak_print(LOG_LEVEL_DEBUG, "%s", format);
+    int len = vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    return ret;
+    
+    if (len >= sizeof(buffer)) {
+        // Truncated, add ellipsis
+        buffer[sizeof(buffer) - 4] = '.';
+        buffer[sizeof(buffer) - 3] = '.';
+        buffer[sizeof(buffer) - 2] = '.';
+        buffer[sizeof(buffer) - 1] = '\0';
+    }
+    
+    return ak_print(LOG_LEVEL_DEBUG, "%s", buffer);
 }
 
 /* Utility functions */

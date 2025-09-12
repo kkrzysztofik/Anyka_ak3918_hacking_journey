@@ -10,6 +10,7 @@
 #define BUFFER_POOL_H
 
 #include <stddef.h>
+#include <pthread.h>
 
 /* Buffer pool configuration */
 #define BUFFER_POOL_SIZE 50
@@ -20,7 +21,7 @@ typedef struct {
     char *buffers[BUFFER_POOL_SIZE];
     int available[BUFFER_POOL_SIZE];
     int count;
-    void *mutex; // pthread_mutex_t, but avoiding pthread.h in header
+    pthread_mutex_t mutex; // Static mutex instead of dynamic allocation
 } buffer_pool_t;
 
 /* Buffer pool functions */

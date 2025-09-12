@@ -23,7 +23,7 @@
 #include "../services/ptz/onvif_ptz.h"
 #include "../services/imaging/onvif_imaging.h"
 #include "../utils/network_utils.h"
-#include "../utils/constants.h"
+#include "../utils/constants_clean.h"
 #include "../utils/xml_utils.h"
 #include "../utils/logging_utils.h"
 #include "../common/onvif_types.h"

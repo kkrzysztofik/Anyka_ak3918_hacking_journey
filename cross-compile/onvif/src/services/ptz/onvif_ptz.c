@@ -12,9 +12,9 @@
 #include <time.h>
 #include "onvif_ptz.h"
 #include "platform.h"
-#include "../server/http/http_parser.h"
 #include "../utils/xml_utils.h"
 #include "../utils/logging_utils.h"
+#include "../utils/error_handling.h"
 #include "../common/onvif_types.h"
 
 /* PTZ Node configuration */
@@ -92,26 +92,29 @@ static int normalize_to_speed(float normalized_velocity) {
 }
 
 int onvif_ptz_get_nodes(struct ptz_node **nodes, int *count) {
-    if (!nodes || !count) return -1;
+    ONVIF_CHECK_NULL(nodes);
+    ONVIF_CHECK_NULL(count);
     
     *nodes = &ptz_node;
     *count = 1;
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_ptz_get_node(const char *node_token, struct ptz_node *node) {
-    if (!node_token || !node) return -1;
+    ONVIF_CHECK_NULL(node_token);
+    ONVIF_CHECK_NULL(node);
     
     if (strcmp(node_token, ptz_node.token) == 0) {
         *node = ptz_node;
-        return 0;
+        return ONVIF_SUCCESS;
     }
     
-    return -1;
+    return ONVIF_ERROR_NOT_FOUND;
 }
 
 int onvif_ptz_get_configuration(const char *config_token, struct ptz_configuration_ex *config) {
-    if (!config_token || !config) return -1;
+    ONVIF_CHECK_NULL(config_token);
+    ONVIF_CHECK_NULL(config);
     
     /* Default PTZ configuration */
     strncpy(config->token, "PTZConfig0", sizeof(config->token) - 1);
@@ -145,15 +148,16 @@ int onvif_ptz_get_configuration(const char *config_token, struct ptz_configurati
     config->zoom_limits.range.y_range.max = 0.0;
     config->zoom_limits.range.uri[0] = '\0';  /* No zoom support */
     
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_ptz_get_status(const char *profile_token, struct ptz_status *status) {
-    if (!profile_token || !status) return -1;
+    ONVIF_CHECK_NULL(profile_token);
+    ONVIF_CHECK_NULL(status);
     
     struct ptz_device_status adapter_status;
     if (ptz_adapter_get_status(&adapter_status) != 0) {
-        return -1;
+        return ONVIF_ERROR;
     }
     
     /* Convert adapter status to ONVIF format */
@@ -177,12 +181,13 @@ int onvif_ptz_get_status(const char *profile_token, struct ptz_status *status) {
     struct tm *utc_tm = gmtime(&now);
     strftime(status->utc_time, sizeof(status->utc_time), "%Y-%m-%dT%H:%M:%S.000Z", utc_tm);
     
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_ptz_absolute_move(const char *profile_token, const struct ptz_vector *position, 
                            const struct ptz_speed *speed) {
-    if (!profile_token || !position) return -1;
+    ONVIF_CHECK_NULL(profile_token);
+    ONVIF_CHECK_NULL(position);
     
     int pan_deg = normalize_to_degrees_pan(position->pan_tilt.x);
     int tilt_deg = normalize_to_degrees_tilt(position->pan_tilt.y);
@@ -198,7 +203,8 @@ int onvif_ptz_absolute_move(const char *profile_token, const struct ptz_vector *
 
 int onvif_ptz_relative_move(const char *profile_token, const struct ptz_vector *translation,
                            const struct ptz_speed *speed) {
-    if (!profile_token || !translation) return -1;
+    ONVIF_CHECK_NULL(profile_token);
+    ONVIF_CHECK_NULL(translation);
     
     int pan_delta = normalize_to_degrees_pan(translation->pan_tilt.x);
     int tilt_delta = normalize_to_degrees_tilt(translation->pan_tilt.y);
@@ -214,7 +220,8 @@ int onvif_ptz_relative_move(const char *profile_token, const struct ptz_vector *
 
 int onvif_ptz_continuous_move(const char *profile_token, const struct ptz_speed *velocity, 
                              int timeout) {
-    if (!profile_token || !velocity) return -1;
+    ONVIF_CHECK_NULL(profile_token);
+    ONVIF_CHECK_NULL(velocity);
     
     int pan_vel = normalize_to_speed(velocity->pan_tilt.x);
     int tilt_vel = normalize_to_speed(velocity->pan_tilt.y);
@@ -230,17 +237,17 @@ int onvif_ptz_continuous_move(const char *profile_token, const struct ptz_speed 
 }
 
 int onvif_ptz_stop(const char *profile_token, int pan_tilt, int zoom) {
-    if (!profile_token) return -1;
+    ONVIF_CHECK_NULL(profile_token);
     
     if (pan_tilt) {
         return ptz_adapter_stop();
     }
     
-    return 0;  /* Zoom stop not needed (no zoom support) */
+    return ONVIF_SUCCESS;  /* Zoom stop not needed (no zoom support) */
 }
 
 int onvif_ptz_goto_home_position(const char *profile_token, const struct ptz_speed *speed) {
-    if (!profile_token) return -1;
+    ONVIF_CHECK_NULL(profile_token);
     
     /* Home position is center (0, 0) in normalized coordinates */
     struct ptz_vector home_position;
@@ -252,32 +259,36 @@ int onvif_ptz_goto_home_position(const char *profile_token, const struct ptz_spe
 }
 
 int onvif_ptz_set_home_position(const char *profile_token) {
-    if (!profile_token) return -1;
+    ONVIF_CHECK_NULL(profile_token);
     
     /* TODO: Implement home position setting */
-    printf("SetHomePosition for profile %s (not implemented)\n", profile_token);
-    return 0;
+    platform_log_info("SetHomePosition for profile %s (not implemented)\n", profile_token);
+    return ONVIF_SUCCESS;
 }
 
 int onvif_ptz_get_presets(const char *profile_token, struct ptz_preset **preset_list, int *count) {
-    if (!profile_token || !preset_list || !count) return -1;
+    ONVIF_CHECK_NULL(profile_token);
+    ONVIF_CHECK_NULL(preset_list);
+    ONVIF_CHECK_NULL(count);
     
     *preset_list = presets;
     *count = preset_count;
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_ptz_set_preset(const char *profile_token, const char *preset_name, char *preset_token, size_t token_size) {
-    if (!profile_token || !preset_name || !preset_token) return -1;
+    ONVIF_CHECK_NULL(profile_token);
+    ONVIF_CHECK_NULL(preset_name);
+    ONVIF_CHECK_NULL(preset_token);
     
     if (preset_count >= 10) {
-        return -1;  /* Maximum presets reached */
+        return ONVIF_ERROR;  /* Maximum presets reached */
     }
     
     /* Get current position */
     struct ptz_status status;
     if (onvif_ptz_get_status(profile_token, &status) != 0) {
-        return -1;
+        return ONVIF_ERROR;
     }
     
     /* Create new preset */
@@ -295,11 +306,12 @@ int onvif_ptz_set_preset(const char *profile_token, const char *preset_name, cha
         strncpy(preset_token, preset->token, 64);
     }
     
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int onvif_ptz_remove_preset(const char *profile_token, const char *preset_token) {
-    if (!profile_token || !preset_token) return -1;
+    ONVIF_CHECK_NULL(profile_token);
+    ONVIF_CHECK_NULL(preset_token);
     
     /* Find and remove preset */
     for (int i = 0; i < preset_count; i++) {
@@ -309,16 +321,17 @@ int onvif_ptz_remove_preset(const char *profile_token, const char *preset_token)
                 presets[j] = presets[j + 1];
             }
             preset_count--;
-            return 0;
+            return ONVIF_SUCCESS;
         }
     }
     
-    return -1;
+    return ONVIF_ERROR;
 }
 
 int onvif_ptz_goto_preset(const char *profile_token, const char *preset_token,
                          const struct ptz_speed *speed) {
-    if (!profile_token || !preset_token) return -1;
+    ONVIF_CHECK_NULL(profile_token);
+    ONVIF_CHECK_NULL(preset_token);
     
     /* Find preset */
     struct ptz_preset *preset = NULL;
@@ -329,7 +342,7 @@ int onvif_ptz_goto_preset(const char *profile_token, const char *preset_token,
         }
     }
     
-    if (!preset) return -1;
+    ONVIF_CHECK_NULL(preset);
     
     /* Move to preset position */
     return onvif_ptz_absolute_move(profile_token, &preset->ptz_position, speed);
@@ -373,7 +386,7 @@ static void soap_success_response(char *response, size_t response_size, const ch
  */
 int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
     if (!request || !response) {
-        return -1;
+        return ONVIF_ERROR;
     }
     
     // Initialize response structure
@@ -381,7 +394,7 @@ int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *
     response->content_type = "application/soap+xml";
     response->body = malloc(4096);
     if (!response->body) {
-        return -1;
+        return ONVIF_ERROR;
     }
     response->body_length = 0;
     
@@ -734,9 +747,9 @@ int ptz_adapter_init(void) {
             platform_ptz_move_to_position(current_pan_pos, current_tilt_pos);
             
             ptz_initialized = 1;
-            printf("PTZ adapter initialized successfully\n");
+            platform_log_notice("PTZ adapter initialized successfully\n");
         } else {
-            fprintf(stderr, "ak_drv_ptz_open failed: %d\n", ret);
+            platform_log_error("ak_drv_ptz_open failed: %d\n", ret);
         }
     }
     pthread_mutex_unlock(&ptz_lock);
@@ -750,16 +763,16 @@ int ptz_adapter_shutdown(void) {
         ptz_initialized = 0;
     }
     pthread_mutex_unlock(&ptz_lock);
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int ptz_adapter_get_status(struct ptz_device_status *status) {
-    if (!status) return -1;
+    ONVIF_CHECK_NULL(status);
     
     pthread_mutex_lock(&ptz_lock);
     if (!ptz_initialized) {
         pthread_mutex_unlock(&ptz_lock);
-        return -1;
+        return ONVIF_ERROR;
     }
     
     int h = platform_ptz_get_step_position(PLATFORM_PTZ_AXIS_PAN);
@@ -771,14 +784,14 @@ int ptz_adapter_get_status(struct ptz_device_status *status) {
     status->v_speed = 0;
     
     pthread_mutex_unlock(&ptz_lock);
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int ptz_adapter_absolute_move(int pan_deg, int tilt_deg, int speed) {
     pthread_mutex_lock(&ptz_lock);
     if (!ptz_initialized) {
         pthread_mutex_unlock(&ptz_lock);
-        return -1;
+        return ONVIF_ERROR;
     }
     
     /* Clamp values to safe ranges - based on akipc implementation */
@@ -787,7 +800,7 @@ int ptz_adapter_absolute_move(int pan_deg, int tilt_deg, int speed) {
     if (tilt_deg > 130) tilt_deg = 130;
     if (tilt_deg < -130) tilt_deg = -130;
     
-    printf("PTZ absolute move to pan=%d, tilt=%d\n", pan_deg, tilt_deg);
+    platform_log_info("PTZ absolute move to pan=%d, tilt=%d\n", pan_deg, tilt_deg);
     
     int ret = platform_ptz_move_to_position(pan_deg, tilt_deg);
     if (ret == 0) {
@@ -811,10 +824,10 @@ int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg, int speed) 
     pthread_mutex_lock(&ptz_lock);
     if (!ptz_initialized) {
         pthread_mutex_unlock(&ptz_lock);
-        return -1;
+        return ONVIF_ERROR;
     }
     
-    printf("PTZ relative move pan_delta=%d, tilt_delta=%d\n", pan_delta_deg, tilt_delta_deg);
+    platform_log_info("PTZ relative move pan_delta=%d, tilt_delta=%d\n", pan_delta_deg, tilt_delta_deg);
     
     int ret = 0;
     platform_ptz_status_t h_status, v_status;
@@ -858,7 +871,7 @@ int ptz_adapter_continuous_move(int pan_vel, int tilt_vel, int timeout_s) {
     pthread_mutex_lock(&ptz_lock);
     if (!ptz_initialized) {
         pthread_mutex_unlock(&ptz_lock);
-        return -1;
+        return ONVIF_ERROR;
     }
     
     if (pan_vel > 0) platform_ptz_set_speed(PLATFORM_PTZ_AXIS_PAN, pan_vel);
@@ -875,17 +888,17 @@ int ptz_adapter_continuous_move(int pan_vel, int tilt_vel, int timeout_s) {
     }
     
     pthread_mutex_unlock(&ptz_lock);
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int ptz_adapter_stop(void) {
     pthread_mutex_lock(&ptz_lock);
     if (!ptz_initialized) {
         pthread_mutex_unlock(&ptz_lock);
-        return -1;
+        return ONVIF_ERROR;
     }
     
-    printf("PTZ stop all movement\n");
+    platform_log_info("PTZ stop all movement\n");
     
     /* Stop all directions of movement */
     platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_LEFT);
@@ -894,32 +907,32 @@ int ptz_adapter_stop(void) {
     platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
     
     pthread_mutex_unlock(&ptz_lock);
-    return 0;
+    return ONVIF_SUCCESS;
 }
 
 int ptz_adapter_set_preset(const char *name, int id) {
     pthread_mutex_lock(&ptz_lock);
     if (!ptz_initialized) {
         pthread_mutex_unlock(&ptz_lock);
-        return -1;
+        return ONVIF_ERROR;
     }
     
-    printf("PTZ set preset %s (id=%d) at pan=%d, tilt=%d\n", 
+    platform_log_info("PTZ set preset %s (id=%d) at pan=%d, tilt=%d\n", 
            name ? name : "unnamed", id, current_pan_pos, current_tilt_pos);
     
     /* For now, just store current position - could be enhanced to save to file */
     pthread_mutex_unlock(&ptz_lock);
-    return 0;   /* Basic implementation */
+    return ONVIF_SUCCESS;   /* Basic implementation */
 }
 
 int ptz_adapter_goto_preset(int id) {
     pthread_mutex_lock(&ptz_lock);
     if (!ptz_initialized) {
         pthread_mutex_unlock(&ptz_lock);
-        return -1;
+        return ONVIF_ERROR;
     }
     
-    printf("PTZ goto preset id=%d\n", id);
+    platform_log_info("PTZ goto preset id=%d\n", id);
     
     /* Basic implementation - could be enhanced to load from saved presets */
     int ret = -1;
@@ -932,7 +945,7 @@ int ptz_adapter_goto_preset(int id) {
             }
             break;
         default:
-            printf("Preset %d not implemented\n", id);
+            platform_log_info("Preset %d not implemented\n", id);
             break;
     }
     
