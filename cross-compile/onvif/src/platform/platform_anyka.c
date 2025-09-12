@@ -406,7 +406,7 @@ platform_result_t platform_ptz_move_to_position(int pan_deg, int tilt_deg) {
     return PLATFORM_SUCCESS;
 }
 
-platform_result_t platform_ptz_get_step_position(platform_ptz_axis_t axis) {
+int platform_ptz_get_step_position(platform_ptz_axis_t axis) {
     int anyka_axis = map_ptz_axis(axis);
     if (anyka_axis < 0) return PLATFORM_ERROR_INVALID;
     

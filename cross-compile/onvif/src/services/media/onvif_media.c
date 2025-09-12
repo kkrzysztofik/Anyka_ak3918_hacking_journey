@@ -15,6 +15,9 @@
 #include "utils/logging_utils.h"
 #include "utils/error_handling.h"
 #include "utils/constants_clean.h"
+#include "utils/soap_helpers.h"
+#include "utils/response_helpers.h"
+#include "utils/service_handler.h"
 #include "common/onvif_types.h"
 
 /* Static media profiles */
@@ -354,47 +357,15 @@ int onvif_media_stop_multicast_streaming(const char *profile_token) {
     return ONVIF_ERROR_NOT_FOUND;
 }
 
-/* SOAP XML generation helpers */
-static void soap_fault_response(char *response, size_t response_size, const char *fault_code, const char *fault_string) {
-    snprintf(response, response_size, 
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-        "  <soap:Body>\n"
-        "    <soap:Fault>\n"
-        "      <soap:Code>\n"
-        "        <soap:Value>%s</soap:Value>\n"
-        "      </soap:Code>\n"
-        "      <soap:Reason>\n"
-        "        <soap:Text>%s</soap:Text>\n"
-        "      </soap:Reason>\n"
-        "    </soap:Fault>\n"
-        "  </soap:Body>\n"
-        "</soap:Envelope>", fault_code, fault_string);
-}
-
-static void soap_success_response(char *response, size_t response_size, const char *action, const char *body_content) {
-    snprintf(response, response_size,
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-        "  <soap:Body>\n"
-        "    <trt:%sResponse xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\">\n"
-        "      %s\n"
-        "    </trt:%sResponse>\n"
-        "  </soap:Body>\n"
-        "</soap:Envelope>", action, body_content, action);
-}
+/* SOAP XML generation helpers - now using common utilities */
 
 /* XML parsing helpers - now using xml_utils module */
 
 
 /**
- * @brief Handle ONVIF media service requests
+ * @brief Internal media service handler
  */
-int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
-    if (!request || !response) {
-        return ONVIF_ERROR_NOT_FOUND;
-    }
-    
+static int media_service_handler(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
     // Initialize response structure
     response->status_code = 200;
     response->content_type = "application/soap+xml";
@@ -487,19 +458,9 @@ int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t
                 }
                 strcat(profiles_xml, "</trt:Profiles>");
                 
-                snprintf(response->body, ONVIF_RESPONSE_BUFFER_SIZE, 
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                    "  <soap:Body>\n"
-                    "    <trt:GetProfilesResponse xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\">\n"
-                    "      %s\n"
-                    "    </trt:GetProfilesResponse>\n"
-                    "  </soap:Body>\n"
-                    "</soap:Envelope>", profiles_xml);
-                response->body_length = strlen(response->body);
+                onvif_response_media_success(response, "GetProfiles", profiles_xml);
             } else {
-                soap_fault_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, SOAP_FAULT_RECEIVER, "Failed to get profiles");
-                response->body_length = strlen(response->body);
+                onvif_response_soap_fault(response, "soap:Receiver", "Failed to get profiles");
             }
             break;
         }
@@ -534,19 +495,9 @@ int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t
                 }
                 strcat(sources_xml, "</trt:VideoSources>");
                 
-                snprintf(response->body, ONVIF_RESPONSE_BUFFER_SIZE,
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                    "  <soap:Body>\n"
-                    "    <trt:GetVideoSourcesResponse xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\">\n"
-                    "      %s\n"
-                    "    </trt:GetVideoSourcesResponse>\n"
-                    "  </soap:Body>\n"
-                    "</soap:Envelope>", sources_xml);
-                response->body_length = strlen(response->body);
+                onvif_response_media_success(response, "GetVideoSources", sources_xml);
             } else {
-                soap_fault_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, SOAP_FAULT_RECEIVER, "Failed to get video sources");
-                response->body_length = strlen(response->body);
+                onvif_response_soap_fault(response, "soap:Receiver", "Failed to get video sources");
             }
             break;
         }
@@ -571,23 +522,12 @@ int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t
                         uri.invalid_after_reboot ? "true" : "false",
                         uri.timeout);
                     
-                    snprintf(response->body, 4096,
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                        "  <soap:Body>\n"
-                        "    <trt:GetStreamUriResponse xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\">\n"
-                        "      %s\n"
-                        "    </trt:GetStreamUriResponse>\n"
-                        "  </soap:Body>\n"
-                        "</soap:Envelope>", uri_xml);
-                    response->body_length = strlen(response->body);
+                    onvif_response_media_success(response, "GetStreamUri", uri_xml);
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get stream URI");
-                    response->body_length = strlen(response->body);
+                    onvif_response_soap_fault(response, "soap:Receiver", "Failed to get stream URI");
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing ProfileToken or Protocol");
-                response->body_length = strlen(response->body);
+                onvif_handle_missing_parameter(response, "ProfileToken or Protocol");
             }
             
             if (profile_token) free(profile_token);
@@ -614,23 +554,12 @@ int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t
                         uri.invalid_after_reboot ? "true" : "false",
                         uri.timeout);
                     
-                    snprintf(response->body, 4096,
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                        "  <soap:Body>\n"
-                        "    <trt:GetSnapshotUriResponse xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\">\n"
-                        "      %s\n"
-                        "    </trt:GetSnapshotUriResponse>\n"
-                        "  </soap:Body>\n"
-                        "</soap:Envelope>", uri_xml);
-                    response->body_length = strlen(response->body);
+                    onvif_response_media_success(response, "GetSnapshotUri", uri_xml);
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get snapshot URI");
-                    response->body_length = strlen(response->body);
+                    onvif_response_soap_fault(response, "soap:Receiver", "Failed to get snapshot URI");
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing ProfileToken");
-                response->body_length = strlen(response->body);
+                onvif_handle_missing_parameter(response, "ProfileToken");
             }
             
             if (profile_token) free(profile_token);
@@ -638,10 +567,16 @@ int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t
         }
         
         default:
-            soap_fault_response(response->body, 4096, "soap:Receiver", "Unsupported action");
-            response->body_length = strlen(response->body);
+            onvif_handle_unsupported_action(response);
             break;
     }
     
     return response->body_length;
+}
+
+/**
+ * @brief Handle ONVIF media service requests
+ */
+int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
+    return onvif_handle_service_request(action, request, response, media_service_handler);
 }

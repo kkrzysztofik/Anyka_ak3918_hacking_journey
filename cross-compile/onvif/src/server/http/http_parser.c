@@ -24,6 +24,7 @@ static size_t strnlen(const char *s, size_t maxlen) {
 }
 #endif
 
+/* Fallback implementation for missing strcasestr function */
 #ifndef strcasestr
 static char *strcasestr(const char *haystack, const char *needle) {
     size_t needle_len = strlen(needle);

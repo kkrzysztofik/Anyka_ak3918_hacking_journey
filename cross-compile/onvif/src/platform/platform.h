@@ -207,7 +207,7 @@ void platform_ptz_cleanup(void);
 platform_result_t platform_ptz_set_degree(int pan_range_deg, int tilt_range_deg);
 platform_result_t platform_ptz_check_self(void);
 platform_result_t platform_ptz_move_to_position(int pan_deg, int tilt_deg);
-platform_result_t platform_ptz_get_step_position(platform_ptz_axis_t axis);
+int platform_ptz_get_step_position(platform_ptz_axis_t axis);
 platform_result_t platform_ptz_get_status(platform_ptz_axis_t axis, 
                                         platform_ptz_status_t *status);
 platform_result_t platform_ptz_set_speed(platform_ptz_axis_t axis, int speed);

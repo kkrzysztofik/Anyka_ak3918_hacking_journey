@@ -34,10 +34,6 @@ int onvif_to_http_response(const onvif_response_t *onvif_resp, http_response_t *
  */
 void onvif_request_cleanup(onvif_request_t *onvif_req);
 
-/**
- * @brief Cleanup ONVIF response (free allocated memory)
- * @param onvif_resp ONVIF response structure
- */
-void onvif_response_cleanup(onvif_response_t *onvif_resp);
+/* onvif_response_cleanup is now provided by utils/response_helpers.h */
 
 #endif /* HTTP_ONVIF_ADAPTER_H */

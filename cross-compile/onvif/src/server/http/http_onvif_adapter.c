@@ -6,6 +6,7 @@
 #include "http_onvif_adapter.h"
 #include "common/onvif_types.h"
 #include "utils/logging_utils.h"
+#include "utils/response_helpers.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -103,19 +104,4 @@ void onvif_request_cleanup(onvif_request_t *onvif_req) {
     onvif_req->headers_length = 0;
 }
 
-void onvif_response_cleanup(onvif_response_t *onvif_resp) {
-    if (!onvif_resp) return;
-    
-    if (onvif_resp->body) {
-        free(onvif_resp->body);
-        onvif_resp->body = NULL;
-    }
-    
-    if (onvif_resp->content_type) {
-        free(onvif_resp->content_type);
-        onvif_resp->content_type = NULL;
-    }
-    
-    onvif_resp->transport_data = NULL;
-    onvif_resp->body_length = 0;
-}
+/* onvif_response_cleanup is now provided by utils/response_helpers.c */

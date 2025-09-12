@@ -13,6 +13,9 @@
 #include "utils/xml_utils.h"
 #include "utils/logging_utils.h"
 #include "utils/error_handling.h"
+#include "utils/soap_helpers.h"
+#include "utils/response_helpers.h"
+#include "utils/service_handler.h"
 #include "common/onvif_types.h"
 
 static struct auto_daynight_config g_auto_config;
@@ -513,47 +516,15 @@ int onvif_imaging_get_options(char *response, int response_size) {
     return ONVIF_SUCCESS;
 }
 
-/* SOAP XML generation helpers */
-static void soap_fault_response(char *response, size_t response_size, const char *fault_code, const char *fault_string) {
-    snprintf(response, response_size, 
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-        "  <soap:Body>\n"
-        "    <soap:Fault>\n"
-        "      <soap:Code>\n"
-        "        <soap:Value>%s</soap:Value>\n"
-        "      </soap:Code>\n"
-        "      <soap:Reason>\n"
-        "        <soap:Text>%s</soap:Text>\n"
-        "      </soap:Reason>\n"
-        "    </soap:Fault>\n"
-        "  </soap:Body>\n"
-        "</soap:Envelope>", fault_code, fault_string);
-}
-
-static void soap_success_response(char *response, size_t response_size, const char *action, const char *body_content) {
-    snprintf(response, response_size,
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-        "  <soap:Body>\n"
-        "    <timg:%sResponse xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">\n"
-        "      %s\n"
-        "    </timg:%sResponse>\n"
-        "  </soap:Body>\n"
-        "</soap:Envelope>", action, body_content, action);
-}
+/* SOAP XML generation helpers - now using common utilities */
 
 /* XML parsing helpers - now using xml_utils module */
 
 
 /**
- * @brief Handle ONVIF imaging service requests
+ * @brief Internal imaging service handler
  */
-int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
-    if (!request || !response) {
-        return ONVIF_ERROR;
-    }
-    
+static int imaging_service_handler(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
     // Initialize response structure
     response->status_code = 200;
     response->content_type = "application/soap+xml";
@@ -596,23 +567,12 @@ int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request
                         "</timg:ImagingSettings>",
                         settings.brightness, settings.contrast, settings.saturation, settings.sharpness);
                     
-                    snprintf(response->body, 4096, 
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                        "  <soap:Body>\n"
-                        "    <timg:GetImagingSettingsResponse xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">\n"
-                        "      %s\n"
-                        "    </timg:GetImagingSettingsResponse>\n"
-                        "  </soap:Body>\n"
-                        "</soap:Envelope>", settings_xml);
-                    response->body_length = strlen(response->body);
+                    onvif_response_imaging_success(response, "GetImagingSettings", settings_xml);
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get imaging settings");
-                    response->body_length = strlen(response->body);
+                    onvif_response_soap_fault(response, "soap:Receiver", "Failed to get imaging settings");
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing VideoSourceToken");
-                response->body_length = strlen(response->body);
+                onvif_handle_missing_parameter(response, "VideoSourceToken");
             }
             
             if (video_source_token) free(video_source_token);
@@ -636,26 +596,15 @@ int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request
                     if (sharpness_str) settings.sharpness = atoi(sharpness_str);
                     
                     if (onvif_imaging_set_settings(&settings) == 0) {
-                        snprintf(response->body, 4096,
-                            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                            "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                            "  <soap:Body>\n"
-                            "    <timg:SetImagingSettingsResponse xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">\n"
-                            "    </timg:SetImagingSettingsResponse>\n"
-                            "  </soap:Body>\n"
-                            "</soap:Envelope>");
-                        response->body_length = strlen(response->body);
+                        onvif_response_imaging_success(response, "SetImagingSettings", "");
                     } else {
-                        soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to set imaging settings");
-                        response->body_length = strlen(response->body);
+                        onvif_response_soap_fault(response, "soap:Receiver", "Failed to set imaging settings");
                     }
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get current imaging settings");
-                    response->body_length = strlen(response->body);
+                    onvif_response_soap_fault(response, "soap:Receiver", "Failed to get current imaging settings");
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing VideoSourceToken");
-                response->body_length = strlen(response->body);
+                onvif_handle_missing_parameter(response, "VideoSourceToken");
             }
             
             if (video_source_token) free(video_source_token);
@@ -711,19 +660,9 @@ int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request
                     "  </tt:Focus>\n"
                     "</timg:ImagingOptions>");
                 
-                snprintf(response->body, 4096,
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                    "  <soap:Body>\n"
-                    "    <timg:GetOptionsResponse xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">\n"
-                    "      %s\n"
-                    "    </timg:GetOptionsResponse>\n"
-                    "  </soap:Body>\n"
-                    "</soap:Envelope>", options_xml);
-                response->body_length = strlen(response->body);
+                onvif_response_imaging_success(response, "GetOptions", options_xml);
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing VideoSourceToken");
-                response->body_length = strlen(response->body);
+                onvif_handle_missing_parameter(response, "VideoSourceToken");
             }
             
             if (video_source_token) free(video_source_token);
@@ -731,10 +670,16 @@ int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request
         }
         
         default:
-            soap_fault_response(response->body, 4096, "soap:Receiver", "Unsupported action");
-            response->body_length = strlen(response->body);
+            onvif_handle_unsupported_action(response);
             break;
     }
     
     return response->body_length;
+}
+
+/**
+ * @brief Handle ONVIF imaging service requests
+ */
+int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
+    return onvif_handle_service_request(action, request, response, imaging_service_handler);
 }

@@ -10,11 +10,15 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#include <pthread.h>
 #include "onvif_ptz.h"
 #include "platform/platform.h"
 #include "utils/xml_utils.h"
 #include "utils/logging_utils.h"
 #include "utils/error_handling.h"
+#include "utils/soap_helpers.h"
+#include "utils/response_helpers.h"
+#include "utils/service_handler.h"
 #include "common/onvif_types.h"
 
 /* PTZ Node configuration */
@@ -348,47 +352,15 @@ int onvif_ptz_goto_preset(const char *profile_token, const char *preset_token,
     return onvif_ptz_absolute_move(profile_token, &preset->ptz_position, speed);
 }
 
-/* SOAP XML generation helpers */
-static void soap_fault_response(char *response, size_t response_size, const char *fault_code, const char *fault_string) {
-    snprintf(response, response_size, 
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-        "  <soap:Body>\n"
-        "    <soap:Fault>\n"
-        "      <soap:Code>\n"
-        "        <soap:Value>%s</soap:Value>\n"
-        "      </soap:Code>\n"
-        "      <soap:Reason>\n"
-        "        <soap:Text>%s</soap:Text>\n"
-        "      </soap:Reason>\n"
-        "    </soap:Fault>\n"
-        "  </soap:Body>\n"
-        "</soap:Envelope>", fault_code, fault_string);
-}
-
-static void soap_success_response(char *response, size_t response_size, const char *action, const char *body_content) {
-    snprintf(response, response_size,
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-        "  <soap:Body>\n"
-        "    <tptz:%sResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
-        "      %s\n"
-        "    </tptz:%sResponse>\n"
-        "  </soap:Body>\n"
-        "</soap:Envelope>", action, body_content, action);
-}
+/* SOAP XML generation helpers - now using common utilities */
 
 /* XML parsing helpers - now using xml_utils module */
 
 
 /**
- * @brief Handle ONVIF PTZ service requests
+ * @brief Internal PTZ service handler
  */
-int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
-    if (!request || !response) {
-        return ONVIF_ERROR;
-    }
-    
+static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
     // Initialize response structure
     response->status_code = 200;
     response->content_type = "application/soap+xml";
@@ -425,23 +397,12 @@ int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *
                         status.move_status.zoom == PTZ_MOVE_MOVING ? "MOVING" : "IDLE",
                         status.error, status.utc_time);
                     
-                    snprintf(response->body, 4096, 
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                        "  <soap:Body>\n"
-                        "    <tptz:GetStatusResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
-                        "      %s\n"
-                        "    </tptz:GetStatusResponse>\n"
-                        "  </soap:Body>\n"
-                        "</soap:Envelope>", status_xml);
-                    response->body_length = strlen(response->body);
+                    onvif_response_ptz_success(response, "GetStatus", status_xml);
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get PTZ status");
-                    response->body_length = strlen(response->body);
+                    onvif_response_soap_fault(response, "soap:Receiver", "Failed to get PTZ status");
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing ProfileToken");
-                response->body_length = strlen(response->body);
+                onvif_handle_missing_parameter(response, "ProfileToken");
             }
             
             if (profile_token) free(profile_token);
@@ -461,22 +422,12 @@ int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *
                 strcpy(position.space, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace");
                 
                 if (onvif_ptz_absolute_move(profile_token, &position, NULL) == 0) {
-                    snprintf(response->body, 4096,
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                        "  <soap:Body>\n"
-                        "    <tptz:AbsoluteMoveResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
-                        "    </tptz:AbsoluteMoveResponse>\n"
-                        "  </soap:Body>\n"
-                        "</soap:Envelope>");
-                    response->body_length = strlen(response->body);
+                    onvif_response_ptz_success(response, "AbsoluteMove", "");
                 } else {
-                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to execute absolute move");
-                    response->body_length = strlen(response->body);
+                    onvif_response_soap_fault(response, "soap:Receiver", "Failed to execute absolute move");
                 }
             } else {
-                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing required parameters");
-                response->body_length = strlen(response->body);
+                onvif_handle_missing_parameter(response, "required parameters");
             }
             
             if (profile_token) free(profile_token);
@@ -712,12 +663,18 @@ int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *
         }
         
         default:
-            soap_fault_response(response->body, 4096, "soap:Receiver", "Unsupported action");
-            response->body_length = strlen(response->body);
+            onvif_handle_unsupported_action(response);
             break;
     }
     
     return response->body_length;
+}
+
+/**
+ * @brief Handle ONVIF PTZ service requests
+ */
+int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
+    return onvif_handle_service_request(action, request, response, ptz_service_handler);
 }
 
 /* ============================================================================
@@ -729,7 +686,27 @@ static int ptz_initialized = 0;
 static int current_pan_pos = 0;
 static int current_tilt_pos = 0;
 
+/* Continuous move timeout handling */
+static pthread_t continuous_move_timer_thread = 0;
+static int continuous_move_timeout_s = 0;
+static volatile int continuous_move_active = 0;
+
 static int simple_abs(int value) { return (value < 0) ? -value : value; }
+
+/* Continuous move timeout thread function */
+static void* continuous_move_timeout_thread(void* arg) {
+    (void)arg; /* Suppress unused parameter warning */
+    
+    platform_sleep_ms(continuous_move_timeout_s * 1000);
+    
+    if (continuous_move_active) {
+        platform_log_info("PTZ continuous move timeout after %ds, stopping movement\n", continuous_move_timeout_s);
+        ptz_adapter_stop();
+        continuous_move_active = 0;
+    }
+    
+    return NULL;
+}
 
 int ptz_adapter_init(void) {
     int ret = 0;
@@ -759,6 +736,24 @@ int ptz_adapter_init(void) {
 int ptz_adapter_shutdown(void) {
     pthread_mutex_lock(&ptz_lock);
     if (ptz_initialized) {
+        /* Stop any ongoing continuous movement */
+        if (continuous_move_active) {
+            platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_LEFT);
+            platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_RIGHT);
+            platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_UP);
+            platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
+            continuous_move_active = 0;
+        }
+        
+        /* Wait for timeout thread to finish if it exists */
+        if (continuous_move_timer_thread != 0) {
+            pthread_t timer_thread = continuous_move_timer_thread;
+            continuous_move_timer_thread = 0;
+            pthread_mutex_unlock(&ptz_lock);
+            pthread_join(timer_thread, NULL);
+            pthread_mutex_lock(&ptz_lock);
+        }
+        
         platform_ptz_cleanup();
         ptz_initialized = 0;
     }
@@ -807,12 +802,24 @@ int ptz_adapter_absolute_move(int pan_deg, int tilt_deg, int speed) {
         current_pan_pos = pan_deg;
         current_tilt_pos = tilt_deg;
         
-        /* Wait for movement to complete */
+        /* Wait for movement to complete with timeout */
         platform_ptz_status_t h_status, v_status;
+        uint32_t timeout_ms = 5000; /* 5 second timeout */
+        uint32_t elapsed_ms = 0;
+        uint32_t check_interval_ms = 5; /* Check every 5ms */
+        
         do {
-            platform_sleep_us(5000); /* 5ms delay */
+            platform_sleep_us(check_interval_ms * 1000); /* Convert to microseconds */
+            elapsed_ms += check_interval_ms;
+            
             platform_ptz_get_status(PLATFORM_PTZ_AXIS_PAN, &h_status);
             platform_ptz_get_status(PLATFORM_PTZ_AXIS_TILT, &v_status);
+            
+            if (elapsed_ms >= timeout_ms) {
+                platform_log_error("PTZ absolute move timeout after %dms\n", timeout_ms);
+                ret = ONVIF_ERROR_TIMEOUT;
+                break;
+            }
         } while ((h_status != PLATFORM_PTZ_STATUS_OK) || (v_status != PLATFORM_PTZ_STATUS_OK));
     }
     
@@ -854,12 +861,24 @@ int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg, int speed) 
         if (ret == 0) current_tilt_pos += (dir == PLATFORM_PTZ_DIRECTION_DOWN) ? steps : -steps;
     }
     
-    /* Wait for movement to complete */
+    /* Wait for movement to complete with timeout */
     if (ret == 0) {
+        uint32_t timeout_ms = 5000; /* 5 second timeout */
+        uint32_t elapsed_ms = 0;
+        uint32_t check_interval_ms = 5; /* Check every 5ms */
+        
         do {
-            platform_sleep_us(5000); /* 5ms delay */
+            platform_sleep_us(check_interval_ms * 1000); /* Convert to microseconds */
+            elapsed_ms += check_interval_ms;
+            
             platform_ptz_get_status(PLATFORM_PTZ_AXIS_PAN, &h_status);
             platform_ptz_get_status(PLATFORM_PTZ_AXIS_TILT, &v_status);
+            
+            if (elapsed_ms >= timeout_ms) {
+                platform_log_error("PTZ relative move timeout after %dms\n", timeout_ms);
+                ret = ONVIF_ERROR_TIMEOUT;
+                break;
+            }
         } while ((h_status != PLATFORM_PTZ_STATUS_OK) || (v_status != PLATFORM_PTZ_STATUS_OK));
     }
     
@@ -874,17 +893,61 @@ int ptz_adapter_continuous_move(int pan_vel, int tilt_vel, int timeout_s) {
         return ONVIF_ERROR;
     }
     
-    if (pan_vel > 0) platform_ptz_set_speed(PLATFORM_PTZ_AXIS_PAN, pan_vel);
-    if (tilt_vel > 0) platform_ptz_set_speed(PLATFORM_PTZ_AXIS_TILT, tilt_vel);
+    /* Stop any existing continuous movement */
+    if (continuous_move_active) {
+        platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_LEFT);
+        platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_RIGHT);
+        platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_UP);
+        platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
+        continuous_move_active = 0;
+        
+        /* Wait for existing timer thread to finish */
+        if (continuous_move_timer_thread != 0) {
+            pthread_mutex_unlock(&ptz_lock);
+            pthread_join(continuous_move_timer_thread, NULL);
+            pthread_mutex_lock(&ptz_lock);
+            continuous_move_timer_thread = 0;
+        }
+    }
     
+    /* Handle negative speeds by using absolute value and proper direction */
+    int pan_speed = simple_abs(pan_vel);
+    int tilt_speed = simple_abs(tilt_vel);
+    
+    /* Set speed for both axes if movement is requested */
+    if (pan_vel != 0) {
+        platform_ptz_set_speed(PLATFORM_PTZ_AXIS_PAN, pan_speed);
+    }
+    if (tilt_vel != 0) {
+        platform_ptz_set_speed(PLATFORM_PTZ_AXIS_TILT, tilt_speed);
+    }
+    
+    /* Start movement in appropriate directions */
     if (pan_vel != 0) {
         platform_ptz_direction_t dir = (pan_vel > 0) ? PLATFORM_PTZ_DIRECTION_RIGHT : PLATFORM_PTZ_DIRECTION_LEFT;
-        platform_ptz_turn(dir, 360);
+        platform_ptz_turn(dir, 360); /* Large number for continuous movement */
     }
     
     if (tilt_vel != 0) {
         platform_ptz_direction_t dir = (tilt_vel > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
-        platform_ptz_turn(dir, 180);
+        platform_ptz_turn(dir, 180); /* Large number for continuous movement */
+    }
+    
+    /* Start timeout timer if timeout is specified and > 0 */
+    if (timeout_s > 0) {
+        continuous_move_timeout_s = timeout_s;
+        continuous_move_active = 1;
+        
+        if (pthread_create(&continuous_move_timer_thread, NULL, continuous_move_timeout_thread, NULL) != 0) {
+            platform_log_error("Failed to create continuous move timeout thread\n");
+            continuous_move_active = 0;
+            pthread_mutex_unlock(&ptz_lock);
+            return ONVIF_ERROR;
+        }
+        
+        platform_log_info("PTZ continuous move started with %ds timeout\n", timeout_s);
+    } else {
+        platform_log_info("PTZ continuous move started (no timeout)\n");
     }
     
     pthread_mutex_unlock(&ptz_lock);
@@ -905,6 +968,18 @@ int ptz_adapter_stop(void) {
     platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_RIGHT);
     platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_UP);
     platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
+    
+    /* Clear continuous move state */
+    continuous_move_active = 0;
+    
+    /* Wait for timeout thread to finish if it exists */
+    if (continuous_move_timer_thread != 0) {
+        pthread_t timer_thread = continuous_move_timer_thread;
+        continuous_move_timer_thread = 0;
+        pthread_mutex_unlock(&ptz_lock);
+        pthread_join(timer_thread, NULL);
+        pthread_mutex_lock(&ptz_lock);
+    }
     
     pthread_mutex_unlock(&ptz_lock);
     return ONVIF_SUCCESS;

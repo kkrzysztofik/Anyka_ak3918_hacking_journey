@@ -37,7 +37,10 @@ SRCS := \
 	src/server/discovery/ws_discovery.c \
 	src/utils/network_utils.c \
 	src/utils/xml_utils.c \
-	src/utils/logging_utils.c
+	src/utils/logging_utils.c \
+	src/utils/soap_helpers.c \
+	src/utils/response_helpers.c \
+	src/utils/service_handler.c
 
 OBJS := $(SRCS:src/%.c=$(OUT_DIR)/%.o)
 

@@ -17,6 +17,9 @@
 #include "utils/logging_utils.h"
 #include "utils/error_handling.h"
 #include "utils/constants_clean.h"
+#include "utils/soap_helpers.h"
+#include "utils/response_helpers.h"
+#include "utils/service_handler.h"
 #include "common/onvif_types.h"
 
 /* Device information constants */
@@ -204,47 +207,15 @@ int onvif_device_get_services(struct device_service *services, int *count) {
     return ONVIF_SUCCESS;
 }
 
-/* SOAP XML generation helpers */
-static void soap_fault_response(char *response, size_t response_size, const char *fault_code, const char *fault_string) {
-    snprintf(response, response_size, 
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-        "  <soap:Body>\n"
-        "    <soap:Fault>\n"
-        "      <soap:Code>\n"
-        "        <soap:Value>%s</soap:Value>\n"
-        "      </soap:Code>\n"
-        "      <soap:Reason>\n"
-        "        <soap:Text>%s</soap:Text>\n"
-        "      </soap:Reason>\n"
-        "    </soap:Fault>\n"
-        "  </soap:Body>\n"
-        "</soap:Envelope>", fault_code, fault_string);
-}
-
-static void soap_success_response(char *response, size_t response_size, const char *action, const char *body_content) {
-    snprintf(response, response_size,
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-        "  <soap:Body>\n"
-        "    <tds:%sResponse xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\">\n"
-        "      %s\n"
-        "    </tds:%sResponse>\n"
-        "  </soap:Body>\n"
-        "</soap:Envelope>", action, body_content, action);
-}
+/* SOAP XML generation helpers - now using common utilities */
 
 /* XML parsing helpers - now using xml_utils module */
 
 
 /**
- * @brief Handle ONVIF device service requests
+ * @brief Internal device service handler
  */
-int onvif_device_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
-    if (!request || !response) {
-        return ONVIF_ERROR;
-    }
-    
+static int device_service_handler(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
     // Use response buffer management for automatic cleanup
     response_buffer_t resp_buf;
     if (response_buffer_init(&resp_buf, response) != 0) {
@@ -286,30 +257,9 @@ int onvif_device_handle_request(onvif_action_type_t action, const onvif_request_
                     caps.has_events ? "true" : "false",
                     caps.has_media ? "true" : "false");
                 
-                response_buffer_set_body_printf(&resp_buf,
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                    "  <soap:Body>\n"
-                    "    <tds:GetCapabilitiesResponse xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\">\n"
-                    "      %s\n"
-                    "    </tds:GetCapabilitiesResponse>\n"
-                    "  </soap:Body>\n"
-                    "</soap:Envelope>", caps_xml);
+                onvif_response_device_success(response, "GetCapabilities", caps_xml);
             } else {
-                response_buffer_set_body_printf(&resp_buf,
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                    "  <soap:Body>\n"
-                    "    <soap:Fault>\n"
-                    "      <soap:Code>\n"
-                    "        <soap:Value>soap:Receiver</soap:Value>\n"
-                    "      </soap:Code>\n"
-                    "      <soap:Reason>\n"
-                    "        <soap:Text>Failed to get capabilities</soap:Text>\n"
-                    "      </soap:Reason>\n"
-                    "    </soap:Fault>\n"
-                    "  </soap:Body>\n"
-                    "</soap:Envelope>");
+                onvif_response_soap_fault(response, "soap:Receiver", "Failed to get capabilities");
             }
             break;
         }
@@ -327,30 +277,9 @@ int onvif_device_handle_request(onvif_action_type_t action, const onvif_request_
                     info.manufacturer, info.model, info.firmware_version,
                     info.serial_number, info.hardware_id);
                 
-                response_buffer_set_body_printf(&resp_buf,
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                    "  <soap:Body>\n"
-                    "    <tds:GetDeviceInformationResponse xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\">\n"
-                    "      %s\n"
-                    "    </tds:GetDeviceInformationResponse>\n"
-                    "  </soap:Body>\n"
-                    "</soap:Envelope>", info_xml);
+                onvif_response_device_success(response, "GetDeviceInformation", info_xml);
             } else {
-                response_buffer_set_body_printf(&resp_buf,
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                    "  <soap:Body>\n"
-                    "    <soap:Fault>\n"
-                    "      <soap:Code>\n"
-                    "        <soap:Value>soap:Receiver</soap:Value>\n"
-                    "      </soap:Code>\n"
-                    "      <soap:Reason>\n"
-                    "        <soap:Text>Failed to get device information</soap:Text>\n"
-                    "      </soap:Reason>\n"
-                    "    </soap:Fault>\n"
-                    "  </soap:Body>\n"
-                    "</soap:Envelope>");
+                onvif_response_soap_fault(response, "soap:Receiver", "Failed to get device information");
             }
             break;
         }
@@ -400,11 +329,9 @@ int onvif_device_handle_request(onvif_action_type_t action, const onvif_request_
                     dt.local_date_time.hour, dt.local_date_time.minute, dt.local_date_time.second,
                     dt.local_date_time.year, dt.local_date_time.month, dt.local_date_time.day);
                 
-                soap_success_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, "GetSystemDateAndTime", dt_xml);
-                response->body_length = strlen(response->body);
+                onvif_response_device_success(response, "GetSystemDateAndTime", dt_xml);
             } else {
-                soap_fault_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, SOAP_FAULT_RECEIVER, "Failed to get system date and time");
-                response->body_length = strlen(response->body);
+                onvif_response_soap_fault(response, "soap:Receiver", "Failed to get system date and time");
             }
             break;
         }
@@ -431,33 +358,25 @@ int onvif_device_handle_request(onvif_action_type_t action, const onvif_request_
                 }
                 strcat(services_xml, "</tds:Service>");
                 
-                soap_success_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, "GetServices", services_xml);
-                response->body_length = strlen(response->body);
+                onvif_response_device_success(response, "GetServices", services_xml);
             } else {
-                soap_fault_response(response->body, ONVIF_RESPONSE_BUFFER_SIZE, SOAP_FAULT_RECEIVER, "Failed to get services");
-                response->body_length = strlen(response->body);
+                onvif_response_soap_fault(response, "soap:Receiver", "Failed to get services");
             }
             break;
         }
         
         default:
-            response_buffer_set_body_printf(&resp_buf,
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                "  <soap:Body>\n"
-                "    <soap:Fault>\n"
-                "      <soap:Code>\n"
-                "        <soap:Value>soap:Receiver</soap:Value>\n"
-                "      </soap:Code>\n"
-                "      <soap:Reason>\n"
-                "        <soap:Text>Unsupported action</soap:Text>\n"
-                "      </soap:Reason>\n"
-                "    </soap:Fault>\n"
-                "  </soap:Body>\n"
-                "</soap:Envelope>");
+            onvif_handle_unsupported_action(response);
             break;
     }
     
     // Response buffer will be automatically cleaned up when it goes out of scope
     return response->body_length;
+}
+
+/**
+ * @brief Handle ONVIF device service requests
+ */
+int onvif_device_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
+    return onvif_handle_service_request(action, request, response, device_service_handler);
 }
