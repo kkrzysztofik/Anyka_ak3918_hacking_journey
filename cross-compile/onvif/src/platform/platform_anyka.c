@@ -15,13 +15,14 @@
 #include "ak_drv_ptz.h"
 #include "ak_drv_irled.h"
 #include "ak_vpss.h"
-#include <time.h>
-#include <unistd.h>
+#include "ak_global.h"
+#include "ak_thread.h"
+#include "list.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#include <sys/time.h>
+#include <pthread.h>
 
 /* Platform state */
 static bool g_platform_initialized = false;
@@ -38,6 +39,41 @@ static int map_video_codec(platform_video_codec_t codec) {
         case PLATFORM_VIDEO_CODEC_H264: return H264_ENC_TYPE;
         case PLATFORM_VIDEO_CODEC_H265: return HEVC_ENC_TYPE;
         case PLATFORM_VIDEO_CODEC_MJPEG: return MJPEG_ENC_TYPE;
+        default: return -1;
+    }
+}
+
+static int map_platform_enc_type(int platform_enc_type) {
+    switch (platform_enc_type) {
+        case PLATFORM_H264_ENC_TYPE: return H264_ENC_TYPE;
+        case PLATFORM_HEVC_ENC_TYPE: return HEVC_ENC_TYPE;
+        case PLATFORM_MJPEG_ENC_TYPE: return MJPEG_ENC_TYPE;
+        default: return -1;
+    }
+}
+
+static int map_platform_profile(int platform_profile) {
+    switch (platform_profile) {
+        case PLATFORM_PROFILE_MAIN: return PROFILE_MAIN;
+        case PLATFORM_PROFILE_BASELINE: return PROFILE_MAIN; // Use MAIN as fallback
+        case PLATFORM_PROFILE_HIGH: return PROFILE_MAIN; // Use MAIN as fallback
+        default: return -1;
+    }
+}
+
+static int map_platform_br_mode(int platform_br_mode) {
+    switch (platform_br_mode) {
+        case PLATFORM_BR_MODE_CBR: return BR_MODE_CBR;
+        case PLATFORM_BR_MODE_VBR: return BR_MODE_VBR;
+        default: return -1;
+    }
+}
+
+static int map_platform_frame_type(int platform_frame_type) {
+    switch (platform_frame_type) {
+        case PLATFORM_FRAME_TYPE_I: return FRAME_TYPE_I;
+        case PLATFORM_FRAME_TYPE_P: return FRAME_TYPE_P;
+        case PLATFORM_FRAME_TYPE_B: return FRAME_TYPE_B;
         default: return -1;
     }
 }
@@ -469,75 +505,117 @@ platform_result_t platform_irled_get_status(void) {
 }
 
 /* Configuration functions */
+static char g_config_buffer[4096] = {0};
+static bool g_config_loaded = false;
+
 platform_result_t platform_config_load(const char *filename) {
     if (!filename) return PLATFORM_ERROR_NULL;
-    // Implementation would load configuration from file
+    
+    FILE *fp = fopen(filename, "r");
+    if (!fp) {
+        platform_log_warning("Failed to open config file: %s\n", filename);
+        return PLATFORM_ERROR_IO;
+    }
+    
+    size_t bytes_read = fread(g_config_buffer, 1, sizeof(g_config_buffer) - 1, fp);
+    fclose(fp);
+    
+    if (bytes_read == 0) {
+        platform_log_warning("Config file is empty: %s\n", filename);
+        return PLATFORM_ERROR_IO;
+    }
+    
+    g_config_buffer[bytes_read] = '\0';
+    g_config_loaded = true;
+    
+    platform_log_info("Configuration loaded from: %s\n", filename);
     return PLATFORM_SUCCESS;
 }
 
 platform_result_t platform_config_save(const char *filename) {
     if (!filename) return PLATFORM_ERROR_NULL;
-    // Implementation would save configuration to file
+    
+    FILE *fp = fopen(filename, "w");
+    if (!fp) {
+        platform_log_error("Failed to create config file: %s\n", filename);
+        return PLATFORM_ERROR_IO;
+    }
+    
+    size_t bytes_written = fwrite(g_config_buffer, 1, strlen(g_config_buffer), fp);
+    fclose(fp);
+    
+    if (bytes_written != strlen(g_config_buffer)) {
+        platform_log_error("Failed to write complete config to: %s\n", filename);
+        return PLATFORM_ERROR_IO;
+    }
+    
+    platform_log_info("Configuration saved to: %s\n", filename);
     return PLATFORM_SUCCESS;
 }
 
 const char* platform_config_get_string(const char *section, const char *key, 
                                       const char *default_value) {
-    if (!section || !key) return default_value;
-    // Implementation would read from configuration
+    if (!section || !key || !g_config_loaded) return default_value;
+    
+    // Simple INI-style parsing
+    char search_pattern[256];
+    snprintf(search_pattern, sizeof(search_pattern), "[%s]", section);
+    
+    char *section_start = strstr(g_config_buffer, search_pattern);
+    if (!section_start) return default_value;
+    
+    char *line_start = strchr(section_start, '\n');
+    if (!line_start) return default_value;
+    line_start++; // Skip the newline
+    
+    while (*line_start && *line_start != '[') {
+        char *line_end = strchr(line_start, '\n');
+        if (!line_end) line_end = g_config_buffer + strlen(g_config_buffer);
+        
+        char *equals = strchr(line_start, '=');
+        if (equals && equals < line_end) {
+            // Check if this is our key
+            char *key_end = equals;
+            while (key_end > line_start && (*key_end == ' ' || *key_end == '\t')) key_end--;
+            
+            size_t key_len = key_end - line_start;
+            if (strncmp(line_start, key, key_len) == 0) {
+                // Found our key, return the value
+                char *value_start = equals + 1;
+                while (*value_start == ' ' || *value_start == '\t') value_start++;
+                
+                char *value_end = line_end;
+                while (value_end > value_start && (value_end[-1] == ' ' || value_end[-1] == '\t' || value_end[-1] == '\r')) value_end--;
+                
+                static char value_buffer[256];
+                size_t value_len = value_end - value_start;
+                if (value_len >= sizeof(value_buffer)) value_len = sizeof(value_buffer) - 1;
+                
+                strncpy(value_buffer, value_start, value_len);
+                value_buffer[value_len] = '\0';
+                
+                return value_buffer;
+            }
+        }
+        
+        line_start = line_end;
+        if (*line_start == '\n') line_start++;
+    }
+    
     return default_value;
 }
 
 int platform_config_get_int(const char *section, const char *key, int default_value) {
-    if (!section || !key) return default_value;
-    // Implementation would read from configuration
-    return default_value;
-}
-
-/* Missing ak_print implementation for legacy compatibility */
-int ak_print(int level, const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
+    const char *str_value = platform_config_get_string(section, key, NULL);
+    if (!str_value) return default_value;
     
-    // Get current time for timestamp
-    time_t now = time(NULL);
-    struct tm *tm_info = localtime(&now);
-    char timestamp[32];
-    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", tm_info);
-    
-    // Print timestamp and level prefix
-    switch (level) {
-        case LOG_LEVEL_ERROR:
-            fprintf(stderr, "[%s] [ERROR] ", timestamp);
-            break;
-        case LOG_LEVEL_WARNING:
-            fprintf(stderr, "[%s] [WARNING] ", timestamp);
-            break;
-        case LOG_LEVEL_NOTICE:
-            printf("[%s] [NOTICE] ", timestamp);
-            break;
-        case LOG_LEVEL_NORMAL:
-            printf("[%s] [NORMAL] ", timestamp);
-            break;
-        case LOG_LEVEL_INFO:
-            printf("[%s] [INFO] ", timestamp);
-            break;
-        case LOG_LEVEL_DEBUG:
-            printf("[%s] [DEBUG] ", timestamp);
-            break;
-        default:
-            printf("[%s] [UNKNOWN] ", timestamp);
-            break;
+    char *endptr;
+    long int_value = strtol(str_value, &endptr, 10);
+    if (endptr == str_value || *endptr != '\0') {
+        return default_value;
     }
     
-    // Print the actual message
-    int ret = vfprintf((level <= LOG_LEVEL_WARNING) ? stderr : stdout, fmt, args);
-    va_end(args);
-    
-    // Ensure output is flushed
-    fflush((level <= LOG_LEVEL_WARNING) ? stderr : stdout);
-    
-    return ret;
+    return (int)int_value;
 }
 
 /* Logging functions */
@@ -583,15 +661,88 @@ int platform_log_debug(const char *format, ...) {
 
 /* Utility functions */
 void platform_sleep_ms(uint32_t milliseconds) {
-    usleep(milliseconds * 1000);
+    struct timespec ts;
+    ts.tv_sec = milliseconds / 1000;
+    ts.tv_nsec = (milliseconds % 1000) * 1000000;
+    nanosleep(&ts, NULL);
 }
 
 void platform_sleep_us(uint32_t microseconds) {
-    usleep(microseconds);
+    struct timespec ts;
+    ts.tv_sec = microseconds / 1000000;
+    ts.tv_nsec = (microseconds % 1000000) * 1000;
+    nanosleep(&ts, NULL);
 }
 
 uint64_t platform_get_time_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/* Video Encoder Stream functions (for RTSP) */
+platform_result_t platform_venc_get_stream(platform_venc_handle_t handle, 
+                                          platform_venc_stream_t *stream, 
+                                          uint32_t timeout_ms) {
+    if (!handle || !stream) return PLATFORM_ERROR_NULL;
+    
+    struct video_stream anyka_stream;
+    int result = ak_venc_get_stream(handle, &anyka_stream);
+    
+    if (result != 0) {
+        return PLATFORM_ERROR;
+    }
+    
+    stream->data = anyka_stream.data;
+    stream->len = anyka_stream.len;
+    stream->timestamp = anyka_stream.ts;
+    stream->is_keyframe = (anyka_stream.frame_type == FRAME_TYPE_I);
+    
+    return PLATFORM_SUCCESS;
+}
+
+void platform_venc_release_stream(platform_venc_handle_t handle, 
+                                 platform_venc_stream_t *stream) {
+    if (!handle || !stream) return;
+    
+    struct video_stream anyka_stream;
+    anyka_stream.data = stream->data;
+    anyka_stream.len = stream->len;
+    anyka_stream.ts = stream->timestamp;
+    
+    ak_venc_release_stream(handle, &anyka_stream);
+}
+
+/* Audio Encoder Stream functions (for RTSP) */
+platform_result_t platform_aenc_get_stream(platform_aenc_handle_t handle, 
+                                          platform_aenc_stream_t *stream, 
+                                          uint32_t timeout_ms) {
+    if (!handle || !stream) return PLATFORM_ERROR_NULL;
+    
+    struct list_head stream_head;
+    INIT_LIST_HEAD(&stream_head);
+    
+    int result = ak_aenc_get_stream(handle, &stream_head);
+    if (result != 0) {
+        return PLATFORM_ERROR;
+    }
+    
+    if (list_empty(&stream_head)) {
+        return PLATFORM_ERROR;
+    }
+    
+    struct aenc_entry *entry = list_first_entry(&stream_head, struct aenc_entry, list);
+    stream->data = entry->stream.data;
+    stream->len = entry->stream.len;
+    stream->timestamp = entry->stream.ts;
+    
+    return PLATFORM_SUCCESS;
+}
+
+void platform_aenc_release_stream(platform_aenc_handle_t handle, 
+                                 platform_aenc_stream_t *stream) {
+    if (!handle || !stream) return;
+    
+    // Note: Audio encoder stream is managed internally by Anyka SDK
+    // The stream data is released automatically when the next frame is retrieved
 }

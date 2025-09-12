@@ -15,8 +15,8 @@
 
 #include "ws_discovery.h"
 #include "network_utils.h"
-#include "utils.h"
 #include "constants.h"
+#include "platform.h"
 
 #define WS_DISCOVERY_PORT 3702
 #define WS_DISCOVERY_ADDR "239.255.255.250"
@@ -183,7 +183,7 @@ int ws_discovery_stop(void){
     /* Timed join fallback */
     for (int i=0;i<50;i++) { /* wait up to ~5s */
         if (pthread_join(discovery_thread, NULL) == 0) break;
-    sleep_us(100000); /* 100ms */
+    platform_sleep_us(100000); /* 100ms */
     }
     send_bye();
     return 0;

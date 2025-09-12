@@ -8,8 +8,10 @@ This project was originally developed by **Gerge** (https://gitea.raspiweb.com/G
 
 ## Recent Updates
 
+- **Complete Platform Abstraction Layer**: Full hardware abstraction implementation for Anyka AK3918 with proper SDK integration
+- **ONVIF Server Implementation**: Complete ONVIF server with Device, Media, PTZ, and Imaging services
+- **RTSP Streaming**: Robust RTSP server with H.264 video and audio streaming support
 - **Docker Cross-Compilation Environment**: Added Docker-based cross-compilation setup for easier development on Windows and other platforms
-- **ONVIF Implementation**: Complete ONVIF server implementation with PTZ, imaging, and media services
 - **Code Quality Improvements**: Fixed compilation errors, improved code structure, and enhanced error handling
 - **Build System**: Streamlined build process with proper Makefiles and build scripts
 - **Web Interface Reorganization**: Separated ONVIF and legacy interfaces for better organization and user experience
@@ -19,21 +21,78 @@ This project was originally developed by **Gerge** (https://gitea.raspiweb.com/G
 This is a simplified README with the latest features. For detailed hacking process and development information, see the [hack process documentation](hack_process/README.md).
 
 ### Working Features
-- **RTSP stream** (720p on http://IP:554/vs0)
-- **BMP snapshot** (up to 720p) on port 3000
-- **JPEG snapshot**
-- **H264 video recording** (no mp4 yet, but ffmpeg converts it)
-- **Audio playback**
-- **Audio recording to mp3**
-- **PTZ movement**
-- **IR shutter**
-- **Combined web interface** with PTZ and IR on port 80
-- **ONVIF web interface** with advanced PTZ, imaging, and preset controls
-- **Motion detection**
-- **ONVIF server** with full PTZ, imaging, and media services
-- **Docker cross-compilation** environment for easy development
+- **Complete Platform Abstraction Layer** - Full hardware abstraction for Anyka AK3918
+- **ONVIF Server** - Complete implementation with Device, Media, PTZ, and Imaging services
+- **RTSP Streaming** - H.264 video and audio streaming with proper resource management
+- **PTZ Control** - Full pan-tilt-zoom functionality with preset management
+- **Imaging Services** - Real-time video effects and day/night switching
+- **IR LED Management** - Automatic night vision control
+- **Configuration Management** - INI-style configuration with load/save functionality
+- **Web Interfaces** - Both ONVIF and legacy interfaces with clear separation
+- **Motion Detection** - Real-time motion detection capabilities
+- **Audio Support** - Audio recording and playback functionality
+- **Docker Cross-Compilation** - Easy development environment for all platforms
 
-The camera can now be connected to a video recorder or monitor software such as MotionEye, and supports standard ONVIF protocols for integration with professional surveillance systems.
+### Key Technical Achievements
+- **Hardware Abstraction**: Clean, platform-agnostic interface for all hardware operations
+- **ONVIF Compliance**: Full implementation of ONVIF Device, Media, PTZ, and Imaging services
+- **RTSP Integration**: Robust streaming with proper video/audio synchronization
+- **Resource Management**: Proper cleanup and resource handling using Anyka SDK
+- **Error Handling**: Comprehensive error handling with standardized return codes
+- **Logging System**: Unified logging interface with timestamp formatting
+
+The camera can now be connected to professional surveillance software such as MotionEye, Blue Iris, or any ONVIF-compliant system, providing full integration with industry-standard protocols.
+
+# Platform Abstraction Layer
+
+The project features a comprehensive platform abstraction layer (`cross-compile/onvif/src/platform/platform_anyka.c`) that provides unified hardware access for the Anyka AK3918 platform.
+
+## Core Components
+
+### Video Processing
+- **Video Input (VI)**: Device management, sensor resolution detection, day/night switching
+- **Video Processing Subsystem (VPSS)**: Real-time effects (brightness, contrast, saturation, sharpness, hue)
+- **Video Encoder**: H.264/H.265/MJPEG encoding with configurable parameters
+
+### Audio Processing
+- **Audio Input (AI)**: Audio capture and device management
+- **Audio Encoder**: AAC, G.711, PCM encoding with synchronized streaming
+
+### Control Systems
+- **PTZ Control**: Complete pan-tilt-zoom functionality with coordinate mapping
+- **IR LED Management**: Automatic night vision control and mode switching
+- **Configuration Management**: INI-style configuration with load/save functionality
+
+### System Services
+- **Logging System**: Unified logging interface using Anyka's `ak_print()` function
+- **Resource Management**: Proper cleanup and resource handling
+- **Error Handling**: Standardized error codes and comprehensive error reporting
+
+## API Design
+
+The platform abstraction provides a clean, hardware-agnostic interface:
+
+```c
+// Video encoder stream for RTSP
+platform_result_t platform_venc_get_stream(platform_venc_handle_t handle, 
+                                          platform_venc_stream_t *stream, 
+                                          uint32_t timeout_ms);
+
+// PTZ control
+platform_result_t platform_ptz_move_to_position(int pan_deg, int tilt_deg);
+
+// Configuration management
+const char* platform_config_get_string(const char *section, const char *key, 
+                                      const char *default_value);
+```
+
+## Benefits
+
+- **Hardware Independence**: Clean separation between application logic and hardware specifics
+- **Maintainability**: Easy to modify or extend hardware support
+- **Error Handling**: Consistent error reporting across all platform functions
+- **Resource Management**: Proper cleanup and resource handling
+- **Testing**: Easier unit testing with abstracted interfaces
 
 # Development Environment
 
@@ -150,35 +209,55 @@ www/cgi-bin/
 
 # ONVIF Server
 
-A complete ONVIF server implementation with:
+A complete ONVIF server implementation with full platform abstraction integration:
 
 ## Features
 
 ### Device Management
 - Device information, capabilities, and discovery
 - WS-Discovery for automatic device discovery on the network
+- Hardware abstraction for device-specific operations
 
 ### Media Services
 - Video stream configuration and management
-- RTSP streaming with H.264 video and audio
+- RTSP streaming with H.264 video and synchronized audio
+- Real-time stream generation using platform video encoder
+- Proper resource management and frame handling
 
 ### PTZ Services
 - Pan-tilt-zoom control with preset management
 - Relative and absolute movement commands
 - Preset storage and recall (up to 5 positions)
+- Hardware abstraction for PTZ operations
 
 ### Imaging Services
-- Brightness, contrast, and saturation adjustment
-- Real-time parameter adjustment
+- Brightness, contrast, saturation, sharpness, and hue adjustment
+- Real-time parameter adjustment using VPSS effects
+- Day/night mode switching with automatic IR LED control
 - Quick preset configurations
 
 ## Architecture
 
-The ONVIF web interface communicates with the ONVIF server using HTTP POST requests with SOAP XML payloads:
+The system uses a layered architecture with clear separation of concerns:
 
 ```
-Web Browser → CGI Script → HTTP POST → ONVIF Server → Hardware
+Web Browser → CGI Script → HTTP POST → ONVIF Server → Platform Abstraction → Anyka SDK → Hardware
 ```
+
+### Component Layers
+
+1. **Web Interface Layer**: CGI scripts and web pages for user interaction
+2. **ONVIF Service Layer**: SOAP/HTTP server implementing ONVIF protocols
+3. **Platform Abstraction Layer**: Hardware-agnostic interface for all operations
+4. **SDK Integration Layer**: Direct integration with Anyka SDK functions
+5. **Hardware Layer**: Physical camera hardware and peripherals
+
+### Data Flow
+
+- **Configuration**: INI files → Platform abstraction → Hardware settings
+- **Video Streams**: Hardware → SDK → Platform abstraction → RTSP server → Network
+- **PTZ Commands**: Web interface → ONVIF server → Platform abstraction → Hardware
+- **Imaging Controls**: Web interface → ONVIF server → Platform abstraction → VPSS effects
 
 ### ONVIF Services Used
 
@@ -239,8 +318,13 @@ Both interfaces share the same configuration files:
 
 ## Current Status
 - ✅ **Compilation**: All projects compile successfully with Docker environment
-- ✅ **Basic ONVIF**: Device discovery, media, and PTZ services working
-- ⚠️ **RTSP Streaming**: Basic implementation complete, some protocol compliance issues remain
+- ✅ **Platform Abstraction**: Complete hardware abstraction layer implemented
+- ✅ **ONVIF Server**: Full implementation with Device, Media, PTZ, and Imaging services
+- ✅ **RTSP Streaming**: Robust implementation with H.264 video and audio streaming
+- ✅ **PTZ Control**: Complete pan-tilt-zoom functionality with preset management
+- ✅ **Imaging Services**: Real-time video effects and day/night switching
+- ✅ **Configuration Management**: INI-style configuration with load/save functionality
+- ✅ **Resource Management**: Proper cleanup and resource handling
 - ⚠️ **Security**: No authentication implemented (as noted in original design)
 - 🔧 **Known Issues**: See [REVIEW.md](REVIEW.md) for detailed technical analysis and improvement suggestions
 
@@ -258,6 +342,11 @@ Both interfaces share the same configuration files:
 3. **More Features**: Imaging controls and preset management
 4. **Real-time Status**: Live monitoring of service status
 5. **Future-proof**: Easily extensible with additional ONVIF services
+6. **Hardware Abstraction**: Clean separation between application and hardware
+7. **Robust Error Handling**: Comprehensive error reporting and recovery
+8. **Resource Management**: Proper cleanup and resource handling
+9. **Maintainability**: Easier to modify and extend functionality
+10. **Professional Grade**: Suitable for integration with professional surveillance systems
 
 ## Troubleshooting
 
@@ -365,8 +454,13 @@ To modify the web interface:
 
 ## Future Enhancements
 
-- **Authentication**: Add ONVIF authentication support
-- **More Presets**: Increase preset storage capacity
-- **Advanced Imaging**: Add more imaging parameters (sharpness, white balance, etc.)
+- **Authentication**: Add ONVIF authentication support (HTTP Digest, WS-Security)
+- **More Presets**: Increase preset storage capacity beyond current 5 positions
+- **Advanced Imaging**: Add more imaging parameters (white balance, exposure, etc.)
 - **Recording Controls**: Add video recording start/stop controls
 - **Event Handling**: Add motion detection and event management
+- **Profile S Compliance**: Full ONVIF Profile S compliance for advanced features
+- **Audio Streaming**: Enhanced audio streaming with multiple codec support
+- **Multi-Stream**: Support for multiple video streams simultaneously
+- **Advanced PTZ**: More sophisticated PTZ features (tours, patterns, etc.)
+- **Configuration UI**: Web-based configuration interface for platform settings

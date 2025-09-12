@@ -29,4 +29,10 @@ int http_server_start(int port);
  */
 int http_server_stop(void);
 
+/**
+ * @brief Process a single connection (used by thread pool)
+ * @param conn Connection to process
+ */
+void process_connection(void *conn);
+
 #endif

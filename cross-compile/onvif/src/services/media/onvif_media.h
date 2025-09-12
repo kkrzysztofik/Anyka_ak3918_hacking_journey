@@ -5,6 +5,9 @@
 #ifndef ONVIF_MEDIA_H
 #define ONVIF_MEDIA_H
 
+#include "../common/onvif_types.h"
+#include "../common/onvif_request.h"
+
 struct stream_uri {
     char uri[256];
     int invalid_after_connect;
@@ -145,5 +148,6 @@ int onvif_media_get_audio_source_configurations(struct audio_source_configuratio
 int onvif_media_get_audio_encoder_configurations(struct audio_encoder_configuration **configs, int *count); /**< Audio encoder configs. */
 int onvif_media_get_stream_uri(const char *profile_token, const char *protocol, struct stream_uri *uri); /**< Build stream URI. */
 int onvif_media_get_snapshot_uri(const char *profile_token, struct stream_uri *uri); /**< Build snapshot URI. */
+int onvif_media_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response); /**< Handle ONVIF media service requests. */
 
 #endif

@@ -7,6 +7,8 @@
 #define ONVIF_IMAGING_H
 
 #include <stdint.h>
+#include "../common/onvif_types.h"
+#include "../common/onvif_request.h"
 
 enum day_night_mode {
     DAY_NIGHT_AUTO = 0,
@@ -55,5 +57,6 @@ int onvif_imaging_get_auto_config(struct auto_daynight_config *config); /**< Ret
 int onvif_imaging_get_imaging_settings(char *response, int response_size); /**< SOAP: GetImagingSettings. */
 int onvif_imaging_set_imaging_settings(const char *request, char *response, int response_size); /**< SOAP: SetImagingSettings. */
 int onvif_imaging_get_options(char *response, int response_size); /**< SOAP: GetOptions. */
+int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response); /**< Handle ONVIF imaging service requests. */
 
 #endif

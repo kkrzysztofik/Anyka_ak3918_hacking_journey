@@ -41,6 +41,25 @@ typedef enum {
     PLATFORM_VIDEO_CODEC_MJPEG = 2
 } platform_video_codec_t;
 
+/* Video encoding constants */
+#define PLATFORM_H264_ENC_TYPE 0
+#define PLATFORM_HEVC_ENC_TYPE 1
+#define PLATFORM_MJPEG_ENC_TYPE 2
+
+/* Video profile constants */
+#define PLATFORM_PROFILE_MAIN 0
+#define PLATFORM_PROFILE_BASELINE 1
+#define PLATFORM_PROFILE_HIGH 2
+
+/* Bitrate mode constants */
+#define PLATFORM_BR_MODE_CBR 0
+#define PLATFORM_BR_MODE_VBR 1
+
+/* Frame type constants */
+#define PLATFORM_FRAME_TYPE_I 0
+#define PLATFORM_FRAME_TYPE_P 1
+#define PLATFORM_FRAME_TYPE_B 2
+
 typedef enum {
     PLATFORM_DAYNIGHT_DAY = 0,
     PLATFORM_DAYNIGHT_NIGHT = 1,
@@ -143,6 +162,20 @@ platform_result_t platform_venc_get_frame(platform_venc_handle_t handle,
                                          uint8_t **data, uint32_t *size);
 void platform_venc_release_frame(platform_venc_handle_t handle, uint8_t *data);
 
+/* Video Encoder Stream functions (for RTSP) */
+typedef struct {
+    uint8_t *data;
+    uint32_t len;
+    uint32_t timestamp;
+    bool is_keyframe;
+} platform_venc_stream_t;
+
+platform_result_t platform_venc_get_stream(platform_venc_handle_t handle, 
+                                          platform_venc_stream_t *stream, 
+                                          uint32_t timeout_ms);
+void platform_venc_release_stream(platform_venc_handle_t handle, 
+                                 platform_venc_stream_t *stream);
+
 /* Audio Input (AI) functions */
 platform_result_t platform_ai_open(platform_ai_handle_t *handle);
 void platform_ai_close(platform_ai_handle_t handle);
@@ -154,6 +187,19 @@ void platform_aenc_cleanup(platform_aenc_handle_t handle);
 platform_result_t platform_aenc_get_frame(platform_aenc_handle_t handle, 
                                          uint8_t **data, uint32_t *size);
 void platform_aenc_release_frame(platform_aenc_handle_t handle, uint8_t *data);
+
+/* Audio Encoder Stream functions (for RTSP) */
+typedef struct {
+    uint8_t *data;
+    uint32_t len;
+    uint32_t timestamp;
+} platform_aenc_stream_t;
+
+platform_result_t platform_aenc_get_stream(platform_aenc_handle_t handle, 
+                                          platform_aenc_stream_t *stream, 
+                                          uint32_t timeout_ms);
+void platform_aenc_release_stream(platform_aenc_handle_t handle, 
+                                 platform_aenc_stream_t *stream);
 
 /* PTZ functions */
 platform_result_t platform_ptz_init(void);

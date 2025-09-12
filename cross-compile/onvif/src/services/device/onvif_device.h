@@ -5,6 +5,9 @@
 #ifndef ONVIF_DEVICE_H
 #define ONVIF_DEVICE_H
 
+#include "../common/onvif_types.h"
+#include "../common/onvif_request.h"
+
 struct device_info {
     char manufacturer[64];
     char model[64];
@@ -84,5 +87,6 @@ int onvif_device_get_dns(struct dns_information *dns); /**< Get DNS settings. */
 int onvif_device_get_network_interfaces(struct network_interface *interfaces, int *count); /**< Enumerate NICs. */
 int onvif_device_get_network_protocols(struct network_protocol *protocols, int *count); /**< Enumerate protocols & ports. */
 int onvif_device_get_services(struct device_service *services, int *count); /**< List device services and versions. */
+int onvif_device_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response); /**< Handle ONVIF device service requests. */
 
 #endif

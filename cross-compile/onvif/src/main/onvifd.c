@@ -15,15 +15,12 @@
 #include <signal.h>
 #include <unistd.h>
 #include <string.h>
-#include "ptz_adapter.h"
 #include "config.h"
-#include "services/imaging/onvif_imaging.h"
-#include "http_server.h"
-#include "rtsp_server.h"
+#include "services/service_manager.h"
+#include "server/http/http_server.h"
+#include "server/rtsp/rtsp_server.h"
+#include "server/discovery/ws_discovery.h"
 #include "constants.h"
-#include "ws_discovery.h"
-#include "ak_vi.h"
-#include "ak_venc.h"
 #include "platform.h"
 
 static volatile int running = 1;
@@ -57,8 +54,7 @@ static void full_cleanup(void){
     if (vi_handle) { platform_vi_close(vi_handle); vi_handle = NULL; }
     ws_discovery_stop();
     http_server_stop();
-    onvif_imaging_cleanup();
-    ptz_adapter_shutdown();
+    onvif_services_cleanup();
 }
 
 /**
@@ -132,8 +128,8 @@ static void init_video_and_streams(void){
     main_cfg.video_config.width  = (resolution.width  > 1920) ? 1920 : resolution.width;
     main_cfg.video_config.height = (resolution.height > 1080) ? 1080 : resolution.height;
     main_cfg.video_config.fps = 25; main_cfg.video_config.bitrate = 2000; /* kbps */
-    main_cfg.video_config.gop_size = 50; main_cfg.video_config.profile = PROFILE_MAIN;
-    main_cfg.video_config.codec_type = H264_ENC_TYPE; main_cfg.video_config.br_mode = BR_MODE_CBR;
+    main_cfg.video_config.gop_size = 50; main_cfg.video_config.profile = PLATFORM_PROFILE_MAIN;
+    main_cfg.video_config.codec_type = PLATFORM_H264_ENC_TYPE; main_cfg.video_config.br_mode = PLATFORM_BR_MODE_CBR;
     rtsp_server_main = create_and_start_rtsp(&main_cfg, "main");
     if (rtsp_server_main) printf("RTSP main stream started: rtsp://[IP]:554/vs0\n");
 
@@ -149,8 +145,8 @@ static void init_video_and_streams(void){
     if (target_w & 1) target_w--; if (target_h & 1) target_h--; /* even */
     sub_cfg.video_config.width = target_w; sub_cfg.video_config.height = target_h;
     sub_cfg.video_config.fps = 15; sub_cfg.video_config.bitrate = 512;
-    sub_cfg.video_config.gop_size = 30; sub_cfg.video_config.profile = PROFILE_MAIN;
-    sub_cfg.video_config.codec_type = H264_ENC_TYPE; sub_cfg.video_config.br_mode = BR_MODE_CBR;
+    sub_cfg.video_config.gop_size = 30; sub_cfg.video_config.profile = PLATFORM_PROFILE_MAIN;
+    sub_cfg.video_config.codec_type = PLATFORM_H264_ENC_TYPE; sub_cfg.video_config.br_mode = PLATFORM_BR_MODE_CBR;
     rtsp_server_sub = create_and_start_rtsp(&sub_cfg, "sub");
     if (rtsp_server_sub){
         printf("RTSP sub stream started: rtsp://[IP]:554/vs1 (%dx%d @ %dfps %dkbps)\n",
@@ -163,8 +159,8 @@ static void init_video_and_streams(void){
  * @brief Start imaging, HTTP server, and WS-Discovery (non-fatal if some fail).
  */
 static void start_optional_services(const struct application_config *cfg){
-    if (onvif_imaging_init(vi_handle) != 0)
-        fprintf(stderr, "warning: failed to initialize imaging service\n");
+    if (onvif_services_init(vi_handle) != 0)
+        fprintf(stderr, "warning: failed to initialize ONVIF services\n");
     if (http_server_start(cfg->onvif.http_port) != 0) {
         fprintf(stderr, "failed to start HTTP server on port %d\n", cfg->onvif.http_port);
         full_cleanup();
@@ -195,8 +191,6 @@ int main(int argc, char **argv){
     printf("Configuration: port=%d, user=%s (imaging.brightness=%d)\n",
            cfg.onvif.http_port, cfg.onvif.username, cfg.imaging.brightness);
 
-    if (ptz_adapter_init() != 0)
-        fprintf(stderr, "warning: failed to initialize ptz adapter\n");
 
     init_video_and_streams(); /* Non-fatal on failure */
     start_optional_services(&cfg);

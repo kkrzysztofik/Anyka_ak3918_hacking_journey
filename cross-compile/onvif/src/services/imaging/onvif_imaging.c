@@ -9,8 +9,11 @@
 #include "onvif_imaging.h"
 #include "config.h"
 #include "constants.h"
-#include "ak_common.h"
 #include "platform.h"
+#include "../server/http/http_parser.h"
+#include "../utils/xml_utils.h"
+#include "../utils/logging_utils.h"
+#include "../common/onvif_types.h"
 
 static struct auto_daynight_config g_auto_config;
 static struct imaging_settings g_imaging_settings;
@@ -51,7 +54,7 @@ int onvif_imaging_init(void *vi_handle) {
     const struct application_config *ucfg = config_get();
     if (ucfg) {
         g_imaging_settings = ucfg->imaging;
-    platform_log_notice("Loaded imaging settings from application config\n");
+    log_config_updated("imaging settings");
     } else {
     platform_log_notice("Application config not loaded; using defaults\n");
     }
@@ -119,7 +122,7 @@ int onvif_imaging_init(void *vi_handle) {
     
     g_imaging_initialized = 1; 
     pthread_mutex_unlock(&g_imaging_mutex); 
-    platform_log_notice("ONVIF Imaging service initialized successfully\n"); 
+    log_service_init_success("Imaging"); 
     return 0; 
 }
 
@@ -127,21 +130,21 @@ void onvif_imaging_cleanup(void) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (g_imaging_initialized) {
         g_imaging_initialized = 0;
-        platform_log_notice("ONVIF Imaging service cleaned up\n");
+        log_service_cleanup("Imaging");
     }
     pthread_mutex_unlock(&g_imaging_mutex);
 }
 
 int onvif_imaging_get_settings(struct imaging_settings *settings) {
     if (!settings) {
-        platform_log_error("Invalid parameters\n");
+        log_invalid_parameters("onvif_imaging_get_settings");
         return -1;
     }
     
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        platform_log_error("Imaging service not initialized\n");
+        log_service_not_initialized("Imaging");
         return -1;
     }
     
@@ -159,7 +162,7 @@ int onvif_imaging_set_settings(const struct imaging_settings *settings) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        platform_log_error("Imaging service not initialized\n");
+        log_service_not_initialized("Imaging");
         return -1;
     }
     
@@ -227,7 +230,7 @@ int onvif_imaging_set_day_night_mode(enum day_night_mode mode) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        platform_log_error("Imaging service not initialized\n");
+        log_service_not_initialized("Imaging");
         return -1;
     }
     
@@ -264,7 +267,7 @@ int onvif_imaging_get_day_night_mode(void) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        platform_log_error("Imaging service not initialized\n");
+        log_service_not_initialized("Imaging");
         return -1;
     }
     
@@ -277,7 +280,7 @@ int onvif_imaging_set_irled_mode(enum ir_led_mode mode) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        platform_log_error("Imaging service not initialized\n");
+        log_service_not_initialized("Imaging");
         return -1;
     }
     
@@ -315,7 +318,7 @@ int onvif_imaging_set_flip_mirror(int flip, int mirror) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        platform_log_error("Imaging service not initialized\n");
+        log_service_not_initialized("Imaging");
         return -1;
     }
     
@@ -339,7 +342,7 @@ int onvif_imaging_set_auto_config(const struct auto_daynight_config *config) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        platform_log_error("Imaging service not initialized\n");
+        log_service_not_initialized("Imaging");
         return -1;
     }
     
@@ -363,7 +366,7 @@ int onvif_imaging_get_auto_config(struct auto_daynight_config *config) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        platform_log_error("Imaging service not initialized\n");
+        log_service_not_initialized("Imaging");
         return -1;
     }
     
@@ -381,7 +384,7 @@ int onvif_imaging_get_imaging_settings(char *response, int response_size) {
     pthread_mutex_lock(&g_imaging_mutex);
     if (!g_imaging_initialized) {
         pthread_mutex_unlock(&g_imaging_mutex);
-        platform_log_error("Imaging service not initialized\n");
+        log_service_not_initialized("Imaging");
         return -1;
     }
     
@@ -504,4 +507,230 @@ int onvif_imaging_get_options(char *response, int response_size) {
     snprintf(response, response_size, ONVIF_SOAP_IMAGING_GET_OPTIONS_RESPONSE);
     
     return 0;
+}
+
+/* SOAP XML generation helpers */
+static void soap_fault_response(char *response, size_t response_size, const char *fault_code, const char *fault_string) {
+    snprintf(response, response_size, 
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+        "  <soap:Body>\n"
+        "    <soap:Fault>\n"
+        "      <soap:Code>\n"
+        "        <soap:Value>%s</soap:Value>\n"
+        "      </soap:Code>\n"
+        "      <soap:Reason>\n"
+        "        <soap:Text>%s</soap:Text>\n"
+        "      </soap:Reason>\n"
+        "    </soap:Fault>\n"
+        "  </soap:Body>\n"
+        "</soap:Envelope>", fault_code, fault_string);
+}
+
+static void soap_success_response(char *response, size_t response_size, const char *action, const char *body_content) {
+    snprintf(response, response_size,
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+        "  <soap:Body>\n"
+        "    <timg:%sResponse xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">\n"
+        "      %s\n"
+        "    </timg:%sResponse>\n"
+        "  </soap:Body>\n"
+        "</soap:Envelope>", action, body_content, action);
+}
+
+/* XML parsing helpers - now using xml_utils module */
+
+
+/**
+ * @brief Handle ONVIF imaging service requests
+ */
+int onvif_imaging_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
+    if (!request || !response) {
+        return -1;
+    }
+    
+    // Initialize response structure
+    response->status_code = 200;
+    response->content_type = "application/soap+xml";
+    response->body = malloc(4096);
+    if (!response->body) {
+        return -1;
+    }
+    response->body_length = 0;
+    
+    switch (action) {
+        case ONVIF_ACTION_GET_IMAGING_SETTINGS: {
+            char *video_source_token = xml_extract_value(request->body, "<timg:VideoSourceToken>", "</timg:VideoSourceToken>");
+            
+            if (video_source_token) {
+                struct imaging_settings settings;
+                if (onvif_imaging_get_settings(&settings) == 0) {
+                    char settings_xml[1024];
+                    snprintf(settings_xml, sizeof(settings_xml),
+                        "<timg:ImagingSettings>\n"
+                        "  <tt:Brightness>%d</tt:Brightness>\n"
+                        "  <tt:Contrast>%d</tt:Contrast>\n"
+                        "  <tt:ColorSaturation>%d</tt:ColorSaturation>\n"
+                        "  <tt:Sharpness>%d</tt:Sharpness>\n"
+                        "  <tt:BacklightCompensation>\n"
+                        "    <tt:Mode>OFF</tt:Mode>\n"
+                        "  </tt:BacklightCompensation>\n"
+                        "  <tt:WideDynamicRange>\n"
+                        "    <tt:Mode>OFF</tt:Mode>\n"
+                        "  </tt:WideDynamicRange>\n"
+                        "  <tt:WhiteBalance>\n"
+                        "    <tt:Mode>AUTO</tt:Mode>\n"
+                        "  </tt:WhiteBalance>\n"
+                        "  <tt:Exposure>\n"
+                        "    <tt:Mode>AUTO</tt:Mode>\n"
+                        "    <tt:Priority>LowNoise</tt:Priority>\n"
+                        "  </tt:Exposure>\n"
+                        "  <tt:Focus>\n"
+                        "    <tt:AutoFocusMode>AUTO</tt:AutoFocusMode>\n"
+                        "  </tt:Focus>\n"
+                        "</timg:ImagingSettings>",
+                        settings.brightness, settings.contrast, settings.saturation, settings.sharpness);
+                    
+                    snprintf(response->body, 4096, 
+                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+                        "  <soap:Body>\n"
+                        "    <timg:GetImagingSettingsResponse xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">\n"
+                        "      %s\n"
+                        "    </timg:GetImagingSettingsResponse>\n"
+                        "  </soap:Body>\n"
+                        "</soap:Envelope>", settings_xml);
+                    response->body_length = strlen(response->body);
+                } else {
+                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get imaging settings");
+                    response->body_length = strlen(response->body);
+                }
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing VideoSourceToken");
+                response->body_length = strlen(response->body);
+            }
+            
+            if (video_source_token) free(video_source_token);
+            break;
+        }
+        
+        case ONVIF_ACTION_SET_IMAGING_SETTINGS: {
+            char *video_source_token = xml_extract_value(request->body, "<timg:VideoSourceToken>", "</timg:VideoSourceToken>");
+            char *brightness_str = xml_extract_value(request->body, "<tt:Brightness>", "</tt:Brightness>");
+            char *contrast_str = xml_extract_value(request->body, "<tt:Contrast>", "</tt:Contrast>");
+            char *saturation_str = xml_extract_value(request->body, "<tt:ColorSaturation>", "</tt:ColorSaturation>");
+            char *sharpness_str = xml_extract_value(request->body, "<tt:Sharpness>", "</tt:Sharpness>");
+            
+            if (video_source_token) {
+                struct imaging_settings settings;
+                if (onvif_imaging_get_settings(&settings) == 0) {
+                    // Update only the provided parameters
+                    if (brightness_str) settings.brightness = atoi(brightness_str);
+                    if (contrast_str) settings.contrast = atoi(contrast_str);
+                    if (saturation_str) settings.saturation = atoi(saturation_str);
+                    if (sharpness_str) settings.sharpness = atoi(sharpness_str);
+                    
+                    if (onvif_imaging_set_settings(&settings) == 0) {
+                        snprintf(response->body, 4096,
+                            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                            "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+                            "  <soap:Body>\n"
+                            "    <timg:SetImagingSettingsResponse xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">\n"
+                            "    </timg:SetImagingSettingsResponse>\n"
+                            "  </soap:Body>\n"
+                            "</soap:Envelope>");
+                        response->body_length = strlen(response->body);
+                    } else {
+                        soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to set imaging settings");
+                        response->body_length = strlen(response->body);
+                    }
+                } else {
+                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get current imaging settings");
+                    response->body_length = strlen(response->body);
+                }
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing VideoSourceToken");
+                response->body_length = strlen(response->body);
+            }
+            
+            if (video_source_token) free(video_source_token);
+            if (brightness_str) free(brightness_str);
+            if (contrast_str) free(contrast_str);
+            if (saturation_str) free(saturation_str);
+            if (sharpness_str) free(sharpness_str);
+            break;
+        }
+        
+        case ONVIF_ACTION_GET_OPTIONS: {
+            char *video_source_token = xml_extract_value(request->body, "<timg:VideoSourceToken>", "</timg:VideoSourceToken>");
+            
+            if (video_source_token) {
+                char options_xml[2048];
+                snprintf(options_xml, sizeof(options_xml),
+                    "<timg:ImagingOptions>\n"
+                    "  <tt:Brightness>\n"
+                    "    <tt:Min>-100</tt:Min>\n"
+                    "    <tt:Max>100</tt:Max>\n"
+                    "    <tt:Step>1</tt:Step>\n"
+                    "  </tt:Brightness>\n"
+                    "  <tt:Contrast>\n"
+                    "    <tt:Min>-100</tt:Min>\n"
+                    "    <tt:Max>100</tt:Max>\n"
+                    "    <tt:Step>1</tt:Step>\n"
+                    "  </tt:Contrast>\n"
+                    "  <tt:ColorSaturation>\n"
+                    "    <tt:Min>-100</tt:Min>\n"
+                    "    <tt:Max>100</tt:Max>\n"
+                    "    <tt:Step>1</tt:Step>\n"
+                    "  </tt:ColorSaturation>\n"
+                    "  <tt:Sharpness>\n"
+                    "    <tt:Min>-100</tt:Min>\n"
+                    "    <tt:Max>100</tt:Max>\n"
+                    "    <tt:Step>1</tt:Step>\n"
+                    "  </tt:Sharpness>\n"
+                    "  <tt:BacklightCompensation>\n"
+                    "    <tt:Mode>OFF ON</tt:Mode>\n"
+                    "  </tt:BacklightCompensation>\n"
+                    "  <tt:WideDynamicRange>\n"
+                    "    <tt:Mode>OFF ON</tt:Mode>\n"
+                    "  </tt:WideDynamicRange>\n"
+                    "  <tt:WhiteBalance>\n"
+                    "    <tt:Mode>AUTO MANUAL</tt:Mode>\n"
+                    "  </tt:WhiteBalance>\n"
+                    "  <tt:Exposure>\n"
+                    "    <tt:Mode>AUTO MANUAL</tt:Mode>\n"
+                    "    <tt:Priority>LowNoise Balanced</tt:Priority>\n"
+                    "  </tt:Exposure>\n"
+                    "  <tt:Focus>\n"
+                    "    <tt:AutoFocusMode>AUTO MANUAL</tt:AutoFocusMode>\n"
+                    "  </tt:Focus>\n"
+                    "</timg:ImagingOptions>");
+                
+                snprintf(response->body, 4096,
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+                    "  <soap:Body>\n"
+                    "    <timg:GetOptionsResponse xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">\n"
+                    "      %s\n"
+                    "    </timg:GetOptionsResponse>\n"
+                    "  </soap:Body>\n"
+                    "</soap:Envelope>", options_xml);
+                response->body_length = strlen(response->body);
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing VideoSourceToken");
+                response->body_length = strlen(response->body);
+            }
+            
+            if (video_source_token) free(video_source_token);
+            break;
+        }
+        
+        default:
+            soap_fault_response(response->body, 4096, "soap:Receiver", "Unsupported action");
+            response->body_length = strlen(response->body);
+            break;
+    }
+    
+    return response->body_length;
 }

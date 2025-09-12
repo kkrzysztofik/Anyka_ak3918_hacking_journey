@@ -5,6 +5,9 @@
 #ifndef ONVIF_PTZ_H
 #define ONVIF_PTZ_H
 
+#include "../common/onvif_types.h"
+#include "../common/onvif_request.h"
+
 enum ptz_move_status {
     PTZ_MOVE_IDLE = 0,
     PTZ_MOVE_MOVING = 1,
@@ -105,5 +108,29 @@ int onvif_ptz_get_presets(const char *profile_token, struct ptz_preset **preset_
 int onvif_ptz_set_preset(const char *profile_token, const char *preset_name, char *preset_token, size_t token_size); /**< SetPreset. */
 int onvif_ptz_goto_preset(const char *profile_token, const char *preset_token, const struct ptz_speed *speed); /**< GotoPreset. */
 int onvif_ptz_remove_preset(const char *profile_token, const char *preset_token); /**< RemovePreset. */
+int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response); /**< Handle ONVIF PTZ service requests. */
+
+/**
+ * @struct ptz_device_status
+ * @brief Current device PTZ position & speed in degrees / speed units.
+ * This is the low-level hardware abstraction used internally.
+ */
+struct ptz_device_status {
+    int h_pos_deg; /**< Horizontal position (degrees). */
+    int v_pos_deg; /**< Vertical position (degrees). */
+    int h_speed;   /**< Current horizontal speed. */
+    int v_speed;   /**< Current vertical speed. */
+};
+
+/* Low-level PTZ hardware abstraction functions (formerly ptz_adapter) */
+int ptz_adapter_init(void); /**< Initialize underlying PTZ hardware or control channel. */
+int ptz_adapter_shutdown(void); /**< Shutdown / release PTZ hardware resources. */
+int ptz_adapter_get_status(struct ptz_device_status *status); /**< Retrieve current PTZ absolute position & speed. */
+int ptz_adapter_absolute_move(int pan_deg, int tilt_deg, int speed); /**< Move to absolute pan/tilt with speed. */
+int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg, int speed); /**< Move relative delta in pan/tilt. */
+int ptz_adapter_continuous_move(int pan_vel, int tilt_vel, int timeout_s); /**< Start continuous velocity move (timeout_s seconds, 0 = indefinite). */
+int ptz_adapter_stop(void); /**< Stop any motion (pan & tilt). */
+int ptz_adapter_set_preset(const char *name, int id); /**< Store current position as preset id with optional name. */
+int ptz_adapter_goto_preset(int id); /**< Move to a previously stored preset id. */
 
 #endif

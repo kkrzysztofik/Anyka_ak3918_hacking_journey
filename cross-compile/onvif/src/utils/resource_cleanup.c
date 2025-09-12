@@ -5,7 +5,6 @@
 
 #include "resource_cleanup.h"
 #include "error_handling.h"
-#include "ak_common.h"
 
 #define CLEANUP_INITIAL_CAPACITY 16
 

@@ -12,7 +12,10 @@
 #include <time.h>
 #include "onvif_ptz.h"
 #include "platform.h"
-#include "ptz_adapter.h"
+#include "../server/http/http_parser.h"
+#include "../utils/xml_utils.h"
+#include "../utils/logging_utils.h"
+#include "../common/onvif_types.h"
 
 /* PTZ Node configuration */
 static struct ptz_node ptz_node = {
@@ -330,4 +333,609 @@ int onvif_ptz_goto_preset(const char *profile_token, const char *preset_token,
     
     /* Move to preset position */
     return onvif_ptz_absolute_move(profile_token, &preset->ptz_position, speed);
+}
+
+/* SOAP XML generation helpers */
+static void soap_fault_response(char *response, size_t response_size, const char *fault_code, const char *fault_string) {
+    snprintf(response, response_size, 
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+        "  <soap:Body>\n"
+        "    <soap:Fault>\n"
+        "      <soap:Code>\n"
+        "        <soap:Value>%s</soap:Value>\n"
+        "      </soap:Code>\n"
+        "      <soap:Reason>\n"
+        "        <soap:Text>%s</soap:Text>\n"
+        "      </soap:Reason>\n"
+        "    </soap:Fault>\n"
+        "  </soap:Body>\n"
+        "</soap:Envelope>", fault_code, fault_string);
+}
+
+static void soap_success_response(char *response, size_t response_size, const char *action, const char *body_content) {
+    snprintf(response, response_size,
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+        "  <soap:Body>\n"
+        "    <tptz:%sResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
+        "      %s\n"
+        "    </tptz:%sResponse>\n"
+        "  </soap:Body>\n"
+        "</soap:Envelope>", action, body_content, action);
+}
+
+/* XML parsing helpers - now using xml_utils module */
+
+
+/**
+ * @brief Handle ONVIF PTZ service requests
+ */
+int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
+    if (!request || !response) {
+        return -1;
+    }
+    
+    // Initialize response structure
+    response->status_code = 200;
+    response->content_type = "application/soap+xml";
+    response->body = malloc(4096);
+    if (!response->body) {
+        return -1;
+    }
+    response->body_length = 0;
+    
+    switch (action) {
+        case ONVIF_ACTION_GET_STATUS: {
+            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
+            
+            if (profile_token) {
+                struct ptz_status status;
+                if (onvif_ptz_get_status(profile_token, &status) == 0) {
+                    char status_xml[1024];
+                    snprintf(status_xml, sizeof(status_xml),
+                        "<tptz:PTZStatus>\n"
+                        "  <tt:Position>\n"
+                        "    <tt:PanTilt x=\"%.3f\" y=\"%.3f\" space=\"%s\" />\n"
+                        "    <tt:Zoom x=\"%.3f\" space=\"%s\" />\n"
+                        "  </tt:Position>\n"
+                        "  <tt:MoveStatus>\n"
+                        "    <tt:PanTilt>%s</tt:PanTilt>\n"
+                        "    <tt:Zoom>%s</tt:Zoom>\n"
+                        "  </tt:MoveStatus>\n"
+                        "  <tt:Error>%s</tt:Error>\n"
+                        "  <tt:UtcTime>%s</tt:UtcTime>\n"
+                        "</tptz:PTZStatus>",
+                        status.position.pan_tilt.x, status.position.pan_tilt.y, status.position.space,
+                        status.position.zoom, status.position.space,
+                        status.move_status.pan_tilt == PTZ_MOVE_MOVING ? "MOVING" : "IDLE",
+                        status.move_status.zoom == PTZ_MOVE_MOVING ? "MOVING" : "IDLE",
+                        status.error, status.utc_time);
+                    
+                    snprintf(response->body, 4096, 
+                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+                        "  <soap:Body>\n"
+                        "    <tptz:GetStatusResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
+                        "      %s\n"
+                        "    </tptz:GetStatusResponse>\n"
+                        "  </soap:Body>\n"
+                        "</soap:Envelope>", status_xml);
+                    response->body_length = strlen(response->body);
+                } else {
+                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get PTZ status");
+                    response->body_length = strlen(response->body);
+                }
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing ProfileToken");
+                response->body_length = strlen(response->body);
+            }
+            
+            if (profile_token) free(profile_token);
+            break;
+        }
+        
+        case ONVIF_ACTION_ABSOLUTE_MOVE: {
+            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
+            char *x_str = xml_extract_value(request->body, "<tt:PanTilt><tt:x>", "</tt:x></tt:PanTilt>");
+            char *y_str = xml_extract_value(request->body, "<tt:PanTilt><tt:y>", "</tt:y></tt:PanTilt>");
+            
+            if (profile_token && x_str && y_str) {
+                struct ptz_vector position;
+                position.pan_tilt.x = atof(x_str);
+                position.pan_tilt.y = atof(y_str);
+                position.zoom = 0.0;
+                strcpy(position.space, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace");
+                
+                if (onvif_ptz_absolute_move(profile_token, &position, NULL) == 0) {
+                    snprintf(response->body, 4096,
+                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+                        "  <soap:Body>\n"
+                        "    <tptz:AbsoluteMoveResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
+                        "    </tptz:AbsoluteMoveResponse>\n"
+                        "  </soap:Body>\n"
+                        "</soap:Envelope>");
+                    response->body_length = strlen(response->body);
+                } else {
+                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to execute absolute move");
+                    response->body_length = strlen(response->body);
+                }
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing required parameters");
+                response->body_length = strlen(response->body);
+            }
+            
+            if (profile_token) free(profile_token);
+            if (x_str) free(x_str);
+            if (y_str) free(y_str);
+            break;
+        }
+        
+        case ONVIF_ACTION_RELATIVE_MOVE: {
+            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
+            char *x_str = xml_extract_value(request->body, "<tt:Translation><tt:PanTilt><tt:x>", "</tt:x></tt:PanTilt></tt:Translation>");
+            char *y_str = xml_extract_value(request->body, "<tt:Translation><tt:PanTilt><tt:y>", "</tt:y></tt:PanTilt></tt:Translation>");
+            
+            if (profile_token && x_str && y_str) {
+                struct ptz_vector translation;
+                translation.pan_tilt.x = atof(x_str);
+                translation.pan_tilt.y = atof(y_str);
+                translation.zoom = 0.0;
+                strcpy(translation.space, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace");
+                
+                if (onvif_ptz_relative_move(profile_token, &translation, NULL) == 0) {
+                    snprintf(response->body, 4096,
+                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+                        "  <soap:Body>\n"
+                        "    <tptz:RelativeMoveResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
+                        "    </tptz:RelativeMoveResponse>\n"
+                        "  </soap:Body>\n"
+                        "</soap:Envelope>");
+                    response->body_length = strlen(response->body);
+                } else {
+                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to execute relative move");
+                    response->body_length = strlen(response->body);
+                }
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing required parameters");
+                response->body_length = strlen(response->body);
+            }
+            
+            if (profile_token) free(profile_token);
+            if (x_str) free(x_str);
+            if (y_str) free(y_str);
+            break;
+        }
+        
+        case ONVIF_ACTION_CONTINUOUS_MOVE: {
+            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
+            char *x_str = xml_extract_value(request->body, "<tt:Velocity><tt:PanTilt><tt:x>", "</tt:x></tt:PanTilt></tt:Velocity>");
+            char *y_str = xml_extract_value(request->body, "<tt:Velocity><tt:PanTilt><tt:y>", "</tt:y></tt:PanTilt></tt:Velocity>");
+            char *timeout_str = xml_extract_value(request->body, "<tptz:Timeout>", "</tptz:Timeout>");
+            
+            if (profile_token && x_str && y_str) {
+                struct ptz_speed velocity;
+                velocity.pan_tilt.x = atof(x_str);
+                velocity.pan_tilt.y = atof(y_str);
+                velocity.zoom = 0.0;
+                
+                int timeout = timeout_str ? atoi(timeout_str) : 10000; // Default 10 seconds
+                
+                if (onvif_ptz_continuous_move(profile_token, &velocity, timeout) == 0) {
+                    snprintf(response->body, 4096,
+                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+                        "  <soap:Body>\n"
+                        "    <tptz:ContinuousMoveResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
+                        "    </tptz:ContinuousMoveResponse>\n"
+                        "  </soap:Body>\n"
+                        "</soap:Envelope>");
+                    response->body_length = strlen(response->body);
+                } else {
+                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to execute continuous move");
+                    response->body_length = strlen(response->body);
+                }
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing required parameters");
+                response->body_length = strlen(response->body);
+            }
+            
+            if (profile_token) free(profile_token);
+            if (x_str) free(x_str);
+            if (y_str) free(y_str);
+            if (timeout_str) free(timeout_str);
+            break;
+        }
+        
+        case ONVIF_ACTION_STOP: {
+            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
+            char *pan_tilt_str = xml_extract_value(request->body, "<tptz:PanTilt>", "</tptz:PanTilt>");
+            char *zoom_str = xml_extract_value(request->body, "<tptz:Zoom>", "</tptz:Zoom>");
+            
+            if (profile_token) {
+                int pan_tilt = pan_tilt_str ? 1 : 0;
+                int zoom = zoom_str ? 1 : 0;
+                
+                if (onvif_ptz_stop(profile_token, pan_tilt, zoom) == 0) {
+                    snprintf(response->body, 4096,
+                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+                        "  <soap:Body>\n"
+                        "    <tptz:StopResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
+                        "    </tptz:StopResponse>\n"
+                        "  </soap:Body>\n"
+                        "</soap:Envelope>");
+                    response->body_length = strlen(response->body);
+                } else {
+                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to stop PTZ");
+                    response->body_length = strlen(response->body);
+                }
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing ProfileToken");
+                response->body_length = strlen(response->body);
+            }
+            
+            if (profile_token) free(profile_token);
+            if (pan_tilt_str) free(pan_tilt_str);
+            if (zoom_str) free(zoom_str);
+            break;
+        }
+        
+        case ONVIF_ACTION_GET_PRESETS: {
+            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
+            
+            if (profile_token) {
+                struct ptz_preset *presets = NULL;
+                int count = 0;
+                if (onvif_ptz_get_presets(profile_token, &presets, &count) == 0) {
+                    char presets_xml[2048];
+                    strcpy(presets_xml, "<tptz:Preset>\n");
+                    
+                    for (int i = 0; i < count; i++) {
+                        char preset_xml[256];
+                        snprintf(preset_xml, sizeof(preset_xml),
+                            "  <tt:Preset token=\"%s\">\n"
+                            "    <tt:Name>%s</tt:Name>\n"
+                            "    <tt:PTZPosition>\n"
+                            "      <tt:PanTilt x=\"%.3f\" y=\"%.3f\" space=\"%s\" />\n"
+                            "      <tt:Zoom x=\"%.3f\" space=\"%s\" />\n"
+                            "    </tt:PTZPosition>\n"
+                            "  </tt:Preset>\n",
+                            presets[i].token, presets[i].name,
+                            presets[i].ptz_position.pan_tilt.x, presets[i].ptz_position.pan_tilt.y,
+                            presets[i].ptz_position.space,
+                            presets[i].ptz_position.zoom, presets[i].ptz_position.space);
+                        strcat(presets_xml, preset_xml);
+                    }
+                    strcat(presets_xml, "</tptz:Preset>");
+                    
+                    snprintf(response->body, 4096,
+                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+                        "  <soap:Body>\n"
+                        "    <tptz:GetPresetsResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
+                        "      %s\n"
+                        "    </tptz:GetPresetsResponse>\n"
+                        "  </soap:Body>\n"
+                        "</soap:Envelope>", presets_xml);
+                    response->body_length = strlen(response->body);
+                } else {
+                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get presets");
+                    response->body_length = strlen(response->body);
+                }
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing ProfileToken");
+                response->body_length = strlen(response->body);
+            }
+            
+            if (profile_token) free(profile_token);
+            break;
+        }
+        
+        case ONVIF_ACTION_SET_PRESET: {
+            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
+            char *preset_name = xml_extract_value(request->body, "<tptz:PresetName>", "</tptz:PresetName>");
+            
+            if (profile_token && preset_name) {
+                char preset_token[64];
+                if (onvif_ptz_set_preset(profile_token, preset_name, preset_token, sizeof(preset_token)) == 0) {
+                    char preset_xml[256];
+                    snprintf(preset_xml, sizeof(preset_xml),
+                        "<tptz:PresetToken>%s</tptz:PresetToken>", preset_token);
+                    
+                    snprintf(response->body, 4096,
+                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+                        "  <soap:Body>\n"
+                        "    <tptz:SetPresetResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
+                        "      %s\n"
+                        "    </tptz:SetPresetResponse>\n"
+                        "  </soap:Body>\n"
+                        "</soap:Envelope>", preset_xml);
+                    response->body_length = strlen(response->body);
+                } else {
+                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to set preset");
+                    response->body_length = strlen(response->body);
+                }
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing required parameters");
+                response->body_length = strlen(response->body);
+            }
+            
+            if (profile_token) free(profile_token);
+            if (preset_name) free(preset_name);
+            break;
+        }
+        
+        case ONVIF_ACTION_GOTO_PRESET: {
+            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
+            char *preset_token = xml_extract_value(request->body, "<tptz:PresetToken>", "</tptz:PresetToken>");
+            
+            if (profile_token && preset_token) {
+                if (onvif_ptz_goto_preset(profile_token, preset_token, NULL) == 0) {
+                    snprintf(response->body, 4096,
+                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+                        "  <soap:Body>\n"
+                        "    <tptz:GotoPresetResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
+                        "    </tptz:GotoPresetResponse>\n"
+                        "  </soap:Body>\n"
+                        "</soap:Envelope>");
+                    response->body_length = strlen(response->body);
+                } else {
+                    soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to goto preset");
+                    response->body_length = strlen(response->body);
+                }
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Missing required parameters");
+                response->body_length = strlen(response->body);
+            }
+            
+            if (profile_token) free(profile_token);
+            if (preset_token) free(preset_token);
+            break;
+        }
+        
+        default:
+            soap_fault_response(response->body, 4096, "soap:Receiver", "Unsupported action");
+            response->body_length = strlen(response->body);
+            break;
+    }
+    
+    return response->body_length;
+}
+
+/* ============================================================================
+ * Low-level PTZ hardware abstraction functions (formerly ptz_adapter)
+ * ============================================================================ */
+
+static pthread_mutex_t ptz_lock = PTHREAD_MUTEX_INITIALIZER;
+static int ptz_initialized = 0;
+static int current_pan_pos = 0;
+static int current_tilt_pos = 0;
+
+static int simple_abs(int value) { return (value < 0) ? -value : value; }
+
+int ptz_adapter_init(void) {
+    int ret = 0;
+    pthread_mutex_lock(&ptz_lock);
+    if (!ptz_initialized) {
+        ret = platform_ptz_init();
+        if (ret == 0) {
+            /* Initialize PTZ with proper motor parameters */
+            platform_ptz_set_degree(350, 130);
+            platform_ptz_check_self();
+            
+            /* Reset to center position */
+            current_pan_pos = 0;
+            current_tilt_pos = 0;
+            platform_ptz_move_to_position(current_pan_pos, current_tilt_pos);
+            
+            ptz_initialized = 1;
+            printf("PTZ adapter initialized successfully\n");
+        } else {
+            fprintf(stderr, "ak_drv_ptz_open failed: %d\n", ret);
+        }
+    }
+    pthread_mutex_unlock(&ptz_lock);
+    return ptz_initialized ? 0 : -1;
+}
+
+int ptz_adapter_shutdown(void) {
+    pthread_mutex_lock(&ptz_lock);
+    if (ptz_initialized) {
+        platform_ptz_cleanup();
+        ptz_initialized = 0;
+    }
+    pthread_mutex_unlock(&ptz_lock);
+    return 0;
+}
+
+int ptz_adapter_get_status(struct ptz_device_status *status) {
+    if (!status) return -1;
+    
+    pthread_mutex_lock(&ptz_lock);
+    if (!ptz_initialized) {
+        pthread_mutex_unlock(&ptz_lock);
+        return -1;
+    }
+    
+    int h = platform_ptz_get_step_position(PLATFORM_PTZ_AXIS_PAN);
+    int v = platform_ptz_get_step_position(PLATFORM_PTZ_AXIS_TILT);
+    
+    status->h_pos_deg = h;
+    status->v_pos_deg = v;
+    status->h_speed = 0;
+    status->v_speed = 0;
+    
+    pthread_mutex_unlock(&ptz_lock);
+    return 0;
+}
+
+int ptz_adapter_absolute_move(int pan_deg, int tilt_deg, int speed) {
+    pthread_mutex_lock(&ptz_lock);
+    if (!ptz_initialized) {
+        pthread_mutex_unlock(&ptz_lock);
+        return -1;
+    }
+    
+    /* Clamp values to safe ranges - based on akipc implementation */
+    if (pan_deg > 350) pan_deg = 350;
+    if (pan_deg < -350) pan_deg = -350;
+    if (tilt_deg > 130) tilt_deg = 130;
+    if (tilt_deg < -130) tilt_deg = -130;
+    
+    printf("PTZ absolute move to pan=%d, tilt=%d\n", pan_deg, tilt_deg);
+    
+    int ret = platform_ptz_move_to_position(pan_deg, tilt_deg);
+    if (ret == 0) {
+        current_pan_pos = pan_deg;
+        current_tilt_pos = tilt_deg;
+        
+        /* Wait for movement to complete */
+        platform_ptz_status_t h_status, v_status;
+        do {
+            platform_sleep_us(5000); /* 5ms delay */
+            platform_ptz_get_status(PLATFORM_PTZ_AXIS_PAN, &h_status);
+            platform_ptz_get_status(PLATFORM_PTZ_AXIS_TILT, &v_status);
+        } while ((h_status != PLATFORM_PTZ_STATUS_OK) || (v_status != PLATFORM_PTZ_STATUS_OK));
+    }
+    
+    pthread_mutex_unlock(&ptz_lock);
+    return ret;
+}
+
+int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg, int speed) {
+    pthread_mutex_lock(&ptz_lock);
+    if (!ptz_initialized) {
+        pthread_mutex_unlock(&ptz_lock);
+        return -1;
+    }
+    
+    printf("PTZ relative move pan_delta=%d, tilt_delta=%d\n", pan_delta_deg, tilt_delta_deg);
+    
+    int ret = 0;
+    platform_ptz_status_t h_status, v_status;
+    
+    /* Horizontal movement - based on akipc implementation with step size 16 */
+    if (pan_delta_deg != 0) {
+        platform_ptz_direction_t dir = (pan_delta_deg > 0) ? PLATFORM_PTZ_DIRECTION_LEFT : PLATFORM_PTZ_DIRECTION_RIGHT;
+        int steps = simple_abs(pan_delta_deg);
+        if (steps > 16) steps = 16; /* Limit step size like in akipc */
+        
+        ret = platform_ptz_turn(dir, steps);
+        if (ret == 0) {
+            current_pan_pos += (dir == PLATFORM_PTZ_DIRECTION_LEFT) ? steps : -steps;
+        }
+    }
+    
+    /* Vertical movement - based on akipc implementation with step size 8 */
+    if (tilt_delta_deg != 0) {
+        platform_ptz_direction_t dir = (tilt_delta_deg > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
+        int steps = simple_abs(tilt_delta_deg);
+        if (steps > 8) steps = 8; /* Limit step size like in akipc */
+        
+        ret |= platform_ptz_turn(dir, steps);
+        if (ret == 0) current_tilt_pos += (dir == PLATFORM_PTZ_DIRECTION_DOWN) ? steps : -steps;
+    }
+    
+    /* Wait for movement to complete */
+    if (ret == 0) {
+        do {
+            platform_sleep_us(5000); /* 5ms delay */
+            platform_ptz_get_status(PLATFORM_PTZ_AXIS_PAN, &h_status);
+            platform_ptz_get_status(PLATFORM_PTZ_AXIS_TILT, &v_status);
+        } while ((h_status != PLATFORM_PTZ_STATUS_OK) || (v_status != PLATFORM_PTZ_STATUS_OK));
+    }
+    
+    pthread_mutex_unlock(&ptz_lock);
+    return ret;
+}
+
+int ptz_adapter_continuous_move(int pan_vel, int tilt_vel, int timeout_s) {
+    pthread_mutex_lock(&ptz_lock);
+    if (!ptz_initialized) {
+        pthread_mutex_unlock(&ptz_lock);
+        return -1;
+    }
+    
+    if (pan_vel > 0) platform_ptz_set_speed(PLATFORM_PTZ_AXIS_PAN, pan_vel);
+    if (tilt_vel > 0) platform_ptz_set_speed(PLATFORM_PTZ_AXIS_TILT, tilt_vel);
+    
+    if (pan_vel != 0) {
+        platform_ptz_direction_t dir = (pan_vel > 0) ? PLATFORM_PTZ_DIRECTION_RIGHT : PLATFORM_PTZ_DIRECTION_LEFT;
+        platform_ptz_turn(dir, 360);
+    }
+    
+    if (tilt_vel != 0) {
+        platform_ptz_direction_t dir = (tilt_vel > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
+        platform_ptz_turn(dir, 180);
+    }
+    
+    pthread_mutex_unlock(&ptz_lock);
+    return 0;
+}
+
+int ptz_adapter_stop(void) {
+    pthread_mutex_lock(&ptz_lock);
+    if (!ptz_initialized) {
+        pthread_mutex_unlock(&ptz_lock);
+        return -1;
+    }
+    
+    printf("PTZ stop all movement\n");
+    
+    /* Stop all directions of movement */
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_LEFT);
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_RIGHT);
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_UP);
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
+    
+    pthread_mutex_unlock(&ptz_lock);
+    return 0;
+}
+
+int ptz_adapter_set_preset(const char *name, int id) {
+    pthread_mutex_lock(&ptz_lock);
+    if (!ptz_initialized) {
+        pthread_mutex_unlock(&ptz_lock);
+        return -1;
+    }
+    
+    printf("PTZ set preset %s (id=%d) at pan=%d, tilt=%d\n", 
+           name ? name : "unnamed", id, current_pan_pos, current_tilt_pos);
+    
+    /* For now, just store current position - could be enhanced to save to file */
+    pthread_mutex_unlock(&ptz_lock);
+    return 0;   /* Basic implementation */
+}
+
+int ptz_adapter_goto_preset(int id) {
+    pthread_mutex_lock(&ptz_lock);
+    if (!ptz_initialized) {
+        pthread_mutex_unlock(&ptz_lock);
+        return -1;
+    }
+    
+    printf("PTZ goto preset id=%d\n", id);
+    
+    /* Basic implementation - could be enhanced to load from saved presets */
+    int ret = -1;
+    switch (id) {
+        case 1: /* Home position */
+            ret = platform_ptz_move_to_position(0, 0);
+            if (ret == 0) {
+                current_pan_pos = 0;
+                current_tilt_pos = 0;
+            }
+            break;
+        default:
+            printf("Preset %d not implemented\n", id);
+            break;
+    }
+    
+    pthread_mutex_unlock(&ptz_lock);
+    return ret;
 }

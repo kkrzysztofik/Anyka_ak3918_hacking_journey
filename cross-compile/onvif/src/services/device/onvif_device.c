@@ -9,8 +9,13 @@
 #include <string.h>
 #include <time.h>
 #include <sys/utsname.h>
+#include <stdlib.h>
 #include "onvif_device.h"
 #include "config.h"
+#include "../server/http/http_parser.h"
+#include "../utils/xml_utils.h"
+#include "../utils/logging_utils.h"
+#include "../common/onvif_types.h"
 
 /* Device information constants */
 #define DEVICE_MANUFACTURER    "Anyka"
@@ -191,4 +196,214 @@ int onvif_device_get_services(struct device_service *services, int *count) {
     services[2].version.minor = 5;
     
     return 0;
+}
+
+/* SOAP XML generation helpers */
+static void soap_fault_response(char *response, size_t response_size, const char *fault_code, const char *fault_string) {
+    snprintf(response, response_size, 
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+        "  <soap:Body>\n"
+        "    <soap:Fault>\n"
+        "      <soap:Code>\n"
+        "        <soap:Value>%s</soap:Value>\n"
+        "      </soap:Code>\n"
+        "      <soap:Reason>\n"
+        "        <soap:Text>%s</soap:Text>\n"
+        "      </soap:Reason>\n"
+        "    </soap:Fault>\n"
+        "  </soap:Body>\n"
+        "</soap:Envelope>", fault_code, fault_string);
+}
+
+static void soap_success_response(char *response, size_t response_size, const char *action, const char *body_content) {
+    snprintf(response, response_size,
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
+        "  <soap:Body>\n"
+        "    <tds:%sResponse xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\">\n"
+        "      %s\n"
+        "    </tds:%sResponse>\n"
+        "  </soap:Body>\n"
+        "</soap:Envelope>", action, body_content, action);
+}
+
+/* XML parsing helpers - now using xml_utils module */
+
+
+/**
+ * @brief Handle ONVIF device service requests
+ */
+int onvif_device_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
+    if (!request || !response) {
+        return -1;
+    }
+    
+    // Initialize response structure
+    response->status_code = 200;
+    response->content_type = "application/soap+xml";
+    response->body = malloc(4096);
+    if (!response->body) {
+        return -1;
+    }
+    response->body_length = 0;
+    
+    switch (action) {
+        case ONVIF_ACTION_GET_CAPABILITIES: {
+            struct device_capabilities caps;
+            if (onvif_device_get_capabilities(&caps) == 0) {
+                char caps_xml[1024];
+                snprintf(caps_xml, sizeof(caps_xml),
+                    "<tds:Capabilities>\n"
+                    "  <tt:Analytics XAddr=\"http://[IP]:8080/onvif/analytics_service\" "
+                    "  AnalyticsModuleSupport=\"%s\" RuleSupport=\"%s\" "
+                    "  CellBasedSceneDescriptionSupported=\"%s\" "
+                    "  MulticastSupport=\"%s\" />\n"
+                    "  <tt:Device XAddr=\"http://[IP]:8080/onvif/device_service\" "
+                    "  Network=\"%s\" System=\"%s\" IO=\"%s\" Security=\"%s\" />\n"
+                    "  <tt:Events XAddr=\"http://[IP]:8080/onvif/event_service\" "
+                    "  WSPullPointSupport=\"%s\" WSSubscriptionPolicySupport=\"%s\" "
+                    "  WSPausableSubscriptionManagerInterfaceSupport=\"%s\" />\n"
+                    "  <tt:Imaging XAddr=\"http://[IP]:8080/onvif/imaging_service\" />\n"
+                    "  <tt:Media XAddr=\"http://[IP]:8080/onvif/media_service\" "
+                    "  StreamingCapabilities=\"%s\" />\n"
+                    "  <tt:PTZ XAddr=\"http://[IP]:8080/onvif/ptz_service\" />\n"
+                    "</tds:Capabilities>",
+                    caps.has_analytics ? "true" : "false",
+                    caps.has_analytics ? "true" : "false", 
+                    caps.has_analytics ? "true" : "false",
+                    caps.has_analytics ? "true" : "false",
+                    caps.has_device ? "true" : "false",
+                    caps.has_device ? "true" : "false",
+                    caps.has_device ? "true" : "false", 
+                    caps.has_device ? "true" : "false",
+                    caps.has_events ? "true" : "false",
+                    caps.has_events ? "true" : "false",
+                    caps.has_events ? "true" : "false",
+                    caps.has_media ? "true" : "false",
+                    caps.has_ptz ? "true" : "false");
+                
+                soap_success_response(response->body, 4096, "GetCapabilities", caps_xml);
+                response->body_length = strlen(response->body);
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get capabilities");
+                response->body_length = strlen(response->body);
+            }
+            break;
+        }
+        
+        case ONVIF_ACTION_GET_DEVICE_INFORMATION: {
+            struct device_info info;
+            if (onvif_device_get_device_information(&info) == 0) {
+                char info_xml[512];
+                snprintf(info_xml, sizeof(info_xml),
+                    "<tds:Manufacturer>%s</tds:Manufacturer>\n"
+                    "<tds:Model>%s</tds:Model>\n"
+                    "<tds:FirmwareVersion>%s</tds:FirmwareVersion>\n"
+                    "<tds:SerialNumber>%s</tds:SerialNumber>\n"
+                    "<tds:HardwareId>%s</tds:HardwareId>",
+                    info.manufacturer, info.model, info.firmware_version,
+                    info.serial_number, info.hardware_id);
+                
+                soap_success_response(response->body, 4096, "GetDeviceInformation", info_xml);
+                response->body_length = strlen(response->body);
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get device information");
+                response->body_length = strlen(response->body);
+            }
+            break;
+        }
+        
+        case ONVIF_ACTION_GET_SYSTEM_DATE_AND_TIME: {
+            struct system_date_time dt;
+            if (onvif_device_get_system_date_time(&dt) == 0) {
+                char dt_xml[1024];
+                snprintf(dt_xml, sizeof(dt_xml),
+                    "<tds:SystemDateAndTime>\n"
+                    "  <tt:DateTimeType>%s</tt:DateTimeType>\n"
+                    "  <tt:DaylightSavings>%s</tt:DaylightSavings>\n"
+                    "  <tt:TimeZone>\n"
+                    "    <tt:TZ xmlns:tt=\"http://www.onvif.org/ver10/schema\">%s%02d:%02d</tt:TZ>\n"
+                    "  </tt:TimeZone>\n"
+                    "  <tt:UTCDateTime>\n"
+                    "    <tt:Time xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
+                    "      <tt:Hour>%d</tt:Hour>\n"
+                    "      <tt:Minute>%d</tt:Minute>\n"
+                    "      <tt:Second>%d</tt:Second>\n"
+                    "    </tt:Time>\n"
+                    "    <tt:Date xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
+                    "      <tt:Year>%d</tt:Year>\n"
+                    "      <tt:Month>%d</tt:Month>\n"
+                    "      <tt:Day>%d</tt:Day>\n"
+                    "    </tt:Date>\n"
+                    "  </tt:UTCDateTime>\n"
+                    "  <tt:LocalDateTime>\n"
+                    "    <tt:Time xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
+                    "      <tt:Hour>%d</tt:Hour>\n"
+                    "      <tt:Minute>%d</tt:Minute>\n"
+                    "      <tt:Second>%d</tt:Second>\n"
+                    "    </tt:Time>\n"
+                    "    <tt:Date xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
+                    "      <tt:Year>%d</tt:Year>\n"
+                    "      <tt:Month>%d</tt:Month>\n"
+                    "      <tt:Day>%d</tt:Day>\n"
+                    "    </tt:Date>\n"
+                    "  </tt:LocalDateTime>\n"
+                    "</tds:SystemDateAndTime>",
+                    dt.date_time_type ? "NTP" : "Manual",
+                    dt.daylight_savings ? "true" : "false",
+                    dt.time_zone.tz_hour >= 0 ? "+" : "",
+                    dt.time_zone.tz_hour, dt.time_zone.tz_minute,
+                    dt.utc_date_time.hour, dt.utc_date_time.minute, dt.utc_date_time.second,
+                    dt.utc_date_time.year, dt.utc_date_time.month, dt.utc_date_time.day,
+                    dt.local_date_time.hour, dt.local_date_time.minute, dt.local_date_time.second,
+                    dt.local_date_time.year, dt.local_date_time.month, dt.local_date_time.day);
+                
+                soap_success_response(response->body, 4096, "GetSystemDateAndTime", dt_xml);
+                response->body_length = strlen(response->body);
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get system date and time");
+                response->body_length = strlen(response->body);
+            }
+            break;
+        }
+        
+        case ONVIF_ACTION_GET_SERVICES: {
+            struct device_service services[10];
+            int count = 0;
+            if (onvif_device_get_services(services, &count) == 0) {
+                char services_xml[2048];
+                strcpy(services_xml, "<tds:Service>\n");
+                
+                for (int i = 0; i < count; i++) {
+                    char service_xml[512];
+                    snprintf(service_xml, sizeof(service_xml),
+                        "  <tt:Namespace>%s</tt:Namespace>\n"
+                        "  <tt:XAddr>%s</tt:XAddr>\n"
+                        "  <tt:Version>\n"
+                        "    <tt:Major>%d</tt:Major>\n"
+                        "    <tt:Minor>%d</tt:Minor>\n"
+                        "  </tt:Version>\n",
+                        services[i].namespace, services[i].xaddr,
+                        services[i].version.major, services[i].version.minor);
+                    strcat(services_xml, service_xml);
+                }
+                strcat(services_xml, "</tds:Service>");
+                
+                soap_success_response(response->body, 4096, "GetServices", services_xml);
+                response->body_length = strlen(response->body);
+            } else {
+                soap_fault_response(response->body, 4096, "soap:Receiver", "Failed to get services");
+                response->body_length = strlen(response->body);
+            }
+            break;
+        }
+        
+        default:
+            soap_fault_response(response->body, 4096, "soap:Receiver", "Unsupported action");
+            response->body_length = strlen(response->body);
+            break;
+    }
+    
+    return response->body_length;
 }
