@@ -1,3 +1,4 @@
 cross-compile/component/**/*
 cross-compile/platform/**/*
 cross-compile/onvif/out/**/*
+orig/**/*
