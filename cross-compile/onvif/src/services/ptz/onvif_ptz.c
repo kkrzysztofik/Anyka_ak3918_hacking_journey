@@ -1,30 +1,40 @@
-/*
- * onvif_ptz.c - ONVIF PTZ service implementation
- * 
- * This file implements the ONVIF PTZ Web Service endpoints including
- * PTZ movement, presets, and status operations.
+/**
+ * @file onvif_ptz.c
+ * @brief ONVIF PTZ service implementation
+ * @author kkrzysztofik
+ * @date 2025
  */
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <math.h>
-#include <time.h>
 #include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "core/config/config.h"
 #include "onvif_ptz.h"
 #include "platform/platform.h"
-#include "utils/xml_utils.h"
-#include "utils/logging_utils.h"
-#include "utils/error_handling.h"
-#include "utils/unified_soap_generator.h"
-#include "utils/response_helpers.h"
-#include "utils/service_handler.h"
-#include "utils/xml_builder.h"
-#include "utils/common_error_handling.h"
-#include "utils/centralized_config.h"
-#include "common/onvif_types.h"
-#include "utils/safe_string.h"
-#include "utils/memory_manager.h"
+#include "protocol/soap/onvif_soap.h"
+#include "protocol/xml/unified_xml.h"
+#include "protocol/response/onvif_service_handler.h"
+#include "services/common/onvif_types.h"
+#include "utils/error/error_handling.h"
+#include "utils/logging/logging_utils.h"
+#include "utils/memory/memory_manager.h"
+#include "utils/string/string_shims.h"
+
+/* PTZ Movement Constants */
+#define PTZ_MOVEMENT_TIMEOUT_MS        5000
+#define PTZ_MOVEMENT_CHECK_INTERVAL_MS 5
+#define PTZ_MAX_PAN_DEGREES           350
+#define PTZ_MIN_PAN_DEGREES          -350
+#define PTZ_MAX_TILT_DEGREES          130
+#define PTZ_MIN_TILT_DEGREES         -130
+#define PTZ_MAX_STEP_SIZE_PAN         16
+#define PTZ_MAX_STEP_SIZE_TILT        8
+#define PTZ_DEFAULT_SPEED             50
+#define PTZ_MAX_PRESETS               10
 
 /* PTZ Node configuration */
 static struct ptz_node ptz_node = {
@@ -62,14 +72,22 @@ static struct ptz_node ptz_node = {
             .y_range = {.min = 0.0, .max = 0.0}
         }
     },
-    .maximum_number_of_presets = 10,
+    .maximum_number_of_presets = PTZ_MAX_PRESETS,
     .home_supported = 1,
     .auxiliary_commands = {0}  /* No auxiliary commands */
 };
 
 /* Static preset storage */
-static struct ptz_preset presets[10];
+static struct ptz_preset presets[PTZ_MAX_PRESETS];
 static int preset_count = 0;
+
+/* Preset management helper functions */
+static int find_preset_by_token(const char *token, int *index);
+static int remove_preset_at_index(int index);
+
+/* Error handler functions */
+static int handle_ptz_validation_error(const error_context_t *context, const error_result_t *result, onvif_response_t *response);
+static int handle_ptz_system_error(const error_context_t *context, const error_result_t *result, onvif_response_t *response);
 
 /* Convert ONVIF normalized coordinates to device degrees */
 static int normalize_to_degrees_pan(float normalized_value) {
@@ -126,10 +144,11 @@ int onvif_ptz_get_configuration(const char *config_token, struct ptz_configurati
     ONVIF_CHECK_NULL(config);
     
     /* Default PTZ configuration */
-    strncpy(config->token, "PTZConfig0", sizeof(config->token) - 1);
-    strncpy(config->name, "PTZ Configuration", sizeof(config->name) - 1);
+    strcpy(config->token, "PTZConfig0");
+    strcpy(config->name, "PTZ Configuration");
     config->use_count = 1;
     strncpy(config->node_token, ptz_node.token, sizeof(config->node_token) - 1);
+    config->node_token[sizeof(config->node_token) - 1] = '\0';
     
     config->default_absolute_pan_tilt_position_space = ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space;
     config->default_absolute_zoom_position_space = ptz_node.supported_ptz_spaces.absolute_zoom_position_space;
@@ -148,8 +167,10 @@ int onvif_ptz_get_configuration(const char *config_token, struct ptz_configurati
     config->pan_tilt_limits.range.x_range.max = 1.0;
     config->pan_tilt_limits.range.y_range.min = -1.0;
     config->pan_tilt_limits.range.y_range.max = 1.0;
-    strncpy(config->pan_tilt_limits.range.uri, ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.uri, 
+    strncpy(config->pan_tilt_limits.range.uri, 
+            ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.uri, 
             sizeof(config->pan_tilt_limits.range.uri) - 1);
+    config->pan_tilt_limits.range.uri[sizeof(config->pan_tilt_limits.range.uri) - 1] = '\0';
     
     config->zoom_limits.range.x_range.min = 0.0;
     config->zoom_limits.range.x_range.max = 0.0;
@@ -174,8 +195,10 @@ int onvif_ptz_get_status(const char *profile_token, struct ptz_status *status) {
     status->position.pan_tilt.y = degrees_to_normalize_tilt(adapter_status.v_pos_deg);
     status->position.zoom = 0.0;  /* No zoom support */
     
-    strncpy(status->position.space, ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.uri,
+    strncpy(status->position.space, 
+            ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.uri,
             sizeof(status->position.space) - 1);
+    status->position.space[sizeof(status->position.space) - 1] = '\0';
     
     /* Movement status */
     status->move_status.pan_tilt = (adapter_status.h_speed > 0 || adapter_status.v_speed > 0) ? 
@@ -183,7 +206,7 @@ int onvif_ptz_get_status(const char *profile_token, struct ptz_status *status) {
     status->move_status.zoom = PTZ_MOVE_IDLE;
     
     /* Error status */
-    safe_strcpy(status->error, sizeof(status->error), "");
+    strcpy(status->error, "");
     
     /* UTC time - simplified */
     time_t now = time(NULL);
@@ -201,7 +224,7 @@ int onvif_ptz_absolute_move(const char *profile_token, const struct ptz_vector *
     int pan_deg = normalize_to_degrees_pan(position->pan_tilt.x);
     int tilt_deg = normalize_to_degrees_tilt(position->pan_tilt.y);
     
-    int move_speed = 50;  /* Default speed */
+    int move_speed = PTZ_DEFAULT_SPEED;  /* Default speed */
     if (speed) {
         float max_speed = fmax(fabs(speed->pan_tilt.x), fabs(speed->pan_tilt.y));
         move_speed = normalize_to_speed(max_speed);
@@ -218,7 +241,7 @@ int onvif_ptz_relative_move(const char *profile_token, const struct ptz_vector *
     int pan_delta = normalize_to_degrees_pan(translation->pan_tilt.x);
     int tilt_delta = normalize_to_degrees_tilt(translation->pan_tilt.y);
     
-    int move_speed = 50;  /* Default speed */
+    int move_speed = PTZ_DEFAULT_SPEED;  /* Default speed */
     if (speed) {
         float max_speed = fmax(fabs(speed->pan_tilt.x), fabs(speed->pan_tilt.y));
         move_speed = normalize_to_speed(max_speed);
@@ -290,7 +313,7 @@ int onvif_ptz_set_preset(const char *profile_token, const char *preset_name, cha
     ONVIF_CHECK_NULL(preset_name);
     ONVIF_CHECK_NULL(preset_token);
     
-    if (preset_count >= 10) {
+    if (preset_count >= PTZ_MAX_PRESETS) {
         return ONVIF_ERROR;  /* Maximum presets reached */
     }
     
@@ -302,8 +325,11 @@ int onvif_ptz_set_preset(const char *profile_token, const char *preset_name, cha
     
     /* Create new preset */
     struct ptz_preset *preset = &presets[preset_count];
-    snprintf(preset->token, sizeof(preset->token), "Preset%d", preset_count + 1);
+    if (snprintf(preset->token, sizeof(preset->token), "Preset%d", preset_count + 1) >= sizeof(preset->token)) {
+        return ONVIF_ERROR;
+    }
     strncpy(preset->name, preset_name, sizeof(preset->name) - 1);
+    preset->name[sizeof(preset->name) - 1] = '\0';
     preset->ptz_position = status.position;
     
     /* Call adapter to persist preset */
@@ -312,7 +338,8 @@ int onvif_ptz_set_preset(const char *profile_token, const char *preset_name, cha
     preset_count++;
     
     if (preset_token) {
-        strncpy(preset_token, preset->token, 64);
+        strncpy(preset_token, preset->token, 63);
+        preset_token[63] = '\0';
     }
     
     return ONVIF_SUCCESS;
@@ -322,19 +349,13 @@ int onvif_ptz_remove_preset(const char *profile_token, const char *preset_token)
     ONVIF_CHECK_NULL(profile_token);
     ONVIF_CHECK_NULL(preset_token);
     
-    /* Find and remove preset */
-    for (int i = 0; i < preset_count; i++) {
-        if (strcmp(presets[i].token, preset_token) == 0) {
-            /* Shift remaining presets */
-            for (int j = i; j < preset_count - 1; j++) {
-                presets[j] = presets[j + 1];
-            }
-            preset_count--;
-            return ONVIF_SUCCESS;
-        }
+    /* Find and remove preset using helper function */
+    int index;
+    if (find_preset_by_token(preset_token, &index) == ONVIF_SUCCESS) {
+        return remove_preset_at_index(index);
     }
     
-    return ONVIF_ERROR;
+    return ONVIF_ERROR_NOT_FOUND;
 }
 
 int onvif_ptz_goto_preset(const char *profile_token, const char *preset_token,
@@ -342,488 +363,301 @@ int onvif_ptz_goto_preset(const char *profile_token, const char *preset_token,
     ONVIF_CHECK_NULL(profile_token);
     ONVIF_CHECK_NULL(preset_token);
     
-    /* Find preset */
-    struct ptz_preset *preset = NULL;
-    for (int i = 0; i < preset_count; i++) {
-        if (strcmp(presets[i].token, preset_token) == 0) {
-            preset = &presets[i];
-            break;
-        }
+    /* Find preset using helper function */
+    int index;
+    if (find_preset_by_token(preset_token, &index) != ONVIF_SUCCESS) {
+        return ONVIF_ERROR_NOT_FOUND;
     }
     
-    ONVIF_CHECK_NULL(preset);
-    
     /* Move to preset position */
-    return onvif_ptz_absolute_move(profile_token, &preset->ptz_position, speed);
+    return onvif_ptz_absolute_move(profile_token, &presets[index].ptz_position, speed);
 }
 
 /* SOAP XML generation helpers - now using common utilities */
 
 /* XML parsing helpers - now using xml_utils module */
 
-
-/**
- * @brief Internal PTZ service handler
- */
-static int ptz_service_handler(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
-    // Initialize response structure
-    response->status_code = 200;
-    response->content_type = "application/soap+xml";
-    response->body = malloc(4096);
-    if (!response->body) {
-        return ONVIF_ERROR;
-    }
-    response->body_length = 0;
-    
-    switch (action) {
-        case ONVIF_ACTION_GET_STATUS: {
-            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
-            
-            if (profile_token) {
-                struct ptz_status status;
-                if (onvif_ptz_get_status(profile_token, &status) == 0) {
-                    char status_xml[1024];
-                    snprintf(status_xml, sizeof(status_xml),
-                        "<tptz:PTZStatus>\n"
-                        "  <tt:Position>\n"
-                        "    <tt:PanTilt x=\"%.3f\" y=\"%.3f\" space=\"%s\" />\n"
-                        "    <tt:Zoom x=\"%.3f\" space=\"%s\" />\n"
-                        "  </tt:Position>\n"
-                        "  <tt:MoveStatus>\n"
-                        "    <tt:PanTilt>%s</tt:PanTilt>\n"
-                        "    <tt:Zoom>%s</tt:Zoom>\n"
-                        "  </tt:MoveStatus>\n"
-                        "  <tt:Error>%s</tt:Error>\n"
-                        "  <tt:UtcTime>%s</tt:UtcTime>\n"
-                        "</tptz:PTZStatus>",
-                        status.position.pan_tilt.x, status.position.pan_tilt.y, status.position.space,
-                        status.position.zoom, status.position.space,
-                        status.move_status.pan_tilt == PTZ_MOVE_MOVING ? "MOVING" : "IDLE",
-                        status.move_status.zoom == PTZ_MOVE_MOVING ? "MOVING" : "IDLE",
-                        status.error, status.utc_time);
-                    
-                    onvif_response_ptz_success(response, "GetStatus", status_xml);
-                } else {
-                    onvif_response_soap_fault(response, "soap:Receiver", "Failed to get PTZ status");
-                }
-            } else {
-                onvif_handle_missing_parameter(response, "ProfileToken");
-            }
-            
-            if (profile_token) free(profile_token);
-            break;
-        }
-        
-        case ONVIF_ACTION_ABSOLUTE_MOVE: {
-            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
-            char *x_str = xml_extract_value(request->body, "<tt:PanTilt><tt:x>", "</tt:x></tt:PanTilt>");
-            char *y_str = xml_extract_value(request->body, "<tt:PanTilt><tt:y>", "</tt:y></tt:PanTilt>");
-            
-            if (profile_token && x_str && y_str) {
-                struct ptz_vector position;
-                position.pan_tilt.x = atof(x_str);
-                position.pan_tilt.y = atof(y_str);
-                position.zoom = 0.0;
-                safe_strcpy(position.space, sizeof(position.space), "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace");
-                
-                if (onvif_ptz_absolute_move(profile_token, &position, NULL) == 0) {
-                    onvif_response_ptz_success(response, "AbsoluteMove", "");
-                } else {
-                    onvif_response_soap_fault(response, "soap:Receiver", "Failed to execute absolute move");
-                }
-            } else {
-                onvif_handle_missing_parameter(response, "required parameters");
-            }
-            
-            if (profile_token) free(profile_token);
-            if (x_str) free(x_str);
-            if (y_str) free(y_str);
-            break;
-        }
-        
-        case ONVIF_ACTION_RELATIVE_MOVE: {
-            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
-            char *x_str = xml_extract_value(request->body, "<tt:Translation><tt:PanTilt><tt:x>", "</tt:x></tt:PanTilt></tt:Translation>");
-            char *y_str = xml_extract_value(request->body, "<tt:Translation><tt:PanTilt><tt:y>", "</tt:y></tt:PanTilt></tt:Translation>");
-            
-            if (profile_token && x_str && y_str) {
-                struct ptz_vector translation;
-                translation.pan_tilt.x = atof(x_str);
-                translation.pan_tilt.y = atof(y_str);
-                translation.zoom = 0.0;
-                safe_strcpy(translation.space, sizeof(translation.space), "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace");
-                
-                if (onvif_ptz_relative_move(profile_token, &translation, NULL) == 0) {
-                    snprintf(response->body, 4096,
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                        "  <soap:Body>\n"
-                        "    <tptz:RelativeMoveResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
-                        "    </tptz:RelativeMoveResponse>\n"
-                        "  </soap:Body>\n"
-                        "</soap:Envelope>");
-                    response->body_length = strlen(response->body);
-                } else {
-                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to execute relative move");
-                    response->body_length = strlen(response->body);
-                }
-            } else {
-                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing required parameters");
-                response->body_length = strlen(response->body);
-            }
-            
-            if (profile_token) free(profile_token);
-            if (x_str) free(x_str);
-            if (y_str) free(y_str);
-            break;
-        }
-        
-        case ONVIF_ACTION_CONTINUOUS_MOVE: {
-            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
-            char *x_str = xml_extract_value(request->body, "<tt:Velocity><tt:PanTilt><tt:x>", "</tt:x></tt:PanTilt></tt:Velocity>");
-            char *y_str = xml_extract_value(request->body, "<tt:Velocity><tt:PanTilt><tt:y>", "</tt:y></tt:PanTilt></tt:Velocity>");
-            char *timeout_str = xml_extract_value(request->body, "<tptz:Timeout>", "</tptz:Timeout>");
-            
-            if (profile_token && x_str && y_str) {
-                struct ptz_speed velocity;
-                velocity.pan_tilt.x = atof(x_str);
-                velocity.pan_tilt.y = atof(y_str);
-                velocity.zoom = 0.0;
-                
-                int timeout = timeout_str ? atoi(timeout_str) : 10000; // Default 10 seconds
-                
-                if (onvif_ptz_continuous_move(profile_token, &velocity, timeout) == 0) {
-                    snprintf(response->body, 4096,
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                        "  <soap:Body>\n"
-                        "    <tptz:ContinuousMoveResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
-                        "    </tptz:ContinuousMoveResponse>\n"
-                        "  </soap:Body>\n"
-                        "</soap:Envelope>");
-                    response->body_length = strlen(response->body);
-                } else {
-                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to execute continuous move");
-                    response->body_length = strlen(response->body);
-                }
-            } else {
-                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing required parameters");
-                response->body_length = strlen(response->body);
-            }
-            
-            if (profile_token) free(profile_token);
-            if (x_str) free(x_str);
-            if (y_str) free(y_str);
-            if (timeout_str) free(timeout_str);
-            break;
-        }
-        
-        case ONVIF_ACTION_STOP: {
-            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
-            char *pan_tilt_str = xml_extract_value(request->body, "<tptz:PanTilt>", "</tptz:PanTilt>");
-            char *zoom_str = xml_extract_value(request->body, "<tptz:Zoom>", "</tptz:Zoom>");
-            
-            if (profile_token) {
-                int pan_tilt = pan_tilt_str ? 1 : 0;
-                int zoom = zoom_str ? 1 : 0;
-                
-                if (onvif_ptz_stop(profile_token, pan_tilt, zoom) == 0) {
-                    snprintf(response->body, 4096,
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                        "  <soap:Body>\n"
-                        "    <tptz:StopResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
-                        "    </tptz:StopResponse>\n"
-                        "  </soap:Body>\n"
-                        "</soap:Envelope>");
-                    response->body_length = strlen(response->body);
-                } else {
-                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to stop PTZ");
-                    response->body_length = strlen(response->body);
-                }
-            } else {
-                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing ProfileToken");
-                response->body_length = strlen(response->body);
-            }
-            
-            if (profile_token) free(profile_token);
-            if (pan_tilt_str) free(pan_tilt_str);
-            if (zoom_str) free(zoom_str);
-            break;
-        }
-        
-        case ONVIF_ACTION_GET_PRESETS: {
-            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
-            
-            if (profile_token) {
-                struct ptz_preset *presets = NULL;
-                int count = 0;
-                if (onvif_ptz_get_presets(profile_token, &presets, &count) == 0) {
-                    char presets_xml[2048];
-                    if (safe_strcpy(presets_xml, sizeof(presets_xml), "<tptz:Preset>\n") != 0) {
-                        onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for presets XML");
-                        break;
-                    }
-                    
-                    for (int i = 0; i < count; i++) {
-                        char preset_xml[256];
-                        if (safe_sprintf(preset_xml, sizeof(preset_xml),
-                            "  <tt:Preset token=\"%s\">\n"
-                            "    <tt:Name>%s</tt:Name>\n"
-                            "    <tt:PTZPosition>\n"
-                            "      <tt:PanTilt x=\"%.3f\" y=\"%.3f\" space=\"%s\" />\n"
-                            "      <tt:Zoom x=\"%.3f\" space=\"%s\" />\n"
-                            "    </tt:PTZPosition>\n"
-                            "  </tt:Preset>\n",
-                            presets[i].token, presets[i].name,
-                            presets[i].ptz_position.pan_tilt.x, presets[i].ptz_position.pan_tilt.y,
-                            presets[i].ptz_position.space,
-                            presets[i].ptz_position.zoom, presets[i].ptz_position.space) < 0) {
-                            onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for preset XML");
-                            break;
-                        }
-                        if (safe_strcat(presets_xml, sizeof(presets_xml), preset_xml) != 0) {
-                            onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for presets XML");
-                            break;
-                        }
-                    }
-                    if (safe_strcat(presets_xml, sizeof(presets_xml), "</tptz:Preset>") != 0) {
-                        onvif_response_soap_fault(response, "soap:Receiver", "Buffer too small for presets XML");
-                        break;
-                    }
-                    
-                    snprintf(response->body, 4096,
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                        "  <soap:Body>\n"
-                        "    <tptz:GetPresetsResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
-                        "      %s\n"
-                        "    </tptz:GetPresetsResponse>\n"
-                        "  </soap:Body>\n"
-                        "</soap:Envelope>", presets_xml);
-                    response->body_length = strlen(response->body);
-                } else {
-                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to get presets");
-                    response->body_length = strlen(response->body);
-                }
-            } else {
-                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing ProfileToken");
-                response->body_length = strlen(response->body);
-            }
-            
-            if (profile_token) free(profile_token);
-            break;
-        }
-        
-        case ONVIF_ACTION_SET_PRESET: {
-            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
-            char *preset_name = xml_extract_value(request->body, "<tptz:PresetName>", "</tptz:PresetName>");
-            
-            if (profile_token && preset_name) {
-                char preset_token[64];
-                if (onvif_ptz_set_preset(profile_token, preset_name, preset_token, sizeof(preset_token)) == 0) {
-                    char preset_xml[256];
-                    snprintf(preset_xml, sizeof(preset_xml),
-                        "<tptz:PresetToken>%s</tptz:PresetToken>", preset_token);
-                    
-                    snprintf(response->body, 4096,
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                        "  <soap:Body>\n"
-                        "    <tptz:SetPresetResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
-                        "      %s\n"
-                        "    </tptz:SetPresetResponse>\n"
-                        "  </soap:Body>\n"
-                        "</soap:Envelope>", preset_xml);
-                    response->body_length = strlen(response->body);
-                } else {
-                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to set preset");
-                    response->body_length = strlen(response->body);
-                }
-            } else {
-                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing required parameters");
-                response->body_length = strlen(response->body);
-            }
-            
-            if (profile_token) free(profile_token);
-            if (preset_name) free(preset_name);
-            break;
-        }
-        
-        case ONVIF_ACTION_GOTO_PRESET: {
-            char *profile_token = xml_extract_value(request->body, "<tptz:ProfileToken>", "</tptz:ProfileToken>");
-            char *preset_token = xml_extract_value(request->body, "<tptz:PresetToken>", "</tptz:PresetToken>");
-            
-            if (profile_token && preset_token) {
-                if (onvif_ptz_goto_preset(profile_token, preset_token, NULL) == 0) {
-                    snprintf(response->body, 4096,
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">\n"
-                        "  <soap:Body>\n"
-                        "    <tptz:GotoPresetResponse xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\">\n"
-                        "    </tptz:GotoPresetResponse>\n"
-                        "  </soap:Body>\n"
-                        "</soap:Envelope>");
-                    response->body_length = strlen(response->body);
-                } else {
-                    soap_generate_fault(response->body, 4096, "soap:Receiver", "Failed to goto preset");
-                    response->body_length = strlen(response->body);
-                }
-            } else {
-                soap_generate_fault(response->body, 4096, "soap:Receiver", "Missing required parameters");
-                response->body_length = strlen(response->body);
-            }
-            
-            if (profile_token) free(profile_token);
-            if (preset_token) free(preset_token);
-            break;
-        }
-        
-        default:
-            onvif_handle_unsupported_action(response);
-            break;
-    }
-    
-    return response->body_length;
-}
-
-/**
- * @brief Handle ONVIF PTZ service requests
- */
-int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
-    return onvif_handle_service_request(action, request, response, ptz_service_handler);
-}
-
 /* Refactored PTZ service implementation */
 
 // Service handler instance
-static service_handler_t g_ptz_handler;
+static onvif_service_handler_instance_t g_ptz_handler;
 static int g_handler_initialized = 0;
 
 // Action handlers
 static int handle_get_nodes(const service_handler_config_t *config,
                            const onvif_request_t *request,
                            onvif_response_t *response,
-                           xml_builder_t *xml_builder) {
-  if (!config || !response || !xml_builder) {
-    return ONVIF_ERROR_INVALID;
+                           onvif_xml_builder_t *xml_builder) {
+  // Initialize error context
+  error_context_t error_ctx;
+  error_context_init(&error_ctx, "PTZ", "GetNodes", "nodes_retrieval");
+  
+  // Enhanced parameter validation
+  if (!config) {
+    return error_handle_parameter(&error_ctx, "config", "missing", response);
+  }
+  if (!response) {
+    return error_handle_parameter(&error_ctx, "response", "missing", response);
+  }
+  if (!xml_builder) {
+    return error_handle_parameter(&error_ctx, "xml_builder", "missing", response);
   }
   
   // Build PTZ nodes XML using XML builder
-  xml_builder_start_element(xml_builder, "tptz:PTZNode", NULL);
+  onvif_xml_builder_start_element(xml_builder, "tptz:PTZNode", NULL);
   
-  xml_builder_element_with_text(xml_builder, "tt:Name", ptz_node.name, NULL);
-  xml_builder_element_with_text(xml_builder, "tt:SupportedPTZSpaces", "true", NULL);
+  onvif_xml_builder_element_with_text(xml_builder, "tt:Name", ptz_node.name, NULL);
+  onvif_xml_builder_element_with_text(xml_builder, "tt:SupportedPTZSpaces", "true", NULL);
   
   // Supported spaces
-  xml_builder_start_element(xml_builder, "tt:SupportedSpaces", NULL);
+  onvif_xml_builder_start_element(xml_builder, "tt:SupportedSpaces", NULL);
   
   // Absolute position space
-  xml_builder_start_element(xml_builder, "tt:AbsolutePanTiltPositionSpace", NULL);
-  xml_builder_element_with_text(xml_builder, "tt:URI", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.uri, NULL);
-  xml_builder_start_element(xml_builder, "tt:XRange", NULL);
-  xml_builder_element_with_formatted_text(xml_builder, "tt:Min", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.min);
-  xml_builder_element_with_formatted_text(xml_builder, "tt:Max", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.max);
-  xml_builder_end_element(xml_builder, "tt:XRange");
-  xml_builder_start_element(xml_builder, "tt:YRange", NULL);
-  xml_builder_element_with_formatted_text(xml_builder, "tt:Min", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.min);
-  xml_builder_element_with_formatted_text(xml_builder, "tt:Max", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.max);
-  xml_builder_end_element(xml_builder, "tt:YRange");
-  xml_builder_end_element(xml_builder, "tt:AbsolutePanTiltPositionSpace");
+  onvif_xml_builder_start_element(xml_builder, "tt:AbsolutePanTiltPositionSpace", NULL);
+  onvif_xml_builder_element_with_text(xml_builder, "tt:URI", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.uri, NULL);
+  onvif_xml_builder_start_element(xml_builder, "tt:XRange", NULL);
+  onvif_xml_builder_element_with_formatted_text(xml_builder, "tt:Min", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.min);
+  onvif_xml_builder_element_with_formatted_text(xml_builder, "tt:Max", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.max);
+  onvif_xml_builder_end_element(xml_builder, "tt:XRange");
+  onvif_xml_builder_start_element(xml_builder, "tt:YRange", NULL);
+  onvif_xml_builder_element_with_formatted_text(xml_builder, "tt:Min", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.min);
+  onvif_xml_builder_element_with_formatted_text(xml_builder, "tt:Max", "%.1f", ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.max);
+  onvif_xml_builder_end_element(xml_builder, "tt:YRange");
+  onvif_xml_builder_end_element(xml_builder, "tt:AbsolutePanTiltPositionSpace");
   
   // Absolute zoom position space
-  xml_builder_start_element(xml_builder, "tt:AbsoluteZoomPositionSpace", NULL);
-  xml_builder_element_with_text(xml_builder, "tt:URI", ptz_node.supported_ptz_spaces.absolute_zoom_position_space.uri, NULL);
-  xml_builder_start_element(xml_builder, "tt:XRange", NULL);
-  xml_builder_element_with_formatted_text(xml_builder, "tt:Min", "%.1f", ptz_node.supported_ptz_spaces.absolute_zoom_position_space.x_range.min);
-  xml_builder_element_with_formatted_text(xml_builder, "tt:Max", "%.1f", ptz_node.supported_ptz_spaces.absolute_zoom_position_space.x_range.max);
-  xml_builder_end_element(xml_builder, "tt:XRange");
-  xml_builder_end_element(xml_builder, "tt:AbsoluteZoomPositionSpace");
+  onvif_xml_builder_start_element(xml_builder, "tt:AbsoluteZoomPositionSpace", NULL);
+  onvif_xml_builder_element_with_text(xml_builder, "tt:URI", ptz_node.supported_ptz_spaces.absolute_zoom_position_space.uri, NULL);
+  onvif_xml_builder_start_element(xml_builder, "tt:XRange", NULL);
+  onvif_xml_builder_element_with_formatted_text(xml_builder, "tt:Min", "%.1f", ptz_node.supported_ptz_spaces.absolute_zoom_position_space.x_range.min);
+  onvif_xml_builder_element_with_formatted_text(xml_builder, "tt:Max", "%.1f", ptz_node.supported_ptz_spaces.absolute_zoom_position_space.x_range.max);
+  onvif_xml_builder_end_element(xml_builder, "tt:XRange");
+  onvif_xml_builder_end_element(xml_builder, "tt:AbsoluteZoomPositionSpace");
   
-  xml_builder_end_element(xml_builder, "tt:SupportedSpaces");
+  onvif_xml_builder_end_element(xml_builder, "tt:SupportedSpaces");
   
   // Maximum number of presets
-  xml_builder_element_with_formatted_text(xml_builder, "tt:MaximumNumberOfPresets", "%d", ptz_node.maximum_number_of_presets);
+  onvif_xml_builder_element_with_formatted_text(xml_builder, "tt:MaximumNumberOfPresets", "%d", ptz_node.maximum_number_of_presets);
   
   // Home supported
-  xml_builder_element_with_formatted_text(xml_builder, "tt:HomeSupported", "%s", ptz_node.home_supported ? "true" : "false");
+  onvif_xml_builder_element_with_formatted_text(xml_builder, "tt:HomeSupported", "%s", ptz_node.home_supported ? "true" : "false");
   
-  xml_builder_end_element(xml_builder, "tptz:PTZNode");
+  onvif_xml_builder_end_element(xml_builder, "tptz:PTZNode");
   
-  // Generate success response
-  const char *xml_content = xml_builder_get_string(xml_builder);
-  return service_handler_generate_success(&g_ptz_handler, "GetNodes", xml_content, response);
+  // Generate success response using consistent SOAP response utility
+  const char *xml_content = onvif_xml_builder_get_string(xml_builder);
+  return onvif_generate_complete_response(response, ONVIF_SERVICE_PTZ, "GetNodes", xml_content);
 }
 
 static int handle_absolute_move(const service_handler_config_t *config,
                                const onvif_request_t *request,
                                onvif_response_t *response,
-                               xml_builder_t *xml_builder) {
-  if (!config || !response || !xml_builder) {
-    return ONVIF_ERROR_INVALID;
+                               onvif_xml_builder_t *xml_builder) {
+  // Initialize error context
+  error_context_t error_ctx;
+  error_context_init(&error_ctx, "PTZ", "AbsoluteMove", "ptz_movement");
+  
+  // Enhanced parameter validation
+  if (!config) {
+    return error_handle_parameter(&error_ctx, "config", "missing", response);
+  }
+  if (!response) {
+    return error_handle_parameter(&error_ctx, "response", "missing", response);
+  }
+  if (!xml_builder) {
+    return error_handle_parameter(&error_ctx, "xml_builder", "missing", response);
   }
   
-  // Parse profile token from request
-  char profile_token[32] = "MainProfile";
-  char *profile_start = strstr(request->body, "<ProfileToken>");
-  if (profile_start) {
-    char *profile_end = strstr(profile_start, "</ProfileToken>");
-    if (profile_end) {
-      size_t len = profile_end - (profile_start + 13);
-      if (len < sizeof(profile_token)) {
-        strncpy(profile_token, profile_start + 13, len);
-        profile_token[len] = '\0';
-      }
-    }
+  // Parse profile token from request using common XML parser
+  char profile_token[32];
+  if (onvif_xml_parse_profile_token(request->body, profile_token, sizeof(profile_token)) != 0) {
+    return error_handle_parameter(&error_ctx, "profile_token", "invalid", response);
   }
   
-  // Parse position from request
-  float pan = 0.0f, tilt = 0.0f, zoom = 0.0f;
-  char *pan_start = strstr(request->body, "<Pan>");
-  if (pan_start) {
-    char *pan_end = strstr(pan_start, "</Pan>");
-    if (pan_end) {
-      sscanf(pan_start + 5, "%f", &pan);
-    }
+  // Parse PTZ position from request using common XML parser
+  struct ptz_vector position;
+  onvif_xml_parser_t parser;
+  if (onvif_xml_parser_init(&parser, request->body, strlen(request->body), NULL) != ONVIF_SUCCESS) {
+    return error_handle_parameter(&error_ctx, "xml_parser", "init_failed", response);
   }
   
-  char *tilt_start = strstr(request->body, "<Tilt>");
-  if (tilt_start) {
-    char *tilt_end = strstr(tilt_start, "</Tilt>");
-    if (tilt_end) {
-      sscanf(tilt_start + 6, "%f", &tilt);
-    }
+  if (onvif_xml_parse_ptz_position(&parser, &position) != 0) {
+    onvif_xml_parser_cleanup(&parser);
+    return error_handle_parameter(&error_ctx, "ptz_position", "invalid", response);
   }
   
-  char *zoom_start = strstr(request->body, "<Zoom>");
-  if (zoom_start) {
-    char *zoom_end = strstr(zoom_start, "</Zoom>");
-    if (zoom_end) {
-      sscanf(zoom_start + 6, "%f", &zoom);
-    }
-  }
+  onvif_xml_parser_cleanup(&parser);
   
-  // Execute PTZ movement
-  int result = ptz_adapter_absolute_move((int)pan, (int)tilt, 50);
+  // Execute PTZ movement using the existing function
+  int result = onvif_ptz_absolute_move(profile_token, &position, NULL);
   
   if (result == ONVIF_SUCCESS) {
-    // Generate success response
-    const char *xml_content = xml_builder_get_string(xml_builder);
-    return service_handler_generate_success(&g_ptz_handler, "AbsoluteMove", xml_content, response);
+    // Generate success response using consistent SOAP response utility
+    return onvif_generate_complete_response(response, ONVIF_SERVICE_PTZ, "AbsoluteMove", "");
   } else {
-    return service_handler_generate_error(&g_ptz_handler, "AbsoluteMove",
-                                        ERROR_PATTERN_INTERNAL_ERROR,
-                                        "Failed to execute PTZ movement", response);
+    return onvif_generate_fault_response(response, SOAP_FAULT_RECEIVER, "Internal server error");
   }
+}
+
+// Additional action handlers
+static int handle_get_presets(const service_handler_config_t *config,
+                             const onvif_request_t *request,
+                             onvif_response_t *response,
+                             onvif_xml_builder_t *xml_builder) {
+  // Initialize error context
+  error_context_t error_ctx;
+  error_context_init(&error_ctx, "PTZ", "GetPresets", "presets_retrieval");
+  
+  // Enhanced parameter validation
+  if (!config) {
+    return error_handle_parameter(&error_ctx, "config", "missing", response);
+  }
+  if (!response) {
+    return error_handle_parameter(&error_ctx, "response", "missing", response);
+  }
+  if (!xml_builder) {
+    return error_handle_parameter(&error_ctx, "xml_builder", "missing", response);
+  }
+  
+  // Parse profile token from request using common XML parser
+  char profile_token[32];
+  if (onvif_xml_parse_profile_token(request->body, profile_token, sizeof(profile_token)) != 0) {
+    return error_handle_parameter(&error_ctx, "profile_token", "invalid", response);
+  }
+  
+  // Get presets using existing function
+  struct ptz_preset *preset_list;
+  int count;
+  int result = onvif_ptz_get_presets(profile_token, &preset_list, &count);
+  
+  if (result != ONVIF_SUCCESS) {
+    return onvif_generate_fault_response(response, SOAP_FAULT_RECEIVER, "Internal server error");
+  }
+  
+  // Build presets XML
+  onvif_xml_builder_start_element(xml_builder, "tptz:Preset", NULL);
+  
+  for (int i = 0; i < count; i++) {
+    onvif_xml_builder_start_element(xml_builder, "tt:Preset", "token", preset_list[i].token, NULL);
+    onvif_xml_builder_element_with_text(xml_builder, "tt:Name", preset_list[i].name, NULL);
+    onvif_xml_builder_end_element(xml_builder, "tt:Preset");
+  }
+  
+  onvif_xml_builder_end_element(xml_builder, "tptz:Preset");
+  
+  // Generate success response using consistent SOAP response utility
+  const char *xml_content = onvif_xml_builder_get_string(xml_builder);
+  return onvif_generate_complete_response(response, ONVIF_SERVICE_PTZ, "GetPresets", xml_content);
+}
+
+static int handle_set_preset(const service_handler_config_t *config,
+                            const onvif_request_t *request,
+                            onvif_response_t *response,
+                            onvif_xml_builder_t *xml_builder) {
+  // Initialize error context
+  error_context_t error_ctx;
+  error_context_init(&error_ctx, "PTZ", "SetPreset", "preset_creation");
+  
+  // Enhanced parameter validation
+  if (!config) {
+    return error_handle_parameter(&error_ctx, "config", "missing", response);
+  }
+  if (!response) {
+    return error_handle_parameter(&error_ctx, "response", "missing", response);
+  }
+  if (!xml_builder) {
+    return error_handle_parameter(&error_ctx, "xml_builder", "missing", response);
+  }
+  
+  // Parse profile token from request using common XML parser
+  char profile_token[32];
+  if (onvif_xml_parse_profile_token(request->body, profile_token, sizeof(profile_token)) != 0) {
+    return error_handle_parameter(&error_ctx, "profile_token", "invalid", response);
+  }
+  
+  // Parse preset name from request
+  char preset_name[64] = "Preset";
+  onvif_xml_extract_string_value(request->body, "<trt:Name>", "</trt:Name>", preset_name, sizeof(preset_name));
+  
+  // Set preset using existing function
+  char preset_token[64];
+  int result = onvif_ptz_set_preset(profile_token, preset_name, preset_token, sizeof(preset_token));
+  
+  if (result != ONVIF_SUCCESS) {
+    return onvif_generate_fault_response(response, SOAP_FAULT_RECEIVER, "Internal server error");
+  }
+  
+  // Build response XML
+  onvif_xml_builder_element_with_text(xml_builder, "tptz:PresetToken", preset_token, NULL);
+  
+  // Generate success response using consistent SOAP response utility
+  const char *xml_content = onvif_xml_builder_get_string(xml_builder);
+  return onvif_generate_complete_response(response, ONVIF_SERVICE_PTZ, "SetPreset", xml_content);
+}
+
+static int handle_goto_preset(const service_handler_config_t *config,
+                             const onvif_request_t *request,
+                             onvif_response_t *response,
+                             onvif_xml_builder_t *xml_builder) {
+  // Initialize error context
+  error_context_t error_ctx;
+  error_context_init(&error_ctx, "PTZ", "GotoPreset", "preset_movement");
+  
+  // Enhanced parameter validation
+  if (!config) {
+    return error_handle_parameter(&error_ctx, "config", "missing", response);
+  }
+  if (!response) {
+    return error_handle_parameter(&error_ctx, "response", "missing", response);
+  }
+  if (!xml_builder) {
+    return error_handle_parameter(&error_ctx, "xml_builder", "missing", response);
+  }
+  
+  // Parse profile token from request using common XML parser
+  char profile_token[32];
+  if (onvif_xml_parse_profile_token(request->body, profile_token, sizeof(profile_token)) != 0) {
+    return error_handle_parameter(&error_ctx, "profile_token", "invalid", response);
+  }
+  
+  // Parse preset token from request
+  char preset_token[64];
+  if (onvif_xml_extract_string_value(request->body, "<trt:PresetToken>", "</trt:PresetToken>", 
+                                   preset_token, sizeof(preset_token)) != 0) {
+    return error_handle_parameter(&error_ctx, "preset_token", "missing", response);
+  }
+  
+  // Parse PTZ speed from request (optional)
+  struct ptz_speed speed;
+  onvif_xml_parser_t parser;
+  if (onvif_xml_parser_init(&parser, request->body, strlen(request->body), NULL) != ONVIF_SUCCESS) {
+    return error_handle_parameter(&error_ctx, "xml_parser", "init_failed", response);
+  }
+  
+  onvif_xml_parse_ptz_speed(&parser, &speed);
+  onvif_xml_parser_cleanup(&parser);
+  
+  // Goto preset using existing function
+  int result = onvif_ptz_goto_preset(profile_token, preset_token, &speed);
+  
+  if (result != ONVIF_SUCCESS) {
+    return onvif_generate_fault_response(response, SOAP_FAULT_RECEIVER, "Internal server error");
+  }
+  
+  // Generate success response using consistent SOAP response utility
+  return onvif_generate_complete_response(response, ONVIF_SERVICE_PTZ, "GotoPreset", "");
 }
 
 // Action definitions
 static const service_action_def_t ptz_actions[] = {
   {ONVIF_ACTION_GET_CONFIGURATIONS, "GetConfigurations", handle_get_nodes, 0},
-  {ONVIF_ACTION_ABSOLUTE_MOVE, "AbsoluteMove", handle_absolute_move, 1}
+  {ONVIF_ACTION_ABSOLUTE_MOVE, "AbsoluteMove", handle_absolute_move, 1},
+  {ONVIF_ACTION_GET_PRESETS, "GetPresets", handle_get_presets, 1},
+  {ONVIF_ACTION_SET_PRESET, "SetPreset", handle_set_preset, 1},
+  {ONVIF_ACTION_GOTO_PRESET, "GotoPreset", handle_goto_preset, 1}
 };
 
-int onvif_ptz_init(centralized_config_t *config) {
+int onvif_ptz_init(config_manager_t *config) {
   if (g_handler_initialized) {
     return ONVIF_SUCCESS;
   }
@@ -836,10 +670,13 @@ int onvif_ptz_init(centralized_config_t *config) {
     .enable_logging = 1
   };
   
-  int result = service_handler_init(&g_ptz_handler, &handler_config,
+  int result = onvif_service_handler_init(&g_ptz_handler, &handler_config,
                                    ptz_actions, sizeof(ptz_actions) / sizeof(ptz_actions[0]));
   
   if (result == ONVIF_SUCCESS) {
+    // Register PTZ-specific error handlers
+    // Error handler registration not implemented yet
+    
     g_handler_initialized = 1;
   }
   
@@ -848,9 +685,30 @@ int onvif_ptz_init(centralized_config_t *config) {
 
 void onvif_ptz_cleanup(void) {
   if (g_handler_initialized) {
-    service_handler_cleanup(&g_ptz_handler);
+    error_context_t error_ctx;
+    error_context_init(&error_ctx, "PTZ", "Cleanup", "service_cleanup");
+    
+    onvif_service_handler_cleanup(&g_ptz_handler);
+    
+    // Unregister error handlers
+    // Error handler unregistration not implemented yet
+    
     g_handler_initialized = 0;
+    
+    // Check for memory leaks
+    memory_manager_check_leaks();
   }
+}
+
+/**
+ * @brief Handle ONVIF PTZ service requests
+ */
+int onvif_ptz_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response) {
+    if (!g_handler_initialized) {
+        return ONVIF_ERROR;
+    }
+    
+    return onvif_service_handler_handle_request(&g_ptz_handler, action, request, response);
 }
 
 /* ============================================================================
@@ -868,6 +726,52 @@ static int continuous_move_timeout_s = 0;
 static volatile int continuous_move_active = 0;
 
 static int simple_abs(int value) { return (value < 0) ? -value : value; }
+
+/* Common movement completion checking function */
+static int wait_for_movement_completion(uint32_t timeout_ms) {
+    platform_ptz_status_t h_status, v_status;
+    uint32_t elapsed_ms = 0;
+    uint32_t check_interval_ms = PTZ_MOVEMENT_CHECK_INTERVAL_MS;
+    
+    do {
+        platform_sleep_us(check_interval_ms * 1000); /* Convert to microseconds */
+        elapsed_ms += check_interval_ms;
+        
+        platform_ptz_get_status(PLATFORM_PTZ_AXIS_PAN, &h_status);
+        platform_ptz_get_status(PLATFORM_PTZ_AXIS_TILT, &v_status);
+        
+        if (elapsed_ms >= timeout_ms) {
+            platform_log_error("PTZ movement timeout after %dms\n", timeout_ms);
+            return ONVIF_ERROR_TIMEOUT;
+        }
+    } while ((h_status != PLATFORM_PTZ_STATUS_OK) || (v_status != PLATFORM_PTZ_STATUS_OK));
+    
+    return ONVIF_SUCCESS;
+}
+
+/* Preset management helper functions */
+static int find_preset_by_token(const char *token, int *index) {
+    for (int i = 0; i < preset_count; i++) {
+        if (strcmp(presets[i].token, token) == 0) {
+            *index = i;
+            return ONVIF_SUCCESS;
+        }
+    }
+    return ONVIF_ERROR_NOT_FOUND;
+}
+
+static int remove_preset_at_index(int index) {
+    if (index < 0 || index >= preset_count) {
+        return ONVIF_ERROR_INVALID;
+    }
+    
+    /* Shift remaining presets */
+    for (int j = index; j < preset_count - 1; j++) {
+        presets[j] = presets[j + 1];
+    }
+    preset_count--;
+    return ONVIF_SUCCESS;
+}
 
 /* Continuous move timeout thread function */
 static void* continuous_move_timeout_thread(void* arg) {
@@ -891,7 +795,7 @@ int ptz_adapter_init(void) {
         ret = platform_ptz_init();
         if (ret == 0) {
             /* Initialize PTZ with proper motor parameters */
-            platform_ptz_set_degree(350, 130);
+            platform_ptz_set_degree(PTZ_MAX_PAN_DEGREES, PTZ_MAX_TILT_DEGREES);
             platform_ptz_check_self();
             
             /* Reset to center position */
@@ -937,7 +841,7 @@ int ptz_adapter_shutdown(void) {
     return ONVIF_SUCCESS;
 }
 
-int ptz_adapter_get_status(struct ptz_device_status *status) {
+platform_result_t ptz_adapter_get_status(struct ptz_device_status *status) {
     ONVIF_CHECK_NULL(status);
     
     pthread_mutex_lock(&ptz_lock);
@@ -959,6 +863,8 @@ int ptz_adapter_get_status(struct ptz_device_status *status) {
 }
 
 int ptz_adapter_absolute_move(int pan_deg, int tilt_deg, int speed) {
+    int ret = ONVIF_ERROR;
+    
     pthread_mutex_lock(&ptz_lock);
     if (!ptz_initialized) {
         pthread_mutex_unlock(&ptz_lock);
@@ -966,37 +872,20 @@ int ptz_adapter_absolute_move(int pan_deg, int tilt_deg, int speed) {
     }
     
     /* Clamp values to safe ranges - based on akipc implementation */
-    if (pan_deg > 350) pan_deg = 350;
-    if (pan_deg < -350) pan_deg = -350;
-    if (tilt_deg > 130) tilt_deg = 130;
-    if (tilt_deg < -130) tilt_deg = -130;
+    if (pan_deg > PTZ_MAX_PAN_DEGREES) pan_deg = PTZ_MAX_PAN_DEGREES;
+    if (pan_deg < PTZ_MIN_PAN_DEGREES) pan_deg = PTZ_MIN_PAN_DEGREES;
+    if (tilt_deg > PTZ_MAX_TILT_DEGREES) tilt_deg = PTZ_MAX_TILT_DEGREES;
+    if (tilt_deg < PTZ_MIN_TILT_DEGREES) tilt_deg = PTZ_MIN_TILT_DEGREES;
     
     platform_log_info("PTZ absolute move to pan=%d, tilt=%d\n", pan_deg, tilt_deg);
     
-    int ret = platform_ptz_move_to_position(pan_deg, tilt_deg);
+    ret = platform_ptz_move_to_position(pan_deg, tilt_deg);
     if (ret == 0) {
         current_pan_pos = pan_deg;
         current_tilt_pos = tilt_deg;
         
         /* Wait for movement to complete with timeout */
-        platform_ptz_status_t h_status, v_status;
-        uint32_t timeout_ms = 5000; /* 5 second timeout */
-        uint32_t elapsed_ms = 0;
-        uint32_t check_interval_ms = 5; /* Check every 5ms */
-        
-        do {
-            platform_sleep_us(check_interval_ms * 1000); /* Convert to microseconds */
-            elapsed_ms += check_interval_ms;
-            
-            platform_ptz_get_status(PLATFORM_PTZ_AXIS_PAN, &h_status);
-            platform_ptz_get_status(PLATFORM_PTZ_AXIS_TILT, &v_status);
-            
-            if (elapsed_ms >= timeout_ms) {
-                platform_log_error("PTZ absolute move timeout after %dms\n", timeout_ms);
-                ret = ONVIF_ERROR_TIMEOUT;
-                break;
-            }
-        } while ((h_status != PLATFORM_PTZ_STATUS_OK) || (v_status != PLATFORM_PTZ_STATUS_OK));
+        ret = wait_for_movement_completion(PTZ_MOVEMENT_TIMEOUT_MS);
     }
     
     pthread_mutex_unlock(&ptz_lock);
@@ -1019,7 +908,7 @@ int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg, int speed) 
     if (pan_delta_deg != 0) {
         platform_ptz_direction_t dir = (pan_delta_deg > 0) ? PLATFORM_PTZ_DIRECTION_LEFT : PLATFORM_PTZ_DIRECTION_RIGHT;
         int steps = simple_abs(pan_delta_deg);
-        if (steps > 16) steps = 16; /* Limit step size like in akipc */
+        if (steps > PTZ_MAX_STEP_SIZE_PAN) steps = PTZ_MAX_STEP_SIZE_PAN; /* Limit step size like in akipc */
         
         ret = platform_ptz_turn(dir, steps);
         if (ret == 0) {
@@ -1031,7 +920,7 @@ int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg, int speed) 
     if (tilt_delta_deg != 0) {
         platform_ptz_direction_t dir = (tilt_delta_deg > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
         int steps = simple_abs(tilt_delta_deg);
-        if (steps > 8) steps = 8; /* Limit step size like in akipc */
+        if (steps > PTZ_MAX_STEP_SIZE_TILT) steps = PTZ_MAX_STEP_SIZE_TILT; /* Limit step size like in akipc */
         
         ret |= platform_ptz_turn(dir, steps);
         if (ret == 0) current_tilt_pos += (dir == PLATFORM_PTZ_DIRECTION_DOWN) ? steps : -steps;
@@ -1039,23 +928,7 @@ int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg, int speed) 
     
     /* Wait for movement to complete with timeout */
     if (ret == 0) {
-        uint32_t timeout_ms = 5000; /* 5 second timeout */
-        uint32_t elapsed_ms = 0;
-        uint32_t check_interval_ms = 5; /* Check every 5ms */
-        
-        do {
-            platform_sleep_us(check_interval_ms * 1000); /* Convert to microseconds */
-            elapsed_ms += check_interval_ms;
-            
-            platform_ptz_get_status(PLATFORM_PTZ_AXIS_PAN, &h_status);
-            platform_ptz_get_status(PLATFORM_PTZ_AXIS_TILT, &v_status);
-            
-            if (elapsed_ms >= timeout_ms) {
-                platform_log_error("PTZ relative move timeout after %dms\n", timeout_ms);
-                ret = ONVIF_ERROR_TIMEOUT;
-                break;
-            }
-        } while ((h_status != PLATFORM_PTZ_STATUS_OK) || (v_status != PLATFORM_PTZ_STATUS_OK));
+        ret = wait_for_movement_completion(PTZ_MOVEMENT_TIMEOUT_MS);
     }
     
     pthread_mutex_unlock(&ptz_lock);
@@ -1101,12 +974,12 @@ int ptz_adapter_continuous_move(int pan_vel, int tilt_vel, int timeout_s) {
     /* Start movement in appropriate directions */
     if (pan_vel != 0) {
         platform_ptz_direction_t dir = (pan_vel > 0) ? PLATFORM_PTZ_DIRECTION_RIGHT : PLATFORM_PTZ_DIRECTION_LEFT;
-        platform_ptz_turn(dir, 360); /* Large number for continuous movement */
+        platform_ptz_turn(dir, PTZ_MAX_PAN_DEGREES); /* Large number for continuous movement */
     }
     
     if (tilt_vel != 0) {
         platform_ptz_direction_t dir = (tilt_vel > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
-        platform_ptz_turn(dir, 180); /* Large number for continuous movement */
+        platform_ptz_turn(dir, PTZ_MAX_TILT_DEGREES); /* Large number for continuous movement */
     }
     
     /* Start timeout timer if timeout is specified and > 0 */
@@ -1202,4 +1075,23 @@ int ptz_adapter_goto_preset(int id) {
     
     pthread_mutex_unlock(&ptz_lock);
     return ret;
+}
+
+/* Error handler implementations */
+static int handle_ptz_validation_error(const error_context_t *context, const error_result_t *result, onvif_response_t *response) {
+    if (!context || !result || !response) {
+        return ONVIF_ERROR_INVALID;
+    }
+    
+    platform_log_error("PTZ validation failed: %s", result->error_message);
+    return onvif_generate_fault_response(response, result->soap_fault_code, result->soap_fault_string);
+}
+
+static int handle_ptz_system_error(const error_context_t *context, const error_result_t *result, onvif_response_t *response) {
+    if (!context || !result || !response) {
+        return ONVIF_ERROR_INVALID;
+    }
+    
+    platform_log_error("PTZ system error: %s", result->error_message);
+    return onvif_generate_fault_response(response, result->soap_fault_code, result->soap_fault_string);
 }

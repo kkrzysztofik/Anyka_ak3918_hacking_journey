@@ -1,0 +1,46 @@
+/**
+ * @file string_shims.h
+ * @brief String function shims for missing standard library functions
+ * @author kkrzysztofik
+ * @date 2025
+ */
+
+#ifndef ONVIF_STRING_SHIMS_H
+#define ONVIF_STRING_SHIMS_H
+
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @brief Case-insensitive string search
+ * @param haystack String to search in
+ * @param needle String to search for
+ * @return Pointer to first occurrence, NULL if not found
+ * @note This function is not available on all platforms
+ */
+char *strcasestr(const char *haystack, const char *needle);
+
+/**
+ * @brief Get length of string with maximum limit
+ * @param s String to measure
+ * @param maxlen Maximum length to check
+ * @return Length of string or maxlen, whichever is smaller
+ * @note This function is not available on all platforms
+ */
+size_t strnlen(const char *s, size_t maxlen);
+
+/**
+ * @brief Trim leading and trailing whitespace from a string
+ * @param s String to trim (modified in place)
+ * @note Trims spaces, tabs, newlines, and carriage returns
+ */
+void trim_whitespace(char *s);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* ONVIF_STRING_SHIMS_H */

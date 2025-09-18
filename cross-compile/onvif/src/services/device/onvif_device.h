@@ -1,29 +1,30 @@
 /**
  * @file onvif_device.h
- * @brief ONVIF Device service data structures and API surface.
+ * @brief ONVIF Device service implementation
+ * @author kkrzysztofik
+ * @date 2025
  */
 #ifndef ONVIF_DEVICE_H
 #define ONVIF_DEVICE_H
 
-#include "common/onvif_types.h"
-#include "common/onvif_request.h"
-#include "utils/centralized_config.h"
+#include "core/config/config.h"
+#include "services/common/onvif_request.h"
+#include "services/common/onvif_types.h"
 
-struct device_info {
-    char manufacturer[64];
-    char model[64];
-    char firmware_version[32];
-    char serial_number[64];
-    char hardware_id[64];
-};
+/**
+ * @brief Device identification information - defined in config.h
+ */
 
+/**
+ * @brief Device service capabilities
+ */
 struct device_capabilities {
-    int has_analytics;
-    int has_device;
-    int has_events;
-    int has_imaging;
-    int has_media;
-    int has_ptz;
+    int has_analytics;    /**< Analytics service available */
+    int has_device;       /**< Device service available */
+    int has_events;       /**< Event service available */
+    int has_imaging;      /**< Imaging service available */
+    int has_media;        /**< Media service available */
+    int has_ptz;          /**< PTZ service available */
 };
 
 struct system_date_time {
@@ -84,6 +85,7 @@ int onvif_device_get_device_information(struct device_info *info); /**< Populate
 int onvif_device_get_capabilities(struct device_capabilities *caps); /**< Report supported services. */
 int onvif_device_get_system_date_time(struct system_date_time *dt); /**< Retrieve system time. */
 int onvif_device_set_system_date_time(const struct system_date_time *dt); /**< Set system time. */
+int onvif_device_system_reboot(void); /**< Reboot the system. */
 int onvif_device_get_dns(struct dns_information *dns); /**< Get DNS settings. */
 int onvif_device_get_network_interfaces(struct network_interface *interfaces, int *count); /**< Enumerate NICs. */
 int onvif_device_get_network_protocols(struct network_protocol *protocols, int *count); /**< Enumerate protocols & ports. */
@@ -95,7 +97,7 @@ int onvif_device_get_services(struct device_service *services, int *count); /**<
  * @param config Centralized configuration
  * @return 0 on success, negative error code on failure
  */
-int onvif_device_init(centralized_config_t *config);
+int onvif_device_init(config_manager_t *config);
 
 /**
  * @brief Handle ONVIF device service requests

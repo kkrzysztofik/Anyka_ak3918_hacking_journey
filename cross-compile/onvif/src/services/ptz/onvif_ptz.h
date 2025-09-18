@@ -5,9 +5,10 @@
 #ifndef ONVIF_PTZ_H
 #define ONVIF_PTZ_H
 
-#include "common/onvif_types.h"
-#include "common/onvif_request.h"
-#include "utils/centralized_config.h"
+#include "core/config/config.h"
+#include "platform/platform.h"
+#include "services/common/onvif_request.h"
+#include "services/common/onvif_types.h"
 
 enum ptz_move_status {
     PTZ_MOVE_IDLE = 0,
@@ -126,7 +127,7 @@ struct ptz_device_status {
 /* Low-level PTZ hardware abstraction functions (formerly ptz_adapter) */
 int ptz_adapter_init(void); /**< Initialize underlying PTZ hardware or control channel. */
 int ptz_adapter_shutdown(void); /**< Shutdown / release PTZ hardware resources. */
-int ptz_adapter_get_status(struct ptz_device_status *status); /**< Retrieve current PTZ absolute position & speed. */
+/* ptz_adapter_get_status is declared in platform/adapters/ptz_adapter.h */
 int ptz_adapter_absolute_move(int pan_deg, int tilt_deg, int speed); /**< Move to absolute pan/tilt with speed. */
 int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg, int speed); /**< Move relative delta in pan/tilt. */
 int ptz_adapter_continuous_move(int pan_vel, int tilt_vel, int timeout_s); /**< Start continuous velocity move (timeout_s seconds, 0 = indefinite). */
@@ -141,7 +142,7 @@ int ptz_adapter_goto_preset(int id); /**< Move to a previously stored preset id.
  * @param config Centralized configuration
  * @return 0 on success, negative error code on failure
  */
-int onvif_ptz_init(centralized_config_t *config);
+int onvif_ptz_init(config_manager_t *config);
 
 /**
  * @brief Clean up PTZ service

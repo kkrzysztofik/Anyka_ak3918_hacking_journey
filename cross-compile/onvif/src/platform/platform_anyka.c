@@ -6,26 +6,29 @@
  * into a single implementation for the Anyka AK3918 platform.
  */
 
-#include "platform.h"
-#include "ak_common.h"
-#include "ak_vi.h"
-#include "ak_venc.h"
-#include "ak_ai.h"
-#include "ak_aenc.h"
-#include "ak_drv_ptz.h"
-#include "ak_drv_irled.h"
-#include "ak_vpss.h"
-#include "ak_global.h"
-#include "ak_thread.h"
-#include "list.h"
-#include "utils/safe_string.h"
-#include "utils/error_context.h"
-#include "utils/memory_manager.h"
+#include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
-#include <pthread.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include "ak_aenc.h"
+#include "ak_ai.h"
+#include "ak_common.h"
+#include "ak_drv_irled.h"
+#include "ak_drv_ptz.h"
+#include "ak_global.h"
+#include "ak_thread.h"
+#include "ak_venc.h"
+#include "ak_vi.h"
+#include "ak_vpss.h"
+#include "list.h"
+#include "platform.h"
+#include "utils/error/error_handling.h"
+#include "utils/memory/memory_manager.h"
+#include "utils/string/string_shims.h"
 
 /* Platform state */
 static bool g_platform_initialized = false;
@@ -35,6 +38,14 @@ static platform_ai_handle_t g_ai_handle = NULL;
 static platform_aenc_handle_t g_aenc_handle = NULL;
 static platform_video_config_t g_video_config;
 static platform_audio_config_t g_audio_config;
+
+/* Snapshot context structure */
+struct snapshot_context {
+    platform_vi_handle_t vi_handle;
+    int width;
+    int height;
+    void *jpeg_encoder;
+};
 
 /* Internal helper functions */
 static int map_video_codec(platform_video_codec_t codec) {
@@ -169,6 +180,15 @@ void platform_cleanup(void) {
 }
 
 /* Video Input (VI) functions */
+platform_result_t platform_vi_match_sensor(const char *isp_cfg_path) {
+    if (!isp_cfg_path) return PLATFORM_ERROR_NULL;
+    
+    int ret = ak_vi_match_sensor(isp_cfg_path);
+    if (ret != 0) return PLATFORM_ERROR;
+    
+    return PLATFORM_SUCCESS;
+}
+
 platform_result_t platform_vi_open(platform_vi_handle_t *handle) {
     if (!handle) return PLATFORM_ERROR_NULL;
     
@@ -388,6 +408,7 @@ void platform_aenc_release_frame(platform_aenc_handle_t handle, uint8_t *data) {
 /* PTZ functions */
 platform_result_t platform_ptz_init(void) {
     if (ak_drv_ptz_open() != 0) {
+        platform_log_warning("PTZ functions not available, PTZ disabled\n");
         return PLATFORM_ERROR;
     }
     return PLATFORM_SUCCESS;
@@ -633,92 +654,47 @@ int platform_config_get_int(const char *section, const char *key, int default_va
 /* Logging functions */
 int platform_log_error(const char *format, ...) {
     va_list args;
-    char buffer[1024];
     va_start(args, format);
-    int len = vsnprintf(buffer, sizeof(buffer), format, args);
+    int result = vfprintf(stdout, format, args);
     va_end(args);
-    
-    if (len >= sizeof(buffer)) {
-        // Truncated, add ellipsis
-        buffer[sizeof(buffer) - 4] = '.';
-        buffer[sizeof(buffer) - 3] = '.';
-        buffer[sizeof(buffer) - 2] = '.';
-        buffer[sizeof(buffer) - 1] = '\0';
-    }
-    
-    return ak_print(LOG_LEVEL_ERROR, "\n%s", buffer);
+    fflush(stdout);
+    return result;
 }
 
 int platform_log_warning(const char *format, ...) {
     va_list args;
-    char buffer[1024];
     va_start(args, format);
-    int len = vsnprintf(buffer, sizeof(buffer), format, args);
+    int result = vfprintf(stdout, format, args);
     va_end(args);
-    
-    if (len >= sizeof(buffer)) {
-        // Truncated, add ellipsis
-        buffer[sizeof(buffer) - 4] = '.';
-        buffer[sizeof(buffer) - 3] = '.';
-        buffer[sizeof(buffer) - 2] = '.';
-        buffer[sizeof(buffer) - 1] = '\0';
-    }
-    
-    return ak_print(LOG_LEVEL_WARNING, "\n%s", buffer);
+    fflush(stdout);
+    return result;
 }
 
 int platform_log_notice(const char *format, ...) {
     va_list args;
-    char buffer[1024];
     va_start(args, format);
-    int len = vsnprintf(buffer, sizeof(buffer), format, args);
+    int result = vfprintf(stdout, format, args);
     va_end(args);
-    
-    if (len >= sizeof(buffer)) {
-        // Truncated, add ellipsis
-        buffer[sizeof(buffer) - 4] = '.';
-        buffer[sizeof(buffer) - 3] = '.';
-        buffer[sizeof(buffer) - 2] = '.';
-        buffer[sizeof(buffer) - 1] = '\0';
-    }
-    
-    return ak_print(LOG_LEVEL_NOTICE, "%s", buffer);
+    fflush(stdout);
+    return result;
 }
 
 int platform_log_info(const char *format, ...) {
     va_list args;
-    char buffer[1024];
     va_start(args, format);
-    int len = vsnprintf(buffer, sizeof(buffer), format, args);
+    int result = vfprintf(stdout, format, args);
     va_end(args);
-    
-    if (len >= sizeof(buffer)) {
-        // Truncated, add ellipsis
-        buffer[sizeof(buffer) - 4] = '.';
-        buffer[sizeof(buffer) - 3] = '.';
-        buffer[sizeof(buffer) - 2] = '.';
-        buffer[sizeof(buffer) - 1] = '\0';
-    }
-    
-    return ak_print(LOG_LEVEL_INFO, "%s", buffer);
+    fflush(stdout);
+    return result;
 }
 
 int platform_log_debug(const char *format, ...) {
     va_list args;
-    char buffer[1024];
     va_start(args, format);
-    int len = vsnprintf(buffer, sizeof(buffer), format, args);
+    int result = vfprintf(stdout, format, args);
     va_end(args);
-    
-    if (len >= sizeof(buffer)) {
-        // Truncated, add ellipsis
-        buffer[sizeof(buffer) - 4] = '.';
-        buffer[sizeof(buffer) - 3] = '.';
-        buffer[sizeof(buffer) - 2] = '.';
-        buffer[sizeof(buffer) - 1] = '\0';
-    }
-    
-    return ak_print(LOG_LEVEL_DEBUG, "%s", buffer);
+    fflush(stdout);
+    return result;
 }
 
 /* Utility functions */
@@ -775,6 +751,104 @@ void platform_venc_release_stream(platform_venc_handle_t handle,
     ak_venc_release_stream(handle, &anyka_stream);
 }
 
+/* Snapshot functions */
+platform_result_t platform_snapshot_init(platform_snapshot_handle_t *handle,
+                                       platform_vi_handle_t vi_handle,
+                                       int width, int height) {
+    if (!handle || !vi_handle) return PLATFORM_ERROR_NULL;
+    
+    // Create snapshot context
+    struct snapshot_context *ctx = malloc(sizeof(struct snapshot_context));
+    if (!ctx) return PLATFORM_ERROR;
+    
+    ctx->vi_handle = vi_handle;
+    ctx->width = width;
+    ctx->height = height;
+    ctx->jpeg_encoder = NULL;
+    
+    // Initialize JPEG encoder for snapshots
+    struct encode_param param = {0};
+    param.width = width;
+    param.height = height;
+    param.minqp = 20;
+    param.maxqp = 51;
+    param.fps = 10;
+    param.goplen = 1;
+    param.bps = 1000; // kbps
+    param.profile = PROFILE_MAIN;
+    param.use_chn = ENCODE_SUB_CHN;
+    param.enc_grp = ENCODE_PICTURE;
+    param.br_mode = BR_MODE_CBR;
+    param.enc_out_type = MJPEG_ENC_TYPE;
+    
+    ctx->jpeg_encoder = ak_venc_open(&param);
+    if (!ctx->jpeg_encoder) {
+        free(ctx);
+        return PLATFORM_ERROR;
+    }
+    
+    *handle = ctx;
+    return PLATFORM_SUCCESS;
+}
+
+void platform_snapshot_cleanup(platform_snapshot_handle_t handle) {
+    if (!handle) return;
+    
+    struct snapshot_context *ctx = (struct snapshot_context*)handle;
+    if (ctx->jpeg_encoder) {
+        ak_venc_close(ctx->jpeg_encoder);
+    }
+    free(ctx);
+}
+
+platform_result_t platform_snapshot_capture(platform_snapshot_handle_t handle,
+                                           platform_snapshot_t *snapshot,
+                                           uint32_t timeout_ms) {
+    if (!handle || !snapshot) return PLATFORM_ERROR_NULL;
+    
+    struct snapshot_context *ctx = (struct snapshot_context*)handle;
+    struct video_input_frame frame;
+    struct video_stream jpeg_stream;
+    
+    // Get a frame from video input
+    if (ak_vi_get_frame(ctx->vi_handle, &frame) != 0) {
+        return PLATFORM_ERROR;
+    }
+    
+    // Encode frame to JPEG
+    int result = ak_venc_send_frame(ctx->jpeg_encoder, 
+                                   frame.vi_frame[VIDEO_CHN_SUB].data,
+                                   frame.vi_frame[VIDEO_CHN_SUB].len, 
+                                   &jpeg_stream);
+    
+    // Release the input frame
+    ak_vi_release_frame(ctx->vi_handle, &frame);
+    
+    if (result != 0) {
+        return PLATFORM_ERROR;
+    }
+    
+    // Populate snapshot structure
+    snapshot->data = jpeg_stream.data;
+    snapshot->len = jpeg_stream.len;
+    snapshot->timestamp = jpeg_stream.ts;
+    
+    return PLATFORM_SUCCESS;
+}
+
+void platform_snapshot_release(platform_snapshot_handle_t handle,
+                              platform_snapshot_t *snapshot) {
+    if (!handle || !snapshot) return;
+    
+    struct snapshot_context *ctx = (struct snapshot_context*)handle;
+    struct video_stream jpeg_stream;
+    jpeg_stream.data = snapshot->data;
+    jpeg_stream.len = snapshot->len;
+    jpeg_stream.ts = snapshot->timestamp;
+    
+    ak_venc_release_stream(ctx->jpeg_encoder, &jpeg_stream);
+}
+
 /* Audio Encoder Stream functions (for RTSP) */
 platform_result_t platform_aenc_get_stream(platform_aenc_handle_t handle, 
                                           platform_aenc_stream_t *stream, 
@@ -807,4 +881,98 @@ void platform_aenc_release_stream(platform_aenc_handle_t handle,
     
     // Note: Audio encoder stream is managed internally by Anyka SDK
     // The stream data is released automatically when the next frame is retrieved
+}
+
+/* System monitoring functions */
+static float get_cpu_usage(void) {
+    static unsigned long long prev_idle = 0, prev_total = 0;
+    unsigned long long idle, total, diff_idle, diff_total;
+    float cpu_percent = 0.0f;
+    
+    FILE *fp = fopen("/proc/stat", "r");
+    if (!fp) return 0.0f;
+    
+    if (fscanf(fp, "cpu %llu %llu %llu %llu", &total, &idle, &idle, &idle) == 4) {
+        diff_idle = idle - prev_idle;
+        diff_total = total - prev_total;
+        
+        if (diff_total > 0) {
+            cpu_percent = 100.0f * (1.0f - (float)diff_idle / (float)diff_total);
+        }
+        
+        prev_idle = idle;
+        prev_total = total;
+    }
+    
+    fclose(fp);
+    return cpu_percent;
+}
+
+static float get_cpu_temperature(void) {
+    float temp = 0.0f;
+    FILE *fp = fopen("/sys/class/thermal/thermal_zone0/temp", "r");
+    if (!fp) {
+        // Fallback to alternative temperature sources
+        fp = fopen("/proc/thermal_zone0/temp", "r");
+        if (!fp) return 0.0f;
+    }
+    
+    if (fscanf(fp, "%f", &temp) == 1) {
+        temp /= 1000.0f; // Convert from millidegrees to degrees
+    }
+    
+    fclose(fp);
+    return temp;
+}
+
+static void get_memory_info(uint64_t *total, uint64_t *free) {
+    *total = 0;
+    *free = 0;
+    
+    FILE *fp = fopen("/proc/meminfo", "r");
+    if (!fp) return;
+    
+    char line[256];
+    while (fgets(line, sizeof(line), fp)) {
+        if (sscanf(line, "MemTotal: %llu kB", total) == 1) {
+            *total *= 1024; // Convert from kB to bytes
+        } else if (sscanf(line, "MemAvailable: %llu kB", free) == 1) {
+            *free *= 1024; // Convert from kB to bytes
+        }
+    }
+    
+    fclose(fp);
+}
+
+static uint64_t get_system_uptime(void) {
+    uint64_t uptime_seconds = 0;
+    FILE *fp = fopen("/proc/uptime", "r");
+    if (!fp) return 0;
+    
+    if (fscanf(fp, "%llu", &uptime_seconds) == 1) {
+        uptime_seconds *= 1000; // Convert to milliseconds
+    }
+    
+    fclose(fp);
+    return uptime_seconds;
+}
+
+platform_result_t platform_get_system_info(platform_system_info_t *info) {
+    if (!info) return PLATFORM_ERROR_NULL;
+    
+    memset(info, 0, sizeof(platform_system_info_t));
+    
+    // Get CPU usage
+    info->cpu_usage = get_cpu_usage();
+    
+    // Get CPU temperature
+    info->cpu_temperature = get_cpu_temperature();
+    
+    // Get memory information
+    get_memory_info(&info->total_memory, &info->free_memory);
+    
+    // Get system uptime
+    info->uptime_ms = get_system_uptime();
+    
+    return PLATFORM_SUCCESS;
 }
