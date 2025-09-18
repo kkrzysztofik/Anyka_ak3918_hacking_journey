@@ -4,7 +4,7 @@
 Write-Host "Building Anyka cross-compilation environment..." -ForegroundColor Green
 
 try {
-    docker build -t anyka-cross-compile .
+    docker build -f cross-compile/Dockerfile -t anyka-cross-compile .
     
     Write-Host "Docker image built successfully!" -ForegroundColor Green
     Write-Host ""

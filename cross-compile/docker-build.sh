@@ -2,7 +2,7 @@
 
 # Build the cross-compilation Docker image
 echo "Building Anyka cross-compilation environment..."
-docker build -t anyka-cross-compile .
+docker build -f cross-compile/Dockerfile -t anyka-cross-compile .
 
 echo "Docker image built successfully!"
 echo ""
