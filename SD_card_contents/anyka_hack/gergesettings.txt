@@ -3,17 +3,9 @@ run_ftp=1
 #telnet connection [default 1]
 run_telnet=1
 #web interface on port 80 [default 0]
-run_web_interface=1
-#use ONVIF web interface instead of legacy [default 1 when ONVIF server enabled]
-use_onvif_web_interface=1
-#start ptz_daemon from SD card to control motion [default 1]
-run_ptz_daemon=0
-#home the camera ptz at bootup [default 0]
-ptz_init_on_boot=0
-#Libre-Anyka-App (RTSP, snapshot and motion trigger recording)
-run_libre_anyka=0
+run_web_interface=0
 #ONVIF server (PTZ, imaging, and media services) [default 0]
-run_onvif_server=1
+run_onvif_server=0
 #width and height of preview image (SUB channel) [must be smaller than 640x480]
 image_width=640
 image_height=360

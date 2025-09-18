@@ -46,10 +46,6 @@
 LOG_FILE="gergehack.log"
 CFG_FILE="/etc/jffs2/anyka_cfg.ini"
 
-# PTZ daemon configuration
-PTZ_INIT_DELAY_SEC=10
-PTZ_DAEMON_FILE="/mnt/tmp/ptz.daemon"
-
 # =============================================================================
 # FUNCTION DEFINITIONS
 # =============================================================================
@@ -204,47 +200,6 @@ check_wifi_credentials() {
   fi
 }
 
-# PTZ daemon functions
-start_ptz_daemon() {
-  log INFO "Starting PTZ daemon"
-  
-  if [ -f /usr/bin/ptz_daemon_dyn ]; then
-    if ptz_daemon_dyn &; then
-      log INFO "PTZ daemon started (pid=$!)"
-      return 0
-    else
-      log ERROR "Failed to start PTZ daemon"
-      return 1
-    fi
-  elif [ -f /mnt/anyka_hack/ptz/run_ptz.sh ]; then
-    if /mnt/anyka_hack/ptz/run_ptz.sh &; then
-      log INFO "PTZ daemon started via script (pid=$!)"
-      return 0
-    else
-      log ERROR "Failed to start PTZ daemon via script"
-      return 1
-    fi
-  else
-    log ERROR "PTZ daemon script not found: /mnt/anyka_hack/ptz/run_ptz.sh"
-    return 1
-  fi
-}
-
-initialize_ptz() {
-  if [ "${ptz_init_on_boot:-0}" -eq 1 ]; then
-    log INFO "PTZ initialization enabled, waiting ${PTZ_INIT_DELAY_SEC}s"
-    sleep $PTZ_INIT_DELAY_SEC
-    if echo "init_ptz" > "$PTZ_DAEMON_FILE" 2>/dev/null; then
-      log INFO "PTZ initialization command sent"
-      return 0
-    else
-      log ERROR "Failed to send PTZ initialization command"
-      return 1
-    fi
-  fi
-  return 0
-}
-
 # Web interface functions
 start_web_interface() {
   log INFO "Starting web interface"
@@ -255,22 +210,13 @@ start_web_interface() {
     return 0
   fi
   
-  if [ "${use_onvif_web_interface:-0}" -eq 1 ] && [ -f /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh ]; then
+  if [ -f /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh ]; then
     log INFO "Starting ONVIF web interface"
     if /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh &; then
       log INFO "ONVIF web interface started (pid=$!)"
       return 0
     else
       log ERROR "Failed to start ONVIF web interface"
-      return 1
-    fi
-  else
-    log INFO "Starting legacy web interface"
-    if /mnt/anyka_hack/web_interface/start_web_interface.sh &; then
-      log INFO "Legacy web interface started (pid=$!)"
-      return 0
-    else
-      log ERROR "Failed to start legacy web interface"
       return 1
     fi
   fi
@@ -291,41 +237,6 @@ start_onvif_server() {
   else
     log WARN "ONVIF server binary not found at /mnt/anyka_hack/onvif/onvifd"
     return 1
-  fi
-}
-
-# Libre Anyka functions
-start_libre_anyka() {
-  log INFO "Starting Libre Anyka"
-  
-  # Check SD card mount status
-  local sd_detect=$(mount | grep mmcblk0p1)
-  if [ ${#sd_detect} -eq 0 ]; then
-    md_record_sec=0 # disable recording if SD card is not mounted
-    log WARN "SD card not mounted; disabling recording"
-  fi
-  
-  if [ -f /usr/bin/ptz_daemon_dyn ]; then
-    if libre_anyka_app -w "$image_width" -h "$image_height" -m "$md_record_sec" $extra_args &; then
-      log INFO "Libre Anyka started (pid=$!)"
-      return 0
-    else
-      log ERROR "Failed to start Libre Anyka"
-      return 1
-    fi
-  else
-    if [ -f /mnt/anyka_hack/libre_anyka_app/run_libre_anyka_app.sh ]; then
-      if /mnt/anyka_hack/libre_anyka_app/run_libre_anyka_app.sh &; then
-        log INFO "Libre Anyka started via script (pid=$!)"
-        return 0
-      else
-        log ERROR "Failed to start Libre Anyka via script"
-        return 1
-      fi
-    else
-      log ERROR "Libre Anyka script not found"
-      return 1
-    fi
   fi
 }
 
@@ -441,12 +352,7 @@ else
   
   # Load kernel modules for camera
   load_camera_modules "$sensor_kern_module"
-  
-  # Start services based on configuration
-  if [ "${run_ptz_daemon:-0}" -eq 1 ]; then
-    start_ptz_daemon
-    initialize_ptz
-  fi
+
   
   if [ "${run_web_interface:-0}" -eq 1 ]; then
     start_web_interface
@@ -455,10 +361,7 @@ else
   if [ "${run_onvif_server:-0}" -eq 1 ]; then
     start_onvif_server
   fi
-  
-  if [ "${run_libre_anyka:-0}" -eq 1 ]; then
-    start_libre_anyka
-  fi
+
   
   # Start monitoring services
   start_system_monitor
@@ -468,7 +371,7 @@ else
   report_service_status "sys_monitor" "/mnt/tmp/sys_monitor.pid" "/mnt/logs/sys_monitor.log"
   report_service_status "periodic_reboot" "/mnt/tmp/periodic_reboot.pid" "/mnt/logs/periodic_reboot.log"
   
-  if [ "${run_ipc:-1}" -eq 0 ] && [ "${rootfs_modified:-0}" -eq 0 ]; then
+  if [ "${run_ipc:-0}" -eq 0 ] && [ "${rootfs_modified:-0}" -eq 0 ]; then
     log INFO "IPC disabled and rootfs not modified, entering maintenance mode"
     while true; do
       sleep 30
