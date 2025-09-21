@@ -1,4 +1,16 @@
-cross-compile/component/**/*
-cross-compile/platform/**/*
+cross-compile/anyka_reference/component/**/*
+cross-compile/anyka_reference/platform/**/*
 cross-compile/onvif/out/**/*
 orig/**/*
+toolchain/arm-anykav200-crosstool/**/*
+debugging/coredump/core*
+debugging/logs/*.log
+
+# Clangd output files and logs
+clangd-logs/**/*
+
+# Additional clangd temporary files
+verbose
+off
+
+cross-compile/onvif/.cache/**/*
