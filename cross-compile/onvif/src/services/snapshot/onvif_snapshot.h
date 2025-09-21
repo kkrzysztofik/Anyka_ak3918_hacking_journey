@@ -1,20 +1,31 @@
 /**
  * @file onvif_snapshot.h
- * @brief ONVIF Snapshot service implementation.
- * 
- * This file provides the interface for the ONVIF Snapshot service,
- * which handles snapshot capture and HTTP serving for Profile S compliance.
+ * @brief ONVIF Snapshot service implementation
+ * @author kkrzysztofik
+ * @date 2025
  */
 
 #ifndef ONVIF_SNAPSHOT_H
 #define ONVIF_SNAPSHOT_H
 
-#include "platform.h"
+#include <stdint.h>
+
+#include "core/config/config.h"
+#include "services/common/onvif_request.h"
+#include "services/common/onvif_types.h"
 #include "services/media/onvif_media.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * @brief Snapshot dimensions structure
+ */
+typedef struct {
+  int width;  /**< Snapshot width in pixels */
+  int height; /**< Snapshot height in pixels */
+} snapshot_dimensions_t;
 
 /**
  * @brief Initialize the snapshot service
@@ -29,13 +40,13 @@ void onvif_snapshot_cleanup(void);
 
 /**
  * @brief Capture a snapshot
- * @param width Snapshot width
- * @param height Snapshot height
+ * @param dimensions Snapshot dimensions (width and height)
  * @param data Pointer to store JPEG data
  * @param size Pointer to store data size
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int onvif_snapshot_capture(int width, int height, uint8_t **data, size_t *size);
+int onvif_snapshot_capture(const snapshot_dimensions_t *dimensions,
+                           uint8_t **data, size_t *size);
 
 /**
  * @brief Release snapshot data
@@ -70,7 +81,9 @@ void onvif_snapshot_service_cleanup(void);
  * @param response Response structure
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int onvif_snapshot_handle_request(onvif_action_type_t action, const onvif_request_t *request, onvif_response_t *response);
+int onvif_snapshot_handle_request(onvif_action_type_t action,
+                                  const onvif_request_t *request,
+                                  onvif_response_t *response);
 
 #ifdef __cplusplus
 }

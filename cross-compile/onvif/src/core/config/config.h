@@ -1,9 +1,9 @@
 /**
  * @file config.h
  * @brief Configuration management system with validation
- * 
- * This module provides a unified configuration management system that eliminates
- * hardcoded values and provides consistent default handling and validation.
+ * @author kkrzysztofik
+ * @date 2025
+
  */
 
 #ifndef ONVIF_CONFIG_H
@@ -11,8 +11,7 @@
 
 #include <stddef.h>
 
-#include "common/onvif_types.h"
-#include "common/onvif_constants.h"
+#include "services/common/video_config_types.h"
 
 /* Forward declarations for imaging structures */
 struct imaging_settings;
@@ -22,35 +21,37 @@ struct device_info;
 
 /* Core ONVIF daemon settings */
 struct onvif_settings {
-    int enabled;               /* daemon enable flag */
-    int http_port;             /* HTTP/SOAP port */
-    char username[64];         /* auth user (optional) */
-    char password[64];         /* auth password (optional) */
+  int enabled;       /* daemon enable flag */
+  int http_port;     /* HTTP/SOAP port */
+  char username[64]; /* auth user (optional) */
+  char password[64]; /* auth password (optional) */
 };
 
 /* Network settings for ONVIF services */
 struct network_settings {
-    int rtsp_port;             /* RTSP server port */
-    int snapshot_port;         /* Snapshot service port */
-    int ws_discovery_port;     /* WS-Discovery port */
+  int rtsp_port;         /* RTSP server port */
+  int snapshot_port;     /* Snapshot service port */
+  int ws_discovery_port; /* WS-Discovery port */
 };
 
 /* Device information for ONVIF identification */
 struct device_info {
-    char manufacturer[64];     /* Device manufacturer name */
-    char model[64];            /* Device model name */
-    char firmware_version[32]; /* Firmware version string */
-    char serial_number[64];    /* Device serial number */
-    char hardware_id[64];      /* Hardware identification */
+  char manufacturer[64];     /* Device manufacturer name */
+  char model[64];            /* Device model name */
+  char firmware_version[32]; /* Firmware version string */
+  char serial_number[64];    /* Device serial number */
+  char hardware_id[64];      /* Hardware identification */
 };
 
 /* Full application configuration */
 struct application_config {
-    struct onvif_settings onvif;                 /* core ONVIF settings */
-    struct imaging_settings *imaging;            /* imaging tuning */
-    struct auto_daynight_config *auto_daynight;  /* day/night auto thresholds */
-    struct network_settings *network;            /* network service settings */
-    struct device_info *device;                  /* device identification info */
+  struct onvif_settings onvif;                /* core ONVIF settings */
+  struct imaging_settings *imaging;           /* imaging tuning */
+  struct auto_daynight_config *auto_daynight; /* day/night auto thresholds */
+  struct network_settings *network;           /* network service settings */
+  struct device_info *device;                 /* device identification info */
+  video_config_t *main_stream; /* main stream (vs0) configuration */
+  video_config_t *sub_stream;  /* sub stream (vs1) configuration */
 };
 
 /**
@@ -73,7 +74,9 @@ typedef enum {
   CONFIG_SECTION_AUTO_DAYNIGHT,
   CONFIG_SECTION_NETWORK,
   CONFIG_SECTION_RTSP,
-  CONFIG_SECTION_DEVICE
+  CONFIG_SECTION_DEVICE,
+  CONFIG_SECTION_MAIN_STREAM,
+  CONFIG_SECTION_SUB_STREAM
 } config_section_t;
 
 /**
@@ -126,7 +129,8 @@ typedef struct {
  * @param app_config Application configuration structure
  * @return 0 on success, negative error code on failure
  */
-int config_init(config_manager_t *config, struct application_config *app_config);
+int config_init(config_manager_t *config,
+                struct application_config *app_config);
 
 /**
  * @brief Load configuration from file with validation
@@ -135,7 +139,6 @@ int config_init(config_manager_t *config, struct application_config *app_config)
  * @return 0 on success, negative error code on failure
  */
 int config_load(config_manager_t *config, const char *config_file);
-
 
 /**
  * @brief Validate configuration values
@@ -154,7 +157,8 @@ config_validation_result_t config_validate(config_manager_t *config);
  * @return 0 on success, negative error code on failure
  */
 int config_get_value(config_manager_t *config, config_section_t section,
-                                const char *key, void *value_ptr, config_value_type_t value_type);
+                     const char *key, void *value_ptr,
+                     config_value_type_t value_type);
 
 /**
  * @brief Set configuration value with validation
@@ -166,7 +170,8 @@ int config_get_value(config_manager_t *config, config_section_t section,
  * @return 0 on success, negative error code on failure
  */
 int config_set_value(config_manager_t *config, config_section_t section,
-                                const char *key, const void *value_ptr, config_value_type_t value_type);
+                     const char *key, const void *value_ptr,
+                     config_value_type_t value_type);
 
 /**
  * @brief Reset configuration to defaults
@@ -183,14 +188,14 @@ int config_reset_to_defaults(config_manager_t *config);
  * @return Parameter definition or NULL if not found
  */
 const config_parameter_t *config_get_parameter(config_manager_t *config,
-                                                          config_section_t section, const char *key);
+                                               config_section_t section,
+                                               const char *key);
 
 /**
  * @brief Clean up configuration manager
  * @param config Configuration manager to clean up
  */
 void config_cleanup(config_manager_t *config);
-
 
 /**
  * @brief Get configuration summary for logging
@@ -199,6 +204,7 @@ void config_cleanup(config_manager_t *config);
  * @param summary_size Size of summary buffer
  * @return 0 on success, negative error code on failure
  */
-int config_get_summary(config_manager_t *config, char *summary, size_t summary_size);
+int config_get_summary(config_manager_t *config, char *summary,
+                       size_t summary_size);
 
 #endif /* ONVIF_CONFIG_H */

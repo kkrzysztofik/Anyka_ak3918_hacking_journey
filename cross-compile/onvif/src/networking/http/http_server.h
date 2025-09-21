@@ -7,6 +7,9 @@
 #ifndef HTTP_SERVER_H
 #define HTTP_SERVER_H
 
+#include "networking/common/buffer_pool.h"
+#include "networking/common/thread_pool.h"
+
 /**
  * @brief Start the ONVIF HTTP/SOAP server.
  * @param port TCP port to bind.
@@ -25,5 +28,9 @@ int http_server_stop(void);
  * @param conn Connection to process
  */
 void process_connection(void *conn);
+
+/* Global pool instances for shared access */
+extern buffer_pool_t g_http_buffer_pool;  // NOLINT
+extern thread_pool_t g_http_thread_pool;  // NOLINT
 
 #endif

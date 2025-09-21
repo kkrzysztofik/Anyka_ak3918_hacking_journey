@@ -1,6 +1,8 @@
 /**
  * @file logging_utils.h
- * @brief Common logging utilities for ONVIF services.
+ * @brief Common logging utilities for ONVIF services
+ * @author kkrzysztofik
+ * @date 2025
  */
 
 #ifndef ONVIF_LOGGING_UTILS_H
@@ -63,6 +65,7 @@ void log_config_updated(const char *config_type);
  * @param operation Description of the platform operation
  * @param error_msg Error message describing the failure
  */
-void log_platform_operation_failure(const char *operation, const char *error_msg);
+void log_platform_operation_failure(const char *operation,
+                                    const char *error_msg);
 
 #endif /* ONVIF_LOGGING_UTILS_H */

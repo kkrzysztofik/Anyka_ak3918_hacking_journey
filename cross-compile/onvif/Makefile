@@ -1,8 +1,58 @@
+# ONVIF Project Makefile
+# =======================
+#
+# Build system with enhanced debugging support
+#
+# Environment Variables:
+#   BUILD_TYPE - Build type: 'debug' or 'release' (default: release)
+#   LOG_LEVEL  - Logging level: 'DEBUG', 'INFO', 'WARNING', 'ERROR' (default: INFO)
+#
+# Build Commands:
+#   make                    - Build release version
+#   make debug              - Build debug version with symbols (automatically sets BUILD_TYPE=debug LOG_LEVEL=DEBUG)
+#   make release            - Explicitly build release version
+#   make clean              - Clean build artifacts
+#   make docs               - Generate documentation
+#
+# Examples:
+#   make debug              - Automatically enables debug build with maximum logging
+#   make release            - Build optimized release version
+#   BUILD_TYPE=debug LOG_LEVEL=DEBUG make - Override defaults for custom builds
+#
 export PATH := $(PATH):/opt/arm-anykav200-crosstool/usr/bin
 PREFIX=arm-anykav200-linux-uclibcgnueabi-
 CC=${PREFIX}gcc
 CPP=${PREFIX}g++
-CFLAGS=-std=c99 -D_POSIX_C_SOURCE=199309L -DANYKA_PLATFORM=1 -Os -fno-builtin -fno-stack-protector -Wl,--hash-style=sysv
+# Build configuration with environment variable support
+BUILD_TYPE ?= release
+LOG_LEVEL ?= INFO
+
+# Base compiler flags
+BASE_CFLAGS=-std=c99 -D_POSIX_C_SOURCE=199309L -DANYKA_PLATFORM=1 -fno-builtin -fno-stack-protector -Wl,--hash-style=sysv
+
+# Optimization and debug flags based on build type
+ifeq ($(BUILD_TYPE), debug)
+    OPT_CFLAGS=-g -O0 -DDEBUG_BUILD
+    TARGET_SUFFIX=_debug
+else
+    OPT_CFLAGS=-Os
+    TARGET_SUFFIX=
+endif
+
+# Log level definitions (numeric values matching enum)
+ifeq ($(LOG_LEVEL), DEBUG)
+    LOG_CFLAGS=-DPLATFORM_LOG_LEVEL_DEBUG=4
+else ifeq ($(LOG_LEVEL), INFO)
+    LOG_CFLAGS=-DPLATFORM_LOG_LEVEL_INFO=3
+else ifeq ($(LOG_LEVEL), WARNING)
+    LOG_CFLAGS=-DPLATFORM_LOG_LEVEL_WARNING=1
+else ifeq ($(LOG_LEVEL), ERROR)
+    LOG_CFLAGS=-DPLATFORM_LOG_LEVEL_ERROR=0
+else
+    LOG_CFLAGS=-DPLATFORM_LOG_LEVEL_INFO=3
+endif
+
+CFLAGS=$(BASE_CFLAGS) $(OPT_CFLAGS) $(LOG_CFLAGS)
 LINKERFLAG=-L./lib -Wl,--gc-sections -lakuio -lakispsdk -lakv_encode -lplat_common -lplat_thread -lplat_vi -lplat_vpss -lplat_ipcsrv -lplat_venc_cb -lmpi_venc -lakstreamenc -lpthread -lakae -lakaudiocodec -lakmedia -lakv_encode -lapp_net -lapp_rtsp -lmpi_aed -lmpi_aenc -lplat_ai -lplat_drv -lm
 INCLUDES=include src src/core src/platform src/services src/networking src/protocol src/utils
 
@@ -14,6 +64,11 @@ SRCS := \
 	src/platform/platform_anyka.c \
 	src/core/config/config.c \
 	src/core/lifecycle/service_manager.c \
+	src/core/lifecycle/video_lifecycle.c \
+	src/core/lifecycle/network_lifecycle.c \
+	src/core/lifecycle/platform_lifecycle.c \
+	src/core/lifecycle/config_lifecycle.c \
+	src/core/lifecycle/signal_lifecycle.c \
 	src/services/device/onvif_device.c \
 	src/services/media/onvif_media.c \
 	src/services/ptz/onvif_ptz.c \
@@ -26,7 +81,7 @@ SRCS := \
 	src/networking/common/thread_pool.c \
 	src/networking/common/buffer_pool.c \
 	src/networking/common/epoll_server.c \
-	src/networking/rtsp/rtsp_server_main.c \
+	src/networking/rtsp/rtsp_multistream.c \
 	src/networking/rtsp/rtsp_auth.c \
 	src/networking/rtsp/rtsp_sdp.c \
 	src/networking/rtsp/rtsp_rtcp.c \
@@ -42,14 +97,17 @@ SRCS := \
 	src/utils/network/network_utils.c \
 	src/utils/logging/logging_utils.c \
 	src/utils/logging/service_logging.c \
+	src/utils/logging/platform_logging.c \
 	src/utils/validation/common_validation.c \
 	src/utils/validation/input_validation.c \
+	src/utils/validation/audio_validation.c \
 	src/utils/security/security_hardening.c \
-	src/utils/service/common_service_init.c
+	src/utils/service/common_service_init.c \
+	src/utils/stream/stream_config_utils.c
 
 OBJS := $(SRCS:src/%.c=$(OUT_DIR)/%.o)
 
-.PHONY = all clean debug docs docs-clean docs-open static-analysis clang-analyze cppcheck-analyze snyk-analyze
+.PHONY = all clean debug release docs docs-clean docs-open static-analysis clang-analyze cppcheck-analyze snyk-analyze compile-commands
 
 # Documentation directory
 DOCS_DIR = docs
@@ -57,9 +115,14 @@ DOCS_DIR = docs
 # Limit parallel jobs to prevent memory issues
 MAKEFLAGS += -j1
 
-all: clean $(OUT_DIR)/onvifd
+# Main targets
+all: $(OUT_DIR)/onvifd
 
-
+# Debug build with environment variable support
+debug:
+	@echo "Building debug version with maximum debugging enabled"
+	@$(MAKE) clean BUILD_TYPE=debug LOG_LEVEL=DEBUG
+	@$(MAKE) $(OUT_DIR)/onvifd_debug BUILD_TYPE=debug LOG_LEVEL=DEBUG
 
 # Documentation targets
 docs: $(DOCS_DIR)/html/index.html
@@ -78,22 +141,19 @@ $(DOCS_DIR)/html/index.html: Doxyfile $(SRCS) $(wildcard src/*.h) $(wildcard inc
 	@doxygen Doxyfile
 	@echo "Documentation generated successfully in $(DOCS_DIR)/html/"
 
-# Debug target to build with debugging symbols
-debug: clean
-	@echo "Building debug version with symbols..."
-	@mkdir -p $(OUT_DIR)
-	@for src in $(SRCS); do \
-		echo "Building $$src..."; \
-		obj=$$(echo $$src | sed 's|src/|$(OUT_DIR)/|' | sed 's|\.c|\.o|'); \
-		mkdir -p $$(dirname $$obj); \
-		${CC} -g -O0 -std=c99 -D_POSIX_C_SOURCE=199309L -DANYKA_PLATFORM=1 -fno-builtin -fno-stack-protector -Wl,--hash-style=sysv ${INCLUDES:%=-I%} -c $$src -o $$obj -pipe || exit 1; \
-	done
-	@echo "Linking debug binary..."
-	${CC} -g -O0 -std=c99 -D_POSIX_C_SOURCE=199309L -DANYKA_PLATFORM=1 -fno-builtin -fno-stack-protector -Wl,--hash-style=sysv $(OBJS) ${LINKERFLAG} -o $(OUT_DIR)/onvifd_debug
-	@echo "Debug build completed: $(OUT_DIR)/onvifd_debug"
+# Release target (optimized build)
+release:
+	@echo "Building release version..."
+	@$(MAKE) clean
+	@$(MAKE) $(OUT_DIR)/onvifd
 
 $(OUT_DIR)/onvifd: $(OBJS)
 	${CC} ${CFLAGS} $(OBJS) ${LINKERFLAG} -o $@
+
+$(OUT_DIR)/onvifd_debug: $(OBJS)
+	@echo "Linking debug binary with debug symbols..."
+	${CC} ${CFLAGS} $(OBJS) ${LINKERFLAG} -o $@
+	@echo "Debug build completed: $@"
 
 $(OUT_DIR)/%.o: src/%.c | $(OUT_DIR)
 	@mkdir -p $(dir $@)
@@ -125,5 +185,10 @@ snyk-analyze:
 	@snyk code test --sarif --sarif-file-output=analysis-results/snyk-results.sarif src/
 	@echo "Snyk analysis completed. Results in analysis-results/"
 
-clean: docs-clean
-	rm -rf $(OUT_DIR) analysis-results
+# Generate compile_commands.json for clangd
+compile-commands:
+	@echo "Generating compile_commands.json for clangd..."
+	@./generate_compile_commands.sh
+
+clean:
+	rm -rf $(OUT_DIR)

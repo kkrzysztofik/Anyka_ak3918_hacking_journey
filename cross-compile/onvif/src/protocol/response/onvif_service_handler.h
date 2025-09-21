@@ -8,13 +8,14 @@
 #ifndef ONVIF_SERVICE_HANDLER_H
 #define ONVIF_SERVICE_HANDLER_H
 
-#include "services/common/onvif_types.h"
-#include "protocol/soap/onvif_soap.h"
-#include "protocol/xml/unified_xml.h"
-#include "core/config/config.h"
-#include "utils/error/error_handling.h"
 #include <stddef.h>
 
+#include "common/onvif_constants.h"
+#include "core/config/config.h"
+#include "protocol/xml/unified_xml.h"
+#include "services/common/onvif_request.h"
+#include "services/common/onvif_types.h"
+#include "utils/error/error_handling.h"
 
 #define MAX_ACTIONS 32
 
@@ -54,8 +55,8 @@ typedef struct {
  * @brief Service action handler function type
  */
 typedef int (*service_action_handler_t)(const service_handler_config_t *config,
-                                       const onvif_request_t *request,
-                                       onvif_response_t *response,
+                                        const onvif_request_t *request,
+                                        onvif_response_t *response,
                                         onvif_xml_builder_t *xml_builder);
 
 /**
@@ -80,20 +81,10 @@ typedef struct {
   service_stats_t stats;
 } onvif_service_handler_instance_t;
 
-/**
- * @brief Service handler function type (legacy)
- * @param action The ONVIF action to handle
- * @param request The incoming request
- * @param response The response to populate
- * @return Response body length on success, negative error code on failure
- */
-typedef int (*onvif_service_handler_t)(onvif_action_type_t action, 
-                                      const onvif_request_t *request, 
-                                      onvif_response_t *response);
-
 /* ============================================================================
  * Service Handler Management
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief Initialize ONVIF service handler
@@ -116,10 +107,9 @@ int onvif_service_handler_init(onvif_service_handler_instance_t *handler,
  * @param response Response structure
  * @return 0 on success, negative error code on failure
  */
-int onvif_service_handler_handle_request(onvif_service_handler_instance_t *handler,
-                                          onvif_action_type_t action,
-                                          const onvif_request_t *request,
-                                          onvif_response_t *response);
+int onvif_service_handler_handle_request(
+    onvif_service_handler_instance_t *handler, onvif_action_type_t action,
+    const onvif_request_t *request, onvif_response_t *response);
 
 /**
  * @brief Clean up unified service handler
@@ -135,23 +125,21 @@ void onvif_service_handler_cleanup(onvif_service_handler_instance_t *handler);
  * @param param_count Number of required parameters
  * @return 0 on success, negative error code on failure
  */
-int onvif_service_handler_validate_request(onvif_service_handler_instance_t *handler,
-                                            const onvif_request_t *request,
-                                            const char **required_params,
-                                            size_t param_count);
+int onvif_service_handler_validate_request(
+    onvif_service_handler_instance_t *handler, const onvif_request_t *request,
+    const char **required_params, size_t param_count);
 
 /**
  * @brief Generate success response using XML builder
  * @param handler Service handler
- * @param action_name Action name
- * @param xml_content XML content
+ * @param action Action name
+ * @param body_content XML body content
  * @param response Response structure
  * @return 0 on success, negative error code on failure
  */
-int onvif_service_handler_generate_success(onvif_service_handler_instance_t *handler,
-                                            const char *action_name,
-                                            const char *xml_content,
-                                            onvif_response_t *response);
+int onvif_service_handler_generate_success(
+    onvif_service_handler_instance_t *handler, const char *action,
+    const char *body_content, onvif_response_t *response);
 
 /**
  * @brief Generate error response using common error handling
@@ -162,11 +150,10 @@ int onvif_service_handler_generate_success(onvif_service_handler_instance_t *han
  * @param response Response structure
  * @return 0 on success, negative error code on failure
  */
-int onvif_service_handler_generate_error(onvif_service_handler_instance_t *handler,
-                                          const char *action_name,
-                                          error_pattern_t error_pattern,
-                                          const char *error_message,
-                                          onvif_response_t *response);
+int onvif_service_handler_generate_error(
+    onvif_service_handler_instance_t *handler, const char *action_name,
+    error_pattern_t error_pattern, const char *error_message,
+    onvif_response_t *response);
 
 /**
  * @brief Get service configuration value
@@ -177,11 +164,9 @@ int onvif_service_handler_generate_error(onvif_service_handler_instance_t *handl
  * @param value_type Value type
  * @return 0 on success, negative error code on failure
  */
-int onvif_service_handler_get_config_value(onvif_service_handler_instance_t *handler,
-                                            config_section_t section,
-                                            const char *key,
-                                            void *value_ptr,
-                                            config_value_type_t value_type);
+int onvif_service_handler_get_config_value(
+    onvif_service_handler_instance_t *handler, config_section_t section,
+    const char *key, void *value_ptr, config_value_type_t value_type);
 
 /**
  * @brief Set service configuration value
@@ -192,11 +177,9 @@ int onvif_service_handler_get_config_value(onvif_service_handler_instance_t *han
  * @param value_type Value type
  * @return 0 on success, negative error code on failure
  */
-int onvif_service_handler_set_config_value(onvif_service_handler_instance_t *handler,
-                                            config_section_t section,
-                                            const char *key,
-                                            const void *value_ptr,
-                                            config_value_type_t value_type);
+int onvif_service_handler_set_config_value(
+    onvif_service_handler_instance_t *handler, config_section_t section,
+    const char *key, const void *value_ptr, config_value_type_t value_type);
 
 /**
  * @brief Log service operation
@@ -206,23 +189,24 @@ int onvif_service_handler_set_config_value(onvif_service_handler_instance_t *han
  * @param level Log level
  */
 void onvif_service_handler_log(onvif_service_handler_instance_t *handler,
-                                const char *action_name,
-                                const char *message,
-                                int level);
+                               const char *action_name, const char *message,
+                               int level);
 
 /**
  * @brief Get XML builder for service
  * @param handler Service handler
  * @return XML builder pointer
  */
-onvif_xml_builder_t *onvif_service_handler_get_xml_builder(onvif_service_handler_instance_t *handler);
+onvif_xml_builder_t *onvif_service_handler_get_xml_builder(
+    onvif_service_handler_instance_t *handler);
 
 /**
  * @brief Reset XML builder for new operation
  * @param handler Service handler
  * @return 0 on success, negative error code on failure
  */
-int onvif_service_handler_reset_xml_builder(onvif_service_handler_instance_t *handler);
+int onvif_service_handler_reset_xml_builder(
+    onvif_service_handler_instance_t *handler);
 
 /**
  * @brief Get service statistics
@@ -231,7 +215,7 @@ int onvif_service_handler_reset_xml_builder(onvif_service_handler_instance_t *ha
  * @return 0 on success, negative error code on failure
  */
 int onvif_service_handler_get_stats(onvif_service_handler_instance_t *handler,
-                                     service_stats_t *stats);
+                                    service_stats_t *stats);
 
 /**
  * @brief Register custom action handler
@@ -239,8 +223,9 @@ int onvif_service_handler_get_stats(onvif_service_handler_instance_t *handler,
  * @param action_def Action definition
  * @return 0 on success, negative error code on failure
  */
-int onvif_service_handler_register_action(onvif_service_handler_instance_t *handler,
-                                           const service_action_def_t *action_def);
+int onvif_service_handler_register_action(
+    onvif_service_handler_instance_t *handler,
+    const service_action_def_t *action_def);
 
 /**
  * @brief Unregister action handler
@@ -248,12 +233,13 @@ int onvif_service_handler_register_action(onvif_service_handler_instance_t *hand
  * @param action_type Action type to unregister
  * @return 0 on success, negative error code on failure
  */
-int onvif_service_handler_unregister_action(onvif_service_handler_instance_t *handler,
-                                             onvif_action_type_t action_type);
+int onvif_service_handler_unregister_action(
+    onvif_service_handler_instance_t *handler, onvif_action_type_t action_type);
 
 /* ============================================================================
  * Legacy Service Handler Functions
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief Common service request handler with standard error handling
@@ -288,7 +274,8 @@ int onvif_handle_unsupported_action(onvif_response_t *response);
  * @param param_name Name of the missing parameter
  * @return 0 on success, negative error code on failure
  */
-int onvif_handle_missing_parameter(onvif_response_t *response, const char *param_name);
+int onvif_handle_missing_parameter(onvif_response_t *response,
+                                   const char *param_name);
 
 /**
  * @brief Handle service error with standard error response
@@ -296,43 +283,7 @@ int onvif_handle_missing_parameter(onvif_response_t *response, const char *param
  * @param error_message Description of the error
  * @return 0 on success, negative error code on failure
  */
-int onvif_handle_service_error(onvif_response_t *response, const char *error_message);
-
-/**
- * @brief Get configuration value from service handler
- * @param handler Service handler instance
- * @param section Configuration section
- * @param key Configuration key
- * @param value Pointer to store the value
- * @param value_type Type of the value to retrieve
- * @return 0 on success, negative error code on failure
- */
-int onvif_service_handler_get_config_value(onvif_service_handler_instance_t *handler, config_section_t section, const char *key, void *value, config_value_type_t value_type);
-
-/**
- * @brief Generate success response for service handler
- * @param handler Service handler instance
- * @param action Action name
- * @param body_content XML body content
- * @param response Response structure to populate
- * @return 0 on success, negative error code on failure
- */
-int onvif_service_handler_generate_success(onvif_service_handler_instance_t *handler, const char *action, const char *body_content, onvif_response_t *response);
-
-/**
- * @brief Get XML builder from service handler
- * @param handler Service handler instance
- * @return Pointer to XML builder, NULL on error
- */
-onvif_xml_builder_t *onvif_service_handler_get_xml_builder(onvif_service_handler_instance_t *handler);
-
-/**
- * @brief Log message from service handler
- * @param handler Service handler instance
- * @param action_name Action name
- * @param message Log message
- * @param level Log level (0=INFO, 1=ERROR)
- */
-void onvif_service_handler_log(onvif_service_handler_instance_t *handler, const char *action_name, const char *message, int level);
+int onvif_handle_service_error(onvif_response_t *response,
+                               const char *error_message);
 
 #endif /* ONVIF_SERVICE_HANDLER_H */

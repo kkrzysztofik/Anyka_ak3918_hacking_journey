@@ -1,16 +1,16 @@
 /**
  * @file service_manager.h
- * @brief ONVIF service manager for centralized service lifecycle management.
- * 
- * This module provides a centralized way to initialize, manage, and cleanup
- * all ONVIF services without the main daemon needing to know about individual
- * service implementations.
+ * @brief ONVIF service manager for centralized service lifecycle management
+ * @author kkrzysztofik
+ * @date 2025
  */
 
 #ifndef ONVIF_SERVICE_MANAGER_H
 #define ONVIF_SERVICE_MANAGER_H
 
-#include "platform/platform.h"
+#include <stdbool.h>
+
+#include "platform/platform_common.h"
 
 /**
  * @brief Initialize all ONVIF services

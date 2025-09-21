@@ -1,23 +1,27 @@
 /**
  * @file http_parser.c
- * @brief HTTP request parsing module implementation.
+ * @brief HTTP request parsing module implementation
+ * @author kkrzysztofik
+ * @date 2025
  */
 
 #include "http_parser.h"
-#include "platform/platform.h"
-#include "utils/string/string_shims.h"
-#include "utils/validation/input_validation.h"
-#include "utils/error/error_handling.h"
+
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <errno.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <unistd.h>
+
+#include "platform/platform.h"
+#include "utils/error/error_handling.h"
+#include "utils/string/string_shims.h"
+#include "utils/validation/input_validation.h"
+
 
 /* Fallback implementations for missing functions */
-
 
 #define MAX_METHOD_LEN 15
 #define MAX_PATH_LEN 255
@@ -26,7 +30,8 @@
 
 /* Safe string functions are now provided by utils/safe_string.h */
 
-/* validate_content_length is now provided by utils/validation/input_validation.h */
+/* validate_content_length is now provided by
+ * utils/validation/input_validation.h */
 
 /**
  * @brief Parse HTTP request line (method, path, version)
@@ -35,26 +40,27 @@
  * @return 0 on success, -1 on error
  */
 int parse_http_request_line(const char *request, http_request_t *req) {
-    if (!request || !req) return -1;
-    
-    // Initialize buffers to prevent uninitialized data
-    memset(req->method, 0, sizeof(req->method));
-    memset(req->path, 0, sizeof(req->path));
-    memset(req->version, 0, sizeof(req->version));
-    
-    // Use safer parsing with explicit null termination
-    int parsed = sscanf(request, "%14s %254s %14s", req->method, req->path, req->version);
-    if (parsed != 3) {
-        platform_log_error("Failed to parse HTTP request line\n");
-        return -1;
-    }
-    
-    // Ensure null termination (sscanf should do this, but be explicit)
-    req->method[sizeof(req->method) - 1] = '\0';
-    req->path[sizeof(req->path) - 1] = '\0';
-    req->version[sizeof(req->version) - 1] = '\0';
-    
-    return 0;
+  if (!request || !req) return -1;
+
+  // Initialize buffers to prevent uninitialized data
+  memset(req->method, 0, sizeof(req->method));
+  memset(req->path, 0, sizeof(req->path));
+  memset(req->version, 0, sizeof(req->version));
+
+  // Use safer parsing with explicit null termination
+  int parsed =
+      sscanf(request, "%14s %254s %14s", req->method, req->path, req->version);
+  if (parsed != 3) {
+    platform_log_error("Failed to parse HTTP request line\n");
+    return -1;
+  }
+
+  // Ensure null termination (sscanf should do this, but be explicit)
+  req->method[sizeof(req->method) - 1] = '\0';
+  req->path[sizeof(req->path) - 1] = '\0';
+  req->version[sizeof(req->version) - 1] = '\0';
+
+  return 0;
 }
 
 /**
@@ -63,26 +69,26 @@ int parse_http_request_line(const char *request, http_request_t *req) {
  * @return Content length on success, 0 if not found, -1 on error
  */
 ssize_t parse_content_length(const char *request) {
-    if (!request) return -1;
-    
-    const char *cl = strcasestr(request, "Content-Length:");
-    if (!cl) return 0;
-    
-    cl += 15; // Skip "Content-Length:"
-    while (*cl == ' ' || *cl == '\t') cl++;
-    
-    long parsed_length = atol(cl);
-    if (parsed_length < 0) {
-        platform_log_error("Invalid negative Content-Length: %ld\n", parsed_length);
-        return -1;
-    }
-    
-    size_t content_length = (size_t)parsed_length;
-    if (validate_content_length(content_length) != ONVIF_VALIDATION_SUCCESS) {
-        return -1;
-    }
-    
-    return (ssize_t)content_length;
+  if (!request) return -1;
+
+  const char *cl = strcasestr(request, "Content-Length:");
+  if (!cl) return 0;
+
+  cl += 15;  // Skip "Content-Length:"
+  while (*cl == ' ' || *cl == '\t') cl++;
+
+  long parsed_length = atol(cl);
+  if (parsed_length < 0) {
+    platform_log_error("Invalid negative Content-Length: %ld\n", parsed_length);
+    return -1;
+  }
+
+  size_t content_length = (size_t)parsed_length;
+  if (validate_content_length(content_length) != ONVIF_VALIDATION_SUCCESS) {
+    return -1;
+  }
+
+  return (ssize_t)content_length;
 }
 
 /**
@@ -93,129 +99,130 @@ ssize_t parse_content_length(const char *request) {
  * @param need_more_data Output flag indicating if more data needed
  * @return 0 on success, -1 on error
  */
-int parse_http_request_state_machine(char *buffer, size_t buffer_used, 
-                                   http_request_t *request, int *need_more_data) {
-    if (!buffer || !request || !need_more_data) return -1;
-    
-    size_t pos = 0;
-    http_parse_state_t state = HTTP_STATE_METHOD;
-    char *line_start = buffer;
-    char *header_end = NULL;
-    size_t header_length = 0;
-    
-    while (pos < buffer_used) {
-        char c = buffer[pos];
-        
-        switch (state) {
-            case HTTP_STATE_METHOD:
-                if (c == ' ') {
-                    buffer[pos] = '\0';
-                    if (pos >= MAX_METHOD_LEN) {
-                        platform_log_error("Method too long\n");
-                        return -1;
-                    }
-                    strcpy(request->method, line_start);
-                    line_start = buffer + pos + 1;
-                    state = HTTP_STATE_PATH;
-                } else if (pos >= MAX_METHOD_LEN) {
-                    platform_log_error("Method too long\n");
-                    return -1;
-                }
-                break;
-                
-            case HTTP_STATE_PATH:
-                if (c == ' ') {
-                    buffer[pos] = '\0';
-                    if (pos - (line_start - buffer) >= MAX_PATH_LEN) {
-                        platform_log_error("Path too long\n");
-                        return -1;
-                    }
-                    strcpy(request->path, line_start);
-                    line_start = buffer + pos + 1;
-                    state = HTTP_STATE_VERSION;
-                } else if (pos - (line_start - buffer) >= MAX_PATH_LEN) {
-                    platform_log_error("Path too long\n");
-                    return -1;
-                }
-                break;
-                
-            case HTTP_STATE_VERSION:
-                if (c == '\r' && pos + 1 < buffer_used && buffer[pos + 1] == '\n') {
-                    buffer[pos] = '\0';
-                    if (pos - (line_start - buffer) >= MAX_VERSION_LEN) {
-                        platform_log_error("Version too long\n");
-                        return -1;
-                    }
-                    strcpy(request->version, line_start);
-                    pos++; // Skip \n
-                    state = HTTP_STATE_HEADERS;
-                    line_start = buffer + pos + 1;
-                } else if (pos - (line_start - buffer) >= MAX_VERSION_LEN) {
-                    platform_log_error("Version too long\n");
-                    return -1;
-                }
-                break;
-                
-            case HTTP_STATE_HEADERS:
-                if (c == '\r' && pos + 1 < buffer_used && buffer[pos + 1] == '\n') {
-                    if (pos == line_start - buffer) {
-                        // Empty line - end of headers
-                        header_end = buffer + pos;
-                        state = HTTP_STATE_BODY;
-                        header_length = pos + 2;
-                        break;
-                    }
-                    pos++; // Skip \n
-                    line_start = buffer + pos + 1;
-                }
-                break;
-                
-            case HTTP_STATE_BODY:
-                // Body parsing is handled separately
-                state = HTTP_STATE_COMPLETE;
-                break;
-                
-            default:
-                break;
+int parse_http_request_state_machine(char *buffer, size_t buffer_used,
+                                     http_request_t *request,
+                                     int *need_more_data) {
+  if (!buffer || !request || !need_more_data) return -1;
+
+  size_t pos = 0;
+  http_parse_state_t state = HTTP_STATE_METHOD;
+  char *line_start = buffer;
+  char *header_end = NULL;
+  size_t header_length = 0;
+
+  while (pos < buffer_used) {
+    char c = buffer[pos];
+
+    switch (state) {
+      case HTTP_STATE_METHOD:
+        if (c == ' ') {
+          buffer[pos] = '\0';
+          if (pos >= MAX_METHOD_LEN) {
+            platform_log_error("Method too long\n");
+            return -1;
+          }
+          strcpy(request->method, line_start);
+          line_start = buffer + pos + 1;
+          state = HTTP_STATE_PATH;
+        } else if (pos >= MAX_METHOD_LEN) {
+          platform_log_error("Method too long\n");
+          return -1;
         }
-        
-        pos++;
+        break;
+
+      case HTTP_STATE_PATH:
+        if (c == ' ') {
+          buffer[pos] = '\0';
+          if (pos - (line_start - buffer) >= MAX_PATH_LEN) {
+            platform_log_error("Path too long\n");
+            return -1;
+          }
+          strcpy(request->path, line_start);
+          line_start = buffer + pos + 1;
+          state = HTTP_STATE_VERSION;
+        } else if (pos - (line_start - buffer) >= MAX_PATH_LEN) {
+          platform_log_error("Path too long\n");
+          return -1;
+        }
+        break;
+
+      case HTTP_STATE_VERSION:
+        if (c == '\r' && pos + 1 < buffer_used && buffer[pos + 1] == '\n') {
+          buffer[pos] = '\0';
+          if (pos - (line_start - buffer) >= MAX_VERSION_LEN) {
+            platform_log_error("Version too long\n");
+            return -1;
+          }
+          strcpy(request->version, line_start);
+          pos++;  // Skip \n
+          state = HTTP_STATE_HEADERS;
+          line_start = buffer + pos + 1;
+        } else if (pos - (line_start - buffer) >= MAX_VERSION_LEN) {
+          platform_log_error("Version too long\n");
+          return -1;
+        }
+        break;
+
+      case HTTP_STATE_HEADERS:
+        if (c == '\r' && pos + 1 < buffer_used && buffer[pos + 1] == '\n') {
+          if (pos == line_start - buffer) {
+            // Empty line - end of headers
+            header_end = buffer + pos;
+            state = HTTP_STATE_BODY;
+            header_length = pos + 2;
+            break;
+          }
+          pos++;  // Skip \n
+          line_start = buffer + pos + 1;
+        }
+        break;
+
+      case HTTP_STATE_BODY:
+        // Body parsing is handled separately
+        state = HTTP_STATE_COMPLETE;
+        break;
+
+      default:
+        break;
     }
-    
-    if (state == HTTP_STATE_COMPLETE) {
-        // Parse Content-Length header
-        if (header_end) {
-            char *cl = strcasestr(buffer, "Content-Length:");
-            if (cl && cl < header_end) {
-                cl += 15;
-                while (*cl == ' ' || *cl == '\t') cl++;
-                long parsed_length = atol(cl);
-                if (parsed_length < 0 || parsed_length > MAX_CONTENT_LENGTH) {
-                    platform_log_error("Invalid Content-Length: %ld\n", parsed_length);
-                    return -1;
-                }
-                request->content_length = (size_t)parsed_length;
-            }
+
+    pos++;
+  }
+
+  if (state == HTTP_STATE_COMPLETE) {
+    // Parse Content-Length header
+    if (header_end) {
+      char *cl = strcasestr(buffer, "Content-Length:");
+      if (cl && cl < header_end) {
+        cl += 15;
+        while (*cl == ' ' || *cl == '\t') cl++;
+        long parsed_length = atol(cl);
+        if (parsed_length < 0 || parsed_length > MAX_CONTENT_LENGTH) {
+          platform_log_error("Invalid Content-Length: %ld\n", parsed_length);
+          return -1;
         }
-        
-        // Set up request structure
-        request->headers = buffer;
-        request->body = buffer + header_length;
-        request->body_length = buffer_used - header_length;
-        request->total_length = buffer_used;
-        
-        // Check if we have complete body
-        if (request->body_length >= request->content_length) {
-            *need_more_data = 0;
-            return 0; // Complete request
-        } else {
-            *need_more_data = 1;
-            return 0; // Need more data
-        }
+        request->content_length = (size_t)parsed_length;
+      }
     }
-    
-    *need_more_data = 1;
-    return 0; // Need more data
+
+    // Set up request structure
+    request->headers = buffer;
+    request->body = buffer + header_length;
+    request->body_length = buffer_used - header_length;
+    request->total_length = buffer_used;
+
+    // Check if we have complete body
+    if (request->body_length >= request->content_length) {
+      *need_more_data = 0;
+      return 0;  // Complete request
+    } else {
+      *need_more_data = 1;
+      return 0;  // Need more data
+    }
+  }
+
+  *need_more_data = 1;
+  return 0;  // Need more data
 }
 
 /**
@@ -225,38 +232,40 @@ int parse_http_request_state_machine(char *buffer, size_t buffer_used,
  * @return 0 on success, -1 on error
  */
 int send_http_response(int client, const http_response_t *response) {
-    if (!response) return -1;
-    
-    char header[512];
-    const char *status_text = (response->status_code == 200) ? "OK" : 
-                             (response->status_code == 404) ? "Not Found" : "Internal Server Error";
-    
-    snprintf(header, sizeof(header),
-        "HTTP/1.1 %d %s\r\n"
-        "Content-Type: %s\r\n"
-        "Content-Length: %zu\r\n"
-        "Connection: close\r\n\r\n",
-        response->status_code, status_text,
-        response->content_type ? response->content_type : "text/plain",
-        response->body_length);
-    
-    // Send header
-    ssize_t sent = send(client, header, strlen(header), 0);
+  if (!response) return -1;
+
+  char header[512];
+  const char *status_text = (response->status_code == 200) ? "OK"
+                            : (response->status_code == 404)
+                                ? "Not Found"
+                                : "Internal Server Error";
+
+  snprintf(header, sizeof(header),
+           "HTTP/1.1 %d %s\r\n"
+           "Content-Type: %s\r\n"
+           "Content-Length: %zu\r\n"
+           "Connection: close\r\n\r\n",
+           response->status_code, status_text,
+           response->content_type ? response->content_type : "text/plain",
+           response->body_length);
+
+  // Send header
+  ssize_t sent = send(client, header, strlen(header), 0);
+  if (sent < 0) {
+    platform_log_error("Failed to send header: %s\n", strerror(errno));
+    return -1;
+  }
+
+  // Send body if present
+  if (response->body && response->body_length > 0) {
+    sent = send(client, response->body, response->body_length, 0);
     if (sent < 0) {
-        platform_log_error("Failed to send header: %s\n", strerror(errno));
-        return -1;
+      platform_log_error("Failed to send response body: %s\n", strerror(errno));
+      return -1;
     }
-    
-    // Send body if present
-    if (response->body && response->body_length > 0) {
-        sent = send(client, response->body, response->body_length, 0);
-        if (sent < 0) {
-            platform_log_error("Failed to send response body: %s\n", strerror(errno));
-            return -1;
-        }
-    }
-    
-    return 0;
+  }
+
+  return 0;
 }
 
 /**
@@ -266,13 +275,16 @@ int send_http_response(int client, const http_response_t *response) {
  * @param content_type Content type
  * @return Response structure (static, don't free)
  */
-http_response_t create_http_200_response(const char *body, size_t body_length, const char *content_type) {
-    static http_response_t response;
-    response.status_code = 200;
-    response.content_type = (char*)(content_type ? content_type : "application/soap+xml; charset=utf-8");
-    response.body = (char*)body;
-    response.body_length = body_length;
-    return response;
+http_response_t create_http_200_response(const char *body, size_t body_length,
+                                         const char *content_type) {
+  static http_response_t response;
+  response.status_code = 200;
+  response.content_type =
+      (char *)(content_type ? content_type
+                            : "application/soap+xml; charset=utf-8");
+  response.body = (char *)body;
+  response.body_length = body_length;
+  return response;
 }
 
 /**
@@ -280,13 +292,13 @@ http_response_t create_http_200_response(const char *body, size_t body_length, c
  * @return Response structure (static, don't free)
  */
 http_response_t create_http_404_response(void) {
-    static http_response_t response;
-    static const char *not_found_body = "404 Not Found";
-    response.status_code = 404;
-    response.content_type = (char*)"text/plain";
-    response.body = (char*)not_found_body;
-    response.body_length = strlen(not_found_body);
-    return response;
+  static http_response_t response;
+  static const char *not_found_body = "404 Not Found";
+  response.status_code = 404;
+  response.content_type = (char *)"text/plain";
+  response.body = (char *)not_found_body;
+  response.body_length = strlen(not_found_body);
+  return response;
 }
 
 /**
@@ -294,11 +306,11 @@ http_response_t create_http_404_response(void) {
  * @return Response structure (static, don't free)
  */
 http_response_t create_http_400_response(void) {
-    static http_response_t response;
-    static const char *bad_request_body = "400 Bad Request";
-    response.status_code = 400;
-    response.content_type = (char*)"text/plain";
-    response.body = (char*)bad_request_body;
-    response.body_length = strlen(bad_request_body);
-    return response;
+  static http_response_t response;
+  static const char *bad_request_body = "400 Bad Request";
+  response.status_code = 400;
+  response.content_type = (char *)"text/plain";
+  response.body = (char *)bad_request_body;
+  response.body_length = strlen(bad_request_body);
+  return response;
 }

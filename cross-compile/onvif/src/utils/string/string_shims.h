@@ -15,6 +15,15 @@ extern "C" {
 #endif
 
 /**
+ * @brief Case-insensitive string comparison
+ * @param s1 First string to compare
+ * @param s2 Second string to compare
+ * @return Negative if s1 < s2, 0 if equal, positive if s1 > s2
+ * @note This function is not available on all platforms
+ */
+int strcasecmp(const char *s1, const char *s2);
+
+/**
  * @brief Case-insensitive string search
  * @param haystack String to search in
  * @param needle String to search for

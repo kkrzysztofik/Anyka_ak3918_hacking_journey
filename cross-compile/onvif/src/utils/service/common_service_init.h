@@ -1,33 +1,33 @@
 /**
  * @file common_service_init.h
  * @brief Common service initialization utilities for ONVIF services
- * 
- * This module provides unified service initialization patterns that eliminate
- * code duplication across all ONVIF service implementations.
+ * @author kkrzysztofik
+ * @date 2025
  */
 
 #ifndef ONVIF_COMMON_SERVICE_INIT_H
 #define ONVIF_COMMON_SERVICE_INIT_H
 
-#include "services/common/onvif_types.h"
 #include "protocol/response/onvif_service_handler.h"
+#include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
 
 /**
  * @brief Error handler callback function type
  */
-typedef int (*error_handler_callback_t)(const error_context_t *context, const error_result_t *result);
+typedef int (*error_handler_callback_t)(const error_context_t *context,
+                                        const error_result_t *result);
 
 /**
  * @brief Service initialization context
  */
 typedef struct {
-    onvif_service_type_t service_type;
-    const char *service_name;
-    service_handler_config_t handler_config;
-    const service_action_def_t *actions;
-    int action_count;
-    int initialized;
+  onvif_service_type_t service_type;
+  const char *service_name;
+  service_handler_config_t handler_config;
+  const service_action_def_t *actions;
+  int action_count;
+  int initialized;
 } common_service_context_t;
 
 /**
@@ -41,11 +41,11 @@ typedef struct {
  * @return 0 on success, -1 on error
  */
 int common_service_init_context(common_service_context_t *context,
-                               onvif_service_type_t service_type,
-                               const char *service_name,
-                               config_manager_t *config,
-                               const service_action_def_t *actions,
-                               int action_count);
+                                onvif_service_type_t service_type,
+                                const char *service_name,
+                                config_manager_t *config,
+                                const service_action_def_t *actions,
+                                int action_count);
 
 /**
  * @brief Initialize service handler
@@ -54,7 +54,7 @@ int common_service_init_context(common_service_context_t *context,
  * @return 0 on success, -1 on error
  */
 int common_service_init_handler(common_service_context_t *context,
-                               onvif_service_handler_instance_t *handler);
+                                onvif_service_handler_instance_t *handler);
 
 /**
  * @brief Register service error handlers
@@ -64,10 +64,11 @@ int common_service_init_handler(common_service_context_t *context,
  * @param config_handler Configuration error handler
  * @return 0 on success, -1 on error
  */
-int common_service_register_error_handlers(common_service_context_t *context,
-                                          error_handler_callback_t validation_handler,
-                                          error_handler_callback_t system_handler,
-                                          error_handler_callback_t config_handler);
+int common_service_register_error_handlers(
+    common_service_context_t *context,
+    error_handler_callback_t validation_handler,
+    error_handler_callback_t system_handler,
+    error_handler_callback_t config_handler);
 
 /**
  * @brief Handle service request
@@ -79,10 +80,10 @@ int common_service_register_error_handlers(common_service_context_t *context,
  * @return 0 on success, -1 on error
  */
 int common_service_handle_request(common_service_context_t *context,
-                                 onvif_service_handler_instance_t *handler,
-                                 onvif_action_type_t action,
-                                 const onvif_request_t *request,
-                                 onvif_response_t *response);
+                                  onvif_service_handler_instance_t *handler,
+                                  onvif_action_type_t action,
+                                  const onvif_request_t *request,
+                                  onvif_response_t *response);
 
 /**
  * @brief Cleanup service
@@ -90,7 +91,7 @@ int common_service_handle_request(common_service_context_t *context,
  * @param handler Service handler
  */
 void common_service_cleanup(common_service_context_t *context,
-                           onvif_service_handler_instance_t *handler);
+                            onvif_service_handler_instance_t *handler);
 
 /**
  * @brief Check if service is initialized

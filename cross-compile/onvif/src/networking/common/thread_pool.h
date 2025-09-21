@@ -1,7 +1,9 @@
 /**
  * @file thread_pool.h
- * @brief Thread pool management for concurrent request processing.
- * 
+ * @brief Thread pool management for concurrent request processing
+ * @author kkrzysztofik
+ * @date 2025
+ *
  * This module provides a pool of worker threads for processing
  * HTTP requests concurrently.
  */
@@ -9,8 +11,9 @@
 #ifndef THREAD_POOL_H
 #define THREAD_POOL_H
 
-#include <stdint.h>
 #include <pthread.h>
+#include <stdint.h>
+
 
 /* Thread pool configuration */
 #define THREAD_POOL_SIZE 8
@@ -22,12 +25,12 @@ typedef struct thread_pool thread_pool_t;
 
 /* Thread pool structure */
 struct thread_pool {
-    pthread_t threads[THREAD_POOL_SIZE];
-    pthread_mutex_t queue_mutex;
-    pthread_cond_t queue_cond;
-    connection_t *work_queue;
-    int shutdown;
-    int active_threads;
+  pthread_t threads[THREAD_POOL_SIZE];
+  pthread_mutex_t queue_mutex;
+  pthread_cond_t queue_cond;
+  connection_t *work_queue;
+  int shutdown;
+  int active_threads;
 };
 
 /* Thread pool functions */

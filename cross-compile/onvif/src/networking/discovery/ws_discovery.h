@@ -1,4 +1,9 @@
-/* ws_discovery.h - Minimal WS-Discovery (ONVIF) responder */
+/**
+ * @file ws_discovery.h
+ * @brief Minimal WS-Discovery (ONVIF) responder
+ * @author kkrzysztofik
+ * @date 2025
+ */
 #ifndef WS_DISCOVERY_H
 #define WS_DISCOVERY_H
 

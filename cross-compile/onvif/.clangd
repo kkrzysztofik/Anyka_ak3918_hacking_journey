@@ -1,0 +1,88 @@
+# WSL2 clangd configuration for Anyka ONVIF project
+# Optimized for native Linux development environment and Cursor problems pane
+
+CompileFlags:
+  # Specify the C compiler explicitly
+  Compiler: arm-anykav200-linux-uclibcgnueabi-gcc
+  Add:
+    # Use the actual ARM target from your toolchain
+    - --target=arm-anykav200-linux-uclibcgnueabi
+    - --sysroot=/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool/usr/arm-anykav200-linux-uclibcgnueabi/sysroot
+    - --gcc-toolchain=/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool/usr
+
+    # Force C language mode for all files (prevents Objective-C++ detection)
+    - -x
+    - c
+
+    # C standard and basic definitions
+    - -std=c99
+    - -D_POSIX_C_SOURCE=199309L
+    - -DANYKA_PLATFORM=1
+
+    # C-specific flags to ensure proper C language mode
+    - -fno-builtin
+    - -fno-stack-protector
+
+    # ARM architecture definitions
+    - -D__ARM_ARCH_7A__=1
+    - -D__ARM_NEON__=1
+    - -march=armv7-a
+    - -mfpu=neon
+    - -mfloat-abi=softfp
+
+    # Linux definitions
+    - -D__linux__=1
+    - -D__unix__=1
+
+    # Include paths - ONVIF project
+    # Primary include path for relative includes from src/
+    - -Icross-compile/onvif/src
+    - -Icross-compile/onvif/include
+
+
+    # Toolchain system headers
+    - -isystem
+    - /home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool/usr/lib/gcc/arm-anykav200-linux-uclibcgnueabi/4.8.5/include
+    - -isystem
+    - /home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool/usr/lib/gcc/arm-anykav200-linux-uclibcgnueabi/4.8.5/include-fixed
+
+# Diagnostic configuration - OPTIMIZED FOR CURSOR PROBLEMS PANE
+Diagnostics:
+  ClangTidy:
+    Add:
+      - readability-*
+      - performance-*
+      - modernize-*
+      - bugprone-*
+      - cert-*
+      - cppcoreguidelines-*
+      - clang-analyzer-*
+      - security-*
+    Remove:
+      - readability-magic-numbers
+      - readability-uppercase-literal-suffix
+      - modernize-use-trailing-return-type
+      - readability-identifier-naming
+      - cppcoreguidelines-avoid-magic-numbers
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+
+# Index configuration
+Index:
+  Background: Build
+  StandardLibrary: No
+
+# Completion
+Completion:
+  AllScopes: Yes
+
+# Inlay hints for better code understanding
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+  Designators: Yes
+
+# Hover information
+Hover:
+  ShowAKA: Yes

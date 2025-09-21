@@ -1,6 +1,7 @@
 /**
  * @file unified_xml.h
- * @brief Unified XML building, parsing, and validation utilities for ONVIF services
+ * @brief Unified XML building, parsing, and validation utilities for ONVIF
+ * services
  * @author kkrzysztofik
  * @date 2025
  */
@@ -9,12 +10,9 @@
 #define ONVIF_UNIFIED_XML_H
 
 #include <stddef.h>
-#include <stdarg.h>
-#include <time.h>
-#include "services/common/onvif_types.h"
+
 #include "services/common/onvif_imaging_types.h"
-#include "utils/memory/memory_manager.h"
-#include "utils/error/error_handling.h"
+
 
 /* Forward declarations for structs used in function parameters */
 struct ptz_vector;
@@ -26,7 +24,8 @@ struct imaging_settings;
 
 /* ============================================================================
  * XML Builder
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief XML builder state
@@ -51,7 +50,8 @@ typedef struct {
 
 /* ============================================================================
  * XML Parser
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief XML parser state
@@ -76,7 +76,8 @@ typedef struct {
 
 /* ============================================================================
  * XML Validation
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief XML validation configuration
@@ -103,7 +104,8 @@ typedef struct {
 
 /* ============================================================================
  * XML Builder Functions
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief Initialize XML builder
@@ -113,8 +115,9 @@ typedef struct {
  * @param config Builder configuration (can be NULL for defaults)
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_builder_init(onvif_xml_builder_t *builder, char *buffer, size_t buffer_size, 
-                          const onvif_xml_builder_config_t *config);
+int onvif_xml_builder_init(onvif_xml_builder_t *builder, char *buffer,
+                           size_t buffer_size,
+                           const onvif_xml_builder_config_t *config);
 
 /**
  * @brief Clean up XML builder
@@ -149,7 +152,8 @@ size_t onvif_xml_builder_get_remaining(const onvif_xml_builder_t *builder);
  * @param encoding Character encoding (e.g., "UTF-8")
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_builder_start_document(onvif_xml_builder_t *builder, const char *encoding);
+int onvif_xml_builder_start_document(onvif_xml_builder_t *builder,
+                                     const char *encoding);
 
 /**
  * @brief Start XML element with attributes
@@ -158,7 +162,8 @@ int onvif_xml_builder_start_document(onvif_xml_builder_t *builder, const char *e
  * @param ... Attribute pairs (name, value) terminated with NULL
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_builder_start_element(onvif_xml_builder_t *builder, const char *name, ...);
+int onvif_xml_builder_start_element(onvif_xml_builder_t *builder,
+                                    const char *name, ...);
 
 /**
  * @brief Start XML element with namespace
@@ -168,8 +173,10 @@ int onvif_xml_builder_start_element(onvif_xml_builder_t *builder, const char *na
  * @param namespace_uri Namespace URI
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_builder_start_element_with_namespace(onvif_xml_builder_t *builder, const char *prefix,
-                                                   const char *name, const char *namespace_uri);
+int onvif_xml_builder_start_element_with_namespace(onvif_xml_builder_t *builder,
+                                                   const char *prefix,
+                                                   const char *name,
+                                                   const char *namespace_uri);
 
 /**
  * @brief End XML element
@@ -177,7 +184,8 @@ int onvif_xml_builder_start_element_with_namespace(onvif_xml_builder_t *builder,
  * @param name Element name (for validation)
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_builder_end_element(onvif_xml_builder_t *builder, const char *name);
+int onvif_xml_builder_end_element(onvif_xml_builder_t *builder,
+                                  const char *name);
 
 /**
  * @brief Add self-closing XML element
@@ -186,7 +194,8 @@ int onvif_xml_builder_end_element(onvif_xml_builder_t *builder, const char *name
  * @param ... Attribute pairs (name, value) terminated with NULL
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_builder_self_closing_element(onvif_xml_builder_t *builder, const char *name, ...);
+int onvif_xml_builder_self_closing_element(onvif_xml_builder_t *builder,
+                                           const char *name, ...);
 
 /**
  * @brief Add XML element with text content
@@ -196,7 +205,9 @@ int onvif_xml_builder_self_closing_element(onvif_xml_builder_t *builder, const c
  * @param ... Attribute pairs (name, value) terminated with NULL
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_builder_element_with_text(onvif_xml_builder_t *builder, const char *name, const char *content, ...);
+int onvif_xml_builder_element_with_text(onvif_xml_builder_t *builder,
+                                        const char *name, const char *content,
+                                        ...);
 
 /**
  * @brief Add XML element with formatted text content
@@ -206,7 +217,8 @@ int onvif_xml_builder_element_with_text(onvif_xml_builder_t *builder, const char
  * @param ... Format arguments
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_builder_element_with_formatted_text(onvif_xml_builder_t *builder, const char *name,
+int onvif_xml_builder_element_with_formatted_text(onvif_xml_builder_t *builder,
+                                                  const char *name,
                                                   const char *format, ...);
 
 /**
@@ -215,7 +227,8 @@ int onvif_xml_builder_element_with_formatted_text(onvif_xml_builder_t *builder, 
  * @param content Raw XML content
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_builder_raw_content(onvif_xml_builder_t *builder, const char *content);
+int onvif_xml_builder_raw_content(onvif_xml_builder_t *builder,
+                                  const char *content);
 
 /**
  * @brief Add formatted XML content
@@ -224,7 +237,8 @@ int onvif_xml_builder_raw_content(onvif_xml_builder_t *builder, const char *cont
  * @param ... Format arguments
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_builder_formatted_content(onvif_xml_builder_t *builder, const char *format, ...);
+int onvif_xml_builder_formatted_content(onvif_xml_builder_t *builder,
+                                        const char *format, ...);
 
 /**
  * @brief Get the final XML string
@@ -242,7 +256,8 @@ size_t onvif_xml_builder_get_length(const onvif_xml_builder_t *builder);
 
 /* ============================================================================
  * XML Parser Functions
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief Initialize XML parser
@@ -252,8 +267,9 @@ size_t onvif_xml_builder_get_length(const onvif_xml_builder_t *builder);
  * @param config Parser configuration (can be NULL for defaults)
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parser_init(onvif_xml_parser_t *parser, const char *xml, size_t length,
-                         const onvif_xml_parser_config_t *config);
+int onvif_xml_parser_init(onvif_xml_parser_t *parser, const char *xml,
+                          size_t length,
+                          const onvif_xml_parser_config_t *config);
 
 /**
  * @brief Clean up XML parser
@@ -270,7 +286,8 @@ void onvif_xml_parser_cleanup(onvif_xml_parser_t *parser);
  * @param value_size Size of the value buffer
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parser_extract_value(onvif_xml_parser_t *parser, const char *start_tag, const char *end_tag,
+int onvif_xml_parser_extract_value(onvif_xml_parser_t *parser,
+                                   const char *start_tag, const char *end_tag,
                                    char *value, size_t value_size);
 
 /**
@@ -281,7 +298,9 @@ int onvif_xml_parser_extract_value(onvif_xml_parser_t *parser, const char *start
  * @param value Pointer to store the parsed integer value
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parser_extract_int(onvif_xml_parser_t *parser, const char *start_tag, const char *end_tag, int *value);
+int onvif_xml_parser_extract_int(onvif_xml_parser_t *parser,
+                                 const char *start_tag, const char *end_tag,
+                                 int *value);
 
 /**
  * @brief Extract a float value from XML
@@ -291,7 +310,9 @@ int onvif_xml_parser_extract_int(onvif_xml_parser_t *parser, const char *start_t
  * @param value Pointer to store the parsed float value
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parser_extract_float(onvif_xml_parser_t *parser, const char *start_tag, const char *end_tag, float *value);
+int onvif_xml_parser_extract_float(onvif_xml_parser_t *parser,
+                                   const char *start_tag, const char *end_tag,
+                                   float *value);
 
 /**
  * @brief Extract a boolean value from XML
@@ -301,7 +322,9 @@ int onvif_xml_parser_extract_float(onvif_xml_parser_t *parser, const char *start
  * @param value Pointer to store the parsed boolean value
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parser_extract_bool(onvif_xml_parser_t *parser, const char *start_tag, const char *end_tag, int *value);
+int onvif_xml_parser_extract_bool(onvif_xml_parser_t *parser,
+                                  const char *start_tag, const char *end_tag,
+                                  int *value);
 
 /**
  * @brief Check if parser has encountered an error
@@ -312,7 +335,8 @@ int onvif_xml_parser_has_error(const onvif_xml_parser_t *parser);
 
 /* ============================================================================
  * XML Validation Functions
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief Validate XML structure and content
@@ -322,8 +346,9 @@ int onvif_xml_parser_has_error(const onvif_xml_parser_t *parser);
  * @param result Validation result (can be NULL if not needed)
  * @return ONVIF_SUCCESS if valid, negative error code on failure
  */
-int onvif_xml_validate(const char *xml, size_t length, const onvif_xml_validation_config_t *config,
-                      onvif_xml_validation_result_t *result);
+int onvif_xml_validate(const char *xml, size_t length,
+                       const onvif_xml_validation_config_t *config,
+                       onvif_xml_validation_result_t *result);
 
 /**
  * @brief Basic XML structure validation
@@ -350,7 +375,8 @@ int onvif_xml_is_xml_content(const char *str);
 
 /* ============================================================================
  * Common XML Helper Functions
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief Escape XML special characters
@@ -359,7 +385,8 @@ int onvif_xml_is_xml_content(const char *str);
  * @param output_size Size of output buffer
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_escape_string(const char *input, char *output, size_t output_size);
+int onvif_xml_escape_string(const char *input, char *output,
+                            size_t output_size);
 
 /**
  * @brief Parse PTZ position from ONVIF request XML
@@ -367,7 +394,8 @@ int onvif_xml_escape_string(const char *input, char *output, size_t output_size)
  * @param position Pointer to store the parsed PTZ position
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parse_ptz_position(onvif_xml_parser_t *parser, struct ptz_vector *position);
+int onvif_xml_parse_ptz_position(onvif_xml_parser_t *parser,
+                                 struct ptz_vector *position);
 
 /**
  * @brief Parse PTZ speed from ONVIF request XML
@@ -375,7 +403,8 @@ int onvif_xml_parse_ptz_position(onvif_xml_parser_t *parser, struct ptz_vector *
  * @param speed Pointer to store the parsed PTZ speed
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parse_ptz_speed(onvif_xml_parser_t *parser, struct ptz_speed *speed);
+int onvif_xml_parse_ptz_speed(onvif_xml_parser_t *parser,
+                              struct ptz_speed *speed);
 
 /**
  * @brief Parse imaging settings from ONVIF request XML
@@ -383,7 +412,8 @@ int onvif_xml_parse_ptz_speed(onvif_xml_parser_t *parser, struct ptz_speed *spee
  * @param settings Pointer to store the parsed imaging settings
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parse_imaging_settings(onvif_xml_parser_t *parser, struct imaging_settings *settings);
+int onvif_xml_parse_imaging_settings(onvif_xml_parser_t *parser,
+                                     struct imaging_settings *settings);
 
 /**
  * @brief Parse video source configuration from ONVIF request XML
@@ -391,7 +421,8 @@ int onvif_xml_parse_imaging_settings(onvif_xml_parser_t *parser, struct imaging_
  * @param config Pointer to store the parsed video source configuration
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parse_video_source_configuration(onvif_xml_parser_t *parser, struct video_source_configuration *config);
+int onvif_xml_parse_video_source_configuration(
+    onvif_xml_parser_t *parser, struct video_source_configuration *config);
 
 /**
  * @brief Parse video encoder configuration from ONVIF request XML
@@ -399,7 +430,8 @@ int onvif_xml_parse_video_source_configuration(onvif_xml_parser_t *parser, struc
  * @param config Pointer to store the parsed video encoder configuration
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parse_video_encoder_configuration(onvif_xml_parser_t *parser, struct video_encoder_configuration *config);
+int onvif_xml_parse_video_encoder_configuration(
+    onvif_xml_parser_t *parser, struct video_encoder_configuration *config);
 
 /**
  * @brief Parse metadata configuration from ONVIF request XML
@@ -407,14 +439,17 @@ int onvif_xml_parse_video_encoder_configuration(onvif_xml_parser_t *parser, stru
  * @param config Pointer to store the parsed metadata configuration
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parse_metadata_configuration(onvif_xml_parser_t *parser, struct metadata_configuration *config);
+int onvif_xml_parse_metadata_configuration(
+    onvif_xml_parser_t *parser, struct metadata_configuration *config);
 
 /* ============================================================================
  * Simple parsing functions for service compatibility
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
- * @brief Extract string value from XML between start and end tags (simple version)
+ * @brief Extract string value from XML between start and end tags (simple
+ * version)
  * @param xml XML content to parse
  * @param start_tag The opening tag (e.g., "<tt:ProfileToken>")
  * @param end_tag The closing tag (e.g., "</tt:ProfileToken>")
@@ -422,8 +457,9 @@ int onvif_xml_parse_metadata_configuration(onvif_xml_parser_t *parser, struct me
  * @param value_size Size of the value buffer
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_extract_string_value(const char *xml, const char *start_tag, const char *end_tag,
-                                   char *value, size_t value_size);
+int onvif_xml_extract_string_value(const char *xml, const char *start_tag,
+                                   const char *end_tag, char *value,
+                                   size_t value_size);
 
 /**
  * @brief Parse profile token from ONVIF request XML (simple version)
@@ -432,7 +468,8 @@ int onvif_xml_extract_string_value(const char *xml, const char *start_tag, const
  * @param token_size Size of the token buffer
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parse_profile_token(const char *xml, char *token, size_t token_size);
+int onvif_xml_parse_profile_token(const char *xml, char *token,
+                                  size_t token_size);
 
 /**
  * @brief Parse protocol from ONVIF request XML (simple version)
@@ -441,7 +478,8 @@ int onvif_xml_parse_profile_token(const char *xml, char *token, size_t token_siz
  * @param protocol_size Size of the protocol buffer
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parse_protocol(const char *xml, char *protocol, size_t protocol_size);
+int onvif_xml_parse_protocol(const char *xml, char *protocol,
+                             size_t protocol_size);
 
 /**
  * @brief Parse configuration token from ONVIF request XML (simple version)
@@ -450,6 +488,7 @@ int onvif_xml_parse_protocol(const char *xml, char *protocol, size_t protocol_si
  * @param token_size Size of the token buffer
  * @return ONVIF_SUCCESS on success, negative error code on failure
  */
-int onvif_xml_parse_configuration_token(const char *xml, char *token, size_t token_size);
+int onvif_xml_parse_configuration_token(const char *xml, char *token,
+                                        size_t token_size);
 
 #endif /* ONVIF_UNIFIED_XML_H */

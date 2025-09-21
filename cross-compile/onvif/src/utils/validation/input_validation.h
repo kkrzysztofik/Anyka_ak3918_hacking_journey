@@ -8,9 +8,10 @@
 #ifndef INPUT_VALIDATION_H
 #define INPUT_VALIDATION_H
 
-#include "services/common/onvif_types.h"
-#include "networking/http/http_parser.h"
 #include <stddef.h>
+
+#include "networking/http/http_parser.h"
+
 
 /**
  * @brief Validate HTTP method
@@ -71,4 +72,4 @@ int validate_http_request(const http_request_t *request);
  */
 int sanitize_string_input(const char *input, char *output, size_t output_size);
 
-#endif // INPUT_VALIDATION_H
+#endif  // INPUT_VALIDATION_H

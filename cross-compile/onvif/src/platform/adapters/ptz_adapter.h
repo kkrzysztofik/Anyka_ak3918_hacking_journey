@@ -1,7 +1,9 @@
 /**
  * @file ptz_adapter.h
- * @brief PTZ control abstraction adapter for Anyka platform.
- * 
+ * @brief PTZ control abstraction adapter for Anyka platform
+ * @author kkrzysztofik
+ * @date 2025
+ *
  * This file provides the interface for pan-tilt-zoom control operations
  * on the Anyka AK3918 platform.
  */
@@ -9,8 +11,7 @@
 #ifndef PTZ_ADAPTER_H
 #define PTZ_ADAPTER_H
 
-#include "platform.h"
-#include "services/common/onvif_types.h"
+#include "platform/platform_common.h"
 
 /* Forward declaration */
 struct ptz_device_status;
@@ -32,7 +33,8 @@ platform_result_t ptz_adapter_move_to_position(int pan_deg, int tilt_deg);
 int ptz_adapter_get_step_position(platform_ptz_axis_t axis);
 platform_result_t ptz_adapter_get_status(struct ptz_device_status *status);
 platform_result_t ptz_adapter_set_speed(platform_ptz_axis_t axis, int speed);
-platform_result_t ptz_adapter_turn(platform_ptz_direction_t direction, int steps);
+platform_result_t ptz_adapter_turn(platform_ptz_direction_t direction,
+                                   int steps);
 platform_result_t ptz_adapter_turn_stop(platform_ptz_direction_t direction);
 
 #ifdef __cplusplus

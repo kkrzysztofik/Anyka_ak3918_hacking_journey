@@ -9,10 +9,9 @@
 #define ONVIF_SOAP_H
 
 #include <stddef.h>
-#include "common/onvif_types.h"
+
 #include "common/onvif_request.h"
-#include "common/onvif_constants.h"
-#include "protocol/xml/unified_xml.h"
+#include "common/onvif_types.h"
 
 /**
  * @brief SOAP response configuration
@@ -29,13 +28,14 @@ typedef struct {
  * @brief Response buffer with automatic cleanup
  */
 typedef struct {
-    onvif_response_t *response;    /**< Pointer to response structure */
-    int owned;                     /**< Whether this structure owns the response */
+  onvif_response_t *response; /**< Pointer to response structure */
+  int owned;                  /**< Whether this structure owns the response */
 } response_buffer_t;
 
 /* ============================================================================
  * SOAP Response Generation
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief Generate a unified SOAP response based on configuration
@@ -44,7 +44,8 @@ typedef struct {
  * @param config Response configuration
  * @return 0 on success, negative error code on failure
  */
-int soap_generate_response(char *response, size_t response_size, const soap_response_config_t *config);
+int soap_generate_response(char *response, size_t response_size,
+                           const soap_response_config_t *config);
 
 /**
  * @brief Generate a SOAP fault response
@@ -54,19 +55,21 @@ int soap_generate_response(char *response, size_t response_size, const soap_resp
  * @param fault_string Human-readable fault description
  * @return 0 on success, negative error code on failure
  */
-int soap_generate_fault(char *response, size_t response_size, const char *fault_code, const char *fault_string);
+int soap_generate_fault(char *response, size_t response_size,
+                        const char *fault_code, const char *fault_string);
 
 /**
  * @brief Generate a SOAP success response for any service
  * @param response Buffer to write the SOAP success response to
- * @param response_size Size of the response buffer
  * @param service_type The ONVIF service type
+ * @param response_size Size of the response buffer
  * @param action_name The action name
  * @param body_content The XML content for the response body
  * @return 0 on success, negative error code on failure
  */
-int soap_generate_success(char *response, size_t response_size, onvif_service_type_t service_type,
-                         const char *action_name, const char *body_content);
+int soap_generate_success(char *response, onvif_service_type_t service_type,
+                          size_t response_size, const char *action_name,
+                          const char *body_content);
 
 /**
  * @brief Get the namespace prefix for a service type
@@ -90,8 +93,10 @@ const char *soap_get_namespace_uri(onvif_service_type_t service_type);
  * @param body_content The XML content for the response body
  * @return 0 on success, negative error code on failure
  */
-int onvif_generate_complete_response(onvif_response_t *response, onvif_service_type_t service_type,
-                                    const char *action_name, const char *body_content);
+int onvif_generate_complete_response(onvif_response_t *response,
+                                     onvif_service_type_t service_type,
+                                     const char *action_name,
+                                     const char *body_content);
 
 /**
  * @brief Generate a complete ONVIF fault response
@@ -100,11 +105,14 @@ int onvif_generate_complete_response(onvif_response_t *response, onvif_service_t
  * @param fault_string Human-readable fault description
  * @return 0 on success, negative error code on failure
  */
-int onvif_generate_fault_response(onvif_response_t *response, const char *fault_code, const char *fault_string);
+int onvif_generate_fault_response(onvif_response_t *response,
+                                  const char *fault_code,
+                                  const char *fault_string);
 
 /* ============================================================================
  * Response Buffer Management
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief Initialize response buffer with automatic cleanup
@@ -141,7 +149,8 @@ onvif_response_t *response_buffer_get(response_buffer_t *buffer);
  * @param length Length of body content
  * @return 0 on success, -1 on error
  */
-int response_buffer_set_body(response_buffer_t *buffer, const char *body, size_t length);
+int response_buffer_set_body(response_buffer_t *buffer, const char *body,
+                             size_t length);
 
 /**
  * @brief Set response body using printf-style formatting
@@ -150,19 +159,21 @@ int response_buffer_set_body(response_buffer_t *buffer, const char *body, size_t
  * @param ... Format arguments
  * @return 0 on success, -1 on error
  */
-int response_buffer_set_body_printf(response_buffer_t *buffer, const char *format, ...);
+int response_buffer_set_body_printf(response_buffer_t *buffer,
+                                    const char *format, ...);
 
 /**
  * @brief Macro for automatic cleanup using RAII pattern
  */
-#define RESPONSE_BUFFER_AUTO(buffer) \
-    response_buffer_t buffer; \
-    response_buffer_init(&buffer, NULL); \
-    __attribute__((cleanup(response_buffer_cleanup)))
+#define RESPONSE_BUFFER_AUTO(buffer)     \
+  response_buffer_t buffer;              \
+  response_buffer_init(&(buffer), NULL); \
+  __attribute__((cleanup(response_buffer_cleanup)))
 
 /* ============================================================================
  * Response Helpers
- * ============================================================================ */
+ * ============================================================================
+ */
 
 /**
  * @brief Initialize a response structure with common defaults
@@ -184,7 +195,8 @@ void onvif_response_cleanup(onvif_response_t *response);
  * @param body_content The content to set as the response body
  * @return 0 on success, negative error code on failure
  */
-int onvif_response_set_body(onvif_response_t *response, const char *body_content);
+int onvif_response_set_body(onvif_response_t *response,
+                            const char *body_content);
 
 /**
  * @brief Set response body content using printf-style formatting
@@ -193,7 +205,8 @@ int onvif_response_set_body(onvif_response_t *response, const char *body_content
  * @param ... Format arguments
  * @return 0 on success, negative error code on failure
  */
-int onvif_response_set_body_printf(onvif_response_t *response, const char *format, ...);
+int onvif_response_set_body_printf(onvif_response_t *response,
+                                   const char *format, ...);
 
 /**
  * @brief Generate a standard SOAP fault response
@@ -202,7 +215,8 @@ int onvif_response_set_body_printf(onvif_response_t *response, const char *forma
  * @param fault_string Human-readable fault description
  * @return 0 on success, negative error code on failure
  */
-int onvif_response_soap_fault(onvif_response_t *response, const char *fault_code, const char *fault_string);
+int onvif_response_soap_fault(onvif_response_t *response,
+                              const char *fault_code, const char *fault_string);
 
 /**
  * @brief Generate a standard SOAP success response for Device service
@@ -211,7 +225,8 @@ int onvif_response_soap_fault(onvif_response_t *response, const char *fault_code
  * @param body_content The XML content for the response body
  * @return 0 on success, negative error code on failure
  */
-int onvif_response_device_success(onvif_response_t *response, const char *action, const char *body_content);
+int onvif_response_device_success(onvif_response_t *response,
+                                  const char *action, const char *body_content);
 
 /**
  * @brief Generate a standard SOAP success response for Media service
@@ -220,7 +235,8 @@ int onvif_response_device_success(onvif_response_t *response, const char *action
  * @param body_content The XML content for the response body
  * @return 0 on success, negative error code on failure
  */
-int onvif_response_media_success(onvif_response_t *response, const char *action, const char *body_content);
+int onvif_response_media_success(onvif_response_t *response, const char *action,
+                                 const char *body_content);
 
 /**
  * @brief Generate a standard SOAP success response for PTZ service
@@ -229,7 +245,8 @@ int onvif_response_media_success(onvif_response_t *response, const char *action,
  * @param body_content The XML content for the response body
  * @return 0 on success, negative error code on failure
  */
-int onvif_response_ptz_success(onvif_response_t *response, const char *action, const char *body_content);
+int onvif_response_ptz_success(onvif_response_t *response, const char *action,
+                               const char *body_content);
 
 /**
  * @brief Generate a standard SOAP success response for Imaging service
@@ -238,6 +255,8 @@ int onvif_response_ptz_success(onvif_response_t *response, const char *action, c
  * @param body_content The XML content for the response body
  * @return 0 on success, negative error code on failure
  */
-int onvif_response_imaging_success(onvif_response_t *response, const char *action, const char *body_content);
+int onvif_response_imaging_success(onvif_response_t *response,
+                                   const char *action,
+                                   const char *body_content);
 
 #endif /* ONVIF_SOAP_H */

@@ -1,7 +1,9 @@
 /**
  * @file epoll_server.h
- * @brief Epoll-based async I/O server module.
- * 
+ * @brief Epoll-based async I/O server module
+ * @author kkrzysztofik
+ * @date 2025
+ *
  * This module provides async I/O handling using epoll for
  * high-performance concurrent connection management.
  */
