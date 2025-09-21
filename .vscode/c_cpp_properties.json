@@ -1,0 +1,131 @@
+{
+    "configurations": [
+        {
+            "name": "Local LLVM/Clang (Windows)",
+            "includePath": [
+                "${workspaceFolder}/cross-compile/onvif/include",
+                "${workspaceFolder}/cross-compile/onvif/src",
+                "${workspaceFolder}/cross-compile/anyka_reference/component",
+                "${workspaceFolder}/cross-compile/anyka_reference/platform",
+                "${workspaceFolder}/cross-compile/anyka_reference/akipc/include",
+                "${workspaceFolder}/cross-compile/anyka_reference/component/include",
+                "${workspaceFolder}/cross-compile/anyka_reference/platform/include",
+                "C:/Program Files/LLVM/include",
+                "C:/Program Files/LLVM/lib/clang/*/include"
+            ],
+            "defines": [
+                "ANYKA_PLATFORM=1",
+                "_POSIX_C_SOURCE=199309L",
+                "PLATFORM_LOG_LEVEL_INFO=3",
+                "DEBUG_BUILD",
+                "_WIN32",
+                "_MSC_VER=1900"
+            ],
+            "compilerPath": "C:/Program Files/LLVM/bin/clang.exe",
+            "cStandard": "c99",
+            "cppStandard": "c++11",
+            "intelliSenseMode": "clang-x64",
+            "compilerArgs": [
+                "-std=c99",
+                "-D_POSIX_C_SOURCE=199309L",
+                "-DANYKA_PLATFORM=1",
+                "-D_WIN32",
+                "-D_MSC_VER=1900",
+                "-g",
+                "-O0",
+                "-DDEBUG_BUILD",
+                "-Wall",
+                "-Wextra",
+                "-Wpedantic"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/cross-compile/onvif",
+                    "${workspaceFolder}/cross-compile/anyka_reference",
+                    "C:/Program Files/LLVM/include"
+                ],
+                "limitSymbolsToIncludedHeaders": false,
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
+            },
+            "configurationProvider": "ms-vscode.cmake-tools"
+        },
+        {
+            "name": "Anyka AK3918 Cross-Compile (Docker)",
+            "includePath": [
+                "${workspaceFolder}/cross-compile/onvif/include",
+                "${workspaceFolder}/cross-compile/onvif/src",
+                "${workspaceFolder}/cross-compile/anyka_reference/component",
+                "${workspaceFolder}/cross-compile/anyka_reference/platform",
+                "${workspaceFolder}/cross-compile/anyka_reference/akipc/include",
+                "${workspaceFolder}/cross-compile/anyka_reference/component/include",
+                "${workspaceFolder}/cross-compile/anyka_reference/platform/include",
+                "/opt/arm-anykav200-crosstool/usr/arm-anykav200-linux-uclibcgnueabi/include",
+                "/opt/arm-anykav200-crosstool/usr/arm-anykav200-linux-uclibcgnueabi/sysroot/usr/include",
+                "/opt/arm-anykav200-crosstool/usr/include",
+                "/opt/arm-anykav200-crosstool/usr/include/c++/4.9.4",
+                "/opt/arm-anykav200-crosstool/usr/include/c++/4.9.4/arm-anykav200-linux-uclibcgnueabi"
+            ],
+            "defines": [
+                "ANYKA_PLATFORM=1",
+                "_POSIX_C_SOURCE=199309L",
+                "PLATFORM_LOG_LEVEL_INFO=3",
+                "DEBUG_BUILD"
+            ],
+            "compilerPath": "/opt/arm-anykav200-crosstool/usr/bin/arm-anykav200-linux-uclibcgnueabi-gcc",
+            "cStandard": "c99",
+            "cppStandard": "c++11",
+            "intelliSenseMode": "gcc-arm",
+            "compilerArgs": [
+                "-std=c99",
+                "-D_POSIX_C_SOURCE=199309L",
+                "-DANYKA_PLATFORM=1",
+                "-fno-builtin",
+                "-fno-stack-protector",
+                "-Wl,--hash-style=sysv",
+                "-g",
+                "-O0",
+                "-DDEBUG_BUILD"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/cross-compile/onvif",
+                    "${workspaceFolder}/cross-compile/anyka_reference",
+                    "/opt/arm-anykav200-crosstool/usr/include"
+                ],
+                "limitSymbolsToIncludedHeaders": false,
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
+            },
+            "configurationProvider": "ms-vscode.cmake-tools"
+        },
+        {
+            "name": "Docker Build Environment (Local IntelliSense)",
+            "includePath": [
+                "${workspaceFolder}/cross-compile/onvif/include",
+                "${workspaceFolder}/cross-compile/onvif/src",
+                "${workspaceFolder}/cross-compile/anyka_reference/component",
+                "${workspaceFolder}/cross-compile/anyka_reference/platform",
+                "${workspaceFolder}/cross-compile/anyka_reference/akipc/include",
+                "${workspaceFolder}/cross-compile/anyka_reference/component/include",
+                "${workspaceFolder}/cross-compile/anyka_reference/platform/include"
+            ],
+            "defines": [
+                "ANYKA_PLATFORM=1",
+                "_POSIX_C_SOURCE=199309L",
+                "PLATFORM_LOG_LEVEL_INFO=3"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c99",
+            "cppStandard": "c++11",
+            "intelliSenseMode": "gcc-x64",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/cross-compile/onvif",
+                    "${workspaceFolder}/cross-compile/anyka_reference"
+                ],
+                "limitSymbolsToIncludedHeaders": false,
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
+            }
+        }
+    ],
+    "version": 4
+}
