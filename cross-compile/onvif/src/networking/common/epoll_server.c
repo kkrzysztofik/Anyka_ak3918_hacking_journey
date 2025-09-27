@@ -7,14 +7,6 @@
 
 #include "epoll_server.h"
 
-#include "core/config/config.h"
-#include "core/lifecycle/signal_lifecycle.h"
-#include "networking/common/buffer_pool.h"
-#include "networking/common/connection_manager.h"
-#include "networking/common/thread_pool.h"
-#include "networking/http/http_server.h"
-#include "platform/platform.h"
-
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -25,6 +17,14 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include "core/config/config.h"
+#include "core/lifecycle/signal_lifecycle.h"
+#include "networking/common/buffer_pool.h"
+#include "networking/common/connection_manager.h"
+#include "networking/common/thread_pool.h"
+#include "networking/http/http_server.h"
+#include "platform/platform.h"
 
 /* Global epoll state */
 static int g_epoll_fd = -1;      // NOLINT

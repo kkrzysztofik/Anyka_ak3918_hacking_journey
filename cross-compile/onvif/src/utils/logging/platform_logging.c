@@ -7,8 +7,6 @@
 
 #include "platform_logging.h"
 
-#include "core/config/config.h"
-
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -16,6 +14,8 @@
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
+
+#include "core/config/config.h"
 
 /* Log level strings */
 static const char* LOG_LEVEL_STRINGS[] = {"DEBUG", "INFO ", "NOTICE", "WARN ", "ERROR"};

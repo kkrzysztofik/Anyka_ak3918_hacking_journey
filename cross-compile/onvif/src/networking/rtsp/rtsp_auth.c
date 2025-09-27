@@ -10,13 +10,13 @@
 
 #include "rtsp_auth.h"
 
-#include "rtsp_session.h"
-#include "rtsp_types.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#include "rtsp_session.h"
+#include "rtsp_types.h"
 
 /* ==================== Authentication Functions ==================== */
 

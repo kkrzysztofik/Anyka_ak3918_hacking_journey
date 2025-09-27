@@ -7,6 +7,14 @@
 
 #include "onvif_imaging.h"
 
+#include <bits/pthreadtypes.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
@@ -21,14 +29,6 @@
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
 #include "utils/validation/common_validation.h"
-
-#include <bits/pthreadtypes.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <unistd.h>
 
 static struct auto_daynight_config g_imaging_auto_config;           // NOLINT
 static struct imaging_settings g_imaging_settings;                  // NOLINT

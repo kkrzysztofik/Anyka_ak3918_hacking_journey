@@ -11,10 +11,6 @@
 
 #include "core/lifecycle/signal_lifecycle.h"
 
-#include "core/config/config.h"
-#include "core/lifecycle/video_lifecycle.h"
-#include "platform/platform.h"
-
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -23,6 +19,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "core/config/config.h"
+#include "core/lifecycle/video_lifecycle.h"
+#include "platform/platform.h"
 
 /* Define SA_RESTART if not available */
 #ifndef SA_RESTART

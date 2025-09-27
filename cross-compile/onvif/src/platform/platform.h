@@ -8,12 +8,12 @@
 #ifndef ONVIF_PLATFORM_H
 #define ONVIF_PLATFORM_H
 
-#include "platform_common.h"
-
 #include <pthread.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "platform_common.h"
 
 /* Platform detection */
 #ifdef ANYKA_PLATFORM

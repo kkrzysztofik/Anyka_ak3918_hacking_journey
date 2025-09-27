@@ -11,6 +11,11 @@
 
 #include "onvif_service_handler.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "generated/soapH.h"
@@ -20,11 +25,6 @@
 #include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
 
 /* ============================================================================
  * Service Handler Management

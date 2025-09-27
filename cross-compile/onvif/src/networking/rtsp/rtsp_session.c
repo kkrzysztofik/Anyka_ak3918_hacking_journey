@@ -11,9 +11,6 @@
 
 #include "rtsp_session.h"
 
-#include "platform.h"
-#include "rtsp_types.h"
-
 #include <arpa/inet.h>
 #include <bits/types.h>
 #include <netinet/in.h>
@@ -25,6 +22,9 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <time.h>
+
+#include "platform.h"
+#include "rtsp_types.h"
 
 /* ==================== Utility Functions ==================== */
 

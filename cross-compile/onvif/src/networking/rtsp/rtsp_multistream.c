@@ -8,15 +8,6 @@
 #define _GNU_SOURCE
 #include "rtsp_multistream.h"
 
-#include "platform/platform.h"
-#include "platform/platform_common.h"
-#include "rtsp_auth.h"
-#include "rtsp_rtp.h"
-#include "rtsp_sdp.h"
-#include "rtsp_session.h"
-#include "rtsp_types.h"
-#include "services/common/video_config_types.h"
-
 #include <arpa/inet.h>
 #include <asm/socket.h>
 #include <bits/pthreadtypes.h>
@@ -31,6 +22,15 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "platform/platform.h"
+#include "platform/platform_common.h"
+#include "rtsp_auth.h"
+#include "rtsp_rtp.h"
+#include "rtsp_sdp.h"
+#include "rtsp_session.h"
+#include "rtsp_types.h"
+#include "services/common/video_config_types.h"
 
 /* Forward declarations */
 static void* rtsp_multistream_accept_thread(void* arg);

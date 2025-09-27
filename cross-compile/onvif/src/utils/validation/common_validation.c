@@ -7,10 +7,10 @@
 
 #include "common_validation.h"
 
-#include "services/common/onvif_imaging_types.h"
-
 #include <math.h>
 #include <string.h>
+
+#include "services/common/onvif_imaging_types.h"
 
 // Note: clang-tidy warns about easily swappable parameters, but this signature
 // is used throughout the codebase. Defensive programming below catches common

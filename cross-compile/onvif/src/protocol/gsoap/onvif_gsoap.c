@@ -12,15 +12,6 @@
 
 #include "protocol/gsoap/onvif_gsoap.h"
 
-#include "common/onvif_imaging_types.h"
-#include "media/onvif_media.h"
-#include "platform/platform.h"
-#include "ptz/onvif_ptz.h"
-#include "services/device/onvif_device.h"
-#include "services/imaging/onvif_imaging.h"
-#include "services/media/onvif_media.h"
-#include "services/ptz/onvif_ptz.h"
-
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -29,6 +20,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#include "common/onvif_imaging_types.h"
+#include "media/onvif_media.h"
+#include "platform/platform.h"
+#include "ptz/onvif_ptz.h"
+#include "services/device/onvif_device.h"
+#include "services/imaging/onvif_imaging.h"
+#include "services/media/onvif_media.h"
+#include "services/ptz/onvif_ptz.h"
 
 // Include gSOAP generated files
 #include "generated/DeviceBinding.nsmap"

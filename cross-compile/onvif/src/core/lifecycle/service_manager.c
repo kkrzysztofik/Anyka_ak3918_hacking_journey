@@ -7,6 +7,9 @@
 
 #include "service_manager.h"
 
+#include <stdbool.h>
+#include <string.h>
+
 #include "core/config/config.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
@@ -14,9 +17,6 @@
 #include "services/imaging/onvif_imaging.h"
 #include "services/media/onvif_media.h"
 #include "services/ptz/onvif_ptz.h"
-
-#include <stdbool.h>
-#include <string.h>
 
 static volatile bool g_service_services_initialized = false; // NOLINT
 

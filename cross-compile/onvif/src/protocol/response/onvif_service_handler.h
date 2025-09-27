@@ -8,6 +8,8 @@
 #ifndef ONVIF_SERVICE_HANDLER_H
 #define ONVIF_SERVICE_HANDLER_H
 
+#include <stddef.h>
+
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "generated/soapH.h"
@@ -15,8 +17,6 @@
 #include "protocol/gsoap/onvif_gsoap.h"
 #include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
-
-#include <stddef.h>
 
 #define MAX_ACTIONS 32
 

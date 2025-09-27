@@ -12,9 +12,9 @@
 #ifndef ONVIF_CONFIG_LIFECYCLE_H
 #define ONVIF_CONFIG_LIFECYCLE_H
 
-#include "core/config/config.h"
-
 #include <stdbool.h>
+
+#include "core/config/config.h"
 
 /**
  * @brief Allocate memory for configuration structures

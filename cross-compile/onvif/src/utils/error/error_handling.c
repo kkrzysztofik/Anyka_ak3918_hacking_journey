@@ -7,14 +7,14 @@
 
 #include "error_handling.h"
 
-#include "networking/http/http_parser.h"
-#include "platform/platform.h"
-#include "protocol/gsoap/onvif_gsoap.h"
-
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "networking/http/http_parser.h"
+#include "platform/platform.h"
+#include "protocol/gsoap/onvif_gsoap.h"
 
 /* SOAP Fault Codes */
 #define SOAP_FAULT_SENDER   "Sender"

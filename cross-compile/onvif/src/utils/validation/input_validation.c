@@ -7,6 +7,11 @@
 
 #include "input_validation.h"
 
+#include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
@@ -14,11 +19,6 @@
 #include "utils/security/security_hardening.h"
 #include "utils/string/string_shims.h"
 #include "utils/validation/common_validation.h"
-
-#include <ctype.h>
-#include <stdlib.h>
-#include <string.h>
-#include <strings.h>
 
 /* Utility macros */
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

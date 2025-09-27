@@ -11,13 +11,13 @@
 
 #include "core/lifecycle/platform_lifecycle.h"
 
+#include <stdbool.h>
+
 #include "core/lifecycle/network_lifecycle.h"
 #include "core/lifecycle/video_lifecycle.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
 #include "utils/memory/memory_manager.h"
-
-#include <stdbool.h>
 
 /* Global platform state - static variables with internal linkage only */
 static volatile bool g_platform_initialized = false; // NOLINT

@@ -7,18 +7,18 @@
 
 #include "config.h"
 
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "common/onvif_constants.h"
 #include "platform/platform.h"
 #include "services/common/onvif_imaging_types.h"
 #include "utils/error/error_handling.h"
 #include "utils/string/string_shims.h"
 #include "utils/validation/common_validation.h"
-
-#include <errno.h>
-#include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 // Default configuration values
 #define DEFAULT_HTTP_PORT     8080

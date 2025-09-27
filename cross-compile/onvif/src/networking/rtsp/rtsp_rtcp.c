@@ -10,9 +10,6 @@
 
 #include "rtsp_rtcp.h"
 
-#include "platform/platform.h"
-#include "rtsp_types.h"
-
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +17,9 @@
 #include <sys/select.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "platform/platform.h"
+#include "rtsp_types.h"
 
 /* ==================== RTCP Functions ==================== */
 

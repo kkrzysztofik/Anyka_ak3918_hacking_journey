@@ -11,13 +11,13 @@
 #ifndef RTSP_MULTISTREAM_H
 #define RTSP_MULTISTREAM_H
 
-#include "platform/platform_common.h"
-#include "rtsp_types.h"
-#include "services/common/video_config_types.h"
-
 #include <bits/pthreadtypes.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include "platform/platform_common.h"
+#include "rtsp_types.h"
+#include "services/common/video_config_types.h"
 
 /* Maximum number of streams supported by the multi-stream server */
 #define RTSP_MAX_STREAMS 4

@@ -11,11 +11,11 @@
 #ifndef VIDEO_ADAPTER_H
 #define VIDEO_ADAPTER_H
 
-#include "platform/platform_common.h"
-
 #include <bits/types.h>
 #include <stdbool.h>
 #include <stdint.h>
+
+#include "platform/platform_common.h"
 
 #ifdef __cplusplus
 extern "C" {

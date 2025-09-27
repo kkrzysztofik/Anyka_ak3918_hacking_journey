@@ -10,12 +10,12 @@
 
 #include "rtsp_sdp.h"
 
-#include "rtsp_types.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#include "rtsp_types.h"
 
 /* ==================== SDP Functions ==================== */
 

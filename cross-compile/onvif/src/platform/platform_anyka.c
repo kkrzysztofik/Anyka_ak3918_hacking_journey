@@ -8,20 +8,6 @@
  * into a single implementation for the Anyka AK3918 platform.
  */
 
-#include "ak_aenc.h"
-#include "ak_ai.h"
-#include "ak_drv_irled.h"
-#include "ak_drv_ptz.h"
-#include "ak_error.h"
-#include "ak_global.h"
-#include "ak_venc.h"
-#include "ak_vi.h"
-#include "ak_vpss.h"
-#include "list.h"
-#include "platform.h"
-#include "platform_common.h"
-#include "utils/logging/platform_logging.h"
-
 #include <bits/pthreadtypes.h>
 #include <bits/types.h>
 #include <errno.h>
@@ -37,6 +23,20 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "ak_aenc.h"
+#include "ak_ai.h"
+#include "ak_drv_irled.h"
+#include "ak_drv_ptz.h"
+#include "ak_error.h"
+#include "ak_global.h"
+#include "ak_venc.h"
+#include "ak_vi.h"
+#include "ak_vpss.h"
+#include "list.h"
+#include "platform.h"
+#include "platform_common.h"
+#include "utils/logging/platform_logging.h"
 
 /* Error type constants for enhanced error logging */
 #define ERROR_TYPE_POINTER_NULL  1

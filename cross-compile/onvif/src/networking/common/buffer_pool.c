@@ -7,10 +7,10 @@
 
 #include "buffer_pool.h"
 
-#include "platform/platform.h"
-
 #include <pthread.h>
 #include <stdlib.h>
+
+#include "platform/platform.h"
 
 /**
  * @brief Initialize buffer pool

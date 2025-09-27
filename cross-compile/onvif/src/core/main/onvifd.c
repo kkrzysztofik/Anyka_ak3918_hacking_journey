@@ -5,6 +5,8 @@
  * @date 2025
  */
 
+#include <string.h>
+
 #include "core/config/config.h"
 #include "core/lifecycle/config_lifecycle.h"
 #include "core/lifecycle/network_lifecycle.h"
@@ -15,8 +17,6 @@
 #include "platform/platform.h"
 #include "utils/logging/platform_logging.h"
 #include "utils/network/network_utils.h"
-
-#include <string.h>
 
 /* ---------------------------- Utility Functions ------------------------- */
 

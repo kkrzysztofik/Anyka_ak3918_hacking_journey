@@ -11,14 +11,6 @@
 
 #include "http_parser.h"
 
-#include "common/onvif_constants.h"
-#include "platform/platform.h"
-#include "utils/error/error_handling.h"
-#include "utils/memory/memory_manager.h"
-#include "utils/string/string_shims.h"
-#include "utils/validation/common_validation.h"
-#include "utils/validation/input_validation.h"
-
 #include <errno.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -28,6 +20,14 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include "common/onvif_constants.h"
+#include "platform/platform.h"
+#include "utils/error/error_handling.h"
+#include "utils/memory/memory_manager.h"
+#include "utils/string/string_shims.h"
+#include "utils/validation/common_validation.h"
+#include "utils/validation/input_validation.h"
 
 /* Fallback implementations for missing functions */
 

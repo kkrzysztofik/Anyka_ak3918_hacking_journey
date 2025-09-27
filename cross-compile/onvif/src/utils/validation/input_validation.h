@@ -8,9 +8,9 @@
 #ifndef INPUT_VALIDATION_H
 #define INPUT_VALIDATION_H
 
-#include "networking/http/http_parser.h"
-
 #include <stddef.h>
+
+#include "networking/http/http_parser.h"
 
 /**
  * @brief Validate HTTP method

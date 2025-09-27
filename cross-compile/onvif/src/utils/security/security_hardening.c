@@ -7,11 +7,6 @@
 
 #include "security_hardening.h"
 
-#include "networking/common/connection_manager.h"
-#include "networking/http/http_parser.h"
-#include "utils/error/error_handling.h"
-#include "utils/logging/platform_logging.h"
-
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <netinet/in.h>
@@ -20,6 +15,11 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <time.h>
+
+#include "networking/common/connection_manager.h"
+#include "networking/http/http_parser.h"
+#include "utils/error/error_handling.h"
+#include "utils/logging/platform_logging.h"
 
 /* Global security configuration */
 static security_level_t g_security_level = SECURITY_LEVEL_BASIC; // NOLINT

@@ -8,11 +8,11 @@
 #ifndef STREAM_CONFIG_UTILS_H
 #define STREAM_CONFIG_UTILS_H
 
-#include "platform/platform.h"
-#include "services/common/video_config_types.h"
-
 #include <stdbool.h>
 #include <stddef.h>
+
+#include "platform/platform.h"
+#include "services/common/video_config_types.h"
 
 /* Forward declarations */
 struct application_config;

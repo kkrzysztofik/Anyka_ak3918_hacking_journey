@@ -11,10 +11,10 @@
 #ifndef AUDIO_ADAPTER_H
 #define AUDIO_ADAPTER_H
 
-#include "platform/platform_common.h"
-
 #include <bits/types.h>
 #include <stdint.h>
+
+#include "platform/platform_common.h"
 
 #ifdef __cplusplus
 extern "C" {

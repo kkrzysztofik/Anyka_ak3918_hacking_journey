@@ -11,11 +11,6 @@
 
 #include "rtsp_rtp.h"
 
-#include "platform/platform.h"
-#include "rtsp_rtcp.h"
-#include "rtsp_session.h"
-#include "rtsp_types.h"
-
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
@@ -26,6 +21,11 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "platform/platform.h"
+#include "rtsp_rtcp.h"
+#include "rtsp_session.h"
+#include "rtsp_types.h"
 
 /* ==================== RTP Functions ==================== */
 

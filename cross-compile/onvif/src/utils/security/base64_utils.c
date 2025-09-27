@@ -7,12 +7,12 @@
 
 #include "utils/security/base64_utils.h"
 
-#include "utils/error/error_handling.h"
-
 #include <b64/cdecode.h>
 #include <b64/cencode.h>
 #include <stddef.h>
 #include <string.h>
+
+#include "utils/error/error_handling.h"
 
 /* ============================================================================
  * Public Functions

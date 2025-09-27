@@ -13,10 +13,10 @@
 #ifndef ONVIF_VIDEO_LIFECYCLE_H
 #define ONVIF_VIDEO_LIFECYCLE_H
 
+#include <stdbool.h>
+
 #include "core/config/config.h"
 #include "networking/rtsp/rtsp_multistream.h"
-
-#include <stdbool.h>
 
 /**
  * @brief Initialize video input and RTSP streaming system

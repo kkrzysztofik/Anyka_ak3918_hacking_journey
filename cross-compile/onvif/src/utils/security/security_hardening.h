@@ -8,10 +8,10 @@
 #ifndef ONVIF_SECURITY_HARDENING_H
 #define ONVIF_SECURITY_HARDENING_H
 
-#include "networking/http/http_parser.h"
-
 #include <stddef.h>
 #include <time.h>
+
+#include "networking/http/http_parser.h"
 
 /* Forward declaration */
 typedef struct connection connection_t;

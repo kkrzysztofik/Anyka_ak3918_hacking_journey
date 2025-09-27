@@ -11,10 +11,10 @@
 #ifndef HTTP_AUTH_H
 #define HTTP_AUTH_H
 
+#include <stdbool.h>
+
 #include "http_parser.h"
 #include "utils/security/security_hardening.h"
-
-#include <stdbool.h>
 
 /* HTTP Authentication constants */
 #define HTTP_MAX_USERNAME_LEN    64

@@ -8,10 +8,6 @@
 #define _GNU_SOURCE
 #include "ws_discovery.h"
 
-#include "common/onvif_constants.h"
-#include "platform/platform.h"
-#include "utils/network/network_utils.h"
-
 #include <arpa/inet.h>
 #include <asm/socket.h>
 #include <bits/pthreadtypes.h>
@@ -27,6 +23,10 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "common/onvif_constants.h"
+#include "platform/platform.h"
+#include "utils/network/network_utils.h"
 
 /* Some stripped uClibc headers may omit ip_mreq; provide minimal fallback */
 #ifndef IP_ADD_MEMBERSHIP

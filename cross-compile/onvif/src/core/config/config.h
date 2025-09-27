@@ -9,9 +9,9 @@
 #ifndef ONVIF_CONFIG_H
 #define ONVIF_CONFIG_H
 
-#include "services/common/video_config_types.h"
-
 #include <stddef.h>
+
+#include "services/common/video_config_types.h"
 
 /* Forward declarations for imaging structures */
 struct imaging_settings;

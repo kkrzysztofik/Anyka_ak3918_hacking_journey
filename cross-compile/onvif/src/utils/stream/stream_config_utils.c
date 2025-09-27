@@ -7,12 +7,12 @@
 
 #include "stream_config_utils.h"
 
-#include "platform/platform.h"
-#include "utils/error/error_handling.h"
-
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "platform/platform.h"
+#include "utils/error/error_handling.h"
 
 // Default configuration values
 #define DEFAULT_MAIN_FPS      25

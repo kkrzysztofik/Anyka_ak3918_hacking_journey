@@ -12,6 +12,8 @@
 
 #include "core/lifecycle/network_lifecycle.h"
 
+#include <stdbool.h>
+
 #include "core/config/config.h"
 #include "core/lifecycle/service_manager.h"
 #include "core/lifecycle/video_lifecycle.h"
@@ -19,8 +21,6 @@
 #include "networking/http/http_server.h"
 #include "platform/platform.h"
 #include "services/snapshot/onvif_snapshot.h"
-
-#include <stdbool.h>
 
 /* Global network services state - static variable with internal linkage only */
 static volatile bool g_network_services_initialized = false; // NOLINT

@@ -17,6 +17,10 @@
 
 #include "core/lifecycle/video_lifecycle.h"
 
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "networking/rtsp/rtsp_multistream.h"
 #include "networking/rtsp/rtsp_types.h"
 #include "platform/platform.h"
@@ -24,10 +28,6 @@
 #include "services/common/video_config_types.h"
 #include "utils/error/error_handling.h"
 #include "utils/stream/stream_config_utils.h"
-
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 /* Global video system state - static variables with internal linkage only */
 static platform_vi_handle_t g_video_vi_handle = NULL;               // NOLINT

@@ -7,6 +7,10 @@
 
 #include "onvif_media.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
@@ -18,10 +22,6 @@
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
 #include "utils/network/network_utils.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #define MEDIA_PROFILE_COUNT_DEFAULT 2
 #define MEDIA_MAIN_PROFILE_TOKEN    "MainProfile"

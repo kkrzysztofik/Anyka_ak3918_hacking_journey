@@ -7,6 +7,14 @@
 
 #include "onvif_snapshot.h"
 
+#include <bits/pthreadtypes.h>
+#include <pthread.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
@@ -19,14 +27,6 @@
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
 #include "utils/network/network_utils.h"
-
-#include <bits/pthreadtypes.h>
-#include <pthread.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 /* Snapshot service state */
 static bool g_snapshot_initialized = false;                          // NOLINT

@@ -7,18 +7,18 @@
 
 #include "connection_manager.h"
 
-#include "networking/common/buffer_pool.h"
-#include "networking/common/epoll_server.h"
-#include "networking/http/http_server.h"
-#include "platform/platform.h"
-#include "utils/memory/memory_manager.h"
-
 #include <bits/pthreadtypes.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "networking/common/buffer_pool.h"
+#include "networking/common/epoll_server.h"
+#include "networking/http/http_server.h"
+#include "platform/platform.h"
+#include "utils/memory/memory_manager.h"
 
 /* Global connection list - static for encapsulation */
 static connection_t* g_connections = NULL;  // NOLINT

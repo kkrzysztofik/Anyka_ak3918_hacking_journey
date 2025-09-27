@@ -7,6 +7,19 @@
 
 #include "networking/http/http_server.h"
 
+#include <arpa/inet.h>
+#include <asm/socket.h>
+#include <bits/types.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "networking/common/buffer_pool.h"
@@ -27,19 +40,6 @@
 #include "utils/security/security_hardening.h"
 #include "utils/validation/common_validation.h"
 #include "utils/validation/input_validation.h"
-
-#include <arpa/inet.h>
-#include <asm/socket.h>
-#include <bits/types.h>
-#include <errno.h>
-#include <netinet/in.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <unistd.h>
 
 /* ============================================================================
  * Global Variables

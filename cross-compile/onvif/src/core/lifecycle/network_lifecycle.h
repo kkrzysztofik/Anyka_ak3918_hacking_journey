@@ -12,9 +12,9 @@
 #ifndef ONVIF_NETWORK_LIFECYCLE_H
 #define ONVIF_NETWORK_LIFECYCLE_H
 
-#include "core/config/config.h"
-
 #include <stdbool.h>
+
+#include "core/config/config.h"
 
 /**
  * @brief Initialize network services (HTTP server, WS-Discovery, snapshot)

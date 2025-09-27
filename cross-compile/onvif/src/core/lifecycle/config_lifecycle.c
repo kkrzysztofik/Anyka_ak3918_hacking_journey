@@ -11,6 +11,11 @@
 
 #include "core/lifecycle/config_lifecycle.h"
 
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "platform/platform.h"
@@ -18,11 +23,6 @@
 #include "services/common/video_config_types.h"
 #include "utils/error/error_handling.h"
 #include "utils/stream/stream_config_utils.h"
-
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 /* Global configuration state */
 static volatile bool g_config_loaded = false;           // NOLINT

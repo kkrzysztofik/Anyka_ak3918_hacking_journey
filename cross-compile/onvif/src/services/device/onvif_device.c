@@ -7,6 +7,12 @@
 
 #include "onvif_device.h"
 
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
 #include "core/config/config.h"
 #include "networking/common/buffer_pool.h"
 #include "networking/http/http_parser.h"
@@ -19,12 +25,6 @@
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
 #include "utils/memory/smart_response_builder.h"
-
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
 
 /* ============================================================================
  * Device Service Specific Utility Functions

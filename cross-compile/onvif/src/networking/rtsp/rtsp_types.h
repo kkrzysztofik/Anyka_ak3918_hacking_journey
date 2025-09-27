@@ -11,9 +11,6 @@
 #ifndef RTSP_TYPES_H
 #define RTSP_TYPES_H
 
-#include "platform/platform_common.h"
-#include "services/common/video_config_types.h"
-
 #include <bits/pthreadtypes.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -22,6 +19,9 @@
 #include <stdint.h>
 #include <sys/socket.h>
 #include <time.h>
+
+#include "platform/platform_common.h"
+#include "services/common/video_config_types.h"
 
 /* RTSP constants */
 #define RTSP_MAX_CLIENTS         10

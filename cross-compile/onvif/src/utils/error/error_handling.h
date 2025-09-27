@@ -8,10 +8,10 @@
 #ifndef ONVIF_ERROR_HANDLING_H
 #define ONVIF_ERROR_HANDLING_H
 
-#include "networking/http/http_parser.h"
-
 #include <stdarg.h>
 #include <stddef.h>
+
+#include "networking/http/http_parser.h"
 
 /* Standardized return codes */
 #define ONVIF_SUCCESS               0

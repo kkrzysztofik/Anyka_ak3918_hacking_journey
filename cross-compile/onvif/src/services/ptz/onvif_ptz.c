@@ -7,6 +7,14 @@
 
 #include "onvif_ptz.h"
 
+#include <bits/pthreadtypes.h>
+#include <math.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
@@ -19,14 +27,6 @@
 #include "utils/error/error_handling.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
-
-#include <bits/pthreadtypes.h>
-#include <math.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
 
 /* PTZ Movement Constants */
 #define PTZ_MOVEMENT_TIMEOUT_MS        5000

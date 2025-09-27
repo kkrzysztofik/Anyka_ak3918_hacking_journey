@@ -7,11 +7,11 @@
 
 #include "service_logging.h"
 
-#include "platform/platform.h"
-#include "utils/memory/memory_manager.h"
-
 #include <stdarg.h>
 #include <stdio.h>
+
+#include "platform/platform.h"
+#include "utils/memory/memory_manager.h"
 
 void service_log_init_context(service_log_context_t* context, // NOLINT
                               const char* service_name,       // NOLINT

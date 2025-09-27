@@ -7,13 +7,13 @@
 
 #include "onvif_service_common.h"
 
-#include "common/onvif_constants.h"
-#include "core/config/config.h"
-
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "common/onvif_constants.h"
+#include "core/config/config.h"
 
 /* ============================================================================
  * Common Utility Function Implementations

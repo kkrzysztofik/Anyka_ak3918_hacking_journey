@@ -7,13 +7,13 @@
 
 #include "smart_response_builder.h"
 
+#include <string.h>
+
 #include "/home/kmk/anyka-dev/cross-compile/onvif/src/networking/common/buffer_pool.h"
 #include "/home/kmk/anyka-dev/cross-compile/onvif/src/networking/http/http_parser.h"
 #include "common/onvif_constants.h"
 #include "platform/platform.h"
 #include "utils/memory/memory_manager.h"
-
-#include <string.h>
 
 /* ============================================================================
  * Constants

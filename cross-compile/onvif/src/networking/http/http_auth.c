@@ -10,6 +10,12 @@
 
 #include "networking/http/http_auth.h"
 
+#include <ctype.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
 #include "utils/security/base64_utils.h"
@@ -17,12 +23,6 @@
 #include "utils/string/string_shims.h"
 #include "utils/validation/common_validation.h"
 #include "utils/validation/input_validation.h"
-
-#include <ctype.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 /* ==================== Helper Functions ==================== */
 

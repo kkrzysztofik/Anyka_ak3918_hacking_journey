@@ -7,18 +7,18 @@
 
 #include <bits/pthreadtypes.h>
 #define _GNU_SOURCE
-#include "core/lifecycle/signal_lifecycle.h"
-#include "networking/common/connection_manager.h"
-#include "platform/platform.h"
-#include "thread_pool.h"
-#include "utils/memory/memory_manager.h"
-
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "core/lifecycle/signal_lifecycle.h"
+#include "networking/common/connection_manager.h"
+#include "platform/platform.h"
+#include "thread_pool.h"
+#include "utils/memory/memory_manager.h"
 
 /* Forward declaration for connection processing */
 extern void process_connection(void* conn);

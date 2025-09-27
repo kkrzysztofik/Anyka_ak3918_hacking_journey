@@ -12,15 +12,15 @@
 #ifndef ONVIF_GSOAP_H
 #define ONVIF_GSOAP_H
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include "generated/soapH.h"    //NOLINT
 #include "generated/soapStub.h" //NOLINT
 #include "services/common/onvif_imaging_types.h"
 #include "services/media/onvif_media.h"
 #include "services/ptz/onvif_ptz.h"
-
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 
 /* ============================================================================
  * Error Codes

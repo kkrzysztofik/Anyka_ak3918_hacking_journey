@@ -12,10 +12,10 @@
 #ifndef SMART_RESPONSE_BUILDER_H
 #define SMART_RESPONSE_BUILDER_H
 
+#include <stddef.h>
+
 #include "networking/common/buffer_pool.h"
 #include "networking/http/http_parser.h"
-
-#include <stddef.h>
 
 /* ============================================================================
  * Smart Response Builder Functions
