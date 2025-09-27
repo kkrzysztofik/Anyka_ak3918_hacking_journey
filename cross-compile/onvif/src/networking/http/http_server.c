@@ -23,7 +23,10 @@
 #include "services/ptz/onvif_ptz.h"
 #include "services/snapshot/onvif_snapshot.h"
 #include "utils/error/error_handling.h"
+#include "utils/memory/memory_manager.h"
 #include "utils/security/security_hardening.h"
+#include "utils/validation/common_validation.h"
+#include "utils/validation/input_validation.h"
 
 #include <arpa/inet.h>
 #include <asm/socket.h>
@@ -71,6 +74,9 @@ static struct http_auth_config g_http_auth_config = {0}; // NOLINT
 
 /** @brief Final chunk message size (including CRLF) */
 #define FINAL_CHUNK_SIZE 5
+
+/** @brief Maximum HTTP header line length */
+#define HTTP_MAX_HEADER_LINE_LENGTH 8192
 
 /* ============================================================================
  * Service Type Detection
@@ -263,7 +269,7 @@ static int handle_onvif_request_by_operation(onvif_service_type_t service_type,
  * @param client_fd Client socket file descriptor
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
-static int send_chunk_header(size_t chunk_size, int client_fd) { //NOLINT
+static int send_chunk_header(size_t chunk_size, int client_fd) { // NOLINT
   char chunk_header[CHUNK_HEADER_BUFFER_SIZE];
   int header_len = snprintf(chunk_header, sizeof(chunk_header), "%zx\r\n", chunk_size);
 
@@ -361,15 +367,15 @@ static int build_chunked_header(const http_response_t* response, char* header, s
   }
 
   const char* status_text = get_http_status_text(response->status_code);
-  const char* content_type = response->content_type ? response->content_type : "application/soap+xml; charset=utf-8";
+  const char* content_type =
+    response->content_type ? response->content_type : "application/soap+xml; charset=utf-8";
 
-  int result = snprintf(
-    header, header_size,
-    "HTTP/1.1 %d %s\r\n"
-    "Content-Type: %s\r\n"
-    "Transfer-Encoding: chunked\r\n"
-    "Connection: close\r\n",
-    response->status_code, status_text, content_type);
+  int result = snprintf(header, header_size,
+                        "HTTP/1.1 %d %s\r\n"
+                        "Content-Type: %s\r\n"
+                        "Transfer-Encoding: chunked\r\n"
+                        "Connection: close\r\n",
+                        response->status_code, status_text, content_type);
 
   if (result < 0 || (size_t)result >= header_size) {
     platform_log_error("Failed to format chunked HTTP response header\n");
@@ -378,8 +384,9 @@ static int build_chunked_header(const http_response_t* response, char* header, s
 
   // Add custom headers
   for (size_t i = 0; i < response->header_count; i++) {
-    int header_result = snprintf(header + strlen(header), header_size - strlen(header),
-                                "%s: %s\r\n", response->headers[i].name, response->headers[i].value);
+    int header_result =
+      snprintf(header + strlen(header), header_size - strlen(header), "%s: %s\r\n",
+               response->headers[i].name, response->headers[i].value);
 
     if (header_result < 0 || (size_t)header_result >= (header_size - strlen(header))) {
       platform_log_error("Failed to format custom header\n");
@@ -470,6 +477,90 @@ static int send_chunked_response(int client_fd, const http_response_t* response,
 }
 
 /* ============================================================================
+ * Request Validation Functions
+ * ============================================================================
+ */
+
+/**
+ * @brief Validate HTTP request components (method, path, version)
+ * @param request HTTP request structure
+ * @param client_ip Client IP address for logging
+ * @return ONVIF_SUCCESS if validation succeeds, error code if it fails
+ */
+static int validate_request_components(const http_request_t* request, const char* client_ip) {
+  if (!request) {
+    return ONVIF_ERROR_NULL;
+  }
+
+  // Validate HTTP method
+  validation_result_t method_validation =
+    validate_string("HTTP method", request->method, 1, sizeof(request->method) - 1, 0);
+  if (!validation_is_valid(&method_validation)) {
+    platform_log_error("Invalid HTTP method from %s: %s\n", client_ip,
+                       validation_get_error_message(&method_validation));
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Validate HTTP path
+  validation_result_t path_validation =
+    validate_string("HTTP path", request->path, 1, sizeof(request->path) - 1, 0);
+  if (!validation_is_valid(&path_validation)) {
+    platform_log_error("Invalid HTTP path from %s: %s\n", client_ip,
+                       validation_get_error_message(&path_validation));
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Validate HTTP version
+  validation_result_t version_validation =
+    validate_string("HTTP version", request->version, 1, sizeof(request->version) - 1, 0);
+  if (!validation_is_valid(&version_validation)) {
+    platform_log_error("Invalid HTTP version from %s: %s\n", client_ip,
+                       validation_get_error_message(&version_validation));
+    return ONVIF_ERROR_INVALID;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Perform comprehensive security validation
+ * @param request HTTP request structure
+ * @param security_ctx Security context
+ * @return ONVIF_SUCCESS if validation succeeds, error code if it fails
+ */
+static int perform_security_validation(const http_request_t* request,
+                                       security_context_t* security_ctx) {
+  if (!request || !security_ctx) {
+    return ONVIF_ERROR_NULL;
+  }
+
+  // Perform comprehensive security validation
+  if (security_validate_request(request, security_ctx) != ONVIF_SUCCESS) {
+    platform_log_error("Request security validation failed for client %s\n",
+                       security_ctx->client_ip);
+    return ONVIF_ERROR;
+  }
+
+  // Check HTTP Basic Authentication with attack detection
+  if (http_validate_authentication(request, security_ctx) != ONVIF_SUCCESS) {
+    platform_log_error("ONVIF Authentication failed for request from %s\n",
+                       security_ctx->client_ip);
+    // Log authentication failure as potential brute force attempt
+    security_log_security_event("AUTH_FAILURE", security_ctx->client_ip, 2);
+    return ONVIF_ERROR;
+  }
+
+  // Validate request body for security threats
+  if (security_validate_request_body(request, security_ctx) != ONVIF_SUCCESS) {
+    platform_log_error("Request body security validation failed for client %s\n",
+                       security_ctx->client_ip);
+    return ONVIF_ERROR;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
  * Main Request Handler
  * ============================================================================
  */
@@ -487,34 +578,39 @@ static int handle_onvif_request(const http_request_t* request, http_response_t* 
 
   // Initialize security context
   security_context_t security_ctx = {{0}, 0, 0, 0};
-  strncpy(security_ctx.client_ip, request->client_ip, sizeof(security_ctx.client_ip) - 1);
-  security_ctx.client_ip[sizeof(security_ctx.client_ip) - 1] = '\0';
+  if (memory_safe_strncpy(security_ctx.client_ip, sizeof(security_ctx.client_ip),
+                          request->client_ip, strlen(request->client_ip)) < 0) {
+    platform_log_error("Failed to copy client IP safely\n");
+    return ONVIF_ERROR;
+  }
   security_ctx.last_request_time = security_get_current_time();
   security_ctx.security_level = SECURITY_LEVEL_BASIC;
 
-  // Perform comprehensive security validation
-  if (security_validate_request(request, &security_ctx) != ONVIF_SUCCESS) {
-    platform_log_error("Request security validation failed for client %s\n",
-                       security_ctx.client_ip);
+  // Validate HTTP request using common validation utilities
+  if (validate_http_request(request) != ONVIF_VALIDATION_SUCCESS) {
+    platform_log_error("HTTP request validation failed for client %s\n", security_ctx.client_ip);
     return ONVIF_ERROR;
   }
 
-  // Check HTTP Basic Authentication with attack detection
-  if (http_validate_authentication(request, &security_ctx) != ONVIF_SUCCESS) {
-    platform_log_error("ONVIF Authentication failed for request from %s\n", security_ctx.client_ip);
-    // Log authentication failure as potential brute force attempt
-    security_log_security_event("AUTH_FAILURE", security_ctx.client_ip, 2);
+  // Validate request components (method, path, version)
+  if (validate_request_components(request, security_ctx.client_ip) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR;
+  }
+
+  // Perform comprehensive security validation
+  if (perform_security_validation(request, &security_ctx) != ONVIF_SUCCESS) {
     return ONVIF_ERROR;
   }
 
   // Determine service type from path
   onvif_service_type_t service_type = get_service_type(request->path);
 
-  // Validate request body for security threats
-  if (security_validate_request_body(request, &security_ctx) != ONVIF_SUCCESS) {
-    platform_log_error("Request body security validation failed for client %s\n",
-                       security_ctx.client_ip);
-    return ONVIF_ERROR;
+  // Validate request body content if present
+  if (request->body && request->body_length > 0) {
+    if (validate_xml_content(request->body, request->body_length) != ONVIF_VALIDATION_SUCCESS) {
+      platform_log_error("Invalid XML content in request body from %s\n", security_ctx.client_ip);
+      return ONVIF_ERROR;
+    }
   }
 
   // Extract operation name from SOAP body
@@ -647,9 +743,13 @@ int http_server_process_request(int client_fd) {
   http_request_t request = {0};
   http_response_t response = {0};
 
-  // Set client IP in request
-  strncpy(request.client_ip, client_ip_str, sizeof(request.client_ip) - 1);
-  request.client_ip[sizeof(request.client_ip) - 1] = '\0';
+  // Set client IP in request using safe string function
+  if (memory_safe_strncpy(request.client_ip, sizeof(request.client_ip), client_ip_str,
+                          strlen(client_ip_str)) < 0) {
+    platform_log_error("Failed to copy client IP safely\n");
+    buffer_pool_return(&g_http_server.buffer_pool, buffer);
+    return ONVIF_ERROR;
+  }
 
   int need_more_data = 0;
   if (parse_http_request_state_machine(buffer, bytes_read, &request, &need_more_data) != 0) {

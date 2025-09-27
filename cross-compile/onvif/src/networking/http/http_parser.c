@@ -13,9 +13,14 @@
 
 #include "common/onvif_constants.h"
 #include "platform/platform.h"
+#include "utils/error/error_handling.h"
+#include "utils/memory/memory_manager.h"
 #include "utils/string/string_shims.h"
+#include "utils/validation/common_validation.h"
+#include "utils/validation/input_validation.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,25 +79,25 @@ static size_t count_http_headers(const char* headers, size_t headers_size);
  * @param line_len Length of the header line
  * @param header Header structure to populate
  * @param header_index Index of the header in the array
- * @return 0 on success, -1 on error
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 static int parse_single_header_line(const char* line_start, size_t line_len, http_header_t* header,
                                     size_t header_index) {
   if (!line_start || !header || line_len == 0) {
-    return -1;
+    return ONVIF_ERROR_NULL;
   }
 
   // Find colon separator
   const char* colon = (const char*)memchr(line_start, ':', line_len);
   if (!colon) {
     platform_log_error("Invalid header format (no colon): %.*s\n", (int)line_len, line_start);
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   size_t name_len = colon - line_start;
   if (name_len == 0) {
     platform_log_error("Empty header name\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Find value start (skip colon and whitespace)
@@ -104,12 +109,12 @@ static int parse_single_header_line(const char* line_start, size_t line_len, htt
   size_t value_len = line_len - (value_start - line_start);
   if (value_len == 0) {
     platform_log_error("Empty header value\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Validate header name and value
   if (validate_header_name_value(line_start, name_len, value_start, value_len) != 0) {
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Zero-copy implementation: insert null terminators and assign pointers
@@ -122,7 +127,7 @@ static int parse_single_header_line(const char* line_start, size_t line_len, htt
   header[header_index].name = (char*)line_start;
   header[header_index].value = (char*)value_start;
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -131,12 +136,12 @@ static int parse_single_header_line(const char* line_start, size_t line_len, htt
  * @param name_len Length of header name
  * @param value Header value
  * @param value_len Length of header value
- * @return 0 on success, -1 on error
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 static int validate_header_name_value(const char* name, size_t name_len, const char* value,
                                       size_t value_len) {
   if (!name || !value || name_len == 0 || value_len == 0) {
-    return -1;
+    return ONVIF_ERROR_NULL;
   }
 
   // Check for valid header name characters
@@ -145,17 +150,17 @@ static int validate_header_name_value(const char* name, size_t name_len, const c
     if (!((char_value >= 'A' && char_value <= 'Z') || (char_value >= 'a' && char_value <= 'z') ||
           (char_value >= '0' && char_value <= '9') || char_value == '-' || char_value == '_')) {
       platform_log_error("Invalid character in header name: %c\n", char_value);
-      return -1;
+      return ONVIF_ERROR_INVALID;
     }
   }
 
   // Check for reasonable length limits
   if (name_len > HTTP_MAX_HEADER_LINE_LENGTH || value_len > HTTP_MAX_HEADER_LINE_LENGTH) {
     platform_log_error("Header name or value too long\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -165,12 +170,12 @@ static int validate_header_name_value(const char* name, size_t name_len, const c
  * @param buffer_used Amount of data in buffer
  * @param request Request structure to populate
  * @param line_start Start of current line
- * @return 0 on success, -1 on error
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 static int parse_http_method(const char* buffer, size_t* pos, size_t buffer_used,
                              http_request_t* request, const char** line_start) {
   if (!buffer || !pos || !request || !line_start) {
-    return -1;
+    return ONVIF_ERROR_NULL;
   }
 
   // Find end of method (space or end of buffer)
@@ -181,15 +186,18 @@ static int parse_http_method(const char* buffer, size_t* pos, size_t buffer_used
 
   if (method_end == *pos || method_end - *pos >= sizeof(request->method)) {
     platform_log_error("Invalid or too long HTTP method\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
-  // Copy method with bounds checking
-  strncpy(request->method, *line_start, method_end - *pos);
-  request->method[method_end - *pos] = '\0';
+  // Copy method with bounds checking using safe string function
+  if (memory_safe_strncpy(request->method, sizeof(request->method), *line_start,
+                          method_end - *pos) < 0) {
+    platform_log_error("Failed to copy HTTP method safely\n");
+    return ONVIF_ERROR_MEMORY;
+  }
 
   *pos = method_end + 1; // Skip space
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -199,12 +207,12 @@ static int parse_http_method(const char* buffer, size_t* pos, size_t buffer_used
  * @param buffer_used Amount of data in buffer
  * @param request Request structure to populate
  * @param line_start Start of current line
- * @return 0 on success, -1 on error
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 static int parse_http_path(const char* buffer, size_t* pos, size_t buffer_used,
                            http_request_t* request, const char** line_start) {
   if (!buffer || !pos || !request || !line_start) {
-    return -1;
+    return ONVIF_ERROR_NULL;
   }
 
   // Find end of path (space or end of buffer)
@@ -215,15 +223,18 @@ static int parse_http_path(const char* buffer, size_t* pos, size_t buffer_used,
 
   if (path_end == *pos || path_end - *pos >= sizeof(request->path)) {
     platform_log_error("Invalid or too long HTTP path\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
-  // Copy path with bounds checking
-  strncpy(request->path, *line_start + (*pos - (*line_start - buffer)), path_end - *pos);
-  request->path[path_end - *pos] = '\0';
+  // Copy path with bounds checking using safe string function
+  const char* path_start = *line_start + (*pos - (*line_start - buffer));
+  if (memory_safe_strncpy(request->path, sizeof(request->path), path_start, path_end - *pos) < 0) {
+    platform_log_error("Failed to copy HTTP path safely\n");
+    return ONVIF_ERROR_MEMORY;
+  }
 
   *pos = path_end + 1; // Skip space
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -233,12 +244,12 @@ static int parse_http_path(const char* buffer, size_t* pos, size_t buffer_used,
  * @param buffer_used Amount of data in buffer
  * @param request Request structure to populate
  * @param line_start Start of current line
- * @return 0 on success, -1 on error
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 static int parse_http_version(const char* buffer, size_t* pos, size_t buffer_used,
                               http_request_t* request, const char** line_start) {
   if (!buffer || !pos || !request || !line_start) {
-    return -1;
+    return ONVIF_ERROR_NULL;
   }
 
   // Find end of version (CRLF or end of buffer)
@@ -249,15 +260,19 @@ static int parse_http_version(const char* buffer, size_t* pos, size_t buffer_use
 
   if (version_end == *pos || version_end - *pos >= sizeof(request->version)) {
     platform_log_error("Invalid or too long HTTP version\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
-  // Copy version with bounds checking
-  strncpy(request->version, *line_start + (*pos - (*line_start - buffer)), version_end - *pos);
-  request->version[version_end - *pos] = '\0';
+  // Copy version with bounds checking using safe string function
+  const char* version_start = *line_start + (*pos - (*line_start - buffer));
+  if (memory_safe_strncpy(request->version, sizeof(request->version), version_start,
+                          version_end - *pos) < 0) {
+    platform_log_error("Failed to copy HTTP version safely\n");
+    return ONVIF_ERROR_MEMORY;
+  }
 
   *pos = version_end;
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -268,13 +283,13 @@ static int parse_http_version(const char* buffer, size_t* pos, size_t buffer_use
  * @param request Request structure to populate
  * @param line_start Start of current line
  * @param header_length Length of headers section
- * @return 0 on success, -1 on error
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 static int parse_http_headers_state(const char* buffer, size_t* pos, size_t buffer_used,
                                     http_request_t* request, const char** line_start,
                                     size_t* header_length) {
   if (!buffer || !pos || !request || !line_start || !header_length) {
-    return -1;
+    return ONVIF_ERROR_NULL;
   }
 
   // Parse headers
@@ -282,12 +297,12 @@ static int parse_http_headers_state(const char* buffer, size_t* pos, size_t buff
                                   &request->header_count);
   if (result != 0) {
     platform_log_error("Failed to parse HTTP headers\n");
-    return -1;
+    return ONVIF_ERROR_PARSE_FAILED;
   }
 
   *header_length = buffer_used - *pos;
   *pos = buffer_used; // Move to end of headers
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -297,12 +312,12 @@ static int parse_http_headers_state(const char* buffer, size_t* pos, size_t buff
  * @param request Request structure to populate
  * @param header_length Length of headers section
  * @param need_more_data Flag indicating if more data is needed
- * @return 0 on success, -1 on error
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 static int parse_http_body(const char* buffer, size_t buffer_used, http_request_t* request,
                            size_t header_length, int* need_more_data) {
   if (!buffer || !request || !need_more_data) {
-    return -1;
+    return ONVIF_ERROR_NULL;
   }
 
   // Check if we have Content-Length header
@@ -314,7 +329,7 @@ static int parse_http_body(const char* buffer, size_t buffer_used, http_request_
     if (endptr == content_length_str || *endptr != '\0' || parsed_length < 0 ||
         parsed_length > MAX_CONTENT_LENGTH) {
       platform_log_error("Invalid Content-Length: %s\n", content_length_str);
-      return -1;
+      return ONVIF_ERROR_INVALID;
     }
 
     request->content_length = (size_t)parsed_length;
@@ -324,11 +339,19 @@ static int parse_http_body(const char* buffer, size_t buffer_used, http_request_
     size_t body_start = header_length;
     if (buffer_used < body_start + request->content_length) {
       *need_more_data = 1;
-      return 0;
+      return ONVIF_SUCCESS;
     }
 
     request->body = (char*)buffer + body_start;
     request->body_length = request->content_length;
+
+    // Validate request body content if present
+    if (request->body && request->body_length > 0) {
+      if (validate_xml_content(request->body, request->body_length) != ONVIF_VALIDATION_SUCCESS) {
+        platform_log_error("Invalid XML content in request body\n");
+        return ONVIF_ERROR_INVALID;
+      }
+    }
   } else {
     // No Content-Length header, assume no body
     request->body = NULL;
@@ -337,7 +360,7 @@ static int parse_http_body(const char* buffer, size_t buffer_used, http_request_
   }
 
   *need_more_data = 0;
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -348,7 +371,7 @@ static int parse_http_body(const char* buffer, size_t buffer_used, http_request_
  */
 static size_t count_http_headers(const char* headers, size_t headers_size) {
   if (!headers || headers_size == 0) {
-    return 0;
+    return ONVIF_SUCCESS;
   }
 
   const char* current = headers;
@@ -380,31 +403,31 @@ static size_t count_http_headers(const char* headers, size_t headers_size) {
  * @brief Parse HTTP request line (method, path, version)
  * @param request Raw request buffer
  * @param req Parsed request structure
- * @return 0 on success, -1 on error
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 int parse_http_request_line(const char* request, http_request_t* req) {
   if (!request || !req) {
-    return -1;
+    return ONVIF_ERROR_NULL;
   }
 
   // Find end of line
   const char* line_end = strstr(request, "\r\n");
   if (!line_end) {
     platform_log_error("Invalid request line format\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   size_t line_len = line_end - request;
   if (line_len == 0) {
     platform_log_error("Empty request line\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Find method end
   const char* method_end = strchr(request, ' ');
   if (!method_end || method_end >= line_end) {
     platform_log_error("Invalid method in request line\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Find path end
@@ -412,67 +435,96 @@ int parse_http_request_line(const char* request, http_request_t* req) {
   const char* path_end = strchr(path_start, ' ');
   if (!path_end || path_end >= line_end) {
     platform_log_error("Invalid path in request line\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
-  // Extract method
+  // Extract method using safe string function
   size_t method_len = method_end - request;
   if (method_len >= sizeof(req->method)) {
     platform_log_error("Method too long\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
-  strncpy(req->method, request, method_len);
-  req->method[method_len] = '\0';
+  if (memory_safe_strncpy(req->method, sizeof(req->method), request, method_len) < 0) {
+    platform_log_error("Failed to copy HTTP method safely\n");
+    return ONVIF_ERROR_INVALID;
+  }
 
-  // Extract path
+  // Extract path using safe string function
   size_t path_len = path_end - path_start;
   if (path_len >= sizeof(req->path)) {
     platform_log_error("Path too long\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
-  strncpy(req->path, path_start, path_len);
-  req->path[path_len] = '\0';
+  if (memory_safe_strncpy(req->path, sizeof(req->path), path_start, path_len) < 0) {
+    platform_log_error("Failed to copy HTTP path safely\n");
+    return ONVIF_ERROR_INVALID;
+  }
 
-  // Extract version
+  // Extract version using safe string function
   const char* version_start = path_end + 1;
   size_t version_len = line_end - version_start;
   if (version_len >= sizeof(req->version)) {
     platform_log_error("Version too long\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
-  strncpy(req->version, version_start, version_len);
-  req->version[version_len] = '\0';
+  if (memory_safe_strncpy(req->version, sizeof(req->version), version_start, version_len) < 0) {
+    platform_log_error("Failed to copy HTTP version safely\n");
+    return ONVIF_ERROR_INVALID;
+  }
 
-  return 0;
+  // Validate parsed components using common validation utilities
+  validation_result_t method_validation =
+    validate_string("HTTP method", req->method, 1, sizeof(req->method) - 1, 0);
+  if (!validation_is_valid(&method_validation)) {
+    platform_log_error("Invalid HTTP method: %s\n",
+                       validation_get_error_message(&method_validation));
+    return ONVIF_ERROR_INVALID;
+  }
+
+  validation_result_t path_validation =
+    validate_string("HTTP path", req->path, 1, sizeof(req->path) - 1, 0);
+  if (!validation_is_valid(&path_validation)) {
+    platform_log_error("Invalid HTTP path: %s\n", validation_get_error_message(&path_validation));
+    return ONVIF_ERROR_INVALID;
+  }
+
+  validation_result_t version_validation =
+    validate_string("HTTP version", req->version, 1, sizeof(req->version) - 1, 0);
+  if (!validation_is_valid(&version_validation)) {
+    platform_log_error("Invalid HTTP version: %s\n",
+                       validation_get_error_message(&version_validation));
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Additional HTTP-specific validation
+  if (validate_http_method(req->method) != ONVIF_VALIDATION_SUCCESS) {
+    platform_log_error("HTTP method validation failed: %s\n", req->method);
+    return ONVIF_ERROR_INVALID;
+  }
+
+  if (validate_http_path(req->path) != ONVIF_VALIDATION_SUCCESS) {
+    platform_log_error("HTTP path validation failed: %s\n", req->path);
+    return ONVIF_ERROR_INVALID;
+  }
+
+  if (validate_http_version(req->version) != ONVIF_VALIDATION_SUCCESS) {
+    platform_log_error("HTTP version validation failed: %s\n", req->version);
+    return ONVIF_ERROR_INVALID;
+  }
+
+  return ONVIF_SUCCESS;
 }
 
 /**
- * @brief Parse HTTP headers from raw header data
+ * @brief Parse individual header lines from raw header data
  * @param headers Raw header data
  * @param headers_size Size of header data
  * @param parsed_headers Array to store parsed headers
- * @param header_count Number of headers found
- * @return 0 on success, -1 on error
+ * @param count Number of headers to parse
+ * @return Number of headers successfully parsed
  */
-int parse_http_headers(const char* headers, size_t headers_size, http_header_t** parsed_headers,
-                       size_t* header_count) {
-  if (!headers || !parsed_headers || !header_count) {
-    return -1;
-  }
-
-  // Count headers first
-  size_t count = count_http_headers(headers, headers_size);
-  if (count == 0) {
-    return 0; // No headers found
-  }
-
-  // Allocate header array
-  *parsed_headers = malloc(count * sizeof(http_header_t));
-  if (!*parsed_headers) {
-    return -1;
-  }
-
-  // Parse headers
+static size_t parse_header_lines(const char* headers, size_t headers_size,
+                                 http_header_t* parsed_headers, size_t count) {
   const char* current = headers;
   const char* line_start = headers;
   size_t header_index = 0;
@@ -482,7 +534,7 @@ int parse_http_headers(const char* headers, size_t headers_size, http_header_t**
       size_t line_len = current - line_start;
       if (line_len > 0) {
         // Use helper function to parse single header line
-        if (parse_single_header_line(line_start, line_len, *parsed_headers, header_index) == 0) {
+        if (parse_single_header_line(line_start, line_len, parsed_headers, header_index) == 0) {
           header_index++;
         }
       }
@@ -493,8 +545,78 @@ int parse_http_headers(const char* headers, size_t headers_size, http_header_t**
     }
   }
 
+  return header_index;
+}
+
+/**
+ * @brief Validate all parsed headers using common validation utilities
+ * @param parsed_headers Array of parsed headers
+ * @param header_count Number of headers to validate
+ * @return ONVIF_SUCCESS if all headers are valid, error code if validation fails
+ */
+static int validate_parsed_headers(http_header_t* parsed_headers, size_t header_count) {
+  for (size_t i = 0; i < header_count; i++) {
+    if (parsed_headers[i].name && parsed_headers[i].value) {
+      validation_result_t name_validation =
+        validate_string("Header name", parsed_headers[i].name, 1, HTTP_MAX_HEADER_LINE_LENGTH, 0);
+      if (!validation_is_valid(&name_validation)) {
+        platform_log_error("Invalid header name: %s\n",
+                           validation_get_error_message(&name_validation));
+        return ONVIF_ERROR_INVALID;
+      }
+
+      validation_result_t value_validation =
+        validate_string("Header value", parsed_headers[i].value, 0, HTTP_MAX_HEADER_LINE_LENGTH, 1);
+      if (!validation_is_valid(&value_validation)) {
+        platform_log_error("Invalid header value: %s\n",
+                           validation_get_error_message(&value_validation));
+        return ONVIF_ERROR_INVALID;
+      }
+    }
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Parse HTTP headers from raw header data
+ * @param headers Raw header data
+ * @param headers_size Size of header data
+ * @param parsed_headers Array to store parsed headers
+ * @param header_count Number of headers found
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
+ */
+int parse_http_headers(const char* headers, size_t headers_size, http_header_t** parsed_headers,
+                       size_t* header_count) {
+  if (!headers || !parsed_headers || !header_count) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Count headers first
+  size_t count = count_http_headers(headers, headers_size);
+  if (count == 0) {
+    return ONVIF_SUCCESS; // No headers found
+  }
+
+  // Allocate header array
+  *parsed_headers = malloc(count * sizeof(http_header_t));
+  if (!*parsed_headers) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Parse header lines using helper function
+  size_t header_index = parse_header_lines(headers, headers_size, *parsed_headers, count);
   *header_count = header_index;
-  return 0;
+
+  // Validate parsed headers using helper function
+  if (validate_parsed_headers(*parsed_headers, header_index) != ONVIF_SUCCESS) {
+    free_http_headers(*parsed_headers, header_index);
+    *parsed_headers = NULL;
+    *header_count = 0;
+    return ONVIF_ERROR_INVALID;
+  }
+
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -503,12 +625,12 @@ int parse_http_headers(const char* headers, size_t headers_size, http_header_t**
  * @param buffer_used Amount of data in buffer
  * @param request Parsed request structure
  * @param need_more_data Flag indicating if more data is needed
- * @return 0 on success, -1 on error
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_request_t* request,
                                      int* need_more_data) {
   if (!buffer || !request || !need_more_data) {
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   static int state = 0; // 0: reading request line, 1: reading headers, 2: reading body
@@ -531,7 +653,7 @@ int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_requ
       char* line_end = strstr(buffer + pos, "\r\n");
       if (!line_end) {
         *need_more_data = 1;
-        return 0;
+        return ONVIF_SUCCESS;
       }
 
       // Parse request line using helper functions
@@ -543,7 +665,7 @@ int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_requ
           parse_http_version(buffer, &current_pos, buffer_used, request, &current_line_start) !=
             0) {
         platform_log_error("Failed to parse request line\n");
-        return -1;
+        return ONVIF_ERROR_INVALID;
       }
 
       pos = line_end - buffer + 2; // Skip \r\n
@@ -557,7 +679,7 @@ int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_requ
       char* header_end = strstr(buffer + pos, "\r\n\r\n");
       if (!header_end) {
         *need_more_data = 1;
-        return 0;
+        return ONVIF_SUCCESS;
       }
 
       // Parse headers using helper function
@@ -565,7 +687,7 @@ int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_requ
       if (parse_http_headers_state(buffer, &pos, buffer_used, request, &const_line_start,
                                    &header_length) != 0) {
         platform_log_error("Failed to parse headers\n");
-        return -1;
+        return ONVIF_ERROR_INVALID;
       }
 
       state = 2;
@@ -575,26 +697,26 @@ int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_requ
     case 2: { // Reading body
       if (parse_http_body(buffer, buffer_used, request, header_length, need_more_data) != 0) {
         platform_log_error("Failed to parse body\n");
-        return -1;
+        return ONVIF_ERROR_INVALID;
       }
 
       if (*need_more_data) {
-        return 0;
+        return ONVIF_SUCCESS;
       }
 
       // Request parsing complete
       state = 0;
       pos = 0;
-      return 0;
+      return ONVIF_SUCCESS;
     }
 
     default:
       platform_log_error("Invalid state: %d\n", state);
-      return -1;
+      return ONVIF_ERROR_INVALID;
     }
   }
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /* ============================================================================
@@ -609,25 +731,28 @@ int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_requ
  * @param header_name Name of header to find
  * @param value Buffer to store value
  * @param value_size Size of value buffer
- * @return 0 if found, -1 if not found
+ * @return ONVIF_SUCCESS if found, ONVIF_ERROR_NOT_FOUND if not found, ONVIF_ERROR_INVALID on error
  */
 int find_header_value(const http_header_t* headers, size_t header_count, const char* header_name,
                       char* value, size_t value_size) {
   if (!headers || !header_name || !value || value_size == 0) {
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   for (size_t i = 0; i < header_count; i++) {
     if (headers[i].name && strcasecmp(headers[i].name, header_name) == 0) {
       if (headers[i].value) {
-        strncpy(value, headers[i].value, value_size - 1);
-        value[value_size - 1] = '\0';
-        return 0;
+        if (memory_safe_strncpy(value, value_size, headers[i].value, strlen(headers[i].value)) <
+            0) {
+          platform_log_error("Failed to copy header value safely\n");
+          return ONVIF_ERROR_INVALID;
+        }
+        return ONVIF_SUCCESS;
       }
     }
   }
 
-  return -1;
+  return ONVIF_ERROR_NOT_FOUND;
 }
 
 /**
@@ -654,11 +779,11 @@ void free_http_headers(http_header_t* headers, size_t header_count) { // NOLINT
  * @brief Send HTTP response to client
  * @param client Client socket file descriptor
  * @param response Response structure
- * @return 0 on success, -1 on error
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 int send_http_response(int client, const http_response_t* response) {
   if (!response) {
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   char header[HTTP_RESPONSE_BUFFER_SIZE];
@@ -681,7 +806,7 @@ int send_http_response(int client, const http_response_t* response) {
 
   if (result < 0 || (size_t)result >= sizeof(header)) {
     platform_log_error("Failed to format HTTP response header\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Add custom headers
@@ -692,14 +817,14 @@ int send_http_response(int client, const http_response_t* response) {
 
     if (header_result < 0 || (size_t)header_result >= (sizeof(header) - strlen(header))) {
       platform_log_error("Failed to format custom header\n");
-      return -1;
+      return ONVIF_ERROR_INVALID;
     }
   }
 
   // Add final CRLF
   if (strlen(header) + 2 >= sizeof(header)) {
     platform_log_error("Response header too large\n");
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
   strcat(header, "\r\n");
 
@@ -707,7 +832,7 @@ int send_http_response(int client, const http_response_t* response) {
   ssize_t sent = send(client, header, strlen(header), 0);
   if (sent < 0) {
     platform_log_error("Failed to send header: %s\n", strerror(errno));
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Send body if present
@@ -715,11 +840,11 @@ int send_http_response(int client, const http_response_t* response) {
     sent = send(client, response->body, response->body_length, 0);
     if (sent < 0) {
       platform_log_error("Failed to send body: %s\n", strerror(errno));
-      return -1;
+      return ONVIF_ERROR_INVALID;
     }
   }
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -779,39 +904,48 @@ http_response_t create_http_400_response(void) {
  * @param response Response structure to add header to
  * @param name Header name
  * @param value Header value
- * @return 0 on success, -1 on error
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 int http_response_add_header(http_response_t* response, const char* name, const char* value) {
   if (!response || !name || !value) {
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Allocate new header
   http_header_t* new_headers =
     realloc(response->headers, (response->header_count + 1) * sizeof(http_header_t));
   if (!new_headers) {
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 
   response->headers = new_headers;
 
-  // Allocate and copy header name
+  // Allocate and copy header name using safe string function
   response->headers[response->header_count].name = malloc(strlen(name) + 1);
   if (!response->headers[response->header_count].name) {
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
-  strcpy(response->headers[response->header_count].name, name);
+  if (memory_safe_strcpy(response->headers[response->header_count].name, strlen(name) + 1, name) <
+      0) {
+    free(response->headers[response->header_count].name);
+    return ONVIF_ERROR_INVALID;
+  }
 
-  // Allocate and copy header value
+  // Allocate and copy header value using safe string function
   response->headers[response->header_count].value = malloc(strlen(value) + 1);
   if (!response->headers[response->header_count].value) {
     free(response->headers[response->header_count].name);
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
-  strcpy(response->headers[response->header_count].value, value);
+  if (memory_safe_strcpy(response->headers[response->header_count].value, strlen(value) + 1,
+                         value) < 0) {
+    free(response->headers[response->header_count].name);
+    free(response->headers[response->header_count].value);
+    return ONVIF_ERROR_INVALID;
+  }
 
   response->header_count++;
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
