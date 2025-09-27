@@ -56,8 +56,9 @@ The logging system follows a layered architecture with clear separation of conce
 
 1. **API Layer**: Simple function-based interface for all logging operations
 2. **Formatting Layer**: Standardized message formatting with timestamp, hostname, and component identification
-3. **Output Layer**: Thread-safe stdout output with buffering optimization
-4. **Configuration Layer**: Integration with existing configuration management
+3. **Security & Sanitization Layer**: Normalizes user-supplied data and enforces injection-prevention rules before formatting
+4. **Output Layer**: Thread-safe stdout output with buffering optimization
+5. **Configuration Layer**: Integration with existing configuration management
 
 ### Modular Design Principles
 
@@ -70,10 +71,13 @@ The logging system follows a layered architecture with clear separation of conce
 graph TD
     A[Application Code] --> B[Logging API]
     B --> C[Log Level Check]
-    C --> D[Message Formatting]
+    C --> S[Input Sanitization]
+    S --> D[Message Formatting]
     D --> E[Hostname Resolution]
     D --> F[Timestamp Generation]
     D --> G[Component Path Building]
+    S --> T[Sensitive Field Redaction]
+    T --> D
     E --> H[Output Formatting]
     F --> H
     G --> H
@@ -85,6 +89,8 @@ graph TD
 
     style A fill:#e1f5fe
     style B fill:#f3e5f5
+    style S fill:#fce4ec
+    style T fill:#fce4ec
     style I fill:#e8f5e8
     style J fill:#fff3e0
 ```
@@ -164,6 +170,28 @@ typedef struct {
 } log_config_t;
 ```
 
+## Security and Sanitization Strategy
+
+The unified logger enforces defensive sanitization before formatting to satisfy the Security First principle and Requirement 7:
+
+- **Maximum Message Length**: Log payloads are truncated to 1024 bytes (including terminator). When truncation occurs, a suffix "..." is appended and a single warning is emitted per context to avoid log floods.
+- **Control Character Filtering**: Characters below ASCII 0x20 (except `\t`) and 0x7F are replaced with a space. Embedded `\n` and `\r` are normalized to spaces to prevent multi-line injection.
+- **Format String Safety**: All public APIs accept `const char *format` and route through bounded `vsnprintf` helpers that reject `%n` specifiers and enforce explicit length caps.
+- **Sensitive Token Redaction**: Key/value pairs with case-insensitive keys such as `password`, `passwd`, `token`, `secret`, or `apikey` are rewritten to `***` before emission. This helper is reusable by ONVIF services when constructing context payloads.
+- **UTF-8 Validation**: Invalid byte sequences are replaced with `?` to keep downstream tooling stable.
+
+The sanitization logic resides in `src/utils/logging/logging_sanitizer.c` with a companion header to keep responsibilities isolated and testable.
+
+## Configuration Behavior
+
+Requirement 6 mandates simple configuration semantics. The design adopts the following policies:
+
+- **Read-Only Runtime Configuration**: Log level and hostname cache are loaded during startup from `logging_settings` and stored in `log_config_t`. Updating levels requires a process restart; no runtime setters are exposed.
+- **Stdout-Only Transport**: All log records are written to stdout. If stdout becomes unavailable, output falls back to stderr and a single `LOG_ERROR` is emitted indicating degraded mode.
+- **Static Defaults**: When configuration data is missing, defaults of `LOG_LEVEL_INFO`, hostname `UNKNOWN-HOST`, and timestamps enabled are applied.
+- **Configuration Validation**: Invalid log levels are clamped to the nearest supported value and a warning is logged once per boot cycle.
+
+
 ## Error Handling
 
 ### Error Scenarios
@@ -185,8 +213,8 @@ typedef struct {
    - **User Impact:** Logs lack context information but continue to work
 
 5. **Thread Mutex Lock Failure**
-   - **Handling:** Continue without locking, accept potential race conditions over application failure
-   - **User Impact:** Possible garbled log output under heavy load, but no crashes
+   - **Handling:** Attempt a bounded retry (three spins). If locking still fails, drop the log entry, increment a diagnostic counter, and emit a throttled `LOG_ERROR` once per minute indicating contention.
+   - **User Impact:** Individual log lines may be skipped under extreme contention, but output remains well-formed and the application stays stable.
 
 6. **Format String Vulnerabilities**
    - **Handling:** Input validation and sanitization, limited format specifier support

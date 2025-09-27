@@ -80,29 +80,27 @@ This feature directly supports several key product principles and objectives:
 
 ### Requirement 6: Simple Configuration Management
 
-**User Story:** As a system administrator, I want simple logging configuration that works reliably, so that I can focus on camera operation rather than complex logging setup.
+**User Story:** As a system administrator, I want predictable logging configuration that stays stable at runtime, so that operational workflows remain simple.
 
 #### Acceptance Criteria
 
-1. WHEN the system starts THEN logging configuration SHALL be loaded from the application configuration system with a fixed log level
-2. WHEN the system is running THEN all log messages SHALL be output to stdout for consistent behavior
-3. WHEN log level changes are needed THEN they SHALL require a service restart for simplicity and reliability
-4. WHEN viewing logs THEN administrators SHALL use standard Unix tools (grep, tail, etc.) to filter and monitor stdout output
+1. WHEN the system starts THEN logging level and hostname settings SHALL be loaded from the application configuration and cached for the duration of the process.
+2. WHEN administrators need to adjust log verbosity THEN they SHALL restart the service; no runtime API SHALL exist to modify log level.
+3. WHEN stdout becomes unavailable THEN the logger SHALL fall back to stderr and emit a single error describing the degraded mode.
+4. WHEN the configuration specifies an unsupported log level THEN the system SHALL clamp it to the nearest supported level and emit a warning once per boot.
 
 ### Requirement 7: Standardized Log Format
 
-**User Story:** As a system administrator analyzing logs, I want all log messages to follow a consistent, parseable format, so that I can easily process logs with automated tools and quickly identify important information.
+**User Story:** As a system administrator analyzing logs, I want all log messages to follow a consistent, parseable format, so that automated tooling can rely on the structure.
 
 #### Acceptance Criteria
 
-1. WHEN any log message is output THEN it SHALL follow the exact format: `YYYY-MM-DD HH:MM:SS,mmm LEVEL [HOSTNAME] component.path.identifier Message text`
-2. WHEN a log message includes timestamp THEN it SHALL use ISO date format with millisecond precision (e.g., `2018-10-25 11:56:35,008`)
-3. WHEN a log message includes level THEN it SHALL use standard levels: TRACE, DEBUG, INFO, NOTICE, WARNING, ERROR, FATAL (e.g., `INFO`)
-4. WHEN a log message includes hostname THEN it SHALL be enclosed in square brackets with the system hostname (e.g., `[CAMERA-001]`, `[CAM-192-168-1-100]`)
-5. WHEN a log message includes component path THEN it SHALL use dot notation to identify the source (e.g., `onvif.device.capabilities`, `platform.video.encoder`)
-6. WHEN a log message includes message text THEN it SHALL be the actual log content (e.g., `Found 7 children for 7 groups in 2 ms`)
-
-Example complete log line: `2018-10-25 11:56:35,008 INFO  [CAMERA-001]  onvif.device.capabilities GetCapabilities completed successfully in 15 ms`
+1. WHEN any log message is output THEN it SHALL follow the exact format `YYYY-MM-DD HH:MM:SS,mmm LEVEL [HOSTNAME] component.path.identifier Message text`.
+2. WHEN timestamps are generated THEN they SHALL use ISO 8601 date and time with millisecond precision (e.g., `2018-10-25 11:56:35,008`).
+3. WHEN level names are rendered THEN they SHALL use one of `TRACE`, `DEBUG`, `INFO`, `NOTICE`, `WARNING`, `ERROR`, or `FATAL`.
+4. WHEN hostnames are emitted THEN they SHALL be enclosed in square brackets and derived from the sanitized hostname cache.
+5. WHEN component paths are emitted THEN they SHALL use dot notation and originate from the logging context or fallback default.
+6. WHEN a formatted log line is produced THEN it SHALL contain no raw control characters other than space or tab.
 
 ## Non-Functional Requirements
 
@@ -134,3 +132,38 @@ Example complete log line: `2018-10-25 11:56:35,008 INFO  [CAMERA-001]  onvif.de
 - **Clear Documentation**: All logging functions SHALL have comprehensive Doxygen documentation with examples
 - **Migration Support**: Automated scripts SHALL be provided to convert existing logging calls to the unified API
 - **IDE Integration**: The function-based API SHALL provide excellent IDE support with autocomplete and parameter hints
+
+### Requirement 8: Security and Sanitization
+
+**User Story:** As a security engineer, I want every log message to be sanitized before it is emitted, so that malicious input cannot corrupt log streams or leak sensitive content.
+
+#### Acceptance Criteria
+
+1. WHEN a log message exceeds 1024 bytes THEN it SHALL be truncated with a `...` suffix and a warning SHALL be emitted once per component.
+2. WHEN a log message contains control characters below ASCII 0x20 (excluding tab) or 0x7F THEN they SHALL be replaced with spaces before output.
+3. WHEN a log message contains invalid UTF-8 sequences THEN they SHALL be replaced with `?` characters prior to emission.
+4. WHEN sensitive keys such as `password`, `token`, `secret`, or `apikey` appear in log context THEN their values SHALL be redacted to `***` automatically.
+5. WHEN a logging function formats a message THEN the implementation SHALL reject `%n` specifiers and enforce bounded `vsnprintf` usage.
+
+### Requirement 9: Configuration Behavior
+
+**User Story:** As an operator, I want predictable logging behaviour tied to startup configuration, so that runtime changes do not introduce instability.
+
+#### Acceptance Criteria
+
+1. WHEN the application starts THEN logging level and hostname settings SHALL be loaded once from `logging_settings` and cached for runtime use.
+2. WHEN administrators need to change log level THEN they SHALL restart the service; no runtime API SHALL exist to mutate levels.
+3. WHEN stdout becomes unavailable THEN logging SHALL fail over to stderr and emit a single error describing the degraded mode.
+4. WHEN configuration specifies an unsupported log level THEN the system SHALL clamp it to the nearest supported value and log a warning once per boot.
+
+### Requirement 10: Migration Tooling
+
+**User Story:** As a maintainer, I want automated assistance migrating legacy logging calls to the unified API, so that the transition is fast and free of human error.
+
+#### Acceptance Criteria
+
+1. WHEN the migration script runs THEN it SHALL locate and rewrite `platform_log_*`, `service_log_*`, and `printf`-style logging calls to the new API.
+2. WHEN the migration script completes THEN it SHALL generate a report listing any calls it could not convert automatically.
+3. WHEN the migration script executes THEN it SHALL preserve existing include ordering and coding standards.
+4. WHEN developers run unit tests after migration THEN no legacy logging references SHALL remain.
+

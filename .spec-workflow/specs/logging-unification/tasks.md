@@ -1,299 +1,326 @@
 # Tasks Document
 
-- [ ] 1. Create core logging implementation in src/utils/logging/logging.h
+- [ ] 1. Create logging API header
   - File: src/utils/logging/logging.h
-  - Define function-based logging API with log levels (error, warning, info, debug)
-  - Create log context structure for service and operation tracking
-  - Purpose: Establish unified logging interface for entire ONVIF project
+  - Define function-based logging API with error/warning/info/debug levels
+  - Create log_context_t structure for service and operation tracking
+  - Purpose: Establish unified logging interface for the ONVIF project
   - _Leverage: src/core/config/config.h, src/utils/string/string_shims.h_
-  - _Requirements: 1.1, 1.2, 1.3_
-  - _Prompt: Role: Systems Programming Developer specializing in C embedded systems and logging frameworks | Task: Implement core logging header file for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Create comprehensive logging API following requirements 1.1, 1.2, and 1.3, defining function-based interface with log levels and context structures, leveraging existing configuration patterns from src/core/config/config.h and string utilities from src/utils/string/string_shims.h | Restrictions: Must use C99 standards, avoid macro-heavy approaches, ensure thread safety, do not modify existing config structures | Success: Header compiles without errors, provides complete logging API, follows project coding standards from AGENTS.md, includes comprehensive Doxygen documentation_
+  - _Requirements: 1, 3
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Systems Programming Developer specializing in C embedded systems | Task: Design the unified logging header exposing function-based APIs and context helpers mapped to requirements 1 and 3 | Restrictions: Use C99, avoid macro-heavy patterns, keep thread safety considerations, do not mutate existing config structures | Success: Header compiles cleanly, exports required prototypes, includes Doxygen docs, passes clang-tidy_
 
-- [ ] 2. Implement core logging functionality in src/utils/logging/logging.c
+- [ ] 2. Implement logging core
   - File: src/utils/logging/logging.c
   - Implement log level functions with standardized format output
-  - Add timestamp generation with millisecond precision
-  - Add hostname resolution and component path building
-  - Purpose: Provide complete logging implementation with performance optimization
+  - Generate timestamps with millisecond precision
+  - Build hostname and component paths for formatted messages
+  - Purpose: Provide logging implementation that meets performance and format targets
   - _Leverage: src/platform/platform.h, src/utils/memory/memory_manager.h, src/utils/string/string_shims.h_
-  - _Requirements: 1.1, 1.4, 1.7_
-  - _Prompt: Role: Systems Programming Developer with expertise in C performance optimization and embedded systems | Task: Implement logging functionality for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Create complete logging implementation following requirements 1.1, 1.4, and 1.7, implementing standardized log format "YYYY-MM-DD HH:MM:SS,mmm LEVEL [HOSTNAME] component.path.identifier Message text", using platform utilities for hostname and memory management patterns | Restrictions: Must achieve <1% CPU overhead, use fixed memory buffers only, ensure thread safety with minimal locking, output only to stdout | Success: All logging functions work correctly, format matches specification exactly, performance requirements met, thread-safe operation verified_
+  - _Requirements: 1, 5, 7
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Embedded Systems Performance Developer | Task: Build the logging core that formats messages per requirement 7 while meeting performance targets from requirements 1 and 5 | Restrictions: Achieve <1% CPU overhead, use fixed buffers, ensure thread safety with minimal locking, output to stdout | Success: Logging functions emit the exact format, performance benchmarks pass, thread-safety validated_
 
-- [ ] 3. Implement contextual logging support in src/utils/logging/logging.c
-  - File: src/utils/logging/logging.c (continue from task 2)
-  - Add context creation and management functions
-  - Implement contextual logging functions with service/operation tracking
-  - Add session ID support for request tracing
-  - Purpose: Enable service-aware logging for ONVIF operations
+- [ ] 3. Add contextual logging support
+  - File: src/utils/logging/logging.c
+  - Implement context creation/destruction helpers
+  - Expose log_*_ctx functions with service/operation tagging
+  - Add optional session ID support for request tracing
+  - Purpose: Provide service-aware logging capabilities
   - _Leverage: src/utils/memory/memory_manager.h, existing service patterns_
-  - _Requirements: 1.2, 1.4_
-  - _Prompt: Role: Systems Programming Developer with expertise in C context management and service architectures | Task: Implement contextual logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Add context management and contextual logging functions following requirements 1.2 and 1.4, enabling service and operation tracking for ONVIF services, using existing memory management patterns | Restrictions: Must handle context lifecycle properly, avoid memory leaks, ensure context thread safety, maintain component.path.identifier format | Success: Context creation/destruction works correctly, contextual logging includes proper service identification, memory management is leak-free, supports concurrent contexts_
+  - _Requirements: 1, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Context Management Developer | Task: Extend the logging core with context-aware APIs satisfying requirements 1 and 4 | Restrictions: Prevent leaks, keep context thread-safe, maintain component.path.identifier formatting | Success: Context APIs manage lifecycle correctly and contextual messages include service/operation identifiers_
 
-- [ ] 4. Integrate with configuration system in src/core/config/config.h
-  - File: src/core/config/config.h (modify existing)
-  - Extend logging_settings structure for unified logging configuration
-  - Add log level and hostname configuration options
-  - Purpose: Enable configuration-driven logging behavior
-  - _Leverage: existing configuration patterns, src/core/lifecycle/config_lifecycle.c_
-  - _Requirements: 1.6_
-  - _Prompt: Role: Configuration Systems Developer with expertise in C configuration management and lifecycle patterns | Task: Integrate logging configuration for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Extend configuration system following requirement 1.6, adding unified logging settings to existing logging_settings structure, integrating with configuration lifecycle management | Restrictions: Must maintain backward compatibility during migration, follow existing configuration patterns, do not break existing config loading | Success: Configuration loading works correctly, logging settings are properly applied, integration with lifecycle management is seamless_
+- [ ] 4. Implement logging sanitization helpers
+  - File: src/utils/logging/logging_sanitizer.c
+  - Create sanitization routines for control characters and UTF-8 validation
+  - Add sensitive token redaction helpers
+  - Enforce maximum message length with truncation reporting
+  - Purpose: Provide reusable sanitization utilities for the logging pipeline
+  - _Leverage: src/utils/string/string_shims.h, src/utils/error/error_handling.h_
+  - _Requirements: 7, 8
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Security-Focused Systems Developer | Task: Implement the sanitization layer fulfilling requirements 7 and 8 with message length limits, control filtering, and sensitive-data redaction | Restrictions: Use bounded buffers only, avoid heap allocations, keep helpers reusable and documented | Success: Sanitizer enforces policies, exposes testable APIs, documented in Doxygen_
 
-- [ ] 5. Add configuration integration in src/utils/logging/logging.c
-  - File: src/utils/logging/logging.c (continue from previous tasks)
-  - Implement log_config_init() and log_config_cleanup() functions
-  - Add log level filtering with early return optimization
-  - Add hostname caching for performance
-  - Purpose: Complete configuration integration and performance optimization
-  - _Leverage: src/core/config/config.h, src/core/lifecycle/config_lifecycle.c_
-  - _Requirements: 1.6, 1.5_
-  - _Prompt: Role: Performance-focused C Developer with expertise in embedded systems optimization | Task: Complete configuration integration for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Implement configuration functions and performance optimizations following requirements 1.6 and 1.5, adding early return optimization for disabled log levels and hostname caching | Restrictions: Must achieve zero-cost for disabled levels, maintain thread safety, ensure graceful fallback for configuration errors | Success: Configuration loading is robust, disabled log levels have zero performance impact, hostname caching works correctly, early return optimization verified_
+- [ ] 5. Wire sanitization into logging pipeline
+  - File: src/utils/logging/logging.c
+  - Invoke sanitization helpers before formatting
+  - Reject disallowed format specifiers and enforce bounded vsnprintf
+  - Emit truncation warnings once per component
+  - Purpose: Integrate sanitization layer with logging output
+  - _Leverage: src/utils/logging/logging_sanitizer.h_
+  - _Requirements: 1, 7, 8
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Security-Oriented Logging Developer | Task: Integrate the sanitization helpers into the logging pipeline to meet requirements 1, 7, and 8 | Restrictions: Preserve performance constraints, ensure warning throttling, maintain thread safety | Success: All log outputs pass through sanitizer, `%n` rejected, truncation warnings throttled_
 
-- [ ] 6. Migrate platform logging in src/platform/platform_anyka.c
+- [ ] 6. Create sanitization unit tests
+  - File: tests/utils/logging_sanitizer_tests.c
+  - Test truncation, control filtering, and UTF-8 replacement
+  - Validate sensitive token redaction
+  - Verify `%n` rejection and bounded formatting
+  - Purpose: Ensure sanitization helpers behave as specified
+  - _Leverage: CMocka test harness_
+  - _Requirements: 8
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Security Test Engineer | Task: Author unit tests covering sanitization acceptance criteria for requirement 8 | Restrictions: Use existing test framework, cover success and failure cases, avoid flaky timing checks | Success: Tests cover all sanitization rules and run cleanly in CI_
+
+- [ ] 7. Extend logging configuration structures
+  - File: src/core/config/config.h
+  - Add unified logging settings including min level and hostname
+  - Document new configuration fields
+  - Purpose: Expose unified logging settings through configuration structures
+  - _Leverage: Existing configuration patterns_
+  - _Requirements: 6, 9
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Configuration Systems Developer | Task: Extend logging_settings to capture the unified logger parameters meeting requirements 6 and 9 | Restrictions: Maintain ABI compatibility, update Doxygen comments, avoid altering unrelated structs | Success: Structures compile, configuration docs updated, no regressions in existing config consumers_
+
+- [ ] 8. Implement configuration runtime support
+  - File: src/utils/logging/logging.c
+  - Implement log_config_init/log_config_cleanup
+  - Cache log level and hostname at startup
+  - Add stdout-to-stderr fallback handler
+  - Purpose: Complete configuration integration and performance optimisation
+  - _Leverage: src/core/lifecycle/config_lifecycle.c, src/platform/platform.h_
+  - _Requirements: 5, 6, 9
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Performance-focused C Developer | Task: Implement configuration runtime handling satisfying requirements 5, 6, and 9 including fallback logging and clamping | Restrictions: Ensure constant-time level checks, avoid runtime heap usage after init, throttle fallback error | Success: Configuration initialises correctly, disabled levels return immediately, fallback and clamping behaviour verified_
+
+- [ ] 9. Add format validation tests
+  - File: tests/utils/logging_format_tests.c
+  - Verify rendered lines match the exact required format
+  - Ensure no control characters appear in output
+  - Check hostname and component formatting
+  - Purpose: Prove compliance with standardized log format
+  - _Leverage: Existing unit test infrastructure_
+  - _Requirements: 7
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Logging Validation Engineer | Task: Build automated tests asserting the standard log format for requirement 7 | Restrictions: Use deterministic timestamps via dependency injection, avoid external process dependencies | Success: Tests detect format regressions and run quickly in CI_
+
+- [ ] 10. Add logging performance microbenchmarks
+  - File: tests/perf/logging_perf_tests.c
+  - Benchmark enabled vs disabled level overhead
+  - Measure throughput under concurrent logging
+  - Purpose: Validate performance requirements
+  - _Leverage: Existing perf test harness_
+  - _Requirements: 5
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Embedded Performance Engineer | Task: Create microbenchmarks verifying requirement 5 performance targets | Restrictions: Use fixed-size datasets, avoid hardware-specific timers, capture baseline metrics | Success: Benchmarks confirm <1% CPU overhead and constant-time disabled level checks_
+
+- [ ] 11. Migrate platform logging
   - File: src/platform/platform_anyka.c
-  - Replace platform_log_* calls with unified log_* functions
-  - Update include statements to use new logging API
-  - Add appropriate context for platform operations
-  - Purpose: Begin systematic migration from legacy logging systems
-  - _Leverage: src/utils/logging/logging.h, existing platform abstraction patterns_
-  - _Requirements: 2.1_
-  - _Prompt: Role: Platform Integration Developer with expertise in hardware abstraction and migration strategies | Task: Migrate platform logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Replace legacy platform logging calls following requirement 2.1, updating all platform_log_* calls to use unified logging API with appropriate platform context | Restrictions: Must maintain existing functionality, do not change platform operation behavior, ensure proper error handling | Success: All platform logging migrated correctly, functionality unchanged, new logging format applied, no compilation errors_
+  - Replace platform_log_* calls with unified log_*
+  - Attach platform context metadata
+  - Purpose: Begin legacy system migration
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Platform Integration Developer | Task: Replace platform logging calls with unified APIs while adding platform context per requirements 2 and 4 | Restrictions: Preserve behaviour, maintain error handling, ensure compilation | Success: Platform module builds with unified logging and context metadata_
 
-- [ ] 7. Migrate lifecycle management logging
-  - Files: src/core/lifecycle/config_lifecycle.c, src/core/lifecycle/network_lifecycle.c, src/core/lifecycle/signal_lifecycle.c, src/core/lifecycle/service_manager.c
-  - Replace platform logging calls with unified logging
-  - Add lifecycle context to log messages
-  - Update error handling to use new logging format
-  - Purpose: Complete platform layer migration
-  - _Leverage: src/utils/logging/logging.h, lifecycle management patterns_
-  - _Requirements: 2.1_
-  - _Prompt: Role: Systems Integration Developer with expertise in lifecycle management and service orchestration | Task: Migrate lifecycle logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update all lifecycle modules following requirement 2.1, replacing legacy logging with unified API and adding appropriate lifecycle context to messages | Restrictions: Must preserve lifecycle behavior, maintain error propagation, ensure startup/shutdown logging continuity | Success: All lifecycle modules use unified logging, lifecycle events properly logged with context, system startup/shutdown behavior unchanged_
+- [ ] 12. Migrate lifecycle logging
+  - File: src/core/lifecycle/
+  - Replace lifecycle logging macros with unified APIs
+  - Add lifecycle stage context
+  - Purpose: Migrate lifecycle subsystem to unified logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Systems Integration Developer | Task: Migrate lifecycle modules to the unified logger with context per requirements 2 and 4 | Restrictions: Preserve startup/shutdown sequencing, maintain error propagation | Success: Lifecycle logs use unified API with stage context_
 
-- [ ] 8. Migrate ONVIF Device Service logging in src/services/device/onvif_device.c
+- [ ] 13. Migrate device service logging
   - File: src/services/device/onvif_device.c
-  - Replace service logging calls with contextual unified logging
-  - Add device service context for all operations
-  - Update capability request logging with operation tracking
-  - Purpose: Begin service layer migration with contextual logging
-  - _Leverage: src/utils/logging/logging.h, existing device service patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: ONVIF Protocol Developer with expertise in device services and compliance | Task: Migrate device service logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update device service logging following requirement 2.2, replacing service-specific logging with contextual unified logging for all device operations | Restrictions: Must maintain ONVIF compliance, preserve service functionality, ensure proper error reporting | Success: Device service uses contextual logging, ONVIF operations properly traced, service functionality unchanged, compliance maintained_
+  - Replace service_log_* calls
+  - Add contextual tokens for device operations
+  - Purpose: Bring device service onto unified logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: ONVIF Device Developer | Task: Migrate device service logging to unified API with contextual metadata | Restrictions: Maintain ONVIF compliance, keep error flows intact | Success: Device service builds with unified logger and passes tests_
 
-- [ ] 9. Migrate ONVIF Media Service logging in src/services/media/onvif_media.c
+- [ ] 14. Migrate media service logging
   - File: src/services/media/onvif_media.c
-  - Replace service logging with contextual unified logging
-  - Add media service context for profile and streaming operations
-  - Update video/audio configuration logging with session tracking
-  - Purpose: Complete media service migration with operation tracing
-  - _Leverage: src/utils/logging/logging.h, media service patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: Media Streaming Developer with expertise in ONVIF media services and video processing | Task: Migrate media service logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update media service logging following requirement 2.2, implementing contextual logging for all media operations including profile management and streaming | Restrictions: Must not affect streaming performance, maintain media operation timing, preserve video/audio quality | Success: Media service uses contextual logging, streaming operations properly traced, performance impact minimal, media functionality unchanged_
+  - Replace service logging calls
+  - Provide media profile context
+  - Purpose: Align media service logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: ONVIF Media Developer | Task: Adopt unified logging within media service with contextual information | Restrictions: Preserve streaming configuration behaviour | Success: Media service logs through unified API with context_
 
-- [ ] 10. Migrate ONVIF PTZ Service logging in src/services/ptz/onvif_ptz.c
+- [ ] 15. Migrate PTZ service logging
   - File: src/services/ptz/onvif_ptz.c
-  - Replace service logging with contextual unified logging
-  - Add PTZ service context for movement and preset operations
-  - Update continuous movement logging with session tracking
-  - Purpose: Complete PTZ service migration with operation context
-  - _Leverage: src/utils/logging/logging.h, PTZ service patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: PTZ Control Developer with expertise in camera movement systems and ONVIF PTZ services | Task: Migrate PTZ service logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update PTZ service logging following requirement 2.2, implementing contextual logging for all PTZ operations including movement, presets, and continuous control | Restrictions: Must not affect PTZ response times, maintain movement precision, preserve PTZ operation timing | Success: PTZ service uses contextual logging, movement operations properly traced, response times unchanged, PTZ functionality preserved_
+  - Replace legacy PTZ logging
+  - Add PTZ movement context
+  - Purpose: Unify PTZ logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: PTZ Control Developer | Task: Replace PTZ logging with unified API and contextual metadata | Restrictions: Maintain movement accuracy, keep presets intact | Success: PTZ logs use unified API with contextual data_
 
-- [ ] 11. Migrate ONVIF Imaging Service logging in src/services/imaging/onvif_imaging.c
+- [ ] 16. Migrate imaging service logging
   - File: src/services/imaging/onvif_imaging.c
-  - Replace service logging with contextual unified logging
-  - Add imaging service context for parameter adjustments
-  - Update brightness/contrast/saturation logging with operation tracking
-  - Purpose: Complete imaging service migration
-  - _Leverage: src/utils/logging/logging.h, imaging service patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: Image Processing Developer with expertise in camera imaging controls and ONVIF imaging services | Task: Migrate imaging service logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update imaging service logging following requirement 2.2, implementing contextual logging for all imaging parameter adjustments and image quality controls | Restrictions: Must preserve image quality settings, maintain parameter validation, ensure imaging operation consistency | Success: Imaging service uses contextual logging, parameter adjustments properly traced, image quality unchanged, imaging functionality preserved_
+  - Replace legacy imaging logging
+  - Include imaging parameter context
+  - Purpose: Unify imaging logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Imaging Service Developer | Task: Adopt unified logging within imaging service with contextual metadata | Restrictions: Preserve imaging pipeline behaviour | Success: Imaging service logs through unified API_
 
-- [ ] 12. Migrate ONVIF Snapshot Service logging in src/services/snapshot/onvif_snapshot.c
+- [ ] 17. Migrate snapshot service logging
   - File: src/services/snapshot/onvif_snapshot.c
-  - Replace service logging with contextual unified logging
-  - Add snapshot service context for image capture operations
-  - Update snapshot generation logging with session tracking
-  - Purpose: Complete snapshot service migration
-  - _Leverage: src/utils/logging/logging.h, snapshot service patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: Image Capture Developer with expertise in snapshot generation and ONVIF snapshot services | Task: Migrate snapshot service logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update snapshot service logging following requirement 2.2, implementing contextual logging for all snapshot operations and image capture processes | Restrictions: Must maintain snapshot quality, preserve capture timing, ensure snapshot generation reliability | Success: Snapshot service uses contextual logging, capture operations properly traced, snapshot quality unchanged, capture functionality preserved_
+  - Replace snapshot logging
+  - Add snapshot context
+  - Purpose: Unify snapshot logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Snapshot Service Developer | Task: Migrate snapshot service logging to unified API with contextual details | Restrictions: Maintain snapshot performance | Success: Snapshot service uses unified logging_
 
-- [ ] 13. Migrate HTTP server logging in src/networking/http/http_server.c
+- [ ] 18. Migrate HTTP server logging
   - File: src/networking/http/http_server.c
-  - Replace logging calls with contextual unified logging
-  - Add HTTP server context for request processing
-  - Update connection management logging with client identification
-  - Purpose: Begin network layer migration
-  - _Leverage: src/utils/logging/logging.h, HTTP server patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: Network Programming Developer with expertise in HTTP servers and connection management | Task: Migrate HTTP server logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update HTTP server logging following requirement 2.2, implementing contextual logging for request processing and connection management with client identification | Restrictions: Must not affect HTTP performance, maintain request handling speed, preserve connection reliability | Success: HTTP server uses contextual logging, requests properly traced with client context, performance unchanged, HTTP functionality preserved_
+  - Replace HTTP logging calls
+  - Add request context (method, URI, client)
+  - Purpose: Migrate HTTP layer
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: HTTP Networking Developer | Task: Adopt unified logging in HTTP server with contextual metadata | Restrictions: Maintain performance, avoid blocking | Success: HTTP server logs use unified API with context_
 
-- [ ] 14. Migrate HTTP parser logging in src/networking/http/http_parser.c
+- [ ] 19. Migrate HTTP parser logging
   - File: src/networking/http/http_parser.c
-  - Replace logging calls with unified logging
-  - Add parser context for HTTP message processing
-  - Update parsing error logging with request details
-  - Purpose: Complete HTTP layer migration
-  - _Leverage: src/utils/logging/logging.h, HTTP parser patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: Protocol Parser Developer with expertise in HTTP message parsing and error handling | Task: Migrate HTTP parser logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update HTTP parser logging following requirement 2.2, implementing unified logging for all parsing operations and error conditions | Restrictions: Must maintain parsing accuracy, preserve error detection, ensure parsing performance | Success: HTTP parser uses unified logging, parsing operations properly logged, error handling improved, parsing functionality unchanged_
+  - Replace parser logging
+  - Log parsing errors with context
+  - Purpose: Complete HTTP parser migration
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Protocol Parser Developer | Task: Replace HTTP parser logging with unified API including request context | Restrictions: Maintain parsing accuracy | Success: Parser logs align with unified system_
 
-- [ ] 15. Migrate RTSP multistream logging in src/networking/rtsp/rtsp_multistream.c
-  - File: src/networking/rtsp/rtsp_multistream.c
-  - Replace logging calls with contextual unified logging
-  - Add RTSP context for streaming operations
-  - Update stream management logging with session tracking
-  - Purpose: Complete RTSP layer migration
-  - _Leverage: src/utils/logging/logging.h, RTSP streaming patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: RTSP Streaming Developer with expertise in real-time media streaming and session management | Task: Migrate RTSP multistream logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update RTSP streaming logging following requirement 2.2, implementing contextual logging for all streaming operations and session management | Restrictions: Must not affect streaming performance, maintain real-time characteristics, preserve streaming quality | Success: RTSP streaming uses contextual logging, streaming operations properly traced, performance unchanged, streaming functionality preserved_
+- [ ] 20. Migrate RTSP logging
+  - File: src/networking/rtsp/
+  - Replace RTSP logging
+  - Add session identifiers
+  - Purpose: Unify RTSP logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: RTSP Streaming Developer | Task: Update RTSP components to use unified logging with session context | Restrictions: Maintain streaming performance | Success: RTSP logs use unified API with context_
 
-- [ ] 16. Migrate WS-Discovery logging in src/networking/discovery/ws_discovery.c
+- [ ] 21. Migrate WS-Discovery logging
   - File: src/networking/discovery/ws_discovery.c
-  - Replace logging calls with unified logging
-  - Add discovery context for network operations
-  - Update device discovery logging with network details
-  - Purpose: Complete discovery layer migration
-  - _Leverage: src/utils/logging/logging.h, discovery patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: Network Discovery Developer with expertise in WS-Discovery protocol and multicast networking | Task: Migrate WS-Discovery logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update discovery service logging following requirement 2.2, implementing unified logging for all discovery operations and network events | Restrictions: Must maintain discovery timing, preserve multicast reliability, ensure network compatibility | Success: Discovery service uses unified logging, discovery operations properly logged, network functionality unchanged, discovery reliability preserved_
+  - Replace discovery logging
+  - Add network context
+  - Purpose: Unify discovery logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Network Discovery Developer | Task: Adopt unified logging in discovery module with contextual network data | Restrictions: Maintain multicast behaviour | Success: Discovery logging uses unified API_
 
-- [ ] 17. Migrate connection management logging
-  - Files: src/networking/common/connection_manager.c, src/networking/common/thread_pool.c, src/networking/common/epoll_server.c, src/networking/common/buffer_pool.c
-  - Replace logging calls with unified logging
-  - Add connection context for client tracking
-  - Update performance logging with operation metrics
-  - Purpose: Complete network infrastructure migration
-  - _Leverage: src/utils/logging/logging.h, connection management patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: Network Infrastructure Developer with expertise in connection pooling and high-performance networking | Task: Migrate connection management logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update all network infrastructure logging following requirement 2.2, implementing unified logging for connection management, thread pools, and buffer management | Restrictions: Must maintain network performance, preserve connection handling efficiency, ensure resource management reliability | Success: Network infrastructure uses unified logging, connection operations properly traced, performance metrics maintained, network functionality unchanged_
+- [ ] 22. Migrate connection infrastructure logging
+  - File: src/networking/common/
+  - Replace connection manager logging
+  - Add client context and metrics
+  - Purpose: Unify network infrastructure logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4, 5
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Network Infrastructure Developer | Task: Migrate connection management, epoll, and buffer pool logging to unified API with contextual data while preserving performance | Restrictions: Maintain throughput, avoid introducing locks | Success: Infrastructure components log through unified system without regressions_
 
-- [ ] 18. Migrate ONVIF service handler logging in src/protocol/response/onvif_service_handler.c
+- [ ] 23. Migrate ONVIF protocol response logging
   - File: src/protocol/response/onvif_service_handler.c
-  - Replace logging calls with contextual unified logging
-  - Add protocol handler context for SOAP processing
-  - Update response generation logging with timing information
-  - Purpose: Complete protocol layer migration
-  - _Leverage: src/utils/logging/logging.h, ONVIF protocol patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: ONVIF Protocol Developer with expertise in SOAP message processing and response generation | Task: Migrate protocol handler logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update service handler logging following requirement 2.2, implementing contextual logging for all SOAP processing and response generation with timing metrics | Restrictions: Must maintain ONVIF compliance, preserve protocol timing, ensure response accuracy | Success: Protocol handler uses contextual logging, SOAP operations properly traced, compliance maintained, protocol functionality preserved_
+  - Replace protocol logging
+  - Include SOAP operation context
+  - Purpose: Unify protocol layer logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: ONVIF Protocol Developer | Task: Update protocol response handler logging to unified API with contextual details | Restrictions: Maintain protocol behaviour | Success: Protocol handler logs unified_
 
-- [ ] 19. Migrate error handling logging in src/utils/error/error_handling.c
+- [ ] 24. Migrate error handling logging
   - File: src/utils/error/error_handling.c
-  - Replace logging calls with unified logging
-  - Update error reporting to use contextual information
-  - Add error context for better debugging
-  - Purpose: Complete error handling integration
-  - _Leverage: src/utils/logging/logging.h, error handling patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: Error Handling Specialist with expertise in debugging and error reporting systems | Task: Migrate error handling logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update error handling logging following requirement 2.2, implementing unified logging for all error conditions with enhanced context for debugging | Restrictions: Must preserve error detection, maintain error propagation, ensure error handling reliability | Success: Error handling uses unified logging, error conditions properly traced with context, debugging capability improved, error handling functionality preserved_
+  - Replace error logging
+  - Include error context
+  - Purpose: Unify error handling logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 3, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Error Handling Specialist | Task: Replace error handling logging with unified API while supporting debugging requirement 3 | Restrictions: Keep error propagation and return codes intact | Success: Error handling uses unified API and integrates with debugging workflow_
 
-- [ ] 20. Migrate memory management logging in src/utils/memory/memory_manager.c
+- [ ] 25. Migrate memory manager logging
   - File: src/utils/memory/memory_manager.c
-  - Replace logging calls with unified logging
-  - Add memory context for allocation tracking
-  - Update memory usage logging with performance metrics
-  - Purpose: Complete memory management integration
-  - _Leverage: src/utils/logging/logging.h, memory management patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: Memory Management Developer with expertise in embedded systems and performance optimization | Task: Migrate memory management logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update memory management logging following requirement 2.2, implementing unified logging for all memory operations with performance tracking | Restrictions: Must not affect memory performance, maintain allocation efficiency, preserve memory safety | Success: Memory management uses unified logging, memory operations properly traced, performance impact minimal, memory functionality unchanged_
+  - Replace memory logging
+  - Add allocation context
+  - Purpose: Unify memory management logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Memory Management Developer | Task: Update memory manager logging to unified API with contextual details | Restrictions: Maintain memory performance | Success: Memory manager logs unified_
 
-- [ ] 21. Migrate security hardening logging in src/utils/security/security_hardening.c
+- [ ] 26. Migrate security hardening logging
   - File: src/utils/security/security_hardening.c
-  - Replace logging calls with unified logging
-  - Add security context for audit trail
-  - Update security event logging with detailed information
-  - Purpose: Complete security integration
-  - _Leverage: src/utils/logging/logging.h, security patterns_
-  - _Requirements: 2.2_
-  - _Prompt: Role: Security Developer with expertise in security hardening and audit logging | Task: Migrate security logging for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Update security hardening logging following requirement 2.2, implementing unified logging for all security events with comprehensive audit information | Restrictions: Must maintain security effectiveness, preserve security event detection, ensure audit trail completeness | Success: Security hardening uses unified logging, security events properly traced with audit context, security functionality preserved, audit trail enhanced_
+  - Replace security logging
+  - Include audit context
+  - Purpose: Unify security logging
+  - _Leverage: src/utils/logging/logging.h_
+  - _Requirements: 2, 4, 8
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Security Engineer | Task: Adopt unified logging in security module with sanitisation considerations | Restrictions: Maintain security posture, avoid leaking sensitive data | Success: Security logging uses unified API with redaction_
 
-- [ ] 22. Remove platform logging system files
-  - Files: src/utils/logging/platform_logging.h, src/utils/logging/platform_logging.c
-  - Delete legacy platform logging implementation
-  - Remove from build system (Makefile)
-  - Clean up any remaining references
-  - Purpose: Clean break from legacy logging systems
-  - _Leverage: build system patterns, dependency analysis_
-  - _Requirements: 2.1_
-  - _Prompt: Role: Build System Maintainer with expertise in dependency management and clean refactoring | Task: Remove platform logging system for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Delete legacy platform logging files following requirement 2.1, ensuring complete removal from build system and all references | Restrictions: Must verify no remaining dependencies, ensure clean compilation, maintain build system integrity | Success: Platform logging files completely removed, build system updated correctly, no compilation errors, no remaining references_
+- [ ] 27. Remove legacy platform logging implementation
+  - File: src/utils/logging/platform_logging.c
+  - Delete legacy platform logging sources
+  - Clean include references
+  - Purpose: Eliminate legacy logging code
+  - _Leverage: Project build system_
+  - _Requirements: 2
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Build System Maintainer | Task: Remove legacy platform logging files after migration | Restrictions: Ensure no remaining references, maintain build stability | Success: Legacy files removed and build succeeds_
 
-- [ ] 23. Remove service logging system files
-  - Files: src/utils/logging/service_logging.h, src/utils/logging/service_logging.c
-  - Delete legacy service logging implementation
-  - Remove from build system
-  - Verify no remaining service logging references
-  - Purpose: Continue legacy system cleanup
-  - _Leverage: build system patterns, dependency analysis_
-  - _Requirements: 2.1_
-  - _Prompt: Role: Build System Maintainer with expertise in legacy code removal and dependency cleanup | Task: Remove service logging system for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Delete legacy service logging files following requirement 2.1, ensuring complete removal and verification of no remaining dependencies | Restrictions: Must verify complete migration before removal, ensure no broken references, maintain service functionality | Success: Service logging files completely removed, build system clean, services continue to function correctly, no compilation issues_
+- [ ] 28. Remove legacy service logging implementation
+  - File: src/utils/logging/service_logging.c
+  - Delete service logging sources
+  - Update references
+  - Purpose: Complete legacy cleanup
+  - _Leverage: Project build system_
+  - _Requirements: 2
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Build System Maintainer | Task: Remove service logging legacy code | Restrictions: Verify migration complete before deletion | Success: Legacy service logging removed_
 
-- [ ] 24. Remove generic logging utils files
-  - Files: src/utils/logging/logging_utils.h, src/utils/logging/logging_utils.c
-  - Delete legacy utility logging implementation
-  - Remove from build system
-  - Clean up utility module references
-  - Purpose: Continue legacy cleanup
-  - _Leverage: build system patterns, utility analysis_
-  - _Requirements: 2.1_
-  - _Prompt: Role: Build System Maintainer with expertise in utility module cleanup and dependency management | Task: Remove utility logging system for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Delete legacy utility logging files following requirement 2.1, ensuring complete cleanup of utility logging references | Restrictions: Must verify utility migration complete, ensure no broken dependencies, maintain utility functionality | Success: Utility logging files completely removed, utility modules function correctly, build system clean, no remaining legacy references_
-
-- [ ] 25. Clean up direct stdio usage
-  - Files: Multiple files with printf(), fprintf(), perror() calls
-  - Search and replace remaining direct stdio logging
-  - Replace with appropriate unified logging calls
-  - Verify no direct output remains for logging
-  - Purpose: Complete elimination of fragmented logging
-  - _Leverage: search tools, unified logging API_
-  - _Requirements: 2.1_
-  - _Prompt: Role: Code Cleanup Specialist with expertise in systematic code refactoring and pattern replacement | Task: Clean up direct stdio usage for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Replace all remaining direct stdio logging calls following requirement 2.1, ensuring complete elimination of printf/fprintf/perror usage for logging purposes | Restrictions: Must preserve non-logging stdio usage, maintain output behavior, ensure proper error handling | Success: No direct stdio logging remains, all logging uses unified API, output behavior unchanged, error handling preserved_
-
-- [ ] 26. Update build system configuration
+- [ ] 29. Update build system for unified logging
   - File: cross-compile/onvif/Makefile
-  - Update to include only logging.c in build
-  - Remove legacy logging object files
-  - Update dependencies and compile commands
-  - Purpose: Finalize build system for unified logging
-  - _Leverage: existing Makefile patterns, dependency management_
-  - _Requirements: 2.1_
-  - _Prompt: Role: Build Engineer with expertise in Makefile configuration and dependency management | Task: Update build system for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Configure build system following requirement 2.1, updating Makefile to include only unified logging implementation and removing all legacy logging dependencies | Restrictions: Must maintain build functionality, preserve compilation settings, ensure clean builds | Success: Build system includes only unified logging, clean compilation achieved, all dependencies correctly configured, build performance maintained_
+  - Add logging.c and logging_sanitizer.c to build
+  - Remove legacy logging objects
+  - Purpose: Ensure build only includes unified logging
+  - _Leverage: Existing Makefile patterns_
+  - _Requirements: 2, 10
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Build Engineer | Task: Update build to include unified logging and exclude legacy code | Restrictions: Maintain build options and dependencies | Success: Build compiles unified logging without legacy artefacts_
 
-- [ ] 27. Update documentation and generate docs
-  - Files: Doxygen configuration, documentation updates
-  - Update Doxygen to include new logging module
-  - Generate updated documentation with make docs
-  - Update any developer documentation references
-  - Purpose: Complete documentation for unified logging
-  - _Leverage: existing documentation patterns, Doxygen configuration_
-  - _Requirements: All requirements_
-  - _Prompt: Role: Technical Documentation Specialist with expertise in Doxygen and API documentation | Task: Update documentation for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Generate comprehensive documentation covering all requirements, updating Doxygen configuration and creating developer guides for the unified logging system | Restrictions: Must maintain documentation standards, ensure API documentation completeness, preserve existing documentation structure | Success: Documentation generated successfully, API fully documented, developer guides updated, documentation follows project standards_
+- [ ] 30. Create logging migration script
+  - File: tools/logging_migration.py
+  - Automate conversion of platform/service logging calls
+  - Detect printf-style logging
+  - Purpose: Provide migration automation
+  - _Leverage: Python tooling, regex patterns_
+  - _Requirements: 10, 2
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Automation Engineer | Task: Develop migration script to rewrite legacy logging to unified API | Restrictions: Preserve include ordering, support dry-run mode | Success: Script rewrites majority of legacy calls and outputs report_
 
-- [ ] 28. Create comprehensive unit tests
-  - File: cross-compile/onvif/tests/test_logging.c
-  - Create unit tests for all logging functions
-  - Test log level filtering and contextual logging
-  - Test thread safety and error handling
-  - Purpose: Ensure logging system reliability
-  - _Leverage: existing test framework, test patterns_
-  - _Requirements: All requirements_
-  - _Prompt: Role: Test Engineer with expertise in C unit testing and embedded systems validation | Task: Create unit tests for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Develop comprehensive unit tests covering all requirements, testing core functionality, thread safety, error handling, and performance characteristics | Restrictions: Must test all API functions, ensure test isolation, validate thread safety, test error conditions | Success: All logging functions thoroughly tested, thread safety verified, error handling validated, test coverage complete_
+- [ ] 31. Run migration script and resolve leftovers
+  - File: tools/logging_migration_report.md
+  - Execute migration script
+  - Manually update remaining logging calls
+  - Document results
+  - Purpose: Ensure clean break from legacy logging
+  - _Leverage: tools/logging_migration.py_
+  - _Requirements: 2, 10
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Maintenance Engineer | Task: Run the migration tooling and resolve remaining manual conversions, documenting outcomes | Restrictions: Verify compilation after changes, keep report updated | Success: No legacy logging references remain and report filed_
 
-- [ ] 29. Perform integration testing
-  - Test complete ONVIF functionality with unified logging
-  - Verify log format compliance across all services
-  - Test performance impact on video streaming
-  - Validate configuration loading and error handling
-  - Purpose: Ensure system-wide logging integration
-  - _Leverage: existing integration test patterns, ONVIF test suite_
-  - _Requirements: All requirements_
-  - _Prompt: Role: Integration Test Engineer with expertise in ONVIF testing and system validation | Task: Perform integration testing for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Execute comprehensive integration tests covering all requirements, validating ONVIF functionality, log format compliance, and performance characteristics | Restrictions: Must test complete system functionality, validate ONVIF compliance, ensure performance requirements met | Success: All ONVIF services function correctly, log format compliance verified, performance impact within limits, integration complete_
+- [ ] 32. Update documentation and generate docs
+  - File: docs/ and Doxygen
+  - Include new logging module in Doxygen
+  - Update developer guidance
+  - Purpose: Document the unified logging system
+  - _Leverage: Existing documentation workflow_
+  - _Requirements: 1, 7, 8, 9
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Technical Documentation Specialist | Task: Refresh documentation to cover unified logging features | Restrictions: Maintain documentation standards, regenerate HTML | Success: Documentation builds cleanly and reflects new logging system_
 
-- [ ] 30. Validate production readiness
-  - Build with cross-compilation toolchain
-  - Deploy to SD card for device testing
-  - Test on actual Anyka hardware
-  - Verify performance and stability
-  - Purpose: Final validation for production deployment
-  - _Leverage: SD card deployment process, hardware testing_
-  - _Requirements: All requirements_
-  - _Prompt: Role: Production Validation Engineer with expertise in embedded systems deployment and hardware testing | Task: Validate production readiness for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Complete final validation covering all requirements, testing on actual hardware and validating production deployment readiness | Restrictions: Must test on target hardware, validate performance requirements, ensure stability under load | Success: System functions correctly on target hardware, performance requirements met, production deployment validated, stability confirmed_
+- [ ] 33. Create comprehensive unit tests
+  - File: tests/utils/test_logging.c
+  - Test logging API happy paths
+  - Cover error handling and fallback
+  - Purpose: Ensure reliability via unit tests
+  - _Leverage: Existing test framework_
+  - _Requirements: 1, 4, 5, 6, 7, 8, 9
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Unit Test Engineer | Task: Develop unit tests covering unified logging functionality | Restrictions: Avoid flaky timing assumptions, cover sanitisation and configuration | Success: Unit tests pass and provide high coverage_
+
+- [ ] 34. Perform integration testing
+  - File: tests/integration/logging_integration_tests.c
+  - Validate ONVIF workflows with unified logging
+  - Check log format and performance
+  - Verify sanitisation under realistic traffic
+  - Purpose: Confirm end-to-end behaviour
+  - _Leverage: Integration test suite_
+  - _Requirements: 1, 2, 4, 5, 6, 7, 8, 9
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Integration Test Engineer | Task: Execute integration tests ensuring unified logging meets requirements | Restrictions: Use existing test harness, capture metrics | Success: Integration tests pass with format/performance compliance_
+
+- [ ] 35. Validate production readiness
+  - File: Deployment tests
+  - Cross-compile and deploy to device
+  - Verify runtime logging on hardware
+  - Monitor performance and stability
+  - Purpose: Final production validation
+  - _Leverage: SD card deployment workflow_
+  - _Requirements: 1, 2, 4, 5, 6, 7, 8, 9, 10
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Production Validation Engineer | Task: Perform hardware validation to ensure unified logging is production-ready | Restrictions: Test on Anyka hardware, monitor memory/CPU usage | Success: Hardware tests pass with logging functioning and no regressions_
