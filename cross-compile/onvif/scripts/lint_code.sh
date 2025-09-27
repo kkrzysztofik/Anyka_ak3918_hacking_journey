@@ -19,6 +19,7 @@ source "$SCRIPT_DIR/common.sh"
 # Default configuration
 DRY_RUN=false
 FILES_ONLY=""
+SINGLE_FILE=""
 CHECK_ONLY=false
 FORMAT_CHECK=false
 SEVERITY_LEVEL="hint"
@@ -38,6 +39,7 @@ OPTIONS:
   -d, --dry-run           Show what would be linted without making changes
   -c, --check             Check if files have linting issues (exit 1 if issues found)
   -f, --files FILE        Lint specific files (comma-separated)
+  --file FILE             Lint a single file
   --format                Also check code formatting with clang-format
   --severity LEVEL        Fail on severity level: error, warn, info, hint (default: hint)
 
@@ -45,6 +47,7 @@ EXAMPLES:
   $0                      # Lint all C files in the project
   $0 --dry-run            # Show what would be linted
   $0 --check              # Check if files have linting issues
+  $0 --file src/core/main.c                    # Lint a single file
   $0 --files src/core/main.c,src/services/device/onvif_device.c
   $0 --format             # Also check code formatting
   $0 --severity error     # Only fail on errors
@@ -196,6 +199,10 @@ parse_arguments() {
                 print_usage
                 exit 0
                 ;;
+            --file)
+                SINGLE_FILE="$2"
+                shift 2
+                ;;
             --format)
                 FORMAT_CHECK=true
                 shift
@@ -227,10 +234,45 @@ main() {
     check_clangd_tidy
     check_compile_commands
 
-    # Find and lint files
-    log_info "Scanning for C source files..."
-    local files
-    mapfile -t files < <(find_c_files)
+    # Determine which files to lint
+    local files=()
+
+    if [[ -n "$SINGLE_FILE" ]]; then
+        # Lint single file
+        if [[ ! -f "$SINGLE_FILE" ]]; then
+            log_error "Error: File '$SINGLE_FILE' does not exist"
+            exit 1
+        fi
+
+        # Convert to absolute path if relative
+        if [[ "$SINGLE_FILE" != /* ]]; then
+            SINGLE_FILE="$PROJECT_ROOT/$SINGLE_FILE"
+        fi
+
+        files=("$SINGLE_FILE")
+        log_info "Linting single file: $(get_relative_path "$SINGLE_FILE")"
+    elif [[ -n "$FILES_ONLY" ]]; then
+        # Lint specific files (comma-separated)
+        IFS=',' read -ra file_array <<< "$FILES_ONLY"
+        for file in "${file_array[@]}"; do
+            # Trim whitespace
+            file=$(echo "$file" | xargs)
+            if [[ ! -f "$file" ]]; then
+                log_error "Error: File '$file' does not exist"
+                exit 1
+            fi
+            # Convert to absolute path if relative
+            if [[ "$file" != /* ]]; then
+                file="$PROJECT_ROOT/$file"
+            fi
+            files+=("$file")
+        done
+        log_info "Linting specified files: ${#files[@]} file(s)"
+    else
+        # Find and lint all C files
+        log_info "Scanning for C source files..."
+        mapfile -t files < <(find_c_files)
+    fi
 
     # Lint the files
     lint_files "${files[@]}"
