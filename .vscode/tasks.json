@@ -2,22 +2,12 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "docker-build-debug",
+      "label": "build-debug",
       "type": "shell",
-      "command": "docker",
+      "command": "make",
       "args": [
-        "run",
-        "--rm",
-        "-v",
-        "${workspaceFolder}:/workspace",
-        "-e",
-        "BUILD_TYPE=debug",
-        "-e",
-        "LOG_LEVEL=DEBUG",
-        "anyka-cross-compile",
-        "make",
         "-C",
-        "/workspace/onvif",
+        "${workspaceFolder}/cross-compile/onvif",
         "debug"
       ],
       "group": {
@@ -40,22 +30,12 @@
       }
     },
     {
-      "label": "docker-build-release",
+      "label": "build-release",
       "type": "shell",
-      "command": "docker",
+      "command": "make",
       "args": [
-        "run",
-        "--rm",
-        "-v",
-        "${workspaceFolder}:/workspace",
-        "-e",
-        "BUILD_TYPE=release",
-        "-e",
-        "LOG_LEVEL=INFO",
-        "anyka-cross-compile",
-        "make",
         "-C",
-        "/workspace/onvif",
+        "${workspaceFolder}/cross-compile/onvif",
         "release"
       ],
       "group": "build",
@@ -75,40 +55,12 @@
       }
     },
     {
-      "label": "build-debug",
+      "label": "clean",
       "type": "shell",
       "command": "make",
       "args": [
         "-C",
         "${workspaceFolder}/cross-compile/onvif",
-        "debug"
-      ],
-      "group": "build",
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": false,
-        "panel": "shared",
-        "showReuseMessage": true,
-        "clear": false
-      },
-      "problemMatcher": [
-        "$msCompile"
-      ]
-    },
-    {
-      "label": "docker-clean",
-      "type": "shell",
-      "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-v",
-        "${workspaceFolder}:/workspace",
-        "anyka-cross-compile",
-        "make",
-        "-C",
-        "/workspace/onvif",
         "clean"
       ],
       "group": "build",
@@ -119,21 +71,18 @@
         "panel": "shared",
         "showReuseMessage": true,
         "clear": false
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
       }
     },
     {
-      "label": "docker-docs",
+      "label": "docs",
       "type": "shell",
-      "command": "docker",
+      "command": "make",
       "args": [
-        "run",
-        "--rm",
-        "-v",
-        "${workspaceFolder}:/workspace",
-        "anyka-cross-compile",
-        "make",
         "-C",
-        "/workspace/onvif",
+        "${workspaceFolder}/cross-compile/onvif",
         "docs"
       ],
       "group": "build",
@@ -150,46 +99,12 @@
       }
     },
     {
-      "label": "docker-static-analysis",
+      "label": "test",
       "type": "shell",
-      "command": "docker",
+      "command": "make",
       "args": [
-        "run",
-        "--rm",
-        "-v",
-        "${workspaceFolder}:/workspace",
-        "anyka-cross-compile",
-        "make",
         "-C",
-        "/workspace/onvif",
-        "static-analysis"
-      ],
-      "group": "build",
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": false,
-        "panel": "shared",
-        "showReuseMessage": true,
-        "clear": false
-      },
-      "options": {
-        "cwd": "${workspaceFolder}"
-      }
-    },
-    {
-      "label": "docker-test",
-      "type": "shell",
-      "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-v",
-        "${workspaceFolder}:/workspace",
-        "anyka-cross-compile",
-        "make",
-        "-C",
-        "/workspace/onvif",
+        "${workspaceFolder}/cross-compile/onvif",
         "test"
       ],
       "group": "test",
@@ -206,71 +121,12 @@
       }
     },
     {
-      "label": "docker-shell",
+      "label": "copy-to-sd",
       "type": "shell",
-      "command": "docker",
+      "command": "bash",
       "args": [
-        "run",
-        "--rm",
-        "-it",
-        "-v",
-        "${workspaceFolder}:/workspace",
-        "anyka-cross-compile",
-        "/bin/bash"
-      ],
-      "group": "build",
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": true,
-        "panel": "new",
-        "showReuseMessage": false,
-        "clear": true
-      },
-      "options": {
-        "cwd": "${workspaceFolder}"
-      }
-    },
-    {
-      "label": "docker-verify-build",
-      "type": "shell",
-      "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-v",
-        "${workspaceFolder}:/workspace",
-        "anyka-cross-compile",
-        "bash",
         "-c",
-        "cd /workspace/onvif && make clean && make debug && echo 'Build verification successful'"
-      ],
-      "group": "build",
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": false,
-        "panel": "shared",
-        "showReuseMessage": true,
-        "clear": false
-      },
-      "options": {
-        "cwd": "${workspaceFolder}"
-      }
-    },
-    {
-      "label": "docker-copy-to-sd",
-      "type": "shell",
-      "command": "docker",
-      "args": [
-        "run",
-        "--rm",
-        "-v",
-        "${workspaceFolder}:/workspace",
-        "anyka-cross-compile",
-        "bash",
-        "-c",
-        "cd /workspace && cp onvif/out/onvifd SD_card_contents/anyka_hack/usr/bin/ && echo 'Binary copied to SD card payload'"
+        "cp ${workspaceFolder}/cross-compile/onvif/out/onvifd ${workspaceFolder}/SD_card_contents/anyka_hack/usr/bin/ && echo 'Binary copied to SD card payload'"
       ],
       "group": "build",
       "presentation": {
@@ -284,32 +140,7 @@
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "dependsOn": "docker-build-debug"
-    },
-    {
-      "label": "docker-ftp-upload",
-      "type": "shell",
-      "command": "powershell",
-      "args": [
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        ".\\docker-helper.ps1",
-        "ftp-upload"
-      ],
-      "group": "build",
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": false,
-        "panel": "shared",
-        "showReuseMessage": true,
-        "clear": false
-      },
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "dependsOn": "docker-build-debug"
+      "dependsOn": "build-debug"
     },
     {
       "label": "generate-compile-commands",

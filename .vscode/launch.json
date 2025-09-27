@@ -1,75 +1,52 @@
 {
-    "version": "0.2.0",
-    "configurations": [
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug ONVIF Daemon (WSL)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/cross-compile/onvif/out/onvifd",
+      "args": [
+        "--debug",
+        "--log-level=DEBUG"
+      ],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/cross-compile/onvif",
+      "environment": [
         {
-            "name": "Debug ONVIF Daemon (Docker)",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "/workspace/onvif/out/onvifd_debug",
-            "args": ["--debug", "--log-level=DEBUG"],
-            "stopAtEntry": false,
-            "cwd": "/workspace/onvif",
-            "environment": [
-                {
-                    "name": "LOG_LEVEL",
-                    "value": "DEBUG"
-                },
-                {
-                    "name": "BUILD_TYPE",
-                    "value": "debug"
-                },
-                {
-                    "name": "ANYKA_PLATFORM",
-                    "value": "1"
-                }
-            ],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            "miDebuggerPath": "/usr/bin/gdb",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                },
-                {
-                    "description": "Set disassembly-flavor to intel",
-                    "text": "-gdb-set disassembly-flavor intel",
-                    "ignoreFailures": true
-                }
-            ],
-            "preLaunchTask": "docker-build-debug",
-            "logging": {
-                "engineLogging": true,
-                "trace": true,
-                "traceResponse": true
-            }
+          "name": "LOG_LEVEL",
+          "value": "DEBUG"
         },
         {
-            "name": "Debug ONVIF Daemon (Local)",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/cross-compile/onvif/out/onvifd",
-            "args": ["--debug"],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/cross-compile/onvif",
-            "environment": [
-                {
-                    "name": "LOG_LEVEL",
-                    "value": "DEBUG"
-                }
-            ],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            "miDebuggerPath": "gdb",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                }
-            ],
-            "preLaunchTask": "build-debug"
+          "name": "BUILD_TYPE",
+          "value": "debug"
+        },
+        {
+          "name": "ANYKA_PLATFORM",
+          "value": "1"
         }
-    ]
+      ],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        },
+        {
+          "description": "Set disassembly-flavor to intel",
+          "text": "-gdb-set disassembly-flavor intel",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build-debug",
+      "logging": {
+        "engineLogging": true,
+        "trace": false,
+        "traceResponse": false
+      }
+    }
+  ]
 }

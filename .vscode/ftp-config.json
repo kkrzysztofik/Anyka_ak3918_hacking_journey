@@ -1,105 +1,44 @@
 {
-    "name": "FTP Upload Configuration",
-    "description": "FTP settings for uploading binaries to Anyka AK3918 devices",
-    "version": "1.0.0",
-
-    "defaults": {
-        "deviceIP": "192.168.1.100",
-        "username": "root",
-        "password": "123456",
-        "remotePath": "/tmp",
-        "binaryName": "onvifd",
-        "timeout": 10000,
-        "passiveMode": true,
-        "binaryMode": true
-    },
-
-    "devices": [
-        {
-            "name": "Default Device",
-            "ip": "192.168.1.100",
-            "username": "root",
-            "password": "123456",
-            "description": "Default Anyka AK3918 device"
-        },
-        {
-            "name": "Test Device",
-            "ip": "192.168.1.50",
-            "username": "admin",
-            "password": "admin123",
-            "description": "Test device with different credentials"
-        },
-        {
-            "name": "Production Device",
-            "ip": "192.168.1.200",
-            "username": "root",
-            "password": "secure_password",
-            "description": "Production device with secure password"
-        }
-    ],
-
-    "uploadPaths": {
-        "temporary": "/tmp",
-        "system": "/usr/bin",
-        "custom": "/opt/onvif"
-    },
-
-    "postUploadCommands": [
-        "chmod +x {remotePath}",
-        "ldd {remotePath}",
-        "file {remotePath}"
-    ],
-
-    "troubleshooting": {
-        "commonIssues": [
-            {
-                "issue": "Connection timeout",
-                "solutions": [
-                    "Check device IP address",
-                    "Verify network connectivity",
-                    "Ensure FTP service is running on device",
-                    "Check firewall settings"
-                ]
-            },
-            {
-                "issue": "Authentication failed",
-                "solutions": [
-                    "Verify username and password",
-                    "Check if FTP user account exists",
-                    "Ensure user has write permissions",
-                    "Try different credentials"
-                ]
-            },
-            {
-                "issue": "Upload failed",
-                "solutions": [
-                    "Check available disk space on device",
-                    "Verify write permissions to target directory",
-                    "Ensure binary file exists locally",
-                    "Check FTP server logs"
-                ]
-            }
-        ]
-    },
-
-    "usage": {
-        "examples": [
-            {
-                "description": "Upload with default settings",
-                "command": ".\\docker-helper.ps1 ftp-upload"
-            },
-            {
-                "description": "Upload to specific device",
-                "command": ".\\docker-helper.ps1 ftp-upload onvif 192.168.1.50"
-            },
-            {
-                "description": "Upload with custom credentials",
-                "command": ".\\docker-helper.ps1 ftp-upload onvif 192.168.1.50 admin password123"
-            },
-            {
-                "description": "Upload with verbose output",
-                "command": ".\\docker-helper.ps1 ftp-upload onvif 192.168.1.50 root 123456 -Verbose"
-            }
-        ]
+  "name": "Device Upload Configuration",
+  "description": "Configuration for uploading binaries to Anyka AK3918 devices via SCP/SFTP",
+  "version": "1.0.0",
+  "defaults": {
+    "deviceIP": "192.168.1.100",
+    "username": "root",
+    "password": "123456",
+    "remotePath": "/tmp",
+    "binaryName": "onvifd",
+    "timeout": 10000
+  },
+  "devices": [
+    {
+      "name": "Default Device",
+      "ip": "192.168.1.100",
+      "username": "root",
+      "password": "123456",
+      "description": "Default Anyka AK3918 device"
     }
+  ],
+  "uploadPaths": {
+    "temporary": "/tmp",
+    "system": "/usr/bin",
+    "custom": "/opt/onvif"
+  },
+  "postUploadCommands": [
+    "chmod +x {remotePath}",
+    "ldd {remotePath}",
+    "file {remotePath}"
+  ],
+  "usage": {
+    "examples": [
+      {
+        "description": "Upload binary via SCP",
+        "command": "scp cross-compile/onvif/out/onvifd root@192.168.1.100:/tmp/"
+      },
+      {
+        "description": "Copy to SD card payload",
+        "command": "cp cross-compile/onvif/out/onvifd SD_card_contents/anyka_hack/usr/bin/"
+      }
+    ]
+  }
 }

@@ -1,15 +1,13 @@
 {
   "files.associations": {
-    "system_error": "cpp",
-    "fstream": "cpp",
     "*.h": "c",
     "*.c": "c",
     "*.cpp": "cpp",
     "*.hpp": "cpp"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-  "C_Cpp.default.intelliSenseMode": "clang-x64",
-  "C_Cpp.default.compilerPath": "C:/Program Files/LLVM/bin/clang.exe",
+  "C_Cpp.default.intelliSenseMode": "gcc-x64",
+  "C_Cpp.default.compilerPath": "/usr/bin/gcc",
   "C_Cpp.default.cStandard": "c99",
   "C_Cpp.default.cppStandard": "c++11",
   "C_Cpp.default.includePath": [
@@ -19,24 +17,18 @@
     "${workspaceFolder}/cross-compile/anyka_reference/platform",
     "${workspaceFolder}/cross-compile/anyka_reference/akipc/include",
     "${workspaceFolder}/cross-compile/anyka_reference/component/include",
-    "${workspaceFolder}/cross-compile/anyka_reference/platform/include",
-    "C:/Program Files/LLVM/include",
-    "C:/Program Files/LLVM/lib/clang/*/include"
+    "${workspaceFolder}/cross-compile/anyka_reference/platform/include"
   ],
   "C_Cpp.default.defines": [
     "ANYKA_PLATFORM=1",
     "_POSIX_C_SOURCE=199309L",
     "PLATFORM_LOG_LEVEL_INFO=3",
-    "DEBUG_BUILD",
-    "_WIN32",
-    "_MSC_VER=1900"
+    "DEBUG_BUILD"
   ],
   "C_Cpp.default.compilerArgs": [
     "-std=c99",
     "-D_POSIX_C_SOURCE=199309L",
     "-DANYKA_PLATFORM=1",
-    "-D_WIN32",
-    "-D_MSC_VER=1900",
     "-g",
     "-O0",
     "-DDEBUG_BUILD",
@@ -60,11 +52,11 @@
     "**/.vscode/browse.vc.db*": true,
     "**/node_modules/**": true
   },
-  "terminal.integrated.defaultProfile.windows": "PowerShell",
-  "terminal.integrated.profiles.windows": {
-    "PowerShell": {
-      "source": "PowerShell",
-      "icon": "terminal-powershell"
+  "terminal.integrated.defaultProfile.linux": "bash",
+  "terminal.integrated.profiles.linux": {
+    "bash": {
+      "path": "/bin/bash",
+      "icon": "terminal-bash"
     }
   },
   // Build and task settings
@@ -73,7 +65,7 @@
   "task.quickOpen.history": 10,
   "task.quickOpen.detail": true,
   "task.quickOpen.skip": false,
-  // Clangd settings for WSL2 - OPTIMIZED FOR CURSOR PROBLEMS PANE
+  // Clangd settings for WSL2 development
   "clangd.path": "/usr/bin/clangd",
   "clangd.arguments": [
     "--compile-commands-dir=${workspaceFolder}/cross-compile/onvif",
@@ -82,13 +74,9 @@
     "--function-arg-placeholders=false",
     "--fallback-style=Google",
     "--background-index",
-    "--clang-tidy",
-    "--log=verbose",
-    "--pretty"
+    "--clang-tidy"
   ],
   "clangd.checkUpdates": true,
-  "clangd.trace": "verbose",
-  // Language server settings
   "clangd.onConfigChanged": "restart",
   // Problems pane settings
   "problems.decorations.enabled": true,
