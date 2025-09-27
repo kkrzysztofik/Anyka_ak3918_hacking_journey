@@ -1,20 +1,16 @@
-#!/bin/sh
+#!/bin/bash
 
-# GDB analysis script for Docker environment
-# Usage:
-#   From debugging directory: .\analyze_core_windows.ps1
-#   From ONVIF directory: docker run --rm -v ${PWD}:/workspace anyka-cross-compile /workspace/run_gdb_analysis.sh [coredump_file] [binary_file]
-#   Direct Docker: See comments in script for manual commands
-#   Standalone from ONVIF: ./analyze_coredump_direct.sh
-# This script is designed to work both as a standalone script and with the PowerShell wrapper
+# Simplified GDB analysis script for ONVIF coredumps
+# Usage: ./run_gdb_analysis_simple.sh [coredump_file] [binary_file]
+# Example: ./run_gdb_analysis_simple.sh core.onvifd_debug.18851 onvifd_debug
 
-set -e  # Exit on any error
+set -e
 
 # Default values
-COREDUMP_FILE="core.onvifd_debug.17401.15810"
+COREDUMP_FILE="core.onvifd_debug.18851"
 BINARY_FILE="onvifd_debug"
 
-# Parse command line arguments
+# Parse arguments
 if [ $# -ge 1 ]; then
     COREDUMP_FILE="$1"
 fi
@@ -22,144 +18,175 @@ if [ $# -ge 2 ]; then
     BINARY_FILE="$2"
 fi
 
-# Validate input files exist
-if [ ! -f "$COREDUMP_FILE" ]; then
-    echo "Error: Coredump file '$COREDUMP_FILE' not found!"
-    echo "Available core files:"
-    ls -la core.* 2>/dev/null || echo "No core files found in current directory"
-    exit 1
-fi
+# Get script location and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [ ! -f "$BINARY_FILE" ]; then
-    echo "Error: Binary file '$BINARY_FILE' not found!"
-    echo "Available binary files:"
-    ls -la onvifd* 2>/dev/null || echo "No binary files found in current directory"
-    exit 1
-fi
+# Set paths
+ONVIF_DIR="$PROJECT_ROOT/cross-compile/onvif"
+SD_LIB_DIR="$PROJECT_ROOT/SD_card_contents/anyka_hack/onvif/lib"
+BINARY_DIR="$ONVIF_DIR/out"
+COREDUMP_DIR="$SCRIPT_DIR/coredump"
 
-echo "Analyzing coredump: $COREDUMP_FILE"
-echo "Using binary: $BINARY_FILE"
-echo "Working directory: $(pwd)"
-echo ""
+# Set up shared library search path for GDB
+TOOLCHAIN_LIB_DIR="$PROJECT_ROOT/toolchain/arm-anykav200-crosstool/usr/lib"
+SOLIB_SEARCH_PATH="$SD_LIB_DIR:$ONVIF_DIR/out:$TOOLCHAIN_LIB_DIR"
 
-# Check if libraries exist
-if [ ! -d "/workspace/lib" ]; then
-    echo "Error: Library directory '/workspace/lib' not found!"
-    echo "This script expects to be run via Docker with volume mount from PowerShell script"
-    exit 1
-fi
-
-# Count available libraries
-LIB_COUNT=$(ls -1 /workspace/lib/*.so* 2>/dev/null | wc -l)
-echo "Available ARM libraries: $LIB_COUNT"
-
-# Create symlinks for all required libraries
-echo "Setting up library symlinks..."
-mkdir -p /lib
-
-# Essential system libraries (try to create symlinks)
-for lib in ld-uClibc.so.0 libuClibc-0.9.33.2.so libc.so.0 libdl-0.9.33.2.so libpthread-0.9.33.2.so libm-0.9.33.2.so; do
-    if [ -f "/workspace/lib/$lib" ]; then
-        ln -sf "/workspace/lib/$lib" "/lib/$lib" 2>/dev/null || echo "Warning: Could not create symlink for $lib"
-    else
-        echo "Warning: Required library $lib not found in /workspace/lib/"
-    fi
-done
-
-echo "Library setup complete"
-echo ""
-
-# Check if GDB can load the binary
-echo "Testing binary loading..."
-gdb --batch --ex "file $BINARY_FILE" --ex "quit" "$BINARY_FILE" >/dev/null 2>&1
-if [ $? -ne 0 ]; then
-    echo "Warning: GDB could not load the binary file properly"
-    echo "This may be due to missing architecture support or library issues"
-fi
-
-echo "Starting comprehensive GDB analysis..."
-echo "This may take a few minutes for large coredumps..."
-echo ""
-
-# Run comprehensive GDB analysis with error handling
-gdb --batch \
-    --ex "set substitute-path /workspace /mnt/anyka_hack/onvif" \
-    --ex "set substitute-path /workspace/cross-compile/onvif /mnt/anyka_hack/onvif" \
-    --ex "set solib-search-path /workspace/lib:/workspace:/lib:/usr/lib" \
-    --ex "file $BINARY_FILE" \
-    --ex "core-file $COREDUMP_FILE" \
-    --ex "echo === COREDUMP ANALYSIS ===" \
-    --ex "echo Coredump file: $COREDUMP_FILE" \
-    --ex "echo Binary file: $BINARY_FILE" \
-    --ex "echo Analysis date: $(date)" \
-    --ex "echo" \
-    --ex "bt full" \
-    --ex "echo" \
-    --ex "echo === THREAD ANALYSIS ===" \
-    --ex "info threads" \
-    --ex "echo" \
-    --ex "thread apply all bt" \
-    --ex "echo" \
-    --ex "echo === REGISTER ANALYSIS ===" \
-    --ex "info registers" \
-    --ex "echo" \
-    --ex "echo === FRAME ANALYSIS ===" \
-    --ex "info frame" \
-    --ex "echo" \
-    --ex "echo === SOURCE CONTEXT ===" \
-    --ex "list" \
-    --ex "echo" \
-    --ex "echo === ARGUMENTS AND LOCALS ===" \
-    --ex "info args" \
-    --ex "info locals" \
-    --ex "echo" \
-    --ex "echo === MEMORY ANALYSIS ===" \
-    --ex "info proc mappings" \
-    --ex "echo" \
-    --ex "echo === SHARED LIBRARIES ===" \
-    --ex "info sharedlibrary" \
-    --ex "echo" \
-    --ex "echo === MEMORY DUMP ===" \
-    --ex "x/20x \$pc-40" \
-    --ex "x/20x \$sp-40" \
-    --ex "echo" \
-    --ex "echo === ANALYSIS COMPLETE ===" \
-    --ex "quit" \
-    "$BINARY_FILE"
-
-# Check exit code
-EXIT_CODE=$?
-if [ $EXIT_CODE -eq 0 ]; then
-    echo ""
-    echo "GDB analysis completed successfully"
+# Find coredump file
+if [ -f "$COREDUMP_FILE" ]; then
+    COREDUMP_PATH="$COREDUMP_FILE"
+elif [ -f "$COREDUMP_DIR/$COREDUMP_FILE" ]; then
+    COREDUMP_PATH="$COREDUMP_DIR/$COREDUMP_FILE"
 else
-    echo ""
-    echo "Warning: GDB analysis completed with exit code $EXIT_CODE"
-    echo "This may indicate some issues with symbol loading or library paths"
-    echo "Analysis results may still be valid"
+    echo "Error: Coredump file '$COREDUMP_FILE' not found!"
+    exit 1
+fi
+
+# Find binary file
+if [ -f "$BINARY_FILE" ]; then
+    BINARY_PATH="$BINARY_FILE"
+elif [ -f "$BINARY_DIR/$BINARY_FILE" ]; then
+    BINARY_PATH="$BINARY_DIR/$BINARY_FILE"
+else
+    echo "Error: Binary file '$BINARY_FILE' not found!"
+    exit 1
+fi
+
+# Check for GDB
+HOST_GDB="$PROJECT_ROOT/toolchain/arm-anykav200-crosstool/usr/bin/arm-anykav200-linux-uclibcgnueabi-gdb"
+SYSTEM_GDB="gdb"
+
+# Set up library paths for 32-bit GDB
+PYTHON_LIB_PATH="/usr/local/python2.6/lib"
+I386_LIB_PATH="/usr/lib/i386-linux-gnu"
+GDB_LIBRARY_PATH="$PYTHON_LIB_PATH:$I386_LIB_PATH"
+
+if [ -f "$HOST_GDB" ]; then
+    GDB_CMD="$HOST_GDB"
+    GDB_ENV="LD_LIBRARY_PATH=$GDB_LIBRARY_PATH"
+    echo "Using host GDB from toolchain with 32-bit library support"
+    echo "Library path: $GDB_LIBRARY_PATH"
+elif command -v $SYSTEM_GDB &> /dev/null; then
+    GDB_CMD="$SYSTEM_GDB"
+    GDB_ENV=""
+    echo "Using system GDB (may have limited ARM support)"
+else
+    echo "Error: No GDB found!"
+    exit 1
+fi
+
+echo "=== Simplified GDB Core Dump Analysis ==="
+echo "Coredump: $COREDUMP_PATH"
+echo "Binary: $BINARY_PATH"
+echo "Libraries: $SD_LIB_DIR"
+echo ""
+
+# Run GDB analysis
+echo "Running GDB analysis..."
+if [ -n "$GDB_ENV" ]; then
+    env $GDB_ENV $GDB_CMD --batch \
+        --ex "set substitute-path /workspace $ONVIF_DIR" \
+        --ex "set substitute-path /mnt/anyka_hack/onvif $ONVIF_DIR" \
+        --ex "set substitute-path /workspace/cross-compile/onvif $ONVIF_DIR" \
+        --ex "set solib-search-path $SOLIB_SEARCH_PATH" \
+        --ex "file $BINARY_PATH" \
+        --ex "core-file $COREDUMP_PATH" \
+        --ex "echo === COREDUMP ANALYSIS ===" \
+        --ex "echo Coredump file: $COREDUMP_PATH" \
+        --ex "echo Binary file: $BINARY_PATH" \
+        --ex "echo Analysis date: $(date)" \
+        --ex "echo Project root: $PROJECT_ROOT" \
+        --ex "echo" \
+        --ex "bt full" \
+        --ex "echo" \
+        --ex "echo === THREAD ANALYSIS ===" \
+        --ex "info threads" \
+        --ex "echo" \
+        --ex "thread apply all bt" \
+        --ex "echo" \
+        --ex "echo === REGISTER ANALYSIS ===" \
+        --ex "info registers" \
+        --ex "echo" \
+        --ex "echo === FRAME ANALYSIS ===" \
+        --ex "info frame" \
+        --ex "echo" \
+        --ex "echo === SOURCE CONTEXT ===" \
+        --ex "list" \
+        --ex "echo" \
+        --ex "echo === ARGUMENTS AND LOCALS ===" \
+        --ex "info args" \
+        --ex "info locals" \
+        --ex "echo" \
+        --ex "echo === MEMORY ANALYSIS ===" \
+        --ex "info proc mappings" \
+        --ex "echo" \
+        --ex "echo === SHARED LIBRARIES ===" \
+        --ex "info sharedlibrary" \
+        --ex "echo" \
+        --ex "echo === MEMORY DUMP ===" \
+        --ex "x/20x \$pc-40" \
+        --ex "x/20x \$sp-40" \
+        --ex "echo" \
+        --ex "echo === ANALYSIS COMPLETE ===" \
+        --ex "quit" \
+        "$BINARY_PATH"
+else
+    $GDB_CMD --batch \
+        --ex "set substitute-path /workspace $ONVIF_DIR" \
+        --ex "set substitute-path /mnt/anyka_hack/onvif $ONVIF_DIR" \
+        --ex "set substitute-path /workspace/cross-compile/onvif $ONVIF_DIR" \
+        --ex "set solib-search-path $SOLIB_SEARCH_PATH" \
+        --ex "file $BINARY_PATH" \
+        --ex "core-file $COREDUMP_PATH" \
+        --ex "echo === COREDUMP ANALYSIS ===" \
+        --ex "echo Coredump file: $COREDUMP_PATH" \
+        --ex "echo Binary file: $BINARY_PATH" \
+        --ex "echo Analysis date: $(date)" \
+        --ex "echo Project root: $PROJECT_ROOT" \
+        --ex "echo" \
+        --ex "bt full" \
+        --ex "echo" \
+        --ex "echo === THREAD ANALYSIS ===" \
+        --ex "info threads" \
+        --ex "echo" \
+        --ex "thread apply all bt" \
+        --ex "echo" \
+        --ex "echo === REGISTER ANALYSIS ===" \
+        --ex "info registers" \
+        --ex "echo" \
+        --ex "echo === FRAME ANALYSIS ===" \
+        --ex "info frame" \
+        --ex "echo" \
+        --ex "echo === SOURCE CONTEXT ===" \
+        --ex "list" \
+        --ex "echo" \
+        --ex "echo === ARGUMENTS AND LOCALS ===" \
+        --ex "info args" \
+        --ex "info locals" \
+        --ex "echo" \
+        --ex "echo === MEMORY ANALYSIS ===" \
+        --ex "info proc mappings" \
+        --ex "echo" \
+        --ex "echo === SHARED LIBRARIES ===" \
+        --ex "info sharedlibrary" \
+        --ex "echo" \
+        --ex "echo === MEMORY DUMP ===" \
+        --ex "x/20x \$pc-40" \
+        --ex "x/20x \$sp-40" \
+        --ex "echo" \
+        --ex "echo === ANALYSIS COMPLETE ===" \
+        --ex "quit" \
+        "$BINARY_PATH"
 fi
 
 echo ""
-echo "GDB analysis script completed"
-echo ""
-echo "=== ALTERNATIVE ANALYSIS METHODS ==="
-echo ""
-echo "If this script fails, try the direct Docker method from the ONVIF directory:"
-echo "cd SD_card_contents/anyka_hack/onvif"
-echo "docker run --rm -v \${PWD}:/workspace anyka-cross-compile sh -c \""
-echo "mkdir -p /lib &&"
-echo "ln -sf /workspace/lib/ld-uClibc.so.0 /lib/ld-uClibc.so.0 &&"
-echo "ln -sf /workspace/lib/libuClibc-0.9.33.2.so /lib/libuClibc-0.9.33.2.so &&"
-echo "ln -sf /workspace/lib/libc.so.0 /lib/libc.so.0 &&"
-echo "ln -sf /workspace/lib/libdl-0.9.33.2.so /lib/libdl.so.0 &&"
-echo "ln -sf /workspace/lib/libpthread-0.9.33.2.so /lib/libpthread.so.0 &&"
-echo "ln -sf /workspace/lib/libm-0.9.33.2.so /lib/libm.so.0 &&"
-echo "gdb --batch --ex 'set substitute-path /workspace /mnt/anyka_hack/onvif' \\"
-echo "    --ex 'set solib-search-path /workspace/lib:/workspace:/lib:/usr/lib' \\"
-echo "    --ex 'file onvifd_debug' --ex 'core-file $COREDUMP_FILE' \\"
-echo "    --ex 'bt full' --ex 'info threads' --ex 'thread apply all bt' \\"
-echo "    --ex 'info registers' --ex 'info frame' --ex 'list' \\"
-echo "    --ex 'info args' --ex 'info locals' --ex 'info proc mappings' \\"
-echo "    --ex 'info sharedlibrary' --ex 'x/20x \\\$pc-40' --ex 'x/20x \\\$sp-40' \\"
-echo "    --ex 'quit' onvifd_debug"
-echo "\""
+echo "=== Analysis Complete ==="
+echo "For interactive debugging:"
+if [ -n "$GDB_ENV" ]; then
+    echo "  env $GDB_ENV $GDB_CMD $BINARY_PATH"
+else
+    echo "  $GDB_CMD $BINARY_PATH"
+fi
+echo "  (gdb) set solib-search-path $SOLIB_SEARCH_PATH"
+echo "  (gdb) core-file $COREDUMP_PATH"
+echo "  (gdb) bt full"
