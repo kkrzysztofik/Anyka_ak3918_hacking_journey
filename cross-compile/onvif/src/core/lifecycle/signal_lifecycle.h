@@ -12,9 +12,9 @@
 #ifndef ONVIF_SIGNAL_LIFECYCLE_H
 #define ONVIF_SIGNAL_LIFECYCLE_H
 
-#include <stdbool.h>
-
 #include "core/config/config.h"
+
+#include <stdbool.h>
 
 /**
  * @brief Register signal handlers for graceful shutdown
@@ -29,16 +29,10 @@ int signal_lifecycle_register_handlers(void);
 bool signal_lifecycle_should_continue(void);
 
 /**
- * @brief Get signal count for timeout handling
- * @return Number of signals received
- */
-int signal_lifecycle_get_signal_count(void);
-
-/**
  * @brief Run the main daemon loop with signal handling
  * @param cfg Application configuration (for logging)
  */
-void signal_lifecycle_run_daemon_loop(const struct application_config *cfg);
+void signal_lifecycle_run_daemon_loop(const struct application_config* cfg);
 
 /**
  * @brief Request graceful shutdown

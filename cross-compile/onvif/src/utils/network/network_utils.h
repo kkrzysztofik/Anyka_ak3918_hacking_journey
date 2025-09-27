@@ -9,11 +9,10 @@
 #include <stddef.h>
 
 /** Obtain primary (wlan0) IPv4 address into buffer. */
-int get_local_ip_address(char *ip_str, size_t ip_str_size);
+int get_local_ip_address(char* ip_str, size_t ip_str_size);
 /** Retrieve device hostname (fallback value if system call fails). */
-int get_device_hostname(char *hostname, size_t hostname_size);
+int get_device_hostname(char* hostname, size_t hostname_size);
 /** Compose device URL: protocol://ip[:port]/path */
-int build_device_url(const char *protocol, int port, const char *path,
-                     char *url, size_t url_size);
+int build_device_url(const char* protocol, int port, const char* path, char* url, size_t url_size);
 
 #endif

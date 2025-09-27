@@ -11,17 +11,17 @@
 
 #include "core/lifecycle/platform_lifecycle.h"
 
-#include <stdbool.h>
-
 #include "core/lifecycle/network_lifecycle.h"
 #include "core/lifecycle/video_lifecycle.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
 #include "utils/memory/memory_manager.h"
 
+#include <stdbool.h>
+
 /* Global platform state - static variables with internal linkage only */
-static volatile bool g_platform_initialized = false;  // NOLINT
-static volatile int g_platform_status = 0;            // NOLINT
+static volatile bool g_platform_initialized = false; // NOLINT
+static volatile int g_platform_status = 0;           // NOLINT
 
 /* ---------------------------- Public Interface ------------------------- */
 
@@ -65,8 +65,8 @@ void platform_lifecycle_cleanup(void) {
 
   // Cleanup platform components
   platform_log_info("Cleaning up platform components...\n");
-  platform_ptz_cleanup();  // Cleanup PTZ after services
-  platform_cleanup();      // Cleanup platform last
+  platform_ptz_cleanup(); // Cleanup PTZ after services
+  platform_cleanup();     // Cleanup platform last
 
   // Cleanup memory manager last
   platform_log_info("Cleaning up memory manager...\n");
@@ -78,6 +78,10 @@ void platform_lifecycle_cleanup(void) {
   platform_log_info("System cleanup completed\n");
 }
 
-bool platform_lifecycle_initialized(void) { return g_platform_initialized; }
+bool platform_lifecycle_initialized(void) {
+  return g_platform_initialized;
+}
 
-int platform_lifecycle_get_status(void) { return g_platform_status; }
+int platform_lifecycle_get_status(void) {
+  return g_platform_status;
+}

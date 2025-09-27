@@ -8,11 +8,11 @@
 #ifndef STREAM_CONFIG_UTILS_H
 #define STREAM_CONFIG_UTILS_H
 
-#include <stdbool.h>
-#include <stddef.h>
-
 #include "platform/platform.h"
 #include "services/common/video_config_types.h"
+
+#include <stdbool.h>
+#include <stddef.h>
 
 /* Forward declarations */
 struct application_config;
@@ -24,8 +24,7 @@ struct application_config;
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_INVALID on failure
  * @note Sets appropriate default values based on stream type
  */
-int stream_config_init_defaults(video_config_t *stream_config,
-                                bool is_main_stream);
+int stream_config_init_defaults(video_config_t* stream_config, bool is_main_stream);
 
 /**
  * @brief Initialize video stream configuration from anyka_cfg.ini parameters
@@ -36,8 +35,7 @@ int stream_config_init_defaults(video_config_t *stream_config,
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_INVALID on failure
  * @note Converts anyka_cfg.ini parameters to internal stream configuration
  */
-int stream_config_init_from_anyka(video_config_t *stream_config,
-                                  bool is_main_stream,
+int stream_config_init_from_anyka(video_config_t* stream_config, bool is_main_stream,
                                   unsigned int bitrate_kbps, int fps);
 
 /**
@@ -47,8 +45,7 @@ int stream_config_init_from_anyka(video_config_t *stream_config,
  * @return ONVIF_SUCCESS if valid, ONVIF_ERROR_INVALID if invalid
  * @note Validates ranges and constraints based on stream type
  */
-int stream_config_validate(const video_config_t *stream_config,
-                           bool is_main_stream);
+int stream_config_validate(const video_config_t* stream_config, bool is_main_stream);
 
 /**
  * @brief Convert stream configuration to platform video config
@@ -58,9 +55,8 @@ int stream_config_validate(const video_config_t *stream_config,
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_INVALID on failure
  * @note Converts internal stream config to platform-specific video config
  */
-int stream_config_to_platform(const video_config_t *stream_config,
-                              platform_video_config_t *platform_config,
-                              bool is_main_stream);
+int stream_config_to_platform(const video_config_t* stream_config,
+                              platform_video_config_t* platform_config, bool is_main_stream);
 
 /**
  * @brief Get stream configuration summary for logging
@@ -71,9 +67,8 @@ int stream_config_to_platform(const video_config_t *stream_config,
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_INVALID on failure
  * @note Generates human-readable summary of stream configuration
  */
-int stream_config_get_summary(const video_config_t *stream_config,
-                              bool is_main_stream, char *summary,
-                              size_t summary_size);
+int stream_config_get_summary(const video_config_t* stream_config, bool is_main_stream,
+                              char* summary, size_t summary_size);
 
 /**
  * @brief Apply stream configuration to RTSP stream config
@@ -84,16 +79,15 @@ int stream_config_get_summary(const video_config_t *stream_config,
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_INVALID on failure
  * @note Applies stream configuration to RTSP stream configuration structure
  */
-int stream_config_apply_to_rtsp(const video_config_t *stream_config,
-                                void *rtsp_config, bool is_main_stream,
-                                platform_vi_handle_t vi_handle);
+int stream_config_apply_to_rtsp(const video_config_t* stream_config, void* rtsp_config,
+                                bool is_main_stream, platform_vi_handle_t vi_handle);
 
 /**
  * @brief Clean up stream configuration resources
  * @param stream_config Stream configuration to clean up
  * @note Frees any allocated resources in stream configuration
  */
-void stream_config_cleanup(video_config_t *stream_config);
+void stream_config_cleanup(video_config_t* stream_config);
 
 /**
  * @brief Copy stream configuration
@@ -102,7 +96,7 @@ void stream_config_cleanup(video_config_t *stream_config);
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_INVALID on failure
  * @note Performs deep copy of stream configuration
  */
-int stream_config_copy(video_config_t *dest, const video_config_t *src);
+int stream_config_copy(video_config_t* dest, const video_config_t* src);
 
 /**
  * @brief Compare two stream configurations
@@ -111,7 +105,6 @@ int stream_config_copy(video_config_t *dest, const video_config_t *src);
  * @return true if configurations are equal, false otherwise
  * @note Performs field-by-field comparison of stream configurations
  */
-bool stream_config_equals(const video_config_t *config1,
-                          const video_config_t *config2);
+bool stream_config_equals(const video_config_t* config1, const video_config_t* config2);
 
 #endif /* STREAM_CONFIG_UTILS_H */

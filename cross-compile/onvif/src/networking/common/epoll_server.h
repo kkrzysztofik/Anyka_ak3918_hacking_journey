@@ -16,11 +16,15 @@
 /* Epoll configuration */
 #define EPOLL_MAX_EVENTS 100
 
+/* Forward declaration */
+struct application_config;
+
 /* Epoll server functions */
 int epoll_server_init(int server_socket);
 void epoll_server_cleanup(void);
-void *epoll_server_loop(void *arg);
-int epoll_server_add_connection(int fd, void *data);
+void epoll_server_set_config(const struct application_config* config);
+void* epoll_server_loop(void* arg);
+int epoll_server_add_connection(int fd, void* data);
 int epoll_server_remove_connection(int fd);
 
 #endif /* EPOLL_SERVER_H */

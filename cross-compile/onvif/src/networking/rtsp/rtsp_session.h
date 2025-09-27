@@ -31,7 +31,7 @@ struct rtsp_session {
   int timeout_seconds;
 
   /* Headers */
-  struct rtsp_header *headers;
+  struct rtsp_header* headers;
 
   /* Authentication */
   bool authenticated;
@@ -39,8 +39,8 @@ struct rtsp_session {
   char auth_nonce[RTSP_MAX_NONCE_LEN];
 
   /* Buffers */
-  char *recv_buffer;
-  char *send_buffer;
+  char* recv_buffer;
+  char* send_buffer;
   size_t recv_pos;
 
   /* RTP session */
@@ -51,9 +51,9 @@ struct rtsp_session {
   bool audio_enabled;
 
   /* Linked list */
-  struct rtsp_session *next;
-  struct rtsp_session *prev;
-  struct rtsp_server *server; /* back-pointer */
+  struct rtsp_session* next;
+  struct rtsp_session* prev;
+  struct rtsp_server* server; /* back-pointer */
 };
 
 /* Enhanced RTSP functions */
@@ -63,13 +63,13 @@ struct rtsp_session {
  * @param headers Pointer to store parsed headers
  * @return 0 on success, -1 on error
  */
-int rtsp_parse_headers(const char *request, struct rtsp_header **headers);
+int rtsp_parse_headers(const char* request, struct rtsp_header** headers);
 
 /**
  * @brief Free RTSP headers
  * @param headers Headers to free
  */
-void rtsp_free_headers(struct rtsp_header *headers);
+void rtsp_free_headers(struct rtsp_header* headers);
 
 /**
  * @brief Get header value by name
@@ -77,7 +77,7 @@ void rtsp_free_headers(struct rtsp_header *headers);
  * @param name Header name to find
  * @return Header value or NULL if not found
  */
-const char *rtsp_get_header(struct rtsp_header *headers, const char *name);
+const char* rtsp_get_header(struct rtsp_header* headers, const char* name);
 
 /**
  * @brief Validate RTSP request
@@ -85,7 +85,7 @@ const char *rtsp_get_header(struct rtsp_header *headers, const char *name);
  * @param len Length of request
  * @return 0 if valid, -1 if invalid
  */
-int rtsp_validate_request(const char *request, size_t len);
+int rtsp_validate_request(const char* request, size_t len);
 
 /**
  * @brief Send error response
@@ -94,21 +94,21 @@ int rtsp_validate_request(const char *request, size_t len);
  * @param reason Error reason
  * @return 0 on success, -1 on error
  */
-int rtsp_send_error_response(rtsp_session_t *session, enum rtsp_error_code code,
-                             const char *reason);
+int rtsp_send_error_response(rtsp_session_t* session, enum rtsp_error_code code,
+                             const char* reason);
 
 /**
  * @brief Check if session has timed out
  * @param session RTSP session
  * @return 0 if not timed out, 1 if timed out
  */
-int rtsp_check_session_timeout(rtsp_session_t *session);
+int rtsp_check_session_timeout(rtsp_session_t* session);
 
 /**
  * @brief Update session activity timestamp
  * @param session RTSP session
  */
-void rtsp_update_session_activity(rtsp_session_t *session);
+void rtsp_update_session_activity(rtsp_session_t* session);
 
 /**
  * @brief Enhanced header parsing
@@ -116,15 +116,14 @@ void rtsp_update_session_activity(rtsp_session_t *session);
  * @param headers Pointer to store parsed headers
  * @return 0 on success, -1 on error
  */
-int rtsp_parse_headers_enhanced(const char *request,
-                                struct rtsp_header **headers);
+int rtsp_parse_headers_enhanced(const char* request, struct rtsp_header** headers);
 
 /**
  * @brief Handle authentication required response
  * @param session RTSP session
  * @return 0 on success, -1 on error
  */
-int rtsp_handle_auth_required(rtsp_session_t *session);
+int rtsp_handle_auth_required(rtsp_session_t* session);
 
 /**
  * @brief Generate WWW-Authenticate header
@@ -133,7 +132,7 @@ int rtsp_handle_auth_required(rtsp_session_t *session);
  * @param header_size Size of header buffer
  * @return 0 on success, -1 on error
  */
-int rtsp_generate_www_authenticate_header(rtsp_session_t *session, char *header,
+int rtsp_generate_www_authenticate_header(rtsp_session_t* session, char* header,
                                           size_t header_size);
 
 /* Session management functions */
@@ -142,7 +141,7 @@ int rtsp_generate_www_authenticate_header(rtsp_session_t *session, char *header,
  * @param server RTSP server
  * @return Number of sessions cleaned up
  */
-int rtsp_session_cleanup_timeout_sessions(rtsp_server_t *server);
+int rtsp_session_cleanup_timeout_sessions(rtsp_server_t* server);
 
 /**
  * @brief Set session timeout
@@ -150,20 +149,20 @@ int rtsp_session_cleanup_timeout_sessions(rtsp_server_t *server);
  * @param timeout_seconds Timeout in seconds
  * @return 0 on success, -1 on error
  */
-int rtsp_session_set_timeout(rtsp_session_t *session, int timeout_seconds);
+int rtsp_session_set_timeout(rtsp_session_t* session, int timeout_seconds);
 
 /**
  * @brief Cleanup all sessions
  * @param server RTSP server
  */
-void rtsp_session_cleanup_all(rtsp_server_t *server);
+void rtsp_session_cleanup_all(rtsp_server_t* server);
 
 /**
  * @brief Get session count
  * @param server RTSP server
  * @return Number of active sessions
  */
-int rtsp_session_get_count(rtsp_server_t *server);
+int rtsp_session_get_count(rtsp_server_t* server);
 
 /**
  * @brief Add session to server
@@ -171,7 +170,7 @@ int rtsp_session_get_count(rtsp_server_t *server);
  * @param session Session to add
  * @return 0 on success, -1 on error
  */
-int rtsp_session_add(rtsp_server_t *server, rtsp_session_t *session);
+int rtsp_session_add(rtsp_server_t* server, rtsp_session_t* session);
 
 /**
  * @brief Remove session from server
@@ -179,19 +178,19 @@ int rtsp_session_add(rtsp_server_t *server, rtsp_session_t *session);
  * @param session Session to remove
  * @return 0 on success, -1 on error
  */
-int rtsp_session_remove(rtsp_server_t *server, rtsp_session_t *session);
+int rtsp_session_remove(rtsp_server_t* server, rtsp_session_t* session);
 
 /**
  * @brief Check if session has timed out
  * @param session RTSP session
  * @return true if timed out, false otherwise
  */
-bool rtsp_session_has_timed_out(rtsp_session_t *session);
+bool rtsp_session_has_timed_out(rtsp_session_t* session);
 
 /**
  * @brief Cleanup session resources
  * @param session RTSP session
  */
-void rtsp_cleanup_session(rtsp_session_t *session);
+void rtsp_cleanup_session(rtsp_session_t* session);
 
 #endif /* RTSP_SESSION_H */

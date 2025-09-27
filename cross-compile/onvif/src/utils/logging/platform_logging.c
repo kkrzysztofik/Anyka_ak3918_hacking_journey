@@ -7,6 +7,8 @@
 
 #include "platform_logging.h"
 
+#include "core/config/config.h"
+
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -16,26 +18,26 @@
 #include <time.h>
 
 /* Log level strings */
-static const char* LOG_LEVEL_STRINGS[] = {"ERROR", "WARN ", "NOTICE", "INFO ",
-                                          "DEBUG"};
+static const char* LOG_LEVEL_STRINGS[] = {"DEBUG", "INFO ", "NOTICE", "WARN ", "ERROR"};
 
 /* Log level colors for terminal output */
 static const char* LOG_LEVEL_COLORS[] = {
-    "\033[1;31m", /* ERROR - Red */
-    "\033[1;33m", /* WARN  - Yellow */
-    "\033[1;36m", /* NOTICE - Cyan */
-    "\033[1;32m", /* INFO  - Green */
-    "\033[1;37m"  /* DEBUG - White */
+  "\033[1;37m", /* DEBUG - White */
+  "\033[1;32m", /* INFO  - Green */
+  "\033[1;36m", /* NOTICE - Cyan */
+  "\033[1;33m", /* WARN  - Yellow */
+  "\033[1;31m"  /* ERROR - Red */
 };
 
 static const char* COLOR_RESET = "\033[0m";
 
 /* Global logging configuration */
-static platform_logging_config_t g_log_config = {.enabled = true,  // NOLINT
-                                                 .use_colors = true,
-                                                 .use_timestamps = true,
-                                                 .min_level = PLATFORM_LOG_INFO,
-                                                 .tag = "ONVIF"};
+static platform_logging_config_t g_log_config = { // NOLINT
+  .enabled = true,
+  .use_colors = true,
+  .use_timestamps = true,
+  .min_level = PLATFORM_LOG_DEBUG,
+  .tag = "ONVIF"};
 
 /**
  * @brief Get current timestamp as formatted string
@@ -91,9 +93,8 @@ static bool should_log(platform_log_level_t level) {
  * @param args Variable arguments
  * @return Number of characters printed
  */
-int platform_log_printf(platform_log_level_t level, const char* file,
-                        const char* function, int line, const char* format,
-                        va_list args) {
+int platform_log_printf(platform_log_level_t level, const char* file, const char* function,
+                        int line, const char* format, va_list args) {
   if (!should_log(level)) {
     return 0;
   }
@@ -117,8 +118,8 @@ int platform_log_printf(platform_log_level_t level, const char* file,
 
   /* Add log level with color if enabled */
   if (g_log_config.use_colors) {
-    chars_written += printf("%s[%s]%s ", LOG_LEVEL_COLORS[level],
-                            LOG_LEVEL_STRINGS[level], COLOR_RESET);
+    chars_written +=
+      printf("%s[%s]%s ", LOG_LEVEL_COLORS[level], LOG_LEVEL_STRINGS[level], COLOR_RESET);
   } else {
     chars_written += printf("[%s] ", LOG_LEVEL_STRINGS[level]);
   }
@@ -188,6 +189,26 @@ void platform_logging_set_enabled(bool enabled) {
 void platform_logging_set_tag(const char* tag) {
   if (tag) {
     strncpy(g_log_config.tag, tag, sizeof(g_log_config.tag) - 1);
+    g_log_config.tag[sizeof(g_log_config.tag) - 1] = '\0';
+  }
+}
+
+/**
+ * @brief Apply logging configuration from application config
+ * @param logging_config Logging configuration from application config
+ */
+void platform_logging_apply_config(const struct logging_settings* logging_config) {
+  if (!logging_config) {
+    return;
+  }
+
+  g_log_config.enabled = logging_config->enabled != 0;
+  g_log_config.use_colors = logging_config->use_colors != 0;
+  g_log_config.use_timestamps = logging_config->use_timestamps != 0;
+  g_log_config.min_level = (platform_log_level_t)logging_config->min_level;
+
+  if (logging_config->tag[0] != '\0') {
+    strncpy(g_log_config.tag, logging_config->tag, sizeof(g_log_config.tag) - 1);
     g_log_config.tag[sizeof(g_log_config.tag) - 1] = '\0';
   }
 }

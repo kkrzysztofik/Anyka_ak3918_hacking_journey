@@ -19,7 +19,7 @@
  * @return 1 if valid, 0 if invalid
  * @note Validates sample rate, channels, bits per sample, and codec type
  */
-int audio_validation_validate_config(const platform_audio_config_t *config) {
+int audio_validation_validate_config(const platform_audio_config_t* config) {
   if (!config) {
     return 0;
   }
@@ -51,14 +51,14 @@ int audio_validation_validate_config(const platform_audio_config_t *config) {
  */
 int audio_validation_validate_sample_rate(int sample_rate) {
   switch (sample_rate) {
-    case 8000:
-    case 16000:
-    case 22050:
-    case 44100:
-    case 48000:
-      return 1;
-    default:
-      return 0;
+  case 8000:
+  case 16000:
+  case 22050:
+  case 44100:
+  case 48000:
+    return 1;
+  default:
+    return 0;
   }
 }
 
@@ -80,13 +80,13 @@ int audio_validation_validate_channels(int channels) {
  */
 int audio_validation_validate_bits_per_sample(int bits_per_sample) {
   switch (bits_per_sample) {
-    case 8:
-    case 16:
-    case 24:
-    case 32:
-      return 1;
-    default:
-      return 0;
+  case 8:
+  case 16:
+  case 24:
+  case 32:
+    return 1;
+  default:
+    return 0;
   }
 }
 
@@ -98,13 +98,13 @@ int audio_validation_validate_bits_per_sample(int bits_per_sample) {
  */
 int audio_validation_validate_codec(platform_audio_codec_t codec) {
   switch (codec) {
-    case PLATFORM_AUDIO_CODEC_PCM:
-    case PLATFORM_AUDIO_CODEC_AAC:
-    case PLATFORM_AUDIO_CODEC_G711A:
-    case PLATFORM_AUDIO_CODEC_G711U:
-      return 1;
-    default:
-      return 0;
+  case PLATFORM_AUDIO_CODEC_PCM:
+  case PLATFORM_AUDIO_CODEC_AAC:
+  case PLATFORM_AUDIO_CODEC_G711A:
+  case PLATFORM_AUDIO_CODEC_G711U:
+    return 1;
+  default:
+    return 0;
   }
 }
 
@@ -114,19 +114,18 @@ int audio_validation_validate_codec(platform_audio_codec_t codec) {
  * @return 0 on success, -1 on error
  * @note Sets safe default values for Anyka platform with AAC support
  */
-int audio_validation_get_default_config(platform_audio_config_t *config) {
+int audio_validation_get_default_config(platform_audio_config_t* config) {
   if (!config) {
     return -1;
   }
 
   // Set safe defaults based on ai_demo and akipc reference implementations
   // Enhanced for AAC codec support
-  config->sample_rate = 16000;   // 16kHz for better AAC quality
-  config->channels = 1;          // Mono channel (AUDIO_CHANNEL_MONO)
-  config->bits_per_sample = 16;  // 16-bit samples
-  config->codec =
-      PLATFORM_AUDIO_CODEC_AAC;  // AAC as default for better compression
-  config->bitrate = 64000;       // 64 kbps default bitrate for AAC
+  config->sample_rate = 16000;              // 16kHz for better AAC quality
+  config->channels = 1;                     // Mono channel (AUDIO_CHANNEL_MONO)
+  config->bits_per_sample = 16;             // 16-bit samples
+  config->codec = PLATFORM_AUDIO_CODEC_AAC; // AAC as default for better compression
+  config->bitrate = 64000;                  // 64 kbps default bitrate for AAC
 
   return 0;
 }
@@ -137,7 +136,7 @@ int audio_validation_get_default_config(platform_audio_config_t *config) {
  * @return 1 if supported, 0 if not supported
  * @note Checks platform-specific limitations with enhanced AAC support
  */
-int audio_validation_is_supported(const platform_audio_config_t *config) {
+int audio_validation_is_supported(const platform_audio_config_t* config) {
   if (!config) {
     return 0;
   }
@@ -151,9 +150,8 @@ int audio_validation_is_supported(const platform_audio_config_t *config) {
   // From ai_demo and akipc analysis, enhanced for AAC support:
 
   // Sample rate limitations - enhanced for AAC
-  if (config->sample_rate != 8000 && config->sample_rate != 16000 &&
-      config->sample_rate != 22050 && config->sample_rate != 44100 &&
-      config->sample_rate != 48000) {
+  if (config->sample_rate != 8000 && config->sample_rate != 16000 && config->sample_rate != 22050 &&
+      config->sample_rate != 44100 && config->sample_rate != 48000) {
     // Support common sample rates for AAC
     return 0;
   }
@@ -169,8 +167,7 @@ int audio_validation_is_supported(const platform_audio_config_t *config) {
   }
 
   // Codec limitations - PCM and AAC are supported
-  if (config->codec != PLATFORM_AUDIO_CODEC_PCM &&
-      config->codec != PLATFORM_AUDIO_CODEC_AAC) {
+  if (config->codec != PLATFORM_AUDIO_CODEC_PCM && config->codec != PLATFORM_AUDIO_CODEC_AAC) {
     return 0;
   }
 

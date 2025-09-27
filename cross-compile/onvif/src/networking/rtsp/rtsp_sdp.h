@@ -22,14 +22,13 @@
  * @param origin Origin information
  * @return 0 on success, -1 on error
  */
-int sdp_init_session(struct sdp_session *sdp, const char *session_name,
-                     const char *origin);
+int sdp_init_session(struct sdp_session* sdp, const char* session_name, const char* origin);
 
 /**
  * @brief Cleanup SDP session
  * @param sdp SDP session to cleanup
  */
-void sdp_cleanup_session(struct sdp_session *sdp);
+void sdp_cleanup_session(struct sdp_session* sdp);
 
 /**
  * @brief Add media description to SDP session
@@ -43,9 +42,8 @@ void sdp_cleanup_session(struct sdp_session *sdp);
  * @param channels Number of channels (for audio)
  * @return 0 on success, -1 on error
  */
-int sdp_add_media(struct sdp_session *sdp, sdp_media_type_t type, int port,
-                  const char *protocol, int payload_type, const char *encoding,
-                  int clock_rate, int channels);
+int sdp_add_media(struct sdp_session* sdp, sdp_media_type_t type, int port, const char* protocol,
+                  int payload_type, const char* encoding, int clock_rate, int channels);
 
 /**
  * @brief Set media direction
@@ -54,7 +52,7 @@ int sdp_add_media(struct sdp_session *sdp, sdp_media_type_t type, int port,
  * @param direction Direction (sendrecv, sendonly, recvonly, inactive)
  * @return 0 on success, -1 on error
  */
-int sdp_set_media_direction(struct sdp_session *sdp, sdp_media_type_t type,
+int sdp_set_media_direction(struct sdp_session* sdp, sdp_media_type_t type,
                             sdp_direction_t direction);
 
 /**
@@ -64,8 +62,7 @@ int sdp_set_media_direction(struct sdp_session *sdp, sdp_media_type_t type,
  * @param control Control URL
  * @return 0 on success, -1 on error
  */
-int sdp_set_media_control(struct sdp_session *sdp, sdp_media_type_t type,
-                          const char *control);
+int sdp_set_media_control(struct sdp_session* sdp, sdp_media_type_t type, const char* control);
 
 /**
  * @brief Set media format parameters
@@ -74,8 +71,7 @@ int sdp_set_media_control(struct sdp_session *sdp, sdp_media_type_t type,
  * @param fmtp Format parameters
  * @return 0 on success, -1 on error
  */
-int sdp_set_media_fmtp(struct sdp_session *sdp, sdp_media_type_t type,
-                       const char *fmtp);
+int sdp_set_media_fmtp(struct sdp_session* sdp, sdp_media_type_t type, const char* fmtp);
 
 /**
  * @brief Set media RTCP feedback parameters
@@ -84,8 +80,7 @@ int sdp_set_media_fmtp(struct sdp_session *sdp, sdp_media_type_t type,
  * @param rtcp_fb RTCP feedback parameters
  * @return 0 on success, -1 on error
  */
-int sdp_set_media_rtcp_fb(struct sdp_session *sdp, sdp_media_type_t type,
-                          const char *rtcp_fb);
+int sdp_set_media_rtcp_fb(struct sdp_session* sdp, sdp_media_type_t type, const char* rtcp_fb);
 
 /**
  * @brief Set media extension map
@@ -94,8 +89,7 @@ int sdp_set_media_rtcp_fb(struct sdp_session *sdp, sdp_media_type_t type,
  * @param extmap Extension map
  * @return 0 on success, -1 on error
  */
-int sdp_set_media_extmap(struct sdp_session *sdp, sdp_media_type_t type,
-                         const char *extmap);
+int sdp_set_media_extmap(struct sdp_session* sdp, sdp_media_type_t type, const char* extmap);
 
 /**
  * @brief Set media identification
@@ -104,8 +98,7 @@ int sdp_set_media_extmap(struct sdp_session *sdp, sdp_media_type_t type,
  * @param mid Media identification
  * @return 0 on success, -1 on error
  */
-int sdp_set_media_mid(struct sdp_session *sdp, sdp_media_type_t type,
-                      const char *mid);
+int sdp_set_media_mid(struct sdp_session* sdp, sdp_media_type_t type, const char* mid);
 
 /**
  * @brief Set media SSRC
@@ -114,8 +107,7 @@ int sdp_set_media_mid(struct sdp_session *sdp, sdp_media_type_t type,
  * @param ssrc SSRC value
  * @return 0 on success, -1 on error
  */
-int sdp_set_media_ssrc(struct sdp_session *sdp, sdp_media_type_t type,
-                       const char *ssrc);
+int sdp_set_media_ssrc(struct sdp_session* sdp, sdp_media_type_t type, const char* ssrc);
 
 /**
  * @brief Generate SDP text from session
@@ -124,7 +116,7 @@ int sdp_set_media_ssrc(struct sdp_session *sdp, sdp_media_type_t type,
  * @param buffer_size Size of buffer
  * @return 0 on success, -1 on error
  */
-int sdp_generate(struct sdp_session *sdp, char *buffer, size_t buffer_size);
+int sdp_generate(struct sdp_session* sdp, char* buffer, size_t buffer_size);
 
 /**
  * @brief Parse SDP text into session
@@ -132,13 +124,13 @@ int sdp_generate(struct sdp_session *sdp, char *buffer, size_t buffer_size);
  * @param sdp_text SDP text to parse
  * @return 0 on success, -1 on error
  */
-int sdp_parse(struct sdp_session *sdp, const char *sdp_text);
+int sdp_parse(struct sdp_session* sdp, const char* sdp_text);
 
 /**
  * @brief Validate SDP text
  * @param sdp_text SDP text to validate
  * @return 0 if valid, -1 if invalid
  */
-int sdp_validate(const char *sdp_text);
+int sdp_validate(const char* sdp_text);
 
 #endif /* RTSP_SDP_H */

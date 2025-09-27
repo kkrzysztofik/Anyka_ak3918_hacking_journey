@@ -12,8 +12,6 @@
 
 #include "core/lifecycle/network_lifecycle.h"
 
-#include <stdbool.h>
-
 #include "core/config/config.h"
 #include "core/lifecycle/service_manager.h"
 #include "core/lifecycle/video_lifecycle.h"
@@ -22,12 +20,14 @@
 #include "platform/platform.h"
 #include "services/snapshot/onvif_snapshot.h"
 
+#include <stdbool.h>
+
 /* Global network services state - static variable with internal linkage only */
-static volatile bool g_network_services_initialized = false;  // NOLINT
+static volatile bool g_network_services_initialized = false; // NOLINT
 
 /* ---------------------------- Public Interface ------------------------- */
 
-int network_lifecycle_init(const struct application_config *cfg) {
+int network_lifecycle_init(const struct application_config* cfg) {
   platform_log_info("Initializing network services...\n");
 
   // Initialize ONVIF services
@@ -35,17 +35,17 @@ int network_lifecycle_init(const struct application_config *cfg) {
     platform_log_warning("warning: failed to initialize ONVIF services\n");
   }
 
-  // Initialize snapshot service
-  if (onvif_snapshot_init() != 0) {
-    platform_log_warning("warning: failed to initialize snapshot service\n");
-  } else {
-    platform_log_notice("Snapshot service initialized\n");
-  }
+  // Initialize snapshot service (temporarily disabled)
+  // if (onvif_snapshot_init() != 0) {
+  //   platform_log_warning("warning: failed to initialize snapshot service\n");
+  // } else {
+  //   platform_log_notice("Snapshot service initialized\n");
+  // }
+  platform_log_notice("Snapshot service temporarily disabled\n");
 
   // Start HTTP server (fatal if fails)
-  if (http_server_start(cfg->onvif.http_port) != 0) {
-    platform_log_error("failed to start HTTP server on port %d\n",
-                       cfg->onvif.http_port);
+  if (http_server_start(cfg->onvif.http_port, cfg) != 0) {
+    platform_log_error("failed to start HTTP server on port %d\n", cfg->onvif.http_port);
     return -1;
   }
 
@@ -53,8 +53,8 @@ int network_lifecycle_init(const struct application_config *cfg) {
   if (ws_discovery_start(cfg->onvif.http_port) != 0) {
     platform_log_warning("warning: WS-Discovery failed to start\n");
   } else {
-    platform_log_notice("WS-Discovery responder active (multicast %s:%d)\n",
-                        "239.255.255.250", 3702);
+    platform_log_notice("WS-Discovery responder active (multicast %s:%d)\n", "239.255.255.250",
+                        3702);
   }
 
   g_network_services_initialized = true;
@@ -78,7 +78,7 @@ void network_lifecycle_cleanup(void) {
 
   // Cleanup ONVIF services
   platform_log_info("Cleaning up ONVIF services...\n");
-  onvif_snapshot_cleanup();
+  // onvif_snapshot_cleanup(); // Temporarily disabled
   onvif_services_cleanup();
 
   g_network_services_initialized = false;
@@ -90,8 +90,7 @@ bool network_lifecycle_initialized(void) {
   return g_network_services_initialized;
 }
 
-void network_lifecycle_start_optional_services(
-    const struct application_config *cfg) {
+void network_lifecycle_start_optional_services(const struct application_config* cfg) {
   // This function is kept for backward compatibility
   // The actual initialization is now done in network_lifecycle_init()
   platform_log_debug("Optional network services already initialized\n");

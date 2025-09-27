@@ -8,7 +8,7 @@
 #define ONVIF_DEVICE_H
 
 #include "core/config/config.h"
-#include "services/common/onvif_request.h"
+#include "networking/http/http_parser.h"
 #include "services/common/onvif_types.h"
 
 /**
@@ -81,24 +81,7 @@ struct device_service {
   } version;
 };
 
-int onvif_device_get_device_information(
-    struct device_info *info); /**< Populate device identification fields. */
-int onvif_device_get_capabilities(
-    struct device_capabilities *caps); /**< Report supported services. */
-int onvif_device_get_system_date_time(
-    struct system_date_time *date_time); /**< Retrieve system time. */
-int onvif_device_set_system_date_time(
-    const struct system_date_time *date_time); /**< Set system time. */
-int onvif_device_system_reboot(void);          /**< Reboot the system. */
-int onvif_device_get_dns(struct dns_information *dns); /**< Get DNS settings. */
-int onvif_device_get_network_interfaces(struct network_interface *interfaces,
-                                        int *count); /**< Enumerate NICs. */
-int onvif_device_get_network_protocols(
-    struct network_protocol *protocols,
-    int *count); /**< Enumerate protocols & ports. */
-int onvif_device_get_services(
-    struct device_service *services,
-    int *count); /**< List device services and versions. */
+int onvif_device_system_reboot(void); /**< Reboot the system. */
 /* Device service functions */
 
 /**
@@ -106,22 +89,26 @@ int onvif_device_get_services(
  * @param config Centralized configuration
  * @return 0 on success, negative error code on failure
  */
-int onvif_device_init(config_manager_t *config);
+int onvif_device_init(config_manager_t* config);
 
 /**
- * @brief Handle ONVIF device service requests
- * @param action Action type
- * @param request Request structure
+ * @brief Handle ONVIF device service requests by operation name
+ * @param operation_name ONVIF operation name (e.g., "GetDeviceInformation")
+ * @param request HTTP request structure
  * @param response Response structure
  * @return 0 on success, negative error code on failure
  */
-int onvif_device_handle_request(onvif_action_type_t action,
-                                const onvif_request_t *request,
-                                onvif_response_t *response);
+int onvif_device_handle_operation(const char* operation_name, const http_request_t* request,
+                                  http_response_t* response);
 
 /**
  * @brief Clean up device service
+ * @return ONVIF_SUCCESS on success, error code on failure
  */
-void onvif_device_cleanup(void);
+int onvif_device_cleanup(void);
+
+/* Utility functions */
+const char* onvif_service_type_to_string(onvif_service_type_t service);
+/* onvif_action_type_to_string removed - using string names directly */
 
 #endif

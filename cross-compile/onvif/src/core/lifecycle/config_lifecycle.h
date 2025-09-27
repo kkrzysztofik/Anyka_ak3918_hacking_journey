@@ -12,29 +12,29 @@
 #ifndef ONVIF_CONFIG_LIFECYCLE_H
 #define ONVIF_CONFIG_LIFECYCLE_H
 
-#include <stdbool.h>
-
 #include "core/config/config.h"
+
+#include <stdbool.h>
 
 /**
  * @brief Allocate memory for configuration structures
  * @param cfg Configuration structure to initialize
  * @return 0 on success, -1 on failure
  */
-int config_lifecycle_allocate_memory(struct application_config *cfg);
+int config_lifecycle_allocate_memory(struct application_config* cfg);
 
 /**
  * @brief Load configuration from file and initialize stream configs
  * @param cfg Configuration structure to populate
  * @return 0 on success, -1 on failure
  */
-int config_lifecycle_load_configuration(struct application_config *cfg);
+int config_lifecycle_load_configuration(struct application_config* cfg);
 
 /**
  * @brief Free all allocated configuration memory
  * @param cfg Configuration structure to clean up
  */
-void config_lifecycle_free_memory(struct application_config *cfg);
+void config_lifecycle_free_memory(struct application_config* cfg);
 
 /**
  * @brief Check if configuration is loaded
@@ -48,6 +48,6 @@ bool config_lifecycle_loaded(void);
  * @param size Size of the summary buffer
  * @return 0 on success, -1 on failure
  */
-int config_lifecycle_get_summary(char *summary, size_t size);
+int config_lifecycle_get_summary(char* summary, size_t size);
 
 #endif /* ONVIF_CONFIG_LIFECYCLE_H */

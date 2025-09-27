@@ -11,6 +11,9 @@
 
 #include "rtsp_session.h"
 
+#include "platform.h"
+#include "rtsp_types.h"
+
 #include <arpa/inet.h>
 #include <bits/types.h>
 #include <netinet/in.h>
@@ -23,9 +26,6 @@
 #include <sys/socket.h>
 #include <time.h>
 
-#include "platform.h"
-#include "rtsp_types.h"
-
 /* ==================== Utility Functions ==================== */
 
 /**
@@ -34,24 +34,21 @@
  * @return true if valid, false if invalid
  * @note This function helps prevent crashes from corrupted pointers
  */
-static bool rtsp_session_pointer_is_valid(rtsp_session_t *session) {
+static bool rtsp_session_pointer_is_valid(rtsp_session_t* session) {
   if (!session) {
     return false;
   }
 
   // Check for obviously invalid pointers (below typical user space)
   if ((uintptr_t)session < 0x1000) {
-    platform_log_error(
-        "rtsp_session_pointer_is_valid: Invalid session pointer (0x%p)\n",
-        session);
+    platform_log_error("rtsp_session_pointer_is_valid: Invalid session pointer (0x%p)\n", session);
     return false;
   }
 
   // Check for alignment (should be 4-byte aligned)
   if ((uintptr_t)session & 0x3) {
-    platform_log_error(
-        "rtsp_session_pointer_is_valid: Misaligned session pointer (0x%p)\n",
-        session);
+    platform_log_error("rtsp_session_pointer_is_valid: Misaligned session pointer (0x%p)\n",
+                       session);
     return false;
   }
 
@@ -63,7 +60,7 @@ static bool rtsp_session_pointer_is_valid(rtsp_session_t *session) {
 /**
  * Update session activity timestamp
  */
-void rtsp_update_session_activity(rtsp_session_t *session) {
+void rtsp_update_session_activity(rtsp_session_t* session) {
   if (!session) {
     return;
   }
@@ -74,7 +71,7 @@ void rtsp_update_session_activity(rtsp_session_t *session) {
 /**
  * Check if session has timed out
  */
-bool rtsp_session_has_timed_out(rtsp_session_t *session) {
+bool rtsp_session_has_timed_out(rtsp_session_t* session) {
   if (!rtsp_session_pointer_is_valid(session)) {
     return false;
   }
@@ -86,26 +83,25 @@ bool rtsp_session_has_timed_out(rtsp_session_t *session) {
 /**
  * Cleanup timeout sessions
  */
-int rtsp_session_cleanup_timeout_sessions(rtsp_server_t *server) {
+int rtsp_session_cleanup_timeout_sessions(rtsp_server_t* server) {
   if (!server) {
     return -1;
   }
 
   pthread_mutex_lock(&server->sessions_mutex);
 
-  rtsp_session_t *session = server->sessions;
-  rtsp_session_t *prev = NULL;
+  rtsp_session_t* session = server->sessions;
+  rtsp_session_t* prev = NULL;
 
   while (session) {
     // Store next pointer before any potential modifications
-    rtsp_session_t *next = session->next;
+    rtsp_session_t* next = session->next;
 
     // Validate session pointer before using it
     if (!rtsp_session_pointer_is_valid(session)) {
-      platform_log_error(
-          "rtsp_session_cleanup_timeout_sessions: Invalid session pointer "
-          "(0x%p), removing from list\n",
-          session);
+      platform_log_error("rtsp_session_cleanup_timeout_sessions: Invalid session pointer "
+                         "(0x%p), removing from list\n",
+                         session);
 
       // Remove corrupted session from linked list
       if (prev) {
@@ -120,8 +116,7 @@ int rtsp_session_cleanup_timeout_sessions(rtsp_server_t *server) {
     }
 
     if (rtsp_session_has_timed_out(session)) {
-      platform_log_notice("Session %s timed out, cleaning up\n",
-                          session->session_id);
+      platform_log_notice("Session %s timed out, cleaning up\n", session->session_id);
 
       // Remove from linked list
       if (prev) {
@@ -130,7 +125,7 @@ int rtsp_session_cleanup_timeout_sessions(rtsp_server_t *server) {
         server->sessions = session->next;
       }
 
-      rtsp_session_t *to_free = session;
+      rtsp_session_t* to_free = session;
 
       // Cleanup session
       rtsp_cleanup_session(to_free);
@@ -151,7 +146,7 @@ int rtsp_session_cleanup_timeout_sessions(rtsp_server_t *server) {
 /**
  * Set session timeout
  */
-int rtsp_session_set_timeout(rtsp_session_t *session, int timeout_seconds) {
+int rtsp_session_set_timeout(rtsp_session_t* session, int timeout_seconds) {
   if (!session) {
     return -1;
   }
@@ -166,15 +161,14 @@ int rtsp_session_set_timeout(rtsp_session_t *session, int timeout_seconds) {
 /**
  * Get session by ID
  */
-rtsp_session_t *rtsp_session_get_by_id(rtsp_server_t *server,
-                                       const char *session_id) {
+rtsp_session_t* rtsp_session_get_by_id(rtsp_server_t* server, const char* session_id) {
   if (!server || !session_id) {
     return NULL;
   }
 
   pthread_mutex_lock(&server->sessions_mutex);
 
-  rtsp_session_t *session = server->sessions;
+  rtsp_session_t* session = server->sessions;
   while (session) {
     if (strcmp(session->session_id, session_id) == 0) {
       pthread_mutex_unlock(&server->sessions_mutex);
@@ -190,7 +184,7 @@ rtsp_session_t *rtsp_session_get_by_id(rtsp_server_t *server,
 /**
  * Get session count
  */
-int rtsp_session_get_count(rtsp_server_t *server) {
+int rtsp_session_get_count(rtsp_server_t* server) {
   if (!server) {
     return -1;
   }
@@ -198,7 +192,7 @@ int rtsp_session_get_count(rtsp_server_t *server) {
   pthread_mutex_lock(&server->sessions_mutex);
 
   int count = 0;
-  rtsp_session_t *session = server->sessions;
+  rtsp_session_t* session = server->sessions;
   while (session) {
     count++;
     session = session->next;
@@ -211,16 +205,16 @@ int rtsp_session_get_count(rtsp_server_t *server) {
 /**
  * Cleanup all sessions
  */
-void rtsp_session_cleanup_all(rtsp_server_t *server) {
+void rtsp_session_cleanup_all(rtsp_server_t* server) {
   if (!server) {
     return;
   }
 
   pthread_mutex_lock(&server->sessions_mutex);
 
-  rtsp_session_t *session = server->sessions;
+  rtsp_session_t* session = server->sessions;
   while (session) {
-    rtsp_session_t *next = session->next;
+    rtsp_session_t* next = session->next;
     rtsp_cleanup_session(session);
     free(session);
     session = next;
@@ -233,7 +227,7 @@ void rtsp_session_cleanup_all(rtsp_server_t *server) {
 /**
  * Add session to server
  */
-int rtsp_session_add(rtsp_server_t *server, rtsp_session_t *session) {
+int rtsp_session_add(rtsp_server_t* server, rtsp_session_t* session) {
   if (!server || !session) {
     return -1;
   }
@@ -254,7 +248,7 @@ int rtsp_session_add(rtsp_server_t *server, rtsp_session_t *session) {
 /**
  * Remove session from server
  */
-int rtsp_session_remove(rtsp_server_t *server, rtsp_session_t *session) {
+int rtsp_session_remove(rtsp_server_t* server, rtsp_session_t* session) {
   if (!server || !session) {
     return -1;
   }
@@ -278,8 +272,8 @@ int rtsp_session_remove(rtsp_server_t *server, rtsp_session_t *session) {
 /**
  * Get session statistics
  */
-int rtsp_session_get_stats(rtsp_session_t *session, uint64_t *bytes_sent,
-                           uint32_t *packets_sent, time_t *last_activity) {
+int rtsp_session_get_stats(rtsp_session_t* session, uint64_t* bytes_sent, uint32_t* packets_sent,
+                           time_t* last_activity) {
   if (!session) {
     return -1;
   }
@@ -302,8 +296,7 @@ int rtsp_session_get_stats(rtsp_session_t *session, uint64_t *bytes_sent,
 /**
  * Set session state
  */
-int rtsp_session_set_state(rtsp_session_t *session,
-                           enum rtsp_session_state state) {
+int rtsp_session_set_state(rtsp_session_t* session, enum rtsp_session_state state) {
   if (!session) {
     return -1;
   }
@@ -317,7 +310,7 @@ int rtsp_session_set_state(rtsp_session_t *session,
 /**
  * Get session state
  */
-enum rtsp_session_state rtsp_session_get_state(rtsp_session_t *session) {
+enum rtsp_session_state rtsp_session_get_state(rtsp_session_t* session) {
   if (!session) {
     return RTSP_STATE_INVALID;
   }
@@ -328,7 +321,7 @@ enum rtsp_session_state rtsp_session_get_state(rtsp_session_t *session) {
 /**
  * Check if session is active
  */
-bool rtsp_session_is_active(rtsp_session_t *session) {
+bool rtsp_session_is_active(rtsp_session_t* session) {
   if (!rtsp_session_pointer_is_valid(session)) {
     return false;
   }
@@ -339,7 +332,7 @@ bool rtsp_session_is_active(rtsp_session_t *session) {
 /**
  * Deactivate session
  */
-void rtsp_session_deactivate(rtsp_session_t *session) {
+void rtsp_session_deactivate(rtsp_session_t* session) {
   if (!session) {
     return;
   }
@@ -351,7 +344,7 @@ void rtsp_session_deactivate(rtsp_session_t *session) {
 /**
  * Get session age in seconds
  */
-time_t rtsp_session_get_age(rtsp_session_t *session) {
+time_t rtsp_session_get_age(rtsp_session_t* session) {
   if (!session) {
     return 0;
   }
@@ -362,7 +355,7 @@ time_t rtsp_session_get_age(rtsp_session_t *session) {
 /**
  * Get session idle time in seconds
  */
-time_t rtsp_session_get_idle_time(rtsp_session_t *session) {
+time_t rtsp_session_get_idle_time(rtsp_session_t* session) {
   if (!session) {
     return 0;
   }
@@ -373,20 +366,18 @@ time_t rtsp_session_get_idle_time(rtsp_session_t *session) {
 /**
  * Validate session
  */
-bool rtsp_session_is_valid(rtsp_session_t *session) {
+bool rtsp_session_is_valid(rtsp_session_t* session) {
   if (!rtsp_session_pointer_is_valid(session)) {
     return false;
   }
 
-  return session->sockfd >= 0 && session->active &&
-         !rtsp_session_has_timed_out(session);
+  return session->sockfd >= 0 && session->active && !rtsp_session_has_timed_out(session);
 }
 
 /**
  * Get session info string
  */
-int rtsp_session_get_info(rtsp_session_t *session, char *buffer,
-                          size_t buffer_size) {
+int rtsp_session_get_info(rtsp_session_t* session, char* buffer, size_t buffer_size) {
   if (!session || !buffer || buffer_size < 64) {
     return -1;
   }
@@ -394,31 +385,29 @@ int rtsp_session_get_info(rtsp_session_t *session, char *buffer,
   char client_ip[INET_ADDRSTRLEN];
   inet_ntop(AF_INET, &session->addr.sin_addr, client_ip, INET_ADDRSTRLEN);
 
-  const char *state_str = "UNKNOWN";
+  const char* state_str = "UNKNOWN";
   switch (session->state) {
-    case RTSP_STATE_INIT:
-      state_str = "INIT";
-      break;
-    case RTSP_STATE_READY:
-      state_str = "READY";
-      break;
-    case RTSP_STATE_PLAYING:
-      state_str = "PLAYING";
-      break;
-    case RTSP_STATE_RECORDING:
-      state_str = "RECORDING";
-      break;
-    default:
-      state_str = "UNKNOWN";
-      break;
+  case RTSP_STATE_INIT:
+    state_str = "INIT";
+    break;
+  case RTSP_STATE_READY:
+    state_str = "READY";
+    break;
+  case RTSP_STATE_PLAYING:
+    state_str = "PLAYING";
+    break;
+  case RTSP_STATE_RECORDING:
+    state_str = "RECORDING";
+    break;
+  default:
+    state_str = "UNKNOWN";
+    break;
   }
 
   return snprintf(buffer, buffer_size,
                   "Session %s: %s:%d, State: %s, Age: %lds, Idle: %lds, "
                   "Packets: %u, Bytes: %u",
-                  session->session_id, client_ip, ntohs(session->addr.sin_port),
-                  state_str, rtsp_session_get_age(session),
-                  rtsp_session_get_idle_time(session),
-                  session->rtp_session.stats.packets_sent,
-                  session->rtp_session.stats.octets_sent);
+                  session->session_id, client_ip, ntohs(session->addr.sin_port), state_str,
+                  rtsp_session_get_age(session), rtsp_session_get_idle_time(session),
+                  session->rtp_session.stats.packets_sent, session->rtp_session.stats.octets_sent);
 }

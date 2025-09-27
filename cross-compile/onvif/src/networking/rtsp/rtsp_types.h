@@ -11,6 +11,9 @@
 #ifndef RTSP_TYPES_H
 #define RTSP_TYPES_H
 
+#include "platform/platform_common.h"
+#include "services/common/video_config_types.h"
+
 #include <bits/pthreadtypes.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -20,33 +23,26 @@
 #include <sys/socket.h>
 #include <time.h>
 
-#include "platform/platform_common.h"
-#include "services/common/video_config_types.h"
-
 /* RTSP constants */
-#define RTSP_MAX_CLIENTS 10
-#define RTSP_BUFFER_SIZE 4096
-#define RTSP_RTP_BUFFER_SIZE 1500
-#define RTSP_MAX_URI_LEN 256
+#define RTSP_MAX_CLIENTS         10
+#define RTSP_BUFFER_SIZE         4096
+#define RTSP_RTP_BUFFER_SIZE     1500
+#define RTSP_MAX_URI_LEN         256
 #define RTSP_SESSION_TIMEOUT_SEC 60
-#define RTSP_RTCP_INTERVAL_SEC 5
-#define RTSP_MAX_HEADER_LEN 1024
-#define RTSP_MAX_USERNAME_LEN 64
-#define RTSP_MAX_PASSWORD_LEN 64
-#define RTSP_MAX_REALM_LEN 128
-#define RTSP_MAX_NONCE_LEN 32
-#define RTSP_MAX_RESPONSE_LEN 64
+#define RTSP_RTCP_INTERVAL_SEC   5
+#define RTSP_MAX_HEADER_LEN      1024
+#define RTSP_MAX_USERNAME_LEN    64
+#define RTSP_MAX_PASSWORD_LEN    64
+#define RTSP_MAX_REALM_LEN       128
+#define RTSP_MAX_NONCE_LEN       32
+#define RTSP_MAX_RESPONSE_LEN    64
 
 /* RTP transport modes */
 #define RTP_TRANSPORT_UDP 0
 #define RTP_TRANSPORT_TCP 1
 
 /* Authentication types */
-typedef enum {
-  RTSP_AUTH_NONE = 0,
-  RTSP_AUTH_BASIC = 1,
-  RTSP_AUTH_DIGEST = 2
-} rtsp_auth_type_t;
+typedef enum { RTSP_AUTH_NONE = 0, RTSP_AUTH_BASIC = 1, RTSP_AUTH_DIGEST = 2 } rtsp_auth_type_t;
 
 /* SDP media types */
 typedef enum {
@@ -64,9 +60,9 @@ typedef enum {
 } sdp_direction_t;
 
 /* Audio RTP payload types */
-#define RTP_PT_PCMU 0 /* G.711 μ-law */
-#define RTP_PT_PCMA 8 /* G.711 A-law */
-#define RTP_PT_AAC 97 /* AAC */
+#define RTP_PT_PCMU 0  /* G.711 μ-law */
+#define RTP_PT_PCMA 8  /* G.711 A-law */
+#define RTP_PT_AAC  97 /* AAC */
 
 /* Video RTP payload types */
 #define RTP_PT_H264 96 /* H.264 */
@@ -157,11 +153,11 @@ struct rtsp_video_resolution {
 };
 
 /* RTCP packet types */
-#define RTCP_SR 200
-#define RTCP_RR 201
+#define RTCP_SR   200
+#define RTCP_RR   201
 #define RTCP_SDES 202
-#define RTCP_BYE 203
-#define RTCP_APP 204
+#define RTCP_BYE  203
+#define RTCP_APP  204
 
 /* RTCP statistics structure */
 struct rtcp_stats {
@@ -230,14 +226,14 @@ struct audio_rtp_session {
 struct rtsp_header {
   char name[64];
   char value[256];
-  struct rtsp_header *next;
+  struct rtsp_header* next;
 };
 
 /* Authentication user structure */
 struct rtsp_user {
   char username[RTSP_MAX_USERNAME_LEN];
   char password[RTSP_MAX_PASSWORD_LEN];
-  struct rtsp_user *next;
+  struct rtsp_user* next;
 };
 
 /* Authentication configuration */
@@ -245,7 +241,7 @@ struct rtsp_auth_config {
   rtsp_auth_type_t auth_type;
   char realm[RTSP_MAX_REALM_LEN];
   char nonce[RTSP_MAX_NONCE_LEN];
-  struct rtsp_user *users;
+  struct rtsp_user* users;
   bool enabled;
 };
 
@@ -265,7 +261,7 @@ struct sdp_media {
   char extmap[256];
   char mid[32];
   char ssrc[32];
-  struct sdp_media *next;
+  struct sdp_media* next;
 };
 
 /* SDP session description */
@@ -282,7 +278,7 @@ struct sdp_session {
   char time_zone[32];
   char key[64];
   char attributes[512];
-  struct sdp_media *media;
+  struct sdp_media* media;
 };
 
 /** Audio stream encoding configuration */
@@ -300,7 +296,7 @@ typedef struct {
   char stream_name[64];
   int port;
   bool enabled;
-  void *vi_handle;
+  void* vi_handle;
   video_config_t video_config;
   audio_config_t audio_config;
   bool audio_enabled;
@@ -326,7 +322,7 @@ struct rtsp_server {
   pthread_t timeout_thread;
 
   /* Sessions */
-  rtsp_session_t *sessions;
+  rtsp_session_t* sessions;
   pthread_mutex_t sessions_mutex;
   int sessions_count;
 

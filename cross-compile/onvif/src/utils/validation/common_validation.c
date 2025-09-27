@@ -7,17 +7,16 @@
 
 #include "common_validation.h"
 
+#include "services/common/onvif_imaging_types.h"
+
 #include <math.h>
 #include <string.h>
-
-#include "services/common/onvif_imaging_types.h"
 
 // Note: clang-tidy warns about easily swappable parameters, but this signature
 // is used throughout the codebase. Defensive programming below catches common
 // mistakes.
-validation_result_t validate_string(const char *field_name, const char *value,
-                                    size_t min_length, size_t max_length,
-                                    int allow_empty) {
+validation_result_t validate_string(const char* field_name, const char* value, size_t min_length,
+                                    size_t max_length, int allow_empty) {
   validation_result_t result = {0};
 
   // Defensive programming: validate parameters
@@ -70,8 +69,7 @@ validation_result_t validate_string(const char *field_name, const char *value,
   return result;
 }
 
-validation_result_t validate_int(const char *field_name, int value,
-                                 int min_value, int max_value) {
+validation_result_t validate_int(const char* field_name, int value, int min_value, int max_value) {
   validation_result_t result = {0};
 
   // Defensive programming: validate parameters
@@ -108,8 +106,8 @@ validation_result_t validate_int(const char *field_name, int value,
   return result;
 }
 
-validation_result_t validate_float(const char *field_name, float value,
-                                   float min_value, float max_value) {
+validation_result_t validate_float(const char* field_name, float value, float min_value,
+                                   float max_value) {
   validation_result_t result = {0};
 
   // Defensive programming: validate parameters
@@ -160,13 +158,11 @@ validation_result_t validate_float(const char *field_name, float value,
   return result;
 }
 
-validation_result_t validate_onvif_token(const char *token,
-                                         const char *field_name) {
+validation_result_t validate_onvif_token(const char* token, const char* field_name) {
   return validate_string(field_name, token, 1, 64, 0);
 }
 
-validation_result_t validate_profile_token(const char *token,
-                                           const char *field_name) {
+validation_result_t validate_profile_token(const char* token, const char* field_name) {
   validation_result_t result = validate_onvif_token(token, field_name);
 
   if (!result.is_valid) {
@@ -185,8 +181,7 @@ validation_result_t validate_profile_token(const char *token,
   return result;
 }
 
-validation_result_t validate_protocol(const char *protocol,
-                                      const char *field_name) {
+validation_result_t validate_protocol(const char* protocol, const char* field_name) {
   validation_result_t result = validate_string(field_name, protocol, 1, 32, 0);
 
   if (!result.is_valid) {
@@ -230,27 +225,23 @@ validation_result_t validate_ptz_position(float pan, float tilt, float zoom) {
   return result;
 }
 
-validation_result_t validate_ptz_speed(float pan_speed, float tilt_speed,
-                                       float zoom_speed) {
+validation_result_t validate_ptz_speed(float pan_speed, float tilt_speed, float zoom_speed) {
   validation_result_t result = {0};
 
   // Validate pan speed (-1.0 to 1.0)
-  validation_result_t pan_result =
-      validate_float("pan_speed", pan_speed, -1.0f, 1.0f);
+  validation_result_t pan_result = validate_float("pan_speed", pan_speed, -1.0f, 1.0f);
   if (!pan_result.is_valid) {
     return pan_result;
   }
 
   // Validate tilt speed (-1.0 to 1.0)
-  validation_result_t tilt_result =
-      validate_float("tilt_speed", tilt_speed, -1.0f, 1.0f);
+  validation_result_t tilt_result = validate_float("tilt_speed", tilt_speed, -1.0f, 1.0f);
   if (!tilt_result.is_valid) {
     return tilt_result;
   }
 
   // Validate zoom speed (-1.0 to 1.0)
-  validation_result_t zoom_result =
-      validate_float("zoom_speed", zoom_speed, -1.0f, 1.0f);
+  validation_result_t zoom_result = validate_float("zoom_speed", zoom_speed, -1.0f, 1.0f);
   if (!zoom_result.is_valid) {
     return zoom_result;
   }
@@ -259,8 +250,7 @@ validation_result_t validate_ptz_speed(float pan_speed, float tilt_speed,
   return result;
 }
 
-validation_result_t validate_imaging_settings(
-    const struct imaging_settings *settings) {
+validation_result_t validate_imaging_settings(const struct imaging_settings* settings) {
   validation_result_t result = {0};
 
   if (!settings) {
@@ -271,35 +261,32 @@ validation_result_t validate_imaging_settings(
 
   // Validate brightness (-100 to 100)
   validation_result_t brightness_result =
-      validate_int("brightness", settings->brightness, -100, 100);
+    validate_int("brightness", settings->brightness, -100, 100);
   if (!brightness_result.is_valid) {
     return brightness_result;
   }
 
   // Validate contrast (-100 to 100)
-  validation_result_t contrast_result =
-      validate_int("contrast", settings->contrast, -100, 100);
+  validation_result_t contrast_result = validate_int("contrast", settings->contrast, -100, 100);
   if (!contrast_result.is_valid) {
     return contrast_result;
   }
 
   // Validate saturation (-100 to 100)
   validation_result_t saturation_result =
-      validate_int("saturation", settings->saturation, -100, 100);
+    validate_int("saturation", settings->saturation, -100, 100);
   if (!saturation_result.is_valid) {
     return saturation_result;
   }
 
   // Validate sharpness (-100 to 100)
-  validation_result_t sharpness_result =
-      validate_int("sharpness", settings->sharpness, -100, 100);
+  validation_result_t sharpness_result = validate_int("sharpness", settings->sharpness, -100, 100);
   if (!sharpness_result.is_valid) {
     return sharpness_result;
   }
 
   // Validate hue (-180 to 180)
-  validation_result_t hue_result =
-      validate_int("hue", settings->hue, -180, 180);
+  validation_result_t hue_result = validate_int("hue", settings->hue, -180, 180);
   if (!hue_result.is_valid) {
     return hue_result;
   }
@@ -339,21 +326,21 @@ validation_result_t validate_video_quality(float quality) {
 }
 
 validation_result_t validate_bitrate(int bitrate) {
-  return validate_int("bitrate", bitrate, 1, 100000);  // 1 bps to 100 Mbps
+  return validate_int("bitrate", bitrate, 1, 100000); // 1 bps to 100 Mbps
 }
 
 validation_result_t validate_framerate(int framerate) {
-  return validate_int("framerate", framerate, 1, 120);  // 1 to 120 fps
+  return validate_int("framerate", framerate, 1, 120); // 1 to 120 fps
 }
 
-int validation_is_valid(const validation_result_t *result) {
+int validation_is_valid(const validation_result_t* result) {
   return result ? result->is_valid : 0;
 }
 
-const char *validation_get_error_message(const validation_result_t *result) {
+const char* validation_get_error_message(const validation_result_t* result) {
   return result ? result->error_message : NULL;
 }
 
-const char *validation_get_field_name(const validation_result_t *result) {
+const char* validation_get_field_name(const validation_result_t* result) {
   return result ? result->field_name : NULL;
 }

@@ -9,11 +9,7 @@
 #ifndef ONVIF_IMAGING_TYPES_H
 #define ONVIF_IMAGING_TYPES_H
 
-enum day_night_mode {
-  DAY_NIGHT_AUTO = 0,
-  DAY_NIGHT_DAY = 1,
-  DAY_NIGHT_NIGHT = 2
-};
+enum day_night_mode { DAY_NIGHT_AUTO = 0, DAY_NIGHT_DAY = 1, DAY_NIGHT_NIGHT = 2 };
 
 enum ir_led_mode { IR_LED_OFF = 0, IR_LED_ON = 1, IR_LED_AUTO = 2 };
 

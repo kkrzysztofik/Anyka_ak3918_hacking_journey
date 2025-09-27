@@ -8,9 +8,9 @@
 #ifndef ONVIF_SERVICE_MANAGER_H
 #define ONVIF_SERVICE_MANAGER_H
 
-#include <stdbool.h>
-
 #include "platform/platform_common.h"
+
+#include <stdbool.h>
 
 /**
  * @brief Initialize all ONVIF services

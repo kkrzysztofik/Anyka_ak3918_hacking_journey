@@ -8,31 +8,30 @@
 #ifndef INPUT_VALIDATION_H
 #define INPUT_VALIDATION_H
 
-#include <stddef.h>
-
 #include "networking/http/http_parser.h"
 
+#include <stddef.h>
 
 /**
  * @brief Validate HTTP method
  * @param method HTTP method string
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_http_method(const char *method);
+int validate_http_method(const char* method);
 
 /**
  * @brief Validate HTTP path for security
  * @param path HTTP request path
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_http_path(const char *path);
+int validate_http_path(const char* path);
 
 /**
  * @brief Validate HTTP version
  * @param version HTTP version string
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_http_version(const char *version);
+int validate_http_version(const char* version);
 
 /**
  * @brief Validate Content-Length header
@@ -46,7 +45,7 @@ int validate_content_length(size_t content_length);
  * @param action SOAP action string
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_soap_action(const char *action);
+int validate_soap_action(const char* action);
 
 /**
  * @brief Validate XML content for basic security
@@ -54,14 +53,14 @@ int validate_soap_action(const char *action);
  * @param max_length Maximum allowed length
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_xml_content(const char *xml, size_t max_length);
+int validate_xml_content(const char* xml, size_t max_length);
 
 /**
  * @brief Validate HTTP request comprehensively
  * @param request HTTP request structure
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_http_request(const http_request_t *request);
+int validate_http_request(const http_request_t* request);
 
 /**
  * @brief Sanitize string input
@@ -70,6 +69,6 @@ int validate_http_request(const http_request_t *request);
  * @param output_size Size of output buffer
  * @return ONVIF_OPERATION_SUCCESS on success, ONVIF_OPERATION_FAILED on failure
  */
-int sanitize_string_input(const char *input, char *output, size_t output_size);
+int sanitize_string_input(const char* input, char* output, size_t output_size);
 
-#endif  // INPUT_VALIDATION_H
+#endif // INPUT_VALIDATION_H

@@ -11,6 +11,8 @@
 #ifndef CONNECTION_MANAGER_H
 #define CONNECTION_MANAGER_H
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -29,7 +31,7 @@ typedef enum {
 typedef struct connection {
   int fd;
   connection_state_t state;
-  char *buffer;
+  char* buffer;
   size_t buffer_size;
   size_t buffer_used;
   size_t content_length;
@@ -39,23 +41,24 @@ typedef struct connection {
   char method[16];
   char path[256];
   char version[16];
-  struct connection *next;
-  struct connection *prev;
+  char client_ip[INET_ADDRSTRLEN]; /* Client IP address */
+  char* request_buffer;            /* Persistent 32KB buffer for HTTP request processing */
+  struct connection* next;
+  struct connection* prev;
 } connection_t;
 
 /* Connection manager functions */
 int connection_manager_init(void);
 void connection_manager_cleanup(void);
-connection_t *connection_create(int socket_fd, char *buffer);
-void connection_destroy(connection_t *conn);
-int connection_is_timed_out(connection_t *conn);
+connection_t* connection_create(int socket_fd, char* buffer);
+void connection_destroy(connection_t* conn);
+int connection_is_timed_out(connection_t* conn);
 void connection_cleanup_timed_out(void);
-void connection_add_to_list(connection_t *conn);
-void connection_remove_from_list(connection_t *conn);
-uint64_t get_time_ms(void);
+void connection_add_to_list(connection_t* conn);
+void connection_remove_from_list(connection_t* conn);
 
 /* Connection list accessor functions */
-connection_t *connection_get_list_head(void);
+connection_t* connection_get_list_head(void);
 void connection_lock_mutex(void);
 void connection_unlock_mutex(void);
 

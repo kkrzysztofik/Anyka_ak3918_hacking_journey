@@ -5,7 +5,12 @@
  * @date 2025
  */
 
+#define _GNU_SOURCE
 #include "ws_discovery.h"
+
+#include "common/onvif_constants.h"
+#include "platform/platform.h"
+#include "utils/network/network_utils.h"
 
 #include <arpa/inet.h>
 #include <asm/socket.h>
@@ -23,34 +28,30 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "common/onvif_constants.h"
-#include "platform/platform.h"
-#include "utils/network/network_utils.h"
-
 /* Some stripped uClibc headers may omit ip_mreq; provide minimal fallback */
 #ifndef IP_ADD_MEMBERSHIP
 #define IP_ADD_MEMBERSHIP 35
 #endif
-#ifndef HAVE_IP_MREQ
-#ifndef _LINUX_IN_H
+
+/* Only define ip_mreq if it's not already available */
+#if !defined(HAVE_IP_MREQ) && !defined(_LINUX_IN_H) && !defined(__USE_MISC)
 struct ip_mreq {
   struct in_addr imr_multiaddr; /* IP multicast address of group */
   struct in_addr imr_interface; /* local IP address of interface */
 };
 #endif
-#endif
 
 // Global state variables
-static int g_discovery_running = 0;   // NOLINT
-static int g_discovery_socket = -1;   // NOLINT
-static pthread_t g_discovery_thread;  // NOLINT
+static int g_discovery_running = 0;  // NOLINT
+static int g_discovery_socket = -1;  // NOLINT
+static pthread_t g_discovery_thread; // NOLINT
 
 // Global configuration
-static int g_http_port = ONVIF_HTTP_PORT_DEFAULT;        // NOLINT
-static char g_endpoint_uuid[ONVIF_MAX_XADDR_LEN] = {0};  // NOLINT
-                                                         /* urn:uuid:... */
-static pthread_mutex_t g_endpoint_uuid_mutex =           // NOLINT
-    PTHREAD_MUTEX_INITIALIZER;
+static int g_http_port = ONVIF_HTTP_PORT_DEFAULT;       // NOLINT
+static char g_endpoint_uuid[ONVIF_MAX_XADDR_LEN] = {0}; // NOLINT
+                                                        /* urn:uuid:... */
+static pthread_mutex_t g_endpoint_uuid_mutex =          // NOLINT
+  PTHREAD_MUTEX_INITIALIZER;
 
 /* Announcement interval (seconds) for periodic Hello re-broadcast */
 
@@ -61,7 +62,7 @@ static void derive_pseudo_mac(unsigned char mac[6]) {
     strcpy(host, "anyka");
   }
   unsigned hash = 5381;
-  for (char *ptr = host; *ptr; ++ptr) {
+  for (char* ptr = host; *ptr; ++ptr) {
     hash = ((hash << 5) + hash) + (unsigned char)(*ptr);
   }
   /* Construct locally administered unicast MAC (x2 bit set, x1 bit cleared) */
@@ -77,16 +78,15 @@ static void build_endpoint_uuid(void) {
   unsigned char mac[6];
   derive_pseudo_mac(mac);
   /* Simple deterministic UUID style using MAC expanded */
-  int result = snprintf(
-      g_endpoint_uuid, sizeof(g_endpoint_uuid),
-      "urn:uuid:%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%"
-      "02x%02x%02x",
-      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], mac[0], mac[1], mac[2],
-      mac[3], mac[4], mac[5], mac[0], mac[1], mac[2], mac[3]);
-  (void)result;  // Suppress unused variable warning
+  int result = snprintf(g_endpoint_uuid, sizeof(g_endpoint_uuid),
+                        "urn:uuid:%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%"
+                        "02x%02x%02x",
+                        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], mac[0], mac[1], mac[2],
+                        mac[3], mac[4], mac[5], mac[0], mac[1], mac[2], mac[3]);
+  (void)result; // Suppress unused variable warning
 }
 
-static void gen_msg_uuid(char *out, size_t len) {
+static void gen_msg_uuid(char* out, size_t len) {
   // Use time-based seed for better randomness
   static unsigned int seed = 0;
   if (seed == 0) {
@@ -108,19 +108,18 @@ static void gen_msg_uuid(char *out, size_t len) {
   unsigned int rand6 = (seed >> 16) & 0xFFFF;
 
   int result = snprintf(out, len, "%08x-%04x-%04x-%04x-%04x%08x", rand1, rand2,
-                        (rand3 & 0x0FFF) | 0x4000, (rand4 & 0x3FFF) | 0x8000,
-                        rand5, rand6);
-  (void)result;  // Suppress unused variable warning
+                        (rand3 & 0x0FFF) | 0x4000, (rand4 & 0x3FFF) | 0x8000, rand5, rand6);
+  (void)result; // Suppress unused variable warning
 }
 
-static void get_ip(char *ip_buffer, size_t len) {
+static void get_ip(char* ip_buffer, size_t len) {
   if (get_local_ip_address(ip_buffer, len) != 0) {
     strncpy(ip_buffer, "192.168.1.100", len - 1);
     ip_buffer[len - 1] = '\0';
   }
 }
 
-static void send_multicast(const char *payload) {
+static void send_multicast(const char* payload) {
   int sock = socket(AF_INET, SOCK_DGRAM, 0);
   if (sock < 0) {
     return;
@@ -132,9 +131,8 @@ static void send_multicast(const char *payload) {
   addr.sin_port = htons(ONVIF_WS_DISCOVERY_PORT);
   addr.sin_addr.s_addr = inet_addr(ONVIF_WS_DISCOVERY_MULTICAST);
 
-  ssize_t result = sendto(sock, payload, strlen(payload), 0,
-                          (struct sockaddr *)&addr, sizeof(addr));
-  (void)result;  // Suppress unused variable warning
+  ssize_t result = sendto(sock, payload, strlen(payload), 0, (struct sockaddr*)&addr, sizeof(addr));
+  (void)result; // Suppress unused variable warning
 
   close(sock);
 }
@@ -145,9 +143,9 @@ static void send_hello(void) {
   get_ip(ip_address, sizeof(ip_address));
   gen_msg_uuid(msg_id, sizeof(msg_id));
   char xml[ONVIF_XML_BUFFER_SIZE];
-  int result = snprintf(xml, sizeof(xml), WSD_HELLO_TEMPLATE, msg_id,
-                        g_endpoint_uuid, ip_address, g_http_port);
-  (void)result;  // Suppress unused variable warning
+  int result = snprintf(xml, sizeof(xml), WSD_HELLO_TEMPLATE, msg_id, g_endpoint_uuid, ip_address,
+                        g_http_port);
+  (void)result; // Suppress unused variable warning
   send_multicast(xml);
 }
 
@@ -157,13 +155,12 @@ static void send_bye(void) {
   get_ip(ip_address, sizeof(ip_address));
   gen_msg_uuid(msg_id, sizeof(msg_id));
   char xml[ONVIF_XML_BUFFER_SIZE];
-  int result =
-      snprintf(xml, sizeof(xml), WSD_BYE_TEMPLATE, msg_id, g_endpoint_uuid);
-  (void)result;  // Suppress unused variable warning
+  int result = snprintf(xml, sizeof(xml), WSD_BYE_TEMPLATE, msg_id, g_endpoint_uuid);
+  (void)result; // Suppress unused variable warning
   send_multicast(xml);
 }
 
-static void *discovery_loop(void *arg) {
+static void* discovery_loop(void* arg) {
   (void)arg;
   struct sockaddr_in local_addr;
   memset(&local_addr, 0, sizeof(local_addr));
@@ -178,11 +175,9 @@ static void *discovery_loop(void *arg) {
     return NULL;
   }
   int reuse = 1;
-  int result = setsockopt(g_discovery_socket, SOL_SOCKET, SO_REUSEADDR, &reuse,
-                          sizeof(reuse));
-  (void)result;  // Suppress unused variable warning
-  if (bind(g_discovery_socket, (struct sockaddr *)&local_addr,
-           sizeof(local_addr)) < 0) {
+  int result = setsockopt(g_discovery_socket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+  (void)result; // Suppress unused variable warning
+  if (bind(g_discovery_socket, (struct sockaddr*)&local_addr, sizeof(local_addr)) < 0) {
     perror("wsd bind");
     close(g_discovery_socket);
     g_discovery_socket = -1;
@@ -192,8 +187,7 @@ static void *discovery_loop(void *arg) {
   struct ip_mreq mreq;
   mreq.imr_multiaddr.s_addr = inet_addr(ONVIF_WS_DISCOVERY_MULTICAST);
   mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-  if (setsockopt(g_discovery_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq,
-                 sizeof(mreq)) < 0) {
+  if (setsockopt(g_discovery_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
     perror("wsd mcast join");
   }
 
@@ -208,8 +202,8 @@ static void *discovery_loop(void *arg) {
   while (g_discovery_running) {
     struct sockaddr_in src;
     socklen_t slen = sizeof(src);
-    ssize_t bytes_received = recvfrom(g_discovery_socket, buf, sizeof(buf) - 1,
-                                      0, (struct sockaddr *)&src, &slen);
+    ssize_t bytes_received =
+      recvfrom(g_discovery_socket, buf, sizeof(buf) - 1, 0, (struct sockaddr*)&src, &slen);
     if (bytes_received <= 0) {
       if (!g_discovery_running) {
         break;
@@ -223,14 +217,12 @@ static void *discovery_loop(void *arg) {
       char ip_address[64];
       get_ip(ip_address, sizeof(ip_address));
       char response[ONVIF_RESPONSE_BUFFER_SIZE];
-      int snprintf_result =
-          snprintf(response, sizeof(response), WSD_PROBE_MATCH_TEMPLATE, msg_id,
-                   g_endpoint_uuid, ip_address, g_http_port);
-      (void)snprintf_result;  // Suppress unused variable warning
+      int snprintf_result = snprintf(response, sizeof(response), WSD_PROBE_MATCH_TEMPLATE, msg_id,
+                                     g_endpoint_uuid, ip_address, g_http_port);
+      (void)snprintf_result; // Suppress unused variable warning
       ssize_t sendto_result =
-          sendto(g_discovery_socket, response, strlen(response), 0,
-                 (struct sockaddr *)&src, slen);
-      (void)sendto_result;  // Suppress unused variable warning
+        sendto(g_discovery_socket, response, strlen(response), 0, (struct sockaddr*)&src, slen);
+      (void)sendto_result; // Suppress unused variable warning
     }
     time_t now = time(NULL);
     if (now - last_hello >= WSD_HELLO_INTERVAL_SECONDS) {
@@ -262,18 +254,39 @@ int ws_discovery_stop(void) {
   if (!g_discovery_running) {
     return 0;
   }
+
+  platform_log_debug("Stopping WS-Discovery service...\n");
   g_discovery_running = 0;
+
   /* Closing socket will break recvfrom */
   if (g_discovery_socket >= 0) {
     close(g_discovery_socket);
+    g_discovery_socket = -1;
   }
-  /* Timed join fallback */
-  for (int i = 0; i < 50; i++) { /* wait up to ~5s */
-    if (pthread_join(g_discovery_thread, NULL) == 0) {
-      break;
-    }
-    platform_sleep_us(100000); /* 100ms */
+
+  /* Wait for thread with timeout */
+  platform_log_debug("Waiting for discovery thread to finish...\n");
+  struct timespec timeout;
+  clock_gettime(CLOCK_REALTIME, &timeout);
+  timeout.tv_sec += 2; // 2 second timeout
+
+  int join_result = pthread_timedjoin_np(g_discovery_thread, NULL, &timeout);
+  if (join_result == ETIMEDOUT) {
+    platform_log_warning("Discovery thread did not finish within timeout, continuing...\n");
+    // Try to cancel the thread as a last resort
+    pthread_cancel(g_discovery_thread);
+    // Wait a bit more for cancellation to take effect
+    struct timespec cancel_timeout;
+    clock_gettime(CLOCK_REALTIME, &cancel_timeout);
+    cancel_timeout.tv_sec += 1;
+    pthread_timedjoin_np(g_discovery_thread, NULL, &cancel_timeout);
+  } else if (join_result != 0) {
+    platform_log_warning("Failed to join discovery thread: %s\n", strerror(join_result));
+  } else {
+    platform_log_debug("Discovery thread finished successfully\n");
   }
+
   send_bye();
+  platform_log_debug("WS-Discovery service stopped\n");
   return 0;
 }

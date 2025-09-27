@@ -8,14 +8,10 @@
 #define ONVIF_PTZ_H
 
 #include "core/config/config.h"
-#include "services/common/onvif_request.h"
+#include "networking/http/http_parser.h"
 #include "services/common/onvif_types.h"
 
-enum ptz_move_status {
-  PTZ_MOVE_IDLE = 0,
-  PTZ_MOVE_MOVING = 1,
-  PTZ_MOVE_UNKNOWN = 2
-};
+enum ptz_move_status { PTZ_MOVE_IDLE = 0, PTZ_MOVE_MOVING = 1, PTZ_MOVE_UNKNOWN = 2 };
 
 struct ptz_vector_2d {
   float x;
@@ -98,44 +94,32 @@ struct ptz_preset {
   struct ptz_vector ptz_position;
 };
 
-int onvif_ptz_get_node(
-    const char *node_token,
-    struct ptz_node *node); /**< Retrieve PTZ node capabilities. */
+int onvif_ptz_get_node(const char* node_token,
+                       struct ptz_node* node); /**< Retrieve PTZ node capabilities. */
 int onvif_ptz_get_configuration(
-    const char *config_token,
-    struct ptz_configuration_ex *config); /**< Fetch PTZ configuration. */
-int onvif_ptz_get_status(
-    const char *profile_token,
-    struct ptz_status *status); /**< Get current position & status. */
-int onvif_ptz_absolute_move(
-    const char *profile_token, const struct ptz_vector *position,
-    const struct ptz_speed *speed); /**< AbsoluteMove. */
-int onvif_ptz_relative_move(
-    const char *profile_token, const struct ptz_vector *translation,
-    const struct ptz_speed *speed); /**< RelativeMove. */
-int onvif_ptz_continuous_move(const char *profile_token,
-                              const struct ptz_speed *velocity,
-                              int timeout); /**< ContinuousMove. */
-int onvif_ptz_stop(const char *profile_token, int pan_tilt,
-                   int zoom); /**< Stop motion axes. */
-int onvif_ptz_goto_home_position(
-    const char *profile_token,
-    const struct ptz_speed *speed); /**< GotoHomePosition. */
-int onvif_ptz_set_home_position(
-    const char *profile_token); /**< SetHomePosition. */
-int onvif_ptz_get_presets(const char *profile_token,
-                          struct ptz_preset **preset_list,
-                          int *count); /**< GetPresets list. */
-int onvif_ptz_set_preset(const char *profile_token, const char *preset_name,
-                         char *preset_token,
+  const char* config_token, struct ptz_configuration_ex* config); /**< Fetch PTZ configuration. */
+int onvif_ptz_get_status(const char* profile_token,
+                         struct ptz_status* status); /**< Get current position & status. */
+int onvif_ptz_absolute_move(const char* profile_token, const struct ptz_vector* position,
+                            const struct ptz_speed* speed); /**< AbsoluteMove. */
+int onvif_ptz_relative_move(const char* profile_token, const struct ptz_vector* translation,
+                            const struct ptz_speed* speed); /**< RelativeMove. */
+int onvif_ptz_continuous_move(const char* profile_token, const struct ptz_speed* velocity,
+                              int timeout);                            /**< ContinuousMove. */
+int onvif_ptz_stop(const char* profile_token, int pan_tilt, int zoom); /**< Stop motion axes. */
+int onvif_ptz_goto_home_position(const char* profile_token,
+                                 const struct ptz_speed* speed); /**< GotoHomePosition. */
+int onvif_ptz_set_home_position(const char* profile_token);      /**< SetHomePosition. */
+int onvif_ptz_get_presets(const char* profile_token, struct ptz_preset** preset_list,
+                          int* count); /**< GetPresets list. */
+int onvif_ptz_set_preset(const char* profile_token, const char* preset_name, char* preset_token,
                          size_t token_size); /**< SetPreset. */
-int onvif_ptz_goto_preset(const char *profile_token, const char *preset_token,
-                          const struct ptz_speed *speed); /**< GotoPreset. */
-int onvif_ptz_remove_preset(const char *profile_token,
-                            const char *preset_token); /**< RemovePreset. */
-int onvif_ptz_handle_request(
-    onvif_action_type_t action, const onvif_request_t *request,
-    onvif_response_t *response); /**< Handle ONVIF PTZ service requests. */
+int onvif_ptz_goto_preset(const char* profile_token, const char* preset_token,
+                          const struct ptz_speed* speed); /**< GotoPreset. */
+int onvif_ptz_remove_preset(const char* profile_token,
+                            const char* preset_token); /**< RemovePreset. */
+int onvif_ptz_handle_request(const char* action_name, const http_request_t* request,
+                             http_response_t* response); /**< Handle ONVIF PTZ service requests. */
 
 /**
  * @struct ptz_device_status
@@ -150,27 +134,20 @@ struct ptz_device_status {
 };
 
 /* Low-level PTZ hardware abstraction functions (formerly ptz_adapter) */
-int ptz_adapter_init(
-    void); /**< Initialize underlying PTZ hardware or control channel. */
-int ptz_adapter_shutdown(
-    void); /**< Shutdown / release PTZ hardware resources. */
+int ptz_adapter_init(void);     /**< Initialize underlying PTZ hardware or control channel. */
+int ptz_adapter_shutdown(void); /**< Shutdown / release PTZ hardware resources. */
 /* ptz_adapter_get_status is declared in platform/adapters/ptz_adapter.h */
-int ptz_adapter_absolute_move(
-    int pan_deg, int tilt_deg,
-    int speed); /**< Move to absolute pan/tilt with speed. */
-int ptz_adapter_relative_move(
-    int pan_delta_deg, int tilt_delta_deg,
-    int speed); /**< Move relative delta in pan/tilt. */
-int ptz_adapter_continuous_move(
-    int pan_vel, int tilt_vel,
-    int timeout_s); /**< Start continuous velocity move (timeout_s seconds, 0 =
-                       indefinite). */
-int ptz_adapter_stop(void); /**< Stop any motion (pan & tilt). */
-int ptz_adapter_set_preset(const char *name,
-                           int preset_id); /**< Store current position as preset
-                                              id with optional name. */
-int ptz_adapter_goto_preset(
-    int preset_id); /**< Move to a previously stored preset id. */
+int ptz_adapter_absolute_move(int pan_deg, int tilt_deg,
+                              int speed); /**< Move to absolute pan/tilt with speed. */
+int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg,
+                              int speed); /**< Move relative delta in pan/tilt. */
+int ptz_adapter_continuous_move(int pan_vel, int tilt_vel,
+                                int timeout_s); /**< Start continuous velocity move (timeout_s
+                                                   seconds, 0 = indefinite). */
+int ptz_adapter_stop(void);                     /**< Stop any motion (pan & tilt). */
+int ptz_adapter_set_preset(const char* name, int preset_id); /**< Store current position as preset
+                                                                id with optional name. */
+int ptz_adapter_goto_preset(int preset_id); /**< Move to a previously stored preset id. */
 
 /* PTZ service functions */
 
@@ -179,7 +156,7 @@ int ptz_adapter_goto_preset(
  * @param config Centralized configuration
  * @return 0 on success, negative error code on failure
  */
-int onvif_ptz_init(config_manager_t *config);
+int onvif_ptz_init(config_manager_t* config);
 
 /**
  * @brief Clean up PTZ service

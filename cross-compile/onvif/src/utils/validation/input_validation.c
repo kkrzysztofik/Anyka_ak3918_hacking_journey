@@ -7,137 +7,138 @@
 
 #include "input_validation.h"
 
+#include "networking/http/http_parser.h"
+#include "utils/error/error_handling.h"
+#include "utils/string/string_shims.h"
+
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
-#include "networking/http/http_parser.h"
-#include "utils/error/error_handling.h"
-#include "utils/string/string_shims.h"
+/* Utility macros */
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 /* Fallback implementations for missing functions */
 
 /* Centralized validation data - single source of truth */
-static const char *const valid_http_methods[] = {"GET", "POST", "HEAD",
-                                                 "OPTIONS", NULL};
+static const char* const valid_http_methods[] = {"GET", "POST", "HEAD", "OPTIONS", NULL};
 
-static const char *const valid_http_versions[] = {"HTTP/1.0", "HTTP/1.1", NULL};
+static const char* const valid_http_versions[] = {"HTTP/1.0", "HTTP/1.1", NULL};
 
-static const char *const valid_onvif_paths[] = {
-    "/onvif/device_service",  "/onvif/media_service", "/onvif/ptz_service",
-    "/onvif/imaging_service", "/onvif/snapshot.jpeg", NULL};
+static const char* const valid_onvif_paths[] = {"/onvif/device_service", "/onvif/media_service",
+                                                "/onvif/ptz_service",    "/onvif/imaging_service",
+                                                "/onvif/snapshot.jpeg",  NULL};
 
-static const char *const valid_soap_actions[] = {
-    "GetCapabilities",
-    "GetDeviceInformation",
-    "GetSystemDateAndTime",
-    "SetSystemDateAndTime",
-    "GetSystemLogging",
-    "GetScopes",
-    "SetScopes",
-    "AddScopes",
-    "RemoveScopes",
-    "GetDiscoveryMode",
-    "SetDiscoveryMode",
-    "GetRemoteDiscoveryMode",
-    "SetRemoteDiscoveryMode",
-    "GetDPAddresses",
-    "SetDPAddresses",
-    "GetNetworkInterfaces",
-    "SetNetworkInterfaces",
-    "GetNetworkProtocols",
-    "SetNetworkProtocols",
-    "GetNetworkDefaultGateway",
-    "SetNetworkDefaultGateway",
-    "GetZeroConfiguration",
-    "SetZeroConfiguration",
-    "GetIPAddressFilter",
-    "SetIPAddressFilter",
-    "AddIPAddressFilter",
-    "RemoveIPAddressFilter",
-    "GetAccessPolicy",
-    "SetAccessPolicy",
-    "CreateCertificate",
-    "GetCertificates",
-    "GetCertificateInformation",
-    "SetCertificate",
-    "DeleteCertificate",
-    "GetPkcs10Request",
-    "LoadCertificateWithPrivateKey",
-    "GetClientCertificateMode",
-    "SetClientCertificateMode",
-    "GetRelayOutputs",
-    "SetRelayOutputSettings",
-    "SetRelayOutputState",
-    "GetServiceCapabilities",
-    "SystemReboot",
-    "GetVideoSources",
-    "GetVideoOutputs",
-    "GetAudioSources",
-    "GetAudioOutputs",
-    "GetAudioSourceConfigurations",
-    "GetAudioOutputConfigurations",
-    "GetVideoSourceConfigurations",
-    "GetVideoOutputConfigurations",
-    "GetMetadataConfigurations",
-    "GetCompositeConfigurations",
-    "GetAudioDecoderConfigurations",
-    "GetVideoAnalyticsConfigurations",
-    "GetPTZConfigurations",
-    "GetVideoSourceConfiguration",
-    "GetVideoOutputConfiguration",
-    "GetAudioSourceConfiguration",
-    "GetAudioOutputConfiguration",
-    "GetMetadataConfiguration",
-    "GetCompositeConfiguration",
-    "GetAudioDecoderConfiguration",
-    "GetVideoAnalyticsConfiguration",
-    "GetPTZConfiguration",
-    "GetVideoSourceConfigurationOptions",
-    "GetVideoOutputConfigurationOptions",
-    "GetAudioSourceConfigurationOptions",
-    "GetAudioOutputConfigurationOptions",
-    "GetMetadataConfigurationOptions",
-    "GetCompositeConfigurationOptions",
-    "GetAudioDecoderConfigurationOptions",
-    "GetVideoAnalyticsConfigurationOptions",
-    "GetPTZConfigurationOptions",
-    "GetGuaranteedVideoItemBounds",
-    "GetStreamUri",
-    "GetSnapshotUri",
-    "GetProfiles",
-    "AddProfile",
-    "RemoveProfile",
-    "GetVideoSourceMode",
-    "SetVideoSourceMode",
-    "GetOSD",
-    "GetOSDOptions",
-    "SetOSD",
-    "CreateOSD",
-    "DeleteOSD",
-    "GetMoveOptions",
-    "GetStatus",
-    "GetConfiguration",
-    "GetConfigurations",
-    "GetCompatibleConfigurations",
-    "SetConfiguration",
-    "GetConfigurationOptions",
-    "Stop",
-    "AbsoluteMove",
-    "RelativeMove",
-    "ContinuousMove",
-    "GetPresets",
-    "SetPreset",
-    "RemovePreset",
-    "GotoPreset",
-    "GetImagingSettings",
-    "SetImagingSettings",
-    "GetOptions",
-    NULL};
+static const char* const valid_soap_actions[] = {"GetCapabilities",
+                                                 "GetDeviceInformation",
+                                                 "GetSystemDateAndTime",
+                                                 "SetSystemDateAndTime",
+                                                 "GetSystemLogging",
+                                                 "GetScopes",
+                                                 "SetScopes",
+                                                 "AddScopes",
+                                                 "RemoveScopes",
+                                                 "GetDiscoveryMode",
+                                                 "SetDiscoveryMode",
+                                                 "GetRemoteDiscoveryMode",
+                                                 "SetRemoteDiscoveryMode",
+                                                 "GetDPAddresses",
+                                                 "SetDPAddresses",
+                                                 "GetNetworkInterfaces",
+                                                 "SetNetworkInterfaces",
+                                                 "GetNetworkProtocols",
+                                                 "SetNetworkProtocols",
+                                                 "GetNetworkDefaultGateway",
+                                                 "SetNetworkDefaultGateway",
+                                                 "GetZeroConfiguration",
+                                                 "SetZeroConfiguration",
+                                                 "GetIPAddressFilter",
+                                                 "SetIPAddressFilter",
+                                                 "AddIPAddressFilter",
+                                                 "RemoveIPAddressFilter",
+                                                 "GetAccessPolicy",
+                                                 "SetAccessPolicy",
+                                                 "CreateCertificate",
+                                                 "GetCertificates",
+                                                 "GetCertificateInformation",
+                                                 "SetCertificate",
+                                                 "DeleteCertificate",
+                                                 "GetPkcs10Request",
+                                                 "LoadCertificateWithPrivateKey",
+                                                 "GetClientCertificateMode",
+                                                 "SetClientCertificateMode",
+                                                 "GetRelayOutputs",
+                                                 "SetRelayOutputSettings",
+                                                 "SetRelayOutputState",
+                                                 "GetServiceCapabilities",
+                                                 "SystemReboot",
+                                                 "GetVideoSources",
+                                                 "GetVideoOutputs",
+                                                 "GetAudioSources",
+                                                 "GetAudioOutputs",
+                                                 "GetAudioSourceConfigurations",
+                                                 "GetAudioOutputConfigurations",
+                                                 "GetVideoSourceConfigurations",
+                                                 "GetVideoOutputConfigurations",
+                                                 "GetMetadataConfigurations",
+                                                 "GetCompositeConfigurations",
+                                                 "GetAudioDecoderConfigurations",
+                                                 "GetVideoAnalyticsConfigurations",
+                                                 "GetPTZConfigurations",
+                                                 "GetVideoSourceConfiguration",
+                                                 "GetVideoOutputConfiguration",
+                                                 "GetAudioSourceConfiguration",
+                                                 "GetAudioOutputConfiguration",
+                                                 "GetMetadataConfiguration",
+                                                 "GetCompositeConfiguration",
+                                                 "GetAudioDecoderConfiguration",
+                                                 "GetVideoAnalyticsConfiguration",
+                                                 "GetPTZConfiguration",
+                                                 "GetVideoSourceConfigurationOptions",
+                                                 "GetVideoOutputConfigurationOptions",
+                                                 "GetAudioSourceConfigurationOptions",
+                                                 "GetAudioOutputConfigurationOptions",
+                                                 "GetMetadataConfigurationOptions",
+                                                 "GetCompositeConfigurationOptions",
+                                                 "GetAudioDecoderConfigurationOptions",
+                                                 "GetVideoAnalyticsConfigurationOptions",
+                                                 "GetPTZConfigurationOptions",
+                                                 "GetGuaranteedVideoItemBounds",
+                                                 "GetStreamUri",
+                                                 "GetSnapshotUri",
+                                                 "GetProfiles",
+                                                 "AddProfile",
+                                                 "RemoveProfile",
+                                                 "GetVideoSourceMode",
+                                                 "SetVideoSourceMode",
+                                                 "GetOSD",
+                                                 "GetOSDOptions",
+                                                 "SetOSD",
+                                                 "CreateOSD",
+                                                 "DeleteOSD",
+                                                 "GetMoveOptions",
+                                                 "GetStatus",
+                                                 "GetConfiguration",
+                                                 "GetConfigurations",
+                                                 "GetCompatibleConfigurations",
+                                                 "SetConfiguration",
+                                                 "GetConfigurationOptions",
+                                                 "Stop",
+                                                 "AbsoluteMove",
+                                                 "RelativeMove",
+                                                 "ContinuousMove",
+                                                 "GetPresets",
+                                                 "SetPreset",
+                                                 "RemovePreset",
+                                                 "GotoPreset",
+                                                 "GetImagingSettings",
+                                                 "SetImagingSettings",
+                                                 "GetOptions",
+                                                 NULL};
 
 /* Helper function to check if string is in array */
-static int is_string_in_array(const char *str, const char *const array[]) {
+static int is_string_in_array(const char* str, const char* const array[]) {
   ONVIF_VALIDATE_NULL(str, "string");
   ONVIF_VALIDATE_NULL(array, "array");
 
@@ -154,7 +155,7 @@ static int is_string_in_array(const char *str, const char *const array[]) {
  * @param method HTTP method string
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_http_method(const char *method) {
+int validate_http_method(const char* method) {
   return is_string_in_array(method, valid_http_methods);
 }
 
@@ -163,7 +164,7 @@ int validate_http_method(const char *method) {
  * @param path HTTP request path
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_http_path(const char *path) {
+int validate_http_path(const char* path) {
   ONVIF_VALIDATE_NULL(path, "path");
 
   // Check for path traversal attempts
@@ -201,7 +202,7 @@ int validate_http_path(const char *path) {
  * @param version HTTP version string
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_http_version(const char *version) {
+int validate_http_version(const char* version) {
   return is_string_in_array(version, valid_http_versions);
 }
 
@@ -212,7 +213,7 @@ int validate_http_version(const char *version) {
  */
 int validate_content_length(size_t content_length) {
   // Reasonable limits for ONVIF requests
-  const size_t MAX_CONTENT_LENGTH = 1024 * 1024;  // 1MB
+  const size_t MAX_CONTENT_LENGTH = 1024 * 1024; // 1MB
   const size_t MIN_CONTENT_LENGTH = 0;
 
   if (content_length < MIN_CONTENT_LENGTH) {
@@ -221,8 +222,8 @@ int validate_content_length(size_t content_length) {
   }
 
   if (content_length > MAX_CONTENT_LENGTH) {
-    ONVIF_LOG_ERROR("Content length too large: %zu (max: %zu)\n",
-                    content_length, MAX_CONTENT_LENGTH);
+    ONVIF_LOG_ERROR("Content length too large: %zu (max: %zu)\n", content_length,
+                    MAX_CONTENT_LENGTH);
     return ONVIF_VALIDATION_FAILED;
   }
 
@@ -234,7 +235,7 @@ int validate_content_length(size_t content_length) {
  * @param action SOAP action string
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_soap_action(const char *action) {
+int validate_soap_action(const char* action) {
   ONVIF_VALIDATE_NULL(action, "action");
 
   // Check length
@@ -251,11 +252,9 @@ int validate_soap_action(const char *action) {
   // Check for valid characters (alphanumeric and common XML characters)
   for (size_t i = 0; i < len; i++) {
     char character = action[i];
-    if (!isalnum((unsigned char)character) && character != '_' &&
-        character != '-' && character != '.') {
-      ONVIF_LOG_ERROR(
-          "Invalid character in SOAP action: '%c' at position %zu\n", character,
-          i);
+    if (!isalnum((unsigned char)character) && character != '_' && character != '-' &&
+        character != '.') {
+      ONVIF_LOG_ERROR("Invalid character in SOAP action: '%c' at position %zu\n", character, i);
       return ONVIF_VALIDATION_FAILED;
     }
   }
@@ -270,7 +269,7 @@ int validate_soap_action(const char *action) {
  * @param max_length Maximum allowed length
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_xml_content(const char *xml, size_t max_length) {
+int validate_xml_content(const char* xml, size_t max_length) {
   ONVIF_VALIDATE_NULL(xml, "xml");
 
   size_t len = strlen(xml);
@@ -286,21 +285,21 @@ int validate_xml_content(const char *xml, size_t max_length) {
   }
 
   // Check for basic XML structure
-  if (strstr(xml, "<?xml") == NULL && strstr(xml, "<soap:") == NULL) {
-    ONVIF_LOG_ERROR(
-        "Invalid XML structure: missing XML declaration or SOAP envelope\n");
+  // Accept XML declaration or SOAP envelope with various namespace prefixes
+  if (strstr(xml, "<?xml") == NULL && strstr(xml, "<soap:") == NULL &&
+      strstr(xml, "<s:Envelope") == NULL && strstr(xml, "<soapenv:") == NULL) {
+    ONVIF_LOG_ERROR("Invalid XML structure: missing XML declaration or SOAP envelope\n");
+    platform_log_debug("Invalid XML content (length=%zu): %.*s\n", len, (int)MIN(len, 200), xml);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Check for dangerous patterns
-  const char *dangerous_patterns[] = {
-      "<script",  "javascript:", "vbscript:", "onload=", "onerror=",
-      "onclick=", "eval(",       "exec(",     "system(", NULL};
+  const char* dangerous_patterns[] = {"<script",  "javascript:", "vbscript:", "onload=", "onerror=",
+                                      "onclick=", "eval(",       "exec(",     "system(", NULL};
 
   for (int i = 0; dangerous_patterns[i] != NULL; i++) {
     if (strcasestr(xml, dangerous_patterns[i]) != NULL) {
-      ONVIF_LOG_ERROR("Dangerous pattern detected in XML: %s\n",
-                      dangerous_patterns[i]);
+      ONVIF_LOG_ERROR("Dangerous pattern detected in XML: %s\n", dangerous_patterns[i]);
       return ONVIF_VALIDATION_FAILED;
     }
   }
@@ -313,7 +312,7 @@ int validate_xml_content(const char *xml, size_t max_length) {
  * @param request HTTP request structure
  * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
  */
-int validate_http_request(const http_request_t *request) {
+int validate_http_request(const http_request_t* request) {
   ONVIF_VALIDATE_NULL(request, "request");
 
   // Validate method
@@ -335,17 +334,18 @@ int validate_http_request(const http_request_t *request) {
   }
 
   // Validate content length
-  if (validate_content_length(request->content_length) !=
-      ONVIF_VALIDATION_SUCCESS) {
+  if (validate_content_length(request->content_length) != ONVIF_VALIDATION_SUCCESS) {
     ONVIF_LOG_ERROR("Invalid content length: %zu\n", request->content_length);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Validate body if present
   if (request->body && request->body_length > 0) {
-    if (validate_xml_content(request->body, request->body_length) !=
-        ONVIF_VALIDATION_SUCCESS) {
+    if (validate_xml_content(request->body, request->body_length) != ONVIF_VALIDATION_SUCCESS) {
       ONVIF_LOG_ERROR("Invalid XML content in request body\n");
+
+      platform_log_debug("Full request body content (length=%zu): %.*s\n", request->body_length,
+                         (int)request->body_length, request->body);
       return ONVIF_VALIDATION_FAILED;
     }
   }
@@ -360,7 +360,7 @@ int validate_http_request(const http_request_t *request) {
  * @param output_size Size of output buffer
  * @return 1 on success, 0 on failure
  */
-int sanitize_string_input(const char *input, char *output, size_t output_size) {
+int sanitize_string_input(const char* input, char* output, size_t output_size) {
   if (!input || !output || output_size == 0) {
     return 0;
   }
@@ -376,44 +376,44 @@ int sanitize_string_input(const char *input, char *output, size_t output_size) {
 
     // Remove or escape dangerous characters
     switch (character) {
-      case '<':
-        if (out_pos + 4 < output_size - 1) {
-          strcpy(output + out_pos, "&lt;");
-          out_pos += 4;
-        }
-        break;
-      case '>':
-        if (out_pos + 4 < output_size - 1) {
-          strcpy(output + out_pos, "&gt;");
-          out_pos += 4;
-        }
-        break;
-      case '&':
-        if (out_pos + 5 < output_size - 1) {
-          strcpy(output + out_pos, "&amp;");
-          out_pos += 5;
-        }
-        break;
-      case '"':
-        if (out_pos + 6 < output_size - 1) {
-          strcpy(output + out_pos, "&quot;");
-          out_pos += 6;
-        }
-        break;
-      case '\'':
-        if (out_pos + 6 < output_size - 1) {
-          strcpy(output + out_pos, "&apos;");
-          out_pos += 6;
-        }
-        break;
-      case '\0':
-        // Skip null bytes
-        break;
-      default:
-        if (isprint((unsigned char)character)) {
-          output[out_pos++] = character;
-        }
-        break;
+    case '<':
+      if (out_pos + 4 < output_size - 1) {
+        strcpy(output + out_pos, "&lt;");
+        out_pos += 4;
+      }
+      break;
+    case '>':
+      if (out_pos + 4 < output_size - 1) {
+        strcpy(output + out_pos, "&gt;");
+        out_pos += 4;
+      }
+      break;
+    case '&':
+      if (out_pos + 5 < output_size - 1) {
+        strcpy(output + out_pos, "&amp;");
+        out_pos += 5;
+      }
+      break;
+    case '"':
+      if (out_pos + 6 < output_size - 1) {
+        strcpy(output + out_pos, "&quot;");
+        out_pos += 6;
+      }
+      break;
+    case '\'':
+      if (out_pos + 6 < output_size - 1) {
+        strcpy(output + out_pos, "&apos;");
+        out_pos += 6;
+      }
+      break;
+    case '\0':
+      // Skip null bytes
+      break;
+    default:
+      if (isprint((unsigned char)character)) {
+        output[out_pos++] = character;
+      }
+      break;
     }
   }
 

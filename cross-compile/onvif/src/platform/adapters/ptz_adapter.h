@@ -31,10 +31,9 @@ platform_result_t ptz_adapter_check_self(void);
 /* PTZ movement operations */
 platform_result_t ptz_adapter_move_to_position(int pan_deg, int tilt_deg);
 int ptz_adapter_get_step_position(platform_ptz_axis_t axis);
-platform_result_t ptz_adapter_get_status(struct ptz_device_status *status);
+platform_result_t ptz_adapter_get_status(struct ptz_device_status* status);
 platform_result_t ptz_adapter_set_speed(platform_ptz_axis_t axis, int speed);
-platform_result_t ptz_adapter_turn(platform_ptz_direction_t direction,
-                                   int steps);
+platform_result_t ptz_adapter_turn(platform_ptz_direction_t direction, int steps);
 platform_result_t ptz_adapter_turn_stop(platform_ptz_direction_t direction);
 
 #ifdef __cplusplus

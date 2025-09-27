@@ -7,6 +7,19 @@
 
 #include "onvif_snapshot.h"
 
+#include "common/onvif_constants.h"
+#include "core/config/config.h"
+#include "networking/http/http_parser.h"
+#include "platform.h"
+#include "platform/platform_common.h"
+#include "protocol/gsoap/onvif_gsoap.h"
+#include "protocol/response/onvif_service_handler.h"
+#include "services/common/onvif_types.h"
+#include "services/media/onvif_media.h"
+#include "utils/error/error_handling.h"
+#include "utils/memory/memory_manager.h"
+#include "utils/network/network_utils.h"
+
 #include <bits/pthreadtypes.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -15,40 +28,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "common/onvif_constants.h"
-#include "core/config/config.h"
-#include "platform.h"
-#include "platform/platform_common.h"
-#include "protocol/response/onvif_service_handler.h"
-#include "protocol/soap/onvif_soap.h"
-#include "protocol/xml/unified_xml.h"
-#include "services/common/onvif_request.h"
-#include "services/common/onvif_types.h"
-#include "services/media/onvif_media.h"
-#include "utils/error/error_handling.h"
-#include "utils/memory/memory_manager.h"
-#include "utils/network/network_utils.h"
-
 /* Snapshot service state */
-static bool g_snapshot_initialized = false;                           // NOLINT
-static platform_snapshot_handle_t g_snapshot_handle = NULL;           // NOLINT
-static platform_vi_handle_t g_vi_handle = NULL;                       // NOLINT
-static pthread_mutex_t g_snapshot_mutex = PTHREAD_MUTEX_INITIALIZER;  // NOLINT
+static bool g_snapshot_initialized = false;                          // NOLINT
+static platform_snapshot_handle_t g_snapshot_handle = NULL;          // NOLINT
+static platform_vi_handle_t g_vi_handle = NULL;                      // NOLINT
+static pthread_mutex_t g_snapshot_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 
 /* Service handler instance */
-static onvif_service_handler_instance_t g_snapshot_handler;  // NOLINT
-static int g_handler_initialized = 0;                        // NOLINT
-
-/* Forward declarations for helper functions */
-static int handle_snapshot_validation_error(const error_context_t *context,
-                                            const error_result_t *result,
-                                            onvif_response_t *response);
-static int handle_snapshot_system_error(const error_context_t *context,
-                                        const error_result_t *result,
-                                        onvif_response_t *response);
+static onvif_service_handler_instance_t g_snapshot_handler; // NOLINT
+static int g_handler_initialized = 0;                       // NOLINT
 
 /* Default snapshot resolution */
-#define DEFAULT_SNAPSHOT_WIDTH 640
+#define DEFAULT_SNAPSHOT_WIDTH  640
 #define DEFAULT_SNAPSHOT_HEIGHT 480
 
 int onvif_snapshot_init(void) {
@@ -66,9 +57,8 @@ int onvif_snapshot_init(void) {
   }
 
   // Initialize snapshot capture
-  result =
-      platform_snapshot_init(&g_snapshot_handle, g_vi_handle,
-                             DEFAULT_SNAPSHOT_WIDTH, DEFAULT_SNAPSHOT_HEIGHT);
+  result = platform_snapshot_init(&g_snapshot_handle, g_vi_handle, DEFAULT_SNAPSHOT_WIDTH,
+                                  DEFAULT_SNAPSHOT_HEIGHT);
   if (result != PLATFORM_SUCCESS) {
     platform_log_error("Failed to initialize snapshot capture\n");
     platform_vi_close(g_vi_handle);
@@ -105,26 +95,24 @@ void onvif_snapshot_cleanup(void) {
   pthread_mutex_unlock(&g_snapshot_mutex);
 }
 
-int onvif_snapshot_capture(const snapshot_dimensions_t *dimensions,
-                           uint8_t **data, size_t *size) {
+int onvif_snapshot_capture(const snapshot_dimensions_t* dimensions, uint8_t** data, size_t* size) {
   if (!g_snapshot_initialized || !dimensions || !data || !size) {
     return ONVIF_ERROR_NULL;
   }
 
   // Validate dimensions
   if (dimensions->width <= 0 || dimensions->height <= 0) {
-    platform_log_error("Invalid snapshot dimensions: %dx%d\n",
-                       dimensions->width, dimensions->height);
+    platform_log_error("Invalid snapshot dimensions: %dx%d\n", dimensions->width,
+                       dimensions->height);
     return ONVIF_ERROR_INVALID;
   }
 
   // Check if dimensions match the configured snapshot resolution
   if (dimensions->width != DEFAULT_SNAPSHOT_WIDTH ||
       dimensions->height != DEFAULT_SNAPSHOT_HEIGHT) {
-    platform_log_warning(
-        "Requested snapshot dimensions %dx%d differ from configured %dx%d\n",
-        dimensions->width, dimensions->height, DEFAULT_SNAPSHOT_WIDTH,
-        DEFAULT_SNAPSHOT_HEIGHT);
+    platform_log_warning("Requested snapshot dimensions %dx%d differ from configured %dx%d\n",
+                         dimensions->width, dimensions->height, DEFAULT_SNAPSHOT_WIDTH,
+                         DEFAULT_SNAPSHOT_HEIGHT);
     // Note: For now, we capture at the configured resolution
     // TODO: Implement dynamic resolution reconfiguration if needed
   }
@@ -132,8 +120,7 @@ int onvif_snapshot_capture(const snapshot_dimensions_t *dimensions,
   pthread_mutex_lock(&g_snapshot_mutex);
 
   platform_snapshot_t snapshot;
-  platform_result_t result =
-      platform_snapshot_capture(g_snapshot_handle, &snapshot, 5000);
+  platform_result_t result = platform_snapshot_capture(g_snapshot_handle, &snapshot, 5000);
 
   if (result != PLATFORM_SUCCESS) {
     platform_log_error("Failed to capture snapshot\n");
@@ -169,16 +156,17 @@ int onvif_snapshot_capture(const snapshot_dimensions_t *dimensions,
   return ONVIF_SUCCESS;
 }
 
-void onvif_snapshot_release(uint8_t *data) { MEMORY_SAFE_FREE(data); }
+void onvif_snapshot_release(uint8_t* data) {
+  MEMORY_SAFE_FREE(data);
+}
 
-int onvif_snapshot_get_uri(const char *profile_token, struct stream_uri *uri) {
+int onvif_snapshot_get_uri(const char* profile_token, struct stream_uri* uri) {
   if (!profile_token || !uri) {
     return ONVIF_ERROR_NULL;
   }
 
   // Generate snapshot URI
-  build_device_url("http", ONVIF_SNAPSHOT_PORT_DEFAULT, SNAPSHOT_PATH, uri->uri,
-                   sizeof(uri->uri));
+  build_device_url("http", ONVIF_SNAPSHOT_PORT_DEFAULT, SNAPSHOT_PATH, uri->uri, sizeof(uri->uri));
   uri->invalid_after_connect = 0;
   uri->invalid_after_reboot = 0;
   uri->timeout = 60;
@@ -187,32 +175,22 @@ int onvif_snapshot_get_uri(const char *profile_token, struct stream_uri *uri) {
 }
 
 /* Service handler action implementations */
-static int handle_get_snapshot_uri(const service_handler_config_t *config,
-                                   const onvif_request_t *request,
-                                   onvif_response_t *response,
-                                   onvif_xml_builder_t *xml_builder) {
-  // Initialize error context
-  error_context_t error_ctx;
-  error_context_init(&error_ctx, "Snapshot", "GetSnapshotUri", "uri_retrieval");
-
-  // Enhanced parameter validation
-  if (!config) {
-    return error_handle_parameter(&error_ctx, "config", "missing", response);
-  }
-  if (!response) {
-    return error_handle_parameter(&error_ctx, "response", "missing", response);
-  }
-  if (!xml_builder) {
-    return error_handle_parameter(&error_ctx, "xml_builder", "missing",
-                                  response);
+static int handle_get_snapshot_uri(const service_handler_config_t* config,
+                                   const http_request_t* request, http_response_t* response,
+                                   onvif_gsoap_context_t* gsoap_ctx) {
+  (void)request; // Suppress unused parameter warning
+  // Basic parameter validation
+  if (!config || !response || !gsoap_ctx) {
+    return ONVIF_ERROR_NULL;
   }
 
-  // Parse profile token from request using common XML parser
+  // Parse profile token from request using gsoap parser
   char profile_token[32];
-  if (onvif_xml_parse_profile_token(request->body, profile_token,
-                                    sizeof(profile_token)) != 0) {
-    return error_handle_parameter(&error_ctx, "profile_token", "invalid",
-                                  response);
+  int parse_result =
+    onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, sizeof(profile_token));
+  if (parse_result != ONVIF_SUCCESS) {
+    return onvif_gsoap_generate_fault_response(gsoap_ctx, SOAP_FAULT_SERVER,
+                                               "Invalid profile token");
   }
 
   // Get snapshot URI using existing function
@@ -220,56 +198,76 @@ static int handle_get_snapshot_uri(const service_handler_config_t *config,
   int result = onvif_snapshot_get_uri(profile_token, &uri);
 
   if (result != ONVIF_SUCCESS) {
-    return onvif_generate_fault_response(response, SOAP_FAULT_RECEIVER,
-                                         "Internal server error");
+    return onvif_gsoap_generate_fault_response(gsoap_ctx, SOAP_FAULT_SERVER,
+                                               "Internal server error");
   }
 
-  // Build snapshot URI XML
-  onvif_xml_builder_start_element(xml_builder, "timg:MediaUri", NULL);
-  onvif_xml_builder_element_with_text(xml_builder, "tt:Uri", uri.uri, NULL);
-  onvif_xml_builder_element_with_formatted_text(
-      xml_builder, "tt:InvalidAfterConnect", "%s",
-      uri.invalid_after_connect ? "true" : "false");
-  onvif_xml_builder_element_with_formatted_text(
-      xml_builder, "tt:InvalidAfterReboot", "%s",
-      uri.invalid_after_reboot ? "true" : "false");
-  onvif_xml_builder_element_with_formatted_text(xml_builder, "tt:Timeout",
-                                                "PT%dS", uri.timeout);
-  onvif_xml_builder_end_element(xml_builder, "timg:MediaUri");
+  // Generate simple SOAP response
+  char response_buffer[1024];
+  int response_len =
+    snprintf(response_buffer, sizeof(response_buffer),
+             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+             "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" "
+             "xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\" "
+             "xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
+             "  <soap:Body>\n"
+             "    <timg:GetSnapshotUriResponse>\n"
+             "      <timg:MediaUri>\n"
+             "        <tt:Uri>%s</tt:Uri>\n"
+             "        <tt:InvalidAfterConnect>%s</tt:InvalidAfterConnect>\n"
+             "        <tt:InvalidAfterReboot>%s</tt:InvalidAfterReboot>\n"
+             "        <tt:Timeout>PT%dS</tt:Timeout>\n"
+             "      </timg:MediaUri>\n"
+             "    </timg:GetSnapshotUriResponse>\n"
+             "  </soap:Body>\n"
+             "</soap:Envelope>\n",
+             uri.uri, uri.invalid_after_connect ? "true" : "false",
+             uri.invalid_after_reboot ? "true" : "false", uri.timeout);
 
-  // Generate success response using consistent SOAP response utility
-  const char *xml_content = onvif_xml_builder_get_string(xml_builder);
-  return onvif_generate_complete_response(response, ONVIF_SERVICE_IMAGING,
-                                          "GetSnapshotUri", xml_content);
+  if (response_len >= (int)sizeof(response_buffer)) {
+    return onvif_gsoap_generate_fault_response(gsoap_ctx, SOAP_FAULT_SERVER, "Response too large");
+  }
+
+  // Allocate response buffer if not already allocated
+  if (!response->body) {
+    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
+    if (!response->body) {
+      return onvif_gsoap_generate_fault_response(gsoap_ctx, SOAP_FAULT_SERVER,
+                                                 "Memory allocation failed");
+    }
+  }
+
+  // Copy response to output
+  strncpy(response->body, response_buffer, ONVIF_RESPONSE_BUFFER_SIZE - 1);
+  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
+  response->body_length = strlen(response->body);
+  response->status_code = 200;
+  response->content_type = "application/soap+xml";
+
+  return ONVIF_SUCCESS;
 }
 
 /* Action definitions */
 static const service_action_def_t snapshot_actions[] = {
-    {ONVIF_ACTION_GET_SNAPSHOT_URI, "GetSnapshotUri", handle_get_snapshot_uri,
-     1}};
+  {"GetSnapshotUri", handle_get_snapshot_uri, 1}};
 
 /* Service handler functions */
-int onvif_snapshot_service_init(config_manager_t *config) {
+int onvif_snapshot_service_init(config_manager_t* config) {
   if (g_handler_initialized) {
     return ONVIF_SUCCESS;
   }
 
   service_handler_config_t handler_config = {
-      .service_type =
-          ONVIF_SERVICE_IMAGING,  // Snapshot is part of Imaging service
-      .service_name = "Snapshot",
-      .config = config,
-      .enable_validation = 1,
-      .enable_logging = 1};
+    .service_type = ONVIF_SERVICE_IMAGING, // Snapshot is part of Imaging service
+    .service_name = "Snapshot",
+    .config = config,
+    .enable_validation = 1,
+    .enable_logging = 1};
 
-  int result = onvif_service_handler_init(
-      &g_snapshot_handler, &handler_config, snapshot_actions,
-      sizeof(snapshot_actions) / sizeof(snapshot_actions[0]));
+  int result = onvif_service_handler_init(&g_snapshot_handler, &handler_config, snapshot_actions,
+                                          sizeof(snapshot_actions) / sizeof(snapshot_actions[0]));
 
   if (result == ONVIF_SUCCESS) {
-    // Register snapshot-specific error handlers
-    // Error handler registration not implemented yet
-
     g_handler_initialized = 1;
   }
 
@@ -278,14 +276,7 @@ int onvif_snapshot_service_init(config_manager_t *config) {
 
 void onvif_snapshot_service_cleanup(void) {
   if (g_handler_initialized) {
-    error_context_t error_ctx;
-    error_context_init(&error_ctx, "Snapshot", "Cleanup", "service_cleanup");
-
     onvif_service_handler_cleanup(&g_snapshot_handler);
-
-    // Unregister error handlers
-    // Error handler unregistration not implemented yet
-
     g_handler_initialized = 0;
 
     // Check for memory leaks
@@ -293,37 +284,10 @@ void onvif_snapshot_service_cleanup(void) {
   }
 }
 
-int onvif_snapshot_handle_request(onvif_action_type_t action,
-                                  const onvif_request_t *request,
-                                  onvif_response_t *response) {
+int onvif_snapshot_handle_request(const char* action_name, const http_request_t* request,
+                                  http_response_t* response) {
   if (!g_handler_initialized) {
     return ONVIF_ERROR;
   }
-  return onvif_service_handler_handle_request(&g_snapshot_handler, action,
-                                              request, response);
-}
-
-/* Error handler implementations */
-static int handle_snapshot_validation_error(const error_context_t *context,
-                                            const error_result_t *result,
-                                            onvif_response_t *response) {
-  if (!context || !result || !response) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  platform_log_error("Snapshot validation failed: %s", result->error_message);
-  return onvif_generate_fault_response(response, result->soap_fault_code,
-                                       result->soap_fault_string);
-}
-
-static int handle_snapshot_system_error(const error_context_t *context,
-                                        const error_result_t *result,
-                                        onvif_response_t *response) {
-  if (!context || !result || !response) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  platform_log_error("Snapshot system error: %s", result->error_message);
-  return onvif_generate_fault_response(response, result->soap_fault_code,
-                                       result->soap_fault_string);
+  return onvif_service_handler_handle_request(&g_snapshot_handler, action_name, request, response);
 }

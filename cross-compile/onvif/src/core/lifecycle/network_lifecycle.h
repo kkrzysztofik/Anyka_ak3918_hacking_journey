@@ -12,9 +12,9 @@
 #ifndef ONVIF_NETWORK_LIFECYCLE_H
 #define ONVIF_NETWORK_LIFECYCLE_H
 
-#include <stdbool.h>
-
 #include "core/config/config.h"
+
+#include <stdbool.h>
 
 /**
  * @brief Initialize network services (HTTP server, WS-Discovery, snapshot)
@@ -22,7 +22,7 @@
  * @return 0 on success, -1 on failure
  * @note HTTP server failure is fatal, other services are non-fatal
  */
-int network_lifecycle_init(const struct application_config *cfg);
+int network_lifecycle_init(const struct application_config* cfg);
 
 /**
  * @brief Cleanup network services
@@ -40,7 +40,6 @@ bool network_lifecycle_initialized(void);
  * @brief Start optional network services (non-fatal if some fail)
  * @param cfg Application configuration
  */
-void network_lifecycle_start_optional_services(
-    const struct application_config *cfg);
+void network_lifecycle_start_optional_services(const struct application_config* cfg);
 
 #endif /* ONVIF_NETWORK_LIFECYCLE_H */

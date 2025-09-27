@@ -10,21 +10,21 @@
 
 #include "rtsp_sdp.h"
 
+#include "rtsp_types.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-#include "rtsp_types.h"
 
 /* ==================== SDP Functions ==================== */
 
 /**
  * Initialize SDP session
  */
-int sdp_init_session(struct sdp_session *sdp, const char *session_name,
-                     const char *origin) {
-  if (!sdp) return -1;
+int sdp_init_session(struct sdp_session* sdp, const char* session_name, const char* origin) {
+  if (!sdp)
+    return -1;
 
   memset(sdp, 0, sizeof(struct sdp_session));
   sdp->version = 0;
@@ -41,8 +41,8 @@ int sdp_init_session(struct sdp_session *sdp, const char *session_name,
     strncpy(sdp->origin, origin, sizeof(sdp->origin) - 1);
     sdp->origin[sizeof(sdp->origin) - 1] = '\0';
   } else {
-    snprintf(sdp->origin, sizeof(sdp->origin), "- %u %u IN IP4 0.0.0.0",
-             (uint32_t)time(NULL), (uint32_t)time(NULL));
+    snprintf(sdp->origin, sizeof(sdp->origin), "- %u %u IN IP4 0.0.0.0", (uint32_t)time(NULL),
+             (uint32_t)time(NULL));
   }
 
   return 0;
@@ -51,12 +51,13 @@ int sdp_init_session(struct sdp_session *sdp, const char *session_name,
 /**
  * Cleanup SDP session
  */
-void sdp_cleanup_session(struct sdp_session *sdp) {
-  if (!sdp) return;
+void sdp_cleanup_session(struct sdp_session* sdp) {
+  if (!sdp)
+    return;
 
-  struct sdp_media *media = sdp->media;
+  struct sdp_media* media = sdp->media;
   while (media) {
-    struct sdp_media *next = media->next;
+    struct sdp_media* next = media->next;
     free(media);
     media = next;
   }
@@ -66,13 +67,14 @@ void sdp_cleanup_session(struct sdp_session *sdp) {
 /**
  * Add media to SDP session
  */
-int sdp_add_media(struct sdp_session *sdp, sdp_media_type_t type, int port,
-                  const char *protocol, int payload_type, const char *encoding,
-                  int clock_rate, int channels) {
-  if (!sdp) return -1;
+int sdp_add_media(struct sdp_session* sdp, sdp_media_type_t type, int port, const char* protocol,
+                  int payload_type, const char* encoding, int clock_rate, int channels) {
+  if (!sdp)
+    return -1;
 
-  struct sdp_media *media = malloc(sizeof(struct sdp_media));
-  if (!media) return -1;
+  struct sdp_media* media = malloc(sizeof(struct sdp_media));
+  if (!media)
+    return -1;
 
   memset(media, 0, sizeof(struct sdp_media));
   media->type = type;
@@ -106,11 +108,12 @@ int sdp_add_media(struct sdp_session *sdp, sdp_media_type_t type, int port,
 /**
  * Set media direction
  */
-int sdp_set_media_direction(struct sdp_session *sdp, sdp_media_type_t type,
+int sdp_set_media_direction(struct sdp_session* sdp, sdp_media_type_t type,
                             sdp_direction_t direction) {
-  if (!sdp) return -1;
+  if (!sdp)
+    return -1;
 
-  struct sdp_media *media = sdp->media;
+  struct sdp_media* media = sdp->media;
   while (media) {
     if (media->type == type) {
       media->direction = direction;
@@ -119,17 +122,17 @@ int sdp_set_media_direction(struct sdp_session *sdp, sdp_media_type_t type,
     media = media->next;
   }
 
-  return -1;  // Media not found
+  return -1; // Media not found
 }
 
 /**
  * Set media control
  */
-int sdp_set_media_control(struct sdp_session *sdp, sdp_media_type_t type,
-                          const char *control) {
-  if (!sdp || !control) return -1;
+int sdp_set_media_control(struct sdp_session* sdp, sdp_media_type_t type, const char* control) {
+  if (!sdp || !control)
+    return -1;
 
-  struct sdp_media *media = sdp->media;
+  struct sdp_media* media = sdp->media;
   while (media) {
     if (media->type == type) {
       strncpy(media->control, control, sizeof(media->control) - 1);
@@ -139,17 +142,17 @@ int sdp_set_media_control(struct sdp_session *sdp, sdp_media_type_t type,
     media = media->next;
   }
 
-  return -1;  // Media not found
+  return -1; // Media not found
 }
 
 /**
  * Set media fmtp
  */
-int sdp_set_media_fmtp(struct sdp_session *sdp, sdp_media_type_t type,
-                       const char *fmtp) {
-  if (!sdp || !fmtp) return -1;
+int sdp_set_media_fmtp(struct sdp_session* sdp, sdp_media_type_t type, const char* fmtp) {
+  if (!sdp || !fmtp)
+    return -1;
 
-  struct sdp_media *media = sdp->media;
+  struct sdp_media* media = sdp->media;
   while (media) {
     if (media->type == type) {
       strncpy(media->fmtp, fmtp, sizeof(media->fmtp) - 1);
@@ -159,17 +162,17 @@ int sdp_set_media_fmtp(struct sdp_session *sdp, sdp_media_type_t type,
     media = media->next;
   }
 
-  return -1;  // Media not found
+  return -1; // Media not found
 }
 
 /**
  * Set media RTCP feedback
  */
-int sdp_set_media_rtcp_fb(struct sdp_session *sdp, sdp_media_type_t type,
-                          const char *rtcp_fb) {
-  if (!sdp || !rtcp_fb) return -1;
+int sdp_set_media_rtcp_fb(struct sdp_session* sdp, sdp_media_type_t type, const char* rtcp_fb) {
+  if (!sdp || !rtcp_fb)
+    return -1;
 
-  struct sdp_media *media = sdp->media;
+  struct sdp_media* media = sdp->media;
   while (media) {
     if (media->type == type) {
       strncpy(media->rtcp_fb, rtcp_fb, sizeof(media->rtcp_fb) - 1);
@@ -179,17 +182,17 @@ int sdp_set_media_rtcp_fb(struct sdp_session *sdp, sdp_media_type_t type,
     media = media->next;
   }
 
-  return -1;  // Media not found
+  return -1; // Media not found
 }
 
 /**
  * Set media extension map
  */
-int sdp_set_media_extmap(struct sdp_session *sdp, sdp_media_type_t type,
-                         const char *extmap) {
-  if (!sdp || !extmap) return -1;
+int sdp_set_media_extmap(struct sdp_session* sdp, sdp_media_type_t type, const char* extmap) {
+  if (!sdp || !extmap)
+    return -1;
 
-  struct sdp_media *media = sdp->media;
+  struct sdp_media* media = sdp->media;
   while (media) {
     if (media->type == type) {
       strncpy(media->extmap, extmap, sizeof(media->extmap) - 1);
@@ -199,17 +202,17 @@ int sdp_set_media_extmap(struct sdp_session *sdp, sdp_media_type_t type,
     media = media->next;
   }
 
-  return -1;  // Media not found
+  return -1; // Media not found
 }
 
 /**
  * Set media MID
  */
-int sdp_set_media_mid(struct sdp_session *sdp, sdp_media_type_t type,
-                      const char *mid) {
-  if (!sdp || !mid) return -1;
+int sdp_set_media_mid(struct sdp_session* sdp, sdp_media_type_t type, const char* mid) {
+  if (!sdp || !mid)
+    return -1;
 
-  struct sdp_media *media = sdp->media;
+  struct sdp_media* media = sdp->media;
   while (media) {
     if (media->type == type) {
       strncpy(media->mid, mid, sizeof(media->mid) - 1);
@@ -219,17 +222,17 @@ int sdp_set_media_mid(struct sdp_session *sdp, sdp_media_type_t type,
     media = media->next;
   }
 
-  return -1;  // Media not found
+  return -1; // Media not found
 }
 
 /**
  * Set media SSRC
  */
-int sdp_set_media_ssrc(struct sdp_session *sdp, sdp_media_type_t type,
-                       const char *ssrc) {
-  if (!sdp || !ssrc) return -1;
+int sdp_set_media_ssrc(struct sdp_session* sdp, sdp_media_type_t type, const char* ssrc) {
+  if (!sdp || !ssrc)
+    return -1;
 
-  struct sdp_media *media = sdp->media;
+  struct sdp_media* media = sdp->media;
   while (media) {
     if (media->type == type) {
       strncpy(media->ssrc, ssrc, sizeof(media->ssrc) - 1);
@@ -239,14 +242,15 @@ int sdp_set_media_ssrc(struct sdp_session *sdp, sdp_media_type_t type,
     media = media->next;
   }
 
-  return -1;  // Media not found
+  return -1; // Media not found
 }
 
 /**
  * Generate SDP content
  */
-int sdp_generate(struct sdp_session *sdp, char *buffer, size_t buffer_size) {
-  if (!sdp || !buffer || buffer_size < 256) return -1;
+int sdp_generate(struct sdp_session* sdp, char* buffer, size_t buffer_size) {
+  if (!sdp || !buffer || buffer_size < 256)
+    return -1;
 
   int len = 0;
 
@@ -257,13 +261,11 @@ int sdp_generate(struct sdp_session *sdp, char *buffer, size_t buffer_size) {
   len += snprintf(buffer + len, buffer_size - len, "o=%s\r\n", sdp->origin);
 
   // Session name
-  len +=
-      snprintf(buffer + len, buffer_size - len, "s=%s\r\n", sdp->session_name);
+  len += snprintf(buffer + len, buffer_size - len, "s=%s\r\n", sdp->session_name);
 
   // Session info
   if (sdp->session_info[0]) {
-    len += snprintf(buffer + len, buffer_size - len, "i=%s\r\n",
-                    sdp->session_info);
+    len += snprintf(buffer + len, buffer_size - len, "i=%s\r\n", sdp->session_info);
   }
 
   // URI
@@ -283,14 +285,12 @@ int sdp_generate(struct sdp_session *sdp, char *buffer, size_t buffer_size) {
 
   // Connection
   if (sdp->connection[0]) {
-    len +=
-        snprintf(buffer + len, buffer_size - len, "c=%s\r\n", sdp->connection);
+    len += snprintf(buffer + len, buffer_size - len, "c=%s\r\n", sdp->connection);
   }
 
   // Bandwidth
   if (sdp->bandwidth[0]) {
-    len +=
-        snprintf(buffer + len, buffer_size - len, "b=%s\r\n", sdp->bandwidth);
+    len += snprintf(buffer + len, buffer_size - len, "b=%s\r\n", sdp->bandwidth);
   }
 
   // Time
@@ -298,8 +298,7 @@ int sdp_generate(struct sdp_session *sdp, char *buffer, size_t buffer_size) {
 
   // Time zone
   if (sdp->time_zone[0]) {
-    len +=
-        snprintf(buffer + len, buffer_size - len, "z=%s\r\n", sdp->time_zone);
+    len += snprintf(buffer + len, buffer_size - len, "z=%s\r\n", sdp->time_zone);
   }
 
   // Key
@@ -309,37 +308,35 @@ int sdp_generate(struct sdp_session *sdp, char *buffer, size_t buffer_size) {
 
   // Attributes
   if (sdp->attributes[0]) {
-    len +=
-        snprintf(buffer + len, buffer_size - len, "a=%s\r\n", sdp->attributes);
+    len += snprintf(buffer + len, buffer_size - len, "a=%s\r\n", sdp->attributes);
   }
 
   // Media descriptions
-  struct sdp_media *media = sdp->media;
+  struct sdp_media* media = sdp->media;
   while (media) {
     // Media type
-    const char *media_type_str;
+    const char* media_type_str;
     switch (media->type) {
-      case SDP_MEDIA_VIDEO:
-        media_type_str = "video";
-        break;
-      case SDP_MEDIA_AUDIO:
-        media_type_str = "audio";
-        break;
-      case SDP_MEDIA_APPLICATION:
-        media_type_str = "application";
-        break;
-      default:
-        media_type_str = "video";
-        break;
+    case SDP_MEDIA_VIDEO:
+      media_type_str = "video";
+      break;
+    case SDP_MEDIA_AUDIO:
+      media_type_str = "audio";
+      break;
+    case SDP_MEDIA_APPLICATION:
+      media_type_str = "application";
+      break;
+    default:
+      media_type_str = "video";
+      break;
     }
 
-    len += snprintf(buffer + len, buffer_size - len, "m=%s %d %s %d\r\n",
-                    media_type_str, media->port, media->protocol,
-                    media->payload_type);
+    len += snprintf(buffer + len, buffer_size - len, "m=%s %d %s %d\r\n", media_type_str,
+                    media->port, media->protocol, media->payload_type);
 
     // RTP map
-    len += snprintf(buffer + len, buffer_size - len, "a=rtpmap:%d %s/%d",
-                    media->payload_type, media->encoding, media->clock_rate);
+    len += snprintf(buffer + len, buffer_size - len, "a=rtpmap:%d %s/%d", media->payload_type,
+                    media->encoding, media->clock_rate);
     if (media->channels > 0) {
       len += snprintf(buffer + len, buffer_size - len, "/%d", media->channels);
     }
@@ -347,59 +344,55 @@ int sdp_generate(struct sdp_session *sdp, char *buffer, size_t buffer_size) {
 
     // Format parameters
     if (media->fmtp[0]) {
-      len += snprintf(buffer + len, buffer_size - len, "a=fmtp:%d %s\r\n",
-                      media->payload_type, media->fmtp);
+      len += snprintf(buffer + len, buffer_size - len, "a=fmtp:%d %s\r\n", media->payload_type,
+                      media->fmtp);
     }
 
     // Direction
-    const char *direction_str;
+    const char* direction_str;
     switch (media->direction) {
-      case SDP_DIR_SENDRECV:
-        direction_str = "sendrecv";
-        break;
-      case SDP_DIR_SENDONLY:
-        direction_str = "sendonly";
-        break;
-      case SDP_DIR_RECVONLY:
-        direction_str = "recvonly";
-        break;
-      case SDP_DIR_INACTIVE:
-        direction_str = "inactive";
-        break;
-      default:
-        direction_str = "sendrecv";
-        break;
+    case SDP_DIR_SENDRECV:
+      direction_str = "sendrecv";
+      break;
+    case SDP_DIR_SENDONLY:
+      direction_str = "sendonly";
+      break;
+    case SDP_DIR_RECVONLY:
+      direction_str = "recvonly";
+      break;
+    case SDP_DIR_INACTIVE:
+      direction_str = "inactive";
+      break;
+    default:
+      direction_str = "sendrecv";
+      break;
     }
     len += snprintf(buffer + len, buffer_size - len, "a=%s\r\n", direction_str);
 
     // Control
     if (media->control[0]) {
-      len += snprintf(buffer + len, buffer_size - len, "a=control:%s\r\n",
-                      media->control);
+      len += snprintf(buffer + len, buffer_size - len, "a=control:%s\r\n", media->control);
     }
 
     // RTCP feedback
     if (media->rtcp_fb[0]) {
-      len += snprintf(buffer + len, buffer_size - len, "a=rtcp-fb:%d %s\r\n",
-                      media->payload_type, media->rtcp_fb);
+      len += snprintf(buffer + len, buffer_size - len, "a=rtcp-fb:%d %s\r\n", media->payload_type,
+                      media->rtcp_fb);
     }
 
     // Extension map
     if (media->extmap[0]) {
-      len += snprintf(buffer + len, buffer_size - len, "a=extmap:%s\r\n",
-                      media->extmap);
+      len += snprintf(buffer + len, buffer_size - len, "a=extmap:%s\r\n", media->extmap);
     }
 
     // MID
     if (media->mid[0]) {
-      len +=
-          snprintf(buffer + len, buffer_size - len, "a=mid:%s\r\n", media->mid);
+      len += snprintf(buffer + len, buffer_size - len, "a=mid:%s\r\n", media->mid);
     }
 
     // SSRC
     if (media->ssrc[0]) {
-      len += snprintf(buffer + len, buffer_size - len, "a=ssrc:%s\r\n",
-                      media->ssrc);
+      len += snprintf(buffer + len, buffer_size - len, "a=ssrc:%s\r\n", media->ssrc);
     }
 
     media = media->next;
@@ -411,17 +404,20 @@ int sdp_generate(struct sdp_session *sdp, char *buffer, size_t buffer_size) {
 /**
  * Parse SDP content
  */
-int sdp_parse(struct sdp_session *sdp, const char *sdp_text) {
-  if (!sdp || !sdp_text) return -1;
+int sdp_parse(struct sdp_session* sdp, const char* sdp_text) {
+  if (!sdp || !sdp_text)
+    return -1;
 
   // Initialize SDP session
   sdp_init_session(sdp, NULL, NULL);
 
-  const char *line_start = sdp_text;
+  const char* line_start = sdp_text;
   while (*line_start) {
-    const char *line_end = strstr(line_start, "\r\n");
-    if (!line_end) line_end = strchr(line_start, '\n');
-    if (!line_end) break;
+    const char* line_end = strstr(line_start, "\r\n");
+    if (!line_end)
+      line_end = strchr(line_start, '\n');
+    if (!line_end)
+      break;
 
     size_t line_len = line_end - line_start;
     if (line_len < 2) {
@@ -430,7 +426,8 @@ int sdp_parse(struct sdp_session *sdp, const char *sdp_text) {
     }
 
     char line[512];
-    if (line_len >= sizeof(line)) line_len = sizeof(line) - 1;
+    if (line_len >= sizeof(line))
+      line_len = sizeof(line) - 1;
     strncpy(line, line_start, line_len);
     line[line_len] = '\0';
 
@@ -475,8 +472,7 @@ int sdp_parse(struct sdp_session *sdp, const char *sdp_text) {
       char media_type[16], protocol[16];
       int port, payload_type;
 
-      if (sscanf(line + 2, "%15s %d %15s %d", media_type, &port, protocol,
-                 &payload_type) == 4) {
+      if (sscanf(line + 2, "%15s %d %15s %d", media_type, &port, protocol, &payload_type) == 4) {
         sdp_media_type_t type = SDP_MEDIA_VIDEO;
         if (strcmp(media_type, "audio") == 0)
           type = SDP_MEDIA_AUDIO;
@@ -496,14 +492,19 @@ int sdp_parse(struct sdp_session *sdp, const char *sdp_text) {
 /**
  * Validate SDP content
  */
-int sdp_validate(const char *sdp_text) {
-  if (!sdp_text) return -1;
+int sdp_validate(const char* sdp_text) {
+  if (!sdp_text)
+    return -1;
 
   // Check for required SDP fields
-  if (strstr(sdp_text, "v=") == NULL) return -1;  // Version required
-  if (strstr(sdp_text, "o=") == NULL) return -1;  // Origin required
-  if (strstr(sdp_text, "s=") == NULL) return -1;  // Session name required
-  if (strstr(sdp_text, "t=") == NULL) return -1;  // Time required
+  if (strstr(sdp_text, "v=") == NULL)
+    return -1; // Version required
+  if (strstr(sdp_text, "o=") == NULL)
+    return -1; // Origin required
+  if (strstr(sdp_text, "s=") == NULL)
+    return -1; // Session name required
+  if (strstr(sdp_text, "t=") == NULL)
+    return -1; // Time required
 
   return 0;
 }

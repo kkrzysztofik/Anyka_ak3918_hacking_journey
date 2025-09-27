@@ -5,8 +5,6 @@
  * @date 2025
  */
 
-#include <string.h>
-
 #include "core/config/config.h"
 #include "core/lifecycle/config_lifecycle.h"
 #include "core/lifecycle/network_lifecycle.h"
@@ -15,6 +13,10 @@
 #include "core/lifecycle/video_lifecycle.h"
 #include "networking/rtsp/rtsp_multistream.h"
 #include "platform/platform.h"
+#include "utils/logging/platform_logging.h"
+#include "utils/network/network_utils.h"
+
+#include <string.h>
 
 /* ---------------------------- Utility Functions ------------------------- */
 
@@ -22,36 +24,42 @@
  * @brief Print service endpoint URLs for user convenience.
  * @param cfg Application configuration
  */
-static void print_endpoints(const struct application_config *cfg) {
-  platform_log_notice("ONVIF daemon started successfully on port %d\n",
-                      cfg->onvif.http_port);
-  platform_log_notice("Device services available at:\n");
-  platform_log_notice("  Device:  http://[IP]:%d/onvif/device_service\n",
-                      cfg->onvif.http_port);
-  platform_log_notice("  Media:   http://[IP]:%d/onvif/media_service\n",
-                      cfg->onvif.http_port);
-  platform_log_notice("  PTZ:     http://[IP]:%d/onvif/ptz_service\n",
-                      cfg->onvif.http_port);
-  platform_log_notice("  Imaging: http://[IP]:%d/onvif/imaging_service\n",
-                      cfg->onvif.http_port);
+static void print_endpoints(const struct application_config* cfg) {
+  char device_ip[64];
 
-  rtsp_multistream_server_t *rtsp_server = video_lifecycle_get_rtsp_server();
-  if (rtsp_server) {
-    int stream_count = rtsp_multistream_get_stream_count(rtsp_server);
-    platform_log_notice("  RTSP Streams: %d streams available on port 554\n",
-                        stream_count);
-    platform_log_notice("    Main: rtsp://[IP]:554/vs0\n");
-    platform_log_notice("    Sub:  rtsp://[IP]:554/vs1\n");
+  // Get the real device IP address
+  if (get_local_ip_address(device_ip, sizeof(device_ip)) != 0) {
+    // Fallback to placeholder if IP detection fails
+    strncpy(device_ip, "[IP]", sizeof(device_ip) - 1);
+    device_ip[sizeof(device_ip) - 1] = '\0';
   }
 
-  platform_log_notice("  Snapshot: http://[IP]:%d/snapshot.jpeg\n",
+  platform_log_notice("ONVIF daemon started successfully on port %d\n", cfg->onvif.http_port);
+  platform_log_notice("Device services available at:\n");
+  platform_log_notice("  Device:  http://%s:%d/onvif/device_service\n", device_ip,
                       cfg->onvif.http_port);
+  platform_log_notice("  Media:   http://%s:%d/onvif/media_service\n", device_ip,
+                      cfg->onvif.http_port);
+  platform_log_notice("  PTZ:     http://%s:%d/onvif/ptz_service\n", device_ip,
+                      cfg->onvif.http_port);
+  platform_log_notice("  Imaging: http://%s:%d/onvif/imaging_service\n", device_ip,
+                      cfg->onvif.http_port);
+
+  rtsp_multistream_server_t* rtsp_server = video_lifecycle_get_rtsp_server();
+  if (rtsp_server) {
+    int stream_count = rtsp_multistream_get_stream_count(rtsp_server);
+    platform_log_notice("  RTSP Streams: %d streams available on port 554\n", stream_count);
+    platform_log_notice("    Main: rtsp://%s:554/vs0\n", device_ip);
+    platform_log_notice("    Sub:  rtsp://%s:554/vs1\n", device_ip);
+  }
+
+  platform_log_notice("  Snapshot: http://%s:%d/snapshot.jpeg\n", device_ip, cfg->onvif.http_port);
   platform_log_notice("Press Ctrl-C to stop.\n");
 }
 
 /* ---------------------------- Main Function ------------------------- */
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   struct application_config cfg;
 
   /* Initialize configuration structure to prevent garbage data */
@@ -79,6 +87,11 @@ int main(int argc, char **argv) {
     config_lifecycle_free_memory(&cfg);
     platform_lifecycle_cleanup();
     return 1;
+  }
+
+  /* Apply logging configuration */
+  if (cfg.logging) {
+    platform_logging_apply_config(cfg.logging);
   }
 
   if (!cfg.onvif.enabled) {

@@ -20,7 +20,7 @@ extern "C" {
  * @return 1 if valid, 0 if invalid
  * @note Validates sample rate, channels, bits per sample, and codec type
  */
-int audio_validation_validate_config(const platform_audio_config_t *config);
+int audio_validation_validate_config(const platform_audio_config_t* config);
 
 /**
  * @brief Validate audio sample rate
@@ -60,7 +60,7 @@ int audio_validation_validate_codec(platform_audio_codec_t codec);
  * @return 0 on success, -1 on error
  * @note Sets safe default values for Anyka platform
  */
-int audio_validation_get_default_config(platform_audio_config_t *config);
+int audio_validation_get_default_config(platform_audio_config_t* config);
 
 /**
  * @brief Check if audio configuration is supported by platform
@@ -68,7 +68,7 @@ int audio_validation_get_default_config(platform_audio_config_t *config);
  * @return 1 if supported, 0 if not supported
  * @note Checks platform-specific limitations
  */
-int audio_validation_is_supported(const platform_audio_config_t *config);
+int audio_validation_is_supported(const platform_audio_config_t* config);
 
 #ifdef __cplusplus
 }

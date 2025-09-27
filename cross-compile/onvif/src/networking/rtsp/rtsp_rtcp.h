@@ -20,27 +20,27 @@
  * @param rtp_session RTP session to initialize RTCP for
  * @return 0 on success, -1 on error
  */
-int rtcp_init_session(struct rtp_session *rtp_session);
+int rtcp_init_session(struct rtp_session* rtp_session);
 
 /**
  * @brief Cleanup RTCP session
  * @param rtp_session RTP session to cleanup RTCP for
  */
-void rtcp_cleanup_session(struct rtp_session *rtp_session);
+void rtcp_cleanup_session(struct rtp_session* rtp_session);
 
 /**
  * @brief Send RTCP Sender Report (SR)
  * @param rtp_session RTP session
  * @return 0 on success, -1 on error
  */
-int rtcp_send_sr(struct rtp_session *rtp_session);
+int rtcp_send_sr(struct rtp_session* rtp_session);
 
 /**
  * @brief Send RTCP Receiver Report (RR)
  * @param rtp_session RTP session
  * @return 0 on success, -1 on error
  */
-int rtcp_send_rr(struct rtp_session *rtp_session);
+int rtcp_send_rr(struct rtp_session* rtp_session);
 
 /**
  * @brief Handle incoming RTCP packet
@@ -49,14 +49,13 @@ int rtcp_send_rr(struct rtp_session *rtp_session);
  * @param len Length of packet data
  * @return 0 on success, -1 on error
  */
-int rtcp_handle_packet(struct rtp_session *rtp_session, const uint8_t *data,
-                       size_t len);
+int rtcp_handle_packet(struct rtp_session* rtp_session, const uint8_t* data, size_t len);
 
 /**
  * @brief RTCP thread function
  * @param arg RTP session pointer
  * @return NULL
  */
-void *rtcp_thread(void *arg);
+void* rtcp_thread(void* arg);
 
 #endif /* RTSP_RTCP_H */

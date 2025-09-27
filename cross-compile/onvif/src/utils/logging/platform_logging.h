@@ -8,30 +8,33 @@
 #ifndef PLATFORM_LOGGING_H
 #define PLATFORM_LOGGING_H
 
-#include <stdbool.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
 
+/* Forward declaration */
+struct logging_settings;
+
 /**
- * @brief Log levels in order of severity
+ * @brief Log levels in order of verbosity (0=most verbose, 4=least verbose)
  */
 typedef enum {
-  PLATFORM_LOG_ERROR = 0,    /**< Error messages */
-  PLATFORM_LOG_WARNING,      /**< Warning messages */
-  PLATFORM_LOG_NOTICE,       /**< Notice messages */
-  PLATFORM_LOG_INFO,         /**< Informational messages */
-  PLATFORM_LOG_DEBUG,        /**< Debug messages */
+  PLATFORM_LOG_DEBUG = 0, /**< Debug messages (most verbose) */
+  PLATFORM_LOG_INFO,      /**< Informational messages */
+  PLATFORM_LOG_NOTICE,    /**< Notice messages */
+  PLATFORM_LOG_WARNING,   /**< Warning messages */
+  PLATFORM_LOG_ERROR,     /**< Error messages (least verbose) */
 } platform_log_level_t;
 
 /**
  * @brief Logging configuration structure
  */
 typedef struct {
-  bool enabled;                    /**< Enable/disable logging */
-  bool use_colors;                 /**< Enable/disable color output */
-  bool use_timestamps;             /**< Enable/disable timestamps */
+  bool enabled;                   /**< Enable/disable logging */
+  bool use_colors;                /**< Enable/disable color output */
+  bool use_timestamps;            /**< Enable/disable timestamps */
   platform_log_level_t min_level; /**< Minimum log level to print */
-  char tag[32];                    /**< Log tag identifier */
+  char tag[32];                   /**< Log tag identifier */
 } platform_logging_config_t;
 
 /**
@@ -44,9 +47,8 @@ typedef struct {
  * @param args Variable arguments
  * @return Number of characters printed
  */
-int platform_log_printf(platform_log_level_t level, const char* file, 
-                       const char* function, int line, const char* format, 
-                       va_list args);
+int platform_log_printf(platform_log_level_t level, const char* file, const char* function,
+                        int line, const char* format, va_list args);
 
 /**
  * @brief Set logging configuration
@@ -78,45 +80,51 @@ void platform_logging_set_enabled(bool enabled);
  */
 void platform_logging_set_tag(const char* tag);
 
+/**
+ * @brief Apply logging configuration from application config
+ * @param logging_config Logging configuration from application config
+ */
+void platform_logging_apply_config(const struct logging_settings* logging_config);
+
 /* Convenience macros for logging */
-#define PLATFORM_LOG_ERROR(format, ...) \
-  do { \
-    va_list args; \
-    va_start(args, format); \
-    platform_log_printf(PLATFORM_LOG_ERROR, __FILE__, __FUNCTION__, __LINE__, format, args); \
-    va_end(args); \
-  } while(0)
+#define PLATFORM_LOG_ERROR(format, ...)                                                            \
+  do {                                                                                             \
+    va_list args;                                                                                  \
+    va_start(args, format);                                                                        \
+    platform_log_printf(PLATFORM_LOG_ERROR, __FILE__, __FUNCTION__, __LINE__, format, args);       \
+    va_end(args);                                                                                  \
+  } while (0)
 
-#define PLATFORM_LOG_WARNING(format, ...) \
-  do { \
-    va_list args; \
-    va_start(args, format); \
-    platform_log_printf(PLATFORM_LOG_WARNING, __FILE__, __FUNCTION__, __LINE__, format, args); \
-    va_end(args); \
-  } while(0)
+#define PLATFORM_LOG_WARNING(format, ...)                                                          \
+  do {                                                                                             \
+    va_list args;                                                                                  \
+    va_start(args, format);                                                                        \
+    platform_log_printf(PLATFORM_LOG_WARNING, __FILE__, __FUNCTION__, __LINE__, format, args);     \
+    va_end(args);                                                                                  \
+  } while (0)
 
-#define PLATFORM_LOG_NOTICE(format, ...) \
-  do { \
-    va_list args; \
-    va_start(args, format); \
-    platform_log_printf(PLATFORM_LOG_NOTICE, __FILE__, __FUNCTION__, __LINE__, format, args); \
-    va_end(args); \
-  } while(0)
+#define PLATFORM_LOG_NOTICE(format, ...)                                                           \
+  do {                                                                                             \
+    va_list args;                                                                                  \
+    va_start(args, format);                                                                        \
+    platform_log_printf(PLATFORM_LOG_NOTICE, __FILE__, __FUNCTION__, __LINE__, format, args);      \
+    va_end(args);                                                                                  \
+  } while (0)
 
-#define PLATFORM_LOG_INFO(format, ...) \
-  do { \
-    va_list args; \
-    va_start(args, format); \
-    platform_log_printf(PLATFORM_LOG_INFO, __FILE__, __FUNCTION__, __LINE__, format, args); \
-    va_end(args); \
-  } while(0)
+#define PLATFORM_LOG_INFO(format, ...)                                                             \
+  do {                                                                                             \
+    va_list args;                                                                                  \
+    va_start(args, format);                                                                        \
+    platform_log_printf(PLATFORM_LOG_INFO, __FILE__, __FUNCTION__, __LINE__, format, args);        \
+    va_end(args);                                                                                  \
+  } while (0)
 
-#define PLATFORM_LOG_DEBUG(format, ...) \
-  do { \
-    va_list args; \
-    va_start(args, format); \
-    platform_log_printf(PLATFORM_LOG_DEBUG, __FILE__, __FUNCTION__, __LINE__, format, args); \
-    va_end(args); \
-  } while(0)
+#define PLATFORM_LOG_DEBUG(format, ...)                                                            \
+  do {                                                                                             \
+    va_list args;                                                                                  \
+    va_start(args, format);                                                                        \
+    platform_log_printf(PLATFORM_LOG_DEBUG, __FILE__, __FUNCTION__, __LINE__, format, args);       \
+    va_end(args);                                                                                  \
+  } while (0)
 
 #endif /* PLATFORM_LOGGING_H */

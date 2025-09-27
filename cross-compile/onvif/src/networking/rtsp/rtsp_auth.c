@@ -10,21 +10,22 @@
 
 #include "rtsp_auth.h"
 
+#include "rtsp_session.h"
+#include "rtsp_types.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-#include "rtsp_session.h"
-#include "rtsp_types.h"
 
 /* ==================== Authentication Functions ==================== */
 
 /**
  * Initialize authentication configuration
  */
-int rtsp_auth_init(struct rtsp_auth_config *auth_config) {
-  if (!auth_config) return -1;
+int rtsp_auth_init(struct rtsp_auth_config* auth_config) {
+  if (!auth_config)
+    return -1;
 
   memset(auth_config, 0, sizeof(struct rtsp_auth_config));
   auth_config->auth_type = RTSP_AUTH_NONE;
@@ -38,12 +39,13 @@ int rtsp_auth_init(struct rtsp_auth_config *auth_config) {
 /**
  * Cleanup authentication configuration
  */
-void rtsp_auth_cleanup(struct rtsp_auth_config *auth_config) {
-  if (!auth_config) return;
+void rtsp_auth_cleanup(struct rtsp_auth_config* auth_config) {
+  if (!auth_config)
+    return;
 
-  struct rtsp_user *user = auth_config->users;
+  struct rtsp_user* user = auth_config->users;
   while (user) {
-    struct rtsp_user *next = user->next;
+    struct rtsp_user* next = user->next;
     free(user);
     user = next;
   }
@@ -53,12 +55,13 @@ void rtsp_auth_cleanup(struct rtsp_auth_config *auth_config) {
 /**
  * Add user to authentication system
  */
-int rtsp_auth_add_user(struct rtsp_auth_config *auth_config,
-                       const char *username, const char *password) {
-  if (!auth_config || !username || !password) return -1;
+int rtsp_auth_add_user(struct rtsp_auth_config* auth_config, const char* username,
+                       const char* password) {
+  if (!auth_config || !username || !password)
+    return -1;
 
   // Check if user already exists
-  struct rtsp_user *existing = auth_config->users;
+  struct rtsp_user* existing = auth_config->users;
   while (existing) {
     if (strcmp(existing->username, username) == 0) {
       // Update existing user
@@ -70,8 +73,9 @@ int rtsp_auth_add_user(struct rtsp_auth_config *auth_config,
   }
 
   // Create new user
-  struct rtsp_user *user = malloc(sizeof(struct rtsp_user));
-  if (!user) return -1;
+  struct rtsp_user* user = malloc(sizeof(struct rtsp_user));
+  if (!user)
+    return -1;
 
   strncpy(user->username, username, sizeof(user->username) - 1);
   user->username[sizeof(user->username) - 1] = '\0';
@@ -87,12 +91,12 @@ int rtsp_auth_add_user(struct rtsp_auth_config *auth_config,
 /**
  * Remove user from authentication system
  */
-int rtsp_auth_remove_user(struct rtsp_auth_config *auth_config,
-                          const char *username) {
-  if (!auth_config || !username) return -1;
+int rtsp_auth_remove_user(struct rtsp_auth_config* auth_config, const char* username) {
+  if (!auth_config || !username)
+    return -1;
 
-  struct rtsp_user *user = auth_config->users;
-  struct rtsp_user *prev = NULL;
+  struct rtsp_user* user = auth_config->users;
+  struct rtsp_user* prev = NULL;
 
   while (user) {
     if (strcmp(user->username, username) == 0) {
@@ -108,14 +112,15 @@ int rtsp_auth_remove_user(struct rtsp_auth_config *auth_config,
     user = user->next;
   }
 
-  return -1;  // User not found
+  return -1; // User not found
 }
 
 /**
  * Generate random nonce for digest authentication
  */
-void rtsp_auth_generate_nonce(char *nonce, size_t nonce_size) {
-  if (!nonce || nonce_size < 16) return;
+void rtsp_auth_generate_nonce(char* nonce, size_t nonce_size) {
+  if (!nonce || nonce_size < 16)
+    return;
 
   const char charset[] = "0123456789abcdef";
   srand((unsigned int)time(NULL));
@@ -129,20 +134,21 @@ void rtsp_auth_generate_nonce(char *nonce, size_t nonce_size) {
 /**
  * Parse authentication credentials from header
  */
-int rtsp_auth_parse_credentials(const char *auth_header, char *username,
-                                char *password, char *realm, char *nonce,
-                                char *response) {
-  if (!auth_header || !username || !password) return -1;
+int rtsp_auth_parse_credentials(const char* auth_header, char* username, char* password,
+                                char* realm, char* nonce, char* response) {
+  if (!auth_header || !username || !password)
+    return -1;
 
   // Skip "Basic " or "Digest " prefix
-  const char *credentials = auth_header;
+  const char* credentials = auth_header;
   if (strncmp(credentials, "Basic ", 6) == 0) {
     credentials += 6;
 
     // Decode base64
     size_t len = strlen(credentials);
-    char *decoded = malloc(len + 1);
-    if (!decoded) return -1;
+    char* decoded = malloc(len + 1);
+    if (!decoded)
+      return -1;
 
     // Simple base64 decode (in production, use proper base64 library)
     int decoded_len = 0;
@@ -169,7 +175,7 @@ int rtsp_auth_parse_credentials(const char *auth_header, char *username,
     decoded[decoded_len] = '\0';
 
     // Find colon separator
-    char *colon = strchr(decoded, ':');
+    char* colon = strchr(decoded, ':');
     if (colon) {
       *colon = '\0';
       strncpy(username, decoded, RTSP_MAX_USERNAME_LEN - 1);
@@ -185,36 +191,48 @@ int rtsp_auth_parse_credentials(const char *auth_header, char *username,
     credentials += 7;
 
     // Parse digest parameters
-    char *token = strtok((char *)credentials, ",");
+    char* token = strtok((char*)credentials, ",");
     while (token) {
       // Skip whitespace
-      while (*token == ' ') token++;
+      while (*token == ' ')
+        token++;
 
       if (strncmp(token, "username=", 9) == 0) {
-        char *value = token + 9;
-        if (*value == '"') value++;
-        char *end = strchr(value, '"');
-        if (end) *end = '\0';
+        char* value = token + 9;
+        if (*value == '"')
+          value++;
+        char* end = strchr(value, '"');
+        if (end)
+          *end = '\0';
         strncpy(username, value, RTSP_MAX_USERNAME_LEN - 1);
         username[RTSP_MAX_USERNAME_LEN - 1] = '\0';
       } else if (strncmp(token, "realm=", 6) == 0) {
-        char *value = token + 6;
-        if (*value == '"') value++;
-        char *end = strchr(value, '"');
-        if (end) *end = '\0';
-        if (realm) strncpy(realm, value, RTSP_MAX_REALM_LEN - 1);
+        char* value = token + 6;
+        if (*value == '"')
+          value++;
+        char* end = strchr(value, '"');
+        if (end)
+          *end = '\0';
+        if (realm)
+          strncpy(realm, value, RTSP_MAX_REALM_LEN - 1);
       } else if (strncmp(token, "nonce=", 6) == 0) {
-        char *value = token + 6;
-        if (*value == '"') value++;
-        char *end = strchr(value, '"');
-        if (end) *end = '\0';
-        if (nonce) strncpy(nonce, value, RTSP_MAX_NONCE_LEN - 1);
+        char* value = token + 6;
+        if (*value == '"')
+          value++;
+        char* end = strchr(value, '"');
+        if (end)
+          *end = '\0';
+        if (nonce)
+          strncpy(nonce, value, RTSP_MAX_NONCE_LEN - 1);
       } else if (strncmp(token, "response=", 9) == 0) {
-        char *value = token + 9;
-        if (*value == '"') value++;
-        char *end = strchr(value, '"');
-        if (end) *end = '\0';
-        if (response) strncpy(response, value, RTSP_MAX_RESPONSE_LEN - 1);
+        char* value = token + 9;
+        if (*value == '"')
+          value++;
+        char* end = strchr(value, '"');
+        if (end)
+          *end = '\0';
+        if (response)
+          strncpy(response, value, RTSP_MAX_RESPONSE_LEN - 1);
       }
 
       token = strtok(NULL, ",");
@@ -229,43 +247,39 @@ int rtsp_auth_parse_credentials(const char *auth_header, char *username,
 /**
  * Validate Basic authentication
  */
-int rtsp_auth_validate_basic(rtsp_session_t *session, const char *auth_header) {
-  if (!session || !auth_header) return -1;
+int rtsp_auth_validate_basic(rtsp_session_t* session, const char* auth_header) {
+  if (!session || !auth_header)
+    return -1;
 
   char username[RTSP_MAX_USERNAME_LEN];
   char password[RTSP_MAX_PASSWORD_LEN];
 
-  if (rtsp_auth_parse_credentials(auth_header, username, password, NULL, NULL,
-                                  NULL) < 0) {
+  if (rtsp_auth_parse_credentials(auth_header, username, password, NULL, NULL, NULL) < 0) {
     return -1;
   }
 
   // Check against user database
-  struct rtsp_user *user = session->server->auth_config.users;
+  struct rtsp_user* user = session->server->auth_config.users;
   while (user) {
-    if (strcmp(user->username, username) == 0 &&
-        strcmp(user->password, password) == 0) {
+    if (strcmp(user->username, username) == 0 && strcmp(user->password, password) == 0) {
       session->authenticated = true;
-      strncpy(session->auth_username, username,
-              sizeof(session->auth_username) - 1);
+      strncpy(session->auth_username, username, sizeof(session->auth_username) - 1);
       session->auth_username[sizeof(session->auth_username) - 1] = '\0';
       return 0;
     }
     user = user->next;
   }
 
-  return -1;  // Authentication failed
+  return -1; // Authentication failed
 }
 
 /**
  * Verify digest authentication response
  */
-int rtsp_auth_verify_digest(const char *username, const char *password,
-                            const char *realm, const char *nonce,
-                            const char *method, const char *uri,
-                            const char *response) {
-  if (!username || !password || !realm || !nonce || !method || !uri ||
-      !response)
+int rtsp_auth_verify_digest(const char* username, const char* password, const char* realm,
+                            const char* nonce, const char* method, const char* uri,
+                            const char* response) {
+  if (!username || !password || !realm || !nonce || !method || !uri || !response)
     return -1;
 
   // Generate expected response
@@ -280,8 +294,7 @@ int rtsp_auth_verify_digest(const char *username, const char *password,
   snprintf(ha2_input, sizeof(ha2_input), "%s:%s", method, uri);
 
   // Response = MD5(HA1:nonce:HA2)
-  snprintf(response_input, sizeof(response_input), "%s:%s:%s", ha1_input, nonce,
-           ha2_input);
+  snprintf(response_input, sizeof(response_input), "%s:%s:%s", ha1_input, nonce, ha2_input);
 
   // Simple MD5 comparison (in production, use proper MD5 library)
   // For now, just do string comparison as placeholder
@@ -291,9 +304,10 @@ int rtsp_auth_verify_digest(const char *username, const char *password,
 /**
  * Validate Digest authentication
  */
-int rtsp_auth_validate_digest(rtsp_session_t *session, const char *auth_header,
-                              const char *method, const char *uri) {
-  if (!session || !auth_header || !method || !uri) return -1;
+int rtsp_auth_validate_digest(rtsp_session_t* session, const char* auth_header, const char* method,
+                              const char* uri) {
+  if (!session || !auth_header || !method || !uri)
+    return -1;
 
   char username[RTSP_MAX_USERNAME_LEN];
   char password[RTSP_MAX_PASSWORD_LEN];
@@ -301,8 +315,7 @@ int rtsp_auth_validate_digest(rtsp_session_t *session, const char *auth_header,
   char nonce[RTSP_MAX_NONCE_LEN];
   char response[RTSP_MAX_RESPONSE_LEN];
 
-  if (rtsp_auth_parse_credentials(auth_header, username, password, realm, nonce,
-                                  response) < 0) {
+  if (rtsp_auth_parse_credentials(auth_header, username, password, realm, nonce, response) < 0) {
     return -1;
   }
 
@@ -312,14 +325,13 @@ int rtsp_auth_validate_digest(rtsp_session_t *session, const char *auth_header,
   }
 
   // Find user in database
-  struct rtsp_user *user = session->server->auth_config.users;
+  struct rtsp_user* user = session->server->auth_config.users;
   while (user) {
     if (strcmp(user->username, username) == 0) {
-      if (rtsp_auth_verify_digest(username, user->password, realm, nonce,
-                                  method, uri, response) == 0) {
+      if (rtsp_auth_verify_digest(username, user->password, realm, nonce, method, uri, response) ==
+          0) {
         session->authenticated = true;
-        strncpy(session->auth_username, username,
-                sizeof(session->auth_username) - 1);
+        strncpy(session->auth_username, username, sizeof(session->auth_username) - 1);
         session->auth_username[sizeof(session->auth_username) - 1] = '\0';
         return 0;
       }
@@ -328,35 +340,37 @@ int rtsp_auth_validate_digest(rtsp_session_t *session, const char *auth_header,
     user = user->next;
   }
 
-  return -1;  // Authentication failed
+  return -1; // Authentication failed
 }
 
 /**
  * Check if authentication is required
  */
-int rtsp_auth_require_auth(rtsp_session_t *session) {
-  if (!session || !session->server) return 0;
+int rtsp_auth_require_auth(rtsp_session_t* session) {
+  if (!session || !session->server)
+    return 0;
 
   if (!session->server->auth_config.enabled) {
-    return 0;  // No auth required
+    return 0; // No auth required
   }
 
   if (session->authenticated) {
-    return 0;  // Already authenticated
+    return 0; // Already authenticated
   }
 
-  return 1;  // Auth required
+  return 1; // Auth required
 }
 
 /**
  * Handle authentication required response
  */
-int rtsp_handle_auth_required(rtsp_session_t *session) {
-  if (!session) return -1;
+int rtsp_handle_auth_required(rtsp_session_t* session) {
+  if (!session)
+    return -1;
 
   char www_auth_header[512];
-  if (rtsp_generate_www_authenticate_header(session, www_auth_header,
-                                            sizeof(www_auth_header)) < 0) {
+  if (rtsp_generate_www_authenticate_header(session, www_auth_header, sizeof(www_auth_header)) <
+      0) {
     return -1;
   }
 
@@ -366,9 +380,10 @@ int rtsp_handle_auth_required(rtsp_session_t *session) {
 /**
  * Generate WWW-Authenticate header
  */
-int rtsp_generate_www_authenticate_header(rtsp_session_t *session, char *header,
+int rtsp_generate_www_authenticate_header(rtsp_session_t* session, char* header,
                                           size_t header_size) {
-  if (!session || !header || header_size < 64) return -1;
+  if (!session || !header || header_size < 64)
+    return -1;
 
   if (session->server->auth_config.auth_type == RTSP_AUTH_BASIC) {
     snprintf(header, header_size, "WWW-Authenticate: Basic realm=\"%s\"\r\n",
@@ -384,8 +399,7 @@ int rtsp_generate_www_authenticate_header(rtsp_session_t *session, char *header,
     snprintf(header, header_size,
              "WWW-Authenticate: Digest realm=\"%s\", nonce=\"%s\", "
              "algorithm=MD5\r\n",
-             session->server->auth_config.realm,
-             session->server->auth_config.nonce);
+             session->server->auth_config.realm, session->server->auth_config.nonce);
   } else {
     return -1;
   }

@@ -26,8 +26,8 @@ typedef enum {
  * @brief Service logging context
  */
 typedef struct {
-  const char *service_name;
-  const char *action_name;
+  const char* service_name;
+  const char* action_name;
   service_log_level_t level;
 } service_log_context_t;
 
@@ -38,17 +38,15 @@ typedef struct {
  * @param action_name Name of the action (can be NULL)
  * @param level Log level
  */
-void service_log_init_context(service_log_context_t *context,
-                              const char *service_name, const char *action_name,
-                              service_log_level_t level);
+void service_log_init_context(service_log_context_t* context, const char* service_name,
+                              const char* action_name, service_log_level_t level);
 
 /**
  * @brief Log service operation success
  * @param context Logging context
  * @param operation Description of the operation
  */
-void service_log_operation_success(const service_log_context_t *context,
-                                   const char *operation);
+void service_log_operation_success(const service_log_context_t* context, const char* operation);
 
 /**
  * @brief Log service operation failure
@@ -57,9 +55,8 @@ void service_log_operation_success(const service_log_context_t *context,
  * @param error_code Error code
  * @param error_message Error message
  */
-void service_log_operation_failure(const service_log_context_t *context,
-                                   const char *operation, int error_code,
-                                   const char *error_message);
+void service_log_operation_failure(const service_log_context_t* context, const char* operation,
+                                   int error_code, const char* error_message);
 
 /**
  * @brief Log service validation error
@@ -67,8 +64,8 @@ void service_log_operation_failure(const service_log_context_t *context,
  * @param field_name Name of the field that failed validation
  * @param value Value that failed validation
  */
-void service_log_validation_error(const service_log_context_t *context,
-                                  const char *field_name, const char *value);
+void service_log_validation_error(const service_log_context_t* context, const char* field_name,
+                                  const char* value);
 
 /**
  * @brief Log service configuration error
@@ -76,9 +73,8 @@ void service_log_validation_error(const service_log_context_t *context,
  * @param config_key Configuration key
  * @param error_message Error message
  */
-void service_log_config_error(const service_log_context_t *context,
-                              const char *config_key,
-                              const char *error_message);
+void service_log_config_error(const service_log_context_t* context, const char* config_key,
+                              const char* error_message);
 
 /**
  * @brief Log service platform operation failure
@@ -86,16 +82,15 @@ void service_log_config_error(const service_log_context_t *context,
  * @param platform_operation Platform operation that failed
  * @param error_code Platform error code
  */
-void service_log_platform_error(const service_log_context_t *context,
-                                const char *platform_operation, int error_code);
+void service_log_platform_error(const service_log_context_t* context,
+                                const char* platform_operation, int error_code);
 
 /**
  * @brief Log service not implemented
  * @param context Logging context
  * @param feature Feature that's not implemented
  */
-void service_log_not_implemented(const service_log_context_t *context,
-                                 const char *feature);
+void service_log_not_implemented(const service_log_context_t* context, const char* feature);
 
 /**
  * @brief Log service timeout
@@ -103,8 +98,8 @@ void service_log_not_implemented(const service_log_context_t *context,
  * @param operation Operation that timed out
  * @param timeout_ms Timeout in milliseconds
  */
-void service_log_timeout(const service_log_context_t *context,
-                         const char *operation, int timeout_ms);
+void service_log_timeout(const service_log_context_t* context, const char* operation,
+                         int timeout_ms);
 
 /**
  * @brief Log service warning
@@ -112,8 +107,7 @@ void service_log_timeout(const service_log_context_t *context,
  * @param format Warning message format
  * @param ... Format arguments
  */
-void service_log_warning(const service_log_context_t *context,
-                         const char *format, ...);
+void service_log_warning(const service_log_context_t* context, const char* format, ...);
 
 /**
  * @brief Log service info
@@ -121,8 +115,7 @@ void service_log_warning(const service_log_context_t *context,
  * @param format Info message format
  * @param ... Format arguments
  */
-void service_log_info(const service_log_context_t *context, const char *format,
-                      ...);
+void service_log_info(const service_log_context_t* context, const char* format, ...);
 
 /**
  * @brief Log service debug
@@ -130,7 +123,6 @@ void service_log_info(const service_log_context_t *context, const char *format,
  * @param format Debug message format
  * @param ... Format arguments
  */
-void service_log_debug(const service_log_context_t *context, const char *format,
-                       ...);
+void service_log_debug(const service_log_context_t* context, const char* format, ...);
 
 #endif /* ONVIF_SERVICE_LOGGING_H */

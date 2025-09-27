@@ -9,9 +9,9 @@
 #ifndef ONVIF_CONFIG_H
 #define ONVIF_CONFIG_H
 
-#include <stddef.h>
-
 #include "services/common/video_config_types.h"
+
+#include <stddef.h>
 
 /* Forward declarations for imaging structures */
 struct imaging_settings;
@@ -43,15 +43,37 @@ struct device_info {
   char hardware_id[64];      /* Hardware identification */
 };
 
+/* Logging configuration */
+struct logging_settings {
+  int enabled;        /* Enable/disable logging */
+  int use_colors;     /* Enable/disable color output */
+  int use_timestamps; /* Enable/disable timestamps */
+  int min_level;      /* Minimum log level (0=ERROR, 1=WARNING, 2=NOTICE, 3=INFO,
+                         4=DEBUG) */
+  char tag[32];       /* Log tag identifier */
+};
+
+/* HTTP server configuration */
+struct server_settings {
+  int worker_threads;     /* Number of worker threads (1-32) */
+  int max_connections;    /* Maximum concurrent connections (1-1000) */
+  int connection_timeout; /* Connection timeout in seconds (5-300) */
+  int keepalive_timeout;  /* Keep-alive timeout in seconds (1-60) */
+  int epoll_timeout;      /* Epoll event timeout in milliseconds (100-5000) */
+  int cleanup_interval;   /* Periodic cleanup interval in seconds (1-60) */
+};
+
 /* Full application configuration */
 struct application_config {
   struct onvif_settings onvif;                /* core ONVIF settings */
-  struct imaging_settings *imaging;           /* imaging tuning */
-  struct auto_daynight_config *auto_daynight; /* day/night auto thresholds */
-  struct network_settings *network;           /* network service settings */
-  struct device_info *device;                 /* device identification info */
-  video_config_t *main_stream; /* main stream (vs0) configuration */
-  video_config_t *sub_stream;  /* sub stream (vs1) configuration */
+  struct imaging_settings* imaging;           /* imaging tuning */
+  struct auto_daynight_config* auto_daynight; /* day/night auto thresholds */
+  struct network_settings* network;           /* network service settings */
+  struct device_info* device;                 /* device identification info */
+  struct logging_settings* logging;           /* logging configuration */
+  struct server_settings* server;             /* HTTP server configuration */
+  video_config_t* main_stream;                /* main stream (vs0) configuration */
+  video_config_t* sub_stream;                 /* sub stream (vs1) configuration */
 };
 
 /**
@@ -75,6 +97,8 @@ typedef enum {
   CONFIG_SECTION_NETWORK,
   CONFIG_SECTION_RTSP,
   CONFIG_SECTION_DEVICE,
+  CONFIG_SECTION_LOGGING,
+  CONFIG_SECTION_SERVER,
   CONFIG_SECTION_MAIN_STREAM,
   CONFIG_SECTION_SUB_STREAM
 } config_section_t;
@@ -93,13 +117,13 @@ typedef enum {
  * @brief Configuration parameter definition
  */
 typedef struct {
-  const char *key;
+  const char* key;
   config_value_type_t type;
-  void *value_ptr;
+  void* value_ptr;
   size_t value_size;
   int min_value;
   int max_value;
-  const char *default_value;
+  const char* default_value;
   int required;
 } config_parameter_t;
 
@@ -108,8 +132,8 @@ typedef struct {
  */
 typedef struct {
   config_section_t section;
-  const char *section_name;
-  config_parameter_t *parameters;
+  const char* section_name;
+  config_parameter_t* parameters;
   size_t parameter_count;
 } config_section_def_t;
 
@@ -117,8 +141,8 @@ typedef struct {
  * @brief Configuration manager
  */
 typedef struct {
-  struct application_config *app_config;
-  config_section_def_t *sections;
+  struct application_config* app_config;
+  config_section_def_t* sections;
   size_t section_count;
   int validation_enabled;
 } config_manager_t;
@@ -129,8 +153,7 @@ typedef struct {
  * @param app_config Application configuration structure
  * @return 0 on success, negative error code on failure
  */
-int config_init(config_manager_t *config,
-                struct application_config *app_config);
+int config_init(config_manager_t* config, struct application_config* app_config);
 
 /**
  * @brief Load configuration from file with validation
@@ -138,14 +161,14 @@ int config_init(config_manager_t *config,
  * @param config_file Path to configuration file
  * @return 0 on success, negative error code on failure
  */
-int config_load(config_manager_t *config, const char *config_file);
+int config_load(config_manager_t* config, const char* config_file);
 
 /**
  * @brief Validate configuration values
  * @param config Configuration manager
  * @return CONFIG_VALIDATION_OK on success, validation error code on failure
  */
-config_validation_result_t config_validate(config_manager_t *config);
+config_validation_result_t config_validate(config_manager_t* config);
 
 /**
  * @brief Get configuration value with type safety
@@ -156,9 +179,8 @@ config_validation_result_t config_validate(config_manager_t *config);
  * @param value_type Expected value type
  * @return 0 on success, negative error code on failure
  */
-int config_get_value(config_manager_t *config, config_section_t section,
-                     const char *key, void *value_ptr,
-                     config_value_type_t value_type);
+int config_get_value(config_manager_t* config, config_section_t section, const char* key,
+                     void* value_ptr, config_value_type_t value_type);
 
 /**
  * @brief Set configuration value with validation
@@ -169,16 +191,15 @@ int config_get_value(config_manager_t *config, config_section_t section,
  * @param value_type Value type
  * @return 0 on success, negative error code on failure
  */
-int config_set_value(config_manager_t *config, config_section_t section,
-                     const char *key, const void *value_ptr,
-                     config_value_type_t value_type);
+int config_set_value(config_manager_t* config, config_section_t section, const char* key,
+                     const void* value_ptr, config_value_type_t value_type);
 
 /**
  * @brief Reset configuration to defaults
  * @param config Configuration manager
  * @return 0 on success, negative error code on failure
  */
-int config_reset_to_defaults(config_manager_t *config);
+int config_reset_to_defaults(config_manager_t* config);
 
 /**
  * @brief Get configuration parameter definition
@@ -187,15 +208,14 @@ int config_reset_to_defaults(config_manager_t *config);
  * @param key Parameter key
  * @return Parameter definition or NULL if not found
  */
-const config_parameter_t *config_get_parameter(config_manager_t *config,
-                                               config_section_t section,
-                                               const char *key);
+const config_parameter_t* config_get_parameter(config_manager_t* config, config_section_t section,
+                                               const char* key);
 
 /**
  * @brief Clean up configuration manager
  * @param config Configuration manager to clean up
  */
-void config_cleanup(config_manager_t *config);
+void config_cleanup(config_manager_t* config);
 
 /**
  * @brief Get configuration summary for logging
@@ -204,7 +224,6 @@ void config_cleanup(config_manager_t *config);
  * @param summary_size Size of summary buffer
  * @return 0 on success, negative error code on failure
  */
-int config_get_summary(config_manager_t *config, char *summary,
-                       size_t summary_size);
+int config_get_summary(config_manager_t* config, char* summary, size_t summary_size);
 
 #endif /* ONVIF_CONFIG_H */

@@ -18,8 +18,8 @@ struct imaging_settings;
  */
 typedef struct {
   int is_valid;
-  const char *error_message;
-  const char *field_name;
+  const char* error_message;
+  const char* field_name;
 } validation_result_t;
 
 /**
@@ -32,9 +32,8 @@ typedef struct {
  * @return Validation result
  * @note Parameter order: field_name, value, min_length, max_length, allow_empty
  */
-validation_result_t validate_string(const char *field_name, const char *value,
-                                    size_t min_length, size_t max_length,
-                                    int allow_empty);
+validation_result_t validate_string(const char* field_name, const char* value, size_t min_length,
+                                    size_t max_length, int allow_empty);
 
 /**
  * @brief Validate integer parameter
@@ -45,8 +44,7 @@ validation_result_t validate_string(const char *field_name, const char *value,
  * @return Validation result
  * @note Parameter order: field_name, value, min_value, max_value
  */
-validation_result_t validate_int(const char *field_name, int value,
-                                 int min_value, int max_value);
+validation_result_t validate_int(const char* field_name, int value, int min_value, int max_value);
 
 /**
  * @brief Validate float parameter
@@ -57,8 +55,8 @@ validation_result_t validate_int(const char *field_name, int value,
  * @return Validation result
  * @note Parameter order: field_name, value, min_value, max_value
  */
-validation_result_t validate_float(const char *field_name, float value,
-                                   float min_value, float max_value);
+validation_result_t validate_float(const char* field_name, float value, float min_value,
+                                   float max_value);
 
 /**
  * @brief Validate ONVIF token
@@ -66,8 +64,7 @@ validation_result_t validate_float(const char *field_name, float value,
  * @param field_name Name of the field being validated
  * @return Validation result
  */
-validation_result_t validate_onvif_token(const char *token,
-                                         const char *field_name);
+validation_result_t validate_onvif_token(const char* token, const char* field_name);
 
 /**
  * @brief Validate ONVIF profile token
@@ -75,8 +72,7 @@ validation_result_t validate_onvif_token(const char *token,
  * @param field_name Name of the field being validated
  * @return Validation result
  */
-validation_result_t validate_profile_token(const char *token,
-                                           const char *field_name);
+validation_result_t validate_profile_token(const char* token, const char* field_name);
 
 /**
  * @brief Validate ONVIF protocol
@@ -84,8 +80,7 @@ validation_result_t validate_profile_token(const char *token,
  * @param field_name Name of the field being validated
  * @return Validation result
  */
-validation_result_t validate_protocol(const char *protocol,
-                                      const char *field_name);
+validation_result_t validate_protocol(const char* protocol, const char* field_name);
 
 /**
  * @brief Validate PTZ position
@@ -103,16 +98,14 @@ validation_result_t validate_ptz_position(float pan, float tilt, float zoom);
  * @param zoom_speed Zoom speed value
  * @return Validation result
  */
-validation_result_t validate_ptz_speed(float pan_speed, float tilt_speed,
-                                       float zoom_speed);
+validation_result_t validate_ptz_speed(float pan_speed, float tilt_speed, float zoom_speed);
 
 /**
  * @brief Validate imaging settings
  * @param settings Imaging settings to validate
  * @return Validation result
  */
-validation_result_t validate_imaging_settings(
-    const struct imaging_settings *settings);
+validation_result_t validate_imaging_settings(const struct imaging_settings* settings);
 
 /**
  * @brief Validate video resolution
@@ -148,20 +141,20 @@ validation_result_t validate_framerate(int framerate);
  * @param result Validation result to check
  * @return 1 if valid, 0 if invalid
  */
-int validation_is_valid(const validation_result_t *result);
+int validation_is_valid(const validation_result_t* result);
 
 /**
  * @brief Get validation error message
  * @param result Validation result
  * @return Error message or NULL if valid
  */
-const char *validation_get_error_message(const validation_result_t *result);
+const char* validation_get_error_message(const validation_result_t* result);
 
 /**
  * @brief Get validation field name
  * @param result Validation result
  * @return Field name or NULL if not applicable
  */
-const char *validation_get_field_name(const validation_result_t *result);
+const char* validation_get_field_name(const validation_result_t* result);
 
 #endif /* ONVIF_COMMON_VALIDATION_H */
