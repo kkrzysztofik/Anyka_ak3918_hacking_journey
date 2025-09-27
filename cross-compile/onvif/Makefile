@@ -5,19 +5,23 @@
 #
 # Environment Variables:
 #   BUILD_TYPE - Build type: 'debug' or 'release' (default: release)
-#   LOG_LEVEL  - Logging level: 'DEBUG', 'INFO', 'WARNING', 'ERROR' (default: INFO)
 #
 # Build Commands:
 #   make                    - Build release version
-#   make debug              - Build debug version with symbols (automatically sets BUILD_TYPE=debug LOG_LEVEL=DEBUG)
+#   make debug              - Build debug version with symbols (automatically sets BUILD_TYPE=debug)
 #   make release            - Explicitly build release version
 #   make clean              - Clean build artifacts
 #   make docs               - Generate documentation
+#   make lint               - Lint all C source files
+#   make lint-check         - Check for linting issues (exit 1 if issues found)
+#   make lint-dry-run       - Show what would be linted (dry run)
+#   make lint-format        - Lint with format checking
+#   make lint-errors        - Check for errors only
 #
 # Examples:
-#   make debug              - Automatically enables debug build with maximum logging
+#   make debug              - Automatically enables debug build with symbols
 #   make release            - Build optimized release version
-#   BUILD_TYPE=debug LOG_LEVEL=DEBUG make - Override defaults for custom builds
+#   BUILD_TYPE=debug make - Override defaults for custom builds
 #
 export PATH := $(PATH):/opt/arm-anykav200-crosstool/usr/bin
 PREFIX=arm-anykav200-linux-uclibcgnueabi-
@@ -25,36 +29,31 @@ CC=${PREFIX}gcc
 CPP=${PREFIX}g++
 # Build configuration with environment variable support
 BUILD_TYPE ?= release
-LOG_LEVEL ?= INFO
 
-# Base compiler flags
-BASE_CFLAGS=-std=c99 -D_POSIX_C_SOURCE=199309L -DANYKA_PLATFORM=1 -fno-builtin -fno-stack-protector -Wl,--hash-style=sysv
+# Base compiler flags with enhanced security and performance
+BASE_CFLAGS=-std=c99 -D_POSIX_C_SOURCE=199309L -DANYKA_PLATFORM=1 -fno-builtin -ffunction-sections -fdata-sections -fstrict-aliasing -fpie -Wl,--hash-style=sysv -DWITH_NO_C_LOCALE
 
 # Optimization and debug flags based on build type
 ifeq ($(BUILD_TYPE), debug)
-    OPT_CFLAGS=-g -O0 -DDEBUG_BUILD
+    OPT_CFLAGS=-g -O0 -DDEBUG_BUILD -Wall -Wextra -Wstrict-aliasing -Wstrict-overflow -Wunused
     TARGET_SUFFIX=_debug
 else
-    OPT_CFLAGS=-Os
+    OPT_CFLAGS=-Os -Wall -Wextra -Wstrict-aliasing -Wstrict-overflow -Wunused
     TARGET_SUFFIX=
 endif
 
-# Log level definitions (numeric values matching enum)
-ifeq ($(LOG_LEVEL), DEBUG)
-    LOG_CFLAGS=-DPLATFORM_LOG_LEVEL_DEBUG=4
-else ifeq ($(LOG_LEVEL), INFO)
-    LOG_CFLAGS=-DPLATFORM_LOG_LEVEL_INFO=3
-else ifeq ($(LOG_LEVEL), WARNING)
-    LOG_CFLAGS=-DPLATFORM_LOG_LEVEL_WARNING=1
-else ifeq ($(LOG_LEVEL), ERROR)
-    LOG_CFLAGS=-DPLATFORM_LOG_LEVEL_ERROR=0
-else
-    LOG_CFLAGS=-DPLATFORM_LOG_LEVEL_INFO=3
-endif
+CFLAGS=$(BASE_CFLAGS) $(OPT_CFLAGS)
+# gSOAP libraries (libxml2 removed)
+GSOAP_LIBS = -lgsoap -lgsoapck
 
-CFLAGS=$(BASE_CFLAGS) $(OPT_CFLAGS) $(LOG_CFLAGS)
-LINKERFLAG=-L./lib -Wl,--gc-sections -lakuio -lakispsdk -lakv_encode -lplat_common -lplat_thread -lplat_vi -lplat_vpss -lplat_ipcsrv -lplat_venc_cb -lmpi_venc -lakstreamenc -lpthread -lakae -lakaudiocodec -lakmedia -lakv_encode -lapp_net -lapp_rtsp -lmpi_aed -lmpi_aenc -lplat_ai -lplat_drv -lm
-INCLUDES=include src src/core src/platform src/services src/networking src/protocol src/utils
+# Base64 library
+BASE64_LIBS = -lb64
+
+# Enhanced linker flags with dead code elimination and security
+LINKERFLAG=-L./lib -lakuio -lakispsdk -lakv_encode -lplat_common -lplat_thread -lplat_vi -lplat_vpss -lplat_ipcsrv -lplat_venc_cb -lmpi_venc -lakstreamenc -lpthread -lakae -lakaudiocodec -lakmedia -lakv_encode -lapp_net -lapp_rtsp -lmpi_aed -lmpi_aenc -lplat_ai -lplat_drv $(GSOAP_LIBS) $(BASE64_LIBS) -lm
+
+# Updated include paths with generated gSOAP files
+INCLUDES=include src src/core src/platform src/services src/networking src/protocol src/utils src/generated
 
 # Output directory for all build artifacts
 OUT_DIR=out
@@ -69,6 +68,7 @@ SRCS := \
 	src/core/lifecycle/platform_lifecycle.c \
 	src/core/lifecycle/config_lifecycle.c \
 	src/core/lifecycle/signal_lifecycle.c \
+	src/services/common/onvif_service_common.c \
 	src/services/device/onvif_device.c \
 	src/services/media/onvif_media.c \
 	src/services/ptz/onvif_ptz.c \
@@ -76,7 +76,7 @@ SRCS := \
 	src/services/snapshot/onvif_snapshot.c \
 	src/networking/http/http_server.c \
 	src/networking/http/http_parser.c \
-	src/networking/http/http_onvif_adapter.c \
+	src/networking/http/http_auth.c \
 	src/networking/common/connection_manager.c \
 	src/networking/common/thread_pool.c \
 	src/networking/common/buffer_pool.c \
@@ -88,10 +88,11 @@ SRCS := \
 	src/networking/rtsp/rtsp_session.c \
 	src/networking/rtsp/rtsp_rtp.c \
 	src/networking/discovery/ws_discovery.c \
-	src/protocol/soap/onvif_soap.c \
-	src/protocol/xml/unified_xml.c \
 	src/protocol/response/onvif_service_handler.c \
+	src/generated/soapC.c \
+	src/protocol/gsoap/onvif_gsoap.c \
 	src/utils/memory/memory_manager.c \
+	src/utils/memory/smart_response_builder.c \
 	src/utils/string/string_shims.c \
 	src/utils/error/error_handling.c \
 	src/utils/network/network_utils.c \
@@ -102,12 +103,12 @@ SRCS := \
 	src/utils/validation/input_validation.c \
 	src/utils/validation/audio_validation.c \
 	src/utils/security/security_hardening.c \
-	src/utils/service/common_service_init.c \
+	src/utils/security/base64_utils.c \
 	src/utils/stream/stream_config_utils.c
 
 OBJS := $(SRCS:src/%.c=$(OUT_DIR)/%.o)
 
-.PHONY = all clean debug release docs docs-clean docs-open static-analysis clang-analyze cppcheck-analyze snyk-analyze compile-commands
+.PHONY = all clean debug release docs docs-clean docs-open static-analysis clang-analyze cppcheck-analyze snyk-analyze compile-commands lint lint-check lint-dry-run lint-verbose test test-utils test-all test-coverage test-coverage-html test-coverage-report test-coverage-clean test-valgrind
 
 # Documentation directory
 DOCS_DIR = docs
@@ -121,18 +122,14 @@ all: $(OUT_DIR)/onvifd
 # Debug build with environment variable support
 debug:
 	@echo "Building debug version with maximum debugging enabled"
-	@$(MAKE) clean BUILD_TYPE=debug LOG_LEVEL=DEBUG
-	@$(MAKE) $(OUT_DIR)/onvifd_debug BUILD_TYPE=debug LOG_LEVEL=DEBUG
+	@$(MAKE) clean BUILD_TYPE=debug
+	@$(MAKE) $(OUT_DIR)/onvifd_debug BUILD_TYPE=debug
 
 # Documentation targets
 docs: $(DOCS_DIR)/html/index.html
 
 docs-clean:
 	rm -rf $(DOCS_DIR)
-
-docs-open: docs
-	@echo "Documentation generated in $(DOCS_DIR)/html/"
-	@echo "Open $(DOCS_DIR)/html/index.html in your browser"
 
 # Generate Doxygen documentation
 $(DOCS_DIR)/html/index.html: Doxyfile $(SRCS) $(wildcard src/*.h) $(wildcard include/*.h)
@@ -188,7 +185,77 @@ snyk-analyze:
 # Generate compile_commands.json for clangd
 compile-commands:
 	@echo "Generating compile_commands.json for clangd..."
-	@./generate_compile_commands.sh
+	@./scripts/generate_compile_commands.sh
+
+# Code formatting targets
+format:
+	@echo "Formatting all C source files..."
+	@./scripts/format_code.sh
+
+format-check:
+	@echo "Checking code formatting..."
+	@./scripts/format_code.sh --check
+
+format-dry-run:
+	@echo "Showing what would be formatted (dry run)..."
+	@./scripts/format_code.sh --dry-run
+
+
+# Code linting targets
+lint:
+	@echo "Linting all C source files..."
+	@./scripts/lint_code.sh
+
+lint-check:
+	@echo "Checking for linting issues..."
+	@./scripts/lint_code.sh --check
+
+lint-dry-run:
+	@echo "Showing what would be linted (dry run)..."
+	@./scripts/lint_code.sh --dry-run
+
+
+lint-format:
+	@echo "Linting with format checking..."
+	@./scripts/lint_code.sh --format
+
+lint-errors:
+	@echo "Checking for linting errors only..."
+	@./scripts/lint_code.sh --severity error
+
+# Testing targets
+test:
+	@echo "Running unit tests..."
+	@$(MAKE) -C tests test
+
+test-utils:
+	@echo "Running utility unit tests..."
+	@$(MAKE) -C tests test-utils
+
+test-all:
+	@echo "Running all unit tests..."
+	@$(MAKE) -C tests test-all
+
+test-coverage:
+	@echo "Running tests with coverage analysis..."
+	@$(MAKE) -C tests coverage
+
+test-valgrind:
+	@echo "Running tests with valgrind..."
+	@$(MAKE) -C tests valgrind
+
+test-coverage-html:
+	@echo "Generating HTML coverage report..."
+	@$(MAKE) -C tests coverage-html
+
+test-coverage-report:
+	@echo "Generating coverage summary..."
+	@$(MAKE) -C tests coverage-report
+
+test-coverage-clean:
+	@echo "Cleaning coverage files..."
+	@$(MAKE) -C tests coverage-clean
 
 clean:
 	rm -rf $(OUT_DIR)
+	@$(MAKE) -C tests clean

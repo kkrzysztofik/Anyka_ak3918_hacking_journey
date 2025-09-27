@@ -6,7 +6,7 @@ CompileFlags:
   Compiler: arm-anykav200-linux-uclibcgnueabi-gcc
   Add:
     # Use the actual ARM target from your toolchain
-    - --target=arm-anykav200-linux-uclibcgnueabi
+    - --target=armv7a-unknown-linux-gnueabi
     - --sysroot=/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool/usr/arm-anykav200-linux-uclibcgnueabi/sysroot
     - --gcc-toolchain=/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool/usr
 
@@ -58,14 +58,19 @@ Diagnostics:
       - cppcoreguidelines-*
       - clang-analyzer-*
       - security-*
-    Remove:
-      - readability-magic-numbers
-      - readability-uppercase-literal-suffix
-      - modernize-use-trailing-return-type
-      - readability-identifier-naming
-      - cppcoreguidelines-avoid-magic-numbers
   UnusedIncludes: Strict
   MissingIncludes: Strict
+
+---
+# Disable diagnostics for generated files
+If:
+  PathMatch: .*/src/generated/.*
+
+Diagnostics:
+  Suppress: "*"
+  ClangTidy:
+    Remove: "*"
+---
 
 # Index configuration
 Index:
@@ -86,3 +91,12 @@ InlayHints:
 # Hover information
 Hover:
   ShowAKA: Yes
+
+# Clang-format integration via compile flags
+CompileFlags:
+  Add:
+    # Enable clang-format diagnostics
+    - -Wclang-format-violations
+    # Additional formatting-related warnings
+    - -Wformat
+    - -Wformat-security
