@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-dark-bg text-white;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer components {
+  .sidebar-icon {
+    @apply w-6 h-6 stroke-current fill-none stroke-2;
+  }
+  
+  .ptz-button {
+    @apply w-12 h-12 flex items-center justify-center text-xl font-bold rounded-lg transition-colors;
+  }
+  
+  .card {
+    @apply bg-dark-card rounded-lg p-6;
+  }
+}

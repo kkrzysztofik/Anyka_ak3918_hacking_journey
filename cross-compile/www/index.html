@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ONVIF Camera Web Interface</title>
+    
+    <!-- React CDN - Production -->
+    <script crossorigin src="https://unpkg.com/react@19.1.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@19.1.0/umd/react-dom.production.min.js"></script>
+    
+    <style>
+      /* Loading styles */
+      .loading-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        background: #1a1a1a;
+        color: #fff;
+        font-family: Arial, sans-serif;
+      }
+      
+      .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #374151;
+        border-top: 4px solid #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 15px;
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Loading fallback while React loads -->
+      <div class="loading-container">
+        <div class="loading-spinner"></div>
+        <span>Loading application...</span>
+      </div>
+    </div>
+    
+    <!-- Application bundle will be loaded here -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
