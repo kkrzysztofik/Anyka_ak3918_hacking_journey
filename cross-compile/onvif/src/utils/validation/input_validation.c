@@ -8,12 +8,12 @@
 #include "input_validation.h"
 
 #include "networking/http/http_parser.h"
-#include "utils/error/error_handling.h"
-#include "utils/string/string_shims.h"
-#include "utils/security/security_hardening.h"
-#include "utils/security/base64_utils.h"
-#include "utils/validation/common_validation.h"
 #include "platform/platform.h"
+#include "utils/error/error_handling.h"
+#include "utils/security/base64_utils.h"
+#include "utils/security/security_hardening.h"
+#include "utils/string/string_shims.h"
+#include "utils/validation/common_validation.h"
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -318,52 +318,6 @@ int validate_xml_content(const char* xml, size_t max_length) {
 }
 
 /**
- * @brief Validate HTTP request comprehensively
- * @param request HTTP request structure
- * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
- */
-int validate_http_request(const http_request_t* request) {
-  ONVIF_VALIDATE_NULL(request, "request");
-
-  // Validate method
-  if (validate_http_method(request->method) != ONVIF_VALIDATION_SUCCESS) {
-    ONVIF_LOG_ERROR("Invalid HTTP method: %s\n", request->method);
-    return ONVIF_VALIDATION_FAILED;
-  }
-
-  // Validate path
-  if (validate_http_path(request->path) != ONVIF_VALIDATION_SUCCESS) {
-    ONVIF_LOG_ERROR("Invalid HTTP path: %s\n", request->path);
-    return ONVIF_VALIDATION_FAILED;
-  }
-
-  // Validate version
-  if (validate_http_version(request->version) != ONVIF_VALIDATION_SUCCESS) {
-    ONVIF_LOG_ERROR("Invalid HTTP version: %s\n", request->version);
-    return ONVIF_VALIDATION_FAILED;
-  }
-
-  // Validate content length
-  if (validate_content_length(request->content_length) != ONVIF_VALIDATION_SUCCESS) {
-    ONVIF_LOG_ERROR("Invalid content length: %zu\n", request->content_length);
-    return ONVIF_VALIDATION_FAILED;
-  }
-
-  // Validate body if present
-  if (request->body && request->body_length > 0) {
-    if (validate_xml_content(request->body, request->body_length) != ONVIF_VALIDATION_SUCCESS) {
-      ONVIF_LOG_ERROR("Invalid XML content in request body\n");
-
-      platform_log_debug("Full request body content (length=%zu): %.*s\n", request->body_length,
-                         (int)request->body_length, request->body);
-      return ONVIF_VALIDATION_FAILED;
-    }
-  }
-
-  return ONVIF_VALIDATION_SUCCESS;
-}
-
-/**
  * @brief Sanitize string input
  * @param input Input string to sanitize
  * @param output Output buffer for sanitized string
@@ -444,7 +398,8 @@ int validate_username_input(const char* username) {
   }
 
   // Use common validation utilities
-  validation_result_t result = validate_string("username", username, 1, HTTP_MAX_USERNAME_LEN - 1, 0);
+  validation_result_t result =
+    validate_string("username", username, 1, HTTP_MAX_USERNAME_LEN - 1, 0);
   if (!validation_is_valid(&result)) {
     platform_log_warning("Invalid username: %s", validation_get_error_message(&result));
     return ONVIF_VALIDATION_FAILED;
@@ -478,7 +433,8 @@ int validate_password_input(const char* password) {
   }
 
   // Use common validation utilities
-  validation_result_t result = validate_string("password", password, 1, HTTP_MAX_PASSWORD_LEN - 1, 0);
+  validation_result_t result =
+    validate_string("password", password, 1, HTTP_MAX_PASSWORD_LEN - 1, 0);
   if (!validation_is_valid(&result)) {
     platform_log_warning("Invalid password: %s", validation_get_error_message(&result));
     return ONVIF_VALIDATION_FAILED;
@@ -512,7 +468,8 @@ int validate_auth_header_input(const char* auth_header) {
   }
 
   // Use common validation utilities
-  validation_result_t result = validate_string("auth_header", auth_header, 6, HTTP_MAX_AUTH_HEADER_LEN - 1, 0);
+  validation_result_t result =
+    validate_string("auth_header", auth_header, 6, HTTP_MAX_AUTH_HEADER_LEN - 1, 0);
   if (!validation_is_valid(&result)) {
     platform_log_warning("Invalid Authorization header: %s", validation_get_error_message(&result));
     return ONVIF_VALIDATION_FAILED;
@@ -611,6 +568,54 @@ int validate_and_decode_base64(const char* encoded, char* decoded, size_t decode
   for (size_t i = 0; i < decoded_len; i++) {
     if (decoded[i] == '\0' && i < decoded_len - 1) {
       platform_log_warning("Null byte found in decoded credentials at position %zu", i);
+      return ONVIF_VALIDATION_FAILED;
+    }
+  }
+
+  return ONVIF_VALIDATION_SUCCESS;
+}
+
+/* ==================== HTTP Request Validation (Execution Logic) ==================== */
+
+/**
+ * @brief Validate HTTP request comprehensively
+ * @param request HTTP request structure
+ * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
+ */
+int validate_http_request(const http_request_t* request) {
+  ONVIF_VALIDATE_NULL(request, "request");
+
+  // Validate method
+  if (validate_http_method(request->method) != ONVIF_VALIDATION_SUCCESS) {
+    ONVIF_LOG_ERROR("Invalid HTTP method: %s\n", request->method);
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Validate path
+  if (validate_http_path(request->path) != ONVIF_VALIDATION_SUCCESS) {
+    ONVIF_LOG_ERROR("Invalid HTTP path: %s\n", request->path);
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Validate version
+  if (validate_http_version(request->version) != ONVIF_VALIDATION_SUCCESS) {
+    ONVIF_LOG_ERROR("Invalid HTTP version: %s\n", request->version);
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Validate content length
+  if (validate_content_length(request->content_length) != ONVIF_VALIDATION_SUCCESS) {
+    ONVIF_LOG_ERROR("Invalid content length: %zu\n", request->content_length);
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Validate body if present
+  if (request->body && request->body_length > 0) {
+    if (validate_xml_content(request->body, request->body_length) != ONVIF_VALIDATION_SUCCESS) {
+      ONVIF_LOG_ERROR("Invalid XML content in request body\n");
+
+      platform_log_debug("Full request body content (length=%zu): %.*s\n", request->body_length,
+                         (int)request->body_length, request->body);
       return ONVIF_VALIDATION_FAILED;
     }
   }

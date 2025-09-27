@@ -13,17 +13,16 @@
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
 #include "utils/security/base64_utils.h"
-#include "utils/string/string_shims.h"
-#include "utils/validation/input_validation.h"
-#include "utils/validation/common_validation.h"
 #include "utils/security/security_hardening.h"
+#include "utils/string/string_shims.h"
+#include "utils/validation/common_validation.h"
+#include "utils/validation/input_validation.h"
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-
 
 /* ==================== Helper Functions ==================== */
 
@@ -36,7 +35,7 @@
  * @return HTTP_AUTH_SUCCESS on success, error code on failure
  */
 static int extract_and_validate_credential(const char* source, size_t source_len, char* dest,
-                                          size_t dest_size) {
+                                           size_t dest_size) {
   if (!source || !dest || dest_size == 0) {
     return HTTP_AUTH_ERROR_NULL;
   }
@@ -209,14 +208,16 @@ int http_auth_parse_basic_credentials(const char* auth_header, char* username, c
 
   // Extract username
   size_t username_len = colon - decoded;
-  int result = extract_and_validate_credential(decoded, username_len, username, HTTP_MAX_USERNAME_LEN);
+  int result =
+    extract_and_validate_credential(decoded, username_len, username, HTTP_MAX_USERNAME_LEN);
   if (result != HTTP_AUTH_SUCCESS) {
     return result;
   }
 
   // Extract password
   size_t password_len = decoded_len - username_len - 1;
-  result = extract_and_validate_credential(colon + 1, password_len, password, HTTP_MAX_PASSWORD_LEN);
+  result =
+    extract_and_validate_credential(colon + 1, password_len, password, HTTP_MAX_PASSWORD_LEN);
   if (result != HTTP_AUTH_SUCCESS) {
     return result;
   }

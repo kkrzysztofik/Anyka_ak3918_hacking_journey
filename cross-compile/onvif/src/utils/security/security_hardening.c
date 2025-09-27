@@ -66,8 +66,7 @@ int security_validate_http_headers(const http_request_t* request, security_conte
       }
 
       // Check for XSS attempts in header values
-      if (strstr(header_value, "<script") != NULL ||
-          strstr(header_value, "javascript:") != NULL ||
+      if (strstr(header_value, "<script") != NULL || strstr(header_value, "javascript:") != NULL ||
           strstr(header_value, "vbscript:") != NULL) {
         ONVIF_LOG_ERROR("XSS attempt detected in header '%s': %s\n",
                         request->headers[i].name ? request->headers[i].name : "unknown",
@@ -76,8 +75,7 @@ int security_validate_http_headers(const http_request_t* request, security_conte
       }
 
       // Check for SQL injection attempts in header values
-      if (strstr(header_value, "'; DROP") != NULL ||
-          strstr(header_value, "UNION SELECT") != NULL ||
+      if (strstr(header_value, "'; DROP") != NULL || strstr(header_value, "UNION SELECT") != NULL ||
           strstr(header_value, "OR 1=1") != NULL) {
         ONVIF_LOG_ERROR("SQL injection attempt detected in header '%s': %s\n",
                         request->headers[i].name ? request->headers[i].name : "unknown",
@@ -480,7 +478,8 @@ int security_add_security_headers(http_response_t* response, security_context_t*
   }
 
   // Strict-Transport-Security for HTTPS (if applicable)
-  if (http_response_add_header(response, "Strict-Transport-Security", "max-age=31536000; includeSubDomains") != 0) {
+  if (http_response_add_header(response, "Strict-Transport-Security",
+                               "max-age=31536000; includeSubDomains") != 0) {
     ONVIF_LOG_ERROR("Failed to add Strict-Transport-Security header\n");
     return ONVIF_ERROR;
   }
@@ -523,7 +522,8 @@ int security_validate_request(const http_request_t* request, security_context_t*
   // 3. HTTP headers validation for attack detection
   if (security_validate_http_headers(request, context) != ONVIF_SUCCESS) {
     ONVIF_LOG_ERROR("HTTP headers validation failed for client %s\n", context->client_ip);
-    security_log_attack("MALICIOUS_HEADERS", context->client_ip, "Suspicious HTTP headers detected");
+    security_log_attack("MALICIOUS_HEADERS", context->client_ip,
+                        "Suspicious HTTP headers detected");
     return ONVIF_ERROR;
   }
 
@@ -543,7 +543,8 @@ int security_validate_request_body(const http_request_t* request, security_conte
   }
 
   // 1. Validate XML/SOAP body for security threats
-  if (security_validate_xml_structure(request->body, request->body_length, context) != ONVIF_SUCCESS) {
+  if (security_validate_xml_structure(request->body, request->body_length, context) !=
+      ONVIF_SUCCESS) {
     ONVIF_LOG_ERROR("XML security validation failed for client %s\n", context->client_ip);
     security_log_attack("MALICIOUS_XML", context->client_ip, "XML bomb or XXE attack detected");
     return ONVIF_ERROR;
