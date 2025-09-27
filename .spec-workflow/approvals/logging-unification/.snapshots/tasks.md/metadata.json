@@ -1,0 +1,14 @@
+{
+  "filePath": ".spec-workflow/specs/logging-unification/tasks.md",
+  "currentVersion": 1,
+  "snapshots": [
+    {
+      "version": 1,
+      "filename": "snapshot-001.json",
+      "timestamp": "2025-09-27T07:35:00.276Z",
+      "trigger": "initial",
+      "approvalId": "approval_1758958500272_iv7ml1sw2",
+      "approvalTitle": "Tasks Document - Logging System Implementation"
+    }
+  ]
+}
