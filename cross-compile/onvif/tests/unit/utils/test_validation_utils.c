@@ -5,12 +5,7 @@
  * @date 2025
  */
 
-#include <cmocka.h>
-#include <setjmp.h>
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include "cmocka_wrapper.h"
 
 // Include the actual source files we're testing
 #include "utils/validation/audio_validation.h"

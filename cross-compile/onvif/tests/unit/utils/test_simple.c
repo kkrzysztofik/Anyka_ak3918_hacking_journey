@@ -4,14 +4,10 @@
  * @author kkrzysztofik
  * @date 2025
  */
-
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stddef.h>
-#include <stdarg.h>
-#include <setjmp.h>
-#include <cmocka.h>
+
+#include "cmocka_wrapper.h"
 
 /**
  * @brief Simple test that always passes

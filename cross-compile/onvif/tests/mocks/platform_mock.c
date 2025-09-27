@@ -5,14 +5,22 @@
  * @date 2025
  */
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <stddef.h>
-#include <stdarg.h>
-#include <setjmp.h>
-#include <cmocka.h>
+
+#include "cmocka_wrapper.h"
+#include "networking/http/http_parser.h"
+
+// Constants for mock buffer sizes
+#define MOCK_BUFFER_SIZE       1024
+#define MOCK_HEADER_NAME_SIZE  128
+#define MOCK_HEADER_VALUE_SIZE 256
+#define MOCK_TOTAL_BUFFERS     10
+#define MOCK_AVAILABLE_BUFFERS 8
+#define MOCK_ALLOCATED_BUFFERS 2
 
 // Mock implementations of platform functions
 // These will be used to replace actual platform calls during testing
@@ -34,8 +42,8 @@ void mock_platform_log(int level, const char* format, ...) {
   // You could also capture the formatted message for verification
   va_list args;
   va_start(args, format);
-  char buffer[1024];
-  vsnprintf(buffer, sizeof(buffer), format, args);
+  char buffer[MOCK_BUFFER_SIZE];
+  (void)vsnprintf(buffer, sizeof(buffer), format, args);
   va_end(args);
 
   // Store the log message for later verification if needed
@@ -303,19 +311,19 @@ void buffer_pool_cleanup(void) {
 
 void* buffer_pool_get(void* pool) {
   (void)pool;
-  return malloc(1024); // Return a mock buffer
+  return malloc(MOCK_BUFFER_SIZE); // Return a mock buffer
 }
 
-void buffer_pool_return(void* pool, void* buffer) {
+void buffer_pool_return(void* pool, void* buffer) { // NOLINT
   (void)pool;
   free(buffer); // Free the mock buffer
 }
 
 int buffer_pool_get_stats(struct buffer_pool_stats_t* stats) {
   if (stats) {
-    stats->total_buffers = 10;
-    stats->available_buffers = 8;
-    stats->allocated_buffers = 2;
+    stats->total_buffers = MOCK_TOTAL_BUFFERS;
+    stats->available_buffers = MOCK_AVAILABLE_BUFFERS;
+    stats->allocated_buffers = MOCK_ALLOCATED_BUFFERS;
   }
   return 0;
 }
@@ -331,7 +339,7 @@ void onvif_service_handler_cleanup(void* handler) {
   // Mock cleanup - do nothing
 }
 
-int onvif_service_handler_handle_request(void* handler, void* request, void* response) {
+int onvif_service_handler_handle_request(void* handler, void* request, void* response) { // NOLINT
   (void)handler;
   (void)request;
   (void)response;
@@ -347,21 +355,27 @@ void platform_ptz_cleanup(void) {
   // Mock cleanup - do nothing
 }
 
-int platform_ptz_get_position(float* pan, float* tilt, float* zoom) {
-  if (pan) *pan = 0.0f;
-  if (tilt) *tilt = 0.0f;
-  if (zoom) *zoom = 1.0f;
+int platform_ptz_get_position(float* pan, float* tilt, float* zoom) { // NOLINT
+  if (pan) {
+    *pan = 0.0F;
+  }
+  if (tilt) {
+    *tilt = 0.0F;
+  }
+  if (zoom) {
+    *zoom = 1.0F;
+  }
   return 0;
 }
 
-int platform_ptz_absolute_move(float pan, float tilt, float zoom) {
+int platform_ptz_absolute_move(float pan, float tilt, float zoom) { // NOLINT
   (void)pan;
   (void)tilt;
   (void)zoom;
   return 0; // Mock success
 }
 
-int platform_ptz_continuous_move(float pan_speed, float tilt_speed, float zoom_speed) {
+int platform_ptz_continuous_move(float pan_speed, float tilt_speed, float zoom_speed) { // NOLINT
   (void)pan_speed;
   (void)tilt_speed;
   (void)zoom_speed;
@@ -402,17 +416,50 @@ int platform_video_get_frame(void* frame) {
   return 0; // Mock success
 }
 
-int platform_vpss_effect_set(int effect_type, float value) {
+int platform_vpss_effect_set(int effect_type, float value) { // NOLINT
   (void)effect_type;
   (void)value;
   return 0; // Mock success
 }
 
+static char g_last_header_name[MOCK_HEADER_NAME_SIZE];   // NOLINT
+static char g_last_header_value[MOCK_HEADER_VALUE_SIZE]; // NOLINT
+
 // HTTP response mock functions
-int http_response_add_header(void* response, const char* name, const char* value) {
-  (void)response;
-  (void)name;
-  (void)value;
-  return 0; // Mock success
+int http_response_add_header(http_response_t* response, const char* name, const char* value) {
+  if (!response || !name || !value) {
+    return -1;
+  }
+
+  response->header_count += 1;
+
+  (void)snprintf(g_last_header_name, sizeof(g_last_header_name), "%s", name);
+  (void)snprintf(g_last_header_value, sizeof(g_last_header_value), "%s", value);
+
+  return 0;
 }
 
+const char* mock_get_last_header_name(void) {
+  return g_last_header_name;
+}
+
+const char* mock_get_last_header_value(void) {
+  return g_last_header_value;
+}
+
+void mock_reset_last_header(void) {
+  g_last_header_name[0] = '\0';
+  g_last_header_value[0] = '\0';
+}
+
+void http_response_free(http_response_t* response) {
+  if (!response) {
+    return;
+  }
+
+  response->header_count = 0;
+  response->headers = NULL;
+
+  response->body = NULL;
+  response->body_length = 0;
+}

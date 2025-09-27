@@ -5,16 +5,24 @@
  * @date 2025
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <stdbool.h>
 #include <stddef.h>
-#include <stdarg.h>
-#include <setjmp.h>
-#include <cmocka.h>
+#include <string.h>
+
+#include "cmocka_wrapper.h"
+#include "generated/soapH.h"
 
 // Include the module under test
 #include "protocol/gsoap/onvif_gsoap.h"
+
+// Test constants for magic numbers
+#define TEST_BYTES_WRITTEN     100
+#define TEST_START_TIME        12345
+#define TEST_END_TIME          67890
+#define TEST_BUFFER_SIZE       64
+#define TEST_SMALL_BUFFER_SIZE 32
+#define TEST_LARGE_BUFFER_SIZE 128
+#define TEST_HEADER_SIZE       100
 
 /**
  * @brief Test gSOAP context initialization
@@ -34,7 +42,7 @@ void test_onvif_gsoap_init(void** state) {
     // If initialization succeeded, verify context is set up correctly
     assert_non_null(ctx.soap);
     assert_int_equal(ctx.total_bytes_written, 0);
-    assert_true(ctx.generation_start_time > 0);  // Should be set to current timestamp
+    assert_true(ctx.generation_start_time > 0); // Should be set to current timestamp
     assert_int_equal(ctx.generation_end_time, 0);
     assert_null(ctx.user_data);
 
@@ -101,16 +109,16 @@ void test_onvif_gsoap_reset(void** state) {
   // Only test reset if initialization succeeded
   if (result == 0) {
     // Modify some fields
-    ctx.total_bytes_written = 100;
-    ctx.generation_start_time = 12345;
-    ctx.generation_end_time = 67890;
+    ctx.total_bytes_written = TEST_BYTES_WRITTEN;
+    ctx.generation_start_time = TEST_START_TIME;
+    ctx.generation_end_time = TEST_END_TIME;
 
     // Reset context
     onvif_gsoap_reset(&ctx);
 
     // Statistics should be reset
     assert_int_equal(ctx.total_bytes_written, 0);
-    assert_true(ctx.generation_start_time > 0);  // Should be set to current timestamp
+    assert_true(ctx.generation_start_time > 0); // Should be set to current timestamp
     // Note: generation_end_time is not reset by the reset function
 
     // But soap context should still be valid
@@ -139,7 +147,7 @@ void test_onvif_gsoap_generate_fault_response(void** state) {
 
   // Test with NULL context first
   int result = onvif_gsoap_generate_fault_response(NULL, SOAP_FAULT_SERVER, "Test fault");
-  assert_true(result < 0);  // Should return negative error code
+  assert_true(result < 0); // Should return negative error code
 
   // Initialize context
   result = onvif_gsoap_init(&ctx);
@@ -176,7 +184,7 @@ void test_onvif_gsoap_generate_device_info_response(void** state) {
 
   // Test with NULL context first
   int result = onvif_gsoap_generate_device_info_response(NULL, "Mfg", "Model", "1.0", "SN", "HW");
-  assert_true(result < 0);  // Should return negative error code
+  assert_true(result < 0); // Should return negative error code
 
   // Initialize context
   result = onvif_gsoap_init(&ctx);
@@ -184,12 +192,8 @@ void test_onvif_gsoap_generate_device_info_response(void** state) {
   // Only test if initialization succeeded
   if (result == 0) {
     // Test device info response generation
-    result = onvif_gsoap_generate_device_info_response(&ctx,
-                                                     "TestManufacturer",
-                                                     "TestModel",
-                                                     "1.0.0",
-                                                     "TEST123456",
-                                                     "HW001");
+    result = onvif_gsoap_generate_device_info_response(&ctx, "TestManufacturer", "TestModel",
+                                                       "1.0.0", "TEST123456", "HW001");
     // May succeed or fail depending on gSOAP state and platform functions
     (void)result;
 
@@ -228,7 +232,7 @@ void test_onvif_gsoap_get_response_data(void** state) {
     // Test with initialized but unused context
     response_data = onvif_gsoap_get_response_data(&ctx);
     // Response data may be NULL or empty before any response is generated
-    (void)response_data;  // Don't assert specific value
+    (void)response_data; // Don't assert specific value
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -259,7 +263,7 @@ void test_onvif_gsoap_get_response_length(void** state) {
   if (result == 0) {
     // Test with initialized context
     length = onvif_gsoap_get_response_length(&ctx);
-    (void)length;  // Just verify function doesn't crash
+    (void)length; // Just verify function doesn't crash
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -291,7 +295,7 @@ void test_onvif_gsoap_has_error(void** state) {
     // Test with initialized context - may or may not have error depending on gSOAP state
     has_error = onvif_gsoap_has_error(&ctx);
     // Don't assert specific error state as it depends on gSOAP initialization
-    (void)has_error;  // Just verify function doesn't crash
+    (void)has_error; // Just verify function doesn't crash
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -323,7 +327,7 @@ void test_onvif_gsoap_get_error(void** state) {
     // Test with clean context (should have no error)
     error_msg = onvif_gsoap_get_error(&ctx);
     // Error message may be NULL for clean context
-    (void)error_msg;  // Don't assert specific value
+    (void)error_msg; // Don't assert specific value
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -373,7 +377,7 @@ void test_onvif_gsoap_validate_response(void** state) {
 void test_onvif_gsoap_extract_operation_name(void** state) {
   (void)state;
 
-  char operation_name[64];
+  char operation_name[TEST_BUFFER_SIZE];
 
   // Test with NULL request data
   int result = onvif_gsoap_extract_operation_name(NULL, 0, operation_name, sizeof(operation_name));
@@ -381,22 +385,25 @@ void test_onvif_gsoap_extract_operation_name(void** state) {
   assert_true(result < 0);
 
   // Test with NULL operation name buffer
-  const char* test_request = "<soap:Envelope><soap:Body><GetDeviceInformation/></soap:Body></soap:Envelope>";
-  result = onvif_gsoap_extract_operation_name(test_request, strlen(test_request), NULL, 64);
+  const char* test_request =
+    "<soap:Envelope><soap:Body><GetDeviceInformation/></soap:Body></soap:Envelope>";
+  result =
+    onvif_gsoap_extract_operation_name(test_request, strlen(test_request), NULL, TEST_BUFFER_SIZE);
   // Accept any negative error code
   assert_true(result < 0);
 
   // Test with zero buffer size
-  result = onvif_gsoap_extract_operation_name(test_request, strlen(test_request), operation_name, 0);
+  result =
+    onvif_gsoap_extract_operation_name(test_request, strlen(test_request), operation_name, 0);
   // Accept any negative error code
   assert_true(result < 0);
 
   // Test with valid but minimal request
-  result = onvif_gsoap_extract_operation_name(test_request, strlen(test_request), operation_name, sizeof(operation_name));
+  result = onvif_gsoap_extract_operation_name(test_request, strlen(test_request), operation_name,
+                                              sizeof(operation_name));
   // May succeed or fail depending on implementation complexity
-  (void)result;  // Don't assert specific value
+  (void)result; // Don't assert specific value
 }
-
 
 /**
  * @brief Test request parsing initialization
@@ -409,7 +416,8 @@ void test_onvif_gsoap_init_request_parsing(void** state) {
   memset(&ctx, 0, sizeof(ctx));
 
   // Test with NULL context
-  const char* test_request = "<soap:Envelope><soap:Body><GetDeviceInformation/></soap:Body></soap:Envelope>";
+  const char* test_request =
+    "<soap:Envelope><soap:Body><GetDeviceInformation/></soap:Body></soap:Envelope>";
   int result = onvif_gsoap_init_request_parsing(NULL, test_request, strlen(test_request));
   // Accept any negative error code
   assert_true(result < 0);
@@ -420,7 +428,7 @@ void test_onvif_gsoap_init_request_parsing(void** state) {
   // Only test if initialization succeeded
   if (result == 0) {
     // Test with NULL request data
-    result = onvif_gsoap_init_request_parsing(&ctx, NULL, 100);
+    result = onvif_gsoap_init_request_parsing(&ctx, NULL, TEST_HEADER_SIZE);
     // Accept any negative error code
     assert_true(result < 0);
 
@@ -452,7 +460,7 @@ void test_onvif_gsoap_parse_profile_token(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
-  char token[64];
+  char token[TEST_BUFFER_SIZE];
 
   // Test with NULL context
   int result = onvif_gsoap_parse_profile_token(NULL, token, sizeof(token));
@@ -489,7 +497,7 @@ void test_onvif_gsoap_parse_configuration_token(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
-  char token[64];
+  char token[TEST_BUFFER_SIZE];
 
   // Test with NULL context
   int result = onvif_gsoap_parse_configuration_token(NULL, token, sizeof(token));
@@ -521,7 +529,7 @@ void test_onvif_gsoap_parse_protocol(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
-  char protocol[32];
+  char protocol[TEST_SMALL_BUFFER_SIZE];
 
   // Test with NULL context
   int result = onvif_gsoap_parse_protocol(NULL, protocol, sizeof(protocol));
@@ -553,7 +561,7 @@ void test_onvif_gsoap_parse_value(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
-  char value[128];
+  char value[TEST_LARGE_BUFFER_SIZE] = {0};
 
   // Test with NULL context
   int result = onvif_gsoap_parse_value(NULL, "//test", value, sizeof(value));
@@ -589,7 +597,7 @@ void test_onvif_gsoap_parse_boolean(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
-  int value;
+  int value = 0;
 
   // Test with NULL context
   int result = onvif_gsoap_parse_boolean(NULL, "//test", &value);
@@ -621,7 +629,7 @@ void test_onvif_gsoap_parse_integer(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
-  int value;
+  int value = 0;
 
   // Test with NULL context
   int result = onvif_gsoap_parse_integer(NULL, "//test", &value);

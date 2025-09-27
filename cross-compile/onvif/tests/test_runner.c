@@ -4,14 +4,9 @@
  * @author kkrzysztofik
  * @date 2025
  */
-
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stddef.h>
-#include <stdarg.h>
-#include <setjmp.h>
-#include <cmocka.h>
+
+#include "cmocka_wrapper.h"
 
 // Forward declarations of test functions from test_simple.c
 void test_basic_pass(void** state);
@@ -48,6 +43,25 @@ void test_log_level(void** state);
 void test_basic_logging(void** state);
 void test_service_logging(void** state);
 void test_platform_logging(void** state);
+
+// Forward declarations of test functions from test_http_auth.c
+void test_http_auth_init_sets_defaults(void** state);
+void test_http_auth_init_null(void** state);
+void test_http_auth_verify_credentials_success(void** state);
+void test_http_auth_verify_credentials_failure(void** state);
+void test_http_auth_parse_basic_credentials_success(void** state);
+void test_http_auth_parse_basic_credentials_invalid_scheme(void** state);
+void test_http_auth_parse_basic_credentials_decode_failure(void** state);
+void test_http_auth_parse_basic_credentials_missing_delimiter(void** state);
+void test_http_auth_generate_challenge_success(void** state);
+void test_http_auth_generate_challenge_invalid(void** state);
+void test_http_auth_validate_basic_disabled(void** state);
+void test_http_auth_validate_basic_missing_header(void** state);
+void test_http_auth_validate_basic_invalid_credentials(void** state);
+void test_http_auth_validate_basic_success(void** state);
+void test_http_auth_validate_basic_parse_failure(void** state);
+void test_http_auth_create_401_response(void** state);
+void test_http_auth_create_401_response_invalid_realm(void** state);
 
 /**
  * @brief Global test setup
@@ -102,6 +116,25 @@ int main(void) {
     cmocka_unit_test(test_basic_logging),
     cmocka_unit_test(test_service_logging),
     cmocka_unit_test(test_platform_logging),
+
+    // HTTP authentication tests
+    cmocka_unit_test(test_http_auth_init_sets_defaults),
+    cmocka_unit_test(test_http_auth_init_null),
+    cmocka_unit_test(test_http_auth_verify_credentials_success),
+    cmocka_unit_test(test_http_auth_verify_credentials_failure),
+    cmocka_unit_test(test_http_auth_parse_basic_credentials_success),
+    cmocka_unit_test(test_http_auth_parse_basic_credentials_invalid_scheme),
+    cmocka_unit_test(test_http_auth_parse_basic_credentials_decode_failure),
+    cmocka_unit_test(test_http_auth_parse_basic_credentials_missing_delimiter),
+    cmocka_unit_test(test_http_auth_generate_challenge_success),
+    cmocka_unit_test(test_http_auth_generate_challenge_invalid),
+    cmocka_unit_test(test_http_auth_validate_basic_disabled),
+    cmocka_unit_test(test_http_auth_validate_basic_missing_header),
+    cmocka_unit_test(test_http_auth_validate_basic_invalid_credentials),
+    cmocka_unit_test(test_http_auth_validate_basic_success),
+    cmocka_unit_test(test_http_auth_validate_basic_parse_failure),
+    cmocka_unit_test(test_http_auth_create_401_response),
+    cmocka_unit_test(test_http_auth_create_401_response_invalid_realm),
 
     // ONVIF gSOAP tests
     cmocka_unit_test(test_onvif_gsoap_init),

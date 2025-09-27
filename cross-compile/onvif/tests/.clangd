@@ -1,0 +1,142 @@
+# WSL2 clangd configuration for ONVIF Tests
+# Optimized for native Linux unit testing with CMocka framework
+
+CompileFlags:
+  # Use native GCC for unit testing (not cross-compilation)
+  Compiler: gcc
+  Add:
+    # Force C language mode for all files
+    - -x
+    - c
+
+    # C standard and test-specific definitions
+    - -std=c99
+    - -D_POSIX_C_SOURCE=199309L
+    - -DTEST_BUILD
+    - -DUNIT_TESTING
+    - -DPLATFORM_MOCK
+    - -DWITH_NO_C_LOCALE
+
+    # Test-specific flags
+    - -fno-builtin
+    - -fstrict-aliasing
+    - -Wall
+    - -Wextra
+    - -Wstrict-aliasing
+    - -Wstrict-overflow
+    - -Wunused
+
+    # Debug flags for unit testing
+    - -g
+    - -O0
+    - -DDEBUG_BUILD
+
+    # Coverage flags (when building with coverage)
+    - -fprofile-arcs
+    - -ftest-coverage
+
+    # Include paths - Test project structure
+    - -I../include
+    - -I../src
+    - -I../src/core
+    - -I../src/platform
+    - -I../src/services
+    - -I../src/networking
+    - -I../src/protocol
+    - -I../src/utils
+    - -I../src/generated
+    - -I.
+    - -I./mocks
+    - -I./unit
+    - -I./lib
+
+    # Native system includes
+    - -isystem
+    - /usr/include
+    - -isystem
+    - /usr/local/include
+
+# Diagnostic configuration - OPTIMIZED FOR UNIT TESTING
+Diagnostics:
+  ClangTidy:
+    Add:
+      - readability-*
+      - performance-*
+      - modernize-*
+      - bugprone-*
+      - cert-*
+      - cppcoreguidelines-*
+      - clang-analyzer-*
+      - security-*
+    CheckOptions:
+      misc-include-cleaner.IgnoreHeaders: 'cmocka.h'
+
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+  Includes:
+    IgnoreHeader: cmocka\.h
+---
+# Disable diagnostics for generated files
+If:
+  PathMatch: .*/src/generated/.*
+
+Diagnostics:
+  Suppress: "*"
+  ClangTidy:
+    Remove: "*"
+---
+
+# Disable diagnostics for external include files
+If:
+  PathMatch: .*/include/.*
+
+Diagnostics:
+  Suppress: "*"
+  ClangTidy:
+    Remove: "*"
+---
+
+# Disable diagnostics for mock files (they intentionally break normal patterns)
+If:
+  PathMatch: .*/mocks/.*
+
+Diagnostics:
+  Suppress:
+    - "readability-*"
+    - "performance-*"
+    - "modernize-*"
+  ClangTidy:
+    Remove:
+      - "readability-*"
+      - "performance-*"
+      - "modernize-*"
+
+---
+# Index configuration
+Index:
+  Background: Build
+  StandardLibrary: No
+
+# Completion
+Completion:
+  AllScopes: Yes
+
+# Inlay hints for better code understanding
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+  Designators: Yes
+
+# Hover information
+Hover:
+  ShowAKA: Yes
+
+# Clang-format integration via compile flags
+CompileFlags:
+  Add:
+    # Enable clang-format diagnostics
+    - -Wclang-format-violations
+    # Additional formatting-related warnings
+    - -Wformat
+    - -Wformat-security

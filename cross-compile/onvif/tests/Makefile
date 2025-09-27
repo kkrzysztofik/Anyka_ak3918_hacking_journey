@@ -85,6 +85,7 @@ CMOCKA_LIBS=-lcmocka -lpthread -lm $(GSOAP_LIBS) $(BASE64_LIBS)
 # Unit test source files (individual function testing only)
 TEST_SRCS := \
 	test_runner.c \
+	unit/networking/test_http_auth.c \
 	unit/utils/test_simple.c \
 	unit/utils/test_memory_utils.c \
 	unit/utils/test_logging_utils.c \
@@ -101,7 +102,12 @@ MAIN_SRCS := \
 	../src/utils/memory/smart_response_builder.c \
 	../src/protocol/gsoap/onvif_gsoap.c \
 	../src/generated/soapC.c \
-	../src/utils/logging/logging_utils.c
+	../src/utils/logging/logging_utils.c \
+	../src/networking/http/http_auth.c \
+	../src/utils/validation/common_validation.c \
+	../src/utils/validation/input_validation.c \
+	../src/utils/security/base64_utils.c \
+	../src/utils/string/string_shims.c
 
 # Object files
 TEST_OBJS := $(TEST_SRCS:%.c=$(OUT_DIR)/%.o)
@@ -113,7 +119,7 @@ TEST_TARGETS := \
 	$(OUT_DIR)/test_utils \
 	$(OUT_DIR)/test_all
 
-.PHONY: all clean test test-utils test-all coverage coverage-html coverage-report coverage-clean valgrind debug release compile-native-libs
+.PHONY: all clean test test-utils test-all coverage coverage-html coverage-report coverage-clean valgrind debug release compile-native-libs compile-commands
 
 # Default target
 all: $(TEST_TARGETS)
@@ -226,6 +232,11 @@ compile-native-libs:
 	@echo "Compiling native gsoap and libb64 libraries for unit testing..."
 	@./scripts/compile_local_libs.sh
 
+# Generate compile_commands.json for test files
+compile-commands:
+	@echo "Generating compile_commands.json for test files..."
+	@./scripts/generate_compile_commands.sh
+
 # Help target
 help:
 	@echo "Available targets:"
@@ -241,5 +252,6 @@ help:
 	@echo "  debug            - Build debug version"
 	@echo "  release          - Build release version"
 	@echo "  compile-native-libs - Compile native gsoap and libb64 libraries"
+	@echo "  compile-commands  - Generate compile_commands.json for test files"
 	@echo "  clean            - Clean build artifacts"
 	@echo "  help             - Show this help"

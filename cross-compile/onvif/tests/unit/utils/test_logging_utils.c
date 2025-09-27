@@ -5,34 +5,27 @@
  * @date 2025
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stddef.h>
-#include <stdarg.h>
-#include <setjmp.h>
-#include <stdbool.h>
-#include <cmocka.h>
+
+#include "cmocka_wrapper.h"
 
 // Include the actual source files we're testing
 #include "utils/logging/logging_utils.h"
-#include "utils/logging/service_logging.h"
-#include "utils/logging/platform_logging.h"
 
 /**
  * @brief Test service initialization logging
  * @param state Test state (unused)
  */
 void test_logging_init(void** state) {
-    (void)state;
+  (void)state;
 
-    // Test service initialization success logging (should not crash)
-    log_service_init_success("TestService");
-    log_service_init_success("DEVICE");
-    log_service_init_success("MEDIA");
+  // Test service initialization success logging (should not crash)
+  log_service_init_success("TestService");
+  log_service_init_success("DEVICE");
+  log_service_init_success("MEDIA");
 
-    // Test with NULL service name (should handle gracefully)
-    log_service_init_success(NULL);
+  // Test with NULL service name (should handle gracefully)
+  log_service_init_success(NULL);
 }
 
 /**
@@ -40,15 +33,15 @@ void test_logging_init(void** state) {
  * @param state Test state (unused)
  */
 void test_logging_cleanup(void** state) {
-    (void)state;
+  (void)state;
 
-    // Test service cleanup logging (should not crash)
-    log_service_cleanup("TestService");
-    log_service_cleanup("DEVICE");
-    log_service_cleanup("MEDIA");
+  // Test service cleanup logging (should not crash)
+  log_service_cleanup("TestService");
+  log_service_cleanup("DEVICE");
+  log_service_cleanup("MEDIA");
 
-    // Test with NULL service name (should handle gracefully)
-    log_service_cleanup(NULL);
+  // Test with NULL service name (should handle gracefully)
+  log_service_cleanup(NULL);
 }
 
 /**
@@ -56,16 +49,16 @@ void test_logging_cleanup(void** state) {
  * @param state Test state (unused)
  */
 void test_log_level(void** state) {
-    (void)state;
+  (void)state;
 
-    // Test service initialization failure logging
-    log_service_init_failure("TestService", "Initialization failed");
-    log_service_init_failure("DEVICE", "Hardware not available");
+  // Test service initialization failure logging
+  log_service_init_failure("TestService", "Initialization failed");
+  log_service_init_failure("DEVICE", "Hardware not available");
 
-    // Test with NULL parameters (should handle gracefully)
-    log_service_init_failure(NULL, "Error message");
-    log_service_init_failure("TestService", NULL);
-    log_service_init_failure(NULL, NULL);
+  // Test with NULL parameters (should handle gracefully)
+  log_service_init_failure(NULL, "Error message");
+  log_service_init_failure("TestService", NULL);
+  log_service_init_failure(NULL, NULL);
 }
 
 /**
@@ -73,21 +66,21 @@ void test_log_level(void** state) {
  * @param state Test state (unused)
  */
 void test_basic_logging(void** state) {
-    (void)state;
+  (void)state;
 
-    // Test invalid parameters logging
-    log_invalid_parameters("test_function");
-    log_invalid_parameters("onvif_device_init");
+  // Test invalid parameters logging
+  log_invalid_parameters("test_function");
+  log_invalid_parameters("onvif_device_init");
 
-    // Test with NULL function name (should handle gracefully)
-    log_invalid_parameters(NULL);
+  // Test with NULL function name (should handle gracefully)
+  log_invalid_parameters(NULL);
 
-    // Test service not initialized logging
-    log_service_not_initialized("TestService");
-    log_service_not_initialized("DEVICE");
+  // Test service not initialized logging
+  log_service_not_initialized("TestService");
+  log_service_not_initialized("DEVICE");
 
-    // Test with NULL service name (should handle gracefully)
-    log_service_not_initialized(NULL);
+  // Test with NULL service name (should handle gracefully)
+  log_service_not_initialized(NULL);
 }
 
 /**
@@ -95,24 +88,24 @@ void test_basic_logging(void** state) {
  * @param state Test state (unused)
  */
 void test_service_logging(void** state) {
-    (void)state;
+  (void)state;
 
-    // Test operation success logging
-    log_operation_success("Device initialization");
-    log_operation_success("Media profile creation");
-    log_operation_success("PTZ movement");
+  // Test operation success logging
+  log_operation_success("Device initialization");
+  log_operation_success("Media profile creation");
+  log_operation_success("PTZ movement");
 
-    // Test with NULL operation (should handle gracefully)
-    log_operation_success(NULL);
+  // Test with NULL operation (should handle gracefully)
+  log_operation_success(NULL);
 
-    // Test operation failure logging
-    log_operation_failure("Device initialization", "Hardware not found");
-    log_operation_failure("Media profile creation", "Invalid parameters");
+  // Test operation failure logging
+  log_operation_failure("Device initialization", "Hardware not found");
+  log_operation_failure("Media profile creation", "Invalid parameters");
 
-    // Test with NULL parameters (should handle gracefully)
-    log_operation_failure(NULL, "Error message");
-    log_operation_failure("Operation", NULL);
-    log_operation_failure(NULL, NULL);
+  // Test with NULL parameters (should handle gracefully)
+  log_operation_failure(NULL, "Error message");
+  log_operation_failure("Operation", NULL);
+  log_operation_failure(NULL, NULL);
 }
 
 /**
@@ -120,22 +113,22 @@ void test_service_logging(void** state) {
  * @param state Test state (unused)
  */
 void test_platform_logging(void** state) {
-    (void)state;
+  (void)state;
 
-    // Test configuration update logging
-    log_config_updated("video_settings");
-    log_config_updated("network_config");
-    log_config_updated("ptz_presets");
+  // Test configuration update logging
+  log_config_updated("video_settings");
+  log_config_updated("network_config");
+  log_config_updated("ptz_presets");
 
-    // Test with NULL config type (should handle gracefully)
-    log_config_updated(NULL);
+  // Test with NULL config type (should handle gracefully)
+  log_config_updated(NULL);
 
-    // Test platform operation failure logging
-    log_platform_operation_failure("video_init", "Driver not loaded");
-    log_platform_operation_failure("network_setup", "Interface not available");
+  // Test platform operation failure logging
+  log_platform_operation_failure("video_init", "Driver not loaded");
+  log_platform_operation_failure("network_setup", "Interface not available");
 
-    // Test with NULL parameters (should handle gracefully)
-    log_platform_operation_failure(NULL, "Error message");
-    log_platform_operation_failure("Operation", NULL);
-    log_platform_operation_failure(NULL, NULL);
+  // Test with NULL parameters (should handle gracefully)
+  log_platform_operation_failure(NULL, "Error message");
+  log_platform_operation_failure("Operation", NULL);
+  log_platform_operation_failure(NULL, NULL);
 }
