@@ -1,16 +1,223 @@
+# =============================================================================
+# ANYKA REVERSE ENGINEERING PROJECT .gitignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Toolchain and Cross-compilation Environment
+# -----------------------------------------------------------------------------
+toolchain/arm-anykav200-crosstool/**/*
+cross-compile/gsoap/**/*
+
+# -----------------------------------------------------------------------------
+# Reference Code and Original Files
+# -----------------------------------------------------------------------------
 cross-compile/anyka_reference/component/**/*
 cross-compile/anyka_reference/platform/**/*
-cross-compile/onvif/out/**/*
 orig/**/*
-toolchain/arm-anykav200-crosstool/**/*
-debugging/coredump/core*
-debugging/logs/*.log
+sample_xml/**/*
 
-# Clangd output files and logs
+# -----------------------------------------------------------------------------
+# Build Artifacts and Output Directories
+# -----------------------------------------------------------------------------
+# ONVIF build outputs
+cross-compile/onvif/out/**/*
+cross-compile/onvif/build/**/*
+cross-compile/onvif/build_native/**/*
+
+# Test build outputs
+cross-compile/onvif/tests/build_native/**/*
+cross-compile/onvif/tests/out/**/*
+cross-compile/onvif/tests/coverage/**/*
+
+# -----------------------------------------------------------------------------
+# Development Tools and IDE Files
+# -----------------------------------------------------------------------------
+# Clangd files
+.clangd/
+.cache/
+cross-compile/onvif/.cache/**/*
 clangd-logs/**/*
+compile_commands.json
 
-# Additional clangd temporary files
+# VS Code - Keep project configs, ignore personal files
+.vscode/browse.vc.db*
+.vscode/launch.json.old
+.vscode/settings.json.old
+*.code-workspace
+
+# Vim/Neovim
+*.swp
+*.swo
+*~
+.netrwhist
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# -----------------------------------------------------------------------------
+# Debugging and Analysis Files
+# -----------------------------------------------------------------------------
+# Core dumps
+debugging/coredump/core*
+core
+core.*
+vgcore.*
+
+# Debug symbols
+*.dSYM/
+*.debug
+*.pdb
+
+# Valgrind output
+*.valgrind
+valgrind-*.xml
+
+# GDB files
+.gdb_history
+gdb.txt
+
+# -----------------------------------------------------------------------------
+# Testing and Coverage
+# -----------------------------------------------------------------------------
+# Coverage files
+*.gcda
+*.gcno
+*.gcov
+*.info
+coverage.info
+lcov.info
+coverage/
+htmlcov/
+
+# Test results
+test-results/
+*.xml
+junit.xml
+*.tap
+
+# -----------------------------------------------------------------------------
+# Logging and Temporary Files
+# -----------------------------------------------------------------------------
+# Log files
+*.log
+debugging/logs/*.log
+logs/
+*.out
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*.orig
+*.rej
+
+# -----------------------------------------------------------------------------
+# Documentation Generation
+# -----------------------------------------------------------------------------
+# Doxygen output
+docs/html/
+docs/latex/
+docs/xml/
+doxygen_warnings.txt
+
+# Sphinx
+docs/_build/
+docs/.doctrees/
+
+# -----------------------------------------------------------------------------
+# Package Managers and Dependencies
+# -----------------------------------------------------------------------------
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+pip-log.txt
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -----------------------------------------------------------------------------
+# Test Libraries (compiled locally)
+# -----------------------------------------------------------------------------
+cross-compile/onvif/tests/build_native/
+
+# -----------------------------------------------------------------------------
+# Configuration and Environment
+# -----------------------------------------------------------------------------
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Private configuration
+config.private
+*.private
+.secrets
+
+# Generated configuration
+generated_config/
+
+# -----------------------------------------------------------------------------
+# Archive and Distribution Files
+# -----------------------------------------------------------------------------
+
+# Distribution directories
+dist/
+build/
+releases/
+
+# -----------------------------------------------------------------------------
+# System and OS Files
+# -----------------------------------------------------------------------------
+# Windows
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# -----------------------------------------------------------------------------
+# Additional clangd temporary files (legacy)
+# -----------------------------------------------------------------------------
 verbose
 off
-
-cross-compile/onvif/.cache/**/*

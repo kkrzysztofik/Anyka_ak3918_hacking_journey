@@ -9,6 +9,7 @@ The project focuses on creating a fully ONVIF 2.5 compliant implementation while
 
 ### Primary Development Areas
 - **`cross-compile/onvif/`** — **CURRENT FOCUS** - Complete ONVIF 2.5 implementation with Device, Media, PTZ, and Imaging services. Full SOAP-based web services stack for IP camera control and streaming.
+- **`cross-compile/onvif/tests/`** — **MANDATORY** - Unit testing framework using CMocka for testing utility functions in isolation. All utility functions must have corresponding unit tests.
 - **`cross-compile/`** — Source code and build scripts for individual camera applications (e.g., `libre_anyka_app`, `aenc_demo`, `ak_snapshot`, `ptz_daemon`). Each subproject contains its own Makefile or build script and handles specific camera functionality.
 - **`SD_card_contents/anyka_hack/`** — SD card payload system with web UI for runtime testing. This directory contains everything needed to boot custom firmware from an SD card, making it the easiest and safest way to test changes on the actual device without modifying flash memory.
 - **`newroot/`** and prepared squashfs images (`busyroot.sqsh4`, `busyusr.sqsh4`, `newroot.sqsh4`) — Prebuilt root filesystem images for flashing to device. These are compressed squashfs images that replace the camera's root filesystem when flashed.
@@ -39,6 +40,7 @@ The project focuses on creating a fully ONVIF 2.5 compliant implementation while
 - **Use native cross-compilation tools**: `make -C cross-compile/<project>` - This ensures consistent builds in the WSL Ubuntu environment.
 - **Test compilation** before committing changes - Always verify that code compiles successfully before making changes.
 - **SD-card testing** is the primary development workflow for device testing - Copy compiled binaries to the SD card payload and boot the device with the SD card to test functionality.
+- **Unit testing** is **MANDATORY** for all utility functions - Run `make test` to execute unit tests before committing changes.
 - **Integration testing** can be done using the test suite in `integration-tests/` directory.
 
 ## Development Environment
@@ -78,6 +80,29 @@ The project focuses on creating a fully ONVIF 2.5 compliant implementation while
   - Separate groups with blank lines
   - Use include guards (`#ifndef HEADER_H` / `#define HEADER_H` / `#endif`) or `#pragma once`
   - Avoid unnecessary includes and circular dependencies
+
+- **Return Code Constants** (MANDATORY):
+  - **NEVER use magic numbers** for return codes (e.g., `return -1`, `return 0`)
+  - **ALWAYS use predefined constants** for all function return values
+  - **Module-specific constants** should be defined in the module's header file
+  - **Global constants** should be defined in `utils/error/error_handling.h`
+  - **Examples**:
+    ```c
+    // ✅ CORRECT - Using predefined constants
+    return HTTP_AUTH_SUCCESS;
+    return HTTP_AUTH_ERROR_NULL;
+    return ONVIF_SUCCESS;
+    return ONVIF_ERROR_INVALID;
+
+    // ❌ INCORRECT - Using magic numbers
+    return 0;
+    return -1;
+    return -2;
+    ```
+  - **Constant naming convention**:
+    - Success: `MODULE_SUCCESS` (e.g., `HTTP_AUTH_SUCCESS`, `ONVIF_SUCCESS`)
+    - Errors: `MODULE_ERROR_TYPE` (e.g., `HTTP_AUTH_ERROR_NULL`, `ONVIF_ERROR_INVALID`)
+  - **Enforcement**: All code reviews must verify constant usage instead of magic numbers
 
 - **Include Path Format** (MANDATORY for all project headers):
   - **ALWAYS use relative paths from `src/` directory** for all project includes
@@ -503,6 +528,15 @@ When reviewing ONVIF project code, **ALWAYS** follow this comprehensive review p
   - Check for use-after-free vulnerabilities
 
 ### Static Analysis & Testing Requirements (MANDATORY)
+- **Unit Testing** - **MANDATORY** for all utility functions:
+  - Run unit tests: `make test` or `make test-utils`
+  - All utility functions must have corresponding unit tests
+  - Tests must cover success cases, error cases, and edge conditions
+  - Use CMocka framework for isolated unit testing
+  - Generate coverage reports: `make test-coverage-html`
+  - Achieve high code coverage on utility functions
+  - Tests run on development machine (native compilation)
+
 - **Compilation Testing** - ALL code changes must compile successfully:
   - Use native build: `make -C cross-compile/onvif`
   - Fix all compiler warnings and errors
@@ -547,6 +581,7 @@ When reviewing ONVIF project code, **ALWAYS** follow this comprehensive review p
 - [ ] **Include ordering** follows standards
 - [ ] **Include path format** uses relative paths from `src/` (no `../` patterns)
 - [ ] **Global variable naming** follows `g_<module>_<variable_name>` convention
+- [ ] **Return code constants** used instead of magic numbers
 - [ ] **Doxygen documentation** is complete and updated
 - [ ] **Utility functions** are used instead of duplicated code
 - [ ] **No code duplication** exists
@@ -761,13 +796,14 @@ When providing code review feedback, use this format:
   - Regression tests for bug fixes
 
 ### Common Tasks & Examples
-- **ONVIF Development**: "I modified `cross-compile/onvif/src/services/ptz/onvif_ptz.c` to improve preset handling — please build using native make, perform code review, and test PTZ functionality via ONVIF client."
+- **ONVIF Development**: "I modified `cross-compile/onvif/src/services/ptz/onvif_ptz.c` to improve preset handling — please build using native make, run unit tests, perform code review, and test PTZ functionality via ONVIF client."
 - **Platform Updates**: "Update `cross-compile/onvif/src/platform/platform_anyka.c` to add better error handling for PTZ initialization failures — ensure proper code review for security and performance."
-- **App Development**: "I changed `cross-compile/libre_anyka_app/main.c` to add logging — please build using native make, review for memory management issues, and test by copying the new binary to `SD_card_contents/anyka_hack/usr/bin/` and booting an SD-card image."
+- **App Development**: "I changed `cross-compile/libre_anyka_app/main.c` to add logging — please build using native make, run unit tests, review for memory management issues, and test by copying the new binary to `SD_card_contents/anyka_hack/usr/bin/` and booting an SD-card image."
 - **Web UI Updates**: "Patch updates `www/js/app.js` for the web UI. After applying, pack the SD payload and test UI on device at `http://<device-ip>`; capture network requests and serial log if UI doesn't load."
 - **Documentation Updates**: "I added new functions to `cross-compile/onvif/src/services/device/onvif_device.c` — please update the Doxygen documentation, regenerate the HTML docs, and perform security review."
+- **Unit Testing**: "I added new utility functions to `cross-compile/onvif/src/utils/validation/input_validation.c` — please create corresponding unit tests in `cross-compile/onvif/tests/unit/utils/test_validation_utils.c`, run the tests, and generate coverage report."
 - **Code Review**: "Please review the ONVIF project code considering code quality, potential bugs, performance optimizations, readability, and security concerns. Suggest improvements and explain reasoning for each suggestion."
-- **Utility Refactoring**: "I found duplicated string validation code in multiple files — please refactor to use the existing `onvif_util_validate_token()` utility function and remove all duplicated implementations."
+- **Utility Refactoring**: "I found duplicated string validation code in multiple files — please refactor to use the existing `onvif_util_validate_token()` utility function, update unit tests, and remove all duplicated implementations."
 - **Security Audit**: "Please perform a comprehensive security review of the ONVIF implementation, focusing on input validation, buffer management, and authentication mechanisms."
 - **Performance Optimization**: "The RTSP streaming performance is slow — please analyze the code for bottlenecks and suggest optimizations."
 - **Memory Leak Investigation**: "The daemon is consuming increasing memory over time — please investigate and fix any memory leaks."
@@ -854,6 +890,17 @@ find cross-compile/onvif/docs -type f
 
 #### Testing and Debugging Commands
 ```bash
+# Unit Testing (MANDATORY)
+make test                    # Run all unit tests
+make test-utils             # Run utility unit tests
+make test-coverage          # Run tests with coverage
+make test-coverage-html     # Generate HTML coverage report
+make test-coverage-report   # Generate coverage summary
+make test-valgrind          # Run tests with valgrind
+
+# Install unit test dependencies
+./cross-compile/onvif/tests/install_dependencies.sh
+
 # Run static analysis (if available)
 cppcheck cross-compile/onvif/src
 
