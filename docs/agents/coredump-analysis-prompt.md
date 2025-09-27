@@ -1,50 +1,49 @@
 # ONVIF Coredump Analysis Prompt for WSL Ubuntu Development
 
 ## Overview
-This document provides a comprehensive prompt for analyzing ONVIF daemon coredumps in the WSL Ubuntu development environment. The analysis leverages native cross-compilation tools and bash commands for efficient debugging and development workflow.
+This document provides a comprehensive prompt for analyzing ONVIF daemon coredumps in the WSL Ubuntu development environment. The analysis **MUST** use the standardized `run_gdb_multiarch_analysis.sh ` script for all coredump analysis operations. Direct GDB usage is **PROHIBITED** - all analysis must go through the script to ensure consistency and proper environment setup.
 
 ## Quick Reference - Most Common Issues
 
 | Issue | Error Message | Quick Fix |
 |-------|---------------|-----------|
-| Permission denied | `Permission denied` | `chmod +x analyze_core.sh` |
-| Library loading failed | `Could not open '/lib/ld-uClibc.so.0'` | Use native cross-compilation tools with proper library paths |
-| Binary not found | `No such file or directory` | Ensure debug binary exists in `SD_card_contents/anyka_hack/onvif/` |
-| Wrong directory | Various file not found errors | Run from `SD_card_contents/anyka_hack/onvif/` directory |
-| GDB not found | `gdb: command not found` | Install gdb-multiarch: `sudo apt install gdb-multiarch` |
+| Permission denied | `Permission denied` | `chmod +x debugging/run_gdb_multiarch_analysis.sh ` |
+| Script not found | `No such file or directory` | Ensure script exists in `debugging/run_gdb_multiarch_analysis.sh ` |
+| Binary not found | `Binary file not found` | Ensure debug binary exists in `cross-compile/onvif/out/` |
+| Coredump not found | `Coredump file not found` | Check coredump location in `debugging/coredumps/` or current directory |
+| Analysis failed | Script exits with error | **MANDATORY**: Fix the script before proceeding with analysis |
 
 ## Prerequisites
 
 ### Required Tools
 - **WSL2 with Ubuntu** - Primary development environment
-- **gdb-multiarch** - For ARM debugging: `sudo apt install gdb-multiarch`
+- **run_gdb_multiarch_analysis.sh  script** - **MANDATORY** standardized analysis script located in `debugging/run_gdb_multiarch_analysis.sh `
 - **Native cross-compilation tools** - ARM toolchain for building debug binaries
 - **Bash shell** - **MANDATORY** for all terminal operations
 
 ### Required Files
-- **Coredump file** - Located in `SD_card_contents/anyka_hack/onvif/` or `debugging/coredumps/`
-- **Debug binary** - `onvifd_debug` (ARM-compiled with debug symbols)
+- **run_gdb_multiarch_analysis.sh ** - **MANDATORY** analysis script in `debugging/run_gdb_multiarch_analysis.sh `
+- **Coredump file** - Located in `debugging/coredumps/` or current directory
+- **Debug binary** - `onvifd_debug` (ARM-compiled with debug symbols) in `cross-compile/onvif/out/`
 - **Libraries** - ARM libraries in `SD_card_contents/anyka_hack/onvif/lib/`
 
 ## Quick Start Analysis
 
 ```bash
-# Navigate to the ONVIF directory with coredumps
-cd SD_card_contents/anyka_hack/onvif
+# Navigate to project root
+cd /home/kmk/anyka-dev
 
-# Run automatic analysis (auto-detects coredump)
-./analyze_core.sh
+# Make script executable (if needed)
+chmod +x debugging/run_gdb_multiarch_analysis.sh
 
-# Or specify specific files with full paths
-./analyze_core.sh core.onvifd_debug.25148.55166 onvifd_debug
+# Run analysis with specific coredump and binary
+./debugging/run_gdb_multiarch_analysis.sh  core.onvifd_debug.25148.55166 onvifd_debug
 
-# Alternative: Direct GDB analysis
-gdb-multiarch --batch \
-    --ex "file onvifd_debug" \
-    --ex "core-file core.onvifd_debug.25148.55166" \
-    --ex "bt" \
-    --ex "info registers" \
-    --ex "quit"
+# Run analysis with default files (auto-detects coredump)
+./debugging/run_gdb_multiarch_analysis.sh
+
+# If analysis fails, fix the script before proceeding
+# The script MUST work correctly before any coredump analysis can continue
 ```
 
 ## Detailed Analysis Workflow
@@ -54,63 +53,59 @@ gdb-multiarch --batch \
 # Navigate to project root
 cd /home/kmk/anyka-dev
 
-# Verify gdb-multiarch is installed
-gdb-multiarch --version
+# Verify analysis script exists and is executable
+test -f debugging/run_gdb_multiarch_analysis.sh  && chmod +x debugging/run_gdb_multiarch_analysis.sh
 
 # Check if debug binary exists
-test -f SD_card_contents/anyka_hack/onvif/onvifd_debug
+test -f cross-compile/onvif/out/onvifd_debug
 ```
 
 ### Step 2: Locate Coredump Files
 ```bash
-# Check for coredumps in ONVIF directory
-find SD_card_contents/anyka_hack/onvif -name "core.*" -type f
+# Check for coredumps in debugging directory
+find debugging/coredumps -name "core.*" -type f
+
+# Check for coredumps in current directory
+find . -name "core.*" -type f -maxdepth 1
 
 # Example output:
-# SD_card_contents/anyka_hack/onvif/core.onvifd_debug.22788.52860
-# SD_card_contents/anyka_hack/onvif/core.onvifd_debug.18122.16516
+# debugging/coredumps/core.onvifd_debug.22788.52860
+# debugging/coredumps/core.onvifd_debug.18122.16516
 
 # List with file sizes
-ls -lh SD_card_contents/anyka_hack/onvif/core.*
+ls -lh debugging/coredumps/core.*
 ```
 
 ### Step 3: Verify Required Files
 ```bash
 # Check for debug binary
-test -f SD_card_contents/anyka_hack/onvif/onvifd_debug && echo "Debug binary found" || echo "Debug binary missing"
+test -f cross-compile/onvif/out/onvifd_debug && echo "Debug binary found" || echo "Debug binary missing"
 
 # Check for libraries
 ls -la SD_card_contents/anyka_hack/onvif/lib/*.so*
 
 # Verify coredump file
-COREDUMP="SD_card_contents/anyka_hack/onvif/core.onvifd_debug.22788.52860"
+COREDUMP="debugging/coredumps/core.onvifd_debug.22788.52860"
 if [ -f "$COREDUMP" ]; then
     SIZE=$(du -h "$COREDUMP" | cut -f1)
     echo "Coredump found: $COREDUMP ($SIZE)"
 fi
+
+# Verify analysis script
+test -f debugging/run_gdb_multiarch_analysis.sh  && echo "Analysis script found" || echo "Analysis script missing"
 ```
 
 ### Step 4: Run Analysis
 ```bash
-# Navigate to ONVIF directory
-cd SD_card_contents/anyka_hack/onvif
+# Navigate to project root
+cd /home/kmk/anyka-dev
 
-# Run comprehensive analysis
-./analyze_core.sh core.onvifd_debug.22788.52860 onvifd_debug
+# Run comprehensive analysis using the standardized script
+./debugging/run_gdb_multiarch_analysis.sh  core.onvifd_debug.22788.52860 onvifd_debug
 
-# Or run direct GDB analysis
-gdb-multiarch --batch \
-    --ex "file onvifd_debug" \
-    --ex "core-file core.onvifd_debug.22788.52860" \
-    --ex "bt full" \
-    --ex "info registers" \
-    --ex "info frame" \
-    --ex "list" \
-    --ex "info args" \
-    --ex "info locals" \
-    --ex "x/20x \$pc-40" \
-    --ex "x/20x \$sp-40" \
-    --ex "quit"
+# If the script fails, you MUST fix it before proceeding
+# The script handles all GDB setup, library paths, and analysis automatically
+# Direct GDB usage is PROHIBITED - all analysis must go through this script
 ```
 
 ## Analysis Output Interpretation
@@ -159,116 +154,99 @@ list            # Source code around crash
 
 ## Advanced Analysis Techniques
 
-### 1. Custom GDB Commands
+### 1. Script-Based Analysis
 ```bash
-# Create custom GDB script for specific analysis
-cat > custom_analysis.gdb << 'EOF'
-set solib-search-path ./lib:.:/lib:/usr/lib
-file onvifd_debug
-core-file core.onvifd_debug.22788.52860
+# The run_gdb_multiarch_analysis.sh  script provides comprehensive analysis including:
+# - Stack trace analysis (bt full)
+# - Thread analysis (info threads, thread apply all bt)
+# - Register analysis (info registers)
+# - Memory analysis (info proc mappings, x/20x commands)
+# - Shared library analysis (info sharedlibrary)
+# - Source context (list, info args, info locals)
 
-# Custom analysis commands
-bt full
-info registers
-x/50x $sp-100
-x/50x $pc-50
-info proc mappings
-thread apply all bt
-quit
-EOF
-
-# Run custom analysis
-gdb-multiarch --batch --command=custom_analysis.gdb
+# Run the standardized analysis
+./debugging/run_gdb_multiarch_analysis.sh  core.onvifd_debug.22788.52860 onvifd_debug
 ```
 
-### 2. Memory Leak Detection
+### 2. Custom Analysis Script Modification
 ```bash
-# Check for memory leaks in coredump
-gdb-multiarch --batch \
-    --ex "file onvifd_debug" \
-    --ex "core-file core.onvifd_debug.22788.52860" \
-    --ex "info proc mappings" \
-    --ex "info sharedlibrary" \
-    --ex "quit"
+# If you need additional analysis, modify the run_gdb_multiarch_analysis.sh  script
+# Add custom GDB commands to the script's GDB batch execution
+# DO NOT run GDB directly - always modify the script instead
+
+# Example: Add custom memory analysis to the script
+# Edit debugging/run_gdb_multiarch_analysis.sh  and add:
+# --ex "x/50x \$sp-100" \
+# --ex "x/50x \$pc-50" \
 ```
 
-### 3. Thread Analysis
-```bash
-# Analyze all threads in the coredump
-gdb-multiarch --batch \
-    --ex "file onvifd_debug" \
-    --ex "core-file core.onvifd_debug.22788.52860" \
-    --ex "info threads" \
-    --ex "thread apply all bt" \
-    --ex "quit"
-```
-
-### 4. Native Cross-Compilation Analysis
+### 3. Native Cross-Compilation Analysis
 ```bash
 # Build debug binary with native cross-compilation
 cd /home/kmk/anyka-dev/cross-compile/onvif
 make clean
 make DEBUG=1
 
-# Copy debug binary to analysis directory
-cp out/onvifd ../SD_card_contents/anyka_hack/onvif/onvifd_debug
+# The script automatically finds the binary in cross-compile/onvif/out/
+# Run analysis using the standardized script
+cd /home/kmk/anyka-dev
+./debugging/run_gdb_multiarch_analysis.sh  core.onvifd_debug.22788.52860 onvifd_debug
+```
 
-# Run analysis with native tools
-cd ../SD_card_contents/anyka_hack/onvif
-gdb-multiarch --batch \
-    --ex "file onvifd_debug" \
-    --ex "core-file core.onvifd_debug.22788.52860" \
-    --ex "bt full" \
-    --ex "quit"
+### 4. Script Failure Handling
+```bash
+# If the analysis script fails, you MUST fix it before proceeding
+# Common fixes:
+# 1. Check script permissions: chmod +x debugging/run_gdb_multiarch_analysis.sh
+# 2. Verify file paths in the script
+# 3. Ensure all required files exist
+# 4. Check script syntax: bash -n debugging/run_gdb_multiarch_analysis.sh
+
+# NEVER bypass the script - always fix it instead
 ```
 
 ## Troubleshooting
 
-### WSL/Bash Issues
+### Script Issues
 ```bash
 # Permission denied (MOST COMMON ISSUE)
-chmod +x analyze_core.sh
+chmod +x debugging/run_gdb_multiarch_analysis.sh
 
 # Script not found
-ls -la SD_card_contents/anyka_hack/onvif/analyze_core.sh
+ls -la debugging/run_gdb_multiarch_analysis.sh
 
 # Wrong working directory
-# CRITICAL: Always run from SD_card_contents/anyka_hack/onvif/
+# CRITICAL: Always run from project root
 pwd
-cd /home/kmk/anyka-dev/SD_card_contents/anyka_hack/onvif
+cd /home/kmk/anyka-dev
 
-# Path issues
-echo $PATH
-export PATH="/usr/bin:$PATH"
+# Script syntax errors
+bash -n debugging/run_gdb_multiarch_analysis.sh
 ```
 
-### GDB Issues
+### Analysis Script Issues
 ```bash
-# "gdb: command not found"
-sudo apt update
-sudo apt install gdb-multiarch
+# "Binary file not found"
+# Check if binary exists in expected location
+test -f cross-compile/onvif/out/onvifd_debug && echo "Binary found" || echo "Binary missing"
 
-# "No such file or directory"
-# Check if binary and coredump exist
-test -f onvifd_debug && echo "Binary found" || echo "Binary missing"
-test -f core.onvifd_debug.25148.55166 && echo "Coredump found" || echo "Coredump missing"
+# "Coredump file not found"
+# Check if coredump exists in expected locations
+test -f debugging/coredumps/core.onvifd_debug.25148.55166 && echo "Coredump found" || echo "Coredump missing"
+test -f core.onvifd_debug.25148.55166 && echo "Coredump found in current dir" || echo "Coredump missing in current dir"
 
-# "Could not open shared library" - "Could not open '/lib/ld-uClibc.so.0'"
-# SOLUTION: Use proper library paths with native cross-compilation
-export LD_LIBRARY_PATH="./lib:$LD_LIBRARY_PATH"
-gdb-multiarch --batch \
-    --ex "set solib-search-path ./lib:.:/lib:/usr/lib" \
-    --ex "file onvifd_debug" \
-    --ex "core-file core.onvifd_debug.25148.55166" \
-    --ex "bt" \
-    --ex "quit"
+# "No GDB found"
+# The script handles GDB detection automatically
+# If this fails, check the script's GDB detection logic
 
-# "warning: exec file is newer than core file"
-# This is normal - the binary was rebuilt after the coredump was created
-# The analysis will still work correctly
-
-# "warning: Could not load shared library symbols"
-# This is normal for some libraries - analysis will still work
+# Script execution fails
+# MANDATORY: Fix the script before proceeding with analysis
+# Common fixes:
+# 1. Check script permissions
+# 2. Verify file paths in the script
+# 3. Ensure all required files exist
+# 4. Check script syntax
+# 5. Review script error messages
 ```
 
 ### Cross-Compilation Issues
@@ -288,21 +266,26 @@ make clean
 make DEBUG=1
 ```
 
-### Analysis Script Issues
+### Script Execution Issues
 ```bash
 # Script not found
-find . -name "analyze_core.sh" -type f
+find . -name "run_gdb_multiarch_analysis.sh " -type f
 
 # Permission denied
-chmod +x analyze_core.sh
+chmod +x debugging/run_gdb_multiarch_analysis.sh
 
 # Wrong working directory
-# CRITICAL: Always run from SD_card_contents/anyka_hack/onvif/
-cd /home/kmk/anyka-dev/SD_card_contents/anyka_hack/onvif
+# CRITICAL: Always run from project root
+cd /home/kmk/anyka-dev
 
 # Script fails with "Binary file not found"
-# SOLUTION: Ensure you're in the correct directory with all required files
-ls -la onvifd_debug core.* lib/
+# SOLUTION: Ensure debug binary exists in cross-compile/onvif/out/
+ls -la cross-compile/onvif/out/onvifd_debug
+
+# Script fails with "Coredump file not found"
+# SOLUTION: Check coredump location in debugging/coredumps/ or current directory
+ls -la debugging/coredumps/core.*
+ls -la core.*
 ```
 
 ## Common Issues and Solutions
@@ -311,37 +294,46 @@ ls -la onvifd_debug core.* lib/
 **Error**: `Permission denied`
 **Solution**:
 ```bash
-chmod +x analyze_core.sh
+chmod +x debugging/run_gdb_multiarch_analysis.sh
 ```
 
-### Issue 2: Library Loading Failed
-**Error**: `Could not open '/lib/ld-uClibc.so.0'`
-**Solution**: Use proper library paths with native cross-compilation tools
+### Issue 2: Script Not Found
+**Error**: `No such file or directory`
+**Solution**: Ensure script exists in correct location
 ```bash
-export LD_LIBRARY_PATH="./lib:$LD_LIBRARY_PATH"
-gdb-multiarch --batch \
-    --ex "set solib-search-path ./lib:.:/lib:/usr/lib" \
-    --ex "file onvifd_debug" \
-    --ex "core-file core.onvifd_debug.25148.55166" \
-    --ex "bt" \
-    --ex "quit"
+test -f debugging/run_gdb_multiarch_analysis.sh  && echo "Script found" || echo "Script missing"
 ```
 
-### Issue 3: GDB Not Found
-**Error**: `gdb: command not found`
-**Solution**: Install gdb-multiarch
+### Issue 3: Binary File Not Found
+**Error**: `Binary file not found`
+**Solution**: Ensure debug binary exists in expected location
 ```bash
-sudo apt update
-sudo apt install gdb-multiarch
+test -f cross-compile/onvif/out/onvifd_debug && echo "Binary found" || echo "Binary missing"
 ```
 
-### Issue 4: Wrong Working Directory
-**Error**: Various file not found errors
-**Solution**:
-- Always run from `SD_card_contents/anyka_hack/onvif/` directory
-- Ensure all required files (binary, coredump, libraries) are present
+### Issue 4: Coredump File Not Found
+**Error**: `Coredump file not found`
+**Solution**: Check coredump location
+```bash
+# Check in debugging directory
+ls -la debugging/coredumps/core.*
+# Check in current directory
+ls -la core.*
+```
 
-### Issue 5: Cross-Compilation Toolchain Missing
+### Issue 5: Analysis Script Fails
+**Error**: Script exits with error code
+**Solution**: **MANDATORY** - Fix the script before proceeding
+```bash
+# Check script syntax
+bash -n debugging/run_gdb_multiarch_analysis.sh
+# Check script permissions
+ls -la debugging/run_gdb_multiarch_analysis.sh
+# Review script error messages and fix accordingly
+# NEVER bypass the script - always fix it instead
+```
+
+### Issue 6: Cross-Compilation Toolchain Missing
 **Error**: `arm-linux-gnueabihf-gcc: command not found`
 **Solution**: Install cross-compilation tools
 ```bash
@@ -352,39 +344,39 @@ sudo apt install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
 
 ### Coredump Locations
 ```
+debugging/
+├── coredumps/
+│   ├── core.onvifd_debug.22788.52860    # Latest coredump (34MB)
+│   └── core.onvifd_debug.18122.16516    # Archived coredump
+├── run_gdb_multiarch_analysis.sh                   # MANDATORY analysis script
+└── documentation/
+    ├── Coredump_Analysis_Prompt.md      # This file
+    ├── Debugging_Quick_Reference.md     # Quick commands
+    └── RTSP_Session_Crash_Analysis.md   # Specific crash analysis
+
+cross-compile/onvif/out/
+└── onvifd_debug                          # Debug binary (ARM-compiled)
+
 SD_card_contents/anyka_hack/onvif/
-├── core.onvifd_debug.22788.52860    # Latest coredump (34MB)
-├── onvifd_debug                     # Debug binary
-├── analyze_core.sh                  # WSL analysis script
-├── lib/                             # ARM libraries
+├── lib/                                  # ARM libraries
 │   ├── ld-uClibc.so.0
 │   ├── libuClibc-0.9.33.2.so
 │   └── ... (other .so files)
-└── debug_with_sources.sh            # Device-side debug script
-
-debugging/
-├── coredumps/
-│   └── core.onvifd_debug.18122.16516  # Archived coredump
-├── analysis_scripts/
-│   ├── analyze_core.sh                # WSL analysis script
-│   └── run_gdb_analysis.sh            # GDB runner script
-└── documentation/
-    ├── Coredump_Analysis_Prompt.md    # This file
-    ├── Debugging_Quick_Reference.md   # Quick commands
-    └── RTSP_Session_Crash_Analysis.md # Specific crash analysis
+└── debug_with_sources.sh                 # Device-side debug script
 ```
 
 ## Best Practices
 
 ### 1. Before Analysis
-- [ ] Verify gdb-multiarch is installed
+- [ ] Verify `run_gdb_multiarch_analysis.sh ` script exists and is executable
 - [ ] Check coredump file size (should be > 1MB)
-- [ ] Ensure debug binary exists
-- [ ] Verify library files are present
-- [ ] Ensure you're in the correct directory (`SD_card_contents/anyka_hack/onvif/`)
+- [ ] Ensure debug binary exists in `cross-compile/onvif/out/`
+- [ ] Verify library files are present in `SD_card_contents/anyka_hack/onvif/lib/`
+- [ ] Ensure you're in the project root directory (`/home/kmk/anyka-dev/`)
 
 ### 2. During Analysis
-- [ ] Run automatic analysis first
+- [ ] **MANDATORY**: Use only the `run_gdb_multiarch_analysis.sh ` script
+- [ ] If script fails, fix it before proceeding (NEVER bypass)
 - [ ] Save output to file for review
 - [ ] Look for patterns in multiple coredumps
 - [ ] Check for known crash patterns
@@ -410,29 +402,23 @@ debugging/
 cd /home/kmk/anyka-dev
 
 # 1. Check environment
-gdb-multiarch --version
-find SD_card_contents/anyka_hack/onvif -name "core.*" -type f
+test -f debugging/run_gdb_multiarch_analysis.sh  && chmod +x debugging/run_gdb_multiarch_analysis.sh
+find debugging/coredumps -name "core.*" -type f
 
-# 2. Navigate to ONVIF directory
-cd SD_card_contents/anyka_hack/onvif
+# 2. Verify required files
+test -f cross-compile/onvif/out/onvifd_debug && echo "Debug binary found" || echo "Debug binary missing"
+test -f debugging/coredumps/core.onvifd_debug.25148.55166 && echo "Coredump found" || echo "Coredump missing"
 
-# 3. Run analysis using bash script
-./analyze_core.sh core.onvifd_debug.25148.55166 onvifd_debug
+# 3. Run analysis using MANDATORY script
+./debugging/run_gdb_multiarch_analysis.sh  core.onvifd_debug.25148.55166 onvifd_debug
 
-# 4. Alternative: Run analysis using direct GDB method
-gdb-multiarch --batch \
-    --ex "set solib-search-path ./lib:.:/lib:/usr/lib" \
-    --ex "file onvifd_debug" \
-    --ex "core-file core.onvifd_debug.25148.55166" \
-    --ex "bt full" \
-    --ex "info registers" \
-    --ex "info frame" \
-    --ex "list" \
-    --ex "info args" \
-    --ex "info locals" \
-    --ex "x/20x \$pc-40" \
-    --ex "x/20x \$sp-40" \
-    --ex "quit"
+# 4. If script fails, fix it before proceeding
+# NEVER bypass the script - always fix it instead
+# Common fixes:
+# - Check script permissions: chmod +x debugging/run_gdb_multiarch_analysis.sh
+# - Verify file paths in the script
+# - Ensure all required files exist
+# - Check script syntax: bash -n debugging/run_gdb_multiarch_analysis.sh
 
 # 5. Review output
 # Look for stack trace, register values, memory patterns
@@ -440,18 +426,17 @@ gdb-multiarch --batch \
 # Document findings
 
 # 6. Apply fix if needed
-cd ../../cross-compile/onvif
+cd cross-compile/onvif
 make clean
 make DEBUG=1
 
 # 7. Test fix
-cp out/onvifd ../SD_card_contents/anyka_hack/onvif/onvifd_debug
+# The script automatically finds the binary in cross-compile/onvif/out/
+cd /home/kmk/anyka-dev
+./debugging/run_gdb_multiarch_analysis.sh  core.onvifd_debug.25148.55166 onvifd_debug
 ```
 
 ## Related Documentation
-
-- [Debugging Quick Reference](Debugging_Quick_Reference.md) - Quick commands and common patterns
-- [RTSP Session Crash Analysis](RTSP_Session_Crash_Analysis.md) - Detailed analysis of specific crash type
 - [ONVIF Project README](../../cross-compile/onvif/README.md) - Project overview and build instructions
 
 ## Recent Analysis Example
@@ -473,10 +458,13 @@ cp out/onvifd ../SD_card_contents/anyka_hack/onvif/onvifd_debug
 ## Support
 
 For issues with coredump analysis:
-1. Check this document for troubleshooting steps
-2. Review the existing coredump analysis in `debugging/coredumps/`
-3. Check the RTSP crash analysis documentation
-4. Verify WSL Ubuntu and gdb-multiarch environment setup
-5. Ensure all required files are present and accessible
-6. Use native cross-compilation tools for consistent builds
-7. Follow the repository's WSL development workflow guidelines
+1. **MANDATORY**: Use only the `run_gdb_multiarch_analysis.sh ` script for all analysis
+2. If the script fails, fix it before proceeding (NEVER bypass)
+3. Check this document for troubleshooting steps
+4. Review the existing coredump analysis in `debugging/coredumps/`
+5. Check the RTSP crash analysis documentation
+6. Verify WSL Ubuntu environment setup
+7. Ensure all required files are present and accessible
+8. Use native cross-compilation tools for consistent builds
+9. Follow the repository's WSL development workflow guidelines
+10. **Remember**: Direct GDB usage is PROHIBITED - all analysis must go through the script
