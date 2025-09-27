@@ -14,11 +14,16 @@
 #include "utils/error/error_handling.h"
 #include "utils/security/base64_utils.h"
 #include "utils/string/string_shims.h"
+#include "utils/validation/input_validation.h"
+#include "utils/validation/common_validation.h"
+#include "utils/security/security_hardening.h"
 
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+
 
 /* ==================== Helper Functions ==================== */
 
@@ -31,7 +36,7 @@
  * @return HTTP_AUTH_SUCCESS on success, error code on failure
  */
 static int extract_and_validate_credential(const char* source, size_t source_len, char* dest,
-                                           size_t dest_size) {
+                                          size_t dest_size) {
   if (!source || !dest || dest_size == 0) {
     return HTTP_AUTH_ERROR_NULL;
   }
@@ -54,6 +59,8 @@ static int extract_and_validate_credential(const char* source, size_t source_len
     return HTTP_AUTH_ERROR_INVALID; // Empty after trimming
   }
 
+  // Note: Input validation is done in the calling parse function to avoid duplication
+
   return HTTP_AUTH_SUCCESS;
 }
 
@@ -70,7 +77,15 @@ int http_auth_init(struct http_auth_config* auth_config) {
   memset(auth_config, 0, sizeof(struct http_auth_config));
   auth_config->auth_type = HTTP_AUTH_NONE;
   auth_config->enabled = false;
-  strncpy(auth_config->realm, "ONVIF Server", sizeof(auth_config->realm) - 1);
+
+  // Set default realm with validation
+  const char* default_realm = "ONVIF Server";
+  if (validate_realm_input(default_realm) != ONVIF_VALIDATION_SUCCESS) {
+    platform_log_error("Invalid default realm: %s", default_realm);
+    return HTTP_AUTH_ERROR_INVALID;
+  }
+
+  strncpy(auth_config->realm, default_realm, sizeof(auth_config->realm) - 1);
   auth_config->realm[sizeof(auth_config->realm) - 1] = '\0';
 
   return HTTP_AUTH_SUCCESS;
@@ -139,6 +154,12 @@ int http_auth_generate_challenge(const struct http_auth_config* auth_config, cha
     return HTTP_AUTH_ERROR_NULL;
   }
 
+  // Validate realm before using it
+  if (validate_realm_input(auth_config->realm) != ONVIF_VALIDATION_SUCCESS) {
+    platform_log_error("Invalid realm in auth config: %s", auth_config->realm);
+    return HTTP_AUTH_ERROR_INVALID;
+  }
+
   int ret =
     snprintf(challenge, challenge_size, "WWW-Authenticate: Basic realm=\"%s\"", auth_config->realm);
 
@@ -157,35 +178,21 @@ int http_auth_parse_basic_credentials(const char* auth_header, char* username, c
     return HTTP_AUTH_ERROR_NULL;
   }
 
-  // Validate input lengths using string utilities
-  size_t header_len = strnlen(auth_header, HTTP_MAX_AUTH_HEADER_LEN);
-  if (header_len == 0 || header_len >= HTTP_MAX_AUTH_HEADER_LEN) {
+  // Validate Authorization header first
+  if (validate_auth_header_input(auth_header) != ONVIF_VALIDATION_SUCCESS) {
     return HTTP_AUTH_ERROR_INVALID;
   }
 
-  // Check for "Basic " prefix using case-insensitive comparison
-  if (strnlen(auth_header, 6) < 6) {
-    return HTTP_AUTH_ERROR_INVALID;
-  }
-
-  // Create a temporary string for comparison
-  char prefix[7] = {0};
-  strncpy(prefix, auth_header, 6);
-  if (strcasecmp(prefix, "Basic ") != 0) {
-    return HTTP_AUTH_ERROR_INVALID;
-  }
-
-  const char* encoded = auth_header + 6;
+  const char* encoded = auth_header + 6; // Skip "Basic " prefix
   size_t encoded_len = strnlen(encoded, HTTP_MAX_AUTH_HEADER_LEN - 6);
 
   if (encoded_len == 0) {
     return HTTP_AUTH_ERROR_INVALID;
   }
 
-  // Decode Base64 using proper Base64 utilities
+  // Decode Base64 using secure validation
   char decoded[HTTP_MAX_USERNAME_LEN + HTTP_MAX_PASSWORD_LEN + 2] = {0};
-
-  if (onvif_util_base64_decode(encoded, decoded, sizeof(decoded)) != ONVIF_SUCCESS) {
+  if (validate_and_decode_base64(encoded, decoded, sizeof(decoded)) != ONVIF_VALIDATION_SUCCESS) {
     return HTTP_AUTH_ERROR_PARSE_FAILED;
   }
 
@@ -200,18 +207,16 @@ int http_auth_parse_basic_credentials(const char* auth_header, char* username, c
     return HTTP_AUTH_ERROR_PARSE_FAILED;
   }
 
-  // Extract and validate username
+  // Extract username
   size_t username_len = colon - decoded;
-  int result =
-    extract_and_validate_credential(decoded, username_len, username, HTTP_MAX_USERNAME_LEN);
+  int result = extract_and_validate_credential(decoded, username_len, username, HTTP_MAX_USERNAME_LEN);
   if (result != HTTP_AUTH_SUCCESS) {
     return result;
   }
 
-  // Extract and validate password
+  // Extract password
   size_t password_len = decoded_len - username_len - 1;
-  result =
-    extract_and_validate_credential(colon + 1, password_len, password, HTTP_MAX_PASSWORD_LEN);
+  result = extract_and_validate_credential(colon + 1, password_len, password, HTTP_MAX_PASSWORD_LEN);
   if (result != HTTP_AUTH_SUCCESS) {
     return result;
   }
@@ -250,10 +255,17 @@ http_response_t http_auth_create_401_response(const struct http_auth_config* aut
   // Create response body with realm information
   char body[512] = {0};
   if (auth_config && auth_config->realm[0] != '\0') {
-    snprintf(body, sizeof(body),
-             "<html><body><h1>401 Unauthorized</h1><p>Authentication required for realm: "
-             "%s</p></body></html>",
-             auth_config->realm);
+    // Validate realm before using it
+    if (validate_realm_input(auth_config->realm) == ONVIF_VALIDATION_SUCCESS) {
+      snprintf(body, sizeof(body),
+               "<html><body><h1>401 Unauthorized</h1><p>Authentication required for realm: "
+               "%s</p></body></html>",
+               auth_config->realm);
+    } else {
+      platform_log_warning("Invalid realm in 401 response, using default");
+      strcpy(body,
+             "<html><body><h1>401 Unauthorized</h1><p>Authentication required.</p></body></html>");
+    }
   } else {
     strcpy(body,
            "<html><body><h1>401 Unauthorized</h1><p>Authentication required.</p></body></html>");
@@ -266,7 +278,8 @@ http_response_t http_auth_create_401_response(const struct http_auth_config* aut
   }
 
   // Add WWW-Authenticate header
-  if (auth_config && auth_config->realm[0] != '\0') {
+  if (auth_config && auth_config->realm[0] != '\0' &&
+      validate_realm_input(auth_config->realm) == ONVIF_VALIDATION_SUCCESS) {
     char challenge_value[HTTP_MAX_REALM_LEN + 50] = {0};
     snprintf(challenge_value, sizeof(challenge_value), "Basic realm=\"%s\"", auth_config->realm);
     http_response_add_header(&response, "WWW-Authenticate", challenge_value);

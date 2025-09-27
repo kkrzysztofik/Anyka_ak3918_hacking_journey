@@ -71,4 +71,41 @@ int validate_http_request(const http_request_t* request);
  */
 int sanitize_string_input(const char* input, char* output, size_t output_size);
 
+/**
+ * @brief Validate username for security and format
+ * @param username Username to validate
+ * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
+ */
+int validate_username_input(const char* username);
+
+/**
+ * @brief Validate password for security and format
+ * @param password Password to validate
+ * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
+ */
+int validate_password_input(const char* password);
+
+/**
+ * @brief Validate Authorization header for security and format
+ * @param auth_header Authorization header value
+ * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
+ */
+int validate_auth_header_input(const char* auth_header);
+
+/**
+ * @brief Validate realm for security and format
+ * @param realm Realm to validate
+ * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
+ */
+int validate_realm_input(const char* realm);
+
+/**
+ * @brief Sanitize and validate Base64 encoded credentials
+ * @param encoded Base64 encoded string
+ * @param decoded Buffer for decoded data
+ * @param decoded_size Size of decoded buffer
+ * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
+ */
+int validate_and_decode_base64(const char* encoded, char* decoded, size_t decoded_size);
+
 #endif // INPUT_VALIDATION_H

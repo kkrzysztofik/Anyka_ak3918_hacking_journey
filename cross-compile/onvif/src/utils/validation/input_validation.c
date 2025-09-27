@@ -10,6 +10,10 @@
 #include "networking/http/http_parser.h"
 #include "utils/error/error_handling.h"
 #include "utils/string/string_shims.h"
+#include "utils/security/security_hardening.h"
+#include "utils/security/base64_utils.h"
+#include "utils/validation/common_validation.h"
+#include "platform/platform.h"
 
 #include <ctype.h>
 #include <stdlib.h>
@@ -18,6 +22,12 @@
 
 /* Utility macros */
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+/* HTTP Authentication constants for validation */
+#define HTTP_MAX_USERNAME_LEN    64
+#define HTTP_MAX_PASSWORD_LEN    64
+#define HTTP_MAX_REALM_LEN       128
+#define HTTP_MAX_AUTH_HEADER_LEN 1024
 
 /* Fallback implementations for missing functions */
 
@@ -419,4 +429,191 @@ int sanitize_string_input(const char* input, char* output, size_t output_size) {
 
   output[out_pos] = '\0';
   return 1;
+}
+
+/* ==================== HTTP Authentication Validation Functions ==================== */
+
+/**
+ * @brief Validate username for security and format
+ * @param username Username to validate
+ * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
+ */
+int validate_username_input(const char* username) {
+  if (!username) {
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Use common validation utilities
+  validation_result_t result = validate_string("username", username, 1, HTTP_MAX_USERNAME_LEN - 1, 0);
+  if (!validation_is_valid(&result)) {
+    platform_log_warning("Invalid username: %s", validation_get_error_message(&result));
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Check for injection patterns
+  if (security_detect_sql_injection(username) || security_detect_xss_attack(username)) {
+    platform_log_warning("Username contains injection patterns: %s", username);
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Check for valid characters (alphanumeric, underscore, hyphen, dot)
+  for (const char* p = username; *p; p++) {
+    if (!isalnum(*p) && *p != '_' && *p != '-' && *p != '.') {
+      platform_log_warning("Username contains invalid character '%c': %s", *p, username);
+      return ONVIF_VALIDATION_FAILED;
+    }
+  }
+
+  return ONVIF_VALIDATION_SUCCESS;
+}
+
+/**
+ * @brief Validate password for security and format
+ * @param password Password to validate
+ * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
+ */
+int validate_password_input(const char* password) {
+  if (!password) {
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Use common validation utilities
+  validation_result_t result = validate_string("password", password, 1, HTTP_MAX_PASSWORD_LEN - 1, 0);
+  if (!validation_is_valid(&result)) {
+    platform_log_warning("Invalid password: %s", validation_get_error_message(&result));
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Check for injection patterns
+  if (security_detect_sql_injection(password) || security_detect_xss_attack(password)) {
+    platform_log_warning("Password contains injection patterns");
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Check for null bytes or control characters
+  for (const char* p = password; *p; p++) {
+    if (*p == '\0' || iscntrl(*p)) {
+      platform_log_warning("Password contains invalid control character");
+      return ONVIF_VALIDATION_FAILED;
+    }
+  }
+
+  return ONVIF_VALIDATION_SUCCESS;
+}
+
+/**
+ * @brief Validate Authorization header for security and format
+ * @param auth_header Authorization header value
+ * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
+ */
+int validate_auth_header_input(const char* auth_header) {
+  if (!auth_header) {
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Use common validation utilities
+  validation_result_t result = validate_string("auth_header", auth_header, 6, HTTP_MAX_AUTH_HEADER_LEN - 1, 0);
+  if (!validation_is_valid(&result)) {
+    platform_log_warning("Invalid Authorization header: %s", validation_get_error_message(&result));
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Check for injection patterns
+  if (security_detect_sql_injection(auth_header) || security_detect_xss_attack(auth_header)) {
+    platform_log_warning("Authorization header contains injection patterns");
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Validate Basic auth format
+  if (strnlen(auth_header, 6) < 6) {
+    platform_log_warning("Authorization header too short");
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Check for "Basic " prefix (case-insensitive)
+  char prefix[7] = {0};
+  strncpy(prefix, auth_header, 6);
+  if (strcasecmp(prefix, "Basic ") != 0) {
+    platform_log_warning("Authorization header does not start with 'Basic ': %s", prefix);
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  return ONVIF_VALIDATION_SUCCESS;
+}
+
+/**
+ * @brief Validate realm for security and format
+ * @param realm Realm to validate
+ * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
+ */
+int validate_realm_input(const char* realm) {
+  if (!realm) {
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Use common validation utilities
+  validation_result_t result = validate_string("realm", realm, 1, HTTP_MAX_REALM_LEN - 1, 0);
+  if (!validation_is_valid(&result)) {
+    platform_log_warning("Invalid realm: %s", validation_get_error_message(&result));
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Check for injection patterns
+  if (security_detect_sql_injection(realm) || security_detect_xss_attack(realm)) {
+    platform_log_warning("Realm contains injection patterns: %s", realm);
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Check for valid characters (printable ASCII, no quotes)
+  for (const char* p = realm; *p; p++) {
+    if (*p < 32 || *p > 126 || *p == '"' || *p == '\\') {
+      platform_log_warning("Realm contains invalid character '%c': %s", *p, realm);
+      return ONVIF_VALIDATION_FAILED;
+    }
+  }
+
+  return ONVIF_VALIDATION_SUCCESS;
+}
+
+/**
+ * @brief Sanitize and validate Base64 encoded credentials
+ * @param encoded Base64 encoded string
+ * @param decoded Buffer for decoded data
+ * @param decoded_size Size of decoded buffer
+ * @return ONVIF_VALIDATION_SUCCESS if valid, ONVIF_VALIDATION_FAILED if invalid
+ */
+int validate_and_decode_base64(const char* encoded, char* decoded, size_t decoded_size) {
+  if (!encoded || !decoded || decoded_size == 0) {
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Validate Base64 format
+  size_t encoded_len = strnlen(encoded, HTTP_MAX_AUTH_HEADER_LEN);
+  if (encoded_len == 0) {
+    platform_log_warning("Empty Base64 encoded string");
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Decode using secure Base64 utility (includes character validation)
+  if (onvif_util_base64_decode(encoded, decoded, decoded_size) != ONVIF_SUCCESS) {
+    platform_log_warning("Failed to decode Base64 credentials");
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Validate decoded content
+  size_t decoded_len = strnlen(decoded, decoded_size);
+  if (decoded_len == 0) {
+    platform_log_warning("Empty decoded credentials");
+    return ONVIF_VALIDATION_FAILED;
+  }
+
+  // Check for null bytes in decoded content
+  for (size_t i = 0; i < decoded_len; i++) {
+    if (decoded[i] == '\0' && i < decoded_len - 1) {
+      platform_log_warning("Null byte found in decoded credentials at position %zu", i);
+      return ONVIF_VALIDATION_FAILED;
+    }
+  }
+
+  return ONVIF_VALIDATION_SUCCESS;
 }

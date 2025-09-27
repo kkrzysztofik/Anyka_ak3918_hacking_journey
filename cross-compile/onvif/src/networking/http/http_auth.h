@@ -97,6 +97,7 @@ int http_auth_parse_basic_credentials(const char* auth_header, char* username, c
 int http_auth_verify_credentials(const char* username, const char* password,
                                  const char* config_username, const char* config_password);
 
+
 /**
  * @brief Create HTTP 401 Unauthorized response with WWW-Authenticate header
  * @param auth_config Authentication configuration
