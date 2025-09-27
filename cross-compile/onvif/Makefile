@@ -17,6 +17,8 @@
 #   make lint-dry-run       - Show what would be linted (dry run)
 #   make lint-format        - Lint with format checking
 #   make lint-errors        - Check for errors only
+#   make format             - Format all C source files
+#   make format-check       - Check if files are properly formatted
 #
 # Examples:
 #   make debug              - Automatically enables debug build with symbols
@@ -184,8 +186,10 @@ snyk-analyze:
 
 # Generate compile_commands.json for clangd
 compile-commands:
-	@echo "Generating compile_commands.json for clangd..."
+	@echo "Generating compile_commands.json for main project..."
 	@./scripts/generate_compile_commands.sh
+	@echo "Generating compile_commands.json for test files..."
+	@$(MAKE) -C tests compile-commands
 
 # Code formatting targets
 format:

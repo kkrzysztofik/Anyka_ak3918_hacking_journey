@@ -85,6 +85,17 @@ IncludeBlocks: Regroup
 SortIncludes: CaseSensitive
 SortUsingDeclarations: true
 
+# Include categories for proper separation
+IncludeCategories:
+  - Regex: '^<.*\.h>'
+    Priority: 1
+  - Regex: '^<.*>'
+    Priority: 2
+  - Regex: '^"include/.*"'
+    Priority: 3
+  - Regex: '^".*"'
+    Priority: 4
+
 # Comments
 ReflowComments: true
 CommentPragmas: '^ IWYU pragma:'

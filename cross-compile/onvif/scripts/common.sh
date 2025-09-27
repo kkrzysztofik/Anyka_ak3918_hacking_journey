@@ -74,7 +74,7 @@ find_specific_files() {
 }
 
 find_all_c_files() {
-    find "$PROJECT_ROOT/src" \( -name "*.c" -o -name "*.h" \) -print0 2>/dev/null | \
+    find "$PROJECT_ROOT/src" "$PROJECT_ROOT/tests" \( -name "*.c" -o -name "*.h" \) -print0 2>/dev/null | \
         while IFS= read -r -d '' file; do
             echo "$file"
         done
@@ -93,7 +93,7 @@ find_c_files() {
 # =============================================================================
 
 is_generated_file() {
-    [[ "$1" == *"/generated/"* ]]
+    [[ "$1" == *"/generated/"* ]] || [[ "$1" == *"/build_native/"* ]]
 }
 
 get_relative_path() {
