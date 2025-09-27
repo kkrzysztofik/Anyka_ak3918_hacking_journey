@@ -55,17 +55,39 @@ open $DEVICE_IP
 user $USERNAME $PASSWORD
 binary
 cd $SOURCE_DIR
-ls -la core*
+ls -la
 quit
 EOF
 
 echo "Searching for core dumps on device..."
 
 # List core dumps on device with better error handling
+# First try to get the raw listing to debug
+echo "Raw FTP listing:"
+ftp -n < /tmp/ftp_list_cores.txt 2>/dev/null || echo "FTP command failed"
+
+echo ""
+echo "Processing core dump files..."
+
+# Improved pattern matching for core dumps
 CORE_FILES=$(ftp -n < /tmp/ftp_list_cores.txt 2>/dev/null | grep -E "core\." | awk '{print $9}' | grep -v "^$" || true)
+
+# If the above doesn't work, try alternative patterns
+if [ -z "$CORE_FILES" ]; then
+    echo "Trying alternative pattern matching..."
+    CORE_FILES=$(ftp -n < /tmp/ftp_list_cores.txt 2>/dev/null | grep -E "core" | awk '{print $9}' | grep -v "^$" || true)
+fi
+
+# If still no files, try without awk (in case of different ls output format)
+if [ -z "$CORE_FILES" ]; then
+    echo "Trying without awk processing..."
+    CORE_FILES=$(ftp -n < /tmp/ftp_list_cores.txt 2>/dev/null | grep -E "core" | sed 's/.*[[:space:]]//' | grep -v "^$" || true)
+fi
 
 if [ -z "$CORE_FILES" ]; then
     echo "No core dumps found on device"
+    echo "Available files in $SOURCE_DIR:"
+    ftp -n < /tmp/ftp_list_cores.txt 2>/dev/null | grep -v "^total" | grep -v "^$" || true
     rm -f /tmp/ftp_list_cores.txt
     exit 0
 fi

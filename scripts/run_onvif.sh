@@ -96,7 +96,7 @@ chmod +x "$FULL_BINARY_PATH"
 # Set up core dump handling
 echo "Configuring core dump handling..."
 ulimit -c unlimited
-echo "/tmp/core.%e.%p" > /proc/sys/kernel/core_pattern
+echo "/mnt/anyka_hack/onvif/core.%e.%p" > /proc/sys/kernel/core_pattern
 
 # Check available memory
 echo "System memory status:"
