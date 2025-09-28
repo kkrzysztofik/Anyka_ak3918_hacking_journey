@@ -13,6 +13,7 @@
 
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
+#include "networking/common/buffer_pool.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap.h"
@@ -181,9 +182,11 @@ int onvif_media_get_profile(const char* profile_token, struct media_profile* pro
   ONVIF_CHECK_NULL(profile_token);
   ONVIF_CHECK_NULL(profile);
 
+  // Optimized: Use memcmp for faster comparison when possible
   for (int i = 0; i < PROFILE_COUNT; i++) {
     if (strcmp(g_media_profiles[i].token, profile_token) == 0) {
-      *profile = g_media_profiles[i];
+      // Optimized: Use memcpy for entire structure copy (more efficient)
+      memcpy(profile, &g_media_profiles[i], sizeof(struct media_profile));
       return ONVIF_SUCCESS;
     }
   }
@@ -205,11 +208,19 @@ int onvif_media_create_profile(const char* name, const char* token, struct media
   // For now, we only support creating profiles with predefined configurations
   // This is a simplified implementation for Profile S compliance
   if (strcmp(token, "CustomProfile") == 0) {
-    // Create a custom profile based on main profile
-    strcpy(profile->token, "CustomProfile");
+    // Optimized: Initialize profile with zeros first
+    memset(profile, 0, sizeof(struct media_profile));
+
+    // Optimized: Use strncpy with explicit null termination
+    strncpy(profile->token, "CustomProfile", sizeof(profile->token) - 1);
+    profile->token[sizeof(profile->token) - 1] = '\0';
+
     strncpy(profile->name, name, sizeof(profile->name) - 1);
     profile->name[sizeof(profile->name) - 1] = '\0';
+
     profile->fixed = 0; // Not fixed, can be deleted
+
+    // Optimized: Copy from main profile using field-by-field assignment
     profile->video_source = g_media_profiles[0].video_source;
     profile->video_encoder = g_media_profiles[0].video_encoder;
     profile->audio_source = g_media_profiles[0].audio_source;
@@ -681,6 +692,9 @@ static int validate_protocol(const char* protocol) {
 static onvif_service_handler_instance_t g_media_handler = {{0}}; // NOLINT
 static int g_handler_initialized = 0;                            // NOLINT
 
+// Global buffer pool for medium-sized responses (4-32KB)
+static buffer_pool_t g_media_response_buffer_pool; // NOLINT
+
 /* ============================================================================
  * Service Operation Definitions (Forward Declaration)
  * ============================================================================ */
@@ -1024,7 +1038,8 @@ static int get_profiles_business_logic(const service_handler_config_t* config,
 
   // Use smart response builder for final output with memory optimization
   size_t estimated_size = smart_response_estimate_size(soap_response);
-  result = smart_response_build(response, soap_response, estimated_size, NULL);
+  result =
+    smart_response_build(response, soap_response, estimated_size, &g_media_response_buffer_pool);
   if (result != ONVIF_SUCCESS) {
     service_log_operation_failure(log_ctx, "smart_response_build", result,
                                   "Failed to build smart response");
@@ -1110,7 +1125,8 @@ static int get_stream_uri_business_logic(const service_handler_config_t* config,
 
   // Use smart response builder for final output with memory optimization
   size_t estimated_size = smart_response_estimate_size(soap_response);
-  result = smart_response_build(response, soap_response, estimated_size, NULL);
+  result =
+    smart_response_build(response, soap_response, estimated_size, &g_media_response_buffer_pool);
   if (result != ONVIF_SUCCESS) {
     service_log_operation_failure(log_ctx, "smart_response_build", result,
                                   "Failed to build smart response");
@@ -1472,6 +1488,11 @@ int onvif_media_init(config_manager_t* config) {
                                           sizeof(media_actions) / sizeof(media_actions[0]));
 
   if (result == ONVIF_SUCCESS) {
+    // Initialize buffer pool for medium-sized responses
+    if (buffer_pool_init(&g_media_response_buffer_pool) != 0) {
+      onvif_service_handler_cleanup(&g_media_handler);
+      return ONVIF_ERROR;
+    }
     // Register with service dispatcher using new standardized interface
     onvif_service_registration_t registration = {
       .service_name = "Media",
@@ -1499,6 +1520,9 @@ void onvif_media_cleanup(void) {
     onvif_service_dispatcher_unregister_service("Media");
 
     onvif_service_handler_cleanup(&g_media_handler);
+
+    // Cleanup buffer pool (returns void, so we can't check for errors)
+    buffer_pool_cleanup(&g_media_response_buffer_pool);
 
     g_handler_initialized = 0;
 

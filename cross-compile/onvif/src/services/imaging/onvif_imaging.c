@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "core/config/config.h"
+#include "networking/common/buffer_pool.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
@@ -28,6 +29,7 @@
 #include "utils/logging/logging_utils.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
+#include "utils/memory/smart_response_builder.h"
 #include "utils/validation/common_validation.h"
 
 static struct auto_daynight_config g_imaging_auto_config;           // NOLINT
@@ -42,6 +44,9 @@ static struct {
   onvif_gsoap_context_t* gsoap_ctx;
 } g_imaging_handler = {0};            // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 static int g_handler_initialized = 0; // NOLINT
+
+// Buffer pool for imaging service responses
+static buffer_pool_t g_imaging_response_buffer_pool; // NOLINT
 
 /* ============================================================================
  * Constants and Definitions
@@ -68,23 +73,11 @@ static int g_handler_initialized = 0; // NOLINT
 #define IMAGING_VPSS_HUE_MULTIPLIER     50
 #define IMAGING_VPSS_HUE_DIVISOR        180
 
-/* Buffer Size Constants */
-#define IMAGING_RESPONSE_BUFFER_SIZE 4096
-#define IMAGING_SETTINGS_BUFFER_SIZE 1024
-#define IMAGING_OPTIONS_BUFFER_SIZE  2048
-#define IMAGING_TOKEN_BUFFER_SIZE    32
-#define IMAGING_VALUE_BUFFER_SIZE    16
+/* Token parsing constants */
+#define IMAGING_TOKEN_BUFFER_SIZE 32
 
 /* HTTP Status Constants */
 #define IMAGING_HTTP_STATUS_OK 200
-
-/* XML Tag Constants */
-#define IMAGING_XML_BRIGHTNESS_TAG  "<tt:Brightness>"
-#define IMAGING_XML_CONTRAST_TAG    "<tt:Contrast>"
-#define IMAGING_XML_SATURATION_TAG  "<tt:ColorSaturation>"
-#define IMAGING_XML_SHARPNESS_TAG   "<tt:Sharpness>"
-#define IMAGING_XML_HUE_TAG         "<tt:Hue>"
-#define IMAGING_XML_VIDEO_TOKEN_TAG "<VideoSourceToken>"
 
 /* Legacy constants for backward compatibility */
 #define DEFAULT_DAY_TO_NIGHT_LUM IMAGING_DAY_TO_NIGHT_LUM_DEFAULT
@@ -624,6 +617,13 @@ int onvif_imaging_service_init(config_manager_t* config) {
     return ONVIF_ERROR;
   }
 
+  if (buffer_pool_init(&g_imaging_response_buffer_pool) != 0) {
+    onvif_gsoap_cleanup(g_imaging_handler.gsoap_ctx);
+    ONVIF_FREE(g_imaging_handler.gsoap_ctx);
+    g_imaging_handler.gsoap_ctx = NULL;
+    return ONVIF_ERROR;
+  }
+
   g_handler_initialized = 1;
 
   // Register with standardized service dispatcher
@@ -658,6 +658,8 @@ void onvif_imaging_service_cleanup(void) {
     ONVIF_FREE(g_imaging_handler.gsoap_ctx);
     g_imaging_handler.gsoap_ctx = NULL;
   }
+
+  buffer_pool_cleanup(&g_imaging_response_buffer_pool);
 
   g_handler_initialized = 0;
 
@@ -712,37 +714,24 @@ static int handle_get_imaging_settings(const service_handler_config_t* config,
     return error_handle_system(&error_ctx, result, "get_imaging_settings", response);
   }
 
-  // Generate basic SOAP response
-  const char* soap_response =
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" "
-    "xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
-    "  <soap:Body>\n"
-    "    <tt:GetImagingSettingsResponse>\n"
-    "      <tt:ImagingSettings>\n"
-    "        <tt:Brightness>" IMAGING_XML_BRIGHTNESS_TAG "%d</tt:Brightness>\n"
-    "        <tt:Contrast>" IMAGING_XML_CONTRAST_TAG "%d</tt:Contrast>\n"
-    "        <tt:ColorSaturation>" IMAGING_XML_SATURATION_TAG "%d</tt:ColorSaturation>\n"
-    "        <tt:Sharpness>" IMAGING_XML_SHARPNESS_TAG "%d</tt:Sharpness>\n"
-    "        <tt:Hue>" IMAGING_XML_HUE_TAG "%d</tt:Hue>\n"
-    "      </tt:ImagingSettings>\n"
-    "    </tt:GetImagingSettingsResponse>\n"
-    "  </soap:Body>\n"
-    "</soap:Envelope>";
-
-  // Calculate response size
-  size_t response_size = snprintf(NULL, 0, soap_response, settings.brightness, settings.contrast,
-                                  settings.saturation, settings.sharpness, settings.hue) +
-                         1;
-
-  // Allocate and generate response
-  response->body = ONVIF_MALLOC(response_size);
-  if (!response->body) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "malloc_response_body", response);
+  // Generate SOAP response with gSOAP and smart response builder
+  imaging_settings_callback_data_t callback_data = {.settings = &settings};
+  result = onvif_gsoap_generate_response_with_callback(
+    gsoap_ctx, imaging_settings_response_callback, &callback_data);
+  if (result != ONVIF_SUCCESS) {
+    return error_handle_system(&error_ctx, result, "generate_imaging_settings_response", response);
   }
 
-  (void)snprintf(response->body, response_size, soap_response, settings.brightness,
-                 settings.contrast, settings.saturation, settings.sharpness, settings.hue);
+  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
+  if (!soap_response) {
+    return error_handle_system(&error_ctx, ONVIF_ERROR, "get_response_data", response);
+  }
+
+  size_t estimated_size = smart_response_estimate_size(soap_response);
+  if (smart_response_build(response, soap_response, estimated_size,
+                           &g_imaging_response_buffer_pool) != ONVIF_SUCCESS) {
+    return error_handle_system(&error_ctx, ONVIF_ERROR, "smart_response_build", response);
+  }
 
   // Set response headers
   response->status_code = IMAGING_HTTP_STATUS_OK;
@@ -799,25 +788,24 @@ static int handle_set_imaging_settings(const service_handler_config_t* config,
     return error_handle_system(&error_ctx, result, "set_imaging_settings", response);
   }
 
-  // Generate basic SOAP response
-  const char* soap_response =
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" "
-    "xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
-    "  <soap:Body>\n"
-    "    <tt:SetImagingSettingsResponse>\n"
-    "    </tt:SetImagingSettingsResponse>\n"
-    "  </soap:Body>\n"
-    "</soap:Envelope>";
-
-  // Allocate and generate response
-  size_t response_size = strlen(soap_response) + 1;
-  response->body = ONVIF_MALLOC(response_size);
-  if (!response->body) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "malloc_response_body", response);
+  // Generate SOAP response with gSOAP and smart response builder
+  set_imaging_settings_callback_data_t callback_data = {.message = NULL};
+  result = onvif_gsoap_generate_response_with_callback(
+    gsoap_ctx, set_imaging_settings_response_callback, &callback_data);
+  if (result != ONVIF_SUCCESS) {
+    return error_handle_system(&error_ctx, result, "generate_set_imaging_response", response);
   }
 
-  strcpy(response->body, soap_response);
+  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
+  if (!soap_response) {
+    return error_handle_system(&error_ctx, ONVIF_ERROR, "get_response_data", response);
+  }
+
+  size_t estimated_size = smart_response_estimate_size(soap_response);
+  if (smart_response_build(response, soap_response, estimated_size,
+                           &g_imaging_response_buffer_pool) != ONVIF_SUCCESS) {
+    return error_handle_system(&error_ctx, ONVIF_ERROR, "smart_response_build", response);
+  }
 
   // Set response headers
   response->status_code = IMAGING_HTTP_STATUS_OK;
