@@ -84,9 +84,9 @@ verbose_log() {
 # System state validation
 validate_system_state() {
   local errors=0
-  
+
   debug_log "Validating system state..."
-  
+
   # Check essential directories
   for dir in /proc /sys /dev /mnt; do
     if [ ! -d "$dir" ]; then
@@ -96,7 +96,7 @@ validate_system_state() {
       debug_log "Directory OK: $dir"
     fi
   done
-  
+
   # Check essential files
   for file in /proc/stat /proc/meminfo /proc/loadavg; do
     if [ ! -r "$file" ]; then
@@ -106,12 +106,12 @@ validate_system_state() {
       debug_log "File OK: $file"
     fi
   done
-  
+
   # Check log directory
   if ! validate_directory_writable "$LOG_DIR" "log directory"; then
     errors=$((errors + 1))
   fi
-  
+
   if [ $errors -eq 0 ]; then
     debug_log "System state validation passed"
     return 0
@@ -133,16 +133,16 @@ log() {
   #   MESSAGE - Message to log (can be multiple arguments)
   # Returns: 0 on success, 1 on error
   # Notes: DEBUG messages are suppressed unless DEBUG=1 environment variable is set
-  
+
   local lvl="$1"
   shift || true
   local ts=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date)
-  
+
   # Conditionally suppress DEBUG unless DEBUG=1
   if [ "$lvl" = "DEBUG" ] && [ "${DEBUG:-0}" != 1 ]; then
     return 0
   fi
-  
+
   printf '%s [%s] [%s] %s\n' "$ts" "$lvl" "$SCRIPT_NAME" "$*" >> "$LOG_DIR/$LOG_FILE"
 }
 
@@ -159,7 +159,7 @@ validate_file_exists() {
   # validate_file_exists <file_path> <description>
   local file_path="$1"
   local description="${2:-file}"
-  
+
   if [ ! -f "$file_path" ]; then
     log ERROR "$description not found: $file_path"
     return 1
@@ -171,12 +171,12 @@ validate_directory_writable() {
   # validate_directory_writable <dir_path> <description>
   local dir_path="$1"
   local description="${2:-directory}"
-  
+
   if [ ! -d "$dir_path" ]; then
     log ERROR "$description does not exist: $dir_path"
     return 1
   fi
-  
+
   if [ ! -w "$dir_path" ]; then
     log ERROR "$description is not writable: $dir_path"
     return 1
@@ -187,13 +187,14 @@ validate_directory_writable() {
 validate_required_vars() {
   # validate_required_vars <var1> [var2] [var3] ...
   local missing_vars=""
-  
+
   for var in "$@"; do
-    if [ -z "${!var}" ]; then
+    eval "value=\$$var"
+    if [ -z "$value" ]; then
       missing_vars="${missing_vars}${missing_vars:+ }$var"
     fi
   done
-  
+
   if [ -n "$missing_vars" ]; then
     log ERROR "Required configuration variables not set: $missing_vars"
     return 1
@@ -205,32 +206,33 @@ validate_configuration() {
   local config_file="$1"
   local required_vars="$2"
   local errors=0
-  
+
   debug_log "Validating configuration from $config_file"
-  
+
   # Check if config file exists and is readable
   if [ ! -f "$config_file" ]; then
     log WARN "Configuration file not found: $config_file"
     return 1
   fi
-  
+
   if [ ! -r "$config_file" ]; then
     log ERROR "Configuration file not readable: $config_file"
     return 1
   fi
-  
+
   # Validate required variables
   if [ -n "$required_vars" ]; then
     for var in $required_vars; do
-      if [ -z "${!var}" ]; then
+      eval "value=\$$var"
+      if [ -z "$value" ]; then
         log ERROR "Required configuration variable not set: $var"
         errors=$((errors + 1))
       else
-        debug_log "Configuration OK: $var=${!var}"
+        debug_log "Configuration OK: $var=$value"
       fi
     done
   fi
-  
+
   if [ $errors -eq 0 ]; then
     debug_log "Configuration validation passed"
     return 0
@@ -249,12 +251,12 @@ safe_copy() {
   local src="$1"
   local dest="$2"
   local description="${3:-file}"
-  
+
   if [ ! -f "$src" ]; then
     log ERROR "Source $description not found: $src"
     return 1
   fi
-  
+
   if cp "$src" "$dest" 2>/dev/null; then
     log INFO "Successfully copied $description: $src -> $dest"
     return 0
@@ -268,7 +270,7 @@ safe_mkdir() {
   # safe_mkdir <dir_path> <description>
   local dir_path="$1"
   local description="${2:-directory}"
-  
+
   if mkdir -p "$dir_path" 2>/dev/null; then
     log INFO "Successfully created $description: $dir_path"
     return 0
@@ -285,11 +287,11 @@ safe_mkdir() {
 load_camera_modules() {
   # load_camera_modules [sensor_module_path]
   local sensor_module="$1"
-  
+
   if [ -n "$sensor_module" ] && [ -f "$sensor_module" ]; then
     insmod "$sensor_module" 2>/dev/null || log DEBUG "Module $sensor_module may already be loaded"
   fi
-  
+
   for m in /usr/modules/akcamera.ko /usr/modules/ak_info_dump.ko; do
     [ -f "$m" ] && insmod "$m" 2>/dev/null || log DEBUG "Module $m may already be loaded"
   done
@@ -298,15 +300,15 @@ load_camera_modules() {
 ensure_mounted_sd() {
   # Attempt to mount SD card RW if not already mounted at /mnt
   mount | grep -q ' /mnt ' && return 0
-  
+
   if [ -e /dev/mmcblk0p1 ]; then
     mount -rw /dev/mmcblk0p1 /mnt 2>/dev/null && log INFO "Mounted /dev/mmcblk0p1 to /mnt" && return 0
   fi
-  
+
   if [ -e /dev/mmcblk0 ]; then
     mount -rw /dev/mmcblk0 /mnt 2>/dev/null && log INFO "Mounted /dev/mmcblk0 to /mnt" && return 0
   fi
-  
+
   log WARN "SD card mount attempt failed"
   return 1
 }
@@ -334,7 +336,7 @@ readline() {
 is_process_running() {
   local pid_file="$1"
   local process_name="$2"
-  
+
   if [ -f "$pid_file" ]; then
     local pid=$(cat "$pid_file" 2>/dev/null)
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
@@ -345,7 +347,7 @@ is_process_running() {
       rm -f "$pid_file" 2>/dev/null
     fi
   fi
-  
+
   debug_log "$process_name is not running"
   return 1
 }
@@ -354,11 +356,11 @@ report_service_status() {
   local service_name="$1"
   local pid_file="$2"
   local log_file="$3"
-  
+
   if is_process_running "$pid_file" "$service_name"; then
     local pid=$(cat "$pid_file" 2>/dev/null)
     log INFO "$service_name is running (pid=$pid)"
-    
+
     if [ -n "$log_file" ] && [ -f "$log_file" ]; then
       local log_size=$(wc -c < "$log_file" 2>/dev/null || echo "0")
       debug_log "$service_name log file size: ${log_size} bytes"

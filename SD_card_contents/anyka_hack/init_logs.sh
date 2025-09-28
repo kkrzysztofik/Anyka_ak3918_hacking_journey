@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/bin/sh
 
 # init_logs.sh - Initialize log directories and ensure they exist
 # This script should be called early in the boot process to ensure consistent logging

@@ -12,6 +12,10 @@ LOG_FILE=ffmpeg_restarter.log
 
 restart_app() {
   log INFO 'Attempting to (re)start libre_anyka_app'
+
+  # Create temporary directory for PID files
+  mkdir -p /mnt/tmp 2>/dev/null || true
+
   if [ -f /usr/bin/ptz_daemon_dyn ]; then
     SD_detect=$(mount | grep mmcblk0p1)
     if [ ${#SD_detect} -eq 0 ]; then
@@ -19,10 +23,14 @@ restart_app() {
       log WARN 'SD card not mounted; disabling recording'
     fi
     libre_anyka_app -w "$image_width" -h "$image_height" -m "$md_record_sec" $extra_args &
+    APP_PID=$!
+    echo $APP_PID > /mnt/tmp/libre_anyka_app.pid 2>/dev/null
   else
     /mnt/anyka_hack/libre_anyka_app/run_libre_anyka_app.sh &
+    APP_PID=$!
+    echo $APP_PID > /mnt/tmp/libre_anyka_app.pid 2>/dev/null
   fi
-  log INFO "Restart issued pid=$!"
+  log INFO "Restart issued pid=$APP_PID"
 }
 
 check_app() {

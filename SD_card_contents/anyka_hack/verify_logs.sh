@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/bin/sh
 
 # verify_logs.sh - Verify that the logging directory structure is set up correctly
 # Usage: ./verify_logs.sh

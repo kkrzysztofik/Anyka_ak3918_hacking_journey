@@ -11,6 +11,10 @@ LOG_FILE=wrap_mp4.log
 restart_app() {
   [ -f /data/gergesettings.txt ] && . /data/gergesettings.txt
   log INFO 'Restarting libre_anyka_app after wrapping (disabled by default)'
+
+  # Create temporary directory for PID files
+  mkdir -p /mnt/tmp 2>/dev/null || true
+
   if [ -f /usr/bin/ptz_daemon_dyn ]; then
     SD_detect=$(mount | grep mmcblk0p1)
     if [ ${#SD_detect} -eq 0 ]; then
@@ -18,10 +22,14 @@ restart_app() {
       log WARN 'SD card not mounted; disabling recording'
     fi
     libre_anyka_app -w "$image_width" -h "$image_height" -m "$md_record_sec" $extra_args &
+    APP_PID=$!
+    echo $APP_PID > /mnt/tmp/libre_anyka_app.pid 2>/dev/null
   else
     /mnt/anyka_hack/libre_anyka_app/run_libre_anyka_app.sh &
+    APP_PID=$!
+    echo $APP_PID > /mnt/tmp/libre_anyka_app.pid 2>/dev/null
   fi
-  log INFO "Restarted libre_anyka_app pid=$!"
+  log INFO "Restarted libre_anyka_app pid=$APP_PID"
 }
 
 stop_app() {
@@ -34,7 +42,7 @@ stop_app() {
 
 stop_app
 h264files=$(ls /mnt/video_encode/*.str 2>/dev/null)
-mkdir -p /mnt/anyka_hack/web_interface/www/video
+mkdir -p /mnt/anyka_hack/web_interface/www/video 2>/dev/null || true
 
 for i in $h264files; do
   filename="${i%.str}"
