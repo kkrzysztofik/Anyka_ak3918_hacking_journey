@@ -322,5 +322,122 @@
   - Monitor performance and stability
   - Purpose: Final production validation
   - _Leverage: SD card deployment workflow_
-  - _Requirements: 1, 2, 4, 5, 6, 7, 8, 9, 10
-  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Production Validation Engineer | Task: Perform hardware validation to ensure unified logging is production-ready | Restrictions: Test on Anyka hardware, monitor memory/CPU usage | Success: Hardware tests pass with logging functioning and no regressions_
+  - _Requirements: 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Production Validation Engineer | Task: Perform hardware validation to ensure unified logging and error handling are production-ready | Restrictions: Test on Anyka hardware, monitor memory/CPU usage | Success: Hardware tests pass with diagnostics functioning and no regressions_
+
+- [ ] 36. Create error handling API header
+  - File: src/utils/error/error_manager.h
+  - Define unified error context, result types, and public functions
+  - Document correlation, protocol mapping, and metrics hooks
+  - Purpose: Establish canonical error handling interface
+  - _Leverage: src/utils/error/error_handling.h, src/utils/logging/logging.h_
+  - _Requirements: 11, 13
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Embedded Diagnostics Architect | Task: Design the public error handling header with context/result structs and API prototypes covering requirements 11 and 13 | Restrictions: Follow include-order rules, reuse existing error enums, add full Doxygen documentation | Success: Header compiles, exposes required types, and passes linting_
+
+- [ ] 37. Implement error pattern registry and context lifecycle
+  - File: src/utils/error/error_manager.c
+  - Provide pattern lookup, context init, and result construction logic
+  - Integrate correlation ID generation and logging hooks
+  - Purpose: Deliver reusable engine for structured error creation
+  - _Leverage: src/utils/error/error_manager.h, src/utils/logging/logging.h_
+  - _Requirements: 11, 13
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Systems Programmer | Task: Build the error manager core covering pattern registry, context lifecycle, and correlation emission per requirements 11 and 13 | Restrictions: No heap allocations for steady-state paths, respect thread safety, reuse sanitization helpers | Success: Core functions return expected results and emit correlated logs_
+
+- [ ] 38. Build protocol response adapter
+  - File: src/utils/error/error_protocol.c, src/utils/error/error_protocol.h
+  - Convert error_result_t into HTTP responses and SOAP faults
+  - Reuse unified sanitization for payload detail
+  - Purpose: Guarantee consistent protocol outputs across services
+  - _Leverage: src/utils/error/error_manager.h, src/protocol/gsoap/onvif_gsoap.h_
+  - _Requirements: 12, 13
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Network Protocol Engineer | Task: Implement the protocol adapter translating error results to HTTP/SOAP responses for requirements 12 and 13 | Restrictions: Avoid duplicate gSOAP contexts, enforce correlation IDs in payloads, keep formatting thread-safe | Success: Adapter returns correct status codes and ONVIF-compliant faults_
+
+- [ ] 39. Integrate error metrics and throttling
+  - File: src/utils/error/error_metrics.c, src/utils/error/error_metrics.h
+  - Implement per-pattern counters with saturation and throttled warnings
+  - Expose snapshot API for future telemetry exporters
+  - Purpose: Provide observability backing for correlated diagnostics
+  - _Leverage: src/utils/error/error_manager.h, src/utils/logging/logging.h_
+  - _Requirements: 13
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Reliability Engineer | Task: Develop error metrics counters and throttling hooks addressing requirement 13 | Restrictions: Use lock-free atomics where available, otherwise guard with existing mutex patterns, document throttling policy | Success: Metrics API compiles, counters saturate safely, throttled warnings verified_
+
+- [ ] 40. Update logging core with correlated error hooks
+  - File: src/utils/logging/logging.c
+  - Ensure error_record_emit invokes log pipelines with correlation IDs
+  - Provide helper to map error severity to log levels
+  - Purpose: Tie logging and error flows into a single diagnostics fabric
+  - _Leverage: src/utils/error/error_manager.h_
+  - _Requirements: 11, 13
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Diagnostics Integration Developer | Task: Extend the logging core so error handling uses unified logging with correlation identifiers as required by 11 and 13 | Restrictions: Maintain performance constraints, avoid recursion between logging and error modules, document helper behaviour | Success: Correlated logs appear once per error event without deadlocks_
+
+- [ ] 41. Replace legacy error helpers in services
+  - File: src/services/**/ (multiple)
+  - Swap `error_handle_*` and inline HTTP/SOAP builders with new API
+  - Wire correlation IDs through service workflows
+  - Purpose: Complete migration path for runtime error handling
+  - _Leverage: src/utils/error/error_manager.h, src/utils/error/error_protocol.h_
+  - _Requirements: 11, 12, 14
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Service Maintenance Engineer | Task: Refactor ONVIF services to use the unified error handling API per requirements 11, 12, and 14 | Restrictions: Preserve existing error semantics, update unit tests alongside changes, annotate complex mappings with comments | Success: Services compile and emit standardized responses with correlation IDs_
+
+- [ ] 42. Refactor gSOAP diagnostics integration
+  - File: src/protocol/gsoap/onvif_gsoap.c, src/protocol/gsoap/onvif_gsoap.h
+  - Replace platform logging/error helpers with unified APIs and correlation IDs
+  - Ensure SOAP faults originate from error_protocol adapter with sanitised payloads
+  - Purpose: Align gSOAP transport with unified diagnostics system
+  - _Leverage: src/utils/error/error_protocol.h, src/utils/logging/logging.h_
+  - _Requirements: 11, 12, 13, 14
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Protocol Diagnostics Engineer | Task: Refactor onvif_gsoap diagnostics to consume the unified logging and error APIs, enforcing correlation IDs and sanitised SOAP faults per requirements 11, 12, 13, 14 | Restrictions: Remove direct platform_log_* usage, avoid duplicating fault builders, keep gSOAP allocations bounded | Success: gSOAP code compiles with new APIs and emits correlated faults_
+
+- [ ] 43. Update HTTP server diagnostics pipeline
+  - File: src/networking/http/http_server.c, src/networking/http/http_server.h
+  - Replace service logging/error helpers with unified logging and error manager
+  - Connect HTTP responses to error_protocol adapter and metrics layer
+  - Purpose: Ensure HTTP ingress uses consistent diagnostics for ONVIF services
+  - _Leverage: src/utils/error/error_manager.h, src/utils/error/error_protocol.h, src/utils/logging/logging.h_
+  - _Requirements: 11, 12, 13, 14
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Networking Diagnostics Developer | Task: Rework the HTTP server to use unified logging/error handling with correlation IDs and standardised HTTP responses for requirements 11-14 | Restrictions: Preserve existing request parsing, maintain thread safety, ensure throttled warning behaviour | Success: HTTP server build passes and emits unified logs/responses_
+
+- [ ] 44. Extend migration tooling for error handling
+  - File: tools/logging_migration.py
+  - Detect legacy error helper usage and rewrite to new API where possible
+  - Generate separate report section for manual follow-up
+  - Purpose: Automate bulk conversion of error code paths
+  - _Leverage: Existing migration script framework_
+  - _Requirements: 14, 11
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Automation Engineer | Task: Enhance the migration script to rewrite or flag legacy error handling patterns aligned with requirements 14 and 11 | Restrictions: Provide dry-run mode summaries, avoid destructive edits, keep regex patterns well-tested | Success: Script outputs revised error calls and comprehensive report_
+
+- [ ] 45. Run error handling migration and cleanup
+  - File: tools/logging_migration_report.md
+  - Execute enhanced tooling and resolve remaining manual conversions
+  - Document before/after status for each component
+  - Purpose: Certify that no legacy error helpers remain
+  - _Leverage: tools/logging_migration.py_
+  - _Requirements: 14
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Maintenance Engineer | Task: Apply the extended migration tooling and complete manual cleanup ensuring requirement 14 is satisfied | Restrictions: Verify builds after each batch, capture unresolved edge cases in the report, avoid regressions | Success: Report confirms zero legacy error usages and services compile_
+
+- [ ] 46. Create error handling unit tests
+  - File: tests/utils/test_error_manager.c
+  - Cover pattern lookup, correlation IDs, metrics saturation, and logging integration
+  - Stub gSOAP interactions to validate fallback behaviour
+  - Purpose: Provide high coverage for the new error API
+  - _Leverage: CMocka, existing logging test helpers_
+  - _Requirements: 11, 12, 13
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Unit Test Engineer | Task: Develop comprehensive unit tests for the error manager and protocol adapters targeting requirements 11, 12, and 13 | Restrictions: Avoid network I/O, use mocks for gSOAP, assert correlation data | Success: Tests pass and achieve coverage targets_
+
+- [ ] 47. Add integration tests for error responses
+  - File: tests/integration/error_response_tests.c
+  - Validate HTTP/SOAP outputs for representative error scenarios
+  - Confirm correlation IDs and sanitization in payloads
+  - Purpose: Ensure end-to-end compliance with unified error handling
+  - _Leverage: Integration test harness, RTSP/HTTP simulators_
+  - _Requirements: 12, 13, 14
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Integration Test Engineer | Task: Build integration tests verifying unified error handling across protocols for requirements 12, 13, and 14 | Restrictions: Keep tests deterministic, reuse existing fixtures, capture payload snapshots | Success: Integration tests pass and assert protocol correctness_
+
+- [ ] 48. Update documentation for error handling
+  - File: docs/ and Doxygen
+  - Add developer guide for new error API and correlation workflow
+  - Regenerate Doxygen to include error modules
+  - Purpose: Document unified diagnostics across logging and errors
+  - _Leverage: Existing documentation workflow_
+  - _Requirements: 11, 12, 13, 14
+  - _Prompt: Implement the task for spec logging-unification, first run spec-workflow-guide to get the workflow guide then implement the task: Role: Technical Documentation Specialist | Task: Extend documentation to cover unified error handling and correlation per requirements 11-14 | Restrictions: Maintain documentation standards, include migration notes, regenerate HTML | Success: Docs build cleanly and detail new diagnostics system_
