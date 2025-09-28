@@ -44,6 +44,38 @@
 #define HTTP_AUTH_FAILURE_CODE 401
 
 /* ============================================================================
+ * HTTP Status Codes
+ * ============================================================================
+ */
+
+/** @brief HTTP 200 OK */
+#define HTTP_STATUS_OK 200
+
+/** @brief HTTP 400 Bad Request */
+#define HTTP_STATUS_BAD_REQUEST 400
+
+/** @brief HTTP 401 Unauthorized */
+#define HTTP_STATUS_UNAUTHORIZED 401
+
+/** @brief HTTP 403 Forbidden */
+#define HTTP_STATUS_FORBIDDEN 403
+
+/** @brief HTTP 404 Not Found */
+#define HTTP_STATUS_NOT_FOUND 404
+
+/** @brief HTTP 408 Request Timeout */
+#define HTTP_STATUS_REQUEST_TIMEOUT 408
+
+/** @brief HTTP 507 Insufficient Storage */
+#define HTTP_STATUS_INSUFFICIENT_STORAGE 507
+
+/** @brief HTTP 503 Service Unavailable */
+#define HTTP_STATUS_SERVICE_UNAVAILABLE 503
+
+/** @brief HTTP 500 Internal Server Error */
+#define HTTP_STATUS_INTERNAL_SERVER_ERROR 500
+
+/* ============================================================================
  * SOAP/XML Parsing Constants
  * ============================================================================
  */

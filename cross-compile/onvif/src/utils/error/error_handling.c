@@ -12,13 +12,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "common/onvif_constants.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
-#include "protocol/gsoap/onvif_gsoap.h"
 
-/* SOAP Fault Codes */
-#define SOAP_FAULT_SENDER   "Sender"
-#define SOAP_FAULT_RECEIVER "Receiver"
+/* SOAP Fault Codes - using constants from common/onvif_constants.h */
 
 typedef struct {
   error_pattern_t pattern;
@@ -103,8 +101,13 @@ int error_handle_pattern(const error_context_t* context, error_pattern_t pattern
   // Log error
   error_log_with_context(context, &result, NULL);
 
-  // Generate SOAP fault response
-  return onvif_gsoap_generate_fault_response(response, SOAP_FAULT_SERVER, result.soap_fault_string);
+  // Set HTTP response for SOAP fault
+  response->status_code = HTTP_STATUS_INTERNAL_ERROR;
+  response->content_type = "application/soap+xml; charset=utf-8";
+  response->body = (char*)result.soap_fault_string;
+  response->body_length = strlen(result.soap_fault_string);
+
+  return ONVIF_SUCCESS;
 }
 
 int error_handle_validation(const error_context_t* context, int validation_result,

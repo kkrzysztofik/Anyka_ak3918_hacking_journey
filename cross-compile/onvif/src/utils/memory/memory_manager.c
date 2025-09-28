@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "error/error_handling.h"
 #include "platform/platform.h"
 
 /* ============================================================================
@@ -450,7 +451,7 @@ static size_t align_size(size_t size, size_t alignment) {
 int dynamic_buffer_init(dynamic_buffer_t* buffer, size_t initial_size) {
   if (!buffer) {
     platform_log_error("Dynamic Buffer: NULL buffer pointer");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Initialize buffer structure
@@ -468,7 +469,7 @@ int dynamic_buffer_init(dynamic_buffer_t* buffer, size_t initial_size) {
   buffer->data = ONVIF_MALLOC(initial_size);
   if (!buffer->data) {
     set_buffer_error(buffer, "Failed to allocate initial buffer of %zu bytes", initial_size);
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Initialize buffer state
@@ -491,18 +492,18 @@ int dynamic_buffer_init_custom(dynamic_buffer_t* buffer, size_t initial_size, si
                                size_t max_size) {
   if (!buffer) {
     platform_log_error("Dynamic Buffer: NULL buffer pointer");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Validate parameters
   if (growth_factor < 2) {
     platform_log_error("Dynamic Buffer: Invalid growth factor %zu", growth_factor);
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   if (max_size < initial_size) {
     platform_log_error("Dynamic Buffer: Max size %zu < initial size %zu", max_size, initial_size);
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Initialize with default settings first
@@ -550,12 +551,12 @@ void dynamic_buffer_reset(dynamic_buffer_t* buffer) {
 
 int dynamic_buffer_ensure_capacity(dynamic_buffer_t* buffer, size_t required_capacity) {
   if (!buffer || !(buffer->state & DYNAMIC_BUFFER_STATE_INITIALIZED)) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   if (buffer->state & DYNAMIC_BUFFER_STATE_READONLY) {
     set_buffer_error(buffer, "Cannot modify read-only buffer");
-    return -EPERM;
+    return ONVIF_ERROR_NOT_SUPPORTED;
   }
 
   // Check if we already have enough capacity
@@ -570,14 +571,14 @@ int dynamic_buffer_ensure_capacity(dynamic_buffer_t* buffer, size_t required_cap
   if (new_size < required_capacity) {
     set_buffer_error(buffer, "Required capacity %zu exceeds maximum size %zu", required_capacity,
                      DYNAMIC_BUFFER_MAX_SIZE);
-    return -ENOSPC;
+    return ONVIF_ERROR_MEMORY;
   }
 
   // Reallocate buffer using tracked memory
   char* new_data = ONVIF_REALLOC(buffer->data, new_size);
   if (!new_data) {
     set_buffer_error(buffer, "Failed to reallocate buffer to %zu bytes", new_size);
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Update buffer state
@@ -593,7 +594,7 @@ int dynamic_buffer_ensure_capacity(dynamic_buffer_t* buffer, size_t required_cap
 
 int dynamic_buffer_append(dynamic_buffer_t* buffer, const void* data, size_t length) {
   if (!buffer || !data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   if (length == 0) {
@@ -617,7 +618,7 @@ int dynamic_buffer_append(dynamic_buffer_t* buffer, const void* data, size_t len
 
 int dynamic_buffer_appendf(dynamic_buffer_t* buffer, const char* format, ...) {
   if (!buffer || !format) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Format the string into a temporary buffer
@@ -629,7 +630,7 @@ int dynamic_buffer_appendf(dynamic_buffer_t* buffer, const char* format, ...) {
 
   if (result < 0) {
     set_buffer_error(buffer, "Format string error");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Handle case where formatted string is larger than temp buffer
@@ -638,7 +639,7 @@ int dynamic_buffer_appendf(dynamic_buffer_t* buffer, const char* format, ...) {
     char* large_buffer = ONVIF_MALLOC(result + 1);
     if (!large_buffer) {
       set_buffer_error(buffer, "Failed to allocate temporary buffer for formatting");
-      return -ENOMEM;
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
 
     va_start(args, format);
@@ -794,14 +795,14 @@ int buffer_safe_snprintf(char* dest, size_t dest_size, const char* format, ...) 
 int buffer_validate_string(const char* str, size_t max_len, buffer_safety_flags_t flags) {
   if (!str) {
     g_buffer_safety_stats.failed_validations++;
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   size_t len = strlen(str);
   if (max_len > 0 && len > max_len) {
     platform_log_error("String too long: %zu > %zu", len, max_len);
     g_buffer_safety_stats.failed_validations++;
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Validate null termination
@@ -809,7 +810,7 @@ int buffer_validate_string(const char* str, size_t max_len, buffer_safety_flags_
     if (str[len] != '\0') {
       platform_log_error("String not null-terminated");
       g_buffer_safety_stats.failed_validations++;
-      return -EINVAL;
+      return ONVIF_ERROR_INVALID;
     }
   }
 
@@ -819,7 +820,7 @@ int buffer_validate_string(const char* str, size_t max_len, buffer_safety_flags_
       if (str[i] < 32 || str[i] > 126) {
         platform_log_error("Non-printable character at position %zu: %d", i, (int)str[i]);
         g_buffer_safety_stats.failed_validations++;
-        return -EINVAL;
+        return ONVIF_ERROR_INVALID;
       }
     }
   }

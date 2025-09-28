@@ -189,8 +189,8 @@ static int handle_get_snapshot_uri(const service_handler_config_t* config,
   int parse_result =
     onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, sizeof(profile_token));
   if (parse_result != ONVIF_SUCCESS) {
-    return onvif_gsoap_generate_fault_response(gsoap_ctx, SOAP_FAULT_SERVER,
-                                               "Invalid profile token");
+    return onvif_gsoap_generate_fault_response(gsoap_ctx, "soap:Server", "Invalid profile token",
+                                               NULL, NULL, NULL, 0);
   }
 
   // Get snapshot URI using existing function
@@ -198,8 +198,8 @@ static int handle_get_snapshot_uri(const service_handler_config_t* config,
   int result = onvif_snapshot_get_uri(profile_token, &uri);
 
   if (result != ONVIF_SUCCESS) {
-    return onvif_gsoap_generate_fault_response(gsoap_ctx, SOAP_FAULT_SERVER,
-                                               "Internal server error");
+    return onvif_gsoap_generate_fault_response(gsoap_ctx, "soap:Server", "Internal server error",
+                                               NULL, NULL, NULL, 0);
   }
 
   // Generate simple SOAP response
@@ -225,15 +225,16 @@ static int handle_get_snapshot_uri(const service_handler_config_t* config,
              uri.invalid_after_reboot ? "true" : "false", uri.timeout);
 
   if (response_len >= (int)sizeof(response_buffer)) {
-    return onvif_gsoap_generate_fault_response(gsoap_ctx, SOAP_FAULT_SERVER, "Response too large");
+    return onvif_gsoap_generate_fault_response(gsoap_ctx, "soap:Server", "Response too large", NULL,
+                                               NULL, NULL, 0);
   }
 
   // Allocate response buffer if not already allocated
   if (!response->body) {
     response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
     if (!response->body) {
-      return onvif_gsoap_generate_fault_response(gsoap_ctx, SOAP_FAULT_SERVER,
-                                                 "Memory allocation failed");
+      return onvif_gsoap_generate_fault_response(gsoap_ctx, "soap:Server",
+                                                 "Memory allocation failed", NULL, NULL, NULL, 0);
     }
   }
 

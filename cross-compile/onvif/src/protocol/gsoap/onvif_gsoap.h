@@ -773,13 +773,39 @@ int onvif_gsoap_extract_operation_name(const char* request_data, size_t request_
  */
 
 /**
- * @brief Generate SOAP fault response
- * @param ctx Pointer to gSOAP context structure
- * @param fault_code Fault code
- * @param fault_string Fault string message
+ * @brief Callback data structure for SOAP fault response
+ */
+typedef struct {
+  char fault_code[64];    /**< SOAP fault code (e.g., "soap:Server", "soap:Client") */
+  char fault_string[256]; /**< SOAP fault string message */
+  char fault_actor[128];  /**< Optional SOAP fault actor */
+  char fault_detail[512]; /**< Optional SOAP fault detail */
+} fault_callback_data_t;
+
+/**
+ * @brief SOAP fault response callback function
+ * @param soap gSOAP context
+ * @param user_data Pointer to fault_callback_data_t
  * @return 0 on success, negative error code on failure
  */
-int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, int fault_code,
-                                        const char* fault_string);
+int fault_response_callback(struct soap* soap, void* user_data);
+
+/**
+ * @brief Generate SOAP fault response with flexible parameters
+ * @param ctx Pointer to gSOAP context structure (if NULL, creates temporary context)
+ * @param fault_code Fault code string (e.g., "soap:Server", "soap:Client") or NULL for default
+ * @param fault_string Fault string message (required)
+ * @param fault_actor Optional fault actor (can be NULL)
+ * @param fault_detail Optional fault detail (can be NULL)
+ * @param output_buffer Optional output buffer for XML (if NULL, uses gSOAP context)
+ * @param buffer_size Size of the output buffer (ignored if output_buffer is NULL)
+ * @return 0 on success, negative error code on failure
+ * @note If ctx is NULL, creates temporary context internally. If output_buffer is provided,
+ *       generates XML directly without requiring gSOAP context.
+ */
+int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code,
+                                        const char* fault_string, const char* fault_actor,
+                                        const char* fault_detail, char* output_buffer,
+                                        size_t buffer_size);
 
 #endif /* ONVIF_GSOAP_H */

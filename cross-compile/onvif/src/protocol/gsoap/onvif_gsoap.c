@@ -29,6 +29,7 @@
 #include "services/imaging/onvif_imaging.h"
 #include "services/media/onvif_media.h"
 #include "services/ptz/onvif_ptz.h"
+#include "utils/error/error_handling.h"
 
 // Include gSOAP generated files
 #include "generated/DeviceBinding.nsmap"
@@ -60,19 +61,19 @@ static char g_onvif_gsoap_error_msg[256] = {0};
 /**
  * @brief Validate and initialize gSOAP context for proper fault handling
  * @param soap gSOAP context to validate
- * @return 0 on success, -EINVAL if soap is NULL, -ENOMEM if fault allocation
- * fails
+ * @return 0 on success, ONVIF_ERROR_INVALID if soap is NULL, ONVIF_ERROR_MEMORY_ALLOCATION if fault
+ * allocation fails
  */
 static int validate_gsoap_context(struct soap* soap) {
   if (!soap) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Ensure fault structure is available for error handling
   if (!soap->fault) {
     soap->fault = soap_new_SOAP_ENV__Fault(soap, 1);
     if (!soap->fault) {
-      return -ENOMEM;
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
   }
 
@@ -119,7 +120,7 @@ static uint64_t get_timestamp_us(void) {
 int onvif_gsoap_init(onvif_gsoap_context_t* ctx) {
   if (!ctx) {
     platform_log_error("ONVIF gSOAP: NULL context pointer");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Initialize context structure
@@ -129,7 +130,7 @@ int onvif_gsoap_init(onvif_gsoap_context_t* ctx) {
   ctx->soap = soap_new();
   if (!ctx->soap) {
     platform_log_error("ONVIF gSOAP: Failed to create soap context");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Configure gSOAP context
@@ -187,7 +188,7 @@ void onvif_gsoap_reset(onvif_gsoap_context_t* ctx) {
 int onvif_gsoap_serialize_response(onvif_gsoap_context_t* ctx, void* response_data) {
   if (!ctx || !ctx->soap || !response_data) {
     set_gsoap_error(ctx->soap, "Invalid parameters for serialize response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Start timing
@@ -196,7 +197,7 @@ int onvif_gsoap_serialize_response(onvif_gsoap_context_t* ctx, void* response_da
   // Begin SOAP response
   if (soap_begin_send(ctx->soap) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to begin SOAP send");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   platform_log_debug("ONVIF gSOAP: Started response serialization");
@@ -206,13 +207,13 @@ int onvif_gsoap_serialize_response(onvif_gsoap_context_t* ctx, void* response_da
 int onvif_gsoap_finalize_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
     set_gsoap_error(ctx->soap, "NULL context pointer");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // End SOAP response
   if (soap_end_send(ctx->soap) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to end SOAP send");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   // Update statistics
@@ -249,13 +250,13 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
     if (ctx && ctx->soap) {
       set_gsoap_error(ctx->soap, "Invalid parameters for response generation");
     }
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Ensure gSOAP context is properly initialized for fault handling
   if (validate_gsoap_context(ctx->soap) != 0) {
     platform_log_error("ONVIF gSOAP: Failed to initialize fault handling context");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Set up gSOAP for string output - this is the correct way to get XML as a
@@ -267,20 +268,20 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
   if (soap_begin_send(ctx->soap) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to begin SOAP send");
     ctx->soap->os = NULL;
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   // Use gSOAP's proper envelope functions for complete SOAP envelope generation
   if (soap_envelope_begin_out(ctx->soap) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to begin SOAP envelope");
     ctx->soap->os = NULL;
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   if (soap_body_begin_out(ctx->soap) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to begin SOAP body");
     ctx->soap->os = NULL;
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   // Call the endpoint-specific callback to generate the response content
@@ -294,19 +295,19 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
   if (soap_body_end_out(ctx->soap) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to end SOAP body");
     ctx->soap->os = NULL;
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   if (soap_envelope_end_out(ctx->soap) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to end SOAP envelope");
     ctx->soap->os = NULL;
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   if (soap_end_send(ctx->soap) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to end SOAP send");
     ctx->soap->os = NULL;
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   // Clear the output stream pointer
@@ -321,11 +322,11 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
       ctx->soap->length = response_len;
     } else {
       set_gsoap_error(ctx->soap, "Response too large for buffer");
-      return -1;
+      return ONVIF_ERROR_SERIALIZATION_FAILED;
     }
   } else {
     set_gsoap_error(ctx->soap, "No output string generated");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   // Debug: Check buffer after generation
@@ -351,14 +352,14 @@ int device_info_response_callback(struct soap* soap, void* user_data) {
   device_info_callback_data_t* data = (device_info_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _tds__GetDeviceInformationResponse* response =
     soap_new__tds__GetDeviceInformationResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill response data
@@ -371,7 +372,7 @@ int device_info_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__tds__GetDeviceInformationResponse(
         soap, response, "tds:GetDeviceInformationResponse", "") != SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -387,19 +388,19 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
   capabilities_callback_data_t* data = (capabilities_callback_data_t*)user_data;
 
   if (!data || !data->capabilities) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _tds__GetCapabilitiesResponse* response = soap_new__tds__GetCapabilitiesResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create capabilities structure
   response->Capabilities = soap_new_tt__Capabilities(soap, 1);
   if (!response->Capabilities) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill capabilities data
@@ -445,7 +446,7 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__tds__GetCapabilitiesResponse(soap, response, "tds:GetCapabilitiesResponse", "") !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -461,20 +462,20 @@ int system_datetime_response_callback(struct soap* soap, void* user_data) {
   system_datetime_callback_data_t* data = (system_datetime_callback_data_t*)user_data;
 
   if (!data || !data->tm_info) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _tds__GetSystemDateAndTimeResponse* response =
     soap_new__tds__GetSystemDateAndTimeResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create system date time structure
   response->SystemDateAndTime = soap_new_tt__SystemDateTime(soap, 1);
   if (!response->SystemDateAndTime) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill date time data
@@ -533,7 +534,7 @@ int system_datetime_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__tds__GetSystemDateAndTimeResponse(
         soap, response, "tds:GetSystemDateAndTimeResponse", "") != SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -549,19 +550,19 @@ int services_response_callback(struct soap* soap, void* user_data) {
   services_callback_data_t* data = (services_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _tds__GetServicesResponse* response = soap_new__tds__GetServicesResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create service list
   response->Service = soap_new_tds__Service(soap, 3); // Device, Media, PTZ
   if (!response->Service) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Device Service
@@ -597,7 +598,7 @@ int services_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__tds__GetServicesResponse(soap, response, "tds:GetServicesResponse", "") !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -613,13 +614,13 @@ int system_reboot_response_callback(struct soap* soap, void* user_data) {
   system_reboot_callback_data_t* data = (system_reboot_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _tds__SystemRebootResponse* response = soap_new__tds__SystemRebootResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Set message if provided
@@ -630,7 +631,7 @@ int system_reboot_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__tds__SystemRebootResponse(soap, response, "tds:SystemRebootResponse", "") !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -646,20 +647,20 @@ int imaging_settings_response_callback(struct soap* soap, void* user_data) {
   imaging_settings_callback_data_t* data = (imaging_settings_callback_data_t*)user_data;
 
   if (!data || !data->settings) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _onvif4__GetImagingSettingsResponse* response =
     soap_new__onvif4__GetImagingSettingsResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create ImagingSettings structure
   response->ImagingSettings = soap_new_tt__ImagingSettings(soap, 1);
   if (!response->ImagingSettings) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill imaging settings data
@@ -694,7 +695,7 @@ int imaging_settings_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__onvif4__GetImagingSettingsResponse(
         soap, response, "onvif4:GetImagingSettingsResponse", "") != SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -710,14 +711,14 @@ int set_imaging_settings_response_callback(struct soap* soap, void* user_data) {
   set_imaging_settings_callback_data_t* data = (set_imaging_settings_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _onvif4__SetImagingSettingsResponse* response =
     soap_new__onvif4__SetImagingSettingsResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // SetImagingSettingsResponse is an empty structure in this gSOAP version
@@ -725,7 +726,7 @@ int set_imaging_settings_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__onvif4__SetImagingSettingsResponse(
         soap, response, "onvif4:SetImagingSettingsResponse", "") != SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -741,20 +742,20 @@ int ptz_nodes_response_callback(struct soap* soap, void* user_data) {
   ptz_nodes_callback_data_t* data = (ptz_nodes_callback_data_t*)user_data;
 
   if (!data || !data->nodes) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _onvif3__GetNodesResponse* response = soap_new__onvif3__GetNodesResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create PTZ node array
   response->__sizePTZNode = data->count;
   response->PTZNode = soap_new_tt__PTZNode(soap, data->count);
   if (!response->PTZNode) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill PTZ node data
@@ -801,7 +802,7 @@ int ptz_nodes_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__onvif3__GetNodesResponse(soap, response, "onvif3:GetNodesResponse", "") !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -817,13 +818,13 @@ int ptz_absolute_move_response_callback(struct soap* soap, void* user_data) {
   ptz_absolute_move_callback_data_t* data = (ptz_absolute_move_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _onvif3__AbsoluteMoveResponse* response = soap_new__onvif3__AbsoluteMoveResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // AbsoluteMoveResponse is an empty structure in this gSOAP version
@@ -831,7 +832,7 @@ int ptz_absolute_move_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__onvif3__AbsoluteMoveResponse(soap, response, "onvif3:AbsoluteMoveResponse", "") !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -847,20 +848,20 @@ int ptz_presets_response_callback(struct soap* soap, void* user_data) {
   ptz_presets_callback_data_t* data = (ptz_presets_callback_data_t*)user_data;
 
   if (!data || !data->presets) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _onvif3__GetPresetsResponse* response = soap_new__onvif3__GetPresetsResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create preset array
   response->__sizePTZPreset = data->count;
   response->PTZPreset = soap_new_tt__PTZPreset(soap, data->count);
   if (!response->PTZPreset) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill preset data
@@ -888,7 +889,7 @@ int ptz_presets_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__onvif3__GetPresetsResponse(soap, response, "onvif3:GetPresetsResponse", "") !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -904,13 +905,13 @@ int ptz_set_preset_response_callback(struct soap* soap, void* user_data) {
   ptz_set_preset_callback_data_t* data = (ptz_set_preset_callback_data_t*)user_data;
 
   if (!data || !data->preset_token) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _onvif3__SetPresetResponse* response = soap_new__onvif3__SetPresetResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // SetPresetResponse is an empty struct - no fields to set
@@ -919,7 +920,7 @@ int ptz_set_preset_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__onvif3__SetPresetResponse(soap, response, "onvif3:SetPresetResponse", "") !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -935,13 +936,13 @@ int ptz_goto_preset_response_callback(struct soap* soap, void* user_data) {
   ptz_goto_preset_callback_data_t* data = (ptz_goto_preset_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _onvif3__GotoPresetResponse* response = soap_new__onvif3__GotoPresetResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // GotoPresetResponse is an empty structure in this gSOAP version
@@ -949,7 +950,7 @@ int ptz_goto_preset_response_callback(struct soap* soap, void* user_data) {
   // Serialize response within SOAP body
   if (soap_put__onvif3__GotoPresetResponse(soap, response, "onvif3:GotoPresetResponse", "") !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -970,20 +971,20 @@ int media_profiles_response_callback(struct soap* soap, void* user_data) {
   media_profiles_callback_data_t* data = (media_profiles_callback_data_t*)user_data;
 
   if (!data || !data->profiles) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__GetProfilesResponse* response = soap_new__trt__GetProfilesResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create profiles array
   response->__sizeProfiles = data->profile_count;
   response->Profiles = soap_new_tt__Profile(soap, data->profile_count);
   if (!response->Profiles) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill profiles data
@@ -1080,7 +1081,7 @@ int media_profiles_response_callback(struct soap* soap, void* user_data) {
   // Serialize response
   if (soap_put__trt__GetProfilesResponse(soap, response, "trt:GetProfilesResponse", NULL) !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -1096,19 +1097,19 @@ int media_stream_uri_response_callback(struct soap* soap, void* user_data) {
   media_stream_uri_callback_data_t* data = (media_stream_uri_callback_data_t*)user_data;
 
   if (!data || !data->uri) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__GetStreamUriResponse* response = soap_new__trt__GetStreamUriResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill response data
   response->MediaUri = soap_new_tt__MediaUri(soap, 1);
   if (!response->MediaUri) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   response->MediaUri->Uri = soap_strdup(soap, data->uri->uri);
@@ -1121,7 +1122,7 @@ int media_stream_uri_response_callback(struct soap* soap, void* user_data) {
   // Serialize response
   if (soap_put__trt__GetStreamUriResponse(soap, response, "trt:GetStreamUriResponse", NULL) !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -1137,19 +1138,19 @@ int media_create_profile_response_callback(struct soap* soap, void* user_data) {
   media_create_profile_callback_data_t* data = (media_create_profile_callback_data_t*)user_data;
 
   if (!data || !data->profile) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__CreateProfileResponse* response = soap_new__trt__CreateProfileResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill response data
   response->Profile = soap_new_tt__Profile(soap, 1);
   if (!response->Profile) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   const struct media_profile* src_profile = data->profile;
@@ -1165,7 +1166,7 @@ int media_create_profile_response_callback(struct soap* soap, void* user_data) {
   // Serialize response
   if (soap_put__trt__CreateProfileResponse(soap, response, "trt:CreateProfileResponse", NULL) !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -1181,13 +1182,13 @@ int media_delete_profile_response_callback(struct soap* soap, void* user_data) {
   media_delete_profile_callback_data_t* data = (media_delete_profile_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__DeleteProfileResponse* response = soap_new__trt__DeleteProfileResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // DeleteProfileResponse is an empty structure
@@ -1195,7 +1196,7 @@ int media_delete_profile_response_callback(struct soap* soap, void* user_data) {
   // Serialize response
   if (soap_put__trt__DeleteProfileResponse(soap, response, "trt:DeleteProfileResponse", NULL) !=
       SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -1213,14 +1214,14 @@ int media_set_video_source_config_response_callback(struct soap* soap, void* use
     (media_set_video_source_config_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__SetVideoSourceConfigurationResponse* response =
     soap_new__trt__SetVideoSourceConfigurationResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // SetVideoSourceConfigurationResponse is an empty structure
@@ -1228,7 +1229,7 @@ int media_set_video_source_config_response_callback(struct soap* soap, void* use
   // Serialize response
   if (soap_put__trt__SetVideoSourceConfigurationResponse(
         soap, response, "trt:SetVideoSourceConfigurationResponse", NULL) != SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -1246,14 +1247,14 @@ int media_set_video_encoder_config_response_callback(struct soap* soap, void* us
     (media_set_video_encoder_config_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__SetVideoEncoderConfigurationResponse* response =
     soap_new__trt__SetVideoEncoderConfigurationResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // SetVideoEncoderConfigurationResponse is an empty structure
@@ -1261,7 +1262,7 @@ int media_set_video_encoder_config_response_callback(struct soap* soap, void* us
   // Serialize response
   if (soap_put__trt__SetVideoEncoderConfigurationResponse(
         soap, response, "trt:SetVideoEncoderConfigurationResponse", NULL) != SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -1277,14 +1278,14 @@ int media_start_multicast_response_callback(struct soap* soap, void* user_data) 
   media_start_multicast_callback_data_t* data = (media_start_multicast_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__StartMulticastStreamingResponse* response =
     soap_new__trt__StartMulticastStreamingResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // StartMulticastStreamingResponse is an empty structure
@@ -1292,7 +1293,7 @@ int media_start_multicast_response_callback(struct soap* soap, void* user_data) 
   // Serialize response
   if (soap_put__trt__StartMulticastStreamingResponse(
         soap, response, "trt:StartMulticastStreamingResponse", NULL) != SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -1308,14 +1309,14 @@ int media_stop_multicast_response_callback(struct soap* soap, void* user_data) {
   media_stop_multicast_callback_data_t* data = (media_stop_multicast_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__StopMulticastStreamingResponse* response =
     soap_new__trt__StopMulticastStreamingResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // StopMulticastStreamingResponse is an empty structure
@@ -1323,7 +1324,7 @@ int media_stop_multicast_response_callback(struct soap* soap, void* user_data) {
   // Serialize response
   if (soap_put__trt__StopMulticastStreamingResponse(
         soap, response, "trt:StopMulticastStreamingResponse", NULL) != SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -1340,21 +1341,21 @@ int media_get_metadata_configs_response_callback(struct soap* soap, void* user_d
     (media_get_metadata_configs_callback_data_t*)user_data;
 
   if (!data || !data->configs) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__GetMetadataConfigurationsResponse* response =
     soap_new__trt__GetMetadataConfigurationsResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create metadata configurations array
   response->__sizeConfigurations = data->config_count;
   response->Configurations = soap_new_tt__MetadataConfiguration(soap, data->config_count);
   if (!response->Configurations) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill metadata configurations data
@@ -1387,7 +1388,7 @@ int media_get_metadata_configs_response_callback(struct soap* soap, void* user_d
   // Serialize response
   if (soap_put__trt__GetMetadataConfigurationsResponse(
         soap, response, "trt:GetMetadataConfigurationsResponse", NULL) != SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -1404,14 +1405,14 @@ int media_set_metadata_config_response_callback(struct soap* soap, void* user_da
     (media_set_metadata_config_callback_data_t*)user_data;
 
   if (!data) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__SetMetadataConfigurationResponse* response =
     soap_new__trt__SetMetadataConfigurationResponse(soap, 1);
   if (!response) {
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // SetMetadataConfigurationResponse is an empty structure
@@ -1419,7 +1420,7 @@ int media_set_metadata_config_response_callback(struct soap* soap, void* user_da
   // Serialize response
   if (soap_put__trt__SetMetadataConfigurationResponse(
         soap, response, "trt:SetMetadataConfigurationResponse", NULL) != SOAP_OK) {
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return 0;
@@ -1495,11 +1496,11 @@ const char* onvif_gsoap_get_error(const onvif_gsoap_context_t* ctx) {
 
 int onvif_gsoap_validate_response(const onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   if (ctx->soap->error != SOAP_OK) {
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   return 0;
@@ -1515,14 +1516,14 @@ int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
                                            int profile_count) {
   if (!ctx || !ctx->soap || !profiles || profile_count <= 0) {
     set_gsoap_error(ctx->soap, "Invalid parameters for profiles response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__GetProfilesResponse* response = soap_new__trt__GetProfilesResponse(ctx->soap, 1);
   if (!response) {
     set_gsoap_error(ctx->soap, "Failed to allocate profiles response");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Initialize profiles array
@@ -1530,7 +1531,7 @@ int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
   response->Profiles = soap_new_tt__Profile(ctx->soap, profile_count);
   if (!response->Profiles) {
     set_gsoap_error(ctx->soap, "Failed to allocate profiles array");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill profile data
@@ -1554,7 +1555,7 @@ int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
   if (soap_put__trt__GetProfilesResponse(ctx->soap, response, "trt:GetProfilesResponse", NULL) !=
       SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to serialize profiles response");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated profiles response with %d profiles", profile_count);
@@ -1565,21 +1566,21 @@ int onvif_gsoap_generate_stream_uri_response(onvif_gsoap_context_t* ctx,
                                              const struct stream_uri* uri) {
   if (!ctx || !ctx->soap || !uri) {
     set_gsoap_error(ctx->soap, "Invalid parameters for stream URI response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__GetStreamUriResponse* response = soap_new__trt__GetStreamUriResponse(ctx->soap, 1);
   if (!response) {
     set_gsoap_error(ctx->soap, "Failed to allocate stream URI response");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create MediaUri structure
   response->MediaUri = soap_new_tt__MediaUri(ctx->soap, 1);
   if (!response->MediaUri) {
     set_gsoap_error(ctx->soap, "Failed to allocate MediaUri structure");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill MediaUri data
@@ -1592,7 +1593,7 @@ int onvif_gsoap_generate_stream_uri_response(onvif_gsoap_context_t* ctx,
   if (soap_put__trt__GetStreamUriResponse(ctx->soap, response, "trt:GetStreamUriResponse", NULL) !=
       SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to serialize stream URI response");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated stream URI response: %s", uri->uri);
@@ -1603,21 +1604,21 @@ int onvif_gsoap_generate_create_profile_response(onvif_gsoap_context_t* ctx,
                                                  const struct media_profile* profile) {
   if (!ctx || !ctx->soap || !profile) {
     set_gsoap_error(ctx->soap, "Invalid parameters for create profile response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__CreateProfileResponse* response = soap_new__trt__CreateProfileResponse(ctx->soap, 1);
   if (!response) {
     set_gsoap_error(ctx->soap, "Failed to allocate create profile response");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create Profile structure
   response->Profile = soap_new_tt__Profile(ctx->soap, 1);
   if (!response->Profile) {
     set_gsoap_error(ctx->soap, "Failed to allocate Profile structure");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Fill Profile data
@@ -1644,7 +1645,7 @@ int onvif_gsoap_generate_create_profile_response(onvif_gsoap_context_t* ctx,
   if (soap_put__trt__CreateProfileResponse(ctx->soap, response, "trt:CreateProfileResponse",
                                            NULL) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to serialize create profile response");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated create profile response: %s", profile->token);
@@ -1654,21 +1655,21 @@ int onvif_gsoap_generate_create_profile_response(onvif_gsoap_context_t* ctx,
 int onvif_gsoap_generate_delete_profile_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
     set_gsoap_error(ctx->soap, "Invalid parameters for delete profile response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure (empty response for DeleteProfile)
   struct _trt__DeleteProfileResponse* response = soap_new__trt__DeleteProfileResponse(ctx->soap, 1);
   if (!response) {
     set_gsoap_error(ctx->soap, "Failed to allocate delete profile response");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__DeleteProfileResponse(ctx->soap, response, "trt:DeleteProfileResponse",
                                            NULL) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to serialize delete profile response");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated delete profile response");
@@ -1678,7 +1679,7 @@ int onvif_gsoap_generate_delete_profile_response(onvif_gsoap_context_t* ctx) {
 int onvif_gsoap_generate_set_video_source_configuration_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
     set_gsoap_error(ctx->soap, "Invalid parameters for set video source configuration response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure (empty response for SetVideoSourceConfiguration)
@@ -1686,14 +1687,14 @@ int onvif_gsoap_generate_set_video_source_configuration_response(onvif_gsoap_con
     soap_new__trt__SetVideoSourceConfigurationResponse(ctx->soap, 1);
   if (!response) {
     set_gsoap_error(ctx->soap, "Failed to allocate set video source configuration response");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__SetVideoSourceConfigurationResponse(
         ctx->soap, response, "trt:SetVideoSourceConfigurationResponse", NULL) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to serialize set video source configuration response");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated set video source configuration response");
@@ -1703,7 +1704,7 @@ int onvif_gsoap_generate_set_video_source_configuration_response(onvif_gsoap_con
 int onvif_gsoap_generate_set_video_encoder_configuration_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
     set_gsoap_error(ctx->soap, "Invalid parameters for set video encoder configuration response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure (empty response for SetVideoEncoderConfiguration)
@@ -1711,14 +1712,14 @@ int onvif_gsoap_generate_set_video_encoder_configuration_response(onvif_gsoap_co
     soap_new__trt__SetVideoEncoderConfigurationResponse(ctx->soap, 1);
   if (!response) {
     set_gsoap_error(ctx->soap, "Failed to allocate set video encoder configuration response");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__SetVideoEncoderConfigurationResponse(
         ctx->soap, response, "trt:SetVideoEncoderConfigurationResponse", NULL) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to serialize set video encoder configuration response");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated set video encoder configuration response");
@@ -1728,7 +1729,7 @@ int onvif_gsoap_generate_set_video_encoder_configuration_response(onvif_gsoap_co
 int onvif_gsoap_generate_start_multicast_streaming_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
     set_gsoap_error(ctx->soap, "Invalid parameters for start multicast streaming response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure (empty response for StartMulticastStreaming)
@@ -1736,14 +1737,14 @@ int onvif_gsoap_generate_start_multicast_streaming_response(onvif_gsoap_context_
     soap_new__trt__StartMulticastStreamingResponse(ctx->soap, 1);
   if (!response) {
     set_gsoap_error(ctx->soap, "Failed to allocate start multicast streaming response");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__StartMulticastStreamingResponse(
         ctx->soap, response, "trt:StartMulticastStreamingResponse", NULL) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to serialize start multicast streaming response");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated start multicast streaming response");
@@ -1753,7 +1754,7 @@ int onvif_gsoap_generate_start_multicast_streaming_response(onvif_gsoap_context_
 int onvif_gsoap_generate_stop_multicast_streaming_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
     set_gsoap_error(ctx->soap, "Invalid parameters for stop multicast streaming response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure (empty response for StopMulticastStreaming)
@@ -1761,14 +1762,14 @@ int onvif_gsoap_generate_stop_multicast_streaming_response(onvif_gsoap_context_t
     soap_new__trt__StopMulticastStreamingResponse(ctx->soap, 1);
   if (!response) {
     set_gsoap_error(ctx->soap, "Failed to allocate stop multicast streaming response");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__StopMulticastStreamingResponse(
         ctx->soap, response, "trt:StopMulticastStreamingResponse", NULL) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to serialize stop multicast streaming response");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated stop multicast streaming response");
@@ -1779,7 +1780,7 @@ int onvif_gsoap_generate_get_metadata_configurations_response(
   onvif_gsoap_context_t* ctx, const struct metadata_configuration* configs, int count) {
   if (!ctx || !ctx->soap || !configs || count < 0) {
     set_gsoap_error(ctx->soap, "Invalid parameters for get metadata configurations response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
@@ -1787,7 +1788,7 @@ int onvif_gsoap_generate_get_metadata_configurations_response(
     soap_new__trt__GetMetadataConfigurationsResponse(ctx->soap, 1);
   if (!response) {
     set_gsoap_error(ctx->soap, "Failed to allocate get metadata configurations response");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Set the number of configurations
@@ -1798,7 +1799,7 @@ int onvif_gsoap_generate_get_metadata_configurations_response(
     response->Configurations = soap_new_tt__MetadataConfiguration(ctx->soap, count);
     if (!response->Configurations) {
       set_gsoap_error(ctx->soap, "Failed to allocate metadata configurations array");
-      return -ENOMEM;
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
 
     // Fill the configurations array
@@ -1841,7 +1842,7 @@ int onvif_gsoap_generate_get_metadata_configurations_response(
   if (soap_put__trt__GetMetadataConfigurationsResponse(
         ctx->soap, response, "trt:GetMetadataConfigurationsResponse", NULL) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to serialize get metadata configurations response");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated get metadata configurations response with %d "
@@ -1853,7 +1854,7 @@ int onvif_gsoap_generate_get_metadata_configurations_response(
 int onvif_gsoap_generate_set_metadata_configuration_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
     set_gsoap_error(ctx->soap, "Invalid parameters for set metadata configuration response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure (empty response for SetMetadataConfiguration)
@@ -1861,14 +1862,14 @@ int onvif_gsoap_generate_set_metadata_configuration_response(onvif_gsoap_context
     soap_new__trt__SetMetadataConfigurationResponse(ctx->soap, 1);
   if (!response) {
     set_gsoap_error(ctx->soap, "Failed to allocate set metadata configuration response");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__SetMetadataConfigurationResponse(
         ctx->soap, response, "trt:SetMetadataConfigurationResponse", NULL) != SOAP_OK) {
     set_gsoap_error(ctx->soap, "Failed to serialize set metadata configuration response");
-    return -1;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated set metadata configuration response");
@@ -1884,7 +1885,7 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
                                      size_t request_size) {
   if (!ctx || !ctx->soap || !request_data || request_size == 0) {
     set_gsoap_error(ctx->soap, "Invalid parameters for request parsing initialization");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Reset the soap context for parsing
@@ -1902,7 +1903,7 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
 int onvif_gsoap_parse_profile_token(onvif_gsoap_context_t* ctx, char* token, size_t token_size) {
   if (!ctx || !ctx->soap || !token || token_size == 0) {
     set_gsoap_error(ctx->soap, "Invalid parameters for profile token parsing");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // TODO: Implement proper XML parsing for profile token
@@ -1918,7 +1919,7 @@ int onvif_gsoap_parse_configuration_token(onvif_gsoap_context_t* ctx, char* toke
                                           size_t token_size) {
   if (!ctx || !ctx->soap || !token || token_size == 0) {
     set_gsoap_error(ctx->soap, "Invalid parameters for configuration token parsing");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // TODO: Implement proper XML parsing for configuration token
@@ -1933,7 +1934,7 @@ int onvif_gsoap_parse_configuration_token(onvif_gsoap_context_t* ctx, char* toke
 int onvif_gsoap_parse_protocol(onvif_gsoap_context_t* ctx, char* protocol, size_t protocol_size) {
   if (!ctx || !ctx->soap || !protocol || protocol_size == 0) {
     set_gsoap_error(ctx->soap, "Invalid parameters for protocol parsing");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // TODO: Implement proper XML parsing for protocol
@@ -1949,7 +1950,7 @@ int onvif_gsoap_parse_value(onvif_gsoap_context_t* ctx, const char* xpath, char*
                             size_t value_size) {
   if (!ctx || !ctx->soap || !xpath || !value || value_size == 0) {
     set_gsoap_error(ctx->soap, "Invalid parameters for value parsing");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // TODO: Implement proper XML parsing for value
@@ -1964,7 +1965,7 @@ int onvif_gsoap_parse_value(onvif_gsoap_context_t* ctx, const char* xpath, char*
 int onvif_gsoap_parse_boolean(onvif_gsoap_context_t* ctx, const char* xpath, int* value) {
   if (!ctx || !ctx->soap || !xpath || !value) {
     set_gsoap_error(ctx->soap, "Invalid parameters for boolean parsing");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // TODO: Implement proper XML parsing for boolean value
@@ -1978,7 +1979,7 @@ int onvif_gsoap_parse_boolean(onvif_gsoap_context_t* ctx, const char* xpath, int
 int onvif_gsoap_parse_integer(onvif_gsoap_context_t* ctx, const char* xpath, int* value) {
   if (!ctx || !ctx->soap || !xpath || !value) {
     set_gsoap_error(ctx->soap, "Invalid parameters for integer parsing");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // TODO: Implement proper XML parsing for integer value
@@ -2070,22 +2071,154 @@ int onvif_gsoap_extract_operation_name(const char* request_data, size_t request_
  * ============================================================================
  */
 
-int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, int fault_code,
-                                        const char* fault_string) {
-  if (!ctx || !ctx->soap) {
-    return -EINVAL;
+/**
+ * @brief Callback function for SOAP fault response generation
+ * @param soap gSOAP context
+ * @param user_data Pointer to fault_callback_data_t
+ * @return 0 on success, negative error code on failure
+ */
+int fault_response_callback(struct soap* soap, void* user_data) {
+  fault_callback_data_t* data = (fault_callback_data_t*)user_data;
+
+  if (!data) {
+    return ONVIF_ERROR_INVALID;
   }
 
-  // Set SOAP fault
-  soap_fault(ctx->soap);
-  if (ctx->soap->fault) {
-    ctx->soap->fault->faultcode = "soap:Server";
-    ctx->soap->fault->faultstring =
-      soap_strdup(ctx->soap, fault_string ? fault_string : "Internal server error");
+  // Create fault structure using generated gSOAP functions
+  struct SOAP_ENV__Fault* fault = soap_new_SOAP_ENV__Fault(soap, 1);
+  if (!fault) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  platform_log_debug("ONVIF gSOAP: Generated fault response");
-  return 0;
+  // Initialize fault structure with defaults
+  soap_default_SOAP_ENV__Fault(soap, fault);
+
+  // Set fault code and string using proper gSOAP string duplication
+  fault->faultcode = soap_strdup(soap, data->fault_code);
+  fault->faultstring = soap_strdup(soap, data->fault_string);
+
+  // Set optional fault actor if provided
+  if (data->fault_actor[0] != '\0') {
+    fault->faultactor = soap_strdup(soap, data->fault_actor);
+  }
+
+  // Set optional detail if provided
+  if (data->fault_detail[0] != '\0') {
+    fault->SOAP_ENV__Detail = soap_new_SOAP_ENV__Detail(soap, 1);
+    if (fault->SOAP_ENV__Detail) {
+      fault->SOAP_ENV__Detail->__any = soap_strdup(soap, data->fault_detail);
+    }
+  }
+
+  // Serialize fault within SOAP body using generated gSOAP function
+  if (soap_put_SOAP_ENV__Fault(soap, fault, "SOAP-ENV:Fault", NULL) != SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code,
+                                        const char* fault_string, const char* fault_actor,
+                                        const char* fault_detail, char* output_buffer,
+                                        size_t buffer_size) {
+  // Validate required parameters
+  if (!fault_string) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Use default fault code if not provided
+  const char* default_fault_code = "soap:Server";
+  const char* actual_fault_code = fault_code ? fault_code : default_fault_code;
+
+  // Determine if we need to create a temporary context
+  bool temp_ctx = (ctx == NULL);
+  onvif_gsoap_context_t* actual_ctx = ctx;
+
+  // Create temporary context if needed
+  if (temp_ctx) {
+    actual_ctx = (onvif_gsoap_context_t*)malloc(sizeof(onvif_gsoap_context_t));
+    if (!actual_ctx) {
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
+    }
+
+    if (onvif_gsoap_init(actual_ctx) != 0) {
+      free(actual_ctx);
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
+    }
+  }
+
+  // Validate context
+  if (!actual_ctx || !actual_ctx->soap) {
+    if (temp_ctx && actual_ctx) {
+      free(actual_ctx);
+    }
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Prepare callback data
+  fault_callback_data_t callback_data = {0};
+
+  // Set fault code and string
+  strncpy(callback_data.fault_code, actual_fault_code, sizeof(callback_data.fault_code) - 1);
+  callback_data.fault_code[sizeof(callback_data.fault_code) - 1] = '\0';
+
+  strncpy(callback_data.fault_string, fault_string, sizeof(callback_data.fault_string) - 1);
+  callback_data.fault_string[sizeof(callback_data.fault_string) - 1] = '\0';
+
+  // Set optional fault actor
+  if (fault_actor) {
+    strncpy(callback_data.fault_actor, fault_actor, sizeof(callback_data.fault_actor) - 1);
+    callback_data.fault_actor[sizeof(callback_data.fault_actor) - 1] = '\0';
+  }
+
+  // Set optional fault detail
+  if (fault_detail) {
+    strncpy(callback_data.fault_detail, fault_detail, sizeof(callback_data.fault_detail) - 1);
+    callback_data.fault_detail[sizeof(callback_data.fault_detail) - 1] = '\0';
+  }
+
+  // Generate fault response
+  int result = onvif_gsoap_generate_response_with_callback(actual_ctx, fault_response_callback,
+                                                           &callback_data);
+  if (result != ONVIF_SUCCESS) {
+    if (temp_ctx) {
+      onvif_gsoap_cleanup(actual_ctx);
+      free(actual_ctx);
+    }
+    return result;
+  }
+
+  // If output buffer is provided, copy the generated XML
+  if (output_buffer && buffer_size > 0) {
+    const char* response_data = onvif_gsoap_get_response_data(actual_ctx);
+    size_t response_length = onvif_gsoap_get_response_length(actual_ctx);
+
+    if (response_data && response_length > 0) {
+      if (response_length < buffer_size) {
+        strncpy(output_buffer, response_data, buffer_size - 1);
+        output_buffer[buffer_size - 1] = '\0';
+        result = (int)response_length;
+      } else {
+        result = ONVIF_ERROR_MEMORY;
+      }
+    } else {
+      result = ONVIF_ERROR_IO;
+    }
+  }
+
+  // Clean up temporary context if created
+  if (temp_ctx) {
+    onvif_gsoap_cleanup(actual_ctx);
+    free(actual_ctx);
+  }
+
+  if (result == 0) {
+    platform_log_debug("ONVIF gSOAP: Generated fault response: %s - %s", callback_data.fault_code,
+                       callback_data.fault_string);
+  }
+
+  return result;
 }
 
 /* ============================================================================
@@ -2100,7 +2233,7 @@ int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
                                             const struct ptz_node* nodes, int count) {
   if (!ctx || !ctx->soap || !nodes || count <= 0) {
     set_gsoap_error(ctx->soap, "Invalid parameters for GetNodes response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create gSOAP response structure
@@ -2111,7 +2244,7 @@ int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
   response.PTZNode = soap_new_tt__PTZNode(ctx->soap, count);
   if (!response.PTZNode) {
     set_gsoap_error(ctx->soap, "Failed to allocate PTZ nodes array");
-    return -ENOMEM;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Convert each PTZ node to gSOAP format
@@ -2168,7 +2301,7 @@ int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
   soap_serialize__onvif3__GetNodesResponse(ctx->soap, &response);
   if (soap_put__onvif3__GetNodesResponse(ctx->soap, &response, "onvif3:GetNodesResponse", NULL)) {
     set_gsoap_error(ctx->soap, "Failed to serialize GetNodes response");
-    return -EIO;
+    return ONVIF_ERROR_IO;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated GetNodes response with %d nodes", count);
@@ -2181,7 +2314,7 @@ int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
 int onvif_gsoap_generate_absolute_move_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
     set_gsoap_error(ctx->soap, "Invalid parameters for AbsoluteMove response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create gSOAP response structure (empty response)
@@ -2193,7 +2326,7 @@ int onvif_gsoap_generate_absolute_move_response(onvif_gsoap_context_t* ctx) {
   if (soap_put__onvif3__AbsoluteMoveResponse(ctx->soap, &response, "onvif3:AbsoluteMoveResponse",
                                              NULL)) {
     set_gsoap_error(ctx->soap, "Failed to serialize AbsoluteMove response");
-    return -EIO;
+    return ONVIF_ERROR_IO;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated AbsoluteMove response");
@@ -2207,7 +2340,7 @@ int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
                                               const struct ptz_preset* presets, int count) {
   if (!ctx || !ctx->soap || !presets || count < 0) {
     set_gsoap_error(ctx->soap, "Invalid parameters for GetPresets response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create gSOAP response structure
@@ -2219,7 +2352,7 @@ int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
     response.PTZPreset = soap_new_tt__PTZPreset(ctx->soap, count);
     if (!response.PTZPreset) {
       set_gsoap_error(ctx->soap, "Failed to allocate PTZ presets array");
-      return -ENOMEM;
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
 
     // Convert each PTZ preset to gSOAP format
@@ -2264,7 +2397,7 @@ int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
   if (soap_put__onvif3__GetPresetsResponse(ctx->soap, &response, "onvif3:GetPresetsResponse",
                                            NULL)) {
     set_gsoap_error(ctx->soap, "Failed to serialize GetPresets response");
-    return -EIO;
+    return ONVIF_ERROR_IO;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated GetPresets response with %d presets", count);
@@ -2277,7 +2410,7 @@ int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
 int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const char* preset_token) {
   if (!ctx || !ctx->soap || !preset_token) {
     set_gsoap_error(ctx->soap, "Invalid parameters for SetPreset response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create gSOAP response structure
@@ -2290,7 +2423,7 @@ int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const c
   soap_serialize__onvif3__SetPresetResponse(ctx->soap, &response);
   if (soap_put__onvif3__SetPresetResponse(ctx->soap, &response, "onvif3:SetPresetResponse", NULL)) {
     set_gsoap_error(ctx->soap, "Failed to serialize SetPreset response");
-    return -EIO;
+    return ONVIF_ERROR_IO;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated SetPreset response with token: %s", preset_token);
@@ -2303,7 +2436,7 @@ int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const c
 int onvif_gsoap_generate_goto_preset_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
     set_gsoap_error(ctx->soap, "Invalid parameters for GotoPreset response");
-    return -EINVAL;
+    return ONVIF_ERROR_INVALID;
   }
 
   // Create gSOAP response structure (empty response)
@@ -2315,7 +2448,7 @@ int onvif_gsoap_generate_goto_preset_response(onvif_gsoap_context_t* ctx) {
   if (soap_put__onvif3__GotoPresetResponse(ctx->soap, &response, "onvif3:GotoPresetResponse",
                                            NULL)) {
     set_gsoap_error(ctx->soap, "Failed to serialize GotoPreset response");
-    return -EIO;
+    return ONVIF_ERROR_IO;
   }
 
   platform_log_debug("ONVIF gSOAP: Generated GotoPreset response");

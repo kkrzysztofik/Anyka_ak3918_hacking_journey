@@ -442,14 +442,15 @@ static int handle_get_nodes(const service_handler_config_t* config, const http_r
   // Get the complete SOAP response
   const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
   if (!soap_response) {
-    return error_handle_system(&error_ctx, -ENOENT, "get_response_data", response);
+    return error_handle_system(&error_ctx, ONVIF_ERROR_NOT_FOUND, "get_response_data", response);
   }
 
   // Allocate response buffer if not already allocated
   if (!response->body) {
     response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
     if (!response->body) {
-      return error_handle_system(&error_ctx, -ENOMEM, "allocate_response", response);
+      return error_handle_system(&error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "allocate_response",
+                                 response);
     }
   }
 
@@ -542,14 +543,15 @@ static int handle_absolute_move(const service_handler_config_t* config,
   // Get the complete SOAP response
   const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
   if (!soap_response) {
-    return error_handle_system(&error_ctx, -ENOENT, "get_response_data", response);
+    return error_handle_system(&error_ctx, ONVIF_ERROR_NOT_FOUND, "get_response_data", response);
   }
 
   // Allocate response buffer if not already allocated
   if (!response->body) {
     response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
     if (!response->body) {
-      return error_handle_system(&error_ctx, -ENOMEM, "allocate_response", response);
+      return error_handle_system(&error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "allocate_response",
+                                 response);
     }
   }
 
@@ -624,14 +626,15 @@ static int handle_get_presets(const service_handler_config_t* config, const http
   // Get the complete SOAP response
   const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
   if (!soap_response) {
-    return error_handle_system(&error_ctx, -ENOENT, "get_response_data", response);
+    return error_handle_system(&error_ctx, ONVIF_ERROR_NOT_FOUND, "get_response_data", response);
   }
 
   // Allocate response buffer if not already allocated
   if (!response->body) {
     response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
     if (!response->body) {
-      return error_handle_system(&error_ctx, -ENOMEM, "allocate_response", response);
+      return error_handle_system(&error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "allocate_response",
+                                 response);
     }
   }
 
@@ -709,14 +712,15 @@ static int handle_set_preset(const service_handler_config_t* config, const http_
   // Get the complete SOAP response
   const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
   if (!soap_response) {
-    return error_handle_system(&error_ctx, -ENOENT, "get_response_data", response);
+    return error_handle_system(&error_ctx, ONVIF_ERROR_NOT_FOUND, "get_response_data", response);
   }
 
   // Allocate response buffer if not already allocated
   if (!response->body) {
     response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
     if (!response->body) {
-      return error_handle_system(&error_ctx, -ENOMEM, "allocate_response", response);
+      return error_handle_system(&error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "allocate_response",
+                                 response);
     }
   }
 
@@ -801,14 +805,15 @@ static int handle_goto_preset(const service_handler_config_t* config, const http
   // Get the complete SOAP response
   const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
   if (!soap_response) {
-    return error_handle_system(&error_ctx, -ENOENT, "get_response_data", response);
+    return error_handle_system(&error_ctx, ONVIF_ERROR_NOT_FOUND, "get_response_data", response);
   }
 
   // Allocate response buffer if not already allocated
   if (!response->body) {
     response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
     if (!response->body) {
-      return error_handle_system(&error_ctx, -ENOMEM, "allocate_response", response);
+      return error_handle_system(&error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "allocate_response",
+                                 response);
     }
   }
 

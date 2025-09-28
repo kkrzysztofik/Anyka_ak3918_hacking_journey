@@ -304,13 +304,13 @@ static int get_system_date_time_business_logic(const service_handler_config_t* c
   time_t now = time(NULL);
   if (now == (time_t)-1) {
     service_log_operation_failure(log_ctx, "System time retrieval", -1, "time() function failed");
-    return error_handle_system(error_ctx, -EINVAL, "get_system_time", response);
+    return error_handle_system(error_ctx, ONVIF_ERROR_INVALID, "get_system_time", response);
   }
 
   struct tm* tm_info = localtime(&now);
   if (!tm_info) {
     service_log_operation_failure(log_ctx, "Time conversion", -1, "localtime() function failed");
-    return error_handle_system(error_ctx, -EINVAL, "convert_time", response);
+    return error_handle_system(error_ctx, ONVIF_ERROR_INVALID, "convert_time", response);
   }
 
   // Set datetime data
