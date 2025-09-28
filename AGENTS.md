@@ -543,6 +543,35 @@ When reviewing ONVIF project code, **ALWAYS** follow this comprehensive review p
   - Verify no undefined behavior
   - Check for unused variables and functions
 
+- **Code Linting (MANDATORY)** - **MANDATORY** for all code changes:
+  - **Run linting script**: `./cross-compile/onvif/scripts/lint_code.sh` after implementation
+  - **Check specific files**: `./cross-compile/onvif/scripts/lint_code.sh --file src/path/to/file.c`
+  - **Check changed files**: `./cross-compile/onvif/scripts/lint_code.sh --changed`
+  - **Check only mode**: `./cross-compile/onvif/scripts/lint_code.sh --check` (exits 1 if issues found)
+  - **Severity levels**: Use `--severity error` to fail only on errors, `--severity warn` for warnings and errors
+  - **Format checking**: Use `--format` to also check code formatting compliance
+  - **All linting issues MUST be resolved** before code can be approved
+  - **Linting covers**: Code style, potential bugs, performance issues, security concerns, and best practices
+  - **Integration**: Linting is integrated with clangd-tidy for comprehensive analysis
+
+- **Code Formatting (MANDATORY)** - **MANDATORY** for all code changes:
+  - **Run formatting script**: `./cross-compile/onvif/scripts/format_code.sh` after implementation
+  - **Check specific files**: `./cross-compile/onvif/scripts/format_code.sh --files src/path/to/file.c`
+  - **Check only mode**: `./cross-compile/onvif/scripts/format_code.sh --check` (exits 1 if formatting issues found)
+  - **Dry run mode**: `./cross-compile/onvif/scripts/format_code.sh --dry-run` to see what would be changed
+  - **All formatting issues MUST be resolved** before code can be approved
+  - **Formatting covers**: Indentation, spacing, brace placement, line length, and consistent style
+  - **Integration**: Uses clang-format with project-specific configuration
+
+- **Function Order Compliance (MANDATORY)** - **MANDATORY** verification after implementation:
+  - **Verify function ordering** follows project guidelines: definitions at top, execution logic at bottom
+  - **Check global variables** are placed at the top of files after includes
+  - **Validate include ordering**: system headers → third-party → project headers
+  - **Ensure proper spacing** and formatting between function groups
+  - **Use linting script** with `--format` flag to check function ordering compliance
+  - **Manual verification** may be required for complex files with many functions
+  - **All ordering issues MUST be resolved** before code can be approved
+
 - **Static Analysis** - Run automated analysis tools:
   - Use tools like `cppcheck`, `clang-static-analyzer`, or `PVS-Studio`
   - Address all critical and high-severity issues
@@ -592,6 +621,10 @@ When reviewing ONVIF project code, **ALWAYS** follow this comprehensive review p
 - [ ] **Performance** is acceptable
 - [ ] **Security** concerns are addressed
 - [ ] **Code style** is consistent
+- [ ] **Code linting** passes without issues (`./cross-compile/onvif/scripts/lint_code.sh --check`)
+- [ ] **Code formatting** is compliant (`./cross-compile/onvif/scripts/format_code.sh --check`)
+- [ ] **Function ordering** follows guidelines (definitions at top, execution logic at bottom)
+- [ ] **Global variables** are placed at top of files after includes
 - [ ] **Static analysis** passes without critical issues
 - [ ] **Memory analysis** shows no leaks or overflows
 - [ ] **Security testing** validates input handling
@@ -888,6 +921,23 @@ test -f cross-compile/onvif/docs/html/index.html
 find cross-compile/onvif/docs -type f
 ```
 
+#### Code Quality Commands (MANDATORY)
+```bash
+# Code Linting (MANDATORY)
+./cross-compile/onvif/scripts/lint_code.sh                    # Lint all C files
+./cross-compile/onvif/scripts/lint_code.sh --check            # Check for issues (exit 1 if found)
+./cross-compile/onvif/scripts/lint_code.sh --file src/path/to/file.c  # Lint specific file
+./cross-compile/onvif/scripts/lint_code.sh --changed          # Lint only changed files
+./cross-compile/onvif/scripts/lint_code.sh --format           # Also check formatting
+./cross-compile/onvif/scripts/lint_code.sh --severity error   # Fail only on errors
+
+# Code Formatting (MANDATORY)
+./cross-compile/onvif/scripts/format_code.sh                  # Format all C files
+./cross-compile/onvif/scripts/format_code.sh --check          # Check formatting (exit 1 if issues)
+./cross-compile/onvif/scripts/format_code.sh --files src/path/to/file.c  # Format specific files
+./cross-compile/onvif/scripts/format_code.sh --dry-run        # Show what would be changed
+```
+
 #### Testing and Debugging Commands
 ```bash
 # Unit Testing (MANDATORY)
@@ -966,21 +1016,29 @@ wget -O response.xml "http://192.168.1.100/onvif/device_service"
    - Add comprehensive Doxygen documentation
    - Use consistent naming conventions and formatting
 
-2. **Testing and Validation**:
+2. **Code Quality Validation (MANDATORY)**:
+   - **Run linting script**: `./cross-compile/onvif/scripts/lint_code.sh --check`
+   - **Run formatting script**: `./cross-compile/onvif/scripts/format_code.sh --check`
+   - **Fix all linting issues** before proceeding
+   - **Fix all formatting issues** before proceeding
+   - **Verify function ordering** compliance with project guidelines
+   - **Check global variable placement** at top of files after includes
+
+3. **Testing and Validation**:
    - Test compilation with native make
    - Run static analysis tools
    - Perform memory leak testing
    - Test with various input conditions
    - Verify ONVIF compliance
 
-3. **Documentation and Review**:
+4. **Documentation and Review**:
    - Update Doxygen documentation
    - Regenerate HTML documentation
    - Perform comprehensive code review
    - Update any affected documentation
    - Test documentation generation
 
-4. **Integration and Deployment**:
+5. **Integration and Deployment**:
    - Test with SD-card payload
    - Verify functionality on target device
    - Check for regression issues

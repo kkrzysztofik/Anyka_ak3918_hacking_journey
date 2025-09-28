@@ -81,6 +81,29 @@ make snyk-analyze
 make clean
 ```
 
+### Code Quality Validation (MANDATORY)
+
+```bash
+# Code Linting (MANDATORY after implementation)
+./cross-compile/onvif/scripts/lint_code.sh                    # Lint all C files
+./cross-compile/onvif/scripts/lint_code.sh --check            # Check for issues (exit 1 if found)
+./cross-compile/onvif/scripts/lint_code.sh --file src/path/to/file.c  # Lint specific file
+./cross-compile/onvif/scripts/lint_code.sh --changed          # Lint only changed files
+./cross-compile/onvif/scripts/lint_code.sh --format           # Also check formatting
+./cross-compile/onvif/scripts/lint_code.sh --severity error   # Fail only on errors
+
+# Code Formatting (MANDATORY after implementation)
+./cross-compile/onvif/scripts/format_code.sh                  # Format all C files
+./cross-compile/onvif/scripts/format_code.sh --check          # Check formatting (exit 1 if issues)
+./cross-compile/onvif/scripts/format_code.sh --files src/path/to/file.c  # Format specific files
+./cross-compile/onvif/scripts/format_code.sh --dry-run        # Show what would be changed
+
+# Function Order Compliance (MANDATORY verification)
+# Verify function ordering follows guidelines: definitions at top, execution logic at bottom
+# Check global variables are placed at top of files after includes
+# Validate include ordering: system headers → third-party → project headers
+```
+
 ### Unit Testing Commands (MANDATORY)
 
 ```bash
@@ -183,7 +206,14 @@ The ONVIF implementation follows a modular architecture:
 
 3. **Utility Usage**: MANDATORY - Always check `src/utils/` for existing functionality before implementing new code. NO code duplication allowed.
 
-4. **Doxygen Documentation**: ALL code changes must include complete documentation:
+4. **Code Quality Validation**: **MANDATORY** - Run linting and formatting checks after implementation
+   - **Linting**: `./cross-compile/onvif/scripts/lint_code.sh --check`
+   - **Formatting**: `./cross-compile/onvif/scripts/format_code.sh --check`
+   - **Function Ordering**: Verify definitions at top, execution logic at bottom
+   - **Global Variables**: Must be placed at top of files after includes
+   - **All issues MUST be resolved** before code can be approved
+
+5. **Doxygen Documentation**: ALL code changes must include complete documentation:
    ```c
    /**
     * @brief Brief description of function purpose
@@ -193,7 +223,7 @@ The ONVIF implementation follows a modular architecture:
     */
    ```
 
-5. **File Headers**: All files must have consistent headers:
+6. **File Headers**: All files must have consistent headers:
    ```c
    /**
     * @file filename.h
@@ -260,11 +290,16 @@ Integrated tools for code quality:
 
 1. **Plan**: Use TodoWrite tool for task management and tracking
 2. **Code**: Follow mandatory standards in `AGENTS.md`
-3. **Build**: Test compilation with native build environment
-4. **Unit Test**: **MANDATORY** - Run unit tests for all utility functions
-5. **Document**: Update Doxygen documentation for all changes
-6. **Analyze**: Run static analysis tools to ensure code quality
-7. **Test**: Use integration tests and SD card testing
-8. **Review**: Comprehensive code review covering security and performance
+3. **Code Quality Validation**: **MANDATORY** - Run linting and formatting checks
+   - `./cross-compile/onvif/scripts/lint_code.sh --check`
+   - `./cross-compile/onvif/scripts/format_code.sh --check`
+   - Verify function ordering compliance
+   - Check global variable placement
+4. **Build**: Test compilation with native build environment
+5. **Unit Test**: **MANDATORY** - Run unit tests for all utility functions
+6. **Document**: Update Doxygen documentation for all changes
+7. **Analyze**: Run static analysis tools to ensure code quality
+8. **Test**: Use integration tests and SD card testing
+9. **Review**: Comprehensive code review covering security and performance
 
 **Note**: The project focuses on defensive security only. All code must be secure and robust with proper input validation and error handling.
