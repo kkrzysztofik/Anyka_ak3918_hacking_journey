@@ -10,19 +10,25 @@
 
 #include "networking/http/http_auth.h"
 
-#include <ctype.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
-#include "utils/security/base64_utils.h"
-#include "utils/security/security_hardening.h"
 #include "utils/string/string_shims.h"
-#include "utils/validation/common_validation.h"
 #include "utils/validation/input_validation.h"
+
+/* ==================== Constants ==================== */
+
+#define BASIC_AUTH_PREFIX_LEN      6
+#define HTTP_401_STATUS_CODE       401
+#define CONTENT_TYPE_BUFFER_SIZE   10
+#define RESPONSE_BODY_BUFFER_SIZE  512
+#define CHALLENGE_VALUE_EXTRA_SIZE 50
 
 /* ==================== Helper Functions ==================== */
 
@@ -182,8 +188,8 @@ int http_auth_parse_basic_credentials(const char* auth_header, char* username, c
     return HTTP_AUTH_ERROR_INVALID;
   }
 
-  const char* encoded = auth_header + 6; // Skip "Basic " prefix
-  size_t encoded_len = strnlen(encoded, HTTP_MAX_AUTH_HEADER_LEN - 6);
+  const char* encoded = auth_header + BASIC_AUTH_PREFIX_LEN; // Skip "Basic " prefix
+  size_t encoded_len = strnlen(encoded, HTTP_MAX_AUTH_HEADER_LEN - BASIC_AUTH_PREFIX_LEN);
 
   if (encoded_len == 0) {
     return HTTP_AUTH_ERROR_INVALID;
@@ -248,20 +254,33 @@ int http_auth_verify_credentials(const char* username, const char* password,
  */
 http_response_t http_auth_create_401_response(const struct http_auth_config* auth_config) {
   http_response_t response = {0};
-  response.status_code = 401;
-  response.content_type = "text/html";
+  response.status_code = HTTP_401_STATUS_CODE;
+
+  // Allocate content_type dynamically to avoid segmentation fault in http_response_free
+  response.content_type = malloc(CONTENT_TYPE_BUFFER_SIZE);
+  if (response.content_type) {
+    strcpy(response.content_type, "text/html");
+  }
+
   response.headers = NULL;
   response.header_count = 0;
 
   // Create response body with realm information
-  char body[512] = {0};
+  char body[RESPONSE_BODY_BUFFER_SIZE] = {0};
   if (auth_config && auth_config->realm[0] != '\0') {
     // Validate realm before using it
     if (validate_realm_input(auth_config->realm) == ONVIF_VALIDATION_SUCCESS) {
-      snprintf(body, sizeof(body),
-               "<html><body><h1>401 Unauthorized</h1><p>Authentication required for realm: "
-               "%s</p></body></html>",
-               auth_config->realm);
+      int result =
+        snprintf(body, sizeof(body),
+                 "<html><body><h1>401 Unauthorized</h1><p>Authentication required for realm: "
+                 "%s</p></body></html>",
+                 auth_config->realm);
+      if (result < 0 || (size_t)result >= sizeof(body)) {
+        platform_log_error("Failed to format response body with realm");
+        strcpy(
+          body,
+          "<html><body><h1>401 Unauthorized</h1><p>Authentication required.</p></body></html>");
+      }
     } else {
       platform_log_warning("Invalid realm in 401 response, using default");
       strcpy(body,
@@ -281,8 +300,14 @@ http_response_t http_auth_create_401_response(const struct http_auth_config* aut
   // Add WWW-Authenticate header
   if (auth_config && auth_config->realm[0] != '\0' &&
       validate_realm_input(auth_config->realm) == ONVIF_VALIDATION_SUCCESS) {
-    char challenge_value[HTTP_MAX_REALM_LEN + 50] = {0};
-    snprintf(challenge_value, sizeof(challenge_value), "Basic realm=\"%s\"", auth_config->realm);
+    char challenge_value[HTTP_MAX_REALM_LEN + CHALLENGE_VALUE_EXTRA_SIZE] = {0};
+    int result =
+      snprintf(challenge_value, sizeof(challenge_value), "Basic realm=\"%s\"", auth_config->realm);
+    if (result < 0 || (size_t)result >= sizeof(challenge_value)) {
+      platform_log_error("Failed to format challenge value, using default");
+      http_response_add_header(&response, "WWW-Authenticate", "Basic realm=\"ONVIF Server\"");
+      return response;
+    }
     http_response_add_header(&response, "WWW-Authenticate", challenge_value);
   } else {
     http_response_add_header(&response, "WWW-Authenticate", "Basic realm=\"ONVIF Server\"");

@@ -55,7 +55,7 @@ BASE64_LIBS = -lb64
 LINKERFLAG=-L./lib -lakuio -lakispsdk -lakv_encode -lplat_common -lplat_thread -lplat_vi -lplat_vpss -lplat_ipcsrv -lplat_venc_cb -lmpi_venc -lakstreamenc -lpthread -lakae -lakaudiocodec -lakmedia -lakv_encode -lapp_net -lapp_rtsp -lmpi_aed -lmpi_aenc -lplat_ai -lplat_drv $(GSOAP_LIBS) $(BASE64_LIBS) -lm
 
 # Updated include paths with generated gSOAP files
-INCLUDES=include src src/core src/platform src/services src/networking src/protocol src/utils src/generated
+INCLUDES=include src
 
 # Output directory for all build artifacts
 OUT_DIR=out

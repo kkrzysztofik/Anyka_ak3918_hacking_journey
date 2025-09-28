@@ -34,8 +34,8 @@
 #include "ak_vi.h"
 #include "ak_vpss.h"
 #include "list.h"
-#include "platform.h"
-#include "platform_common.h"
+#include "platform/platform.h"
+#include "platform/platform_common.h"
 #include "utils/logging/platform_logging.h"
 
 /* Error type constants for enhanced error logging */

@@ -18,7 +18,7 @@
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
-#include "platform.h"
+#include "platform/platform.h"
 #include "platform/platform_common.h"
 #include "protocol/gsoap/onvif_gsoap.h"
 #include "protocol/response/onvif_service_handler.h"

@@ -21,12 +21,9 @@
 #include <string.h>
 #include <time.h>
 
-#include "common/onvif_imaging_types.h"
-#include "media/onvif_media.h"
 #include "platform/platform.h"
-#include "ptz/onvif_ptz.h"
+#include "services/common/onvif_imaging_types.h"
 #include "services/device/onvif_device.h"
-#include "services/imaging/onvif_imaging.h"
 #include "services/media/onvif_media.h"
 #include "services/ptz/onvif_ptz.h"
 #include "utils/error/error_handling.h"
@@ -44,6 +41,22 @@
 // gSOAP configuration constants
 #define ONVIF_GSOAP_DEFAULT_BUFFER_SIZE 4096
 #define ONVIF_GSOAP_MAX_RESPONSE_SIZE   (16 * 1024 * 1024)
+#define ONVIF_GSOAP_ERROR_MSG_SIZE      256
+
+// Time conversion constants
+#define SECONDS_TO_MICROSECONDS     1000000ULL
+#define NANOSECONDS_TO_MICROSECONDS 1000ULL
+
+// Time constants
+#define TM_YEAR_OFFSET 1900
+
+// ONVIF version constants
+#define ONVIF_MAJOR_VERSION 2
+#define ONVIF_MINOR_VERSION 5
+
+// ONVIF discovery constants
+#define ONVIF_DISCOVERY_PORT 3702
+#define ONVIF_DISCOVERY_TTL  5
 
 /* ============================================================================
  * Global Variables
@@ -51,7 +64,7 @@
  */
 
 // Global error message buffer
-static char g_onvif_gsoap_error_msg[256] = {0};
+static char g_onvif_gsoap_error_msg[ONVIF_GSOAP_ERROR_MSG_SIZE] = {0}; // NOLINT
 
 /* ============================================================================
  * Internal Helper Functions
@@ -89,7 +102,7 @@ static int validate_gsoap_context(struct soap* soap) {
 static void set_gsoap_error(struct soap* soap, const char* format, ...) {
   va_list args;
   va_start(args, format);
-  vsnprintf(g_onvif_gsoap_error_msg, sizeof(g_onvif_gsoap_error_msg), format, args);
+  (void)vsnprintf(g_onvif_gsoap_error_msg, sizeof(g_onvif_gsoap_error_msg), format, args);
   va_end(args);
 
   if (soap) {
@@ -107,9 +120,10 @@ static void set_gsoap_error(struct soap* soap, const char* format, ...) {
  * @return Current timestamp in microseconds
  */
 static uint64_t get_timestamp_us(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+  struct timespec timespec_val;
+  clock_gettime(CLOCK_MONOTONIC, &timespec_val);
+  return (uint64_t)timespec_val.tv_sec * SECONDS_TO_MICROSECONDS +
+         timespec_val.tv_nsec / NANOSECONDS_TO_MICROSECONDS;
 }
 
 /* ============================================================================
@@ -500,7 +514,7 @@ int system_datetime_response_callback(struct soap* soap, void* user_data) {
     response->SystemDateAndTime->UTCDateTime->Time = soap_new_tt__Time(soap, 1);
 
     if (response->SystemDateAndTime->UTCDateTime->Date) {
-      response->SystemDateAndTime->UTCDateTime->Date->Year = tm_info->tm_year + 1900;
+      response->SystemDateAndTime->UTCDateTime->Date->Year = tm_info->tm_year + TM_YEAR_OFFSET;
       response->SystemDateAndTime->UTCDateTime->Date->Month = tm_info->tm_mon + 1;
       response->SystemDateAndTime->UTCDateTime->Date->Day = tm_info->tm_mday;
     }
@@ -519,7 +533,7 @@ int system_datetime_response_callback(struct soap* soap, void* user_data) {
     response->SystemDateAndTime->LocalDateTime->Time = soap_new_tt__Time(soap, 1);
 
     if (response->SystemDateAndTime->LocalDateTime->Date) {
-      response->SystemDateAndTime->LocalDateTime->Date->Year = tm_info->tm_year + 1900;
+      response->SystemDateAndTime->LocalDateTime->Date->Year = tm_info->tm_year + TM_YEAR_OFFSET;
       response->SystemDateAndTime->LocalDateTime->Date->Month = tm_info->tm_mon + 1;
       response->SystemDateAndTime->LocalDateTime->Date->Day = tm_info->tm_mday;
     }
@@ -570,8 +584,8 @@ int services_response_callback(struct soap* soap, void* user_data) {
   response->Service[0].XAddr = soap_strdup(soap, "http://[IP]:8080/onvif/device_service");
   response->Service[0].Version = soap_new_tt__OnvifVersion(soap, 1);
   if (response->Service[0].Version) {
-    response->Service[0].Version->Major = 2;
-    response->Service[0].Version->Minor = 5;
+    response->Service[0].Version->Major = ONVIF_MAJOR_VERSION;
+    response->Service[0].Version->Minor = ONVIF_MINOR_VERSION;
   }
 
   // Media Service
@@ -579,8 +593,8 @@ int services_response_callback(struct soap* soap, void* user_data) {
   response->Service[1].XAddr = soap_strdup(soap, "http://[IP]:8080/onvif/media_service");
   response->Service[1].Version = soap_new_tt__OnvifVersion(soap, 1);
   if (response->Service[1].Version) {
-    response->Service[1].Version->Major = 2;
-    response->Service[1].Version->Minor = 5;
+    response->Service[1].Version->Major = ONVIF_MAJOR_VERSION;
+    response->Service[1].Version->Minor = ONVIF_MINOR_VERSION;
   }
 
   // PTZ Service
@@ -588,8 +602,8 @@ int services_response_callback(struct soap* soap, void* user_data) {
   response->Service[2].XAddr = soap_strdup(soap, "http://[IP]:8080/onvif/ptz_service");
   response->Service[2].Version = soap_new_tt__OnvifVersion(soap, 1);
   if (response->Service[2].Version) {
-    response->Service[2].Version->Major = 2;
-    response->Service[2].Version->Minor = 5;
+    response->Service[2].Version->Major = ONVIF_MAJOR_VERSION;
+    response->Service[2].Version->Minor = ONVIF_MINOR_VERSION;
   }
 
   // Set service count
@@ -967,7 +981,7 @@ int ptz_goto_preset_response_callback(struct soap* soap, void* user_data) {
  * @param user_data Pointer to media_profiles_callback_data_t
  * @return 0 on success, negative error code on failure
  */
-int media_profiles_response_callback(struct soap* soap, void* user_data) {
+int media_profiles_response_callback(struct soap* soap, void* user_data) { // NOLINT
   media_profiles_callback_data_t* data = (media_profiles_callback_data_t*)user_data;
 
   if (!data || !data->profiles) {
@@ -1426,11 +1440,13 @@ int media_set_metadata_config_response_callback(struct soap* soap, void* user_da
   return 0;
 }
 
-int onvif_gsoap_generate_device_info_response(onvif_gsoap_context_t* ctx, const char* manufacturer,
-                                              const char* model, const char* firmware_version,
-                                              const char* serial_number, const char* hardware_id) {
+int onvif_gsoap_generate_device_info_response(
+  onvif_gsoap_context_t* ctx,
+  const char* manufacturer, // NOLINT(bugprone-easily-swappable-parameters)
+  const char* model, const char* firmware_version, const char* serial_number,
+  const char* hardware_id) {
   // Prepare callback data
-  device_info_callback_data_t callback_data = {{0}};
+  device_info_callback_data_t callback_data = {{0}}; // NOLINT
 
   // Copy strings into the callback data structure
   strncpy(callback_data.manufacturer, manufacturer ? manufacturer : "",
@@ -1829,8 +1845,8 @@ int onvif_gsoap_generate_get_metadata_configurations_response(
           gsoap_config->Multicast->Address->Type = tt__IPType__IPv4;
           gsoap_config->Multicast->Address->IPv4Address = soap_strdup(ctx->soap, "239.255.255.250");
         }
-        gsoap_config->Multicast->Port = 3702; // Default ONVIF discovery port
-        gsoap_config->Multicast->TTL = 5;
+        gsoap_config->Multicast->Port = ONVIF_DISCOVERY_PORT;
+        gsoap_config->Multicast->TTL = ONVIF_DISCOVERY_TTL;
         gsoap_config->Multicast->AutoStart = xsd__boolean__false_;
       }
     }
@@ -2002,8 +2018,8 @@ int onvif_gsoap_parse_integer(onvif_gsoap_context_t* ctx, const char* xpath, int
  * @param operation_name_size Size of the operation name buffer
  * @return ONVIF_XML_SUCCESS on success, negative error code on failure
  */
-int onvif_gsoap_extract_operation_name(const char* request_data, size_t request_size,
-                                       char* operation_name, size_t operation_name_size) {
+int onvif_gsoap_extract_operation_name( // NOLINT(readability-function-cognitive-complexity)
+  const char* request_data, size_t request_size, char* operation_name, size_t operation_name_size) {
   if (!request_data || request_size == 0 || !operation_name || operation_name_size == 0) {
     return ONVIF_XML_ERROR_INVALID_INPUT;
   }
@@ -2118,10 +2134,11 @@ int fault_response_callback(struct soap* soap, void* user_data) {
   return ONVIF_SUCCESS;
 }
 
-int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code,
-                                        const char* fault_string, const char* fault_actor,
-                                        const char* fault_detail, char* output_buffer,
-                                        size_t buffer_size) {
+int onvif_gsoap_generate_fault_response( // NOLINT
+  onvif_gsoap_context_t* ctx,
+  const char* fault_code,   // NOLINT(bugprone-easily-swappable-parameters)
+  const char* fault_string, // NOLINT(bugprone-easily-swappable-parameters)
+  const char* fault_actor, const char* fault_detail, char* output_buffer, size_t buffer_size) {
   // Validate required parameters
   if (!fault_string) {
     return ONVIF_ERROR_INVALID;

@@ -23,8 +23,9 @@
 #include <sys/socket.h>
 #include <time.h>
 
-#include "platform.h"
-#include "rtsp_types.h"
+#include "networking/rtsp/rtsp_types.h"
+#include "platform/platform.h"
+
 
 /* ==================== Utility Functions ==================== */
 

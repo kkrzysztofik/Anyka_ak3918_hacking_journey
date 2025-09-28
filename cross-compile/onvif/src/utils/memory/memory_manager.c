@@ -22,8 +22,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "error/error_handling.h"
 #include "platform/platform.h"
+#include "utils/error/error_handling.h"
+
+/* ============================================================================
+ * Constants
+ * ============================================================================
+ */
+
+#define MEMORY_MANAGER_ERROR_MSG_SIZE   256
+#define MEMORY_MANAGER_INITIAL_CAPACITY 1024
+#define DYNAMIC_BUFFER_TEMP_SIZE        1024
+
+// Character validation constants
+#define PRINTABLE_CHAR_MIN 32
+#define PRINTABLE_CHAR_MAX 126
+
+// XML/HTML constants
+#define XML_ELEMENT_BUFFER_SIZE 1024
+#define HTML_ENTITY_LT_LEN      4
+#define HTML_ENTITY_GT_LEN      4
+#define HTML_ENTITY_AMP_LEN     5
+#define HTML_ENTITY_QUOT_LEN    6
+#define HTML_ENTITY_APOS_LEN    6
 
 /* ============================================================================
  * Global Variables
@@ -35,14 +56,14 @@ static bool g_memory_manager_initialized = false;         // NOLINT
 static buffer_safety_stats_t g_buffer_safety_stats = {0}; // NOLINT
 
 // Global error message buffer for dynamic buffers
-static char g_dynamic_buffer_error_msg[256] = {0};
+static char g_dynamic_buffer_error_msg[MEMORY_MANAGER_ERROR_MSG_SIZE] = {0}; // NOLINT
 
 int memory_manager_init(void) {
   if (g_memory_manager_initialized) {
     return 0;
   }
 
-  g_memory_tracker.capacity = 1024;
+  g_memory_tracker.capacity = MEMORY_MANAGER_INITIAL_CAPACITY;
   g_memory_tracker.allocations = malloc(g_memory_tracker.capacity * sizeof(memory_allocation_t));
   if (!g_memory_tracker.allocations) {
     platform_log_error("Failed to initialize memory tracker\n");
@@ -323,8 +344,9 @@ int memory_safe_snprintf(char* dest, size_t dest_size, const char* format, ...) 
     if (*fmt == '%' && *(fmt + 1) == 's') {
       // Handle %s format specifier
       const char* str = va_arg(args, const char*);
-      if (!str)
+      if (!str) {
         str = "(null)";
+      }
 
       while (*str && remaining > 0) {
         *pos++ = *str++;
@@ -400,7 +422,7 @@ void* memory_safe_memset(void* dest, size_t dest_size, size_t n, int value) {
 static void set_buffer_error(dynamic_buffer_t* buffer, const char* format, ...) {
   va_list args;
   va_start(args, format);
-  vsnprintf(g_dynamic_buffer_error_msg, sizeof(g_dynamic_buffer_error_msg), format, args);
+  (void)vsnprintf(g_dynamic_buffer_error_msg, sizeof(g_dynamic_buffer_error_msg), format, args);
   va_end(args);
 
   buffer->state |= DYNAMIC_BUFFER_STATE_ERROR;
@@ -416,6 +438,7 @@ static void set_buffer_error(dynamic_buffer_t* buffer, const char* format, ...) 
  * @param max_size Maximum allowed size
  * @return Next buffer size
  */
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 static size_t calculate_next_size(size_t current_size, size_t required_size, size_t growth_factor,
                                   size_t max_size) {
   size_t next_size = current_size;
@@ -488,8 +511,10 @@ int dynamic_buffer_init(dynamic_buffer_t* buffer, size_t initial_size) {
   return 0;
 }
 
-int dynamic_buffer_init_custom(dynamic_buffer_t* buffer, size_t initial_size, size_t growth_factor,
-                               size_t max_size) {
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+int dynamic_buffer_init_custom(dynamic_buffer_t* buffer, size_t initial_size,
+                               size_t growth_factor, // NOLINT(bugprone-easily-swappable-parameters)
+                               size_t max_size) {    // NOLINT(bugprone-easily-swappable-parameters)
   if (!buffer) {
     platform_log_error("Dynamic Buffer: NULL buffer pointer");
     return ONVIF_ERROR_INVALID;
@@ -622,7 +647,7 @@ int dynamic_buffer_appendf(dynamic_buffer_t* buffer, const char* format, ...) {
   }
 
   // Format the string into a temporary buffer
-  char temp_buffer[1024];
+  char temp_buffer[DYNAMIC_BUFFER_TEMP_SIZE];
   va_list args;
   va_start(args, format);
   int result = vsnprintf(temp_buffer, sizeof(temp_buffer), format, args);
@@ -643,7 +668,7 @@ int dynamic_buffer_appendf(dynamic_buffer_t* buffer, const char* format, ...) {
     }
 
     va_start(args, format);
-    vsnprintf(large_buffer, result + 1, format, args);
+    (void)vsnprintf(large_buffer, result + 1, format, args);
     va_end(args);
 
     int append_result = dynamic_buffer_append(buffer, large_buffer, result);
@@ -792,7 +817,7 @@ int buffer_safe_snprintf(char* dest, size_t dest_size, const char* format, ...) 
   return result;
 }
 
-int buffer_validate_string(const char* str, size_t max_len, buffer_safety_flags_t flags) {
+int buffer_validate_string(const char* str, size_t max_len, buffer_safety_flags_t flags) { // NOLINT
   if (!str) {
     g_buffer_safety_stats.failed_validations++;
     return ONVIF_ERROR_INVALID;
@@ -817,7 +842,7 @@ int buffer_validate_string(const char* str, size_t max_len, buffer_safety_flags_
   // Validate printable characters only
   if (flags & BUFFER_SAFETY_VALIDATE_PRINTABLE_ONLY) {
     for (size_t i = 0; i < len; i++) {
-      if (str[i] < 32 || str[i] > 126) {
+      if (str[i] < PRINTABLE_CHAR_MIN || str[i] > PRINTABLE_CHAR_MAX) {
         platform_log_error("Non-printable character at position %zu: %d", i, (int)str[i]);
         g_buffer_safety_stats.failed_validations++;
         return ONVIF_ERROR_INVALID;
@@ -840,7 +865,7 @@ int buffer_safe_append_xml_element(char* buffer, size_t buffer_size, const char*
   size_t remaining = buffer_size - current_len - 1; // Leave space for null terminator
 
   // Build element string
-  char element[1024];
+  char element[XML_ELEMENT_BUFFER_SIZE];
   int result = snprintf(element, sizeof(element), "<%s", element_name);
   if (result < 0 || (size_t)result >= sizeof(element)) {
     g_buffer_safety_stats.failed_validations++;
@@ -886,6 +911,28 @@ int buffer_safe_append_xml_element(char* buffer, size_t buffer_size, const char*
   return result;
 }
 
+/**
+ * @brief Append HTML entity to destination buffer with bounds checking
+ * @param dest Destination buffer
+ * @param dest_pos Current position in destination
+ * @param dest_size Total destination buffer size
+ * @param entity HTML entity string to append
+ * @param entity_len Length of HTML entity
+ * @return 0 on success, -1 on buffer overflow
+ */
+static int append_html_entity(char* dest, size_t* dest_pos, size_t dest_size, const char* entity,
+                              size_t entity_len) {
+  if (*dest_pos + entity_len >= dest_size) {
+    g_buffer_safety_stats.buffer_overflows_prevented++;
+    g_buffer_safety_stats.failed_validations++;
+    return -1;
+  }
+
+  strcpy(dest + *dest_pos, entity);
+  *dest_pos += entity_len;
+  return 0;
+}
+
 int buffer_safe_escape_xml(char* dest, size_t dest_size, const char* src, size_t src_len) {
   if (!dest || !src || dest_size == 0) {
     g_buffer_safety_stats.failed_validations++;
@@ -896,52 +943,27 @@ int buffer_safe_escape_xml(char* dest, size_t dest_size, const char* src, size_t
   for (size_t i = 0; i < src_len && dest_pos < dest_size - 1; i++) {
     switch (src[i]) {
     case '<':
-      if (dest_pos + 4 < dest_size) {
-        strcpy(dest + dest_pos, "&lt;");
-        dest_pos += 4;
-      } else {
-        g_buffer_safety_stats.buffer_overflows_prevented++;
-        g_buffer_safety_stats.failed_validations++;
+      if (append_html_entity(dest, &dest_pos, dest_size, "&lt;", HTML_ENTITY_LT_LEN) != 0) {
         return -1;
       }
       break;
     case '>':
-      if (dest_pos + 4 < dest_size) {
-        strcpy(dest + dest_pos, "&gt;");
-        dest_pos += 4;
-      } else {
-        g_buffer_safety_stats.buffer_overflows_prevented++;
-        g_buffer_safety_stats.failed_validations++;
+      if (append_html_entity(dest, &dest_pos, dest_size, "&gt;", HTML_ENTITY_GT_LEN) != 0) {
         return -1;
       }
       break;
     case '&':
-      if (dest_pos + 5 < dest_size) {
-        strcpy(dest + dest_pos, "&amp;");
-        dest_pos += 5;
-      } else {
-        g_buffer_safety_stats.buffer_overflows_prevented++;
-        g_buffer_safety_stats.failed_validations++;
+      if (append_html_entity(dest, &dest_pos, dest_size, "&amp;", HTML_ENTITY_AMP_LEN) != 0) {
         return -1;
       }
       break;
     case '"':
-      if (dest_pos + 6 < dest_size) {
-        strcpy(dest + dest_pos, "&quot;");
-        dest_pos += 6;
-      } else {
-        g_buffer_safety_stats.buffer_overflows_prevented++;
-        g_buffer_safety_stats.failed_validations++;
+      if (append_html_entity(dest, &dest_pos, dest_size, "&quot;", HTML_ENTITY_QUOT_LEN) != 0) {
         return -1;
       }
       break;
     case '\'':
-      if (dest_pos + 6 < dest_size) {
-        strcpy(dest + dest_pos, "&apos;");
-        dest_pos += 6;
-      } else {
-        g_buffer_safety_stats.buffer_overflows_prevented++;
-        g_buffer_safety_stats.failed_validations++;
+      if (append_html_entity(dest, &dest_pos, dest_size, "&apos;", HTML_ENTITY_APOS_LEN) != 0) {
         return -1;
       }
       break;
