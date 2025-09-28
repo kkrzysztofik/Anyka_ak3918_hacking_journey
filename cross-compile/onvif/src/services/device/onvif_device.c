@@ -21,6 +21,7 @@
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_service_common.h"
 #include "services/common/onvif_types.h"
+#include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
@@ -129,6 +130,8 @@ static int get_device_information_business_logic(const service_handler_config_t*
                                                  onvif_gsoap_context_t* gsoap_ctx,
                                                  service_log_context_t* log_ctx,
                                                  error_context_t* error_ctx, void* callback_data) {
+  (void)config;
+  (void)request;
   if (!callback_data) {
     return ONVIF_ERROR_INVALID;
   }
@@ -228,6 +231,8 @@ static int get_capabilities_business_logic(const service_handler_config_t* confi
                                            onvif_gsoap_context_t* gsoap_ctx,
                                            service_log_context_t* log_ctx,
                                            error_context_t* error_ctx, void* callback_data) {
+  (void)config;
+  (void)request;
   if (!callback_data) {
     return ONVIF_ERROR_INVALID;
   }
@@ -294,6 +299,8 @@ static int get_system_date_time_business_logic(const service_handler_config_t* c
                                                onvif_gsoap_context_t* gsoap_ctx,
                                                service_log_context_t* log_ctx,
                                                error_context_t* error_ctx, void* callback_data) {
+  (void)config;
+  (void)request;
   if (!callback_data) {
     return ONVIF_ERROR_INVALID;
   }
@@ -362,6 +369,9 @@ static int get_services_business_logic(const service_handler_config_t* config,
                                        onvif_gsoap_context_t* gsoap_ctx,
                                        service_log_context_t* log_ctx, error_context_t* error_ctx,
                                        void* callback_data) {
+  (void)config;
+  (void)request;
+  (void)error_ctx;
   if (!callback_data) {
     return ONVIF_ERROR_INVALID;
   }
@@ -417,6 +427,8 @@ static int system_reboot_business_logic(const service_handler_config_t* config,
                                         onvif_gsoap_context_t* gsoap_ctx,
                                         service_log_context_t* log_ctx, error_context_t* error_ctx,
                                         void* callback_data) {
+  (void)config;
+  (void)request;
   if (!callback_data) {
     return ONVIF_ERROR_INVALID;
   }
@@ -519,7 +531,13 @@ static int handle_get_device_information(const service_handler_config_t* config,
                                          const http_request_t* request, http_response_t* response,
                                          onvif_gsoap_context_t* gsoap_ctx) {
   // Prepare callback data for device information
-  device_info_callback_data_t callback_data = {{0}};
+  device_info_callback_data_t callback_data = {
+    .manufacturer = {0},
+    .model = {0},
+    .firmware_version = {0},
+    .serial_number = {0},
+    .hardware_id = {0}
+  };
 
   // Use the enhanced callback-based handler
   return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
@@ -576,16 +594,60 @@ static int handle_system_reboot(const service_handler_config_t* config,
 }
 
 /* ============================================================================
- * Action Definitions
+ * Service Registration using Standardized Callback Interface
  * ============================================================================
  */
 
-static const service_action_def_t device_actions[] = {
-  {"GetDeviceInformation", handle_get_device_information, 0},
-  {"GetCapabilities", handle_get_capabilities, 0},
-  {"GetSystemDateAndTime", handle_get_system_date_time, 0},
-  {"GetServices", handle_get_services, 0},
-  {"SystemReboot", handle_system_reboot, 0}};
+/**
+ * @brief Device service initialization handler
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int device_service_init_handler(void) {
+  // Buffer pool and gSOAP context are already initialized in onvif_device_init
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Device service cleanup handler
+ */
+static void device_service_cleanup_handler(void) {
+  // Cleanup is handled in onvif_device_cleanup
+}
+
+/**
+ * @brief Device service capabilities check handler
+ * @param capability_name Capability name to check
+ * @return 1 if capability is supported, 0 otherwise
+ */
+static int device_service_capabilities_handler(const char* capability_name) {
+  if (!capability_name) {
+    return 0;
+  }
+
+  // Check against known device service capabilities
+  if (strcmp(capability_name, "GetDeviceInformation") == 0 ||
+      strcmp(capability_name, "GetCapabilities") == 0 ||
+      strcmp(capability_name, "GetSystemDateAndTime") == 0 ||
+      strcmp(capability_name, "GetServices") == 0 ||
+      strcmp(capability_name, "SystemReboot") == 0) {
+    return 1;
+  }
+
+  return 0;
+}
+
+/**
+ * @brief Device service registration structure using standardized interface
+ */
+static const onvif_service_registration_t g_device_service_registration = {
+  .service_name = "device",
+  .namespace_uri = "http://www.onvif.org/ver10/device/wsdl",
+  .operation_handler = onvif_device_handle_operation,
+  .init_handler = device_service_init_handler,
+  .cleanup_handler = device_service_cleanup_handler,
+  .capabilities_handler = device_service_capabilities_handler,
+  .reserved = {NULL, NULL, NULL, NULL}
+};
 
 /* ============================================================================
  * Public API Functions
@@ -597,7 +659,7 @@ static const service_action_def_t device_actions[] = {
  * @param config Configuration manager instance
  * @return ONVIF_SUCCESS on success, error code on failure
  * @note This function initializes the device service handler and registers
- * actions
+ * with the standardized dispatcher
  */
 int onvif_device_init(config_manager_t* config) {
   if (g_handler_initialized) {
@@ -633,9 +695,17 @@ int onvif_device_init(config_manager_t* config) {
 
   g_handler_initialized = 1;
 
+  // Register with standardized service dispatcher
+  int result = onvif_service_dispatcher_register_service(&g_device_service_registration);
+  if (result != ONVIF_SUCCESS) {
+    platform_log_error("Failed to register device service with dispatcher: %d\n", result);
+    onvif_device_cleanup();
+    return result;
+  }
+
   // Log initial buffer pool statistics
   buffer_pool_stats_t stats = buffer_pool_get_stats(&g_device_response_buffer_pool);
-  platform_log_info("Device service initialized - Buffer pool stats: %d/%d buffers used "
+  platform_log_info("Device service initialized and registered - Buffer pool stats: %d/%d buffers used "
                     "(%d%%), hits: %d, misses: %d\n",
                     stats.current_used, BUFFER_POOL_SIZE, stats.utilization_percent, stats.hits,
                     stats.misses);
@@ -646,7 +716,7 @@ int onvif_device_init(config_manager_t* config) {
 /**
  * @brief Cleanup the ONVIF Device service
  * @return ONVIF_SUCCESS on success, error code on failure
- * @note This function cleans up all device service resources
+ * @note This function cleans up all device service resources and unregisters from dispatcher
  */
 int onvif_device_cleanup(void) {
   if (!g_handler_initialized) {
@@ -654,6 +724,13 @@ int onvif_device_cleanup(void) {
   }
 
   int result = ONVIF_SUCCESS;
+
+  // Unregister from standardized service dispatcher
+  int unregister_result = onvif_service_dispatcher_unregister_service("device");
+  if (unregister_result != ONVIF_SUCCESS) {
+    platform_log_error("Failed to unregister device service from dispatcher: %d\n", unregister_result);
+    // Don't fail cleanup for this, but log the error
+  }
 
   // Cleanup buffer pool (returns void, so we can't check for errors)
   buffer_pool_cleanup(&g_device_response_buffer_pool);
@@ -669,28 +746,61 @@ int onvif_device_cleanup(void) {
   return result;
 }
 
+/* ============================================================================
+ * Operation Dispatch Table
+ * ============================================================================ */
+
 /**
- * @brief Handle ONVIF Device service requests by operation name
+ * @brief Device operation handler function pointer type
+ */
+typedef int (*device_operation_handler_t)(const service_handler_config_t* config,
+                                          const http_request_t* request,
+                                          http_response_t* response,
+                                          onvif_gsoap_context_t* gsoap_ctx);
+
+/**
+ * @brief Device operation dispatch entry
+ */
+typedef struct {
+  const char* operation_name;
+  device_operation_handler_t handler;
+} device_operation_entry_t;
+
+/**
+ * @brief Device service operation dispatch table
+ */
+static const device_operation_entry_t g_device_operations[] = {
+  {"GetDeviceInformation", handle_get_device_information},
+  {"GetCapabilities", handle_get_capabilities},
+  {"GetSystemDateAndTime", handle_get_system_date_time},
+  {"GetServices", handle_get_services},
+  {"SystemReboot", handle_system_reboot}
+};
+
+#define DEVICE_OPERATIONS_COUNT (sizeof(g_device_operations) / sizeof(g_device_operations[0]))
+
+/**
+ * @brief Handle ONVIF Device service requests by operation name (Standardized Interface)
  * @param operation_name ONVIF operation name (e.g., "GetDeviceInformation")
  * @param request HTTP request structure
  * @param response HTTP response structure
  * @return ONVIF_SUCCESS on success, error code on failure
- * @note This function routes requests to appropriate handlers by operation name
+ * @note This function implements the standardized onvif_service_operation_handler_t interface
  */
 int onvif_device_handle_operation(const char* operation_name, const http_request_t* request,
                                   http_response_t* response) {
-  if (!g_handler_initialized || !operation_name) {
-    return ONVIF_ERROR;
+  if (!g_handler_initialized || !operation_name || !request || !response) {
+    return ONVIF_ERROR_INVALID;
   }
 
-  // Find handler by operation name
-  for (size_t i = 0; i < sizeof(device_actions) / sizeof(device_actions[0]); i++) {
-    if (strcmp(operation_name, device_actions[i].action_name) == 0) {
-      // Call the handler directly
-      return device_actions[i].handler(&g_device_handler.config, request, response,
-                                       g_device_handler.gsoap_ctx);
+  // Dispatch using lookup table for O(n) performance with small constant factor
+  for (size_t i = 0; i < DEVICE_OPERATIONS_COUNT; i++) {
+    if (strcmp(operation_name, g_device_operations[i].operation_name) == 0) {
+      return g_device_operations[i].handler(&g_device_handler.config, request, response,
+                                           g_device_handler.gsoap_ctx);
     }
   }
 
+  // Operation not found
   return ONVIF_ERROR_NOT_FOUND;
 }

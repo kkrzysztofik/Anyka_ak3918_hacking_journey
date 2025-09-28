@@ -199,23 +199,35 @@ find_changed_files() {
     fi
 
     local changed_files=()
+    local git_root
+    git_root=$(git rev-parse --show-toplevel)
 
     # Get modified and added files since last commit
     while IFS= read -r file; do
-        if [[ -f "$file" ]]; then
-            # Only include C/C++ source files
-            if [[ "$file" =~ \.(c|h|cpp|hpp|cc|hh)$ ]]; then
-                changed_files+=("$PROJECT_ROOT/$file")
+        # Only include C/C++ source files
+        if [[ "$file" =~ \.(c|h|cpp|hpp|cc|hh)$ ]]; then
+            # Convert to absolute path if relative
+            if [[ "$file" != /* ]]; then
+                file="$git_root/$file"
+            fi
+            # Check if file exists after converting to absolute path
+            if [[ -f "$file" ]]; then
+                changed_files+=("$file")
             fi
         fi
     done < <(git diff --name-only HEAD)
 
     # Get untracked files (new files not yet committed)
     while IFS= read -r file; do
-        if [[ -f "$file" ]]; then
-            # Only include C/C++ source files
-            if [[ "$file" =~ \.(c|h|cpp|hpp|cc|hh)$ ]]; then
-                changed_files+=("$PROJECT_ROOT/$file")
+        # Only include C/C++ source files
+        if [[ "$file" =~ \.(c|h|cpp|hpp|cc|hh)$ ]]; then
+            # Convert to absolute path if relative
+            if [[ "$file" != /* ]]; then
+                file="$git_root/$file"
+            fi
+            # Check if file exists after converting to absolute path
+            if [[ -f "$file" ]]; then
+                changed_files+=("$file")
             fi
         fi
     done < <(git ls-files --others --exclude-standard)
