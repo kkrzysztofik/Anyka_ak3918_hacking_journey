@@ -11,7 +11,6 @@
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
 #include "services/common/onvif_imaging_types.h"
-#include "services/common/onvif_types.h"
 
 int onvif_imaging_init(void* vi_handle); /**< Initialize imaging module with VI
                                             handle (nullable). */
@@ -27,9 +26,10 @@ int onvif_imaging_set_auto_config(
   const struct auto_daynight_config* config); /**< Persist auto config. */
 int onvif_imaging_get_auto_config(
   struct auto_daynight_config* config); /**< Retrieve auto config. */
-int onvif_imaging_handle_request(
-  const char* action, const http_request_t* request,
-  http_response_t* response); /**< Handle ONVIF imaging service requests. */
+int onvif_imaging_handle_operation(
+  const char* operation_name, const http_request_t* request,
+  http_response_t*
+    response); /**< Handle ONVIF imaging service operations (standardized interface). */
 
 /* Imaging service functions */
 

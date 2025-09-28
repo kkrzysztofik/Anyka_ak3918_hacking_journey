@@ -29,7 +29,6 @@
 #include "networking/http/http_auth.h"
 #include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
-#include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap.h"
 #include "services/common/onvif_types.h"
 #include "services/device/onvif_device.h"
@@ -100,10 +99,10 @@ static void http_log_init_context(service_log_context_t* context, const char* cl
   }
 
   // Create enhanced action name that includes client IP for better context
-  static char enhanced_action[256];
+  static char enhanced_action[HTTP_ENHANCED_ACTION_MAX_LEN];
   if (client_ip && strlen(client_ip) > 0) {
-    snprintf(enhanced_action, sizeof(enhanced_action), "%s [%s]", operation ? operation : "unknown",
-             client_ip);
+    (void)snprintf(enhanced_action, sizeof(enhanced_action), "%s [%s]",
+                   operation ? operation : "unknown", client_ip);
     service_log_init_context(context, "HTTP", enhanced_action, level);
   } else {
     service_log_init_context(context, "HTTP", operation, level);
@@ -353,7 +352,7 @@ static int handle_onvif_request_by_operation(onvif_service_type_t service_type,
     return onvif_ptz_handle_request(operation_name, request, response);
 
   case ONVIF_SERVICE_IMAGING:
-    return onvif_imaging_handle_request(operation_name, request, response);
+    return onvif_imaging_handle_operation(operation_name, request, response);
 
   case ONVIF_SERVICE_SNAPSHOT:
     return onvif_snapshot_handle_request(operation_name, request, response);
@@ -583,22 +582,6 @@ static int generate_http_error_response(const error_context_t* error_ctx,
                                 error_ctx->message);
 
   return ONVIF_SUCCESS;
-}
-
-/**
- * @brief Handle error condition and generate standardized HTTP error response
- * @param error_ctx Error context containing error details
- * @param response HTTP response structure to populate
- * @param client_ip Client IP address for logging context
- * @return ONVIF_SUCCESS if error response generated successfully, error code if it fails
- */
-static int handle_http_error(const error_context_t* error_ctx, http_response_t* response,
-                             const char* client_ip) {
-  if (!error_ctx || !response) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  return generate_http_error_response(error_ctx, response, client_ip);
 }
 
 /**
@@ -1008,6 +991,188 @@ int http_server_init(int port) {
 }
 
 /**
+ * @brief Get client IP address from socket
+ * @param client_fd Client socket file descriptor
+ * @param client_ip_str Buffer to store client IP string
+ * @param buffer_size Size of the client IP buffer
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int get_client_ip_address(int client_fd, char* client_ip_str, size_t buffer_size) {
+  struct sockaddr_in client_addr;
+  socklen_t client_len = sizeof(client_addr);
+
+  if (getpeername(client_fd, (struct sockaddr*)&client_addr, &client_len) == 0) {
+    inet_ntop(AF_INET, &client_addr.sin_addr, client_ip_str, buffer_size);
+  } else {
+    strncpy(client_ip_str, "unknown", buffer_size - 1);
+    client_ip_str[buffer_size - 1] = '\0';
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Read HTTP request from client socket
+ * @param client_fd Client socket file descriptor
+ * @param buffer Buffer to store request data
+ * @param client_ip_str Client IP string for logging
+ * @return Number of bytes read on success, -1 on failure
+ */
+static ssize_t read_http_request(int client_fd, char* buffer, const char* client_ip_str) {
+  ssize_t bytes_read = read(client_fd, buffer, BUFFER_SIZE - 1);
+  if (bytes_read <= 0) {
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, client_ip_str, "socket_read", SERVICE_LOG_ERROR);
+    service_log_operation_failure(&log_ctx, "socket read", errno,
+                                  "Failed to read from client socket");
+    return -1;
+  }
+
+  buffer[bytes_read] = '\0';
+  return bytes_read;
+}
+
+/**
+ * @brief Parse HTTP request and validate
+ * @param buffer Request buffer
+ * @param bytes_read Number of bytes read
+ * @param request HTTP request structure to populate
+ * @param client_ip_str Client IP string for logging
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int parse_and_validate_request(char* buffer, ssize_t bytes_read, http_request_t* request,
+                                      const char* client_ip_str) {
+  // Set client IP in request using safe string function
+  if (memory_safe_strncpy(request->client_ip, sizeof(request->client_ip), client_ip_str,
+                          strlen(client_ip_str)) < 0) {
+    error_context_t error_ctx;
+    http_error_context_init(&error_ctx, __FUNCTION__, ONVIF_ERROR,
+                            "Failed to copy client IP safely");
+    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s", client_ip_str);
+    onvif_log_error_context(&error_ctx);
+    return ONVIF_ERROR;
+  }
+
+  int need_more_data = 0;
+  if (parse_http_request_state_machine(buffer, bytes_read, request, &need_more_data) != 0) {
+    error_context_t error_ctx;
+    error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
+    ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "Failed to parse HTTP request");
+    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Bytes read: %d", client_ip_str,
+                              bytes_read);
+    onvif_log_error_context(&error_ctx);
+    return ONVIF_ERROR;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Send HTTP response (chunked or regular)
+ * @param client_fd Client socket file descriptor
+ * @param response HTTP response to send
+ * @param client_ip_str Client IP string for logging
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int send_http_response_with_fallback(int client_fd, http_response_t* response,
+                                            const char* client_ip_str) {
+  int result = ONVIF_SUCCESS;
+
+  // Check if we should use chunked transfer encoding
+  if (response->body_length > CHUNKED_TRANSFER_THRESHOLD) {
+    // Create a connection structure for chunked streaming
+    connection_t conn = {0};
+    conn.fd = client_fd;
+
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, client_ip_str, "chunked_transfer", SERVICE_LOG_DEBUG);
+    service_log_debug(&log_ctx, "Using chunked transfer for large response: %zu bytes",
+                      response->body_length);
+
+    result = send_chunked_response(client_fd, response, &conn);
+    if (result != ONVIF_SUCCESS) {
+      // Generate standardized error response for chunked transfer failure
+      error_context_t error_ctx;
+      error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
+      error_ctx.error_code = ONVIF_ERROR_IO;
+      ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "Failed to send chunked response");
+      ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Response size: %zu", client_ip_str,
+                                response->body_length);
+
+      // Create error response
+      http_response_t error_response = {0};
+      if (generate_http_error_response(&error_ctx, &error_response, client_ip_str) ==
+          ONVIF_SUCCESS) {
+        send_http_response(client_fd, &error_response);
+        http_response_free(&error_response);
+      }
+
+      service_log_context_t error_log_ctx;
+      http_log_init_context(&error_log_ctx, client_ip_str, "chunked_send", SERVICE_LOG_ERROR);
+      service_log_operation_failure(&error_log_ctx, "chunked response transmission", result,
+                                    "Failed to send chunked response");
+    }
+  } else {
+    // Use regular HTTP response for smaller responses
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, client_ip_str, "regular_response", SERVICE_LOG_DEBUG);
+    service_log_debug(&log_ctx, "Using regular HTTP response: %zu bytes", response->body_length);
+
+    result = send_http_response(client_fd, response);
+    if (result != 0) {
+      // Generate standardized error response for regular response failure
+      error_context_t error_ctx;
+      error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
+      error_ctx.error_code = ONVIF_ERROR_IO;
+      ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "Failed to send HTTP response");
+      ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Response size: %zu", client_ip_str,
+                                response->body_length);
+
+      // Create error response
+      http_response_t error_response = {0};
+      if (generate_http_error_response(&error_ctx, &error_response, client_ip_str) ==
+          ONVIF_SUCCESS) {
+        send_http_response(client_fd, &error_response);
+        http_response_free(&error_response);
+      }
+
+      service_log_context_t log_ctx;
+      http_log_init_context(&log_ctx, client_ip_str, "response_send", SERVICE_LOG_ERROR);
+      service_log_operation_failure(&log_ctx, "HTTP response transmission", result,
+                                    "Failed to send HTTP response");
+    }
+  }
+
+  return result;
+}
+
+/**
+ * @brief Handle request processing error
+ * @param client_fd Client socket file descriptor
+ * @param client_ip_str Client IP string for logging
+ * @param result Error result code
+ */
+static void handle_request_error(int client_fd, const char* client_ip_str, int result) {
+  error_context_t error_ctx;
+  error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
+  error_ctx.error_code = result;
+  ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "HTTP request processing failed");
+  ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Result: %d", client_ip_str, result);
+
+  // Create error response
+  http_response_t error_response = {0};
+  if (generate_http_error_response(&error_ctx, &error_response, client_ip_str) == ONVIF_SUCCESS) {
+    send_http_response(client_fd, &error_response);
+    http_response_free(&error_response);
+  }
+
+  service_log_context_t error_log_ctx;
+  http_log_init_context(&error_log_ctx, client_ip_str, "request_processing", SERVICE_LOG_ERROR);
+  service_log_operation_failure(&error_log_ctx, "HTTP request processing", result,
+                                "Failed to process HTTP request");
+}
+
+/**
  * @brief Process HTTP request
  * @param client_fd Client socket file descriptor
  * @return ONVIF_SUCCESS if processing succeeds, error code if it fails
@@ -1018,12 +1183,9 @@ int http_server_process_request(int client_fd) {
   }
 
   // Get client IP address
-  struct sockaddr_in client_addr;
-  socklen_t client_len = sizeof(client_addr);
   char client_ip_str[HTTP_CLIENT_IP_BUFFER_SIZE] = "unknown";
-
-  if (getpeername(client_fd, (struct sockaddr*)&client_addr, &client_len) == 0) {
-    inet_ntop(AF_INET, &client_addr.sin_addr, client_ip_str, HTTP_CLIENT_IP_BUFFER_SIZE);
+  if (get_client_ip_address(client_fd, client_ip_str, sizeof(client_ip_str)) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR;
   }
 
   // Get buffer from pool
@@ -1037,42 +1199,17 @@ int http_server_process_request(int client_fd) {
   }
 
   // Read request
-  ssize_t bytes_read = read(client_fd, buffer, BUFFER_SIZE - 1);
-  if (bytes_read <= 0) {
-    service_log_context_t log_ctx;
-    http_log_init_context(&log_ctx, client_ip_str, "socket_read", SERVICE_LOG_ERROR);
-    service_log_operation_failure(&log_ctx, "socket read", errno,
-                                  "Failed to read from client socket");
+  ssize_t bytes_read = read_http_request(client_fd, buffer, client_ip_str);
+  if (bytes_read < 0) {
     buffer_pool_return(&g_http_server.buffer_pool, buffer);
     return ONVIF_ERROR;
   }
-
-  buffer[bytes_read] = '\0';
 
   // Parse HTTP request
   http_request_t request = {0};
   http_response_t response = {0};
 
-  // Set client IP in request using safe string function
-  if (memory_safe_strncpy(request.client_ip, sizeof(request.client_ip), client_ip_str,
-                          strlen(client_ip_str)) < 0) {
-    error_context_t error_ctx;
-    http_error_context_init(&error_ctx, __FUNCTION__, ONVIF_ERROR,
-                            "Failed to copy client IP safely");
-    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s", client_ip_str);
-    onvif_log_error_context(&error_ctx);
-    buffer_pool_return(&g_http_server.buffer_pool, buffer);
-    return ONVIF_ERROR;
-  }
-
-  int need_more_data = 0;
-  if (parse_http_request_state_machine(buffer, bytes_read, &request, &need_more_data) != 0) {
-    error_context_t error_ctx;
-    error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
-    ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "Failed to parse HTTP request");
-    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Bytes read: %d", client_ip_str,
-                              bytes_read);
-    onvif_log_error_context(&error_ctx);
+  if (parse_and_validate_request(buffer, bytes_read, &request, client_ip_str) != ONVIF_SUCCESS) {
     buffer_pool_return(&g_http_server.buffer_pool, buffer);
     return ONVIF_ERROR;
   }
@@ -1080,91 +1217,11 @@ int http_server_process_request(int client_fd) {
   // Handle ONVIF request
   int result = handle_onvif_request(&request, &response);
 
-  // Send response with chunked streaming for large responses
+  // Send response
   if (result == ONVIF_SUCCESS) {
-    // Check if we should use chunked transfer encoding
-    if (response.body_length > CHUNKED_TRANSFER_THRESHOLD) {
-      // Create a connection structure for chunked streaming
-      connection_t conn = {0};
-      conn.fd = client_fd;
-
-      service_log_context_t log_ctx;
-      http_log_init_context(&log_ctx, client_ip_str, "chunked_transfer", SERVICE_LOG_DEBUG);
-      service_log_debug(&log_ctx, "Using chunked transfer for large response: %zu bytes",
-                        response.body_length);
-
-      result = send_chunked_response(client_fd, &response, &conn);
-      if (result != ONVIF_SUCCESS) {
-        // Generate standardized error response for chunked transfer failure
-        error_context_t error_ctx;
-        error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
-        error_ctx.error_code = ONVIF_ERROR_IO;
-        ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "Failed to send chunked response");
-        ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Response size: %zu", client_ip_str,
-                                  response.body_length);
-
-        // Create error response
-        http_response_t error_response = {0};
-        if (generate_http_error_response(&error_ctx, &error_response, client_ip_str) ==
-            ONVIF_SUCCESS) {
-          send_http_response(client_fd, &error_response);
-          http_response_free(&error_response);
-        }
-
-        service_log_context_t error_log_ctx;
-        http_log_init_context(&error_log_ctx, client_ip_str, "chunked_send", SERVICE_LOG_ERROR);
-        service_log_operation_failure(&error_log_ctx, "chunked response transmission", result,
-                                      "Failed to send chunked response");
-      }
-    } else {
-      // Use regular HTTP response for smaller responses
-      service_log_context_t log_ctx;
-      http_log_init_context(&log_ctx, client_ip_str, "regular_response", SERVICE_LOG_DEBUG);
-      service_log_debug(&log_ctx, "Using regular HTTP response: %zu bytes", response.body_length);
-
-      result = send_http_response(client_fd, &response);
-      if (result != 0) {
-        // Generate standardized error response for regular response failure
-        error_context_t error_ctx;
-        error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
-        error_ctx.error_code = ONVIF_ERROR_IO;
-        ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "Failed to send HTTP response");
-        ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Response size: %zu", client_ip_str,
-                                  response.body_length);
-
-        // Create error response
-        http_response_t error_response = {0};
-        if (generate_http_error_response(&error_ctx, &error_response, client_ip_str) ==
-            ONVIF_SUCCESS) {
-          send_http_response(client_fd, &error_response);
-          http_response_free(&error_response);
-        }
-
-        service_log_context_t log_ctx;
-        http_log_init_context(&log_ctx, client_ip_str, "response_send", SERVICE_LOG_ERROR);
-        service_log_operation_failure(&log_ctx, "HTTP response transmission", result,
-                                      "Failed to send HTTP response");
-      }
-    }
+    result = send_http_response_with_fallback(client_fd, &response, client_ip_str);
   } else {
-    // Handle request processing error with standardized error response
-    error_context_t error_ctx;
-    error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
-    error_ctx.error_code = result;
-    ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "HTTP request processing failed");
-    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Result: %d", client_ip_str, result);
-
-    // Create error response
-    http_response_t error_response = {0};
-    if (generate_http_error_response(&error_ctx, &error_response, client_ip_str) == ONVIF_SUCCESS) {
-      send_http_response(client_fd, &error_response);
-      http_response_free(&error_response);
-    }
-
-    service_log_context_t error_log_ctx;
-    http_log_init_context(&error_log_ctx, client_ip_str, "request_processing", SERVICE_LOG_ERROR);
-    service_log_operation_failure(&error_log_ctx, "HTTP request processing", result,
-                                  "Failed to process HTTP request");
+    handle_request_error(client_fd, client_ip_str, result);
   }
 
   // Cleanup response

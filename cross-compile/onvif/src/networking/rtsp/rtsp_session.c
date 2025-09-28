@@ -26,7 +26,6 @@
 #include "networking/rtsp/rtsp_types.h"
 #include "platform/platform.h"
 
-
 /* ==================== Utility Functions ==================== */
 
 /**

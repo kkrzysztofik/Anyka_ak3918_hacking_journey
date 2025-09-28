@@ -531,13 +531,11 @@ static int handle_get_device_information(const service_handler_config_t* config,
                                          const http_request_t* request, http_response_t* response,
                                          onvif_gsoap_context_t* gsoap_ctx) {
   // Prepare callback data for device information
-  device_info_callback_data_t callback_data = {
-    .manufacturer = {0},
-    .model = {0},
-    .firmware_version = {0},
-    .serial_number = {0},
-    .hardware_id = {0}
-  };
+  device_info_callback_data_t callback_data = {.manufacturer = {0},
+                                               .model = {0},
+                                               .firmware_version = {0},
+                                               .serial_number = {0},
+                                               .hardware_id = {0}};
 
   // Use the enhanced callback-based handler
   return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
@@ -628,8 +626,7 @@ static int device_service_capabilities_handler(const char* capability_name) {
   if (strcmp(capability_name, "GetDeviceInformation") == 0 ||
       strcmp(capability_name, "GetCapabilities") == 0 ||
       strcmp(capability_name, "GetSystemDateAndTime") == 0 ||
-      strcmp(capability_name, "GetServices") == 0 ||
-      strcmp(capability_name, "SystemReboot") == 0) {
+      strcmp(capability_name, "GetServices") == 0 || strcmp(capability_name, "SystemReboot") == 0) {
     return 1;
   }
 
@@ -646,8 +643,7 @@ static const onvif_service_registration_t g_device_service_registration = {
   .init_handler = device_service_init_handler,
   .cleanup_handler = device_service_cleanup_handler,
   .capabilities_handler = device_service_capabilities_handler,
-  .reserved = {NULL, NULL, NULL, NULL}
-};
+  .reserved = {NULL, NULL, NULL, NULL}};
 
 /* ============================================================================
  * Public API Functions
@@ -705,10 +701,10 @@ int onvif_device_init(config_manager_t* config) {
 
   // Log initial buffer pool statistics
   buffer_pool_stats_t stats = buffer_pool_get_stats(&g_device_response_buffer_pool);
-  platform_log_info("Device service initialized and registered - Buffer pool stats: %d/%d buffers used "
-                    "(%d%%), hits: %d, misses: %d\n",
-                    stats.current_used, BUFFER_POOL_SIZE, stats.utilization_percent, stats.hits,
-                    stats.misses);
+  platform_log_info(
+    "Device service initialized and registered - Buffer pool stats: %d/%d buffers used "
+    "(%d%%), hits: %d, misses: %d\n",
+    stats.current_used, BUFFER_POOL_SIZE, stats.utilization_percent, stats.hits, stats.misses);
 
   return ONVIF_SUCCESS;
 }
@@ -728,7 +724,8 @@ int onvif_device_cleanup(void) {
   // Unregister from standardized service dispatcher
   int unregister_result = onvif_service_dispatcher_unregister_service("device");
   if (unregister_result != ONVIF_SUCCESS) {
-    platform_log_error("Failed to unregister device service from dispatcher: %d\n", unregister_result);
+    platform_log_error("Failed to unregister device service from dispatcher: %d\n",
+                       unregister_result);
     // Don't fail cleanup for this, but log the error
   }
 
@@ -754,8 +751,7 @@ int onvif_device_cleanup(void) {
  * @brief Device operation handler function pointer type
  */
 typedef int (*device_operation_handler_t)(const service_handler_config_t* config,
-                                          const http_request_t* request,
-                                          http_response_t* response,
+                                          const http_request_t* request, http_response_t* response,
                                           onvif_gsoap_context_t* gsoap_ctx);
 
 /**
@@ -774,8 +770,7 @@ static const device_operation_entry_t g_device_operations[] = {
   {"GetCapabilities", handle_get_capabilities},
   {"GetSystemDateAndTime", handle_get_system_date_time},
   {"GetServices", handle_get_services},
-  {"SystemReboot", handle_system_reboot}
-};
+  {"SystemReboot", handle_system_reboot}};
 
 #define DEVICE_OPERATIONS_COUNT (sizeof(g_device_operations) / sizeof(g_device_operations[0]))
 
@@ -797,7 +792,7 @@ int onvif_device_handle_operation(const char* operation_name, const http_request
   for (size_t i = 0; i < DEVICE_OPERATIONS_COUNT; i++) {
     if (strcmp(operation_name, g_device_operations[i].operation_name) == 0) {
       return g_device_operations[i].handler(&g_device_handler.config, request, response,
-                                           g_device_handler.gsoap_ctx);
+                                            g_device_handler.gsoap_ctx);
     }
   }
 

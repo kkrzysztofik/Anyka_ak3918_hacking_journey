@@ -15,7 +15,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
@@ -24,6 +23,7 @@
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_imaging_types.h"
 #include "services/common/onvif_types.h"
+#include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
 #include "utils/logging/logging_utils.h"
 #include "utils/logging/service_logging.h"
@@ -36,21 +36,16 @@ static platform_vi_handle_t g_imaging_vi_handle = NULL;             // NOLINT
 static pthread_mutex_t g_imaging_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 static int g_imaging_initialized = 0;                               // NOLINT
 
-/* Forward declarations for helper functions */
-static int convert_onvif_to_vpss_brightness(int onvif_value);
-static int convert_onvif_to_vpss_contrast(int onvif_value);
-static int convert_onvif_to_vpss_saturation(int onvif_value);
-static int convert_onvif_to_vpss_sharpness(int onvif_value);
-static int convert_onvif_to_vpss_hue(int onvif_value);
-static int convert_vpss_to_onvif_brightness(int vpss_value);
-static int convert_vpss_to_onvif_contrast(int vpss_value);
-static int convert_vpss_to_onvif_saturation(int vpss_value);
-static int convert_vpss_to_onvif_sharpness(int vpss_value);
-static int convert_vpss_to_onvif_hue(int vpss_value);
-static void init_default_imaging_settings(struct imaging_settings* settings);
-static void init_default_auto_config(struct auto_daynight_config* config);
-static int apply_imaging_settings_to_vpss(const struct imaging_settings* settings);
-static int validate_imaging_settings_local(const struct imaging_settings* settings);
+// Imaging service configuration and state
+static struct {
+  service_handler_config_t config;
+  onvif_gsoap_context_t* gsoap_ctx;
+} g_imaging_handler = {0};            // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static int g_handler_initialized = 0; // NOLINT
+
+/* ============================================================================
+ * Constants and Definitions
+ * ============================================================================ */
 
 /* Imaging Constants */
 #define IMAGING_DEFAULT_BRIGHTNESS 0
@@ -80,6 +75,9 @@ static int validate_imaging_settings_local(const struct imaging_settings* settin
 #define IMAGING_TOKEN_BUFFER_SIZE    32
 #define IMAGING_VALUE_BUFFER_SIZE    16
 
+/* HTTP Status Constants */
+#define IMAGING_HTTP_STATUS_OK 200
+
 /* XML Tag Constants */
 #define IMAGING_XML_BRIGHTNESS_TAG  "<tt:Brightness>"
 #define IMAGING_XML_CONTRAST_TAG    "<tt:Contrast>"
@@ -93,6 +91,234 @@ static int validate_imaging_settings_local(const struct imaging_settings* settin
 #define DEFAULT_NIGHT_TO_DAY_LUM IMAGING_NIGHT_TO_DAY_LUM_DEFAULT
 #define DEFAULT_LOCK_TIME        IMAGING_LOCK_TIME_DEFAULT
 #define DEFAULT_IRLED_LEVEL      IMAGING_IRLED_LEVEL_DEFAULT
+
+/* Forward declarations for action handlers */
+static int handle_get_imaging_settings(const service_handler_config_t* config,
+                                       const http_request_t* request, http_response_t* response,
+                                       onvif_gsoap_context_t* gsoap_ctx);
+static int handle_set_imaging_settings(const service_handler_config_t* config,
+                                       const http_request_t* request, http_response_t* response,
+                                       onvif_gsoap_context_t* gsoap_ctx);
+
+/* ============================================================================
+ * Helper/Utility Functions
+ * ============================================================================ */
+
+static int convert_onvif_to_vpss_brightness(int onvif_value) {
+  return onvif_value / IMAGING_VPSS_BRIGHTNESS_DIVISOR;
+}
+
+static int convert_onvif_to_vpss_contrast(int onvif_value) {
+  return onvif_value / IMAGING_VPSS_CONTRAST_DIVISOR;
+}
+
+static int convert_onvif_to_vpss_saturation(int onvif_value) {
+  return onvif_value / IMAGING_VPSS_SATURATION_DIVISOR;
+}
+
+static int convert_onvif_to_vpss_sharpness(int onvif_value) {
+  return onvif_value / IMAGING_VPSS_SHARPNESS_DIVISOR;
+}
+
+static int convert_onvif_to_vpss_hue(int onvif_value) {
+  return (onvif_value * IMAGING_VPSS_HUE_MULTIPLIER) / IMAGING_VPSS_HUE_DIVISOR;
+}
+
+static void init_default_imaging_settings(struct imaging_settings* settings) {
+  if (!settings) {
+    return;
+  }
+
+  settings->brightness = IMAGING_DEFAULT_BRIGHTNESS;
+  settings->contrast = IMAGING_DEFAULT_CONTRAST;
+  settings->saturation = IMAGING_DEFAULT_SATURATION;
+  settings->sharpness = IMAGING_DEFAULT_SHARPNESS;
+  settings->hue = IMAGING_DEFAULT_HUE;
+}
+
+static void init_default_auto_config(struct auto_daynight_config* config) {
+  if (!config) {
+    return;
+  }
+
+  config->day_to_night_threshold = IMAGING_DAY_TO_NIGHT_LUM_DEFAULT;
+  config->night_to_day_threshold = IMAGING_NIGHT_TO_DAY_LUM_DEFAULT;
+  config->lock_time_seconds = IMAGING_LOCK_TIME_DEFAULT;
+  config->ir_led_level = IMAGING_IRLED_LEVEL_DEFAULT;
+  config->ir_led_mode = IR_LED_AUTO;
+  config->enable_auto_switching = 1;
+}
+
+static int apply_imaging_settings_to_vpss(const struct imaging_settings* settings) {
+  if (!settings || !g_imaging_vi_handle) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  int ret = 0;
+
+  // Set brightness
+  int brightness_vpss = convert_onvif_to_vpss_brightness(settings->brightness);
+  if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_BRIGHTNESS,
+                               brightness_vpss) != 0) {
+    platform_log_error("Failed to set brightness\n");
+    ret = -1;
+  }
+
+  // Set contrast
+  int contrast_vpss = convert_onvif_to_vpss_contrast(settings->contrast);
+  if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_CONTRAST, contrast_vpss) !=
+      0) {
+    platform_log_error("Failed to set contrast\n");
+    ret = -1;
+  }
+
+  // Set saturation
+  int saturation_vpss = convert_onvif_to_vpss_saturation(settings->saturation);
+  if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_SATURATION,
+                               saturation_vpss) != 0) {
+    platform_log_error("Failed to set saturation\n");
+    ret = -1;
+  }
+
+  // Set sharpness
+  int sharpness_vpss = convert_onvif_to_vpss_sharpness(settings->sharpness);
+  if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_SHARPNESS,
+                               sharpness_vpss) != 0) {
+    platform_log_error("Failed to set sharpness\n");
+    ret = -1;
+  }
+
+  // Set hue
+  int hue_vpss = convert_onvif_to_vpss_hue(settings->hue);
+  if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_HUE, hue_vpss) != 0) {
+    platform_log_error("Failed to set hue\n");
+    ret = -1;
+  }
+
+  return ret;
+}
+
+static int validate_imaging_settings_local(const struct imaging_settings* settings) {
+  validation_result_t result = validate_imaging_settings(settings);
+
+  if (!validation_is_valid(&result)) {
+    service_log_context_t log_ctx;
+    service_log_init_context(&log_ctx, "Imaging", "validate_imaging_settings", SERVICE_LOG_ERROR);
+    service_log_validation_error(&log_ctx, validation_get_field_name(&result), "Invalid value");
+    return ONVIF_ERROR_INVALID;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
+ * Service Registration and Dispatch Structures
+ * ============================================================================ */
+
+/**
+ * @brief Imaging service initialization handler
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int imaging_service_init_handler(void) {
+  // gSOAP context is already initialized in onvif_imaging_service_init
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Imaging service cleanup handler
+ */
+static void imaging_service_cleanup_handler(void) {
+  // gSOAP context cleanup is handled in onvif_imaging_service_cleanup
+}
+
+/**
+ * @brief Imaging service capabilities handler
+ * @param capability_name Capability name to check
+ * @return 1 if capability is supported, 0 otherwise
+ */
+static int imaging_service_capabilities_handler(const char* capability_name) {
+  if (!capability_name) {
+    return 0;
+  }
+
+  // Check against known imaging service capabilities
+  if (strcmp(capability_name, "GetImagingSettings") == 0 ||
+      strcmp(capability_name, "SetImagingSettings") == 0) {
+    return 1;
+  }
+
+  return 0;
+}
+
+/**
+ * @brief Imaging service registration structure using standardized interface
+ */
+static const onvif_service_registration_t g_imaging_service_registration = {
+  .service_name = "imaging",
+  .namespace_uri = "http://www.onvif.org/ver20/imaging/wsdl",
+  .operation_handler = onvif_imaging_handle_operation,
+  .init_handler = imaging_service_init_handler,
+  .cleanup_handler = imaging_service_cleanup_handler,
+  .capabilities_handler = imaging_service_capabilities_handler,
+  .reserved = {NULL, NULL, NULL, NULL}};
+
+/* ============================================================================
+ * Operation Dispatch Table
+ * ============================================================================ */
+
+/**
+ * @brief Imaging operation handler function pointer type
+ */
+typedef int (*imaging_operation_handler_t)(const service_handler_config_t* config,
+                                           const http_request_t* request, http_response_t* response,
+                                           onvif_gsoap_context_t* gsoap_ctx);
+
+/**
+ * @brief Imaging operation dispatch entry
+ */
+typedef struct {
+  const char* operation_name;
+  imaging_operation_handler_t handler;
+} imaging_operation_entry_t;
+
+/**
+ * @brief Imaging service operation dispatch table
+ */
+static const imaging_operation_entry_t g_imaging_operations[] = {
+  {"GetImagingSettings", handle_get_imaging_settings},
+  {"SetImagingSettings", handle_set_imaging_settings}};
+
+#define IMAGING_OPERATIONS_COUNT (sizeof(g_imaging_operations) / sizeof(g_imaging_operations[0]))
+
+/**
+ * @brief Handle ONVIF Imaging service requests by operation name (Standardized Interface)
+ * @param operation_name ONVIF operation name (e.g., "GetImagingSettings")
+ * @param request HTTP request structure
+ * @param response HTTP response structure
+ * @return ONVIF_SUCCESS on success, error code on failure
+ * @note This function implements the standardized onvif_service_operation_handler_t interface
+ */
+int onvif_imaging_handle_operation(const char* operation_name, const http_request_t* request,
+                                   http_response_t* response) {
+  if (!g_handler_initialized || !operation_name || !request || !response) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Dispatch using lookup table for O(n) performance with small constant factor
+  for (size_t i = 0; i < IMAGING_OPERATIONS_COUNT; i++) {
+    if (strcmp(operation_name, g_imaging_operations[i].operation_name) == 0) {
+      return g_imaging_operations[i].handler(&g_imaging_handler.config, request, response,
+                                             g_imaging_handler.gsoap_ctx);
+    }
+  }
+
+  // Operation not found
+  return ONVIF_ERROR_NOT_FOUND;
+}
+
+/* ============================================================================
+ * Public API Functions
+ * ============================================================================ */
 
 int onvif_imaging_init(void* vi_handle) {
   pthread_mutex_lock(&g_imaging_mutex);
@@ -374,153 +600,74 @@ int onvif_imaging_get_auto_config(struct auto_daynight_config* config) {
 
 /* XML parsing helpers - now using xml_utils module */
 
-/* Helper Functions */
-
-static void init_default_imaging_settings(struct imaging_settings* settings) {
-  if (!settings) {
-    return;
+int onvif_imaging_service_init(config_manager_t* config) {
+  if (g_handler_initialized) {
+    return ONVIF_SUCCESS;
   }
 
-  memset(settings, 0, sizeof(struct imaging_settings));
-  settings->brightness = IMAGING_DEFAULT_BRIGHTNESS;
-  settings->contrast = IMAGING_DEFAULT_CONTRAST;
-  settings->saturation = IMAGING_DEFAULT_SATURATION;
-  settings->sharpness = IMAGING_DEFAULT_SHARPNESS;
-  settings->hue = IMAGING_DEFAULT_HUE;
-  settings->daynight.mode = DAY_NIGHT_AUTO;
-  settings->daynight.day_to_night_threshold = IMAGING_DAY_TO_NIGHT_LUM_DEFAULT;
-  settings->daynight.night_to_day_threshold = IMAGING_NIGHT_TO_DAY_LUM_DEFAULT;
-  settings->daynight.lock_time_seconds = IMAGING_LOCK_TIME_DEFAULT;
-  settings->daynight.ir_led_mode = IR_LED_AUTO;
-  settings->daynight.ir_led_level = IMAGING_IRLED_LEVEL_DEFAULT;
-  settings->daynight.enable_auto_switching = 1;
-}
+  // Initialize imaging handler configuration
+  g_imaging_handler.config.service_type = ONVIF_SERVICE_IMAGING;
+  g_imaging_handler.config.service_name = "Imaging";
+  g_imaging_handler.config.config = config;
+  g_imaging_handler.config.enable_validation = 1;
+  g_imaging_handler.config.enable_logging = 1;
 
-static void init_default_auto_config(struct auto_daynight_config* config) {
-  if (!config) {
-    return;
+  // Initialize gSOAP context for imaging service
+  g_imaging_handler.gsoap_ctx = ONVIF_MALLOC(sizeof(onvif_gsoap_context_t));
+  if (!g_imaging_handler.gsoap_ctx) {
+    return ONVIF_ERROR;
   }
 
-  memset(config, 0, sizeof(struct auto_daynight_config));
-  config->mode = DAY_NIGHT_AUTO;
-  config->day_to_night_threshold = IMAGING_DAY_TO_NIGHT_LUM_DEFAULT;
-  config->night_to_day_threshold = IMAGING_NIGHT_TO_DAY_LUM_DEFAULT;
-  config->lock_time_seconds = IMAGING_LOCK_TIME_DEFAULT;
-  config->ir_led_mode = IR_LED_AUTO;
-  config->ir_led_level = IMAGING_IRLED_LEVEL_DEFAULT;
-  config->enable_auto_switching = 1;
-}
-
-static int convert_onvif_to_vpss_brightness(int onvif_value) {
-  return onvif_value / IMAGING_VPSS_BRIGHTNESS_DIVISOR;
-}
-
-static int convert_onvif_to_vpss_contrast(int onvif_value) {
-  return onvif_value / IMAGING_VPSS_CONTRAST_DIVISOR;
-}
-
-static int convert_onvif_to_vpss_saturation(int onvif_value) {
-  return onvif_value / IMAGING_VPSS_SATURATION_DIVISOR;
-}
-
-static int convert_onvif_to_vpss_sharpness(int onvif_value) {
-  return onvif_value / IMAGING_VPSS_SHARPNESS_DIVISOR;
-}
-
-static int convert_onvif_to_vpss_hue(int onvif_value) {
-  return (onvif_value * IMAGING_VPSS_HUE_MULTIPLIER) / IMAGING_VPSS_HUE_DIVISOR;
-}
-
-static int convert_vpss_to_onvif_brightness(int vpss_value) {
-  return vpss_value * IMAGING_VPSS_BRIGHTNESS_DIVISOR;
-}
-
-static int convert_vpss_to_onvif_contrast(int vpss_value) {
-  return vpss_value * IMAGING_VPSS_CONTRAST_DIVISOR;
-}
-
-static int convert_vpss_to_onvif_saturation(int vpss_value) {
-  return vpss_value * IMAGING_VPSS_SATURATION_DIVISOR;
-}
-
-static int convert_vpss_to_onvif_sharpness(int vpss_value) {
-  return vpss_value * IMAGING_VPSS_SHARPNESS_DIVISOR;
-}
-
-static int convert_vpss_to_onvif_hue(int vpss_value) {
-  return (vpss_value * IMAGING_VPSS_HUE_DIVISOR) / IMAGING_VPSS_HUE_MULTIPLIER;
-}
-
-static int apply_imaging_settings_to_vpss(const struct imaging_settings* settings) {
-  if (!settings || !g_imaging_vi_handle) {
-    return ONVIF_ERROR_INVALID;
+  if (onvif_gsoap_init(g_imaging_handler.gsoap_ctx) != ONVIF_SUCCESS) {
+    ONVIF_FREE(g_imaging_handler.gsoap_ctx);
+    g_imaging_handler.gsoap_ctx = NULL;
+    return ONVIF_ERROR;
   }
 
-  int ret = 0;
+  g_handler_initialized = 1;
 
-  // Set brightness
-  int brightness_vpss = convert_onvif_to_vpss_brightness(settings->brightness);
-  if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_BRIGHTNESS,
-                               brightness_vpss) != 0) {
-    platform_log_error("Failed to set brightness\n");
-    ret = -1;
+  // Register with standardized service dispatcher
+  int result = onvif_service_dispatcher_register_service(&g_imaging_service_registration);
+  if (result != ONVIF_SUCCESS) {
+    platform_log_error("Failed to register imaging service with dispatcher: %d\n", result);
+    onvif_imaging_service_cleanup();
+    return result;
   }
 
-  // Set contrast
-  int contrast_vpss = convert_onvif_to_vpss_contrast(settings->contrast);
-  if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_CONTRAST, contrast_vpss) !=
-      0) {
-    platform_log_error("Failed to set contrast\n");
-    ret = -1;
-  }
-
-  // Set saturation
-  int saturation_vpss = convert_onvif_to_vpss_saturation(settings->saturation);
-  if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_SATURATION,
-                               saturation_vpss) != 0) {
-    platform_log_error("Failed to set saturation\n");
-    ret = -1;
-  }
-
-  // Set sharpness
-  int sharpness_vpss = convert_onvif_to_vpss_sharpness(settings->sharpness);
-  if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_SHARPNESS,
-                               sharpness_vpss) != 0) {
-    platform_log_error("Failed to set sharpness\n");
-    ret = -1;
-  }
-
-  // Set hue
-  int hue_vpss = convert_onvif_to_vpss_hue(settings->hue);
-  if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_HUE, hue_vpss) != 0) {
-    platform_log_error("Failed to set hue\n");
-    ret = -1;
-  }
-
-  return ret;
-}
-
-static int validate_imaging_settings_local(const struct imaging_settings* settings) {
-  validation_result_t result = validate_imaging_settings(settings);
-
-  if (!validation_is_valid(&result)) {
-    service_log_context_t log_ctx;
-    service_log_init_context(&log_ctx, "Imaging", "validate_imaging_settings", SERVICE_LOG_ERROR);
-    service_log_validation_error(&log_ctx, validation_get_field_name(&result), "Invalid value");
-    return ONVIF_ERROR_INVALID;
-  }
+  platform_log_info("Imaging service initialized and registered with dispatcher\n");
 
   return ONVIF_SUCCESS;
 }
 
-/* Legacy service handler removed - using modern service handler implementation
- * below */
+void onvif_imaging_service_cleanup(void) {
+  if (!g_handler_initialized) {
+    return;
+  }
 
-/* Refactored imaging service implementation */
+  // Unregister from standardized service dispatcher
+  int unregister_result = onvif_service_dispatcher_unregister_service("imaging");
+  if (unregister_result != ONVIF_SUCCESS) {
+    platform_log_error("Failed to unregister imaging service from dispatcher: %d\n",
+                       unregister_result);
+    // Don't fail cleanup for this, but log the error
+  }
 
-// Service handler instance
-static onvif_service_handler_instance_t g_imaging_handler; // NOLINT
-static int g_handler_initialized = 0;                      // NOLINT
+  // Cleanup gSOAP context
+  if (g_imaging_handler.gsoap_ctx) {
+    onvif_gsoap_cleanup(g_imaging_handler.gsoap_ctx);
+    ONVIF_FREE(g_imaging_handler.gsoap_ctx);
+    g_imaging_handler.gsoap_ctx = NULL;
+  }
+
+  g_handler_initialized = 0;
+
+  // Check for memory leaks
+  memory_manager_check_leaks();
+}
+
+/* ============================================================================
+ * Action Handlers
+ * ============================================================================ */
 
 // Action handlers
 static int handle_get_imaging_settings(const service_handler_config_t* config,
@@ -565,44 +712,44 @@ static int handle_get_imaging_settings(const service_handler_config_t* config,
     return error_handle_system(&error_ctx, result, "get_imaging_settings", response);
   }
 
-  // Generate imaging settings response using callback infrastructure
-  // Prepare callback data
-  imaging_settings_callback_data_t callback_data = {.settings = &settings};
+  // Generate basic SOAP response
+  const char* soap_response =
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" "
+    "xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
+    "  <soap:Body>\n"
+    "    <tt:GetImagingSettingsResponse>\n"
+    "      <tt:ImagingSettings>\n"
+    "        <tt:Brightness>" IMAGING_XML_BRIGHTNESS_TAG "%d</tt:Brightness>\n"
+    "        <tt:Contrast>" IMAGING_XML_CONTRAST_TAG "%d</tt:Contrast>\n"
+    "        <tt:ColorSaturation>" IMAGING_XML_SATURATION_TAG "%d</tt:ColorSaturation>\n"
+    "        <tt:Sharpness>" IMAGING_XML_SHARPNESS_TAG "%d</tt:Sharpness>\n"
+    "        <tt:Hue>" IMAGING_XML_HUE_TAG "%d</tt:Hue>\n"
+    "      </tt:ImagingSettings>\n"
+    "    </tt:GetImagingSettingsResponse>\n"
+    "  </soap:Body>\n"
+    "</soap:Envelope>";
 
-  // Use the generic response generation with callback
-  result = onvif_gsoap_generate_response_with_callback(
-    gsoap_ctx, imaging_settings_response_callback, &callback_data);
-  if (result != 0) {
-    return error_handle_system(&error_ctx, result, "generate_response", response);
-  }
+  // Calculate response size
+  size_t response_size = snprintf(NULL, 0, soap_response, settings.brightness, settings.contrast,
+                                  settings.saturation, settings.sharpness, settings.hue) +
+                         1;
 
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR_NOT_FOUND, "get_response_data", response);
-  }
-
-  // Allocate response buffer if not already allocated
+  // Allocate and generate response
+  response->body = ONVIF_MALLOC(response_size);
   if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      return error_handle_system(&error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "allocate_response",
-                                 response);
-    }
+    return error_handle_system(&error_ctx, ONVIF_ERROR, "malloc_response_body", response);
   }
 
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
+  (void)snprintf(response->body, response_size, soap_response, settings.brightness,
+                 settings.contrast, settings.saturation, settings.sharpness, settings.hue);
 
-  service_log_debug(&log_ctx, "Response XML: %s", soap_response);
-  service_log_debug(&log_ctx, "Response structure: body=%p, body_length=%zu, status_code=%d",
-                    response->body, response->body_length, response->status_code);
-  service_log_operation_success(&log_ctx, "Imaging settings retrieved");
+  // Set response headers
+  response->status_code = IMAGING_HTTP_STATUS_OK;
+  response->content_type = "application/soap+xml; charset=utf-8";
 
+  service_log_info(&log_ctx, "Successfully retrieved imaging settings for token: %s\n",
+                   video_source_token);
   return ONVIF_SUCCESS;
 }
 
@@ -633,157 +780,49 @@ static int handle_set_imaging_settings(const service_handler_config_t* config,
     return error_handle_system(&error_ctx, result, "init_request_parsing", response);
   }
 
-  // Parse video source token from request using gSOAP
-  char video_source_token[IMAGING_TOKEN_BUFFER_SIZE] = "VideoSource0";
-  result = onvif_gsoap_parse_value(gsoap_ctx, "//tt:VideoSourceToken", video_source_token,
-                                   sizeof(video_source_token));
-  if (result != 0) {
-    platform_log_warning("Failed to parse video source token, using default\n");
-  }
-
   // Parse imaging settings from request using gSOAP
   struct imaging_settings settings;
-  memset(&settings, 0, sizeof(settings));
-
-  // Parse brightness
-  char brightness_str[IMAGING_VALUE_BUFFER_SIZE];
-  if (onvif_gsoap_parse_value(gsoap_ctx, "//tt:Brightness", brightness_str,
-                              sizeof(brightness_str)) == 0) {
-    settings.brightness = atoi(brightness_str);
+  result = onvif_gsoap_parse_imaging_settings(gsoap_ctx, &settings);
+  if (result != 0) {
+    return error_handle_system(&error_ctx, result, "parse_imaging_settings", response);
   }
 
-  // Parse contrast
-  char contrast_str[IMAGING_VALUE_BUFFER_SIZE];
-  if (onvif_gsoap_parse_value(gsoap_ctx, "//tt:Contrast", contrast_str, sizeof(contrast_str)) ==
-      0) {
-    settings.contrast = atoi(contrast_str);
+  // Validate imaging settings
+  result = validate_imaging_settings_local(&settings);
+  if (result != ONVIF_SUCCESS) {
+    return error_handle_parameter(&error_ctx, "settings", "invalid", response);
   }
 
-  // Parse saturation
-  char saturation_str[IMAGING_VALUE_BUFFER_SIZE];
-  if (onvif_gsoap_parse_value(gsoap_ctx, "//tt:ColorSaturation", saturation_str,
-                              sizeof(saturation_str)) == 0) {
-    settings.saturation = atoi(saturation_str);
-  }
-
-  // Parse sharpness
-  char sharpness_str[IMAGING_VALUE_BUFFER_SIZE];
-  if (onvif_gsoap_parse_value(gsoap_ctx, "//tt:Sharpness", sharpness_str, sizeof(sharpness_str)) ==
-      0) {
-    settings.sharpness = atoi(sharpness_str);
-  }
-
-  // Parse hue
-  char hue_str[IMAGING_VALUE_BUFFER_SIZE];
-  if (onvif_gsoap_parse_value(gsoap_ctx, "//tt:Hue", hue_str, sizeof(hue_str)) == 0) {
-    settings.hue = atoi(hue_str);
-  }
-
-  // Validate settings before applying
-  if (validate_imaging_settings_local(&settings) != 0) {
-    return error_handle_validation(&error_ctx, -1, "imaging_settings", response);
-  }
-
-  // Apply settings
+  // Apply imaging settings
   result = onvif_imaging_set_settings(&settings);
-
   if (result != ONVIF_SUCCESS) {
     return error_handle_system(&error_ctx, result, "set_imaging_settings", response);
   }
 
-  // Generate set imaging settings response using callback infrastructure
-  // Prepare callback data
-  set_imaging_settings_callback_data_t callback_data = {.message =
-                                                          "Imaging settings updated successfully"};
+  // Generate basic SOAP response
+  const char* soap_response =
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+    "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" "
+    "xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
+    "  <soap:Body>\n"
+    "    <tt:SetImagingSettingsResponse>\n"
+    "    </tt:SetImagingSettingsResponse>\n"
+    "  </soap:Body>\n"
+    "</soap:Envelope>";
 
-  // Use the generic response generation with callback
-  result = onvif_gsoap_generate_response_with_callback(
-    gsoap_ctx, set_imaging_settings_response_callback, &callback_data);
-  if (result != 0) {
-    return error_handle_system(&error_ctx, result, "generate_response", response);
-  }
-
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR_NOT_FOUND, "get_response_data", response);
-  }
-
-  // Allocate response buffer if not already allocated
+  // Allocate and generate response
+  size_t response_size = strlen(soap_response) + 1;
+  response->body = ONVIF_MALLOC(response_size);
   if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      return error_handle_system(&error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "allocate_response",
-                                 response);
-    }
+    return error_handle_system(&error_ctx, ONVIF_ERROR, "malloc_response_body", response);
   }
 
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
+  strcpy(response->body, soap_response);
 
-  service_log_debug(&log_ctx, "Response XML: %s", soap_response);
-  service_log_debug(&log_ctx, "Response structure: body=%p, body_length=%zu, status_code=%d",
-                    response->body, response->body_length, response->status_code);
-  service_log_operation_success(&log_ctx, "Imaging settings updated");
+  // Set response headers
+  response->status_code = IMAGING_HTTP_STATUS_OK;
+  response->content_type = "application/soap+xml; charset=utf-8";
 
+  service_log_info(&log_ctx, "Successfully updated imaging settings\n");
   return ONVIF_SUCCESS;
-}
-
-// Action definitions
-static const service_action_def_t imaging_actions[] = {
-  {"GetImagingSettings", handle_get_imaging_settings, 1},
-  {"SetImagingSettings", handle_set_imaging_settings, 1}};
-
-int onvif_imaging_service_init(config_manager_t* config) {
-  if (g_handler_initialized) {
-    return ONVIF_SUCCESS;
-  }
-
-  service_handler_config_t handler_config = {.service_type = ONVIF_SERVICE_IMAGING,
-                                             .service_name = "Imaging",
-                                             .config = config,
-                                             .enable_validation = 1,
-                                             .enable_logging = 1};
-
-  int result = onvif_service_handler_init(&g_imaging_handler, &handler_config, imaging_actions,
-                                          sizeof(imaging_actions) / sizeof(imaging_actions[0]));
-
-  if (result == ONVIF_SUCCESS) {
-    // Register imaging-specific error handlers
-    // Error handler registration not implemented yet
-    // Error handler registration not implemented yet
-
-    g_handler_initialized = 1;
-  }
-
-  return result;
-}
-
-void onvif_imaging_service_cleanup(void) {
-  if (g_handler_initialized) {
-    error_context_t error_ctx;
-    error_context_init(&error_ctx, "Imaging", "Cleanup", "service_cleanup");
-
-    onvif_service_handler_cleanup(&g_imaging_handler);
-
-    // Unregister error handlers
-    // Error handler unregistration not implemented yet
-
-    g_handler_initialized = 0;
-
-    // Check for memory leaks
-    memory_manager_check_leaks();
-  }
-}
-
-int onvif_imaging_handle_request(const char* action_name, const http_request_t* request,
-                                 http_response_t* response) {
-  if (!g_handler_initialized) {
-    return ONVIF_ERROR;
-  }
-  return onvif_service_handler_handle_request(&g_imaging_handler, action_name, request, response);
 }

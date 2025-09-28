@@ -2005,6 +2005,136 @@ int onvif_gsoap_parse_integer(onvif_gsoap_context_t* ctx, const char* xpath, int
   return 0;
 }
 
+// Helper function to parse integer value from string
+static int parse_integer_value(const char* str, int* value) {
+  if (!str || !value) {
+    return -1;
+  }
+
+  char* end_ptr = NULL;
+  const int base = 10;
+  long parsed_value = strtol(str, &end_ptr, base);
+
+  if (end_ptr != str && *end_ptr == '\0') {
+    *value = (int)parsed_value;
+    return 0;
+  }
+
+  return -1;
+}
+
+// Helper function to parse day/night mode
+static void parse_daynight_mode(const char* mode_str, enum day_night_mode* mode) {
+  if (!mode_str || !mode) {
+    return;
+  }
+
+  if (strcmp(mode_str, "Auto") == 0) {
+    *mode = DAY_NIGHT_AUTO;
+  } else if (strcmp(mode_str, "Day") == 0) {
+    *mode = DAY_NIGHT_DAY;
+  } else if (strcmp(mode_str, "Night") == 0) {
+    *mode = DAY_NIGHT_NIGHT;
+  }
+}
+
+// Helper function to parse IR LED mode
+static void parse_ir_led_mode(const char* mode_str, enum ir_led_mode* mode) {
+  if (!mode_str || !mode) {
+    return;
+  }
+
+  if (strcmp(mode_str, "Off") == 0) {
+    *mode = IR_LED_OFF;
+  } else if (strcmp(mode_str, "On") == 0) {
+    *mode = IR_LED_ON;
+  } else if (strcmp(mode_str, "Auto") == 0) {
+    *mode = IR_LED_AUTO;
+  }
+}
+
+int onvif_gsoap_parse_imaging_settings(onvif_gsoap_context_t* ctx,
+                                       struct imaging_settings* settings) {
+  if (!ctx || !ctx->soap || !settings) {
+    set_gsoap_error(ctx->soap, "Invalid parameters for imaging settings parsing");
+    return ONVIF_ERROR_INVALID;
+  }
+
+// Constants for string parsing
+#define IMAGING_STRING_BUFFER_SIZE 32
+
+  // Initialize settings with default values
+  memset(settings, 0, sizeof(struct imaging_settings));
+
+  // Parse basic imaging settings
+  char value_str[IMAGING_STRING_BUFFER_SIZE];
+
+  if (onvif_gsoap_parse_value(ctx, "//tt:Brightness", value_str, sizeof(value_str)) == 0) {
+    parse_integer_value(value_str, &settings->brightness);
+  }
+
+  if (onvif_gsoap_parse_value(ctx, "//tt:Contrast", value_str, sizeof(value_str)) == 0) {
+    parse_integer_value(value_str, &settings->contrast);
+  }
+
+  if (onvif_gsoap_parse_value(ctx, "//tt:ColorSaturation", value_str, sizeof(value_str)) == 0) {
+    parse_integer_value(value_str, &settings->saturation);
+  }
+
+  if (onvif_gsoap_parse_value(ctx, "//tt:Sharpness", value_str, sizeof(value_str)) == 0) {
+    parse_integer_value(value_str, &settings->sharpness);
+  }
+
+  if (onvif_gsoap_parse_value(ctx, "//tt:Hue", value_str, sizeof(value_str)) == 0) {
+    parse_integer_value(value_str, &settings->hue);
+  }
+
+  // Parse day/night configuration
+  if (onvif_gsoap_parse_value(ctx, "//tt:DayNightMode", value_str, sizeof(value_str)) == 0) {
+    parse_daynight_mode(value_str, &settings->daynight.mode);
+  }
+
+  if (onvif_gsoap_parse_value(ctx, "//tt:DayToNightThreshold", value_str, sizeof(value_str)) == 0) {
+    parse_integer_value(value_str, &settings->daynight.day_to_night_threshold);
+  }
+
+  if (onvif_gsoap_parse_value(ctx, "//tt:NightToDayThreshold", value_str, sizeof(value_str)) == 0) {
+    parse_integer_value(value_str, &settings->daynight.night_to_day_threshold);
+  }
+
+  if (onvif_gsoap_parse_value(ctx, "//tt:LockTime", value_str, sizeof(value_str)) == 0) {
+    parse_integer_value(value_str, &settings->daynight.lock_time_seconds);
+  }
+
+  // Parse IR LED settings
+  if (onvif_gsoap_parse_value(ctx, "//tt:IrLedMode", value_str, sizeof(value_str)) == 0) {
+    parse_ir_led_mode(value_str, &settings->daynight.ir_led_mode);
+  }
+
+  if (onvif_gsoap_parse_value(ctx, "//tt:IrLedLevel", value_str, sizeof(value_str)) == 0) {
+    parse_integer_value(value_str, &settings->daynight.ir_led_level);
+  }
+
+  // Parse auto switching enable
+  int auto_switching = 0;
+  if (onvif_gsoap_parse_boolean(ctx, "//tt:EnableAutoSwitching", &auto_switching) == 0) {
+    settings->daynight.enable_auto_switching = auto_switching;
+  }
+
+  platform_log_debug("ONVIF gSOAP: Parsed imaging settings - brightness=%d, contrast=%d, "
+                     "saturation=%d, sharpness=%d, hue=%d",
+                     settings->brightness, settings->contrast, settings->saturation,
+                     settings->sharpness, settings->hue);
+  platform_log_debug("ONVIF gSOAP: Parsed day/night settings - mode=%d, day_to_night=%d, "
+                     "night_to_day=%d, lock_time=%d",
+                     settings->daynight.mode, settings->daynight.day_to_night_threshold,
+                     settings->daynight.night_to_day_threshold,
+                     settings->daynight.lock_time_seconds);
+
+#undef IMAGING_STRING_BUFFER_SIZE
+  return 0;
+}
+
 /**
  * @brief Extract ONVIF operation name from SOAP request using gSOAP XML parser
  *

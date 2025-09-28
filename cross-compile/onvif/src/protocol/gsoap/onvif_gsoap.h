@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "generated/soapH.h"    //NOLINT
 #include "generated/soapStub.h" //NOLINT
@@ -32,6 +33,38 @@
 #define ONVIF_XML_ERROR_PARSE_FAILED      -2
 #define ONVIF_XML_ERROR_MEMORY_ALLOCATION -4
 #define ONVIF_XML_ERROR_NOT_FOUND         -7
+
+/* ============================================================================
+ * String Length Constants
+ * ============================================================================
+ */
+
+/** @brief Maximum length for device manufacturer string */
+#define DEVICE_MANUFACTURER_MAX_LEN 64
+
+/** @brief Maximum length for device model string */
+#define DEVICE_MODEL_MAX_LEN 64
+
+/** @brief Maximum length for firmware version string */
+#define FIRMWARE_VERSION_MAX_LEN 32
+
+/** @brief Maximum length for serial number string */
+#define SERIAL_NUMBER_MAX_LEN 64
+
+/** @brief Maximum length for hardware ID string */
+#define HARDWARE_ID_MAX_LEN 32
+
+/** @brief Maximum length for SOAP fault code string */
+#define SOAP_FAULT_CODE_MAX_LEN 64
+
+/** @brief Maximum length for SOAP fault string message */
+#define SOAP_FAULT_STRING_MAX_LEN 256
+
+/** @brief Maximum length for SOAP fault actor string */
+#define SOAP_FAULT_ACTOR_MAX_LEN 128
+
+/** @brief Maximum length for SOAP fault detail string */
+#define SOAP_FAULT_DETAIL_MAX_LEN 512
 
 /* ============================================================================
  * SOAP Version and Fault Types
@@ -162,11 +195,11 @@ int onvif_gsoap_generate_device_info_response(onvif_gsoap_context_t* ctx, const 
  * @brief Callback data structure for device info response
  */
 typedef struct {
-  char manufacturer[64];
-  char model[64];
-  char firmware_version[32];
-  char serial_number[64];
-  char hardware_id[32];
+  char manufacturer[DEVICE_MANUFACTURER_MAX_LEN];
+  char model[DEVICE_MODEL_MAX_LEN];
+  char firmware_version[FIRMWARE_VERSION_MAX_LEN];
+  char serial_number[SERIAL_NUMBER_MAX_LEN];
+  char hardware_id[HARDWARE_ID_MAX_LEN];
 } device_info_callback_data_t;
 
 /**
@@ -757,6 +790,15 @@ int onvif_gsoap_parse_boolean(onvif_gsoap_context_t* ctx, const char* xpath, int
 int onvif_gsoap_parse_integer(onvif_gsoap_context_t* ctx, const char* xpath, int* value);
 
 /**
+ * @brief Parse imaging settings from SOAP request using gSOAP
+ * @param ctx Pointer to gSOAP context structure
+ * @param settings Pointer to imaging_settings structure to populate
+ * @return 0 on success, negative error code on failure
+ */
+int onvif_gsoap_parse_imaging_settings(onvif_gsoap_context_t* ctx,
+                                       struct imaging_settings* settings);
+
+/**
  * @brief Extract ONVIF operation name from SOAP request using gSOAP parsing
  * @param request_data Raw SOAP request data
  * @param request_size Size of the request data
@@ -776,10 +818,11 @@ int onvif_gsoap_extract_operation_name(const char* request_data, size_t request_
  * @brief Callback data structure for SOAP fault response
  */
 typedef struct {
-  char fault_code[64];    /**< SOAP fault code (e.g., "soap:Server", "soap:Client") */
-  char fault_string[256]; /**< SOAP fault string message */
-  char fault_actor[128];  /**< Optional SOAP fault actor */
-  char fault_detail[512]; /**< Optional SOAP fault detail */
+  char fault_code[SOAP_FAULT_CODE_MAX_LEN];     /**< SOAP fault code (e.g., "soap:Server",
+                                                   "soap:Client") */
+  char fault_string[SOAP_FAULT_STRING_MAX_LEN]; /**< SOAP fault string message */
+  char fault_actor[SOAP_FAULT_ACTOR_MAX_LEN];   /**< Optional SOAP fault actor */
+  char fault_detail[SOAP_FAULT_DETAIL_MAX_LEN]; /**< Optional SOAP fault detail */
 } fault_callback_data_t;
 
 /**

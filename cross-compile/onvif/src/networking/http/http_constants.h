@@ -34,6 +34,9 @@
 /** @brief Maximum length for client IP address with null terminator */
 #define HTTP_CLIENT_IP_BUFFER_SIZE 17
 
+/** @brief Maximum length for enhanced action name with client IP */
+#define HTTP_ENHANCED_ACTION_MAX_LEN 256
+
 /** @brief Socket listen backlog size */
 #define HTTP_SOCKET_BACKLOG_SIZE 10
 
