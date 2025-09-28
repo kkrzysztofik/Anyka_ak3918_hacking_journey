@@ -89,7 +89,8 @@ TEST_SRCS := \
 	unit/utils/test_simple.c \
 	unit/utils/test_memory_utils.c \
 	unit/utils/test_logging_utils.c \
-	unit/protocol/test_onvif_gsoap.c
+	unit/protocol/test_onvif_gsoap.c \
+	unit/services/common/test_service_dispatcher.c
 
 # Mock source files
 MOCK_SRCS := \
@@ -107,7 +108,8 @@ MAIN_SRCS := \
 	../src/utils/validation/common_validation.c \
 	../src/utils/validation/input_validation.c \
 	../src/utils/security/base64_utils.c \
-	../src/utils/string/string_shims.c
+	../src/utils/string/string_shims.c \
+	../src/services/common/service_dispatcher.c
 
 # Object files
 TEST_OBJS := $(TEST_SRCS:%.c=$(OUT_DIR)/%.o)

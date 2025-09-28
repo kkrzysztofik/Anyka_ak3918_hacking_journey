@@ -63,6 +63,23 @@ void test_http_auth_validate_basic_parse_failure(void** state);
 void test_http_auth_create_401_response(void** state);
 void test_http_auth_create_401_response_invalid_realm(void** state);
 
+// Forward declarations of test functions from test_service_dispatcher.c
+void test_service_dispatcher_init(void** state);
+void test_service_dispatcher_cleanup(void** state);
+void test_service_dispatcher_register_service(void** state);
+void test_service_dispatcher_register_service_null_params(void** state);
+void test_service_dispatcher_register_service_invalid_params(void** state);
+void test_service_dispatcher_register_service_duplicate(void** state);
+void test_service_dispatcher_register_service_registry_full(void** state);
+void test_service_dispatcher_unregister_service(void** state);
+void test_service_dispatcher_unregister_service_not_found(void** state);
+void test_service_dispatcher_dispatch(void** state);
+void test_service_dispatcher_dispatch_invalid_params(void** state);
+void test_service_dispatcher_dispatch_service_not_found(void** state);
+void test_service_dispatcher_is_registered(void** state);
+void test_service_dispatcher_get_services(void** state);
+void test_service_dispatcher_init_cleanup_handlers(void** state);
+
 /**
  * @brief Global test setup
  * @param state Test state
@@ -149,6 +166,23 @@ int main(void) {
     cmocka_unit_test(test_onvif_gsoap_get_error),
     cmocka_unit_test(test_onvif_gsoap_validate_response),
     cmocka_unit_test(test_onvif_gsoap_extract_operation_name),
+
+    // Service dispatcher tests
+    cmocka_unit_test(test_service_dispatcher_init),
+    cmocka_unit_test(test_service_dispatcher_cleanup),
+    cmocka_unit_test(test_service_dispatcher_register_service),
+    cmocka_unit_test(test_service_dispatcher_register_service_null_params),
+    cmocka_unit_test(test_service_dispatcher_register_service_invalid_params),
+    cmocka_unit_test(test_service_dispatcher_register_service_duplicate),
+    cmocka_unit_test(test_service_dispatcher_register_service_registry_full),
+    cmocka_unit_test(test_service_dispatcher_unregister_service),
+    cmocka_unit_test(test_service_dispatcher_unregister_service_not_found),
+    cmocka_unit_test(test_service_dispatcher_dispatch),
+    cmocka_unit_test(test_service_dispatcher_dispatch_invalid_params),
+    cmocka_unit_test(test_service_dispatcher_dispatch_service_not_found),
+    cmocka_unit_test(test_service_dispatcher_is_registered),
+    cmocka_unit_test(test_service_dispatcher_get_services),
+    cmocka_unit_test(test_service_dispatcher_init_cleanup_handlers),
   };
 
   int failures = 0;
