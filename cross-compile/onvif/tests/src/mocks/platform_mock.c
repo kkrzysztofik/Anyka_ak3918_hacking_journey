@@ -14,9 +14,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <time.h>
 
-#include "../../src/platform/platform.h"
+#include "platform/platform.h"
+#include "platform/platform_common.h"
 
 /* ============================================================================
  * Mock Constants
@@ -680,8 +682,8 @@ platform_result_t platform_irled_get_status(void) {
  * ============================================================================ */
 
 platform_result_t platform_snapshot_init(platform_snapshot_handle_t* handle,
-                                         platform_vi_handle_t vi_handle, int width,
-                                         int height) { // NOLINT
+                                         platform_vi_handle_t vi_handle, int height,
+                                         int width) { // NOLINT
   if (!handle) {
     return PLATFORM_ERROR_NULL;
   }

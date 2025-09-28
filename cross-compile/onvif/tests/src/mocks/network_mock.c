@@ -8,6 +8,7 @@
 #include "network_mock.h"
 
 #include <arpa/inet.h>
+#include <bits/pthreadtypes.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdint.h>

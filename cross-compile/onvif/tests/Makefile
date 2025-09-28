@@ -92,14 +92,17 @@ TEST_SRCS := \
 	src/unit/protocol/test_onvif_gsoap.c \
 	src/unit/services/common/test_service_dispatcher.c \
 	src/unit/services/media/test_media_utils.c \
+	src/unit/services/media/test_onvif_media_callbacks.c \
 	src/unit/services/ptz/test_ptz_service.c \
+	src/unit/services/ptz/test_onvif_ptz_callbacks.c \
 
 # Mock source files
 MOCK_SRCS := \
 	src/mocks/platform_mock.c \
 	src/mocks/network_mock.c \
 	src/mocks/platform_ptz_mock.c \
-	src/mocks/service_handler_mock.c
+	src/mocks/service_handler_mock.c \
+	src/mocks/mock_service_dispatcher.c
 
 # Source files from main project (for testing - exclude platform_anyka.c)
 MAIN_SRCS := \

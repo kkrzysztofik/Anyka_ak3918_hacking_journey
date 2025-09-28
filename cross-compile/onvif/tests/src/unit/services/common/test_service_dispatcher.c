@@ -13,7 +13,6 @@
 #include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
 
-
 // Error constants from service_dispatcher.c
 #define ONVIF_ERROR_NOT_INITIALIZED -40
 #define ONVIF_ERROR_RESOURCE_LIMIT  -41

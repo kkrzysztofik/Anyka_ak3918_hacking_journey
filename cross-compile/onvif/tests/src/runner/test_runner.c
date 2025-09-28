@@ -152,7 +152,7 @@ void test_ptz_handle_operation_null_request(void** state);
 void test_ptz_handle_operation_null_response(void** state);
 void test_ptz_handle_operation_unknown_operation(void** state);
 
-// Forward declarations of test functions from test_media_simple.c
+// Forward declarations of test functions from test_media_utils.c
 void test_media_basic_functions(void** state);
 void test_media_video_sources(void** state);
 void test_media_audio_sources(void** state);
@@ -161,6 +161,19 @@ void test_media_audio_configurations(void** state);
 void test_media_metadata_configurations(void** state);
 void test_media_error_handling(void** state);
 void test_media_initialization(void** state);
+
+// Forward declarations of test functions from test_onvif_media_callbacks.c
+void test_media_callback_registration_success(void** state);
+void test_media_callback_registration_duplicate(void** state);
+void test_media_callback_registration_null_config(void** state);
+void test_media_callback_registration_dispatcher_failure(void** state);
+void test_media_callback_double_initialization(void** state);
+void test_media_callback_unregistration_success(void** state);
+void test_media_callback_unregistration_not_initialized(void** state);
+void test_media_callback_unregistration_failure(void** state);
+void test_media_callback_dispatch_success(void** state);
+void test_media_callback_dispatch_not_initialized(void** state);
+void test_media_callback_dispatch_null_params(void** state);
 
 /**
  * @brief Global test setup
@@ -278,6 +291,19 @@ int main(void) {
     cmocka_unit_test(test_media_metadata_configurations),
     cmocka_unit_test(test_media_error_handling),
     cmocka_unit_test(test_media_initialization),
+
+    // Media service callback tests
+    cmocka_unit_test(test_media_callback_registration_success),
+    cmocka_unit_test(test_media_callback_registration_duplicate),
+    cmocka_unit_test(test_media_callback_registration_null_config),
+    cmocka_unit_test(test_media_callback_registration_dispatcher_failure),
+    cmocka_unit_test(test_media_callback_double_initialization),
+    cmocka_unit_test(test_media_callback_unregistration_success),
+    cmocka_unit_test(test_media_callback_unregistration_not_initialized),
+    cmocka_unit_test(test_media_callback_unregistration_failure),
+    cmocka_unit_test(test_media_callback_dispatch_success),
+    cmocka_unit_test(test_media_callback_dispatch_not_initialized),
+    cmocka_unit_test(test_media_callback_dispatch_null_params),
   };
 
   int failures = 0;
