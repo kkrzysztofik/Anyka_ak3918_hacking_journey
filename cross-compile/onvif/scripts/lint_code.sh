@@ -23,6 +23,7 @@ SINGLE_FILE=""
 CHECK_ONLY=false
 FORMAT_CHECK=false
 SEVERITY_LEVEL="hint"
+CHANGED_FILES=false
 
 # =============================================================================
 # Script-Specific Functions
@@ -40,6 +41,7 @@ OPTIONS:
   -c, --check             Check if files have linting issues (exit 1 if issues found)
   -f, --files FILE        Lint specific files (comma-separated)
   --file FILE             Lint a single file
+  --changed               Lint only files modified/created since last git commit
   --format                Also check code formatting with clang-format
   --severity LEVEL        Fail on severity level: error, warn, info, hint (default: hint)
 
@@ -49,6 +51,7 @@ EXAMPLES:
   $0 --check              # Check if files have linting issues
   $0 --file src/core/main.c                    # Lint a single file
   $0 --files src/core/main.c,src/services/device/onvif_device.c
+  $0 --changed            # Lint only changed files since last commit
   $0 --format             # Also check code formatting
   $0 --severity error     # Only fail on errors
 EOF
@@ -188,6 +191,39 @@ lint_files() {
     return $exit_code
 }
 
+find_changed_files() {
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        log_error "Error: Not in a git repository"
+        return 1
+    fi
+
+    local changed_files=()
+
+    # Get modified and added files since last commit
+    while IFS= read -r file; do
+        if [[ -f "$file" ]]; then
+            # Only include C/C++ source files
+            if [[ "$file" =~ \.(c|h|cpp|hpp|cc|hh)$ ]]; then
+                changed_files+=("$PROJECT_ROOT/$file")
+            fi
+        fi
+    done < <(git diff --name-only HEAD)
+
+    # Get untracked files (new files not yet committed)
+    while IFS= read -r file; do
+        if [[ -f "$file" ]]; then
+            # Only include C/C++ source files
+            if [[ "$file" =~ \.(c|h|cpp|hpp|cc|hh)$ ]]; then
+                changed_files+=("$PROJECT_ROOT/$file")
+            fi
+        fi
+    done < <(git ls-files --others --exclude-standard)
+
+    # Output the files (one per line)
+    printf '%s\n' "${changed_files[@]}"
+}
+
 # =============================================================================
 # Argument Parsing
 # =============================================================================
@@ -210,6 +246,10 @@ parse_arguments() {
             --severity)
                 SEVERITY_LEVEL="$2"
                 shift 2
+                ;;
+            --changed)
+                CHANGED_FILES=true
+                shift
                 ;;
             *)
                 # Try common argument parsing first
@@ -268,6 +308,15 @@ main() {
             files+=("$file")
         done
         log_info "Linting specified files: ${#files[@]} file(s)"
+    elif [[ "$CHANGED_FILES" == "true" ]]; then
+        # Lint only changed files since last commit
+        log_info "Finding C source files changed since last commit..."
+        mapfile -t files < <(find_changed_files)
+        if [[ ${#files[@]} -eq 0 ]]; then
+            log_info "No C source files have been modified since last commit"
+            exit 0
+        fi
+        log_info "Found ${#files[@]} changed C file(s) to lint"
     else
         # Find and lint all C files
         log_info "Scanning for C source files..."
