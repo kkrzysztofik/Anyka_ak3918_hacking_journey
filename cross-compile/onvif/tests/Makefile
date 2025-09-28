@@ -57,7 +57,7 @@ COVERAGE_HTML=$(COVERAGE_DIR)/html
 CFLAGS=$(BASE_CFLAGS) $(OPT_CFLAGS) $(TEST_CFLAGS)
 
 # Include paths (add native includes if available)
-INCLUDES=../include ../src ../src/core ../src/platform ../src/services ../src/networking ../src/protocol ../src/utils ../src/generated $(NATIVE_INCLUDES)
+INCLUDES=../include ../src src $(NATIVE_INCLUDES)
 
 # Output directory
 OUT_DIR=out
@@ -84,18 +84,22 @@ CMOCKA_LIBS=-lcmocka -lpthread -lm $(GSOAP_LIBS) $(BASE64_LIBS)
 
 # Unit test source files (individual function testing only)
 TEST_SRCS := \
-	test_runner.c \
-	unit/networking/test_http_auth.c \
-	unit/utils/test_simple.c \
-	unit/utils/test_memory_utils.c \
-	unit/utils/test_logging_utils.c \
-	unit/protocol/test_onvif_gsoap.c \
-	unit/services/common/test_service_dispatcher.c
+	src/runner/test_runner.c \
+	src/unit/networking/test_http_auth.c \
+	src/unit/utils/test_simple.c \
+	src/unit/utils/test_memory_utils.c \
+	src/unit/utils/test_logging_utils.c \
+	src/unit/protocol/test_onvif_gsoap.c \
+	src/unit/services/common/test_service_dispatcher.c \
+	src/unit/services/media/test_media_utils.c \
+	src/unit/services/ptz/test_ptz_service.c \
 
 # Mock source files
 MOCK_SRCS := \
-	mocks/platform_mock.c \
-	mocks/network_mock.c
+	src/mocks/platform_mock.c \
+	src/mocks/network_mock.c \
+	src/mocks/platform_ptz_mock.c \
+	src/mocks/service_handler_mock.c
 
 # Source files from main project (for testing - exclude platform_anyka.c)
 MAIN_SRCS := \
@@ -104,17 +108,23 @@ MAIN_SRCS := \
 	../src/protocol/gsoap/onvif_gsoap.c \
 	../src/generated/soapC.c \
 	../src/utils/logging/logging_utils.c \
+	../src/utils/logging/service_logging.c \
 	../src/networking/http/http_auth.c \
 	../src/utils/validation/common_validation.c \
 	../src/utils/validation/input_validation.c \
 	../src/utils/security/base64_utils.c \
 	../src/utils/string/string_shims.c \
-	../src/services/common/service_dispatcher.c
+	../src/services/common/service_dispatcher.c \
+	../src/services/common/onvif_service_common.c \
+	../src/services/media/onvif_media.c \
+	../src/services/ptz/onvif_ptz.c \
+	../src/utils/network/network_utils.c \
+	../src/utils/error/error_handling.c
 
 # Object files
-TEST_OBJS := $(TEST_SRCS:%.c=$(OUT_DIR)/%.o)
-MOCK_OBJS := $(MOCK_SRCS:%.c=$(OUT_DIR)/%.o)
-MAIN_OBJS := $(MAIN_SRCS:../src/%.c=$(OUT_DIR)/main_%.o)
+TEST_OBJS := $(TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
+MOCK_OBJS := $(MOCK_SRCS:src/%.c=$(OUT_DIR)/%.o)
+MAIN_OBJS := $(MAIN_SRCS:../src/%.c=$(OUT_DIR)/main/%.o)
 
 # Unit test executables
 TEST_TARGETS := \
@@ -212,12 +222,12 @@ $(OUT_DIR)/test_all: $(TEST_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
 	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
 
 # Object file compilation
-$(OUT_DIR)/%.o: %.c | $(OUT_DIR)
+$(OUT_DIR)/%.o: src/%.c | $(OUT_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(INCLUDES:%=-I%) -c $< -o $@ -pipe
 
 # Main project object files (exclude platform_anyka.c)
-$(OUT_DIR)/main_%.o: ../src/%.c | $(OUT_DIR)
+$(OUT_DIR)/main/%.o: ../src/%.c | $(OUT_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(INCLUDES:%=-I%) -c $< -o $@ -pipe
 

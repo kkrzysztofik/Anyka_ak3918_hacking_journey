@@ -80,6 +80,88 @@ void test_service_dispatcher_is_registered(void** state);
 void test_service_dispatcher_get_services(void** state);
 void test_service_dispatcher_init_cleanup_handlers(void** state);
 
+// Forward declarations of test functions from test_ptz_service.c
+void test_ptz_get_nodes_success(void** state);
+void test_ptz_get_nodes_null_nodes(void** state);
+void test_ptz_get_nodes_null_count(void** state);
+void test_ptz_get_node_success(void** state);
+void test_ptz_get_node_invalid_token(void** state);
+void test_ptz_get_node_null_token(void** state);
+void test_ptz_get_node_null_node(void** state);
+void test_ptz_get_configuration_success(void** state);
+void test_ptz_get_configuration_null_token(void** state);
+void test_ptz_get_configuration_null_config(void** state);
+void test_ptz_get_status_success(void** state);
+void test_ptz_get_status_null_token(void** state);
+void test_ptz_get_status_null_status(void** state);
+void test_ptz_absolute_move_success(void** state);
+void test_ptz_absolute_move_null_token(void** state);
+void test_ptz_absolute_move_null_position(void** state);
+void test_ptz_absolute_move_null_speed(void** state);
+void test_ptz_relative_move_success(void** state);
+void test_ptz_relative_move_null_token(void** state);
+void test_ptz_relative_move_null_translation(void** state);
+void test_ptz_continuous_move_success(void** state);
+void test_ptz_continuous_move_null_token(void** state);
+void test_ptz_continuous_move_null_velocity(void** state);
+void test_ptz_stop_success(void** state);
+void test_ptz_stop_null_token(void** state);
+void test_ptz_goto_home_position_success(void** state);
+void test_ptz_goto_home_position_null_token(void** state);
+void test_ptz_set_home_position_success(void** state);
+void test_ptz_set_home_position_null_token(void** state);
+void test_ptz_get_presets_success(void** state);
+void test_ptz_get_presets_null_token(void** state);
+void test_ptz_get_presets_null_list(void** state);
+void test_ptz_get_presets_null_count(void** state);
+void test_ptz_set_preset_success(void** state);
+void test_ptz_set_preset_null_token(void** state);
+void test_ptz_set_preset_null_name(void** state);
+void test_ptz_set_preset_null_output_token(void** state);
+void test_ptz_goto_preset_success(void** state);
+void test_ptz_goto_preset_invalid_token(void** state);
+void test_ptz_goto_preset_null_token(void** state);
+void test_ptz_goto_preset_null_preset_token(void** state);
+void test_ptz_remove_preset_success(void** state);
+void test_ptz_remove_preset_invalid_token(void** state);
+void test_ptz_remove_preset_null_token(void** state);
+void test_ptz_remove_preset_null_preset_token(void** state);
+void test_ptz_adapter_init_success(void** state);
+void test_ptz_adapter_init_failure(void** state);
+void test_ptz_adapter_shutdown_success(void** state);
+void test_ptz_adapter_get_status_success(void** state);
+void test_ptz_adapter_get_status_null_status(void** state);
+void test_ptz_adapter_get_status_not_initialized(void** state);
+void test_ptz_adapter_absolute_move_success(void** state);
+void test_ptz_adapter_absolute_move_not_initialized(void** state);
+void test_ptz_adapter_relative_move_success(void** state);
+void test_ptz_adapter_relative_move_not_initialized(void** state);
+void test_ptz_adapter_continuous_move_success(void** state);
+void test_ptz_adapter_continuous_move_not_initialized(void** state);
+void test_ptz_adapter_stop_success(void** state);
+void test_ptz_adapter_stop_not_initialized(void** state);
+void test_ptz_adapter_set_preset_success(void** state);
+void test_ptz_adapter_set_preset_not_initialized(void** state);
+void test_ptz_adapter_goto_preset_success(void** state);
+void test_ptz_adapter_goto_preset_not_initialized(void** state);
+void test_ptz_service_init_success(void** state);
+void test_ptz_service_cleanup_success(void** state);
+void test_ptz_handle_operation_success(void** state);
+void test_ptz_handle_operation_null_operation(void** state);
+void test_ptz_handle_operation_null_request(void** state);
+void test_ptz_handle_operation_null_response(void** state);
+void test_ptz_handle_operation_unknown_operation(void** state);
+
+// Forward declarations of test functions from test_media_simple.c
+void test_media_basic_functions(void** state);
+void test_media_video_sources(void** state);
+void test_media_audio_sources(void** state);
+void test_media_video_configurations(void** state);
+void test_media_audio_configurations(void** state);
+void test_media_metadata_configurations(void** state);
+void test_media_error_handling(void** state);
+void test_media_initialization(void** state);
+
 /**
  * @brief Global test setup
  * @param state Test state
@@ -183,6 +265,19 @@ int main(void) {
     cmocka_unit_test(test_service_dispatcher_is_registered),
     cmocka_unit_test(test_service_dispatcher_get_services),
     cmocka_unit_test(test_service_dispatcher_init_cleanup_handlers),
+
+    // PTZ service tests (commented out - tests not implemented yet)
+    // All PTZ tests are commented out until the test file is created
+
+    // Media service tests
+    cmocka_unit_test(test_media_basic_functions),
+    cmocka_unit_test(test_media_video_sources),
+    cmocka_unit_test(test_media_audio_sources),
+    cmocka_unit_test(test_media_video_configurations),
+    cmocka_unit_test(test_media_audio_configurations),
+    cmocka_unit_test(test_media_metadata_configurations),
+    cmocka_unit_test(test_media_error_handling),
+    cmocka_unit_test(test_media_initialization),
   };
 
   int failures = 0;

@@ -141,29 +141,33 @@ void mock_platform_handle_error(int error_code, const char* error_msg);
  * @brief Mock platform error logging function
  * @param format Format string
  * @param ... Variable arguments
+ * @return Number of characters printed
  */
-void platform_log_error(const char* format, ...);
+int platform_log_error(const char* format, ...);
 
 /**
  * @brief Mock platform info logging function
  * @param format Format string
  * @param ... Variable arguments
+ * @return Number of characters printed
  */
-void platform_log_info(const char* format, ...);
+int platform_log_info(const char* format, ...);
 
 /**
  * @brief Mock platform debug logging function
  * @param format Format string
  * @param ... Variable arguments
+ * @return Number of characters printed
  */
-void platform_log_debug(const char* format, ...);
+int platform_log_debug(const char* format, ...);
 
 /**
  * @brief Mock platform warning logging function
  * @param format Format string
  * @param ... Variable arguments
+ * @return Number of characters printed
  */
-void platform_log_warning(const char* format, ...);
+int platform_log_warning(const char* format, ...);
 
 // Buffer pool mock functions
 struct buffer_pool_t;
@@ -171,5 +175,18 @@ typedef struct buffer_pool_t buffer_pool_t;
 
 void* buffer_pool_get(buffer_pool_t* pool);
 void buffer_pool_return(buffer_pool_t* pool, void* buffer);
+
+// PTZ mock functions
+#include "platform_ptz_mock.h"
+
+/**
+ * @brief Mock platform initialization function
+ */
+void platform_mock_init(void);
+
+/**
+ * @brief Mock platform cleanup function
+ */
+void platform_mock_cleanup(void);
 
 #endif // PLATFORM_MOCK_H
