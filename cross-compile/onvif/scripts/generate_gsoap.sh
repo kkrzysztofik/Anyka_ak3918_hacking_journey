@@ -60,7 +60,6 @@ TYPEMAP_FILE="${WSDL_DIR}/typemap.dat"
 echo "Generating header file from WSDL files..."
 if wsdl2h -o "${GENERATED_DIR}/onvif.h" \
     -c -s -t "${TYPEMAP_FILE}" -F -P \
-    -Ow4 \
     -x -n onvif \
     -I schemas \
     -N "http://www.w3.org/2005/08/addressing" "schemas/ws-addr.xsd" \
