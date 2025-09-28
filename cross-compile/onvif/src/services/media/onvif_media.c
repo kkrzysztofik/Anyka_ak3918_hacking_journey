@@ -17,10 +17,13 @@
 #include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap.h"
 #include "protocol/response/onvif_service_handler.h"
+#include "services/common/onvif_service_common.h"
 #include "services/common/onvif_types.h"
+#include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
+#include "utils/memory/smart_response_builder.h"
 #include "utils/network/network_utils.h"
 
 #define MEDIA_PROFILE_COUNT_DEFAULT 2
@@ -29,12 +32,38 @@
 
 #define MEDIA_MAIN_RESOLUTION_WIDTH  1280
 #define MEDIA_MAIN_RESOLUTION_HEIGHT 720
-#define MEDIA_SUB_RESOLUTION_WIDTH   640
-#define MEDIA_SUB_RESOLUTION_HEIGHT  360
 
-#define MEDIA_MAIN_QUALITY_DEFAULT 4.0
-#define MEDIA_SUB_QUALITY_DEFAULT  3.0
+// Audio sample rate constants
+#define AUDIO_SAMPLE_RATE_8KHZ  8000
+#define AUDIO_SAMPLE_RATE_16KHZ 16000
+#define AUDIO_SAMPLE_RATE_22KHZ 22050
+#define AUDIO_SAMPLE_RATE_44KHZ 44100
+#define AUDIO_SAMPLE_RATE_48KHZ 48000
 
+// Timeout constants
+#define MEDIA_DEFAULT_TIMEOUT_SECONDS 60
+
+// Buffer size constants
+#define MEDIA_ANALYTICS_STR_SIZE   16
+#define MEDIA_NAME_BUFFER_SIZE     64
+#define MEDIA_TOKEN_BUFFER_SIZE    64
+#define MEDIA_PROTOCOL_BUFFER_SIZE 16
+
+// Stream path and port constants are defined in onvif_constants.h
+
+// Media configuration constants
+#define MEDIA_DEFAULT_FRAMERATE     25
+#define MEDIA_DEFAULT_GOV_LENGTH    50
+#define MEDIA_DEFAULT_TTL           5
+#define MEDIA_LOW_BITRATE_AAC       32
+#define MEDIA_SUB_RESOLUTION_WIDTH  640
+#define MEDIA_SUB_RESOLUTION_HEIGHT 360
+
+// Quality constants
+#define MEDIA_MAIN_QUALITY_DEFAULT 25.0F
+#define MEDIA_SUB_QUALITY_DEFAULT  50.0F
+
+// Bitrate constants
 #define MEDIA_MAIN_BITRATE_DEFAULT      2048
 #define MEDIA_SUB_BITRATE_DEFAULT       800
 #define MEDIA_AUDIO_BITRATE_DEFAULT     64
@@ -43,11 +72,29 @@
 #define MEDIA_AUDIO_SAMPLE_RATE_AAC_MIN 8000
 #define MEDIA_AUDIO_SAMPLE_RATE_AAC_MAX 48000
 
+// Response buffer constants
 #define MEDIA_RESPONSE_BUFFER_SIZE 4096
 #define MEDIA_PROFILE_BUFFER_SIZE  2048
-#define MEDIA_URI_BUFFER_SIZE      512
-#define MEDIA_TOKEN_BUFFER_SIZE    32
 #define MEDIA_PROTOCOL_BUFFER_SIZE 16
+
+// Additional constants for magic numbers
+#define MEDIA_DEFAULT_WIDTH_25  25
+#define MEDIA_DEFAULT_WIDTH_50  50
+#define MEDIA_DEFAULT_WIDTH_5   5
+#define MEDIA_DEFAULT_WIDTH_60  60
+#define MEDIA_DEFAULT_WIDTH_128 128
+#define MEDIA_DEFAULT_WIDTH_32  32
+
+// Imaging constants
+#define MEDIA_IMAGING_BRIGHTNESS_DEFAULT 50.0F
+#define MEDIA_IMAGING_SATURATION_DEFAULT 50.0F
+#define MEDIA_IMAGING_CONTRAST_DEFAULT   50.0F
+#define MEDIA_IMAGING_SHARPNESS_DEFAULT  50.0F
+
+// Audio bitrate constants
+#define MEDIA_AUDIO_BITRATE_HIGH_QUALITY 128
+#define MEDIA_AUDIO_BITRATE_LOW_QUALITY  32
+#define MEDIA_SESSION_TIMEOUT_DEFAULT    60
 
 #define MEDIA_XML_PROFILE_TOKEN_TAG "<trt:ProfileToken>"
 #define MEDIA_XML_PROTOCOL_TAG      "<trt:Protocol>"
@@ -58,11 +105,8 @@
 
 static int parse_profile_token(onvif_gsoap_context_t* gsoap_ctx, char* token, size_t token_size);
 static int parse_protocol(onvif_gsoap_context_t* gsoap_ctx, char* protocol, size_t protocol_size);
-// Legacy functions removed - now using gSOAP-based functions
 static int validate_profile_token(const char* token);
 static int validate_protocol(const char* protocol);
-static int find_profile_by_token(const char* token, struct media_profile** profile);
-static void init_default_profiles(void);
 
 static struct media_profile g_media_profiles[] = { // NOLINT
   {.token = MEDIA_MAIN_PROFILE_TOKEN,
@@ -74,15 +118,15 @@ static struct media_profile g_media_profiles[] = { // NOLINT
                      .encoding = "H264",
                      .resolution = {MEDIA_MAIN_RESOLUTION_WIDTH, MEDIA_MAIN_RESOLUTION_HEIGHT},
                      .quality = MEDIA_MAIN_QUALITY_DEFAULT,
-                     .framerate_limit = 25,
+                     .framerate_limit = MEDIA_DEFAULT_FRAMERATE,
                      .encoding_interval = 1,
                      .bitrate_limit = MEDIA_MAIN_BITRATE_DEFAULT,
-                     .gov_length = 50},
+                     .gov_length = MEDIA_DEFAULT_GOV_LENGTH},
    .audio_source = {.source_token = "AudioSource0"},
    .audio_encoder = {.token = "AudioEncoder0",
                      .encoding = "AAC",
                      .bitrate = MEDIA_AUDIO_BITRATE_DEFAULT,
-                     .sample_rate = 16000},
+                     .sample_rate = AUDIO_SAMPLE_RATE_16KHZ},
    .ptz = {.node_token = "PTZNode0",
            .default_absolute_pan_tilt_position_space =
              "http://www.onvif.org/ver10/tptz/PanTiltSpaces/"
@@ -105,15 +149,15 @@ static struct media_profile g_media_profiles[] = { // NOLINT
                      .encoding = "H264",
                      .resolution = {MEDIA_SUB_RESOLUTION_WIDTH, MEDIA_SUB_RESOLUTION_HEIGHT},
                      .quality = MEDIA_SUB_QUALITY_DEFAULT,
-                     .framerate_limit = 25,
+                     .framerate_limit = MEDIA_DEFAULT_FRAMERATE,
                      .encoding_interval = 1,
                      .bitrate_limit = MEDIA_SUB_BITRATE_DEFAULT,
-                     .gov_length = 50},
+                     .gov_length = MEDIA_DEFAULT_GOV_LENGTH},
    .audio_source = {.source_token = "AudioSource0"},
    .audio_encoder = {.token = "AudioEncoder0",
                      .encoding = "AAC",
                      .bitrate = MEDIA_AUDIO_BITRATE_DEFAULT,
-                     .sample_rate = 16000},
+                     .sample_rate = AUDIO_SAMPLE_RATE_16KHZ},
    .ptz = {
      .node_token = "PTZNode0",
      .default_absolute_pan_tilt_position_space = "http://www.onvif.org/ver10/tptz/PanTiltSpaces/"
@@ -203,10 +247,12 @@ int onvif_media_delete_profile(const char* profile_token) {
 int onvif_media_get_video_sources(struct video_source** sources, int* count) {
   static struct video_source video_sources[] = {
     {.token = "VideoSource0",
-     .framerate = 25.0f,
+     .framerate = MEDIA_MAIN_QUALITY_DEFAULT,
      .resolution = {MEDIA_MAIN_RESOLUTION_WIDTH, MEDIA_MAIN_RESOLUTION_HEIGHT},
-     .imaging = {
-       .brightness = 50.0f, .color_saturation = 50.0f, .contrast = 50.0f, .sharpness = 50.0f}}};
+     .imaging = {.brightness = MEDIA_IMAGING_BRIGHTNESS_DEFAULT,
+                 .color_saturation = MEDIA_IMAGING_SATURATION_DEFAULT,
+                 .contrast = MEDIA_IMAGING_CONTRAST_DEFAULT,
+                 .sharpness = MEDIA_IMAGING_SHARPNESS_DEFAULT}}};
 
   ONVIF_CHECK_NULL(sources);
   ONVIF_CHECK_NULL(count);
@@ -253,26 +299,26 @@ int onvif_media_get_video_encoder_configurations(struct video_encoder_configurat
      .encoding = "H264",
      .resolution = {MEDIA_MAIN_RESOLUTION_WIDTH, MEDIA_MAIN_RESOLUTION_HEIGHT},
      .quality = MEDIA_MAIN_QUALITY_DEFAULT,
-     .framerate_limit = 25,
+     .framerate_limit = MEDIA_DEFAULT_FRAMERATE,
      .encoding_interval = 1,
      .bitrate_limit = MEDIA_MAIN_BITRATE_DEFAULT,
-     .gov_length = 50,
+     .gov_length = MEDIA_DEFAULT_GOV_LENGTH,
      .profile = "Main",
      .guaranteed_framerate = 0,
-     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = 5, .auto_start = 0}},
+     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = MEDIA_DEFAULT_TTL, .auto_start = 0}},
     {.token = "VideoEncoder1",
      .name = "H.264 Sub Encoder",
      .use_count = 1,
      .encoding = "H264",
      .resolution = {MEDIA_SUB_RESOLUTION_WIDTH, MEDIA_SUB_RESOLUTION_HEIGHT},
      .quality = MEDIA_SUB_QUALITY_DEFAULT,
-     .framerate_limit = 25,
+     .framerate_limit = MEDIA_DEFAULT_FRAMERATE,
      .encoding_interval = 1,
      .bitrate_limit = MEDIA_SUB_BITRATE_DEFAULT,
-     .gov_length = 50,
+     .gov_length = MEDIA_DEFAULT_GOV_LENGTH,
      .profile = "Main",
      .guaranteed_framerate = 0,
-     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = 5, .auto_start = 0}}};
+     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = MEDIA_DEFAULT_TTL, .auto_start = 0}}};
 
   ONVIF_CHECK_NULL(configs);
   ONVIF_CHECK_NULL(count);
@@ -305,25 +351,25 @@ int onvif_media_get_audio_encoder_configurations(struct audio_encoder_configurat
      .use_count = 2,
      .encoding = "AAC",
      .bitrate = MEDIA_AUDIO_BITRATE_DEFAULT,
-     .sample_rate = 16000,
-     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = 5, .auto_start = 0},
-     .session_timeout = 60},
+     .sample_rate = AUDIO_SAMPLE_RATE_16KHZ,
+     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = MEDIA_DEFAULT_TTL, .auto_start = 0},
+     .session_timeout = MEDIA_SESSION_TIMEOUT_DEFAULT},
     {.token = "AudioEncoder1",
      .name = "AAC-LC Encoder (High Quality)",
      .use_count = 0,
      .encoding = "AAC",
-     .bitrate = 128,
-     .sample_rate = 48000,
-     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = 5, .auto_start = 0},
-     .session_timeout = 60},
+     .bitrate = MEDIA_AUDIO_BITRATE_HIGH_QUALITY,
+     .sample_rate = AUDIO_SAMPLE_RATE_48KHZ,
+     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = MEDIA_DEFAULT_TTL, .auto_start = 0},
+     .session_timeout = MEDIA_SESSION_TIMEOUT_DEFAULT},
     {.token = "AudioEncoder2",
      .name = "AAC-LC Encoder (Low Bitrate)",
      .use_count = 0,
      .encoding = "AAC",
-     .bitrate = 32,
-     .sample_rate = 8000,
-     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = 5, .auto_start = 0},
-     .session_timeout = 60}};
+     .bitrate = MEDIA_AUDIO_BITRATE_LOW_QUALITY,
+     .sample_rate = AUDIO_SAMPLE_RATE_8KHZ,
+     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = MEDIA_DEFAULT_TTL, .auto_start = 0},
+     .session_timeout = MEDIA_SESSION_TIMEOUT_DEFAULT}};
 
   ONVIF_CHECK_NULL(configs);
   ONVIF_CHECK_NULL(count);
@@ -339,9 +385,9 @@ int onvif_media_get_metadata_configurations(struct metadata_configuration** conf
     {.token = "MetadataConfig0",
      .name = "Basic Metadata Configuration",
      .use_count = 1,
-     .session_timeout = 60,
+     .session_timeout = MEDIA_SESSION_TIMEOUT_DEFAULT,
      .analytics = 0,
-     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = 5, .auto_start = 0}}};
+     .multicast = {.address = "0.0.0.0", .port = 0, .ttl = MEDIA_DEFAULT_TTL, .auto_start = 0}}};
 
   ONVIF_CHECK_NULL(configs);
   ONVIF_CHECK_NULL(count);
@@ -438,9 +484,11 @@ int onvif_media_set_audio_encoder_configuration(const char* configuration_token,
     }
 
     // Validate sample rate is supported by Anyka platform
-    if (config->sample_rate != 8000 && config->sample_rate != 16000 &&
-        config->sample_rate != 22050 && config->sample_rate != 44100 &&
-        config->sample_rate != 48000) {
+    if (config->sample_rate != AUDIO_SAMPLE_RATE_8KHZ &&
+        config->sample_rate != AUDIO_SAMPLE_RATE_16KHZ &&
+        config->sample_rate != AUDIO_SAMPLE_RATE_22KHZ &&
+        config->sample_rate != AUDIO_SAMPLE_RATE_44KHZ &&
+        config->sample_rate != AUDIO_SAMPLE_RATE_48KHZ) {
       platform_log_error("Unsupported AAC sample rate: %d Hz (supported: 8000, 16000, 22050, "
                          "44100, 48000)\n",
                          config->sample_rate);
@@ -500,7 +548,7 @@ int onvif_media_get_stream_uri(const char* profile_token, const char* protocol,
 
     uri->invalid_after_connect = 0;
     uri->invalid_after_reboot = 0;
-    uri->timeout = 60;
+    uri->timeout = MEDIA_DEFAULT_TIMEOUT_SECONDS;
     return ONVIF_SUCCESS;
   }
 
@@ -515,7 +563,7 @@ int onvif_media_get_snapshot_uri(const char* profile_token, struct stream_uri* u
   build_device_url("http", ONVIF_SNAPSHOT_PORT_DEFAULT, SNAPSHOT_PATH, uri->uri, sizeof(uri->uri));
   uri->invalid_after_connect = 0;
   uri->invalid_after_reboot = 0;
-  uri->timeout = 60;
+  uri->timeout = MEDIA_SESSION_TIMEOUT_DEFAULT;
 
   return ONVIF_SUCCESS;
 }
@@ -523,34 +571,48 @@ int onvif_media_get_snapshot_uri(const char* profile_token, struct stream_uri* u
 int onvif_media_start_multicast_streaming(const char* profile_token) {
   ONVIF_CHECK_NULL(profile_token);
 
-  // Basic multicast streaming implementation for Profile S compliance
-  // This is a simplified implementation that logs the request
-  platform_log_info("StartMulticastStreaming for profile %s\n", profile_token);
+  // Check if profile exists
+  for (int i = 0; i < PROFILE_COUNT; i++) {
+    if (strcmp(g_media_profiles[i].token, profile_token) == 0) {
+      // Basic multicast streaming implementation for Profile S compliance
+      // This is a simplified implementation that logs the request
+      platform_log_info("StartMulticastStreaming for profile %s\n", profile_token);
 
-  // For now, we just acknowledge the request
-  // In a real implementation, this would:
-  // 1. Start RTP multicast streaming on a specific IP/port
-  // 2. Configure the video encoder for multicast output
-  // 3. Set up RTP packet transmission
+      // For now, we just acknowledge the request
+      // In a real implementation, this would:
+      // 1. Start RTP multicast streaming on a specific IP/port
+      // 2. Configure the video encoder for multicast output
+      // 3. Set up RTP packet transmission
 
-  platform_log_info("Multicast streaming started for profile %s\n", profile_token);
-  return ONVIF_SUCCESS;
+      platform_log_info("Multicast streaming started for profile %s\n", profile_token);
+      return ONVIF_SUCCESS;
+    }
+  }
+
+  return ONVIF_ERROR_NOT_FOUND;
 }
 
 int onvif_media_stop_multicast_streaming(const char* profile_token) {
   ONVIF_CHECK_NULL(profile_token);
 
-  // Basic multicast streaming stop implementation
-  platform_log_info("StopMulticastStreaming for profile %s\n", profile_token);
+  // Check if profile exists
+  for (int i = 0; i < PROFILE_COUNT; i++) {
+    if (strcmp(g_media_profiles[i].token, profile_token) == 0) {
+      // Basic multicast streaming stop implementation
+      platform_log_info("StopMulticastStreaming for profile %s\n", profile_token);
 
-  // For now, we just acknowledge the request
-  // In a real implementation, this would:
-  // 1. Stop RTP multicast streaming
-  // 2. Clean up multicast resources
-  // 3. Reset encoder configuration
+      // For now, we just acknowledge the request
+      // In a real implementation, this would:
+      // 1. Stop RTP multicast streaming
+      // 2. Clean up multicast resources
+      // 3. Reset encoder configuration
 
-  platform_log_info("Multicast streaming stopped for profile %s\n", profile_token);
-  return ONVIF_SUCCESS;
+      platform_log_info("Multicast streaming stopped for profile %s\n", profile_token);
+      return ONVIF_SUCCESS;
+    }
+  }
+
+  return ONVIF_ERROR_NOT_FOUND;
 }
 
 /* SOAP XML generation helpers - now using common utilities */
@@ -575,40 +637,6 @@ static int parse_protocol(onvif_gsoap_context_t* gsoap_ctx, char* protocol, size
   return onvif_gsoap_parse_protocol(gsoap_ctx, protocol, protocol_size);
 }
 
-// Helper function to parse profile token from request body
-static int parse_profile_token_from_request(const char* request_body,
-                                            onvif_gsoap_context_t* gsoap_ctx, char* token,
-                                            size_t token_size) {
-  if (!request_body || !gsoap_ctx || !token || token_size == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Initialize gSOAP context for request parsing
-  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request_body, strlen(request_body));
-  if (result != 0) {
-    return result;
-  }
-
-  return onvif_gsoap_parse_profile_token(gsoap_ctx, token, token_size);
-}
-
-// Helper function to parse configuration token from request body
-static int parse_configuration_token_from_request(const char* request_body,
-                                                  onvif_gsoap_context_t* gsoap_ctx, char* token,
-                                                  size_t token_size) {
-  if (!request_body || !gsoap_ctx || !token || token_size == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Initialize gSOAP context for request parsing
-  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request_body, strlen(request_body));
-  if (result != 0) {
-    return result;
-  }
-
-  return onvif_gsoap_parse_configuration_token(gsoap_ctx, token, token_size);
-}
-
 // Helper function to parse value from request body
 static int parse_value_from_request(const char* request_body, onvif_gsoap_context_t* gsoap_ctx,
                                     const char* xpath, char* value, size_t value_size) {
@@ -623,22 +651,6 @@ static int parse_value_from_request(const char* request_body, onvif_gsoap_contex
   }
 
   return onvif_gsoap_parse_value(gsoap_ctx, xpath, value, value_size);
-}
-
-// Helper function to parse boolean value from request body
-static int parse_boolean_from_request(const char* request_body, onvif_gsoap_context_t* gsoap_ctx,
-                                      const char* xpath, int* value) {
-  if (!request_body || !gsoap_ctx || !xpath || !value) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Initialize gSOAP context for request parsing
-  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request_body, strlen(request_body));
-  if (result != 0) {
-    return result;
-  }
-
-  return onvif_gsoap_parse_boolean(gsoap_ctx, xpath, value);
 }
 
 static int validate_profile_token(const char* token) {
@@ -667,129 +679,379 @@ static int validate_protocol(const char* protocol) {
   return ONVIF_ERROR_NOT_SUPPORTED;
 }
 
-static int find_profile_by_token(const char* token, struct media_profile** profile) {
-  if (!token || !profile) {
-    return ONVIF_ERROR_INVALID;
-  }
+// Media service configuration and state
+static onvif_service_handler_instance_t g_media_handler = {{0}}; // NOLINT
+static int g_handler_initialized = 0;                            // NOLINT
 
-  for (int i = 0; i < MEDIA_PROFILE_COUNT_DEFAULT; i++) {
-    if (strcmp(g_media_profiles[i].token, token) == 0) {
-      *profile = &g_media_profiles[i];
-      return ONVIF_SUCCESS;
-    }
-  }
+/* ============================================================================
+ * Service Operation Definitions (Forward Declaration)
+ * ============================================================================ */
 
-  return ONVIF_ERROR_NOT_FOUND;
-}
+// Forward declarations
+static int get_profiles_business_logic(const service_handler_config_t* config,
+                                       const http_request_t* request, http_response_t* response,
+                                       onvif_gsoap_context_t* gsoap_ctx,
+                                       service_log_context_t* log_ctx, error_context_t* error_ctx,
+                                       void* callback_data);
 
-// Legacy build_profile_xml function removed - now using
-// onvif_xml_create_media_profile_element
+static int get_stream_uri_business_logic(const service_handler_config_t* config,
+                                         const http_request_t* request, http_response_t* response,
+                                         onvif_gsoap_context_t* gsoap_ctx,
+                                         service_log_context_t* log_ctx, error_context_t* error_ctx,
+                                         void* callback_data);
 
-// Legacy build_video_source_xml function removed - now using
-// onvif_xml_create_video_source_element
+static int create_profile_business_logic(const service_handler_config_t* config,
+                                         const http_request_t* request, http_response_t* response,
+                                         onvif_gsoap_context_t* gsoap_ctx,
+                                         service_log_context_t* log_ctx, error_context_t* error_ctx,
+                                         void* callback_data);
 
-// Legacy build_stream_uri_xml function removed - now using
-// onvif_xml_create_media_uri_element
+static int delete_profile_business_logic(const service_handler_config_t* config,
+                                         const http_request_t* request, http_response_t* response,
+                                         onvif_gsoap_context_t* gsoap_ctx,
+                                         service_log_context_t* log_ctx, error_context_t* error_ctx,
+                                         void* callback_data);
 
-static void init_default_profiles(void) {
-  // Profiles are already initialized as static data
-  // This function is a placeholder for future dynamic initialization
-}
+static int set_video_source_configuration_business_logic(
+  const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+  onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
+  void* callback_data);
 
-/* Legacy service handler removed - using modern service handler implementation
- * below */
+static int set_video_encoder_configuration_business_logic(
+  const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+  onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
+  void* callback_data);
 
-/* Refactored media service implementation */
+static int start_multicast_streaming_business_logic(
+  const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+  onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
+  void* callback_data);
 
-// Service handler instance
-static onvif_service_handler_instance_t g_media_handler; // NOLINT
-static int g_handler_initialized = 0;                    // NOLINT
+static int stop_multicast_streaming_business_logic(const service_handler_config_t* config,
+                                                   const http_request_t* request,
+                                                   http_response_t* response,
+                                                   onvif_gsoap_context_t* gsoap_ctx,
+                                                   service_log_context_t* log_ctx,
+                                                   error_context_t* error_ctx, void* callback_data);
+
+static int get_metadata_configurations_business_logic(
+  const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+  onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
+  void* callback_data);
+
+static int set_metadata_configuration_business_logic(
+  const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+  onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
+  void* callback_data);
+
+/**
+ * @brief GetProfiles service operation definition
+ */
+static const onvif_service_operation_t get_profiles_operation = {
+  .service_name = "Media",
+  .operation_name = "GetProfiles",
+  .operation_context = "media_profiles_retrieval",
+  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                .execute_business_logic = get_profiles_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
+
+/**
+ * @brief GetStreamUri service operation definition
+ */
+static const onvif_service_operation_t get_stream_uri_operation = {
+  .service_name = "Media",
+  .operation_name = "GetStreamUri",
+  .operation_context = "media_stream_uri_retrieval",
+  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                .execute_business_logic = get_stream_uri_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
+
+/**
+ * @brief CreateProfile service operation definition
+ */
+static const onvif_service_operation_t create_profile_operation = {
+  .service_name = "Media",
+  .operation_name = "CreateProfile",
+  .operation_context = "media_profile_creation",
+  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                .execute_business_logic = create_profile_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
+
+/**
+ * @brief DeleteProfile service operation definition
+ */
+static const onvif_service_operation_t delete_profile_operation = {
+  .service_name = "Media",
+  .operation_name = "DeleteProfile",
+  .operation_context = "media_profile_deletion",
+  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                .execute_business_logic = delete_profile_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
+
+/**
+ * @brief SetVideoSourceConfiguration service operation definition
+ */
+static const onvif_service_operation_t set_video_source_configuration_operation = {
+  .service_name = "Media",
+  .operation_name = "SetVideoSourceConfiguration",
+  .operation_context = "media_video_source_config",
+  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                .execute_business_logic = set_video_source_configuration_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
+
+/**
+ * @brief SetVideoEncoderConfiguration service operation definition
+ */
+static const onvif_service_operation_t set_video_encoder_configuration_operation = {
+  .service_name = "Media",
+  .operation_name = "SetVideoEncoderConfiguration",
+  .operation_context = "media_video_encoder_config",
+  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                .execute_business_logic = set_video_encoder_configuration_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
+
+/**
+ * @brief StartMulticastStreaming service operation definition
+ */
+static const onvif_service_operation_t start_multicast_streaming_operation = {
+  .service_name = "Media",
+  .operation_name = "StartMulticastStreaming",
+  .operation_context = "media_multicast_start",
+  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                .execute_business_logic = start_multicast_streaming_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
+
+/**
+ * @brief StopMulticastStreaming service operation definition
+ */
+static const onvif_service_operation_t stop_multicast_streaming_operation = {
+  .service_name = "Media",
+  .operation_name = "StopMulticastStreaming",
+  .operation_context = "media_multicast_stop",
+  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                .execute_business_logic = stop_multicast_streaming_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
+
+/**
+ * @brief GetMetadataConfigurations service operation definition
+ */
+static const onvif_service_operation_t get_metadata_configurations_operation = {
+  .service_name = "Media",
+  .operation_name = "GetMetadataConfigurations",
+  .operation_context = "media_metadata_configs",
+  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                .execute_business_logic = get_metadata_configurations_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
+
+/**
+ * @brief SetMetadataConfiguration service operation definition
+ */
+static const onvif_service_operation_t set_metadata_configuration_operation = {
+  .service_name = "Media",
+  .operation_name = "SetMetadataConfiguration",
+  .operation_context = "media_metadata_config",
+  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                .execute_business_logic = set_metadata_configuration_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
 
 // Action handlers
 static int handle_get_profiles(const service_handler_config_t* config,
                                const http_request_t* request, http_response_t* response,
                                onvif_gsoap_context_t* gsoap_ctx) {
-  // Initialize logging context
-  service_log_context_t log_ctx;
-  service_log_init_context(&log_ctx, "Media", "GetProfiles", SERVICE_LOG_INFO);
+  // Prepare callback data for GetProfiles
+  media_profiles_callback_data_t callback_data = {.profiles = NULL, .profile_count = 0};
 
-  service_log_debug(&log_ctx, "Starting GetProfiles request processing");
-
-  // Enhanced parameter validation
-  if (!config) {
-    service_log_debug(&log_ctx, "Missing config parameter");
-    return ONVIF_ERROR_INVALID;
-  }
-  if (!response) {
-    service_log_debug(&log_ctx, "Missing response parameter");
-    return ONVIF_ERROR_INVALID;
-  }
-  if (!gsoap_ctx) {
-    service_log_debug(&log_ctx, "Missing gsoap_ctx parameter");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Prepare callback data
-  media_profiles_callback_data_t callback_data = {.profiles = g_media_profiles,
-                                                  .profile_count = MEDIA_PROFILE_COUNT_DEFAULT};
-
-  // Generate response using callback pattern
-  int result = onvif_gsoap_generate_response_with_callback(
-    gsoap_ctx, media_profiles_response_callback, &callback_data);
-  if (result != 0) {
-    service_log_debug(&log_ctx, "Failed to generate profiles response: %d", result);
-    return result;
-  }
-
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    service_log_debug(&log_ctx, "Failed to retrieve SOAP response data");
-    return ONVIF_ERROR;
-  }
-
-  // Allocate response buffer if not already allocated
-  if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      service_log_debug(&log_ctx, "Failed to allocate response buffer");
-      return ONVIF_ERROR;
-    }
-  }
-
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
-
-  service_log_operation_success(&log_ctx, "GetProfiles completed successfully");
-  return ONVIF_SUCCESS;
+  // Use the enhanced callback-based handler
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
+                                           &get_profiles_operation,
+                                           media_profiles_response_callback, &callback_data);
 }
 
 static int handle_get_stream_uri(const service_handler_config_t* config,
                                  const http_request_t* request, http_response_t* response,
                                  onvif_gsoap_context_t* gsoap_ctx) {
-  // Initialize logging context
-  service_log_context_t log_ctx;
-  service_log_init_context(&log_ctx, "Media", "GetStreamUri", SERVICE_LOG_INFO);
+  // Prepare callback data for GetStreamUri
+  media_stream_uri_callback_data_t callback_data = {.uri = NULL};
 
-  service_log_debug(&log_ctx, "Starting GetStreamUri request processing");
+  // Use the enhanced callback-based handler
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
+                                           &get_stream_uri_operation,
+                                           media_stream_uri_response_callback, &callback_data);
+}
 
-  // Enhanced parameter validation
-  if (!config) {
-    service_log_debug(&log_ctx, "Missing config parameter");
+static int handle_create_profile(const service_handler_config_t* config,
+                                 const http_request_t* request, http_response_t* response,
+                                 onvif_gsoap_context_t* gsoap_ctx) {
+  // Prepare callback data for CreateProfile
+  media_create_profile_callback_data_t callback_data = {.profile = NULL};
+
+  // Use the enhanced callback-based handler
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
+                                           &create_profile_operation,
+                                           media_create_profile_response_callback, &callback_data);
+}
+
+static int handle_delete_profile(const service_handler_config_t* config,
+                                 const http_request_t* request, http_response_t* response,
+                                 onvif_gsoap_context_t* gsoap_ctx) {
+  // Prepare callback data for DeleteProfile
+  media_delete_profile_callback_data_t callback_data = {.message = NULL};
+
+  // Use the enhanced callback-based handler
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
+                                           &delete_profile_operation,
+                                           media_delete_profile_response_callback, &callback_data);
+}
+
+static int handle_set_video_source_configuration(const service_handler_config_t* config,
+                                                 const http_request_t* request,
+                                                 http_response_t* response,
+                                                 onvif_gsoap_context_t* gsoap_ctx) {
+  // Prepare callback data for SetVideoSourceConfiguration
+  media_set_video_source_config_callback_data_t callback_data = {.message = NULL};
+
+  // Use the enhanced callback-based handler
+  return onvif_util_handle_service_request(
+    config, request, response, gsoap_ctx, &set_video_source_configuration_operation,
+    media_set_video_source_config_response_callback, &callback_data);
+}
+
+static int handle_set_video_encoder_configuration(const service_handler_config_t* config,
+                                                  const http_request_t* request,
+                                                  http_response_t* response,
+                                                  onvif_gsoap_context_t* gsoap_ctx) {
+  // Prepare callback data for SetVideoEncoderConfiguration
+  media_set_video_encoder_config_callback_data_t callback_data = {.message = NULL};
+
+  // Use the enhanced callback-based handler
+  return onvif_util_handle_service_request(
+    config, request, response, gsoap_ctx, &set_video_encoder_configuration_operation,
+    media_set_video_encoder_config_response_callback, &callback_data);
+}
+
+static int handle_start_multicast_streaming(const service_handler_config_t* config,
+                                            const http_request_t* request,
+                                            http_response_t* response,
+                                            onvif_gsoap_context_t* gsoap_ctx) {
+  // Prepare callback data for StartMulticastStreaming
+  media_start_multicast_callback_data_t callback_data = {.message = NULL};
+
+  // Use the enhanced callback-based handler
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
+                                           &start_multicast_streaming_operation,
+                                           media_start_multicast_response_callback, &callback_data);
+}
+
+static int handle_stop_multicast_streaming(const service_handler_config_t* config,
+                                           const http_request_t* request, http_response_t* response,
+                                           onvif_gsoap_context_t* gsoap_ctx) {
+  // Prepare callback data for StopMulticastStreaming
+  media_stop_multicast_callback_data_t callback_data = {.message = NULL};
+
+  // Use the enhanced callback-based handler
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
+                                           &stop_multicast_streaming_operation,
+                                           media_stop_multicast_response_callback, &callback_data);
+}
+
+static int handle_get_metadata_configurations(const service_handler_config_t* config,
+                                              const http_request_t* request,
+                                              http_response_t* response,
+                                              onvif_gsoap_context_t* gsoap_ctx) {
+  // Prepare callback data for GetMetadataConfigurations
+  media_get_metadata_configs_callback_data_t callback_data = {.configs = NULL, .config_count = 0};
+
+  // Use the enhanced callback-based handler
+  return onvif_util_handle_service_request(
+    config, request, response, gsoap_ctx, &get_metadata_configurations_operation,
+    media_get_metadata_configs_response_callback, &callback_data);
+}
+
+static int handle_set_metadata_configuration(const service_handler_config_t* config,
+                                             const http_request_t* request,
+                                             http_response_t* response,
+                                             onvif_gsoap_context_t* gsoap_ctx) {
+  // Prepare callback data for SetMetadataConfiguration
+  media_set_metadata_config_callback_data_t callback_data = {.message = NULL};
+
+  // Use the enhanced callback-based handler
+  return onvif_util_handle_service_request(
+    config, request, response, gsoap_ctx, &set_metadata_configuration_operation,
+    media_set_metadata_config_response_callback, &callback_data);
+}
+
+/* ============================================================================
+ * Business Logic Callback Functions
+ * ============================================================================ */
+
+/**
+ * @brief Business logic callback for GetProfiles operation
+ */
+static int get_profiles_business_logic(const service_handler_config_t* config,
+                                       const http_request_t* request, http_response_t* response,
+                                       onvif_gsoap_context_t* gsoap_ctx,
+                                       service_log_context_t* log_ctx, error_context_t* error_ctx,
+                                       void* callback_data) {
+  (void)config;
+  (void)request;
+  (void)error_ctx;
+  if (!callback_data) {
     return ONVIF_ERROR_INVALID;
   }
-  if (!response) {
-    service_log_debug(&log_ctx, "Missing response parameter");
+
+  service_log_info(log_ctx, "Processing GetProfiles request");
+
+  media_profiles_callback_data_t* profile_data = (media_profiles_callback_data_t*)callback_data;
+
+  // Set callback data with existing profiles
+  profile_data->profiles = g_media_profiles;
+  profile_data->profile_count = MEDIA_PROFILE_COUNT_DEFAULT;
+
+  // Generate response using gSOAP callback
+  int result = onvif_gsoap_generate_response_with_callback(
+    gsoap_ctx, media_profiles_response_callback, callback_data);
+  if (result != 0) {
+    service_log_operation_failure(log_ctx, "gsoap_response_generation", result,
+                                  "Failed to generate gSOAP response");
+    return ONVIF_ERROR;
+  }
+
+  // Get the generated SOAP response from gSOAP
+  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
+  if (!soap_response) {
+    service_log_operation_failure(log_ctx, "soap_response_retrieval", -1,
+                                  "Failed to retrieve SOAP response data");
+    return ONVIF_ERROR;
+  }
+
+  // Use smart response builder for final output with memory optimization
+  size_t estimated_size = smart_response_estimate_size(soap_response);
+  result = smart_response_build(response, soap_response, estimated_size, NULL);
+  if (result != ONVIF_SUCCESS) {
+    service_log_operation_failure(log_ctx, "smart_response_build", result,
+                                  "Failed to build smart response");
+    return result;
+  }
+
+  service_log_info(log_ctx, "GetProfiles request completed successfully");
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Business logic callback for GetStreamUri operation
+ */
+static int get_stream_uri_business_logic(const service_handler_config_t* config,
+                                         const http_request_t* request, http_response_t* response,
+                                         onvif_gsoap_context_t* gsoap_ctx,
+                                         service_log_context_t* log_ctx, error_context_t* error_ctx,
+                                         void* callback_data) {
+  (void)config;
+  (void)error_ctx;
+  if (!callback_data) {
     return ONVIF_ERROR_INVALID;
   }
-  if (!gsoap_ctx) {
-    service_log_debug(&log_ctx, "Missing gsoap_ctx parameter");
-    return ONVIF_ERROR_INVALID;
-  }
+
+  service_log_info(log_ctx, "Processing GetStreamUri request");
 
   // Parse profile token and protocol from request using common XML parser
   char profile_token[MEDIA_TOKEN_BUFFER_SIZE];
@@ -798,648 +1060,393 @@ static int handle_get_stream_uri(const service_handler_config_t* config,
   // Initialize gSOAP context for request parsing
   int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
   if (result != 0) {
-    service_log_debug(&log_ctx, "Failed to initialize gSOAP request parsing: %d", result);
-    return result;
+    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result,
+                                  "Failed to initialize gSOAP request parsing");
+    return ONVIF_ERROR;
   }
 
   if (parse_profile_token(gsoap_ctx, profile_token, sizeof(profile_token)) != 0) {
-    service_log_debug(&log_ctx, "Failed to parse profile token");
-    return ONVIF_ERROR_INVALID;
+    return error_handle_parameter(error_ctx, "profile_token", "missing_or_invalid", response);
   }
 
   if (parse_protocol(gsoap_ctx, protocol, sizeof(protocol)) != 0) {
-    service_log_debug(&log_ctx, "Failed to parse protocol");
-    return ONVIF_ERROR_INVALID;
+    return error_handle_parameter(error_ctx, "protocol", "missing_or_invalid", response);
   }
 
   // Validate parameters
   if (validate_profile_token(profile_token) != 0) {
-    service_log_debug(&log_ctx, "Invalid profile token: %s", profile_token);
-    return ONVIF_ERROR_INVALID;
+    return error_handle_parameter(error_ctx, "profile_token", "invalid", response);
   }
 
   if (validate_protocol(protocol) != 0) {
-    service_log_debug(&log_ctx, "Invalid protocol: %s", protocol);
-    return ONVIF_ERROR_INVALID;
+    return error_handle_parameter(error_ctx, "protocol", "invalid", response);
   }
 
   // Get stream URI using the existing function
   struct stream_uri uri;
-  int stream_result = onvif_media_get_stream_uri(profile_token, protocol, &uri);
-
-  if (stream_result != ONVIF_SUCCESS) {
-    service_log_debug(&log_ctx, "Failed to get stream URI: %d", stream_result);
-    return stream_result;
+  result = onvif_media_get_stream_uri(profile_token, protocol, &uri);
+  if (result != ONVIF_SUCCESS) {
+    return error_handle_system(error_ctx, result, "get_stream_uri", response);
   }
 
-  // Prepare callback data
-  media_stream_uri_callback_data_t callback_data = {.uri = &uri};
+  // Update callback data
+  media_stream_uri_callback_data_t* uri_data = (media_stream_uri_callback_data_t*)callback_data;
+  uri_data->uri = &uri;
 
-  // Generate response using callback pattern
+  // Generate response using gSOAP callback
   result = onvif_gsoap_generate_response_with_callback(
-    gsoap_ctx, media_stream_uri_response_callback, &callback_data);
+    gsoap_ctx, media_stream_uri_response_callback, callback_data);
   if (result != 0) {
-    service_log_debug(&log_ctx, "Failed to generate stream URI response: %d", result);
-    return result;
-  }
-
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    service_log_debug(&log_ctx, "Failed to retrieve SOAP response data");
+    service_log_operation_failure(log_ctx, "gsoap_response_generation", result,
+                                  "Failed to generate gSOAP response");
     return ONVIF_ERROR;
   }
 
-  // Allocate response buffer if not already allocated
-  if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      service_log_debug(&log_ctx, "Failed to allocate response buffer");
-      return ONVIF_ERROR;
-    }
+  // Get the generated SOAP response from gSOAP
+  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
+  if (!soap_response) {
+    service_log_operation_failure(log_ctx, "soap_response_retrieval", -1,
+                                  "Failed to retrieve SOAP response data");
+    return ONVIF_ERROR;
   }
 
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
+  // Use smart response builder for final output with memory optimization
+  size_t estimated_size = smart_response_estimate_size(soap_response);
+  result = smart_response_build(response, soap_response, estimated_size, NULL);
+  if (result != ONVIF_SUCCESS) {
+    service_log_operation_failure(log_ctx, "smart_response_build", result,
+                                  "Failed to build smart response");
+    return result;
+  }
 
-  service_log_operation_success(&log_ctx, "GetStreamUri completed successfully");
+  service_log_info(log_ctx, "GetStreamUri request completed successfully");
   return ONVIF_SUCCESS;
 }
 
-// Action handlers for CreateProfile and DeleteProfile
-static int handle_create_profile(const service_handler_config_t* config,
-                                 const http_request_t* request, http_response_t* response,
-                                 onvif_gsoap_context_t* gsoap_ctx) {
-  // Initialize logging context
-  service_log_context_t log_ctx;
-  service_log_init_context(&log_ctx, "Media", "CreateProfile", SERVICE_LOG_INFO);
-
-  service_log_debug(&log_ctx, "Starting CreateProfile request processing");
-
-  if (!config || !response || !gsoap_ctx) {
-    service_log_debug(&log_ctx, "Missing required parameters");
+/**
+ * @brief Business logic callback for CreateProfile operation
+ */
+static int create_profile_business_logic(const service_handler_config_t* config,
+                                         const http_request_t* request, http_response_t* response,
+                                         onvif_gsoap_context_t* gsoap_ctx,
+                                         service_log_context_t* log_ctx, error_context_t* error_ctx,
+                                         void* callback_data) {
+  (void)config;
+  (void)error_ctx;
+  if (!callback_data) {
     return ONVIF_ERROR_INVALID;
   }
 
+  service_log_info(log_ctx, "Processing CreateProfile request");
+
   // Parse profile name and token from request
-  char profile_name[64] = "Custom Profile";
-  char profile_token[64] = "CustomProfile";
+  char profile_name[MEDIA_NAME_BUFFER_SIZE] = "Custom Profile";
+  char profile_token[MEDIA_TOKEN_BUFFER_SIZE] = "CustomProfile";
 
-  // Parse profile name and token using gSOAP
-  if (parse_value_from_request(request->body, gsoap_ctx, "//trt:Name", profile_name,
-                               sizeof(profile_name)) != 0) {
-    // Use default name if parsing fails
-    strncpy(profile_name, "Custom Profile", sizeof(profile_name) - 1);
-    profile_name[sizeof(profile_name) - 1] = '\0';
-  }
-
-  if (parse_value_from_request(request->body, gsoap_ctx, "//trt:Token", profile_token,
-                               sizeof(profile_token)) != 0) {
-    // Use default token if parsing fails
-    strncpy(profile_token, "CustomProfile", sizeof(profile_token) - 1);
-    profile_token[sizeof(profile_token) - 1] = '\0';
-  }
-
-  // Create profile
-  struct media_profile profile;
-  int result = onvif_media_create_profile(profile_name, profile_token, &profile);
-
-  if (result != ONVIF_SUCCESS) {
-    service_log_debug(&log_ctx, "Failed to create profile: %d", result);
-    return result;
-  }
-
-  // Prepare callback data
-  media_create_profile_callback_data_t callback_data = {.profile = &profile};
-
-  // Generate response using callback pattern
-  result = onvif_gsoap_generate_response_with_callback(
-    gsoap_ctx, media_create_profile_response_callback, &callback_data);
+  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
   if (result != 0) {
-    service_log_debug(&log_ctx, "Failed to generate create profile response: %d", result);
-    return result;
-  }
-
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    service_log_debug(&log_ctx, "Failed to retrieve SOAP response data");
     return ONVIF_ERROR;
   }
 
-  // Allocate response buffer if not already allocated
-  if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      service_log_debug(&log_ctx, "Failed to allocate response buffer");
-      return ONVIF_ERROR;
-    }
+  parse_value_from_request(request->body, gsoap_ctx, "//trt:Name", profile_name,
+                           sizeof(profile_name));
+  parse_value_from_request(request->body, gsoap_ctx, "//trt:Token", profile_token,
+                           sizeof(profile_token));
+
+  // Create profile
+  struct media_profile profile;
+  result = onvif_media_create_profile(profile_name, profile_token, &profile);
+  if (result != ONVIF_SUCCESS) {
+    return error_handle_system(error_ctx, result, "create_profile", response);
   }
 
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
+  // Update callback data
+  media_create_profile_callback_data_t* profile_data =
+    (media_create_profile_callback_data_t*)callback_data;
+  profile_data->profile = &profile;
 
-  service_log_operation_success(&log_ctx, "CreateProfile completed successfully");
+  service_log_info(log_ctx, "CreateProfile request completed successfully");
   return ONVIF_SUCCESS;
 }
 
-static int handle_delete_profile(const service_handler_config_t* config,
-                                 const http_request_t* request, http_response_t* response,
-                                 onvif_gsoap_context_t* gsoap_ctx) {
-  error_context_t error_ctx;
-  error_context_init(&error_ctx, "Media", "DeleteProfile", "profile_deletion");
-
-  if (!config || !response || !gsoap_ctx) {
-    return error_handle_parameter(&error_ctx, "parameters", "missing", response);
+/**
+ * @brief Business logic callback for DeleteProfile operation
+ */
+static int delete_profile_business_logic(const service_handler_config_t* config,
+                                         const http_request_t* request, http_response_t* response,
+                                         onvif_gsoap_context_t* gsoap_ctx,
+                                         service_log_context_t* log_ctx, error_context_t* error_ctx,
+                                         void* callback_data) {
+  (void)config;
+  (void)error_ctx;
+  if (!callback_data) {
+    return ONVIF_ERROR_INVALID;
   }
 
-  // Parse profile token from request using gSOAP
-  char profile_token[64] = "";
+  service_log_info(log_ctx, "Processing DeleteProfile request");
+
+  // Parse profile token from request
+  char profile_token[MEDIA_TOKEN_BUFFER_SIZE] = "";
+  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
+  if (result != 0) {
+    return ONVIF_ERROR;
+  }
+
   if (parse_value_from_request(request->body, gsoap_ctx, "//trt:ProfileToken", profile_token,
                                sizeof(profile_token)) != 0) {
-    // Use default token if parsing fails
-    strncpy(profile_token, "MainProfile", sizeof(profile_token) - 1);
-    profile_token[sizeof(profile_token) - 1] = '\0';
-  }
-
-  if (strlen(profile_token) == 0) {
-    return error_handle_parameter(&error_ctx, "profile_token", "missing", response);
+    return error_handle_parameter(error_ctx, "profile_token", "missing", response);
   }
 
   // Delete profile
-  int result = onvif_media_delete_profile(profile_token);
-
+  result = onvif_media_delete_profile(profile_token);
   if (result != ONVIF_SUCCESS) {
-    return error_handle_system(&error_ctx, result, "profile_deletion", response);
+    return error_handle_system(error_ctx, result, "delete_profile", response);
   }
 
-  // Generate delete profile response using proper gSOAP serialization
-  result = onvif_gsoap_generate_delete_profile_response(gsoap_ctx);
-  if (result != 0) {
-    return error_handle_system(&error_ctx, result, "delete_profile_response_generation", response);
-  }
+  // Update callback data
+  media_delete_profile_callback_data_t* delete_data =
+    (media_delete_profile_callback_data_t*)callback_data;
+  delete_data->message = "Profile deleted successfully";
 
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "soap_response_retrieval", response);
-  }
-
-  // Allocate response buffer if not already allocated
-  if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      return error_handle_system(&error_ctx, ONVIF_ERROR, "response_buffer_allocation", response);
-    }
-  }
-
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
-
+  service_log_info(log_ctx, "DeleteProfile request completed successfully");
   return ONVIF_SUCCESS;
 }
 
-// Action handlers for Set*Configuration operations
-static int handle_set_video_source_configuration(const service_handler_config_t* config,
-                                                 const http_request_t* request,
-                                                 http_response_t* response,
-                                                 onvif_gsoap_context_t* gsoap_ctx) {
-  error_context_t error_ctx;
-  error_context_init(&error_ctx, "Media", "SetVideoSourceConfiguration", "config_update");
+/**
+ * @brief Business logic callback for SetVideoSourceConfiguration operation
+ */
+static int set_video_source_configuration_business_logic(
+  const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+  onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
+  void* callback_data) {
+  (void)config;
+  (void)error_ctx;
+  (void)callback_data;
 
-  if (!config || !response || !gsoap_ctx) {
-    return error_handle_parameter(&error_ctx, "parameters", "missing", response);
+  service_log_info(log_ctx, "Processing SetVideoSourceConfiguration request");
+
+  // Parse configuration token from request
+  char config_token[MEDIA_TOKEN_BUFFER_SIZE] = "";
+  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
+  if (result != 0) {
+    return ONVIF_ERROR;
   }
 
-  // Parse configuration token from request using gSOAP
-  char config_token[64] = "";
   if (parse_value_from_request(request->body, gsoap_ctx, "//trt:ConfigurationToken", config_token,
                                sizeof(config_token)) != 0) {
-    // Use default token if parsing fails
-    strncpy(config_token, "VideoSourceConfigToken", sizeof(config_token) - 1);
-    config_token[sizeof(config_token) - 1] = '\0';
-  }
-
-  if (strlen(config_token) == 0) {
-    return error_handle_parameter(&error_ctx, "configuration_token", "missing", response);
+    return error_handle_parameter(error_ctx, "configuration_token", "missing", response);
   }
 
   // Parse video source configuration parameters
   struct video_source_configuration video_config;
-  // For now, initialize with defaults - proper parsing would need specific
-  // implementation
   memset(&video_config, 0, sizeof(video_config));
   strncpy(video_config.token, config_token, sizeof(video_config.token) - 1);
-  video_config.token[sizeof(video_config.token) - 1] = '\0';
-
-  // Ensure the configuration token matches
-  strncpy(video_config.token, config_token, sizeof(video_config.token) - 1);
-  video_config.token[sizeof(video_config.token) - 1] = '\0';
 
   // Set configuration
-  int result = onvif_media_set_video_source_configuration(config_token, &video_config);
-
+  result = onvif_media_set_video_source_configuration(config_token, &video_config);
   if (result != ONVIF_SUCCESS) {
-    return error_handle_system(&error_ctx, result, "config_update", response);
+    return error_handle_system(error_ctx, result, "set_video_source_config", response);
   }
 
-  // Generate set video source configuration response using proper gSOAP
-  // serialization
-  result = onvif_gsoap_generate_set_video_source_configuration_response(gsoap_ctx);
-  if (result != 0) {
-    return error_handle_system(&error_ctx, result,
-                               "set_video_source_configuration_response_generation", response);
-  }
-
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "soap_response_retrieval", response);
-  }
-
-  // Allocate response buffer if not already allocated
-  if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      return error_handle_system(&error_ctx, ONVIF_ERROR, "response_buffer_allocation", response);
-    }
-  }
-
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
-
+  service_log_info(log_ctx, "SetVideoSourceConfiguration request completed successfully");
   return ONVIF_SUCCESS;
 }
 
-static int handle_set_video_encoder_configuration(const service_handler_config_t* config,
-                                                  const http_request_t* request,
-                                                  http_response_t* response,
-                                                  onvif_gsoap_context_t* gsoap_ctx) {
-  error_context_t error_ctx;
-  error_context_init(&error_ctx, "Media", "SetVideoEncoderConfiguration", "config_update");
+/**
+ * @brief Business logic callback for SetVideoEncoderConfiguration operation
+ */
+static int set_video_encoder_configuration_business_logic(
+  const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+  onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
+  void* callback_data) {
+  (void)config;
+  (void)error_ctx;
+  (void)callback_data;
 
-  if (!config || !response || !gsoap_ctx) {
-    return error_handle_parameter(&error_ctx, "parameters", "missing", response);
+  service_log_info(log_ctx, "Processing SetVideoEncoderConfiguration request");
+
+  // Parse configuration token from request
+  char config_token[MEDIA_TOKEN_BUFFER_SIZE] = "";
+  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
+  if (result != 0) {
+    return ONVIF_ERROR;
   }
 
-  // Parse configuration token from request using gSOAP
-  char config_token[64] = "";
   if (parse_value_from_request(request->body, gsoap_ctx, "//trt:ConfigurationToken", config_token,
                                sizeof(config_token)) != 0) {
-    // Use default token if parsing fails
-    strncpy(config_token, "VideoEncoderConfigToken", sizeof(config_token) - 1);
-    config_token[sizeof(config_token) - 1] = '\0';
-  }
-
-  if (strlen(config_token) == 0) {
-    return error_handle_parameter(&error_ctx, "configuration_token", "missing", response);
+    return error_handle_parameter(error_ctx, "configuration_token", "missing", response);
   }
 
   // Parse video encoder configuration parameters
   struct video_encoder_configuration encoder_config;
-  // For now, initialize with defaults - proper parsing would need specific
-  // implementation
   memset(&encoder_config, 0, sizeof(encoder_config));
   strncpy(encoder_config.token, config_token, sizeof(encoder_config.token) - 1);
-  encoder_config.token[sizeof(encoder_config.token) - 1] = '\0';
-
-  // Ensure the configuration token matches
-  strncpy(encoder_config.token, config_token, sizeof(encoder_config.token) - 1);
-  encoder_config.token[sizeof(encoder_config.token) - 1] = '\0';
-
-  // Configuration is already parsed by
-  // onvif_xml_parse_video_encoder_configuration
 
   // Set configuration
-  int result = onvif_media_set_video_encoder_configuration(config_token, &encoder_config);
-
+  result = onvif_media_set_video_encoder_configuration(config_token, &encoder_config);
   if (result != ONVIF_SUCCESS) {
-    return error_handle_system(&error_ctx, result, "config_update", response);
+    return error_handle_system(error_ctx, result, "set_video_encoder_config", response);
   }
 
-  // Generate set video encoder configuration response using proper gSOAP
-  // serialization
-  result = onvif_gsoap_generate_set_video_encoder_configuration_response(gsoap_ctx);
-  if (result != 0) {
-    return error_handle_system(&error_ctx, result,
-                               "set_video_encoder_configuration_response_generation", response);
-  }
-
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "soap_response_retrieval", response);
-  }
-
-  // Allocate response buffer if not already allocated
-  if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      return error_handle_system(&error_ctx, ONVIF_ERROR, "response_buffer_allocation", response);
-    }
-  }
-
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
-
+  service_log_info(log_ctx, "SetVideoEncoderConfiguration request completed successfully");
   return ONVIF_SUCCESS;
 }
 
-// Action handlers for multicast streaming
-static int handle_start_multicast_streaming(const service_handler_config_t* config,
-                                            const http_request_t* request,
-                                            http_response_t* response,
-                                            onvif_gsoap_context_t* gsoap_ctx) {
-  error_context_t error_ctx;
-  error_context_init(&error_ctx, "Media", "StartMulticastStreaming", "multicast_start");
+/**
+ * @brief Business logic callback for StartMulticastStreaming operation
+ */
+static int start_multicast_streaming_business_logic(
+  const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+  onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
+  void* callback_data) {
+  (void)config;
+  (void)error_ctx;
+  (void)callback_data;
 
-  if (!config || !response || !gsoap_ctx) {
-    return error_handle_parameter(&error_ctx, "parameters", "missing", response);
+  service_log_info(log_ctx, "Processing StartMulticastStreaming request");
+
+  // Parse profile token from request
+  char profile_token[MEDIA_TOKEN_BUFFER_SIZE] = "";
+  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
+  if (result != 0) {
+    return ONVIF_ERROR;
   }
 
-  // Parse profile token from request using gSOAP
-  char profile_token[64] = "";
   if (parse_value_from_request(request->body, gsoap_ctx, "//trt:ProfileToken", profile_token,
                                sizeof(profile_token)) != 0) {
-    // Use default token if parsing fails
-    strncpy(profile_token, "MainProfile", sizeof(profile_token) - 1);
-    profile_token[sizeof(profile_token) - 1] = '\0';
-  }
-
-  if (strlen(profile_token) == 0) {
-    return error_handle_parameter(&error_ctx, "profile_token", "missing", response);
+    return error_handle_parameter(error_ctx, "profile_token", "missing", response);
   }
 
   // Start multicast streaming
-  int result = onvif_media_start_multicast_streaming(profile_token);
-
+  result = onvif_media_start_multicast_streaming(profile_token);
   if (result != ONVIF_SUCCESS) {
-    return error_handle_system(&error_ctx, result, "multicast_start", response);
+    return error_handle_system(error_ctx, result, "start_multicast_streaming", response);
   }
 
-  // Generate start multicast streaming response using proper gSOAP
-  // serialization
-  result = onvif_gsoap_generate_start_multicast_streaming_response(gsoap_ctx);
-  if (result != 0) {
-    return error_handle_system(&error_ctx, result, "start_multicast_streaming_response_generation",
-                               response);
-  }
-
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "soap_response_retrieval", response);
-  }
-
-  // Allocate response buffer if not already allocated
-  if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      return error_handle_system(&error_ctx, ONVIF_ERROR, "response_buffer_allocation", response);
-    }
-  }
-
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
-
+  service_log_info(log_ctx, "StartMulticastStreaming request completed successfully");
   return ONVIF_SUCCESS;
 }
 
-static int handle_stop_multicast_streaming(const service_handler_config_t* config,
-                                           const http_request_t* request, http_response_t* response,
-                                           onvif_gsoap_context_t* gsoap_ctx) {
-  error_context_t error_ctx;
-  error_context_init(&error_ctx, "Media", "StopMulticastStreaming", "multicast_stop");
+/**
+ * @brief Business logic callback for StopMulticastStreaming operation
+ */
+static int stop_multicast_streaming_business_logic(
+  const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+  onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
+  void* callback_data) {
+  (void)config;
+  (void)error_ctx;
+  (void)callback_data;
 
-  if (!config || !response || !gsoap_ctx) {
-    return error_handle_parameter(&error_ctx, "parameters", "missing", response);
+  service_log_info(log_ctx, "Processing StopMulticastStreaming request");
+
+  // Parse profile token from request
+  char profile_token[MEDIA_TOKEN_BUFFER_SIZE] = "";
+  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
+  if (result != 0) {
+    return ONVIF_ERROR;
   }
 
-  // Parse profile token from request using gSOAP
-  char profile_token[64] = "";
   if (parse_value_from_request(request->body, gsoap_ctx, "//trt:ProfileToken", profile_token,
                                sizeof(profile_token)) != 0) {
-    // Use default token if parsing fails
-    strncpy(profile_token, "MainProfile", sizeof(profile_token) - 1);
-    profile_token[sizeof(profile_token) - 1] = '\0';
-  }
-
-  if (strlen(profile_token) == 0) {
-    return error_handle_parameter(&error_ctx, "profile_token", "missing", response);
+    return error_handle_parameter(error_ctx, "profile_token", "missing", response);
   }
 
   // Stop multicast streaming
-  int result = onvif_media_stop_multicast_streaming(profile_token);
-
+  result = onvif_media_stop_multicast_streaming(profile_token);
   if (result != ONVIF_SUCCESS) {
-    return error_handle_system(&error_ctx, result, "multicast_stop", response);
+    return error_handle_system(error_ctx, result, "stop_multicast_streaming", response);
   }
 
-  // Generate stop multicast streaming response using proper gSOAP
-  // serialization
-  result = onvif_gsoap_generate_stop_multicast_streaming_response(gsoap_ctx);
-  if (result != 0) {
-    return error_handle_system(&error_ctx, result, "stop_multicast_streaming_response_generation",
-                               response);
-  }
-
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "soap_response_retrieval", response);
-  }
-
-  // Allocate response buffer if not already allocated
-  if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      return error_handle_system(&error_ctx, ONVIF_ERROR, "response_buffer_allocation", response);
-    }
-  }
-
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
-
+  service_log_info(log_ctx, "StopMulticastStreaming request completed successfully");
   return ONVIF_SUCCESS;
 }
 
-// Action handlers for metadata configuration
-static int handle_get_metadata_configurations(const service_handler_config_t* config,
-                                              const http_request_t* request,
-                                              http_response_t* response,
-                                              onvif_gsoap_context_t* gsoap_ctx) {
-  error_context_t error_ctx;
-  error_context_init(&error_ctx, "Media", "GetMetadataConfigurations", "metadata_config_retrieval");
-
-  if (!config || !response || !gsoap_ctx) {
-    return error_handle_parameter(&error_ctx, "parameters", "missing", response);
+/**
+ * @brief Business logic callback for GetMetadataConfigurations operation
+ */
+static int get_metadata_configurations_business_logic(
+  const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+  onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
+  void* callback_data) {
+  (void)config;
+  (void)request;
+  (void)gsoap_ctx;
+  (void)error_ctx;
+  if (!callback_data) {
+    return ONVIF_ERROR_INVALID;
   }
+
+  service_log_info(log_ctx, "Processing GetMetadataConfigurations request");
 
   // Get metadata configurations
   struct metadata_configuration* configs = NULL;
   int count = 0;
   int result = onvif_media_get_metadata_configurations(&configs, &count);
-
   if (result != ONVIF_SUCCESS) {
-    return error_handle_system(&error_ctx, result, "metadata_config_retrieval", response);
+    return error_handle_system(error_ctx, result, "get_metadata_configurations", response);
   }
 
-  // Generate get metadata configurations response using proper gSOAP
-  // serialization
-  result = onvif_gsoap_generate_get_metadata_configurations_response(gsoap_ctx, configs, count);
-  if (result != 0) {
-    return error_handle_system(&error_ctx, result,
-                               "get_metadata_configurations_response_generation", response);
-  }
+  // Update callback data
+  media_get_metadata_configs_callback_data_t* config_data =
+    (media_get_metadata_configs_callback_data_t*)callback_data;
+  config_data->configs = configs;
+  config_data->config_count = count;
 
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "soap_response_retrieval", response);
-  }
-
-  // Allocate response buffer if not already allocated
-  if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      return error_handle_system(&error_ctx, ONVIF_ERROR, "response_buffer_allocation", response);
-    }
-  }
-
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
-
+  service_log_info(log_ctx, "GetMetadataConfigurations request completed successfully");
   return ONVIF_SUCCESS;
 }
 
-static int handle_set_metadata_configuration(const service_handler_config_t* config,
-                                             const http_request_t* request,
-                                             http_response_t* response,
-                                             onvif_gsoap_context_t* gsoap_ctx) {
-  error_context_t error_ctx;
-  error_context_init(&error_ctx, "Media", "SetMetadataConfiguration", "metadata_config_update");
+/**
+ * @brief Business logic callback for SetMetadataConfiguration operation
+ */
+static int set_metadata_configuration_business_logic(
+  const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+  onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
+  void* callback_data) {
+  (void)config;
+  (void)error_ctx;
+  (void)callback_data;
 
-  if (!config || !response || !gsoap_ctx) {
-    return error_handle_parameter(&error_ctx, "parameters", "missing", response);
+  service_log_info(log_ctx, "Processing SetMetadataConfiguration request");
+
+  // Parse configuration token from request
+  char config_token[MEDIA_TOKEN_BUFFER_SIZE] = "";
+  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
+  if (result != 0) {
+    return ONVIF_ERROR;
   }
 
-  // Parse configuration token from request using gSOAP
-  char config_token[64] = "";
   if (parse_value_from_request(request->body, gsoap_ctx, "//trt:ConfigurationToken", config_token,
                                sizeof(config_token)) != 0) {
-    // Use default token if parsing fails
-    strncpy(config_token, "MetadataConfigToken", sizeof(config_token) - 1);
-    config_token[sizeof(config_token) - 1] = '\0';
-  }
-
-  if (strlen(config_token) == 0) {
-    return error_handle_parameter(&error_ctx, "configuration_token", "missing", response);
+    return error_handle_parameter(error_ctx, "configuration_token", "missing", response);
   }
 
   // Parse metadata configuration parameters
   struct metadata_configuration metadata_config = {0};
   strncpy(metadata_config.token, config_token, sizeof(metadata_config.token) - 1);
-  metadata_config.token[sizeof(metadata_config.token) - 1] = '\0';
+  strncpy(metadata_config.name, "Updated Metadata Configuration", sizeof(metadata_config.name) - 1);
 
-  // Extract analytics setting using gSOAP parsing
-  char analytics_str[16] = "";
+  // Parse analytics setting
+  char analytics_str[MEDIA_ANALYTICS_STR_SIZE] = "";
   if (parse_value_from_request(request->body, gsoap_ctx, "//tt:Analytics", analytics_str,
                                sizeof(analytics_str)) == 0) {
     metadata_config.analytics = (strcmp(analytics_str, "true") == 0) ? 1 : 0;
-  } else {
-    metadata_config.analytics = 0; // Default to false
-  }
-
-  // Extract session timeout using gSOAP parsing
-  char timeout_str[16] = "";
-  if (parse_value_from_request(request->body, gsoap_ctx, "//tt:SessionTimeout", timeout_str,
-                               sizeof(timeout_str)) == 0) {
-    // Parse PT60S format
-    if (strstr(timeout_str, "PT") != NULL && strstr(timeout_str, "S") != NULL) {
-      char* endptr = NULL;
-      long timeout_value = strtol(timeout_str + 2, &endptr, 10); // Skip "PT"
-      if (endptr != NULL && *endptr == 'S' && timeout_value > 0) {
-        metadata_config.session_timeout = (int)timeout_value;
-      }
-    }
-  } else {
-    metadata_config.session_timeout = 30; // Default 30 seconds
   }
 
   // Set configuration
-  int result = onvif_media_set_metadata_configuration(config_token, &metadata_config);
-
+  result = onvif_media_set_metadata_configuration(config_token, &metadata_config);
   if (result != ONVIF_SUCCESS) {
-    return error_handle_system(&error_ctx, result, "metadata_config_update", response);
+    return error_handle_system(error_ctx, result, "set_metadata_configuration", response);
   }
 
-  // Generate set metadata configuration response using proper gSOAP
-  // serialization
-  result = onvif_gsoap_generate_set_metadata_configuration_response(gsoap_ctx);
-  if (result != 0) {
-    return error_handle_system(&error_ctx, result, "set_metadata_configuration_response_generation",
-                               response);
-  }
-
-  // Get the complete SOAP response
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "soap_response_retrieval", response);
-  }
-
-  // Allocate response buffer if not already allocated
-  if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      return error_handle_system(&error_ctx, ONVIF_ERROR, "response_buffer_allocation", response);
-    }
-  }
-
-  // Copy response to output
-  strncpy(response->body, soap_response, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
-
+  service_log_info(log_ctx, "SetMetadataConfiguration request completed successfully");
   return ONVIF_SUCCESS;
 }
 
-// Action definitions
+// Media service action configurations
 static const service_action_def_t media_actions[] = {
-  {"GetProfiles", handle_get_profiles, 0},
+  {"GetProfiles", handle_get_profiles, 1},
   {"GetStreamUri", handle_get_stream_uri, 1},
   {"CreateProfile", handle_create_profile, 1},
   {"DeleteProfile", handle_delete_profile, 1},
@@ -1447,10 +1454,12 @@ static const service_action_def_t media_actions[] = {
   {"SetVideoEncoderConfiguration", handle_set_video_encoder_configuration, 1},
   {"StartMulticastStreaming", handle_start_multicast_streaming, 1},
   {"StopMulticastStreaming", handle_stop_multicast_streaming, 1},
-  {"GetMetadataConfigurations", handle_get_metadata_configurations, 0},
+  {"GetMetadataConfigurations", handle_get_metadata_configurations, 1},
   {"SetMetadataConfiguration", handle_set_metadata_configuration, 1}};
 
 int onvif_media_init(config_manager_t* config) {
+  ONVIF_CHECK_NULL(config);
+
   if (g_handler_initialized) {
     return ONVIF_SUCCESS;
   }
@@ -1465,9 +1474,20 @@ int onvif_media_init(config_manager_t* config) {
                                           sizeof(media_actions) / sizeof(media_actions[0]));
 
   if (result == ONVIF_SUCCESS) {
-    // Register media-specific error handlers
-    // Error handler registration not implemented yet
-    // Error handler registration not implemented yet
+    // Register with service dispatcher using new standardized interface
+    onvif_service_registration_t registration = {
+      .service_name = "Media",
+      .namespace_uri = "http://www.onvif.org/ver10/media/wsdl",
+      .operation_handler = onvif_media_handle_request,
+      .init_handler = NULL,
+      .cleanup_handler = NULL,
+      .capabilities_handler = NULL,
+      .reserved = {NULL, NULL, NULL, NULL}};
+
+    int dispatch_result = onvif_service_dispatcher_register_service(&registration);
+    if (dispatch_result != ONVIF_SUCCESS) {
+      platform_log_warning("Failed to register media service with dispatcher\n");
+    }
 
     g_handler_initialized = 1;
   }
@@ -1477,13 +1497,10 @@ int onvif_media_init(config_manager_t* config) {
 
 void onvif_media_cleanup(void) {
   if (g_handler_initialized) {
-    error_context_t error_ctx;
-    error_context_init(&error_ctx, "Media", "Cleanup", "service_cleanup");
+    // Unregister from service dispatcher
+    onvif_service_dispatcher_unregister_service("Media");
 
     onvif_service_handler_cleanup(&g_media_handler);
-
-    // Unregister error handlers
-    // Error handler unregistration not implemented yet
 
     g_handler_initialized = 0;
 

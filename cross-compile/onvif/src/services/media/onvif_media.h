@@ -9,17 +9,24 @@
 
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
-#include "services/common/onvif_types.h"
+
+// Buffer size constants
+#define MEDIA_URI_BUFFER_SIZE 256
+#define MEDIA_TOKEN_SIZE      32
+#define MEDIA_NAME_SIZE       64
+#define MEDIA_ENCODING_SIZE   16
+#define MEDIA_ADDRESS_SIZE    16
+#define MEDIA_SPACE_SIZE      128
 
 struct stream_uri {
-  char uri[256];
+  char uri[MEDIA_URI_BUFFER_SIZE];
   int invalid_after_connect;
   int invalid_after_reboot;
   int timeout;
 };
 
 struct video_source {
-  char token[32];
+  char token[MEDIA_TOKEN_SIZE];
   float framerate;
   struct {
     int width;
@@ -34,15 +41,15 @@ struct video_source {
 };
 
 struct audio_source {
-  char token[32];
+  char token[MEDIA_TOKEN_SIZE];
   int channels;
 };
 
 struct video_source_configuration {
-  char token[32];
-  char name[64];
+  char token[MEDIA_TOKEN_SIZE];
+  char name[MEDIA_NAME_SIZE];
   int use_count;
-  char source_token[32];
+  char source_token[MEDIA_TOKEN_SIZE];
   struct {
     int width;
     int height;
@@ -52,17 +59,17 @@ struct video_source_configuration {
 };
 
 struct multicast_config {
-  char address[16];
+  char address[MEDIA_ADDRESS_SIZE];
   int port;
   int ttl;
   int auto_start;
 };
 
 struct video_encoder_configuration {
-  char token[32];
-  char name[64];
+  char token[MEDIA_TOKEN_SIZE];
+  char name[MEDIA_NAME_SIZE];
   int use_count;
-  char encoding[16];
+  char encoding[MEDIA_ENCODING_SIZE];
   struct {
     int width;
     int height;
@@ -72,23 +79,23 @@ struct video_encoder_configuration {
   int encoding_interval;
   int bitrate_limit;
   int gov_length;
-  char profile[16];
+  char profile[MEDIA_ENCODING_SIZE];
   int guaranteed_framerate;
   struct multicast_config multicast;
 };
 
 struct audio_source_configuration {
-  char token[32];
-  char name[64];
+  char token[MEDIA_TOKEN_SIZE];
+  char name[MEDIA_NAME_SIZE];
   int use_count;
-  char source_token[32];
+  char source_token[MEDIA_TOKEN_SIZE];
 };
 
 struct audio_encoder_configuration {
-  char token[32];
-  char name[64];
+  char token[MEDIA_TOKEN_SIZE];
+  char name[MEDIA_NAME_SIZE];
   int use_count;
-  char encoding[16];
+  char encoding[MEDIA_ENCODING_SIZE];
   int bitrate;
   int sample_rate;
   struct multicast_config multicast;
@@ -96,8 +103,8 @@ struct audio_encoder_configuration {
 };
 
 struct metadata_configuration {
-  char token[32];
-  char name[64];
+  char token[MEDIA_TOKEN_SIZE];
+  char name[MEDIA_NAME_SIZE];
   int use_count;
   int session_timeout;
   int analytics;
@@ -105,11 +112,11 @@ struct metadata_configuration {
 };
 
 struct media_profile {
-  char token[32];
-  char name[64];
+  char token[MEDIA_TOKEN_SIZE];
+  char name[MEDIA_NAME_SIZE];
   int fixed;
   struct {
-    char source_token[32];
+    char source_token[MEDIA_TOKEN_SIZE];
     struct {
       int width;
       int height;
@@ -118,8 +125,8 @@ struct media_profile {
     } bounds;
   } video_source;
   struct {
-    char token[32];
-    char encoding[16];
+    char token[MEDIA_TOKEN_SIZE];
+    char encoding[MEDIA_ENCODING_SIZE];
     struct {
       int width;
       int height;
@@ -131,22 +138,22 @@ struct media_profile {
     int gov_length;
   } video_encoder;
   struct {
-    char source_token[32];
+    char source_token[MEDIA_TOKEN_SIZE];
   } audio_source;
   struct {
-    char token[32];
-    char encoding[16];
+    char token[MEDIA_TOKEN_SIZE];
+    char encoding[MEDIA_ENCODING_SIZE];
     int bitrate;
     int sample_rate;
   } audio_encoder;
   struct {
-    char node_token[32];
-    char default_absolute_pan_tilt_position_space[128];
-    char default_absolute_zoom_position_space[128];
-    char default_relative_pan_tilt_translation_space[128];
-    char default_relative_zoom_translation_space[128];
-    char default_continuous_pan_tilt_velocity_space[128];
-    char default_continuous_zoom_velocity_space[128];
+    char node_token[MEDIA_TOKEN_SIZE];
+    char default_absolute_pan_tilt_position_space[MEDIA_SPACE_SIZE];
+    char default_absolute_zoom_position_space[MEDIA_SPACE_SIZE];
+    char default_relative_pan_tilt_translation_space[MEDIA_SPACE_SIZE];
+    char default_relative_zoom_translation_space[MEDIA_SPACE_SIZE];
+    char default_continuous_pan_tilt_velocity_space[MEDIA_SPACE_SIZE];
+    char default_continuous_zoom_velocity_space[MEDIA_SPACE_SIZE];
   } ptz;
 };
 
