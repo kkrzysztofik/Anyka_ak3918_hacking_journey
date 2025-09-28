@@ -216,7 +216,7 @@
   - _Requirements: 2.1_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: HTTP Logging Developer with structured logging expertise | Task: Integrate service_logging.h utilities for structured HTTP logging | Restrictions: Must use existing utilities only, maintain logging performance, follow existing patterns | Success: Structured HTTP logging implemented, consistent format across operations | Instructions: Mark [-] when starting, integrate logging utilities, test logging output, mark [x] when logging integrated_
 
-- [-] 25. Implement HTTP error handling with utilities
+- [x] 25. Implement HTTP error handling with utilities
   - File: cross-compile/onvif/src/networking/http/http_server.c
   - Use existing error handling utilities for HTTP error responses
   - Implement consistent error reporting across HTTP operations
@@ -234,7 +234,7 @@
   - _Requirements: 3, 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: ONVIF Service Architect with dispatcher expertise | Task: Define shared callback typedefs and helpers in service_dispatcher to codify the device service handler pattern | Restrictions: Maintain backward compatibility for existing device service usage, document new interfaces with Doxygen, avoid introducing unused abstractions | Success: Shared callback interface published, dispatcher enforces signature, documentation updated | Instructions: Mark [-] when starting, add typedefs/helpers, update docs, run unit tests, mark [x] when interface defined_
 
-- [ ] 27. Align device service registration with standardized callback interface
+- [x] 27. Align device service registration with standardized callback interface
   - File: cross-compile/onvif/src/services/device/onvif_device.c
   - Refactor device service registration to use new callback typedefs and helpers
   - Remove legacy registration code paths that bypass standardized dispatcher APIs
@@ -243,7 +243,7 @@
   - _Requirements: 3, 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Device Service Maintainer with callback refactor expertise | Task: Update device service registration to consume the new shared callback helpers and eliminate bespoke code paths | Restrictions: Preserve all device service functionality, keep memory optimizations intact, follow AGENTS.md coding standards | Success: Device service registers exclusively through shared helpers, code compiles cleanly, unit/integration tests pass | Instructions: Mark [-] when starting, refactor registration, run relevant tests, mark [x] when alignment complete_
 
-- [ ] 28. Add device service callback unit tests
+- [x] 28. Add device service callback unit tests
   - File: cross-compile/onvif/tests/unit/services/device/test_onvif_device_callbacks.c
   - Create CMocka tests covering device service callback registration and dispatch flow
   - Validate error handling for null callbacks and ensure dispatcher forwards requests correctly
@@ -252,7 +252,7 @@
   - _Requirements: 3, 4_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Device Service Test Engineer with CMocka expertise | Task: Build unit tests asserting device callbacks register through shared helpers and handle error scenarios | Restrictions: Use existing mocking utilities, keep tests deterministic, ensure memory tracking macros used | Success: New tests compile and pass under make test, coverage includes success and failure paths | Instructions: Mark [-] when starting, add tests, run make test, mark [x] when tests pass_
 
-- [ ] 29. Refactor media service to adopt standardized callback pattern
+- [x] 29. Refactor media service to adopt standardized callback pattern
   - File: cross-compile/onvif/src/services/media/onvif_media.c
   - Update media service registration and handlers to use shared callback typedefs and helpers
   - Remove custom dispatch code and align handler signatures with device service pattern
@@ -261,7 +261,7 @@
   - _Requirements: 3, 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Service Refactoring Engineer with callback expertise | Task: Replace media service registration/dispatch logic with the standardized helper-driven approach mirroring device service | Restrictions: Maintain media functionality, reuse shared helpers, update Doxygen comments | Success: Media service builds with new callbacks, no bespoke dispatcher logic remains, unit/integration tests pass | Instructions: Mark [-] when starting, refactor callbacks, run media tests, mark [x] when refactor complete_
 
-- [ ] 30. Add media service callback unit tests
+- [x] 30. Add media service callback unit tests
   - File: cross-compile/onvif/tests/unit/services/media/test_onvif_media_callbacks.c
   - Build CMocka tests verifying media service registration with shared helpers and dispatch routing
   - Cover error cases (null handlers, duplicate registration) and success path
@@ -270,7 +270,7 @@
   - _Requirements: 3, 4_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Service Test Engineer with dispatcher validation expertise | Task: Add unit tests confirming media callbacks register via shared helpers and behave correctly | Restrictions: Use shared mock utilities, ensure tests enforce error handling, follow test naming conventions | Success: Tests compile, run via make test, and validate both success and failure flows | Instructions: Mark [-] when starting, implement tests, execute make test, mark [x] when passing_
 
-- [ ] 31. Refactor PTZ service to adopt standardized callback pattern
+- [x] 31. Refactor PTZ service to adopt standardized callback pattern
   - File: cross-compile/onvif/src/services/ptz/onvif_ptz.c
   - Update PTZ service registration and handlers to use shared callback typedefs and helpers
   - Remove bespoke dispatcher glue in PTZ module and align with device service flow
@@ -279,7 +279,7 @@
   - _Requirements: 3, 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: PTZ Service Refactoring Engineer with callback expertise | Task: Refactor PTZ service to register handlers through shared helpers and align signatures | Restrictions: Maintain PTZ command behavior, ensure thread safety remains, update documentation | Success: PTZ service builds using standardized callbacks, bespoke logic removed, tests pass | Instructions: Mark [-] when starting, refactor PTZ callbacks, run PTZ tests, mark [x] when complete_
 
-- [ ] 32. Add PTZ service callback unit tests
+- [x] 32. Add PTZ service callback unit tests
   - File: cross-compile/onvif/tests/unit/services/ptz/test_onvif_ptz_callbacks.c
   - Implement CMocka tests covering PTZ service registration, dispatch, and error handling with shared helpers
   - Validate callback invocation order and ensure logging occurs for failure paths
@@ -288,7 +288,7 @@
   - _Requirements: 3, 4_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: PTZ Service Test Engineer with dispatcher validation expertise | Task: Add unit tests verifying PTZ service uses shared callbacks and handles errors correctly | Restrictions: Use consistent mocking strategy, assert logging outputs where applicable, keep tests isolated | Success: PTZ callback tests pass under make test, covering success and failure scenarios | Instructions: Mark [-] when starting, author tests, execute make test, mark [x] when passing_
 
-- [ ] 33. Refactor imaging service to adopt standardized callback pattern
+- [x] 33. Refactor imaging service to adopt standardized callback pattern
   - File: cross-compile/onvif/src/services/imaging/onvif_imaging.c
   - Update imaging service registration and handlers to use shared callback typedefs and helpers
   - Remove imaging-specific dispatch glue and synchronize signatures with device service pattern
@@ -297,7 +297,7 @@
   - _Requirements: 3, 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Imaging Service Refactoring Engineer with callback expertise | Task: Refactor imaging service to register through shared helpers and align handler signatures | Restrictions: Maintain imaging parameter functionality, ensure memory optimizations unaffected, update Doxygen documentation | Success: Imaging service builds with standardized callbacks, bespoke logic removed, tests pass | Instructions: Mark [-] when starting, refactor imaging callbacks, run imaging tests, mark [x] when complete_
 
-- [ ] 34. Add imaging service callback unit tests
+- [x] 34. Add imaging service callback unit tests
   - File: cross-compile/onvif/tests/unit/services/imaging/test_onvif_imaging_callbacks.c
   - Develop CMocka tests ensuring imaging service registers through shared helpers and dispatches correctly
   - Include tests for invalid inputs, null handlers, and normal execution paths
@@ -306,7 +306,7 @@
   - _Requirements: 3, 4_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Imaging Service Test Engineer with dispatcher validation expertise | Task: Create unit tests verifying imaging callbacks follow shared helpers and handle errors | Restrictions: Keep tests deterministic, reuse shared test utilities, follow naming conventions | Success: Imaging callback tests pass under make test, exercising success and failure flows | Instructions: Mark [-] when starting, implement tests, run make test, mark [x] when tests pass_
 
-- [ ] 35. Search for large allocations in media service handlers
+- [x] 35. Search for large allocations in media service handlers
   - File: cross-compile/onvif/src/services/media/onvif_media.c
   - Search for ONVIF_RESPONSE_BUFFER_SIZE and malloc() calls in media handlers
   - Document each allocation with function name, line number, and size
@@ -315,7 +315,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Memory Analysis Engineer with C allocation tracking expertise | Task: Search media service for large allocations using grep patterns for ONVIF_RESPONSE_BUFFER_SIZE and malloc | Restrictions: Analysis only, document exact locations with line numbers and allocation sizes | Success: Complete list of large allocations in media service with precise locations documented | Instructions: Mark [-] when starting, grep for allocation patterns, document each finding with location, mark [x] when all allocations catalogued_
 
-- [ ] 36. Implement smart response builders for media service
+- [x] 36. Implement smart response builders for media service
   - File: cross-compile/onvif/src/services/media/onvif_media.c
   - Replace large allocations with smart response builder patterns
   - Implement dynamic buffer allocation for media responses
@@ -324,7 +324,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Service Memory Developer with response builder expertise | Task: Implement smart response builders for media service following device service patterns | Restrictions: Must maintain media functionality, follow established patterns exactly, preserve ONVIF compliance | Success: Smart response builders implemented, large allocations replaced | Instructions: Mark [-] when starting, implement response builders, test media operations, mark [x] when builders implemented_
 
-- [ ] 37. Optimize media profile management
+- [x] 37. Optimize media profile management
   - File: cross-compile/onvif/src/services/media/onvif_media.c
   - Optimize media profile creation and management operations
   - Implement efficient profile storage and retrieval patterns
@@ -351,7 +351,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Service Test Engineer with optimization validation expertise | Task: Create comprehensive tests for optimized media service to verify improvements | Restrictions: Must test all media operations, validate memory improvements, ensure functionality preservation | Success: All media tests pass, memory improvements validated, functionality preserved | Instructions: Mark [-] when starting, create media tests, run comprehensive testing, mark [x] when testing complete_
 
-- [ ] 40. Analyze PTZ service memory allocation patterns
+- [x] 40. Analyze PTZ service memory allocation patterns
   - File: cross-compile/onvif/src/services/ptz/onvif_ptz.c
   - Identify all memory allocations in PTZ service handlers
   - Document PTZ-specific allocation patterns and optimization opportunities
@@ -360,7 +360,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: PTZ Service Analysis Specialist with memory pattern expertise | Task: Analyze PTZ service code to identify allocations and optimization opportunities | Restrictions: Analysis only, no code changes, document all patterns | Success: Complete inventory of PTZ allocations, optimization targets identified | Instructions: Mark [-] when starting, analyze PTZ service code, document findings, mark [x] when analysis complete_
 
-- [ ] 41. Implement smart response builders for PTZ service
+- [x] 41. Implement smart response builders for PTZ service
   - File: cross-compile/onvif/src/services/ptz/onvif_ptz.c
   - Replace allocations with smart response builder patterns for PTZ operations
   - Implement dynamic buffer allocation for PTZ responses
@@ -396,7 +396,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: PTZ Test Engineer with optimization validation expertise | Task: Create comprehensive tests for optimized PTZ service to verify improvements | Restrictions: Must test all PTZ operations, validate memory improvements, ensure functionality preservation | Success: All PTZ tests pass, memory improvements validated, PTZ functionality preserved | Instructions: Mark [-] when starting, create PTZ tests, run comprehensive testing, mark [x] when testing complete_
 
-- [ ] 45. Analyze imaging service memory allocation patterns
+- [x] 45. Analyze imaging service memory allocation patterns
   - File: cross-compile/onvif/src/services/imaging/onvif_imaging.c
   - Identify all memory allocations in imaging service handlers
   - Document imaging-specific allocation patterns and optimization opportunities
@@ -405,7 +405,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Imaging Service Analysis Specialist with memory pattern expertise | Task: Analyze imaging service code to identify allocations and optimization opportunities | Restrictions: Analysis only, no code changes, document all patterns | Success: Complete inventory of imaging allocations, optimization targets identified | Instructions: Mark [-] when starting, analyze imaging service code, document findings, mark [x] when analysis complete_
 
-- [ ] 46. Implement smart response builders for imaging service
+- [x] 46. Implement smart response builders for imaging service
   - File: cross-compile/onvif/src/services/imaging/onvif_imaging.c
   - Replace allocations with smart response builder patterns for imaging operations
   - Implement dynamic buffer allocation for imaging responses
@@ -611,3 +611,21 @@
   - _Leverage: services/snapshot/onvif_snapshot.h, service dispatcher utilities_
   - _Requirements: 5_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Snapshot Service Engineer with routing expertise | Task: Rework snapshot HTTP endpoint to use generic service delegation leveraging snapshot service handlers | Restrictions: Maintain ONVIF compliance, ensure existing functionality preserved, follow logging conventions | Success: Snapshot requests routed via service dispatcher, HTTP layer contains no business logic, regression tests pass | Instructions: Mark [-] when starting, refactor routing, add regression tests, mark [x] when routing compliant_
+
+- [ ] 69. Consolidate imaging SOAP response generation
+  - File: cross-compile/onvif/src/services/imaging/, cross-compile/onvif/src/protocol/gsoap/
+  - Audit remaining imaging operations for manual SOAP fragments and migrate them to gSOAP callback + smart response builder pipeline
+  - Extract reusable helpers for shared imaging SOAP envelopes to prevent namespace drift
+  - Purpose: Extend imaging service consistency and eliminate duplicated SOAP literals
+  - _Leverage: imaging_settings_response_callback, smart_response_builder APIs, service dispatcher patterns_
+  - _Requirements: 9_
+  - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: ONVIF SOAP Integration Engineer with imaging expertise | Task: Identify any remaining manual SOAP snippets in imaging service, replace them with shared gSOAP-driven helpers, and factor common envelope builders for reuse | Restrictions: Do not regress existing handlers, ensure helpers live under protocol/gsoap utilities, maintain documentation | Success: Imaging service uses shared helpers exclusively, no manual SOAP literals remain, helper coverage documented | Instructions: Mark [-] when starting, audit imaging handlers, create helpers, update code, mark [x] after consistency verified_
+
+- [ ] 70. Validate gSOAP context concurrency for imaging service
+  - File: cross-compile/onvif/src/services/imaging/onvif_imaging.c, cross-compile/onvif/src/protocol/gsoap/onvif_gsoap.c
+  - Review gSOAP context lifecycle under concurrent request load and define pooling/synchronization requirements
+  - Implement safeguards or documentation ensuring imaging handler remains thread-safe with shared context usage
+  - Purpose: Confirm imaging gSOAP context strategy scales under concurrent HTTP servicing
+  - _Leverage: existing gSOAP context utilities, service mutex guards, memory_manager diagnostics_
+  - _Requirements: 9_
+  - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Concurrency Assurance Engineer with gSOAP expertise | Task: Analyze imaging service gSOAP context usage, design necessary pooling or locking, and update code/docs to guarantee safe concurrent handling | Restrictions: Avoid regressions to single-thread behavior, document any new mutexes or pooling structures, align with platform threading model | Success: Concurrency analysis completed, safeguards implemented or documented, stress guidance added to design notes | Instructions: Mark [-] when starting, perform analysis, implement safeguards/documentation, mark [x] when concurrency validation finished_
