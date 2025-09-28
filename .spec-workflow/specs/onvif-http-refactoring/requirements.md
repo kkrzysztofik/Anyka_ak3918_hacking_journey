@@ -85,6 +85,7 @@ This refactoring directly supports the core project goals of creating a robust, 
 3. WHEN service response patterns are implemented THEN they SHALL be consistent across Device, Media, PTZ, and Imaging services
 4. WHEN new services are added THEN they SHALL follow the established memory-efficient patterns
 5. IF response size can be estimated THEN services SHALL provide size hints for optimal allocation strategy
+6. WHEN ONVIF services register handlers THEN they SHALL adopt the callback pattern established by the Device service implementation
 
 ### Requirement 4 - Comprehensive Testing
 

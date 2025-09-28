@@ -189,7 +189,7 @@
   - _Requirements: 2.1_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Authentication Input Validation Specialist with injection prevention expertise | Task: Implement comprehensive input validation for all HTTP authentication data using existing validation utilities | Restrictions: Must use existing input_validation utilities only, validate usernames/passwords/headers, prevent injection attacks, maintain auth performance | Success: All auth inputs validated, injection prevention implemented, validation integrated, malformed input handled | Instructions: Mark [-] when starting in tasks.md, add validation to all auth inputs, test with malicious data, mark [x] when validation complete_
 
-- [ ] 22. Create comprehensive HTTP authentication tests
+- [x] 22. Create comprehensive HTTP authentication tests
   - File: tests/networking/http_auth_tests.c
   - Implement complete test coverage for HTTP authentication system
   - Test valid/invalid credentials, attack scenarios, and ONVIF compliance
@@ -198,7 +198,7 @@
   - _Requirements: 2.1_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: HTTP Authentication Test Engineer with security testing expertise | Task: Create comprehensive test suite for HTTP authentication system covering functionality and security scenarios | Restrictions: Must test all auth scenarios, validate ONVIF compliance, test attack prevention, use existing test infrastructure | Success: Complete auth test suite implemented, all scenarios tested, security validated, ONVIF compliance verified | Instructions: Mark [-] when starting in tasks.md, implement auth tests, test security scenarios, validate ONVIF compliance, mark [x] when testing complete_
 
-- [ ] 23. Integrate validation utilities and safe string operations in HTTP parsing
+- [x] 23. Integrate validation utilities and safe string operations in HTTP parsing
   - File: cross-compile/onvif/src/networking/http/http_server.c, cross-compile/onvif/src/networking/http/http_parser.c
   - Add comprehensive HTTP request validation using common_validation.h and replace raw string copies with string_shims safe APIs
   - Implement validation for headers, query parameters, and request body while removing strncpy/strcpy usage in HTTP modules
@@ -207,7 +207,7 @@
   - _Requirements: 2.1_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: HTTP Validation Developer with input sanitization expertise | Task: Integrate common_validation utilities across HTTP parsing and migrate all HTTP string handling to safe_* helpers | Restrictions: Must use existing utilities only, maintain HTTP performance, ensure no direct strncpy/strcpy remain in HTTP modules | Success: HTTP requests validated using shared utilities, all string copies performed via safe_* helpers, security coverage confirmed by tests | Instructions: Mark [-] when starting, wire validation into parser/server, replace unsafe string usage, extend tests, mark [x] when validation integrated_
 
-- [ ] 24. Integrate service_logging.h for structured HTTP logging
+- [x] 24. Integrate service_logging.h for structured HTTP logging
   - File: cross-compile/onvif/src/networking/http/http_server.c
   - Add structured logging for HTTP requests and responses
   - Implement consistent logging format across HTTP operations
@@ -216,7 +216,7 @@
   - _Requirements: 2.1_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: HTTP Logging Developer with structured logging expertise | Task: Integrate service_logging.h utilities for structured HTTP logging | Restrictions: Must use existing utilities only, maintain logging performance, follow existing patterns | Success: Structured HTTP logging implemented, consistent format across operations | Instructions: Mark [-] when starting, integrate logging utilities, test logging output, mark [x] when logging integrated_
 
-- [ ] 25. Implement HTTP error handling with utilities
+- [-] 25. Implement HTTP error handling with utilities
   - File: cross-compile/onvif/src/networking/http/http_server.c
   - Use existing error handling utilities for HTTP error responses
   - Implement consistent error reporting across HTTP operations
@@ -225,7 +225,88 @@
   - _Requirements: 2.1_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task: Role: HTTP Error Handling Developer with error response expertise | Task: Implement consistent HTTP error handling using existing error utilities | Restrictions: Must use existing utilities only, maintain error response accuracy, follow existing patterns | Success: Consistent error handling implemented, error utilities integrated | Instructions: Mark [-] when starting, integrate error utilities, test error responses, mark [x] when error handling complete_
 
-- [ ] 26. Search for large allocations in media service handlers
+- [x] 26. Define standardized ONVIF service callback interface
+  - File: cross-compile/onvif/src/services/common/service_dispatcher.h, cross-compile/onvif/src/services/common/service_dispatcher.c
+  - Introduce shared callback typedefs and registration helpers reflecting device service pattern
+  - Update service dispatcher documentation to describe required handler signature and lifecycle
+  - Purpose: Provide reusable callback interface so every service adopts the device service pattern
+  - _Leverage: device service registration code, existing service dispatcher infrastructure_
+  - _Requirements: 3, 9_
+  - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: ONVIF Service Architect with dispatcher expertise | Task: Define shared callback typedefs and helpers in service_dispatcher to codify the device service handler pattern | Restrictions: Maintain backward compatibility for existing device service usage, document new interfaces with Doxygen, avoid introducing unused abstractions | Success: Shared callback interface published, dispatcher enforces signature, documentation updated | Instructions: Mark [-] when starting, add typedefs/helpers, update docs, run unit tests, mark [x] when interface defined_
+
+- [ ] 27. Align device service registration with standardized callback interface
+  - File: cross-compile/onvif/src/services/device/onvif_device.c
+  - Refactor device service registration to use new callback typedefs and helpers
+  - Remove legacy registration code paths that bypass standardized dispatcher APIs
+  - Purpose: Ensure device service remains canonical implementation of the callback pattern
+  - _Leverage: standardized dispatcher interface, existing device service handlers_
+  - _Requirements: 3, 9_
+  - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Device Service Maintainer with callback refactor expertise | Task: Update device service registration to consume the new shared callback helpers and eliminate bespoke code paths | Restrictions: Preserve all device service functionality, keep memory optimizations intact, follow AGENTS.md coding standards | Success: Device service registers exclusively through shared helpers, code compiles cleanly, unit/integration tests pass | Instructions: Mark [-] when starting, refactor registration, run relevant tests, mark [x] when alignment complete_
+
+- [ ] 28. Add device service callback unit tests
+  - File: cross-compile/onvif/tests/unit/services/device/test_onvif_device_callbacks.c
+  - Create CMocka tests covering device service callback registration and dispatch flow
+  - Validate error handling for null callbacks and ensure dispatcher forwards requests correctly
+  - Purpose: Provide regression coverage for standardized callback pattern on device service
+  - _Leverage: CMocka test framework, existing device service mocks_
+  - _Requirements: 3, 4_
+  - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Device Service Test Engineer with CMocka expertise | Task: Build unit tests asserting device callbacks register through shared helpers and handle error scenarios | Restrictions: Use existing mocking utilities, keep tests deterministic, ensure memory tracking macros used | Success: New tests compile and pass under make test, coverage includes success and failure paths | Instructions: Mark [-] when starting, add tests, run make test, mark [x] when tests pass_
+
+- [ ] 29. Refactor media service to adopt standardized callback pattern
+  - File: cross-compile/onvif/src/services/media/onvif_media.c
+  - Update media service registration and handlers to use shared callback typedefs and helpers
+  - Remove custom dispatch code and align handler signatures with device service pattern
+  - Purpose: Ensure media service follows the unified callback approach
+  - _Leverage: standardized dispatcher interface, device service reference implementation_
+  - _Requirements: 3, 9_
+  - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Service Refactoring Engineer with callback expertise | Task: Replace media service registration/dispatch logic with the standardized helper-driven approach mirroring device service | Restrictions: Maintain media functionality, reuse shared helpers, update Doxygen comments | Success: Media service builds with new callbacks, no bespoke dispatcher logic remains, unit/integration tests pass | Instructions: Mark [-] when starting, refactor callbacks, run media tests, mark [x] when refactor complete_
+
+- [ ] 30. Add media service callback unit tests
+  - File: cross-compile/onvif/tests/unit/services/media/test_onvif_media_callbacks.c
+  - Build CMocka tests verifying media service registration with shared helpers and dispatch routing
+  - Cover error cases (null handlers, duplicate registration) and success path
+  - Purpose: Deliver unit-level assurance that media service follows standardized callback pattern
+  - _Leverage: CMocka framework, new standardized dispatcher helpers_
+  - _Requirements: 3, 4_
+  - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Service Test Engineer with dispatcher validation expertise | Task: Add unit tests confirming media callbacks register via shared helpers and behave correctly | Restrictions: Use shared mock utilities, ensure tests enforce error handling, follow test naming conventions | Success: Tests compile, run via make test, and validate both success and failure flows | Instructions: Mark [-] when starting, implement tests, execute make test, mark [x] when passing_
+
+- [ ] 31. Refactor PTZ service to adopt standardized callback pattern
+  - File: cross-compile/onvif/src/services/ptz/onvif_ptz.c
+  - Update PTZ service registration and handlers to use shared callback typedefs and helpers
+  - Remove bespoke dispatcher glue in PTZ module and align with device service flow
+  - Purpose: Extend unified callback approach to PTZ service
+  - _Leverage: standardized dispatcher interface, device/media callback refactors_
+  - _Requirements: 3, 9_
+  - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: PTZ Service Refactoring Engineer with callback expertise | Task: Refactor PTZ service to register handlers through shared helpers and align signatures | Restrictions: Maintain PTZ command behavior, ensure thread safety remains, update documentation | Success: PTZ service builds using standardized callbacks, bespoke logic removed, tests pass | Instructions: Mark [-] when starting, refactor PTZ callbacks, run PTZ tests, mark [x] when complete_
+
+- [ ] 32. Add PTZ service callback unit tests
+  - File: cross-compile/onvif/tests/unit/services/ptz/test_onvif_ptz_callbacks.c
+  - Implement CMocka tests covering PTZ service registration, dispatch, and error handling with shared helpers
+  - Validate callback invocation order and ensure logging occurs for failure paths
+  - Purpose: Guarantee PTZ service adherence to standardized callback pattern
+  - _Leverage: CMocka framework, standardized dispatcher mocks_
+  - _Requirements: 3, 4_
+  - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: PTZ Service Test Engineer with dispatcher validation expertise | Task: Add unit tests verifying PTZ service uses shared callbacks and handles errors correctly | Restrictions: Use consistent mocking strategy, assert logging outputs where applicable, keep tests isolated | Success: PTZ callback tests pass under make test, covering success and failure scenarios | Instructions: Mark [-] when starting, author tests, execute make test, mark [x] when passing_
+
+- [ ] 33. Refactor imaging service to adopt standardized callback pattern
+  - File: cross-compile/onvif/src/services/imaging/onvif_imaging.c
+  - Update imaging service registration and handlers to use shared callback typedefs and helpers
+  - Remove imaging-specific dispatch glue and synchronize signatures with device service pattern
+  - Purpose: Apply unified callback approach across imaging service
+  - _Leverage: standardized dispatcher interface, prior service refactors_
+  - _Requirements: 3, 9_
+  - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Imaging Service Refactoring Engineer with callback expertise | Task: Refactor imaging service to register through shared helpers and align handler signatures | Restrictions: Maintain imaging parameter functionality, ensure memory optimizations unaffected, update Doxygen documentation | Success: Imaging service builds with standardized callbacks, bespoke logic removed, tests pass | Instructions: Mark [-] when starting, refactor imaging callbacks, run imaging tests, mark [x] when complete_
+
+- [ ] 34. Add imaging service callback unit tests
+  - File: cross-compile/onvif/tests/unit/services/imaging/test_onvif_imaging_callbacks.c
+  - Develop CMocka tests ensuring imaging service registers through shared helpers and dispatches correctly
+  - Include tests for invalid inputs, null handlers, and normal execution paths
+  - Purpose: Provide unit-level validation that imaging service follows standardized callback pattern
+  - _Leverage: CMocka framework, shared dispatcher mocks_
+  - _Requirements: 3, 4_
+  - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Imaging Service Test Engineer with dispatcher validation expertise | Task: Create unit tests verifying imaging callbacks follow shared helpers and handle errors | Restrictions: Keep tests deterministic, reuse shared test utilities, follow naming conventions | Success: Imaging callback tests pass under make test, exercising success and failure flows | Instructions: Mark [-] when starting, implement tests, run make test, mark [x] when tests pass_
+
+- [ ] 35. Search for large allocations in media service handlers
   - File: cross-compile/onvif/src/services/media/onvif_media.c
   - Search for ONVIF_RESPONSE_BUFFER_SIZE and malloc() calls in media handlers
   - Document each allocation with function name, line number, and size
@@ -234,7 +315,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Memory Analysis Engineer with C allocation tracking expertise | Task: Search media service for large allocations using grep patterns for ONVIF_RESPONSE_BUFFER_SIZE and malloc | Restrictions: Analysis only, document exact locations with line numbers and allocation sizes | Success: Complete list of large allocations in media service with precise locations documented | Instructions: Mark [-] when starting, grep for allocation patterns, document each finding with location, mark [x] when all allocations catalogued_
 
-- [ ] 27. Implement smart response builders for media service
+- [ ] 36. Implement smart response builders for media service
   - File: cross-compile/onvif/src/services/media/onvif_media.c
   - Replace large allocations with smart response builder patterns
   - Implement dynamic buffer allocation for media responses
@@ -243,7 +324,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Service Memory Developer with response builder expertise | Task: Implement smart response builders for media service following device service patterns | Restrictions: Must maintain media functionality, follow established patterns exactly, preserve ONVIF compliance | Success: Smart response builders implemented, large allocations replaced | Instructions: Mark [-] when starting, implement response builders, test media operations, mark [x] when builders implemented_
 
-- [ ] 28. Optimize media profile management
+- [ ] 37. Optimize media profile management
   - File: cross-compile/onvif/src/services/media/onvif_media.c
   - Optimize media profile creation and management operations
   - Implement efficient profile storage and retrieval patterns
@@ -252,7 +333,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Profile Developer with profile management expertise | Task: Optimize media profile management operations for memory efficiency | Restrictions: Must maintain ONVIF compliance, preserve profile functionality, use existing patterns | Success: Profile management optimized, memory usage reduced | Instructions: Mark [-] when starting, optimize profile operations, test profile functionality, mark [x] when profiles optimized_
 
-- [ ] 29. Optimize media stream URI generation
+- [ ] 38. Optimize media stream URI generation
   - File: cross-compile/onvif/src/services/media/onvif_media.c
   - Optimize stream URI generation and response building
   - Implement efficient URI construction patterns
@@ -261,7 +342,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Stream Developer with URI generation expertise | Task: Optimize media stream URI generation for memory efficiency | Restrictions: Must maintain stream functionality, preserve URI accuracy, use existing patterns | Success: Stream URI generation optimized, memory usage reduced | Instructions: Mark [-] when starting, optimize URI generation, test stream operations, mark [x] when streams optimized_
 
-- [ ] 30. Test media service optimization
+- [ ] 39. Test media service optimization
   - File: tests/integration/media_service_tests.c
   - Create comprehensive tests for optimized media service
   - Verify memory usage improvements and functionality preservation
@@ -270,7 +351,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Media Service Test Engineer with optimization validation expertise | Task: Create comprehensive tests for optimized media service to verify improvements | Restrictions: Must test all media operations, validate memory improvements, ensure functionality preservation | Success: All media tests pass, memory improvements validated, functionality preserved | Instructions: Mark [-] when starting, create media tests, run comprehensive testing, mark [x] when testing complete_
 
-- [ ] 31. Analyze PTZ service memory allocation patterns
+- [ ] 40. Analyze PTZ service memory allocation patterns
   - File: cross-compile/onvif/src/services/ptz/onvif_ptz.c
   - Identify all memory allocations in PTZ service handlers
   - Document PTZ-specific allocation patterns and optimization opportunities
@@ -279,7 +360,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: PTZ Service Analysis Specialist with memory pattern expertise | Task: Analyze PTZ service code to identify allocations and optimization opportunities | Restrictions: Analysis only, no code changes, document all patterns | Success: Complete inventory of PTZ allocations, optimization targets identified | Instructions: Mark [-] when starting, analyze PTZ service code, document findings, mark [x] when analysis complete_
 
-- [ ] 32. Implement smart response builders for PTZ service
+- [ ] 41. Implement smart response builders for PTZ service
   - File: cross-compile/onvif/src/services/ptz/onvif_ptz.c
   - Replace allocations with smart response builder patterns for PTZ operations
   - Implement dynamic buffer allocation for PTZ responses
@@ -288,7 +369,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: PTZ Memory Developer with response builder expertise | Task: Implement smart response builders for PTZ service following device service patterns | Restrictions: Must maintain PTZ functionality, follow established patterns exactly, preserve ONVIF compliance | Success: Smart response builders implemented, allocations optimized | Instructions: Mark [-] when starting, implement response builders, test PTZ operations, mark [x] when builders implemented_
 
-- [ ] 33. Optimize PTZ movement operations
+- [ ] 42. Optimize PTZ movement operations
   - File: cross-compile/onvif/src/services/ptz/onvif_ptz.c
   - Optimize continuous move, absolute move, and relative move operations
   - Implement efficient PTZ command processing patterns
@@ -297,7 +378,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: PTZ Movement Developer with command optimization expertise | Task: Optimize PTZ movement operations for memory efficiency | Restrictions: Must maintain movement accuracy, preserve PTZ functionality, use existing patterns | Success: Movement operations optimized, memory usage reduced | Instructions: Mark [-] when starting, optimize movement operations, test PTZ movements, mark [x] when movements optimized_
 
-- [ ] 34. Optimize PTZ preset management
+- [ ] 43. Optimize PTZ preset management
   - File: cross-compile/onvif/src/services/ptz/onvif_ptz.c
   - Optimize preset creation, recall, and management operations
   - Implement efficient preset storage and retrieval patterns
@@ -306,7 +387,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: PTZ Preset Developer with preset optimization expertise | Task: Optimize PTZ preset management operations for memory efficiency | Restrictions: Must maintain preset functionality, preserve preset accuracy, use existing patterns | Success: Preset operations optimized, memory usage reduced | Instructions: Mark [-] when starting, optimize preset operations, test preset functionality, mark [x] when presets optimized_
 
-- [ ] 35. Test PTZ service optimization
+- [ ] 44. Test PTZ service optimization
   - File: tests/integration/ptz_service_tests.c
   - Create comprehensive tests for optimized PTZ service
   - Verify memory usage improvements and PTZ functionality preservation
@@ -315,7 +396,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: PTZ Test Engineer with optimization validation expertise | Task: Create comprehensive tests for optimized PTZ service to verify improvements | Restrictions: Must test all PTZ operations, validate memory improvements, ensure functionality preservation | Success: All PTZ tests pass, memory improvements validated, PTZ functionality preserved | Instructions: Mark [-] when starting, create PTZ tests, run comprehensive testing, mark [x] when testing complete_
 
-- [ ] 36. Analyze imaging service memory allocation patterns
+- [ ] 45. Analyze imaging service memory allocation patterns
   - File: cross-compile/onvif/src/services/imaging/onvif_imaging.c
   - Identify all memory allocations in imaging service handlers
   - Document imaging-specific allocation patterns and optimization opportunities
@@ -324,7 +405,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Imaging Service Analysis Specialist with memory pattern expertise | Task: Analyze imaging service code to identify allocations and optimization opportunities | Restrictions: Analysis only, no code changes, document all patterns | Success: Complete inventory of imaging allocations, optimization targets identified | Instructions: Mark [-] when starting, analyze imaging service code, document findings, mark [x] when analysis complete_
 
-- [ ] 37. Implement smart response builders for imaging service
+- [ ] 46. Implement smart response builders for imaging service
   - File: cross-compile/onvif/src/services/imaging/onvif_imaging.c
   - Replace allocations with smart response builder patterns for imaging operations
   - Implement dynamic buffer allocation for imaging responses
@@ -333,7 +414,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Imaging Memory Developer with response builder expertise | Task: Implement smart response builders for imaging service following established patterns | Restrictions: Must maintain imaging functionality, follow established patterns exactly, preserve ONVIF compliance | Success: Smart response builders implemented, allocations optimized | Instructions: Mark [-] when starting, implement response builders, test imaging operations, mark [x] when builders implemented_
 
-- [ ] 38. Optimize imaging parameter management
+- [ ] 47. Optimize imaging parameter management
   - File: cross-compile/onvif/src/services/imaging/onvif_imaging.c
   - Optimize brightness, contrast, saturation, and other imaging parameter operations
   - Implement efficient parameter storage and retrieval patterns
@@ -342,7 +423,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Imaging Parameter Developer with parameter optimization expertise | Task: Optimize imaging parameter management operations for memory efficiency | Restrictions: Must maintain parameter functionality, preserve image quality settings, use existing patterns | Success: Parameter operations optimized, memory usage reduced | Instructions: Mark [-] when starting, optimize parameter operations, test imaging parameters, mark [x] when parameters optimized_
 
-- [ ] 39. Optimize imaging settings operations
+- [ ] 48. Optimize imaging settings operations
   - File: cross-compile/onvif/src/services/imaging/onvif_imaging.c
   - Optimize imaging settings get/set operations
   - Implement efficient settings processing patterns
@@ -351,7 +432,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Imaging Settings Developer with settings optimization expertise | Task: Optimize imaging settings operations for memory efficiency | Restrictions: Must maintain settings functionality, preserve settings accuracy, use existing patterns | Success: Settings operations optimized, memory usage reduced | Instructions: Mark [-] when starting, optimize settings operations, test imaging settings, mark [x] when settings optimized_
 
-- [ ] 40. Test imaging service optimization
+- [ ] 49. Test imaging service optimization
   - File: tests/integration/imaging_service_tests.c
   - Create comprehensive tests for optimized imaging service
   - Verify memory usage improvements and imaging functionality preservation
@@ -360,7 +441,7 @@
   - _Requirements: 9_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Imaging Test Engineer with optimization validation expertise | Task: Create comprehensive tests for optimized imaging service to verify improvements | Restrictions: Must test all imaging operations, validate memory improvements, ensure functionality preservation | Success: All imaging tests pass, memory improvements validated, imaging functionality preserved | Instructions: Mark [-] when starting, create imaging tests, run comprehensive testing, mark [x] when testing complete_
 
-- [ ] 41. Create baseline memory measurement tests
+- [ ] 50. Create baseline memory measurement tests
   - File: tests/integration/onvif_memory_tests.c
   - Implement memory measurement using /proc/self/status VmRSS before optimization
   - Run device, media, PTZ, and imaging operations to measure baseline memory
@@ -369,7 +450,7 @@
   - _Requirements: 10_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Memory Measurement Engineer with Linux /proc expertise | Task: Create baseline memory measurement tests using /proc/self/status VmRSS to measure memory usage before optimization | Restrictions: Must measure actual RSS memory, run realistic ONVIF operations, document baseline accurately | Success: Baseline memory measurements for all services documented, measurement infrastructure working | Instructions: Mark [-] when starting, implement /proc/self/status reading, run ONVIF operations, document baseline memory, mark [x] when baseline established_
 
-- [ ] 42. Create security functionality integration tests
+- [ ] 51. Create security functionality integration tests
   - File: tests/integration/onvif_security_tests.c
   - Implement comprehensive security testing for HTTP layer and authentication
   - Test buffer overflow prevention, input validation, and authentication
@@ -378,7 +459,7 @@
   - _Requirements: 10_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Security Testing Engineer with vulnerability validation expertise | Task: Create comprehensive security tests to validate vulnerability fixes and security functionality | Restrictions: Must test all security aspects, validate authentication, test input validation | Success: Security tests validate vulnerability fixes, authentication working, input validation effective | Instructions: Mark [-] when starting, implement security tests, validate fixes, mark [x] when security testing complete_
 
-- [ ] 43. Create service functionality integration tests
+- [ ] 52. Create service functionality integration tests
   - File: tests/integration/onvif_service_tests.c
   - Implement comprehensive ONVIF service functionality testing
   - Test device, media, PTZ, and imaging service operations
@@ -387,7 +468,7 @@
   - _Requirements: 10_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: ONVIF Service Testing Engineer with compliance validation expertise | Task: Create comprehensive service functionality tests to validate all ONVIF operations work correctly | Restrictions: Must test all ONVIF operations, validate service compliance, ensure no regressions | Success: All ONVIF services tested and functional, compliance validated, no regressions found | Instructions: Mark [-] when starting, implement service tests, validate functionality, mark [x] when service testing complete_
 
-- [ ] 44. Create performance regression tests
+- [ ] 53. Create performance regression tests
   - File: tests/integration/onvif_performance_tests.c
   - Implement performance testing to ensure optimizations don't degrade performance
   - Test response times, throughput, and resource usage
@@ -396,7 +477,7 @@
   - _Requirements: 10_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Performance Testing Engineer with benchmark validation expertise | Task: Create performance regression tests to ensure optimizations maintain or improve performance | Restrictions: Must test performance metrics, validate no degradation, measure improvements | Success: Performance tests validate maintained or improved performance, no regressions found | Instructions: Mark [-] when starting, implement performance tests, measure metrics, mark [x] when performance testing complete_
 
-- [ ] 45. Create end-to-end integration test suite
+- [ ] 54. Create end-to-end integration test suite
   - File: tests/integration/onvif_e2e_tests.c
   - Implement complete end-to-end ONVIF client-server testing
   - Test full ONVIF workflows with real client interactions
@@ -405,7 +486,7 @@
   - _Requirements: 10_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: E2E Testing Engineer with client integration expertise | Task: Create end-to-end integration tests with real ONVIF client interactions | Restrictions: Must test complete workflows, validate real client compatibility, ensure full functionality | Success: E2E tests validate complete functionality, real client compatibility confirmed | Instructions: Mark [-] when starting, implement E2E tests, validate with real clients, mark [x] when E2E testing complete_
 
-- [ ] 46. Collect baseline and optimized performance metrics
+- [ ] 55. Collect baseline and optimized performance metrics
   - File: docs/refactoring/performance_report.md
   - Measure memory usage, response times, and resource consumption
   - Document performance metrics for baseline and optimized implementations
@@ -414,7 +495,7 @@
   - _Requirements: 4, 10_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Performance Measurement Specialist with metrics collection expertise | Task: Collect comprehensive performance metrics for baseline and optimized implementations | Restrictions: Must use accurate measurement tools, document all metrics | Success: Complete performance data collected for both implementations | Instructions: Mark [-] when starting, run performance measurements, document metrics, mark [x] when metrics collected_
 
-- [ ] 47. Analyze memory optimization achievements
+- [ ] 56. Analyze memory optimization achievements
   - File: docs/refactoring/performance_report.md
   - Calculate memory reduction percentages and buffer pool utilization
   - Document specific optimization achievements and improvements
@@ -423,7 +504,7 @@
   - _Requirements: 1.1_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Memory Analysis Engineer with optimization quantification expertise | Task: Analyze memory optimization achievements and document specific improvements | Restrictions: Must provide accurate calculations, document all improvements | Success: Memory optimization achievements quantified and documented | Instructions: Mark [-] when starting, analyze memory data, calculate improvements, mark [x] when analysis complete_
 
-- [ ] 48. Document security improvements and vulnerability fixes
+- [ ] 57. Document security improvements and vulnerability fixes
   - File: docs/refactoring/performance_report.md
   - Document all security vulnerabilities that were fixed
   - Document security improvements and authentication enhancements
@@ -432,7 +513,7 @@
   - _Requirements: 2.1_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Security Documentation Specialist with vulnerability reporting expertise | Task: Document all security improvements and vulnerability fixes in the performance report | Restrictions: Must document all security aspects, provide clear explanations | Success: Security improvements comprehensively documented | Instructions: Mark [-] when starting, document security fixes, explain improvements, mark [x] when security documented_
 
-- [ ] 49. Create comprehensive performance comparison report
+- [ ] 58. Create comprehensive performance comparison report
   - File: docs/refactoring/performance_report.md
   - Create detailed comparison between baseline and optimized implementations
   - Document all achievements against requirements and objectives
@@ -441,7 +522,7 @@
   - _Requirements: 4, 10_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Technical Report Writer with comprehensive analysis expertise | Task: Create comprehensive performance comparison report documenting all achievements | Restrictions: Must be comprehensive, accurate, and well-structured | Success: Complete performance report demonstrates all achievements and improvements | Instructions: Mark [-] when starting, create comprehensive report, validate all data, mark [x] when report complete_
 
-- [ ] 50. Validate achievement of all requirements
+- [ ] 59. Validate achievement of all requirements
   - File: docs/refactoring/performance_report.md
   - Verify that all requirements have been met and documented
   - Create final validation summary with achievement confirmation
@@ -450,7 +531,7 @@
   - _Requirements: 4, 10_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Requirements Validation Engineer with compliance verification expertise | Task: Validate that all requirements have been met and create final achievement summary | Restrictions: Must verify all requirements, provide clear validation | Success: All requirements validated and documented, final summary complete | Instructions: Mark [-] when starting, validate all requirements, create summary, mark [x] when validation complete_
 
-- [ ] 51. Implement real-time HTTP performance metrics
+- [ ] 60. Implement real-time HTTP performance metrics
   - File: cross-compile/onvif/src/networking/http/http_server.c
   - Capture per-request latency, response size, and error rate metrics without exceeding 5% CPU overhead
   - Record metrics in thread-safe rolling windows and expose them via monitoring API
@@ -459,7 +540,7 @@
   - _Requirements: 6_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Embedded Monitoring Engineer with low-overhead telemetry expertise | Task: Implement real-time HTTP performance metrics (latency, throughput, error rates, memory usage deltas) with <5% CPU overhead and expose retrieval API | Restrictions: Must avoid blocking request processing, use atomic counters for shared data, integrate with existing logging conventions | Success: Metrics collected per acceptance criteria, retrieval API returns current statistics, verified overhead below threshold | Instructions: Mark [-] when starting, instrument request lifecycle, add metrics aggregation, expose retrieval function, validate overhead, mark [x] when monitoring complete_
 
-- [ ] 52. Add HTTP performance metrics tests
+- [ ] 61. Add HTTP performance metrics tests
   - File: tests/networking/http_metrics_tests.c
   - Create unit and integration tests validating metric accuracy and performance thresholds
   - Simulate concurrent requests to ensure metrics remain thread-safe and non-blocking
@@ -468,7 +549,7 @@
   - _Requirements: 6_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Telemetry Test Engineer with concurrency testing expertise | Task: Build automated tests that validate HTTP metrics correctness under concurrent load and confirm <5% CPU overhead | Restrictions: Must simulate concurrent requests, use existing test infrastructure, capture before/after metrics | Success: Tests cover latency, error rate, utilisation accuracy, overhead assertions pass | Instructions: Mark [-] when starting, implement metrics tests, run under load scenarios, mark [x] when tests validate monitoring_
 
-- [ ] 53. Harden connection lifecycle concurrency
+- [ ] 62. Harden connection lifecycle concurrency
   - File: cross-compile/onvif/src/networking/common/connection_manager.c
   - Introduce atomic counters and deterministic cleanup sequencing for connection state transitions
   - Ensure buffer pool returns and socket closures are race-free under concurrent access
@@ -477,7 +558,7 @@
   - _Requirements: 8_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Concurrency Engineer with embedded networking expertise | Task: Harden connection lifecycle by adding atomic state tracking, deterministic cleanup ordering, and race-safe buffer returns | Restrictions: Maintain existing mutex usage, ensure no double-free or leaks, follow logging standards | Success: Connection teardown is deterministic under concurrent load, race detection tools show no data races, buffer pool interactions remain safe | Instructions: Mark [-] when starting, add atomic state tracking, restructure cleanup, run concurrency validation, mark [x] when hardened_
 
-- [ ] 54. Validate connection concurrency with stress tests
+- [ ] 63. Validate connection concurrency with stress tests
   - File: tests/networking/connection_concurrency_tests.c
   - Implement stress tests simulating rapid connect/disconnect cycles with concurrent threads
   - Verify absence of race conditions, deadlocks, and resource leaks using sanitizers
@@ -486,7 +567,7 @@
   - _Requirements: 8_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Concurrency Test Engineer with stress testing expertise | Task: Create stress tests for connection manager ensuring deterministic cleanup, atomic counters, and buffer safety hold under concurrent load | Restrictions: Use existing test infrastructure, include sanitizer instrumentation, collect logs for debugging | Success: Tests pass under high concurrency with sanitizers clean, logs show deterministic cleanup, no leaks detected | Instructions: Mark [-] when starting, implement stress scenarios, execute with sanitizers, mark [x] when concurrency validated_
 
-- [ ] 55. Secure HTTP header response building
+- [ ] 64. Secure HTTP header response building
   - File: cross-compile/onvif/src/networking/http/http_parser.c
   - Replace strcpy usage in http_response_add_header with safe string utilities and size bounds
   - Add unit tests covering header copy edge cases and malicious inputs
@@ -495,7 +576,7 @@
   - _Requirements: 2.1_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: HTTP Security Engineer with memory safety expertise | Task: Refactor http_response_add_header to use safe string helpers and add tests covering overflow and truncation scenarios | Restrictions: Must use string_shims safe APIs, maintain allocation strategy, ensure tests cover boundary cases | Success: No raw strcpy usage remains, tests verify safe handling, static analysis clean | Instructions: Mark [-] when starting, refactor function, add tests, run security-focused test suite, mark [x] when secure_
 
-- [ ] 56. Delegate system utilization requests
+- [ ] 65. Delegate system utilization requests
   - File: cross-compile/onvif/src/networking/http/http_server.c
   - Route `/system/utilization` and related endpoints to dedicated system service handlers
   - Remove business logic from HTTP transport layer in favor of service modules
@@ -504,7 +585,7 @@
   - _Requirements: 5_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: HTTP Architecture Engineer with service delegation expertise | Task: Refactor HTTP server to delegate system utilization requests to system service module, eliminating transport-layer business logic | Restrictions: Preserve existing endpoint behavior, update routing tables only, ensure unit tests cover delegation | Success: HTTP server performs delegation only, system service handles logic, tests confirm routing | Instructions: Mark [-] when starting, refactor routing paths, add delegation tests, mark [x] when delegation complete_
 
-- [ ] 57. Separate HTTP request and response buffers
+- [ ] 66. Separate HTTP request and response buffers
   - File: cross-compile/onvif/src/networking/http/http_server.c, cross-compile/onvif/src/networking/common/connection_manager.c
   - Introduce distinct buffer structures for request parsing and response generation per connection
   - Ensure buffer reuse patterns avoid memory conflicts and align with zero-copy goals
@@ -513,7 +594,7 @@
   - _Requirements: 5_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Embedded Memory Engineer with networking expertise | Task: Provide separate request/response buffers per connection using buffer pools or dynamic allocation while preserving zero-copy parsing | Restrictions: Maintain existing buffer pool usage, avoid regressions in parsing/response flow, update cleanup paths | Success: Distinct buffers verified in connection manager, tests confirm no conflicts, memory usage tracked | Instructions: Mark [-] when starting, update connection structures, adjust parsing/response paths, extend tests, mark [x] when separation complete_
 
-- [ ] 58. Replace hard-coded HTTP buffer constants
+- [ ] 67. Replace hard-coded HTTP buffer constants
   - File: cross-compile/onvif/src/networking/http/http_server.c, cross-compile/onvif/src/networking/http/http_parser.c
   - Remove remaining BUFFER_SIZE/ONVIF_RESPONSE_BUFFER_SIZE constants from HTTP transport
   - Adopt dynamic allocation and size hints from smart response builders throughout
@@ -522,7 +603,7 @@
   - _Requirements: 5_
   - _Prompt: Implement the task for spec onvif-http-refactoring, first run spec-workflow-guide to get the workflow guide then implement the task:  Role: Memory Optimization Engineer with HTTP expertise | Task: Replace hard-coded buffer constants in HTTP transport with dynamic allocations guided by smart response builders | Restrictions: Preserve performance targets, ensure allocations tracked via memory_manager, maintain zero-copy parsing | Success: No static buffer constants remain in HTTP transport, dynamic sizing validated by tests | Instructions: Mark [-] when starting, replace constants, run memory optimization tests, mark [x] when dynamic sizing complete_
 
-- [ ] 59. Implement generic snapshot routing
+- [ ] 68. Implement generic snapshot routing
   - File: cross-compile/onvif/src/networking/http/http_server.c
   - Update snapshot handling to use service delegation framework instead of HTTP-specific logic
   - Ensure routing aligns with ONVIF snapshot service patterns
