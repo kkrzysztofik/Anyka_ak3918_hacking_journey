@@ -73,8 +73,6 @@
 #define MEDIA_AUDIO_SAMPLE_RATE_AAC_MAX 48000
 
 // Response buffer constants
-#define MEDIA_RESPONSE_BUFFER_SIZE 4096
-#define MEDIA_PROFILE_BUFFER_SIZE  2048
 #define MEDIA_PROTOCOL_BUFFER_SIZE 16
 
 // Additional constants for magic numbers
