@@ -857,6 +857,44 @@ def test_profile_s_user_authentication(compliance_validator):
     assert result.level == ComplianceLevel.MANDATORY
 ```
 
+### Streaming Validation (RTSP/RTP + SDP)
+- **Approach:** Perform full Real Time Streaming Test Specification v24.12 coverage for Profile S by validating RTSP session establishment, SDP fidelity, and RTP media continuity end-to-end.
+- **Framework:** pytest with `asyncio`, `aiortc`/`rtsp` client utilities, `ffmpeg-python` for live playback decoding, and `scapy`/`pyshark` for packet inspection when deeper analysis is required.
+- **Handshake Sequence:**
+  1. Issue `OPTIONS` to negotiate methods and verify mandatory RTSP verbs are advertised.
+  2. Execute authenticated `DESCRIBE` (Digest/WS-UsernameToken) and capture SDP payload; assert control URLs, codec declarations, metadata channels, and transport profiles match ONVIF requirements.
+  3. Send `SETUP` for video (and audio/metadata when available) verifying Transport headers (RTP/RTCP ports, interleaved channels, unicast/multicast selection).
+  4. Perform `PLAY`, maintain session for configurable duration, and monitor RTP/RTCP traffic for sequence continuity, timestamp progression, marker bits, and loss/jitter thresholds.
+  5. Issue `TEARDOWN` ensuring session resources are released and server responds with 200-class status within SLA.
+- **SDP Validation:**
+  - Validate presence of media sections (video/audio/metadata) against capabilities.
+  - Confirm `a=control`, `a=range`, `a=recvonly/sendonly` attributes, codec profiles (H.264 Baseline/High for Profile S, AAC/G711 audio if advertised), and ONVIF-specific metadata payload type declarations.
+  - Cross-check SDP connection data with device network configuration to detect mismatches.
+- **RTP Payload Analysis:**
+  - Track sequence numbers and timestamps to ensure monotonic progression without gaps beyond allowed packet loss tolerance.
+  - Decode sample H.264 NAL units to confirm SPS/PPS availability and keyframe cadence within Profile S limits.
+  - Verify RTCP Sender/Receiver Reports are emitted with valid statistics and synchronize AV streams when audio present.
+- **Live Playback Assertions:**
+  - Use `ffmpeg`/`gstreamer` pipeline within tests to confirm decoded frames arrive and maintain frame rate within ±10% of advertised configuration.
+  - Validate metadata/event streams are consumable alongside video when enabled (e.g., XML metadata channel parsing).
+  - Capture frame hashes/PSNR deltas for regression detection.
+- **Failure Handling:**
+  - Capture RTSP/RTP transcripts and packet captures on failure for diagnostics.
+  - Provide remediation hints (e.g., missing interleaved transport support, incorrect SDP attributes).
+- **Coverage Target:** All mandatory Real Time Streaming v24.12 checkpoints for Profile S, including conditional audio/metadata/ PTZ trick modes where supported.
+- **Example Structure:**
+```python
+@pytest.mark.compliance
+@pytest.mark.profile_s_streaming
+def test_profile_s_rtsp_session(profile_s_stream_validator):
+    """Validate RTSP SETUP/PLAY/TEARDOWN and RTP continuity."""
+    result = profile_s_stream_validator.validate_rtsp_session(duration_seconds=60)
+
+    assert result.is_compliant, result.diagnostics
+    assert result.packet_loss_pct <= 1.0
+    assert result.has_keyframes, "Stream lacked keyframes within allowed interval"
+```
+
 ### Quality Assurance (pre-commit + pytest-cov + mypy)
 - **Approach:** Automated pre-commit hooks, local quality gates, comprehensive reporting
 - **Framework:** pre-commit hooks with Black, isort, Pylint, pytest-cov for coverage, mypy for type checking

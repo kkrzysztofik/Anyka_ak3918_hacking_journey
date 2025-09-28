@@ -206,13 +206,45 @@
   - _Requirements: 3.1_
   - _Prompt: Implement the task for spec integration-test-improvements, first run spec-workflow-guide to get the workflow guide then implement the task: Role: ONVIF Media Expert with expertise in media profile validation | Task: Implement validate_media_profiles method in Profile S validator following requirement 3.1 | Restrictions: Only implement media profiles validation, test GetProfiles operation, validate required profile configurations | _Leverage: Media service patterns from existing tests_ | _Requirements: 3.1 - Profile S mandatory media profiles_ | Success: Media profiles validation checks profile configuration and capabilities | Instructions: Mark task in-progress [-], implement media profiles validation, mark complete [x]_
 
-- [ ] 3.13. Implement Profile S streaming validation
+- [ ] 3.13. Implement Profile S streaming entrypoint validation
   - File: integration-tests/utils/profile_s_validator.py (extend)
-  - Add validate_streaming method for streaming URI compliance
-  - Purpose: Validate ONVIF Profile S Section 7.10 streaming requirement
+  - Add validate_streaming method that orchestrates stream validation workflow
+  - Purpose: Invoke stream validator to cover Real Time Streaming v24.12 checkpoints
   - _Leverage: GetStreamUri operation patterns_
   - _Requirements: 3.1_
-  - _Prompt: Implement the task for spec integration-test-improvements, first run spec-workflow-guide to get the workflow guide then implement the task: Role: ONVIF Streaming Expert with expertise in video streaming validation | Task: Implement validate_streaming method in Profile S validator following requirement 3.1 | Restrictions: Only implement streaming validation, test GetStreamUri operation, validate URI format and accessibility | _Leverage: GetStreamUri operation patterns from media tests_ | _Requirements: 3.1 - Profile S mandatory streaming_ | Success: Streaming validation checks URI generation and stream accessibility | Instructions: Mark task in-progress [-], implement streaming validation, mark complete [x]_
+  - _Prompt: Implement the task for spec integration-test-improvements, first run spec-workflow-guide to get the workflow guide then implement the task: Role: ONVIF Streaming Expert with expertise in video streaming validation | Task: Implement validate_streaming method in Profile S validator so it resolves stream URIs, triggers RTSP handshake tests, and aggregates compliance results following requirement 3.1 | Restrictions: Do not embed handshake logic here—delegate to dedicated stream validator utilities | _Leverage: GetStreamUri operation patterns from media tests, new stream validator utilities_ | _Requirements: 3.1 - Profile S mandatory streaming_ | Success: Streaming validation method returns comprehensive ComplianceResult populated from downstream stream validator outcomes | Instructions: Mark task in-progress [-], implement streaming entrypoint, mark complete [x]_
+
+- [ ] 3.13a. Create Profile S stream validator foundation
+  - File: integration-tests/utils/profile_s_stream_validator.py
+  - Implement ProfileSStreamValidator class with configuration, RTSP client scaffolding, and result model
+  - Purpose: Establish reusable component for RTSP/RTP compliance checks
+  - _Leverage: Device configuration utilities, ComplianceResult data structures_
+  - _Requirements: 3.1_
+  - _Prompt: Implement the task for spec integration-test-improvements, first run spec-workflow-guide to get the workflow guide then implement the task: Role: RTSP/RTP Streaming Specialist | Task: Create ProfileSStreamValidator class scaffolding handling session setup, authentication, and result aggregation following requirement 3.1 | Restrictions: Do not yet implement handshake verification—focus on class structure, dependency injection, and diagnostics collection | _Leverage: DeviceConfig, ONVIF client session helpers_ | _Requirements: 3.1 - Profile S streaming validator foundation_ | Success: Stream validator class exists with configurable parameters, authentication handling, and placeholder methods for handshake/SDP/RTP validation | Instructions: Mark task in-progress [-], implement stream validator foundation, mark complete [x]_
+
+- [ ] 3.13b. Implement RTSP handshake validation
+  - File: integration-tests/utils/profile_s_stream_validator.py (extend)
+  - Implement validation of OPTIONS/DESCRIBE/SETUP/PLAY/TEARDOWN sequence with authentication support
+  - Purpose: Verify Real Time Streaming v24.12 handshake behaviour
+  - _Leverage: HTTP Digest utilities, RTSP client scaffolding_
+  - _Requirements: 3.1_
+  - _Prompt: Implement the task for spec integration-test-improvements, first run spec-workflow-guide to get the workflow guide then implement the task: Role: RTSP Protocol Analyst with expertise in ONVIF streaming | Task: Implement RTSP handshake validation covering OPTIONS, DESCRIBE (with SDP capture), SETUP, PLAY, and TEARDOWN including timeout/error handling following requirement 3.1 | Restrictions: Ensure Digest and WS-UsernameToken authentication paths, record status codes/headers, and return structured diagnostics | _Leverage: Requests session helpers, Profile S validator entrypoint_ | _Requirements: 3.1 - Profile S mandatory RTSP handshake_ | Success: Handshake validation detects missing verbs, incorrect status codes, authentication failures, or TEARDOWN issues and reports them via ComplianceResult | Instructions: Mark task in-progress [-], implement handshake validation, mark complete [x]_
+
+- [ ] 3.13c. Implement SDP inspection and validation
+  - File: integration-tests/utils/profile_s_stream_validator.py (extend)
+  - Parse SDP from DESCRIBE response and validate media/control attributes against spec
+  - Purpose: Enforce Real Time Streaming v24.12 SDP requirements
+  - _Leverage: lxml/pyparsing SDP utilities, media configuration data_
+  - _Requirements: 3.1_
+  - _Prompt: Implement the task for spec integration-test-improvements, first run spec-workflow-guide to get the workflow guide then implement the task: Role: SDP Specialist with expertise in ONVIF streaming descriptors | Task: Validate SDP contents including media sections, codecs, control URLs, metadata channels, and transport profiles following requirement 3.1 | Restrictions: Reject mismatched connection data, missing attributes, or unsupported codecs; capture remediation hints | _Leverage: Media configuration validators, DeviceConfig expectations_ | _Requirements: 3.1 - Profile S SDP validation_ | Success: SDP validation passes all compliant descriptors and flags deviations with actionable diagnostics | Instructions: Mark task in-progress [-], implement SDP validation, mark complete [x]_
+
+- [ ] 3.13d. Implement RTP continuity and live playback validation
+  - File: integration-tests/utils/profile_s_stream_validator.py (extend)
+  - Monitor RTP/RTCP packets during PLAY and confirm continuity, jitter, and media decodability
+  - Purpose: Validate ongoing media delivery per Real Time Streaming v24.12
+  - _Leverage: aiortc/ffmpeg-python, scapy/pyshark packet capture helpers_
+  - _Requirements: 3.1_
+  - _Prompt: Implement the task for spec integration-test-improvements, first run spec-workflow-guide to get the workflow guide then implement the task: Role: RTP Media Analyst with expertise in packet-level video validation | Task: Capture RTP streams, verify sequence/timestamp progression, decode sample frames, compute packet loss/jitter, and assert TEARDOWN resource cleanup following requirement 3.1 | Restrictions: Support configurable observation window, log RTCP statistics, and surface decoded frame hashes for regression tracking | _Leverage: Performance metrics utilities, RTSP handshake output_ | _Requirements: 3.1 - Profile S RTP continuity and playback validation_ | Success: Validation detects packet loss, jitter, decode failures, or missing RTCP reports and returns detailed diagnostics while passing compliant streams | Instructions: Mark task in-progress [-], implement RTP continuity validation, mark complete [x]_
 
 - [ ] 3.14. Implement Profile S video encoder configuration validation
   - File: integration-tests/utils/profile_s_validator.py (extend)
