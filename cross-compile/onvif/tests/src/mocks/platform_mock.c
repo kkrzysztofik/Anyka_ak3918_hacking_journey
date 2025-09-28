@@ -638,6 +638,17 @@ void platform_aenc_release_stream(platform_aenc_stream_handle_t handle,
  * Buffer Pool Mock Functions
  * ============================================================================ */
 
+int buffer_pool_init(buffer_pool_t* pool) {
+  (void)pool;
+  // Mock implementation - always succeeds
+  return 0;
+}
+
+void buffer_pool_cleanup(buffer_pool_t* pool) {
+  (void)pool;
+  // Mock implementation - no action needed
+}
+
 void* buffer_pool_get(buffer_pool_t* pool) {
   (void)pool;
   return malloc(MOCK_BUFFER_SIZE);

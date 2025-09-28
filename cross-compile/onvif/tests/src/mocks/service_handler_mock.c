@@ -115,6 +115,7 @@ void onvif_service_handler_cleanup(void) {
 
 int onvif_service_handler_handle_request(const char* request, size_t request_size, char* response,
                                          size_t response_size) {
+  (void)request_size; // Suppress unused parameter warning
   if (!request || !response || response_size == 0) {
     return -1;
   }

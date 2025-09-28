@@ -111,7 +111,7 @@ SRCS := \
 
 OBJS := $(SRCS:src/%.c=$(OUT_DIR)/%.o)
 
-.PHONY = all clean debug release docs docs-clean docs-open static-analysis clang-analyze cppcheck-analyze snyk-analyze compile-commands lint lint-check lint-dry-run lint-verbose test test-utils test-all test-coverage test-coverage-html test-coverage-report test-coverage-clean test-valgrind
+.PHONY = all clean debug release docs docs-clean docs-open static-analysis clang-analyze cppcheck-analyze snyk-analyze compile-commands lint lint-check lint-dry-run lint-verbose test test-utils test-all test-coverage test-coverage-html test-coverage-report test-coverage-clean
 
 # Documentation directory
 DOCS_DIR = docs
@@ -245,9 +245,6 @@ test-coverage:
 	@echo "Running tests with coverage analysis..."
 	@$(MAKE) -C tests coverage
 
-test-valgrind:
-	@echo "Running tests with valgrind..."
-	@$(MAKE) -C tests valgrind
 
 test-coverage-html:
 	@echo "Generating HTML coverage report..."

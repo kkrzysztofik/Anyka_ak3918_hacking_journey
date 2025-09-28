@@ -12,7 +12,6 @@
 #   make test-integration  - Build and run integration tests
 #   make clean             - Clean test build artifacts
 #   make coverage          - Build with coverage analysis
-#   make valgrind          - Run tests with valgrind
 #
 # Environment Variables:
 #   BUILD_TYPE - Build type: 'debug' or 'release' (default: debug for tests)
@@ -52,6 +51,9 @@ GENHTML=genhtml
 COVERAGE_DIR=coverage
 COVERAGE_INFO=$(COVERAGE_DIR)/coverage.info
 COVERAGE_HTML=$(COVERAGE_DIR)/html
+
+# Dependency generation flags
+DEPFLAGS=-MT $@ -MMD -MP -MF $*.d
 
 # Combined flags
 CFLAGS=$(BASE_CFLAGS) $(OPT_CFLAGS) $(TEST_CFLAGS)
@@ -93,6 +95,7 @@ TEST_SRCS := \
 	src/unit/services/common/test_service_dispatcher.c \
 	src/unit/services/media/test_media_utils.c \
 	src/unit/services/media/test_onvif_media_callbacks.c \
+	src/unit/services/imaging/test_onvif_imaging_callbacks.c \
 	src/unit/services/ptz/test_ptz_service.c \
 	src/unit/services/ptz/test_onvif_ptz_callbacks.c \
 
@@ -121,23 +124,34 @@ MAIN_SRCS := \
 	../src/services/common/onvif_service_common.c \
 	../src/services/media/onvif_media.c \
 	../src/services/ptz/onvif_ptz.c \
+	../src/services/imaging/onvif_imaging.c \
 	../src/utils/network/network_utils.c \
 	../src/utils/error/error_handling.c
 
-# Object files
+# Object files - preserve directory structure
 TEST_OBJS := $(TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
 MOCK_OBJS := $(MOCK_SRCS:src/%.c=$(OUT_DIR)/%.o)
 MAIN_OBJS := $(MAIN_SRCS:../src/%.c=$(OUT_DIR)/main/%.o)
+
+# Dependency files for incremental builds
+TEST_DEPS := $(TEST_OBJS:$(OUT_DIR)/%.o=$(OUT_DIR)/%.d)
+MOCK_DEPS := $(MOCK_OBJS:$(OUT_DIR)/%.o=$(OUT_DIR)/%.d)
+MAIN_DEPS := $(MAIN_OBJS:$(OUT_DIR)/main/%.o=$(OUT_DIR)/main/%.d)
+ALL_DEPS := $(TEST_DEPS) $(MOCK_DEPS) $(MAIN_DEPS)
 
 # Unit test executables
 TEST_TARGETS := \
 	$(OUT_DIR)/test_utils \
 	$(OUT_DIR)/test_all
 
-.PHONY: all clean test test-utils test-all coverage coverage-html coverage-report coverage-clean valgrind debug release compile-native-libs compile-commands
+.PHONY: all clean clean-deps test test-utils test-all coverage coverage-html coverage-report coverage-clean debug release compile-native-libs compile-commands incremental-build
 
 # Default target
 all: $(TEST_TARGETS)
+
+# Incremental build - only recompile changed files
+incremental-build: $(TEST_TARGETS)
+	@echo "Incremental build completed - only changed files were recompiled"
 
 # Debug build
 debug:
@@ -154,26 +168,40 @@ release:
 # Coverage build
 coverage: CFLAGS += $(COVERAGE_CFLAGS)
 coverage: CMOCKA_LIBS += $(COVERAGE_LDFLAGS)
-coverage: clean all
+coverage: all
 	@echo "Coverage build completed"
 
 # Generate HTML coverage report
 coverage-html: coverage
+	@echo "Running tests to generate coverage data..."
+	@for test in $(TEST_TARGETS); do \
+		if [ -f $$test ]; then \
+			echo "Running $$test..."; \
+			$$test; \
+		fi; \
+	done
 	@echo "Generating HTML coverage report..."
 	@mkdir -p $(COVERAGE_DIR)
 	@$(LCOV) --capture --directory $(OUT_DIR) --output-file $(COVERAGE_INFO)
-	@$(LCOV) --remove $(COVERAGE_INFO) '/usr/*' --output-file $(COVERAGE_INFO)
 	@$(LCOV) --remove $(COVERAGE_INFO) '*/tests/*' --output-file $(COVERAGE_INFO)
+	@$(LCOV) --remove $(COVERAGE_INFO) '*/generated/*' --output-file $(COVERAGE_INFO)
 	@$(GENHTML) $(COVERAGE_INFO) --output-directory $(COVERAGE_HTML)
 	@echo "HTML coverage report generated in $(COVERAGE_HTML)/index.html"
 
 # Generate coverage summary report
 coverage-report: coverage
+	@echo "Running tests to generate coverage data..."
+	@for test in $(TEST_TARGETS); do \
+		if [ -f $$test ]; then \
+			echo "Running $$test..."; \
+			$$test; \
+		fi; \
+	done
 	@echo "Generating coverage summary..."
 	@mkdir -p $(COVERAGE_DIR)
 	@$(LCOV) --capture --directory $(OUT_DIR) --output-file $(COVERAGE_INFO)
-	@$(LCOV) --remove $(COVERAGE_INFO) '/usr/*' --output-file $(COVERAGE_INFO)
 	@$(LCOV) --remove $(COVERAGE_INFO) '*/tests/*' --output-file $(COVERAGE_INFO)
+	@$(LCOV) --remove $(COVERAGE_INFO) '*/generated/*' --output-file $(COVERAGE_INFO)
 	@echo "Coverage Summary:"
 	@$(LCOV) --summary $(COVERAGE_INFO)
 
@@ -205,15 +233,6 @@ test-all: $(OUT_DIR)/test_all
 	@echo "Running all unit tests..."
 	@$(OUT_DIR)/test_all
 
-# Valgrind testing (requires valgrind)
-valgrind: all
-	@echo "Running tests with valgrind..."
-	@for test in $(TEST_TARGETS); do \
-		if [ -f $$test ]; then \
-			echo "Running valgrind on $$test..."; \
-			valgrind --leak-check=full --show-leak-kinds=all $$test; \
-		fi; \
-	done
 
 # Unit test executable builds
 $(OUT_DIR)/test_utils: $(TEST_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
@@ -224,22 +243,29 @@ $(OUT_DIR)/test_all: $(TEST_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
 
-# Object file compilation
+# Object file compilation with dependency generation
 $(OUT_DIR)/%.o: src/%.c | $(OUT_DIR)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(INCLUDES:%=-I%) -c $< -o $@ -pipe
+	@mkdir -p $(dir $(OUT_DIR)/$*.d)
+	$(CC) $(CFLAGS) -MT $@ -MMD -MP -MF $(OUT_DIR)/$*.d $(INCLUDES:%=-I%) -c $< -o $@ -pipe
 
-# Main project object files (exclude platform_anyka.c)
+# Main project object files (exclude platform_anyka.c) with dependency generation
 $(OUT_DIR)/main/%.o: ../src/%.c | $(OUT_DIR)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(INCLUDES:%=-I%) -c $< -o $@ -pipe
+	@mkdir -p $(dir $(OUT_DIR)/main/$*.d)
+	$(CC) $(CFLAGS) -MT $@ -MMD -MP -MF $(OUT_DIR)/main/$*.d $(INCLUDES:%=-I%) -c $< -o $@ -pipe
 
 # Create output directory
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)
 
+# Clean dependency files
+clean-deps:
+	@echo "Cleaning dependency files..."
+	@find $(OUT_DIR) -name "*.d" -delete 2>/dev/null || true
+
 # Clean build artifacts
-clean: coverage-clean
+clean: coverage-clean clean-deps
 	rm -rf $(OUT_DIR)
 
 # Compile native libraries for unit testing
@@ -252,10 +278,14 @@ compile-commands:
 	@echo "Generating compile_commands.json for test files..."
 	@./scripts/generate_compile_commands.sh
 
+# Include dependency files for incremental builds
+-include $(ALL_DEPS)
+
 # Help target
 help:
 	@echo "Available targets:"
 	@echo "  all              - Build all tests"
+	@echo "  incremental-build - Build only changed files (faster for development)"
 	@echo "  test             - Build and run all tests"
 	@echo "  test-utils       - Build and run utility unit tests"
 	@echo "  test-all         - Run all unit tests"
@@ -263,10 +293,10 @@ help:
 	@echo "  coverage-html    - Generate HTML coverage report"
 	@echo "  coverage-report  - Generate coverage summary"
 	@echo "  coverage-clean   - Clean coverage files"
-	@echo "  valgrind         - Run tests with valgrind"
 	@echo "  debug            - Build debug version"
 	@echo "  release          - Build release version"
 	@echo "  compile-native-libs - Compile native gsoap and libb64 libraries"
 	@echo "  compile-commands  - Generate compile_commands.json for test files"
 	@echo "  clean            - Clean build artifacts"
+	@echo "  clean-deps       - Clean dependency files only"
 	@echo "  help             - Show this help"

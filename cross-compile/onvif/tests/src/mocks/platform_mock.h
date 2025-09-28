@@ -173,6 +173,8 @@ int platform_log_warning(const char* format, ...);
 struct buffer_pool_t;
 typedef struct buffer_pool_t buffer_pool_t;
 
+int buffer_pool_init(buffer_pool_t* pool);
+void buffer_pool_cleanup(buffer_pool_t* pool);
 void* buffer_pool_get(buffer_pool_t* pool);
 void buffer_pool_return(buffer_pool_t* pool, void* buffer);
 

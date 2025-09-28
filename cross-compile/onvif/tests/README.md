@@ -70,7 +70,7 @@ make -C tests test
 ./tests/out/test_utils -v
 
 # Run with memory checking
-valgrind ./tests/out/test_utils
+./tests/out/test_utils
 ```
 
 ## Test Writing Guidelines

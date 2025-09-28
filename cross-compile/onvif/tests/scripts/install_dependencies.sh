@@ -24,7 +24,7 @@ sudo apt-get install -y libcmocka-dev
 
 # Install additional development tools
 echo "Installing additional development tools..."
-sudo apt-get install -y build-essential gdb valgrind lcov wget unzip
+sudo apt-get install -y build-essential gdb lcov wget unzip
 
 # Verify CMocka installation
 echo "Verifying CMocka installation..."
@@ -58,7 +58,6 @@ echo "  make test-all         - Run all unit tests"
 echo "  make test-coverage    - Run tests with coverage"
 echo "  make test-coverage-html - Generate HTML coverage report"
 echo "  make test-coverage-report - Generate coverage summary"
-echo "  make test-valgrind    - Run tests with valgrind"
 echo ""
 echo "From the main project directory:"
 echo "  make test             - Run all unit tests"

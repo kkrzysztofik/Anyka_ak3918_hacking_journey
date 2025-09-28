@@ -116,15 +116,15 @@ void test_smart_response_builder(void** state) {
   const char* soap_content = "<test>content</test>";
   size_t estimated_size = smart_response_estimate_size(soap_content);
   // Just test that the function doesn't crash and returns some value
-  assert_true(estimated_size >= 0); // size_t is always >= 0
+  assert_true(estimated_size > 0); // Should return positive size for valid content
 
   // Test with empty content (should return 0 or some default)
   size_t empty_size = smart_response_estimate_size("");
-  assert_true(empty_size >= 0); // Changed to >= 0
+  (void)empty_size; // Suppress unused variable warning - just test function doesn't crash
 
   // Test with NULL content (should handle gracefully)
   size_t null_size = smart_response_estimate_size(NULL);
-  assert_true(null_size >= 0); // size_t is always >= 0
+  (void)null_size; // Suppress unused variable warning - just test function doesn't crash
 
   // Cleanup
   memory_manager_cleanup();
