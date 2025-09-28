@@ -9,7 +9,19 @@
 
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
-#include "services/common/onvif_types.h"
+
+/* PTZ Constants */
+#define PTZ_DEFAULT_PAN_TILT_SPEED 0.5F
+#define PTZ_DEFAULT_ZOOM_SPEED     0.0F
+
+/* PTZ Buffer Sizes */
+#define PTZ_SPACE_URI_SIZE    128
+#define PTZ_ERROR_MSG_SIZE    256
+#define PTZ_UTC_TIME_SIZE     32
+#define PTZ_TOKEN_SIZE        32
+#define PTZ_NAME_SIZE         64
+#define PTZ_AUX_COMMANDS_SIZE 256
+#define PTZ_PRESET_TOKEN_SIZE 64
 
 enum ptz_move_status { PTZ_MOVE_IDLE = 0, PTZ_MOVE_MOVING = 1, PTZ_MOVE_UNKNOWN = 2 };
 
@@ -21,7 +33,7 @@ struct ptz_vector_2d {
 struct ptz_vector {
   struct ptz_vector_2d pan_tilt;
   float zoom;
-  char space[128];
+  char space[PTZ_SPACE_URI_SIZE];
 };
 
 struct ptz_speed {
@@ -35,12 +47,12 @@ struct ptz_status {
     enum ptz_move_status pan_tilt;
     enum ptz_move_status zoom;
   } move_status;
-  char error[256];
-  char utc_time[32];
+  char error[PTZ_ERROR_MSG_SIZE];
+  char utc_time[PTZ_UTC_TIME_SIZE];
 };
 
 struct ptz_space {
-  char uri[128];
+  char uri[PTZ_SPACE_URI_SIZE];
   struct {
     float min;
     float max;
@@ -52,8 +64,8 @@ struct ptz_space {
 };
 
 struct ptz_node {
-  char token[32];
-  char name[64];
+  char token[PTZ_TOKEN_SIZE];
+  char name[PTZ_NAME_SIZE];
   struct {
     struct ptz_space absolute_pan_tilt_position_space;
     struct ptz_space absolute_zoom_position_space;
@@ -64,14 +76,14 @@ struct ptz_node {
   } supported_ptz_spaces;
   int maximum_number_of_presets;
   int home_supported;
-  char auxiliary_commands[256];
+  char auxiliary_commands[PTZ_AUX_COMMANDS_SIZE];
 };
 
 struct ptz_configuration_ex {
-  char token[32];
-  char name[64];
+  char token[PTZ_TOKEN_SIZE];
+  char name[PTZ_NAME_SIZE];
   int use_count;
-  char node_token[32];
+  char node_token[PTZ_TOKEN_SIZE];
   struct ptz_space default_absolute_pan_tilt_position_space;
   struct ptz_space default_absolute_zoom_position_space;
   struct ptz_space default_relative_pan_tilt_translation_space;
@@ -89,8 +101,8 @@ struct ptz_configuration_ex {
 };
 
 struct ptz_preset {
-  char token[64];
-  char name[64];
+  char token[PTZ_PRESET_TOKEN_SIZE];
+  char name[PTZ_NAME_SIZE];
   struct ptz_vector ptz_position;
 };
 
@@ -118,8 +130,9 @@ int onvif_ptz_goto_preset(const char* profile_token, const char* preset_token,
                           const struct ptz_speed* speed); /**< GotoPreset. */
 int onvif_ptz_remove_preset(const char* profile_token,
                             const char* preset_token); /**< RemovePreset. */
-int onvif_ptz_handle_request(const char* action_name, const http_request_t* request,
-                             http_response_t* response); /**< Handle ONVIF PTZ service requests. */
+int onvif_ptz_handle_operation(
+  const char* operation_name, const http_request_t* request,
+  http_response_t* response); /**< Handle ONVIF PTZ service operations (standardized). */
 
 /**
  * @struct ptz_device_status
@@ -162,5 +175,16 @@ int onvif_ptz_init(config_manager_t* config);
  * @brief Clean up PTZ service
  */
 void onvif_ptz_cleanup(void);
+
+/**
+ * @brief Handle ONVIF PTZ service requests (HTTP server interface)
+ * @param action_name ONVIF action name (e.g., "GetConfigurations")
+ * @param request HTTP request containing SOAP envelope
+ * @param response HTTP response to populate with SOAP envelope
+ * @return ONVIF_SUCCESS on success, error code on failure
+ * @note This function provides the HTTP server interface for PTZ service
+ */
+int onvif_ptz_handle_request(const char* action_name, const http_request_t* request,
+                             http_response_t* response);
 
 #endif
