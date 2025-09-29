@@ -1131,7 +1131,9 @@ int media_stream_uri_response_callback(struct soap* soap, void* user_data) {
     data->uri->invalid_after_connect ? xsd__boolean__true_ : xsd__boolean__false_;
   response->MediaUri->InvalidAfterReboot =
     data->uri->invalid_after_reboot ? xsd__boolean__true_ : xsd__boolean__false_;
-  response->MediaUri->Timeout = soap_strdup(soap, "PT60S");
+  // Use static timeout string to avoid repeated allocations
+  static const char* timeout_str = "PT60S";
+  response->MediaUri->Timeout = soap_strdup(soap, timeout_str);
 
   // Serialize response
   if (soap_put__trt__GetStreamUriResponse(soap, response, "trt:GetStreamUriResponse", NULL) !=

@@ -49,6 +49,7 @@
 #define MEDIA_NAME_BUFFER_SIZE     64
 #define MEDIA_TOKEN_BUFFER_SIZE    64
 #define MEDIA_PROTOCOL_BUFFER_SIZE 16
+#define MEDIA_URI_BUFFER_SIZE      256
 
 // Stream path and port constants are defined in onvif_constants.h
 
@@ -168,6 +169,89 @@ static struct media_profile g_media_profiles[] = { // NOLINT
      .default_continuous_pan_tilt_velocity_space = "http://www.onvif.org/ver10/tptz/PanTiltSpaces/"
                                                    "VelocityGenericSpace",
      .default_continuous_zoom_velocity_space = ""}}};
+
+// Static cached URIs for memory optimization
+static char g_cached_main_rtsp_uri[MEDIA_URI_BUFFER_SIZE] = {0};
+static char g_cached_sub_rtsp_uri[MEDIA_URI_BUFFER_SIZE] = {0};
+static int g_cached_uris_initialized = 0;
+
+/**
+ * @brief Initialize cached URIs for common profiles to optimize memory usage
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int init_cached_uris(void) {
+  if (g_cached_uris_initialized) {
+    return ONVIF_SUCCESS; // Already initialized
+  }
+
+  // Build cached RTSP URIs for common profiles
+  build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_MAIN_STREAM_PATH,
+                   g_cached_main_rtsp_uri, sizeof(g_cached_main_rtsp_uri));
+  build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_SUB_STREAM_PATH,
+                   g_cached_sub_rtsp_uri, sizeof(g_cached_sub_rtsp_uri));
+
+  g_cached_uris_initialized = 1;
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Get cached URI for a profile token to avoid repeated construction
+ * @param profile_token The profile token
+ * @param uri_buffer Buffer to copy the URI to
+ * @param buffer_size Size of the URI buffer
+ * @return ONVIF_SUCCESS if URI found and copied, error code otherwise
+ */
+static int get_cached_rtsp_uri(const char* profile_token, char* uri_buffer, size_t buffer_size) {
+  if (!profile_token || !uri_buffer || buffer_size == 0) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Initialize cached URIs if not done yet
+  int result = init_cached_uris();
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  // Return cached URI for common profiles
+  if (strcmp(profile_token, MEDIA_MAIN_PROFILE_TOKEN) == 0) {
+    strncpy(uri_buffer, g_cached_main_rtsp_uri, buffer_size - 1);
+    uri_buffer[buffer_size - 1] = '\0';
+    return ONVIF_SUCCESS;
+  } else if (strcmp(profile_token, MEDIA_SUB_PROFILE_TOKEN) == 0) {
+    strncpy(uri_buffer, g_cached_sub_rtsp_uri, buffer_size - 1);
+    uri_buffer[buffer_size - 1] = '\0';
+    return ONVIF_SUCCESS;
+  }
+
+  return ONVIF_ERROR_NOT_FOUND; // URI not cached for this profile
+}
+
+/**
+ * @brief Optimized profile lookup using direct indexing for common profiles
+ * @param profile_token The profile token to search for
+ * @return Pointer to profile or NULL if not found
+ */
+static struct media_profile* find_profile_optimized(const char* profile_token) {
+  if (!profile_token) {
+    return NULL;
+  }
+
+  // Direct lookup for common profiles to avoid linear search
+  if (strcmp(profile_token, MEDIA_MAIN_PROFILE_TOKEN) == 0) {
+    return &g_media_profiles[0];
+  } else if (strcmp(profile_token, MEDIA_SUB_PROFILE_TOKEN) == 0) {
+    return &g_media_profiles[1];
+  }
+
+  // Fall back to linear search for custom profiles
+  for (int i = 0; i < PROFILE_COUNT; i++) {
+    if (strcmp(g_media_profiles[i].token, profile_token) == 0) {
+      return &g_media_profiles[i];
+    }
+  }
+
+  return NULL;
+}
 
 int onvif_media_get_profiles(struct media_profile** profile_list, int* count) {
   ONVIF_CHECK_NULL(profile_list);
@@ -533,19 +617,22 @@ int onvif_media_get_stream_uri(const char* profile_token, const char* protocol,
   ONVIF_CHECK_NULL(protocol);
   ONVIF_CHECK_NULL(uri);
 
-  /* Find the profile */
-  struct media_profile* profile = NULL;
-  for (int i = 0; i < PROFILE_COUNT; i++) {
-    if (strcmp(g_media_profiles[i].token, profile_token) == 0) {
-      profile = &g_media_profiles[i];
-      break;
-    }
-  }
-
+  /* Find the profile using optimized lookup */
+  struct media_profile* profile = find_profile_optimized(profile_token);
   ONVIF_CHECK_NULL(profile);
 
-  /* Generate RTSP URI based on profile */
+  /* Use cached URI for RTSP/RTP protocols */
   if (strcmp(protocol, "RTSP") == 0 || strcmp(protocol, "RTP-Unicast") == 0) {
+    // Try to use cached URI first for common profiles
+    int result = get_cached_rtsp_uri(profile_token, uri->uri, sizeof(uri->uri));
+    if (result == ONVIF_SUCCESS) {
+      uri->invalid_after_connect = 0;
+      uri->invalid_after_reboot = 0;
+      uri->timeout = MEDIA_DEFAULT_TIMEOUT_SECONDS;
+      return ONVIF_SUCCESS;
+    }
+
+    // Fall back to dynamic URI construction for non-cached profiles
     if (strcmp(profile_token, "SubProfile") == 0) {
       build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_SUB_STREAM_PATH, uri->uri,
                        sizeof(uri->uri));

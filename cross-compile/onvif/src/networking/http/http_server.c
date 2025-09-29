@@ -11,6 +11,8 @@
 #include <asm/socket.h>
 #include <bits/types.h>
 #include <errno.h>
+#include <inttypes.h>
+#include <limits.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -29,6 +31,7 @@
 #include "networking/http/http_auth.h"
 #include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
+#include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap.h"
 #include "services/common/onvif_types.h"
 #include "services/device/onvif_device.h"
@@ -79,6 +82,15 @@ static struct http_auth_config g_http_auth_config = {0}; // NOLINT
 
 /** @brief Maximum HTTP header line length */
 #define HTTP_MAX_HEADER_LINE_LENGTH 8192
+
+/** @brief HTTP status code constants */
+#define HTTP_STATUS_OK                    200
+#define HTTP_STATUS_INTERNAL_SERVER_ERROR 500
+#define HTTP_STATUS_SUCCESS_MIN           200
+#define HTTP_STATUS_SUCCESS_MAX           299
+#define HTTP_STATUS_CLIENT_ERROR_MIN      400
+#define HTTP_STATUS_CLIENT_ERROR_MAX      499
+#define HTTP_STATUS_SERVER_ERROR_MIN      500
 
 /* ============================================================================
  * HTTP Logging Helpers
@@ -930,6 +942,16 @@ int http_server_init(int port) {
     return ONVIF_ERROR;
   }
 
+  // Initialize performance metrics
+  if (http_metrics_init() != ONVIF_SUCCESS) {
+    service_log_context_t log_ctx;
+    http_server_log_init_context(&log_ctx, "metrics_init", SERVICE_LOG_ERROR);
+    service_log_operation_failure(&log_ctx, "metrics initialization", -1,
+                                  "Failed to initialize performance metrics");
+    buffer_pool_cleanup(&g_http_server.buffer_pool);
+    return ONVIF_ERROR;
+  }
+
   // Create socket
   g_http_server.socket = socket(AF_INET, SOCK_STREAM, 0);
   if (g_http_server.socket < 0) {
@@ -1182,6 +1204,9 @@ int http_server_process_request(int client_fd) {
     return ONVIF_ERROR;
   }
 
+  // Record request start time for latency measurement
+  uint64_t request_start_time = platform_get_time_ms();
+
   // Get client IP address
   char client_ip_str[HTTP_CLIENT_IP_BUFFER_SIZE] = "unknown";
   if (get_client_ip_address(client_fd, client_ip_str, sizeof(client_ip_str)) != ONVIF_SUCCESS) {
@@ -1223,6 +1248,14 @@ int http_server_process_request(int client_fd) {
   } else {
     handle_request_error(client_fd, client_ip_str, result);
   }
+
+  // Record performance metrics
+  uint64_t request_end_time = platform_get_time_ms();
+  uint64_t latency_ms = request_end_time - request_start_time;
+  size_t response_size = (result == ONVIF_SUCCESS) ? response.body_length : 0;
+  int status_code = (result == ONVIF_SUCCESS) ? HTTP_STATUS_OK : HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  http_metrics_record_request(latency_ms, response_size, status_code);
 
   // Cleanup response
   http_response_free(&response);
@@ -1298,6 +1331,10 @@ int http_server_stop(void) {
   }
 
   buffer_pool_cleanup(&g_http_server.buffer_pool);
+
+  // Cleanup performance metrics
+  http_metrics_cleanup();
+
   g_http_server.running = 0;
 
   service_log_context_t log_ctx;
@@ -1318,6 +1355,137 @@ void process_connection(void* conn) {
   service_log_context_t log_ctx;
   http_log_init_context(&log_ctx, NULL, "process_connection", SERVICE_LOG_DEBUG);
   service_log_debug(&log_ctx, "process_connection called with connection %p", conn);
+}
+
+/* ============================================================================
+ * HTTP Performance Metrics Implementation
+ * ============================================================================
+ */
+
+/**
+ * @brief Initialize HTTP performance metrics
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+int http_metrics_init(void) {
+  // Initialize counters
+  g_http_server.metrics.total_requests = 0;
+  g_http_server.metrics.successful_requests = 0;
+  g_http_server.metrics.client_errors = 0;
+  g_http_server.metrics.server_errors = 0;
+  g_http_server.metrics.total_response_bytes = 0;
+  g_http_server.metrics.total_latency_ms = 0;
+  g_http_server.metrics.min_latency_ms = UINT64_MAX;
+  g_http_server.metrics.max_latency_ms = 0;
+  g_http_server.metrics.current_connections = 0;
+
+  // Initialize mutex
+  if (pthread_mutex_init(&g_http_server.metrics.metrics_mutex, NULL) != 0) {
+    return ONVIF_ERROR;
+  }
+
+  // Set start time
+  g_http_server.metrics.metrics_start_time = platform_get_time_ms();
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Cleanup HTTP performance metrics
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+int http_metrics_cleanup(void) {
+  // Destroy mutex
+  if (pthread_mutex_destroy(&g_http_server.metrics.metrics_mutex) != 0) {
+    return ONVIF_ERROR;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Get current HTTP performance metrics
+ * @param metrics Output structure to fill with current metrics
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+int http_metrics_get_current(http_performance_metrics_t* metrics) {
+  if (!metrics) {
+    return ONVIF_ERROR_NULL;
+  }
+
+  // Copy values with mutex protection
+  pthread_mutex_lock(&g_http_server.metrics.metrics_mutex);
+
+  metrics->total_requests = g_http_server.metrics.total_requests;
+  metrics->successful_requests = g_http_server.metrics.successful_requests;
+  metrics->client_errors = g_http_server.metrics.client_errors;
+  metrics->server_errors = g_http_server.metrics.server_errors;
+  metrics->total_response_bytes = g_http_server.metrics.total_response_bytes;
+  metrics->total_latency_ms = g_http_server.metrics.total_latency_ms;
+  metrics->min_latency_ms = g_http_server.metrics.min_latency_ms;
+  metrics->max_latency_ms = g_http_server.metrics.max_latency_ms;
+  metrics->current_connections = g_http_server.metrics.current_connections;
+  metrics->metrics_start_time = g_http_server.metrics.metrics_start_time;
+
+  pthread_mutex_unlock(&g_http_server.metrics.metrics_mutex);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Record HTTP request metrics
+ * @param latency_ms Request latency in milliseconds
+ * @param response_size Response size in bytes
+ * @param status_code HTTP status code
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+int http_metrics_record_request(uint64_t latency_ms, size_t response_size,
+                                int status_code) { // NOLINT
+  // Update all metrics with mutex protection for thread safety
+  pthread_mutex_lock(&g_http_server.metrics.metrics_mutex);
+
+  // Increment total requests
+  g_http_server.metrics.total_requests++;
+
+  // Add response bytes
+  g_http_server.metrics.total_response_bytes += response_size;
+
+  // Add latency
+  g_http_server.metrics.total_latency_ms += latency_ms;
+
+  // Update min/max latency
+  if (latency_ms < g_http_server.metrics.min_latency_ms) {
+    g_http_server.metrics.min_latency_ms = latency_ms;
+  }
+
+  if (latency_ms > g_http_server.metrics.max_latency_ms) {
+    g_http_server.metrics.max_latency_ms = latency_ms;
+  }
+
+  // Categorize by status code
+  if (status_code >= HTTP_STATUS_SUCCESS_MIN && status_code <= HTTP_STATUS_SUCCESS_MAX) {
+    g_http_server.metrics.successful_requests++;
+  } else if (status_code >= HTTP_STATUS_CLIENT_ERROR_MIN &&
+             status_code <= HTTP_STATUS_CLIENT_ERROR_MAX) {
+    g_http_server.metrics.client_errors++;
+  } else if (status_code >= HTTP_STATUS_SERVER_ERROR_MIN) {
+    g_http_server.metrics.server_errors++;
+  }
+
+  pthread_mutex_unlock(&g_http_server.metrics.metrics_mutex);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Update current connection count
+ * @param delta Change in connection count (+1 for new, -1 for closed)
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+int http_metrics_update_connections(int delta) {
+  pthread_mutex_lock(&g_http_server.metrics.metrics_mutex);
+  g_http_server.metrics.current_connections += delta;
+  pthread_mutex_unlock(&g_http_server.metrics.metrics_mutex);
+  return ONVIF_SUCCESS;
 }
 
 /**

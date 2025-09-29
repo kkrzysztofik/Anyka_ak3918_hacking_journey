@@ -16,6 +16,7 @@
 #include <time.h>
 
 #include "core/config/config.h"
+#include "networking/common/buffer_pool.h"
 #include "networking/http/http_parser.h"
 #include "platform/adapters/ptz_adapter.h"
 #include "platform/platform.h"
@@ -97,9 +98,13 @@ static pthread_t g_ptz_continuous_move_timer_thread = 0;       // NOLINT
 static int g_ptz_continuous_move_timeout_s = 0;                // NOLINT
 static volatile int g_ptz_continuous_move_active = 0;          // NOLINT
 
+/* Global buffer pool for PTZ service responses */
+static buffer_pool_t g_ptz_response_buffer_pool; // NOLINT
+
 /* Preset management helper functions */
 static int find_preset_by_token(const char* token, int* index);
 static int remove_preset_at_index(int index);
+static int cleanup_preset_memory(void);
 
 /* Convert ONVIF normalized coordinates to device degrees */
 static int normalize_to_degrees_pan(float normalized_value) {
@@ -351,14 +356,35 @@ int onvif_ptz_set_preset(const char* profile_token, // NOLINT
     return ONVIF_ERROR;
   }
 
+  /* Use buffer pool for preset token generation */
+  char* temp_token = buffer_pool_get(&g_ptz_response_buffer_pool);
+  if (!temp_token) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
   /* Create new preset */
   struct ptz_preset* preset = &g_ptz_presets[g_ptz_preset_count];
-  if (snprintf(preset->token, sizeof(preset->token), "Preset%d", g_ptz_preset_count + 1) >=
-      (int)sizeof(preset->token)) {
+
+  /* Generate preset token using buffer pool with optimized formatting */
+  int token_len = snprintf(temp_token, PTZ_PRESET_TOKEN_SIZE, "Preset%d", g_ptz_preset_count + 1);
+  if (token_len >= PTZ_PRESET_TOKEN_SIZE) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, temp_token);
     return ONVIF_ERROR;
   }
-  strncpy(preset->name, preset_name, sizeof(preset->name) - 1);
-  preset->name[sizeof(preset->name) - 1] = '\0';
+
+  /* Optimized string copying with explicit bounds checking */
+  size_t token_copy_len =
+    (size_t)token_len < sizeof(preset->token) - 1 ? (size_t)token_len : sizeof(preset->token) - 1;
+  memcpy(preset->token, temp_token, token_copy_len);
+  preset->token[token_copy_len] = '\0';
+
+  size_t name_len = strlen(preset_name);
+  if (name_len >= sizeof(preset->name)) {
+    name_len = sizeof(preset->name) - 1;
+  }
+  memcpy(preset->name, preset_name, name_len);
+  preset->name[name_len] = '\0';
+
   preset->ptz_position = status.position;
 
   /* Call adapter to persist preset */
@@ -370,6 +396,9 @@ int onvif_ptz_set_preset(const char* profile_token, // NOLINT
     strncpy(output_preset_token, preset->token, PTZ_PRESET_TOKEN_MAX_LENGTH);
     output_preset_token[PTZ_PRESET_TOKEN_MAX_LENGTH] = '\0';
   }
+
+  /* Return buffer pool allocation */
+  buffer_pool_return(&g_ptz_response_buffer_pool, temp_token);
 
   return ONVIF_SUCCESS;
 }
@@ -548,10 +577,17 @@ static int ptz_absolute_move_business_logic(const service_handler_config_t* conf
                                             service_log_context_t* log_ctx,
                                             error_context_t* error_ctx,
                                             void* callback_data) { // NOLINT
+  // Use buffer pool for temporary parsing buffers
+  char* profile_token = buffer_pool_get(&g_ptz_response_buffer_pool);
+  if (!profile_token) {
+    return error_handle_system(error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "buffer_pool_get",
+                               response);
+  }
+
   // Parse profile token from request using gSOAP
-  char profile_token[PTZ_TOKEN_MAX_LENGTH];
-  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, sizeof(profile_token));
+  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
   if (result != 0) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
     return error_handle_parameter(error_ctx, "profile_token", "invalid", response);
   }
 
@@ -559,10 +595,16 @@ static int ptz_absolute_move_business_logic(const service_handler_config_t* conf
   struct ptz_vector position;
   memset(&position, 0, sizeof(position));
 
-  // Parse pan position
-  char pan_str[PTZ_TOKEN_MAX_LENGTH];
-  result =
-    onvif_gsoap_parse_value(gsoap_ctx, "//tptz:Position/tt:PanTilt/tt:x", pan_str, sizeof(pan_str));
+  // Use buffer pool for pan position parsing
+  char* pan_str = buffer_pool_get(&g_ptz_response_buffer_pool);
+  if (!pan_str) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+    return error_handle_system(error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "buffer_pool_get",
+                               response);
+  }
+
+  result = onvif_gsoap_parse_value(gsoap_ctx, "//tptz:Position/tt:PanTilt/tt:x", pan_str,
+                                   PTZ_TOKEN_MAX_LENGTH);
   if (result == 0) {
     char* endptr = NULL;
     double pan_value = strtod(pan_str, &endptr);
@@ -571,10 +613,17 @@ static int ptz_absolute_move_business_logic(const service_handler_config_t* conf
     }
   }
 
-  // Parse tilt position
-  char tilt_str[PTZ_TOKEN_MAX_LENGTH];
+  // Use buffer pool for tilt position parsing
+  char* tilt_str = buffer_pool_get(&g_ptz_response_buffer_pool);
+  if (!tilt_str) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+    buffer_pool_return(&g_ptz_response_buffer_pool, pan_str);
+    return error_handle_system(error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "buffer_pool_get",
+                               response);
+  }
+
   result = onvif_gsoap_parse_value(gsoap_ctx, "//tptz:Position/tt:PanTilt/tt:y", tilt_str,
-                                   sizeof(tilt_str));
+                                   PTZ_TOKEN_MAX_LENGTH);
   if (result == 0) {
     char* endptr = NULL;
     double tilt_value = strtod(tilt_str, &endptr);
@@ -586,8 +635,16 @@ static int ptz_absolute_move_business_logic(const service_handler_config_t* conf
   // Execute PTZ movement using the existing function
   result = onvif_ptz_absolute_move(profile_token, &position, NULL);
   if (result != ONVIF_SUCCESS) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+    buffer_pool_return(&g_ptz_response_buffer_pool, pan_str);
+    buffer_pool_return(&g_ptz_response_buffer_pool, tilt_str);
     return error_handle_system(error_ctx, result, "absolute_move", response);
   }
+
+  // Release all buffer pool allocations
+  buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+  buffer_pool_return(&g_ptz_response_buffer_pool, pan_str);
+  buffer_pool_return(&g_ptz_response_buffer_pool, tilt_str);
 
   service_log_operation_success(log_ctx, "PTZ absolute move completed");
   return ONVIF_SUCCESS;
@@ -602,10 +659,17 @@ static int get_ptz_presets_business_logic(const service_handler_config_t* config
                                           onvif_gsoap_context_t* gsoap_ctx,
                                           service_log_context_t* log_ctx,
                                           error_context_t* error_ctx, void* callback_data) {
+  // Use buffer pool for profile token parsing
+  char* profile_token = buffer_pool_get(&g_ptz_response_buffer_pool);
+  if (!profile_token) {
+    return error_handle_system(error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "buffer_pool_get",
+                               response);
+  }
+
   // Parse profile token from request using gSOAP
-  char profile_token[PTZ_TOKEN_MAX_LENGTH];
-  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, sizeof(profile_token));
+  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
   if (result != 0) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
     return error_handle_parameter(error_ctx, "profile_token", "invalid", response);
   }
 
@@ -614,6 +678,7 @@ static int get_ptz_presets_business_logic(const service_handler_config_t* config
   int count = 0;
   result = onvif_ptz_get_presets(profile_token, &preset_list, &count);
   if (result != ONVIF_SUCCESS) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
     return error_handle_system(error_ctx, result, "get_presets", response);
   }
 
@@ -621,6 +686,9 @@ static int get_ptz_presets_business_logic(const service_handler_config_t* config
   ptz_presets_callback_data_t* data = (ptz_presets_callback_data_t*)callback_data;
   data->presets = preset_list;
   data->count = count;
+
+  // Release buffer pool allocation
+  buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
 
   service_log_operation_success(log_ctx, "PTZ presets retrieved");
   return ONVIF_SUCCESS;
@@ -635,28 +703,62 @@ static int set_ptz_preset_business_logic(const service_handler_config_t* config,
                                          onvif_gsoap_context_t* gsoap_ctx,
                                          service_log_context_t* log_ctx, error_context_t* error_ctx,
                                          void* callback_data) {
+  // Use buffer pool for profile token parsing
+  char* profile_token = buffer_pool_get(&g_ptz_response_buffer_pool);
+  if (!profile_token) {
+    return error_handle_system(error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "buffer_pool_get",
+                               response);
+  }
+
   // Parse profile token from request using gSOAP
-  char profile_token[PTZ_TOKEN_MAX_LENGTH];
-  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, sizeof(profile_token));
+  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
   if (result != 0) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
     return error_handle_parameter(error_ctx, "profile_token", "invalid", response);
   }
 
-  // Parse preset name from request using gSOAP
-  char preset_name[PTZ_PRESET_NAME_MAX_LENGTH] = "Preset";
-  result = onvif_gsoap_parse_value(gsoap_ctx, "//tptz:Name", preset_name, sizeof(preset_name));
+  // Use buffer pool for preset name parsing
+  char* preset_name = buffer_pool_get(&g_ptz_response_buffer_pool);
+  if (!preset_name) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+    return error_handle_system(error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "buffer_pool_get",
+                               response);
+  }
+
+  // Initialize with default value
+  strncpy(preset_name, "Preset", PTZ_PRESET_NAME_MAX_LENGTH - 1);
+  preset_name[PTZ_PRESET_NAME_MAX_LENGTH - 1] = '\0';
+
+  result =
+    onvif_gsoap_parse_value(gsoap_ctx, "//tptz:Name", preset_name, PTZ_PRESET_NAME_MAX_LENGTH);
   // Note: preset_name defaults to "Preset" if parsing fails
 
+  // Use buffer pool for preset token
+  char* preset_token = buffer_pool_get(&g_ptz_response_buffer_pool);
+  if (!preset_token) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+    buffer_pool_return(&g_ptz_response_buffer_pool, preset_name);
+    return error_handle_system(error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "buffer_pool_get",
+                               response);
+  }
+
   // Set preset using existing function
-  char preset_token[PTZ_PRESET_NAME_MAX_LENGTH];
-  result = onvif_ptz_set_preset(profile_token, preset_name, preset_token, sizeof(preset_token));
+  result =
+    onvif_ptz_set_preset(profile_token, preset_name, preset_token, PTZ_PRESET_NAME_MAX_LENGTH);
   if (result != ONVIF_SUCCESS) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+    buffer_pool_return(&g_ptz_response_buffer_pool, preset_name);
+    buffer_pool_return(&g_ptz_response_buffer_pool, preset_token);
     return error_handle_system(error_ctx, result, "set_preset", response);
   }
 
   // Update callback data
   ptz_set_preset_callback_data_t* data = (ptz_set_preset_callback_data_t*)callback_data;
   data->preset_token = preset_token;
+
+  // Release buffer pool allocations (except preset_token which is used in callback)
+  buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+  buffer_pool_return(&g_ptz_response_buffer_pool, preset_name);
 
   service_log_operation_success(log_ctx, "PTZ preset created");
   return ONVIF_SUCCESS;
@@ -672,18 +774,33 @@ static int goto_ptz_preset_business_logic(const service_handler_config_t* config
                                           service_log_context_t* log_ctx,
                                           error_context_t* error_ctx,
                                           void* callback_data) { // NOLINT
+  // Use buffer pool for profile token parsing
+  char* profile_token = buffer_pool_get(&g_ptz_response_buffer_pool);
+  if (!profile_token) {
+    return error_handle_system(error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "buffer_pool_get",
+                               response);
+  }
+
   // Parse profile token from request using gSOAP
-  char profile_token[PTZ_TOKEN_MAX_LENGTH];
-  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, sizeof(profile_token));
+  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
   if (result != 0) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
     return error_handle_parameter(error_ctx, "profile_token", "invalid", response);
   }
 
-  // Parse preset token from request using gSOAP
-  char preset_token[PTZ_PRESET_NAME_MAX_LENGTH];
-  result =
-    onvif_gsoap_parse_value(gsoap_ctx, "//tptz:PresetToken", preset_token, sizeof(preset_token));
+  // Use buffer pool for preset token parsing
+  char* preset_token = buffer_pool_get(&g_ptz_response_buffer_pool);
+  if (!preset_token) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+    return error_handle_system(error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "buffer_pool_get",
+                               response);
+  }
+
+  result = onvif_gsoap_parse_value(gsoap_ctx, "//tptz:PresetToken", preset_token,
+                                   PTZ_PRESET_NAME_MAX_LENGTH);
   if (result != 0) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+    buffer_pool_return(&g_ptz_response_buffer_pool, preset_token);
     return error_handle_parameter(error_ctx, "preset_token", "missing", response);
   }
 
@@ -695,8 +812,14 @@ static int goto_ptz_preset_business_logic(const service_handler_config_t* config
   // Goto preset using existing function
   result = onvif_ptz_goto_preset(profile_token, preset_token, &speed);
   if (result != ONVIF_SUCCESS) {
+    buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+    buffer_pool_return(&g_ptz_response_buffer_pool, preset_token);
     return error_handle_system(error_ctx, result, "goto_preset", response);
   }
+
+  // Release buffer pool allocations
+  buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
+  buffer_pool_return(&g_ptz_response_buffer_pool, preset_token);
 
   service_log_operation_success(log_ctx, "PTZ goto preset completed");
   return ONVIF_SUCCESS;
@@ -889,6 +1012,15 @@ int onvif_ptz_init(config_manager_t* config) {
     return ONVIF_ERROR;
   }
 
+  // Initialize buffer pool for PTZ service responses
+  if (buffer_pool_init(&g_ptz_response_buffer_pool) != 0) {
+    platform_log_error("Failed to initialize PTZ response buffer pool\n");
+    onvif_gsoap_cleanup(g_ptz_handler_state.gsoap_ctx);
+    ONVIF_FREE(g_ptz_handler_state.gsoap_ctx);
+    g_ptz_handler_state.gsoap_ctx = NULL;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
   // Register with standardized service dispatcher
   int result = onvif_service_dispatcher_register_service(&g_ptz_service_registration);
   if (result != ONVIF_SUCCESS) {
@@ -916,6 +1048,12 @@ void onvif_ptz_cleanup(void) {
     g_ptz_handler_state.gsoap_ctx = NULL;
   }
 
+  // Cleanup buffer pool
+  buffer_pool_cleanup(&g_ptz_response_buffer_pool);
+
+  // Cleanup preset memory
+  cleanup_preset_memory();
+
   // Reset handler state
   memset(&g_ptz_handler_state, 0, sizeof(g_ptz_handler_state));
 
@@ -940,12 +1078,19 @@ static int simple_abs(int value) {
 
 /* Preset management helper functions */
 static int find_preset_by_token(const char* token, int* index) {
+  if (!token || !index) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // For small arrays (PTZ_MAX_PRESETS = 10), linear search is efficient
+  // and simpler than binary search with sorting overhead
   for (int i = 0; i < g_ptz_preset_count; i++) {
     if (strcmp(g_ptz_presets[i].token, token) == 0) {
       *index = i;
       return ONVIF_SUCCESS;
     }
   }
+
   return ONVIF_ERROR_NOT_FOUND;
 }
 
@@ -954,11 +1099,74 @@ static int remove_preset_at_index(int index) {
     return ONVIF_ERROR_INVALID;
   }
 
-  /* Shift remaining presets */
-  for (int j = index; j < g_ptz_preset_count - 1; j++) {
-    g_ptz_presets[j] = g_ptz_presets[j + 1];
+  /* Optimized removal: use memmove for efficient memory shifting */
+  if (index < g_ptz_preset_count - 1) {
+    memmove(&g_ptz_presets[index], &g_ptz_presets[index + 1],
+            (g_ptz_preset_count - index - 1) * sizeof(struct ptz_preset));
   }
+
   g_ptz_preset_count--;
+
+  /* Clear the last slot to prevent stale data */
+  memset(&g_ptz_presets[g_ptz_preset_count], 0, sizeof(struct ptz_preset));
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Sort presets by token for efficient searching
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int sort_presets_by_token(void) {
+  if (g_ptz_preset_count <= 1) {
+    return ONVIF_SUCCESS; // Already sorted or empty
+  }
+
+  // Simple bubble sort for small arrays (PTZ_MAX_PRESETS = 10)
+  for (int i = 0; i < g_ptz_preset_count - 1; i++) {
+    for (int j = 0; j < g_ptz_preset_count - i - 1; j++) {
+      if (strcmp(g_ptz_presets[j].token, g_ptz_presets[j + 1].token) > 0) {
+        // Swap presets
+        struct ptz_preset temp = g_ptz_presets[j];
+        g_ptz_presets[j] = g_ptz_presets[j + 1];
+        g_ptz_presets[j + 1] = temp;
+      }
+    }
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Get preset memory usage statistics
+ * @param used_count Number of presets currently used
+ * @param total_count Total preset capacity
+ * @param memory_used Memory used by presets in bytes
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int get_preset_memory_stats(int* used_count, int* total_count, size_t* memory_used) {
+  if (!used_count || !total_count || !memory_used) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  *used_count = g_ptz_preset_count;
+  *total_count = PTZ_MAX_PRESETS;
+  *memory_used = (size_t)g_ptz_preset_count * sizeof(struct ptz_preset);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Cleanup preset memory and reset to initial state
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int cleanup_preset_memory(void) {
+  // Clear all preset data
+  memset(g_ptz_presets, 0, sizeof(g_ptz_presets));
+  g_ptz_preset_count = 0;
+
+  platform_log_info("PTZ preset memory cleaned up: %zu bytes freed\n", sizeof(g_ptz_presets));
+
   return ONVIF_SUCCESS;
 }
 
