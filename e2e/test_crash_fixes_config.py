@@ -1,5 +1,5 @@
 """
-Configuration for ONVIF crash fix integration tests
+Configuration for ONVIF crash fix E2E tests
 
 This module provides specialized configuration for testing the crash fixes
 implemented in Phase 1, 2, and 3 of the ONVIF service stability improvements.

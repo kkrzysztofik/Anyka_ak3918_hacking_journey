@@ -1,6 +1,6 @@
-# ONVIF Integration Tests
+# ONVIF E2E Tests
 
-This directory contains comprehensive integration tests for the Anyka AK3918 ONVIF implementation. The test suite validates WS-Discovery functionality and all ONVIF services (Device, Media, PTZ, Imaging) as well as RTSP streaming.
+This directory contains comprehensive end-to-end (E2E) tests for the Anyka AK3918 ONVIF implementation. The test suite validates WS-Discovery functionality and all ONVIF services (Device, Media, PTZ, Imaging) as well as RTSP streaming.
 
 ## Features
 
@@ -14,7 +14,7 @@ This directory contains comprehensive integration tests for the Anyka AK3918 ONV
 - **Crash Fix Tests**: Service stability and crash prevention validation
 
 ### Test Types
-- **Integration Tests**: Full end-to-end testing with real camera
+- **E2E Tests**: Full end-to-end testing with real camera
 - **Performance Tests**: Response time and throughput validation
 - **Security Tests**: Input validation and error handling
 - **Smoke Tests**: Basic functionality verification
@@ -28,7 +28,7 @@ This directory contains comprehensive integration tests for the Anyka AK3918 ONV
 
 ### Installation
 ```bash
-cd integration-tests
+cd e2e
 pip install -r requirements.txt
 ```
 
@@ -61,7 +61,7 @@ export ONVIF_TEST_DEVICE_0_PASSWORD="admin"
 
 #### Run All Tests
 ```bash
-cd integration-tests
+cd e2e
 python -m pytest
 ```
 
@@ -99,7 +99,7 @@ python -m pytest -m "phase3_fixes"  # Phase 3: Buffer overflow protection
 # Stress tests
 python -m pytest -m "stress"
 
-# Integration tests (all)
+# E2E tests (all)
 python -m pytest -m "integration"
 ```
 
@@ -167,7 +167,7 @@ python integrate_crash_fix_tests.py run-stress
 ## Test Structure
 
 ```
-integration-tests/
+e2e/
 ├── config.py                    # Test configuration
 ├── test_crash_fixes_config.py   # Crash fix test configuration
 ├── integrate_crash_fix_tests.py # Crash fix test integration script
@@ -195,7 +195,7 @@ integration-tests/
 
 ### Pytest Markers
 - `slow`: Tests that take longer to run (deselect with `-m "not slow"`)
-- `integration`: Full integration tests requiring camera hardware
+- `integration`: Full end-to-end scenarios requiring camera hardware
 - `ws_discovery`: WS-Discovery specific tests
 - `onvif_device`: ONVIF Device service tests
 - `onvif_media`: ONVIF Media service tests
@@ -302,7 +302,7 @@ DeviceConfig(
 
 The test suite includes GitHub Actions workflows for automated testing:
 
-- **Integration Tests**: Full test suite on code changes
+- **E2E Tests**: Full test suite on code changes
 - **Smoke Tests**: Basic functionality verification
 - **Performance Tests**: Performance validation
 - **Security Tests**: Security analysis

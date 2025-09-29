@@ -1,5 +1,5 @@
 """
-WS-Discovery integration tests for ONVIF devices
+WS-Discovery E2E tests for ONVIF devices
 """
 import socket
 import struct
@@ -100,7 +100,7 @@ def ws_client(ws_discovery_config):
 
 
 class TestWSDiscovery:
-    """WS-Discovery integration tests"""
+    """WS-Discovery E2E tests"""
 
     @pytest.mark.ws_discovery
     @pytest.mark.integration

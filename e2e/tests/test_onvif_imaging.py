@@ -1,5 +1,5 @@
 """
-ONVIF Imaging service integration tests
+ONVIF Imaging service E2E tests
 """
 import pytest
 from typing import Dict, Any, List
@@ -179,7 +179,7 @@ def imaging_client(device_config):
 
 
 class TestONVIFImagingService:
-    """ONVIF Imaging service integration tests"""
+    """ONVIF Imaging service E2E tests"""
 
     @pytest.mark.onvif_imaging
     @pytest.mark.integration

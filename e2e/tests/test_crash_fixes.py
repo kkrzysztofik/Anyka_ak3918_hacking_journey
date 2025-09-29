@@ -1,5 +1,5 @@
 """
-Phase 4 Integration Tests for ONVIF Crash Fixes
+Phase 4 E2E Tests for ONVIF Crash Fixes
 
 This module contains comprehensive tests to validate the crash fixes implemented
 in Phase 1, 2, and 3 of the ONVIF service stability improvements.

@@ -1,5 +1,5 @@
 """
-RTSP streaming integration tests
+RTSP streaming E2E tests
 """
 import pytest
 import cv2
@@ -116,7 +116,7 @@ def rtsp_tester(device_config):
 
 
 class TestRTSPStreaming:
-    """RTSP streaming integration tests"""
+    """RTSP streaming E2E tests"""
 
     @pytest.mark.rtsp
     @pytest.mark.integration

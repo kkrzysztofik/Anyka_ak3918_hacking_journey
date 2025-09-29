@@ -1,5 +1,5 @@
 """
-Test fixtures and utilities for ONVIF integration tests
+Test fixtures and utilities for ONVIF E2E tests
 """
 import asyncio
 import pytest
@@ -21,7 +21,7 @@ import xml.etree.ElementTree as ET
 if TYPE_CHECKING:
     from typing import Dict, Any
 
-# Configure detailed logging for integration tests
+# Configure detailed logging for E2E tests
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s [%(levelname)8s] %(name)s: %(message)s',

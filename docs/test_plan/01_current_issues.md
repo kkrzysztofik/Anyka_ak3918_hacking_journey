@@ -2,14 +2,14 @@
 
 ## Overview
 
-Analysis of existing integration test framework identifying key problems that need resolution.
+Analysis of existing E2E test framework identifying key problems that need resolution.
 
 ## Critical Issues
 
 ### 🔴 Code Duplication (High Priority)
 - **Problem**: Extensive duplication in test fixtures and utilities
 - **Impact**: Maintenance nightmare, inconsistent test behavior
-- **Location**: `integration-tests/conftest.py` and `integration-tests/fixtures.py`
+- **Location**: `e2e/conftest.py` and `e2e/fixtures.py`
 - **Solution**: Consolidate into shared fixture modules
 
 ### 🔴 Poor Test Organization (High Priority)
@@ -27,7 +27,7 @@ Analysis of existing integration test framework identifying key problems that ne
 ### 🟡 Inconsistent Error Handling
 - **Problem**: Mixed error handling approaches across test files
 - **Impact**: Unreliable test results, hard to debug failures
-- **Files**: All test_*.py files in integration-tests/
+- **Files**: All test_*.py files in e2e/
 - **Solution**: Standardized error handling utilities
 
 ### 🟡 Overly Complex Logging
@@ -56,7 +56,7 @@ Analysis of existing integration test framework identifying key problems that ne
 
 ### Existing Test Files
 ```
-integration-tests/
+e2e/
 ├── test_device_service.py          # 15 tests - needs refactoring
 ├── test_media_service.py           # 8 tests - basic coverage
 ├── test_ptz_service.py             # 12 tests - good structure

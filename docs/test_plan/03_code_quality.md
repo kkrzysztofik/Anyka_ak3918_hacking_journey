@@ -2,7 +2,7 @@
 
 ## Overview
 
-Implement comprehensive code quality framework for integration tests with automated tooling and enforcement.
+Implement comprehensive code quality framework for E2E tests with automated tooling and enforcement.
 
 ## Quality Standards
 

@@ -5,7 +5,7 @@
 Reorganize tests from flat structure to categorized, agent-friendly layout:
 
 ```
-integration-tests/
+e2e/
 ├── tests/
 │   ├── unit/                    # Unit-style tests (mocked dependencies)
 │   │   ├── __init__.py
@@ -59,12 +59,12 @@ integration-tests/
 ### Phase 1: Create New Structure
 ```bash
 # Create new directory structure
-mkdir -p integration-tests/tests/{unit,integration,performance,compliance}
-mkdir -p integration-tests/{fixtures,utils,config,reports,scripts}
-mkdir -p integration-tests/reports/{coverage,performance,compliance}
+mkdir -p e2e/tests/{unit,integration,performance,compliance}
+mkdir -p e2e/{fixtures,utils,config,reports,scripts}
+mkdir -p e2e/reports/{coverage,performance,compliance}
 
 # Create __init__.py files
-find integration-tests -type d -exec touch {}/__init__.py \;
+find e2e -type d -exec touch {}/__init__.py \;
 ```
 
 ### Phase 2: Migrate Existing Tests
@@ -163,7 +163,7 @@ from pathlib import Path
 
 def validate_directory_structure():
     """Validate that directory structure matches specification."""
-    base_path = Path("integration-tests")
+    base_path = Path("e2e")
 
     required_dirs = [
         "tests/unit",

@@ -1,5 +1,5 @@
 """
-Pytest configuration and shared fixtures for ONVIF integration tests
+Pytest configuration and shared fixtures for ONVIF E2E tests
 """
 import pytest
 import logging

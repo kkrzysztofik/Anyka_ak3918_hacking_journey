@@ -1,5 +1,5 @@
 """
-ONVIF Media service integration tests
+ONVIF Media service E2E tests
 """
 import pytest
 from typing import Dict, Any, List
@@ -175,7 +175,7 @@ def media_client(device_config):
 
 
 class TestONVIFMediaService:
-    """ONVIF Media service integration tests"""
+    """ONVIF Media service E2E tests"""
 
     @pytest.mark.onvif_media
     @pytest.mark.integration

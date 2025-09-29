@@ -1,5 +1,5 @@
 """
-Enhanced logging utilities for ONVIF integration tests
+Enhanced logging utilities for ONVIF E2E tests
 """
 import logging
 import time

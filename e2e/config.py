@@ -1,5 +1,5 @@
 """
-Configuration for ONVIF integration tests
+Configuration for ONVIF E2E tests
 """
 import os
 from dataclasses import dataclass

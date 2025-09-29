@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test runner script for ONVIF integration tests
+Test runner script for ONVIF E2E tests
 """
 import argparse
 import sys
@@ -16,7 +16,7 @@ from config import load_config_from_env, config
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description="Run ONVIF integration tests",
+        description="Run ONVIF E2E tests",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -63,7 +63,7 @@ Examples:
     parser.add_argument(
         '--all',
         action='store_true',
-        help='Run all integration tests'
+        help='Run all E2E tests'
     )
 
     parser.add_argument(
@@ -236,7 +236,7 @@ def main():
     config = load_config_from_env()
 
     # Display configuration
-    print("ONVIF Integration Test Configuration:")
+    print("ONVIF E2E Test Configuration:")
     print(f"  Device: {config.get_default_device().name} at {config.get_default_device().ip_address}:{config.get_default_device().http_port}")
     print(f"  Test timeout: {config.service_timeout}s")
     print(f"  Retry attempts: {config.retry_attempts}")

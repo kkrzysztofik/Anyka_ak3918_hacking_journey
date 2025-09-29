@@ -1,13 +1,13 @@
 # Test Plan Templates
 
-This directory contains working code templates that agents can copy and modify for implementing the integration test plan.
+This directory contains working code templates that agents can copy and modify for implementing the E2E test plan.
 
 ## Available Templates
 
 ### Core Templates
 
 - **[test_template.py](test_template.py)** - Standard test class structure with patterns for:
-  - Integration tests with ONVIF operations
+  - E2E tests with ONVIF operations
   - Performance testing with statistical analysis
   - Error handling and validation
   - Compliance testing patterns
@@ -60,7 +60,7 @@ device_client.operation_method()  # Replace with actual method
 @pytest.mark.onvif_device        # Change to appropriate service marker
 ```
 
-## Integration with Test Plan
+## Alignment with Test Plan
 
 These templates implement the patterns specified in:
 

@@ -1,5 +1,5 @@
 """
-ONVIF Device service integration tests with enhanced logging
+ONVIF Device service E2E tests with enhanced logging
 """
 import pytest
 import logging
@@ -28,7 +28,7 @@ performance_logger = logging.getLogger('onvif.performance')
 
 
 class TestONVIFDeviceService:
-    """ONVIF Device service integration tests"""
+    """ONVIF Device service E2E tests"""
 
     @pytest.mark.onvif_device
     @pytest.mark.integration

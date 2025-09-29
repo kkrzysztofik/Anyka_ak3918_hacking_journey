@@ -1,5 +1,5 @@
 """
-ONVIF PTZ service integration tests
+ONVIF PTZ service E2E tests
 """
 import pytest
 from typing import Dict, Any, List
@@ -202,7 +202,7 @@ def ptz_client(device_config):
 
 
 class TestONVIFPTZService:
-    """ONVIF PTZ service integration tests"""
+    """ONVIF PTZ service E2E tests"""
 
     @pytest.mark.onvif_ptz
     @pytest.mark.integration

@@ -1,5 +1,5 @@
 """
-Logging configuration for ONVIF integration tests
+Logging configuration for ONVIF E2E tests
 """
 import logging
 import logging.handlers
@@ -9,7 +9,7 @@ from datetime import datetime
 
 def setup_test_logging(log_level: str = "DEBUG", log_dir: str = "reports") -> None:
     """
-    Set up comprehensive logging for integration tests
+    Set up comprehensive logging for E2E tests
 
     Args:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR)

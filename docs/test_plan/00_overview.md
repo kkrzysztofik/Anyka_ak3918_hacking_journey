@@ -1,4 +1,4 @@
-# Integration Test Plan Overview
+# E2E Test Plan Overview
 
 ## Purpose
 
