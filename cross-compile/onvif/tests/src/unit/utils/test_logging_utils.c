@@ -16,7 +16,7 @@
  * @brief Test service initialization logging
  * @param state Test state (unused)
  */
-void test_logging_init(void** state) {
+void test_unit_logging_init(void** state) {
   (void)state;
 
   // Test service initialization success logging (should not crash)
@@ -32,7 +32,7 @@ void test_logging_init(void** state) {
  * @brief Test service cleanup logging
  * @param state Test state (unused)
  */
-void test_logging_cleanup(void** state) {
+void test_unit_logging_cleanup(void** state) {
   (void)state;
 
   // Test service cleanup logging (should not crash)
@@ -48,7 +48,7 @@ void test_logging_cleanup(void** state) {
  * @brief Test error logging functions
  * @param state Test state (unused)
  */
-void test_log_level(void** state) {
+void test_unit_log_level(void** state) {
   (void)state;
 
   // Test service initialization failure logging
@@ -65,7 +65,7 @@ void test_log_level(void** state) {
  * @brief Test parameter validation logging
  * @param state Test state (unused)
  */
-void test_basic_logging(void** state) {
+void test_unit_basic_logging(void** state) {
   (void)state;
 
   // Test invalid parameters logging
@@ -87,7 +87,7 @@ void test_basic_logging(void** state) {
  * @brief Test operation logging functions
  * @param state Test state (unused)
  */
-void test_service_logging(void** state) {
+void test_unit_service_logging(void** state) {
   (void)state;
 
   // Test operation success logging
@@ -112,7 +112,7 @@ void test_service_logging(void** state) {
  * @brief Test configuration and platform logging
  * @param state Test state (unused)
  */
-void test_platform_logging(void** state) {
+void test_unit_platform_logging(void** state) {
   (void)state;
 
   // Test configuration update logging

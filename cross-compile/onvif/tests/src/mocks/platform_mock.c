@@ -61,6 +61,8 @@ static struct {
   time_t mock_time;
   void* mock_capabilities;
   void* mock_system_info;
+  int system_result;
+  int system_call_count;
   pthread_mutex_t mutex;
 } g_platform_mock_state = {0}; // NOLINT
 
@@ -635,33 +637,6 @@ void platform_aenc_release_stream(platform_aenc_stream_handle_t handle,
 }
 
 /* ============================================================================
- * Buffer Pool Mock Functions
- * ============================================================================ */
-
-int buffer_pool_init(buffer_pool_t* pool) {
-  (void)pool;
-  // Mock implementation - always succeeds
-  return 0;
-}
-
-void buffer_pool_cleanup(buffer_pool_t* pool) {
-  (void)pool;
-  // Mock implementation - no action needed
-}
-
-void* buffer_pool_get(buffer_pool_t* pool) {
-  (void)pool;
-  return malloc(MOCK_BUFFER_SIZE);
-}
-
-void buffer_pool_return(buffer_pool_t* pool, void* buffer) {
-  (void)pool;
-  if (buffer) {
-    free(buffer);
-  }
-}
-
-/* ============================================================================
  * PTZ Mock Functions (delegated to platform_ptz_mock.c)
  * ============================================================================ */
 // PTZ functions are implemented in platform_ptz_mock.c
@@ -729,4 +704,43 @@ void platform_snapshot_release(platform_snapshot_handle_t handle, platform_snaps
   (void)handle;
   (void)snapshot;
   // Mock implementation - no action needed
+}
+
+/* ============================================================================
+ * System Mock Functions
+ * ============================================================================ */
+
+/**
+ * @brief Set mock platform system result
+ * @param result Result to return
+ * @return 0 on success
+ */
+int mock_platform_set_system_result(int result) {
+  pthread_mutex_lock(&g_platform_mock_state.mutex);
+  g_platform_mock_state.system_result = result;
+  pthread_mutex_unlock(&g_platform_mock_state.mutex);
+  return 0;
+}
+
+/**
+ * @brief Get mock platform system call count
+ * @return Number of system calls
+ */
+int mock_platform_get_system_call_count(void) {
+  pthread_mutex_lock(&g_platform_mock_state.mutex);
+  int count = g_platform_mock_state.system_call_count;
+  pthread_mutex_unlock(&g_platform_mock_state.mutex);
+  return count;
+}
+
+/**
+ * @brief Mock platform system reboot function
+ * @return Result set by mock_platform_set_system_result
+ */
+int platform_system_reboot(void) {
+  pthread_mutex_lock(&g_platform_mock_state.mutex);
+  g_platform_mock_state.system_call_count++;
+  int result = g_platform_mock_state.system_result;
+  pthread_mutex_unlock(&g_platform_mock_state.mutex);
+  return result;
 }

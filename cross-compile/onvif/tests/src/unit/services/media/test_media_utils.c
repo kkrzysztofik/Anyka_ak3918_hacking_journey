@@ -24,7 +24,7 @@
 #define TEST_METADATA_CONFIG_COUNT      1
 
 // Test functions
-void test_media_profile_functions(void** state) {
+void test_unit_media_profile_functions(void** state) {
   (void)state; // Unused parameter
 
   struct media_profile* profiles = NULL;
@@ -51,7 +51,7 @@ void test_media_profile_functions(void** state) {
   assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
 }
 
-void test_media_video_source_functions(void** state) {
+void test_unit_media_video_source_functions(void** state) {
   (void)state; // Unused parameter
 
   struct video_source* video_sources = NULL;
@@ -62,7 +62,7 @@ void test_media_video_source_functions(void** state) {
   assert_int_equal(TEST_VIDEO_SOURCE_COUNT, count);
 }
 
-void test_media_audio_source_functions(void** state) {
+void test_unit_media_audio_source_functions(void** state) {
   (void)state; // Unused parameter
 
   struct audio_source* audio_sources = NULL;
@@ -73,7 +73,7 @@ void test_media_audio_source_functions(void** state) {
   assert_int_equal(TEST_AUDIO_SOURCE_COUNT, count);
 }
 
-void test_media_video_configuration_functions(void** state) {
+void test_unit_media_video_configuration_functions(void** state) {
   (void)state; // Unused parameter
 
   struct video_encoder_configuration* configs = NULL;
@@ -84,7 +84,7 @@ void test_media_video_configuration_functions(void** state) {
   assert_int_equal(TEST_VIDEO_ENCODER_CONFIG_COUNT, count);
 }
 
-void test_media_audio_configuration_functions(void** state) {
+void test_unit_media_audio_configuration_functions(void** state) {
   (void)state; // Unused parameter
 
   struct audio_encoder_configuration* configs = NULL;
@@ -95,7 +95,7 @@ void test_media_audio_configuration_functions(void** state) {
   assert_int_equal(TEST_AUDIO_ENCODER_CONFIG_COUNT, count);
 }
 
-void test_media_stream_uri_functions(void** state) {
+void test_unit_media_stream_uri_functions(void** state) {
   (void)state; // Unused parameter
 
   struct stream_uri stream_uri;
@@ -109,7 +109,7 @@ void test_media_stream_uri_functions(void** state) {
   assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
 }
 
-void test_media_snapshot_uri_functions(void** state) {
+void test_unit_media_snapshot_uri_functions(void** state) {
   (void)state; // Unused parameter
 
   struct stream_uri snapshot_uri;
@@ -123,7 +123,7 @@ void test_media_snapshot_uri_functions(void** state) {
   assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
 }
 
-void test_media_multicast_functions(void** state) {
+void test_unit_media_multicast_functions(void** state) {
   (void)state; // Unused parameter
 
   int result = onvif_media_start_multicast_streaming("MainProfile");
@@ -139,7 +139,7 @@ void test_media_multicast_functions(void** state) {
   assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
 }
 
-void test_media_metadata_functions(void** state) {
+void test_unit_media_metadata_functions(void** state) {
   (void)state; // Unused parameter
 
   struct metadata_configuration* configs = NULL;
@@ -157,7 +157,7 @@ void test_media_metadata_functions(void** state) {
   assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
 }
 
-void test_media_error_handling(void** state) {
+void test_unit_media_error_handling(void** state) {
   (void)state; // Unused parameter
 
   int result;
@@ -193,7 +193,7 @@ void test_media_error_handling(void** state) {
   assert_int_equal(ONVIF_ERROR_NULL, result);
 }
 
-void test_media_initialization(void** state) {
+void test_unit_media_initialization(void** state) {
   (void)state; // Unused parameter
 
   config_manager_t mock_config;
@@ -205,26 +205,26 @@ void test_media_initialization(void** state) {
 }
 
 // Additional test functions expected by test_runner.c
-void test_media_basic_functions(void** state) {
-  test_media_profile_functions(state);
+void test_unit_media_basic_functions(void** state) {
+  test_unit_media_profile_functions(state);
 }
 
-void test_media_video_sources(void** state) {
-  test_media_video_source_functions(state);
+void test_unit_media_video_sources(void** state) {
+  test_unit_media_video_source_functions(state);
 }
 
-void test_media_audio_sources(void** state) {
-  test_media_audio_source_functions(state);
+void test_unit_media_audio_sources(void** state) {
+  test_unit_media_audio_source_functions(state);
 }
 
-void test_media_video_configurations(void** state) {
-  test_media_video_configuration_functions(state);
+void test_unit_media_video_configurations(void** state) {
+  test_unit_media_video_configuration_functions(state);
 }
 
-void test_media_audio_configurations(void** state) {
-  test_media_audio_configuration_functions(state);
+void test_unit_media_audio_configurations(void** state) {
+  test_unit_media_audio_configuration_functions(state);
 }
 
-void test_media_metadata_configurations(void** state) {
-  test_media_metadata_functions(state);
+void test_unit_media_metadata_configurations(void** state) {
+  test_unit_media_metadata_functions(state);
 }

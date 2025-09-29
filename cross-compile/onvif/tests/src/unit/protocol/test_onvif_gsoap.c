@@ -28,7 +28,7 @@
  * @brief Test gSOAP context initialization
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_init(void** state) {
+void test_unit_onvif_gsoap_init(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -60,7 +60,7 @@ void test_onvif_gsoap_init(void** state) {
  * @brief Test gSOAP context initialization with NULL pointer
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_init_null(void** state) {
+void test_unit_onvif_gsoap_init_null(void** state) {
   (void)state;
 
   // Test initialization with NULL context
@@ -73,7 +73,7 @@ void test_onvif_gsoap_init_null(void** state) {
  * @brief Test gSOAP context cleanup
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_cleanup(void** state) {
+void test_unit_onvif_gsoap_cleanup(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -97,7 +97,7 @@ void test_onvif_gsoap_cleanup(void** state) {
  * @brief Test gSOAP context reset
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_reset(void** state) {
+void test_unit_onvif_gsoap_reset(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -139,7 +139,7 @@ void test_onvif_gsoap_reset(void** state) {
  * @brief Test fault response generation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_fault_response(void** state) {
+void test_unit_onvif_gsoap_generate_fault_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -180,7 +180,7 @@ void test_onvif_gsoap_generate_fault_response(void** state) {
  * @brief Test device info response generation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_device_info_response(void** state) {
+void test_unit_onvif_gsoap_generate_device_info_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -218,7 +218,7 @@ void test_onvif_gsoap_generate_device_info_response(void** state) {
  * @brief Test response data retrieval
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_get_response_data(void** state) {
+void test_unit_onvif_gsoap_get_response_data(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -250,7 +250,7 @@ void test_onvif_gsoap_get_response_data(void** state) {
  * @brief Test response length retrieval
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_get_response_length(void** state) {
+void test_unit_onvif_gsoap_get_response_length(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -281,7 +281,7 @@ void test_onvif_gsoap_get_response_length(void** state) {
  * @brief Test error checking functionality
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_has_error(void** state) {
+void test_unit_onvif_gsoap_has_error(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -313,7 +313,7 @@ void test_onvif_gsoap_has_error(void** state) {
  * @brief Test error message retrieval
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_get_error(void** state) {
+void test_unit_onvif_gsoap_get_error(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -345,7 +345,7 @@ void test_onvif_gsoap_get_error(void** state) {
  * @brief Test response validation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_validate_response(void** state) {
+void test_unit_onvif_gsoap_validate_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -378,7 +378,7 @@ void test_onvif_gsoap_validate_response(void** state) {
  * @brief Test operation name extraction
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_extract_operation_name(void** state) {
+void test_unit_onvif_gsoap_extract_operation_name(void** state) {
   (void)state;
 
   char operation_name[TEST_BUFFER_SIZE];
@@ -413,7 +413,7 @@ void test_onvif_gsoap_extract_operation_name(void** state) {
  * @brief Test request parsing initialization
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_init_request_parsing(void** state) {
+void test_unit_onvif_gsoap_init_request_parsing(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -458,7 +458,7 @@ void test_onvif_gsoap_init_request_parsing(void** state) {
  * @brief Test profile token parsing
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_parse_profile_token(void** state) {
+void test_unit_onvif_gsoap_parse_profile_token(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -495,7 +495,7 @@ void test_onvif_gsoap_parse_profile_token(void** state) {
  * @brief Test configuration token parsing
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_parse_configuration_token(void** state) {
+void test_unit_onvif_gsoap_parse_configuration_token(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -527,7 +527,7 @@ void test_onvif_gsoap_parse_configuration_token(void** state) {
  * @brief Test protocol parsing
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_parse_protocol(void** state) {
+void test_unit_onvif_gsoap_parse_protocol(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -559,7 +559,7 @@ void test_onvif_gsoap_parse_protocol(void** state) {
  * @brief Test generic value parsing
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_parse_value(void** state) {
+void test_unit_onvif_gsoap_parse_value(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -595,7 +595,7 @@ void test_onvif_gsoap_parse_value(void** state) {
  * @brief Test boolean value parsing
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_parse_boolean(void** state) {
+void test_unit_onvif_gsoap_parse_boolean(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -627,7 +627,7 @@ void test_onvif_gsoap_parse_boolean(void** state) {
  * @brief Test integer value parsing
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_parse_integer(void** state) {
+void test_unit_onvif_gsoap_parse_integer(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -666,7 +666,7 @@ static int test_callback(struct soap* soap, void* user_data) {
  * @brief Test response generation with callback
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_response_with_callback(void** state) {
+void test_unit_onvif_gsoap_generate_response_with_callback(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -696,7 +696,7 @@ void test_onvif_gsoap_generate_response_with_callback(void** state) {
  * @brief Test profiles response generation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_profiles_response(void** state) {
+void test_unit_onvif_gsoap_generate_profiles_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -726,7 +726,7 @@ void test_onvif_gsoap_generate_profiles_response(void** state) {
  * @brief Test stream URI response generation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_stream_uri_response(void** state) {
+void test_unit_onvif_gsoap_generate_stream_uri_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -752,7 +752,7 @@ void test_onvif_gsoap_generate_stream_uri_response(void** state) {
  * @brief Test create profile response generation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_create_profile_response(void** state) {
+void test_unit_onvif_gsoap_generate_create_profile_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -778,7 +778,7 @@ void test_onvif_gsoap_generate_create_profile_response(void** state) {
  * @brief Test delete profile response generation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_delete_profile_response(void** state) {
+void test_unit_onvif_gsoap_generate_delete_profile_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -804,7 +804,7 @@ void test_onvif_gsoap_generate_delete_profile_response(void** state) {
  * @brief Test PTZ nodes response generation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_get_nodes_response(void** state) {
+void test_unit_onvif_gsoap_generate_get_nodes_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -834,7 +834,7 @@ void test_onvif_gsoap_generate_get_nodes_response(void** state) {
  * @brief Test PTZ absolute move response generation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_absolute_move_response(void** state) {
+void test_unit_onvif_gsoap_generate_absolute_move_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -860,7 +860,7 @@ void test_onvif_gsoap_generate_absolute_move_response(void** state) {
  * @brief Test PTZ presets response generation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_get_presets_response(void** state) {
+void test_unit_onvif_gsoap_generate_get_presets_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -890,7 +890,7 @@ void test_onvif_gsoap_generate_get_presets_response(void** state) {
  * @brief Test PTZ set preset response generation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_set_preset_response(void** state) {
+void test_unit_onvif_gsoap_generate_set_preset_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
@@ -920,7 +920,7 @@ void test_onvif_gsoap_generate_set_preset_response(void** state) {
  * @brief Test PTZ goto preset response generation
  * @param state Test state (unused)
  */
-void test_onvif_gsoap_generate_goto_preset_response(void** state) {
+void test_unit_onvif_gsoap_generate_goto_preset_response(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;

@@ -169,14 +169,9 @@ int platform_log_debug(const char* format, ...);
  */
 int platform_log_warning(const char* format, ...);
 
-// Buffer pool mock functions
-struct buffer_pool_t;
-typedef struct buffer_pool_t buffer_pool_t;
-
-int buffer_pool_init(buffer_pool_t* pool);
-void buffer_pool_cleanup(buffer_pool_t* pool);
-void* buffer_pool_get(buffer_pool_t* pool);
-void buffer_pool_return(buffer_pool_t* pool, void* buffer);
+// System mock functions
+int mock_platform_set_system_result(int result);
+int mock_platform_get_system_call_count(void);
 
 // PTZ mock functions
 #include "platform_ptz_mock.h"

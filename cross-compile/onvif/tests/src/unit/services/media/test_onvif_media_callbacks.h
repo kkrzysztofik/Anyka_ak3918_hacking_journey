@@ -20,67 +20,67 @@
  * @brief Test media service callback registration success
  * @param state Test state (unused)
  */
-void test_media_callback_registration_success(void** state);
+void test_unit_media_callback_registration_success(void** state);
 
 /**
  * @brief Test media service callback registration with duplicate
  * @param state Test state (unused)
  */
-void test_media_callback_registration_duplicate(void** state);
+void test_unit_media_callback_registration_duplicate(void** state);
 
 /**
  * @brief Test media service callback registration with null config
  * @param state Test state (unused)
  */
-void test_media_callback_registration_null_config(void** state);
+void test_unit_media_callback_registration_null_config(void** state);
 
 /**
  * @brief Test media service callback registration with service dispatcher failure
  * @param state Test state (unused)
  */
-void test_media_callback_registration_dispatcher_failure(void** state);
+void test_unit_media_callback_registration_dispatcher_failure(void** state);
 
 /**
  * @brief Test media service callback double initialization
  * @param state Test state (unused)
  */
-void test_media_callback_double_initialization(void** state);
+void test_unit_media_callback_double_initialization(void** state);
 
 /**
  * @brief Test media service callback unregistration success
  * @param state Test state (unused)
  */
-void test_media_callback_unregistration_success(void** state);
+void test_unit_media_callback_unregistration_success(void** state);
 
 /**
  * @brief Test media service callback unregistration when not initialized
  * @param state Test state (unused)
  */
-void test_media_callback_unregistration_not_initialized(void** state);
+void test_unit_media_callback_unregistration_not_initialized(void** state);
 
 /**
  * @brief Test media service callback unregistration failure
  * @param state Test state (unused)
  */
-void test_media_callback_unregistration_failure(void** state);
+void test_unit_media_callback_unregistration_failure(void** state);
 
 /**
  * @brief Test media service callback dispatch success
  * @param state Test state (unused)
  */
-void test_media_callback_dispatch_success(void** state);
+void test_unit_media_callback_dispatch_success(void** state);
 
 /**
  * @brief Test media service callback dispatch when not initialized
  * @param state Test state (unused)
  */
-void test_media_callback_dispatch_not_initialized(void** state);
+void test_unit_media_callback_dispatch_not_initialized(void** state);
 
 /**
  * @brief Test media service callback dispatch with null parameters
  * @param state Test state (unused)
  */
-void test_media_callback_dispatch_null_params(void** state);
+void test_unit_media_callback_dispatch_null_params(void** state);
 
 /**
  * @brief Run media service callback tests

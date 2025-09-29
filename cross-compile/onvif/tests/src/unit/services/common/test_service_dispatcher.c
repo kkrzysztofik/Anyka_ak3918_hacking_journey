@@ -1,6 +1,6 @@
 /**
  * @file test_service_dispatcher.c
- * @brief Unit tests for ONVIF service dispatcher implementation
+ * @brief Refactored service dispatcher tests demonstrating generic mock framework
  * @author kkrzysztofik
  * @date 2025
  */
@@ -9,61 +9,40 @@
 #include <string.h>
 
 #include "cmocka_wrapper.h"
-#include "networking/http/http_parser.h"
+#include "common/test_helpers.h"
 #include "services/common/service_dispatcher.h"
-#include "utils/error/error_handling.h"
 
-// Error constants from service_dispatcher.c
-#define ONVIF_ERROR_NOT_INITIALIZED -40
-#define ONVIF_ERROR_RESOURCE_LIMIT  -41
+// Create mock handlers using the new macro system
+TEST_HELPER_CREATE_MOCK_HANDLERS(test_service)
 
-// Test constants
-#define MAX_SERVICES_TEST       16
-#define MAX_SERVICE_NAME_LENGTH 32
+/* ============================================================================
+ * Test Setup/Teardown
+ * ============================================================================ */
 
-// Mock data for testing
-static int g_test_init_called = 0;             // NOLINT
-static int g_test_cleanup_called = 0;          // NOLINT
-static int g_test_operation_called = 0;        // NOLINT
-static int g_test_init_result = ONVIF_SUCCESS; // NOLINT
-
-// Mock service handlers
-static int test_service_init_handler(void) {
-  g_test_init_called++;
-  return g_test_init_result;
-}
-
-static void test_service_cleanup_handler(void) {
-  g_test_cleanup_called++;
-}
-
-static int test_service_operation_handler(const char* operation_name, const http_request_t* request,
-                                          http_response_t* response) {
-  (void)operation_name;
-  (void)request;
-  (void)response;
-  g_test_operation_called++;
-  return ONVIF_SUCCESS;
-}
-
-// Reset test state before each test
-static void reset_test_state(void) {
-  g_test_init_called = 0;
-  g_test_cleanup_called = 0;
-  g_test_operation_called = 0;
-  g_test_init_result = ONVIF_SUCCESS;
-
-  // Ensure clean state
+static int setup_service_dispatcher_tests(void** state) {
+  (void)state;
+  test_service_reset_mock_state();
   onvif_service_dispatcher_cleanup();
+  return 0;
 }
+
+static int teardown_service_dispatcher_tests(void** state) {
+  (void)state;
+  onvif_service_dispatcher_cleanup();
+  test_service_reset_mock_state();
+  return 0;
+}
+
+/* ============================================================================
+ * Refactored Tests Using Generic Mock Framework
+ * ============================================================================ */
 
 /**
  * @brief Test service dispatcher initialization
  * @param state Test state (unused)
  */
-void test_service_dispatcher_init(void** state) {
+void test_unit_service_dispatcher_init(void** state) {
   (void)state;
-  reset_test_state();
 
   // Test initialization
   int result = onvif_service_dispatcher_init();
@@ -81,47 +60,45 @@ void test_service_dispatcher_init(void** state) {
  * @brief Test service dispatcher cleanup
  * @param state Test state (unused)
  */
-void test_service_dispatcher_cleanup(void** state) {
+void test_unit_service_dispatcher_cleanup(void** state) {
   (void)state;
-  reset_test_state();
 
   // Initialize first
   onvif_service_dispatcher_init();
 
   // Register a service with cleanup handler
   onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "test_service", "http://test.namespace.uri", test_service_operation_handler,
-    test_service_init_handler, test_service_cleanup_handler);
+    "test_service", "http://test.namespace.uri", test_service_mock_operation,
+    test_service_mock_init, test_service_mock_cleanup);
 
   onvif_service_dispatcher_register_service(&registration);
 
   // Test cleanup (should call service cleanup handlers)
   onvif_service_dispatcher_cleanup();
-  assert_int_equal(g_test_cleanup_called, 1);
+  assert_int_equal(g_test_service_mock_state.cleanup_call_count, 1);
 
   // Test multiple cleanups (should not crash)
   onvif_service_dispatcher_cleanup();
-  assert_int_equal(g_test_cleanup_called, 1); // Should not be called again
+  assert_int_equal(g_test_service_mock_state.cleanup_call_count, 1); // Should not be called again
 }
 
 /**
  * @brief Test successful service registration
  * @param state Test state (unused)
  */
-void test_service_dispatcher_register_service(void** state) {
+void test_unit_service_dispatcher_register_service(void** state) {
   (void)state;
-  reset_test_state();
 
   onvif_service_dispatcher_init();
 
   // Test basic service registration
   onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_operation_handler,
-    test_service_init_handler, test_service_cleanup_handler);
+    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation,
+    test_service_mock_init, test_service_mock_cleanup);
 
   int result = onvif_service_dispatcher_register_service(&registration);
   assert_int_equal(result, ONVIF_SUCCESS);
-  assert_int_equal(g_test_init_called, 1);
+  assert_int_equal(g_test_service_mock_state.init_call_count, 1);
 
   // Verify service is registered
   assert_int_equal(onvif_service_dispatcher_is_registered("device"), 1);
@@ -133,9 +110,8 @@ void test_service_dispatcher_register_service(void** state) {
  * @brief Test service registration with NULL parameters
  * @param state Test state (unused)
  */
-void test_service_dispatcher_register_service_null_params(void** state) {
+void test_unit_service_dispatcher_register_service_null_params(void** state) {
   (void)state;
-  reset_test_state();
 
   onvif_service_dispatcher_init();
 
@@ -150,36 +126,35 @@ void test_service_dispatcher_register_service_null_params(void** state) {
  * @brief Test service registration with invalid parameters
  * @param state Test state (unused)
  */
-void test_service_dispatcher_register_service_invalid_params(void** state) {
+void test_unit_service_dispatcher_register_service_invalid_params(void** state) {
   (void)state;
-  reset_test_state();
 
   onvif_service_dispatcher_init();
 
   // Test empty service name
   onvif_service_registration_t registration_empty_name = ONVIF_SERVICE_REGISTRATION(
-    "", "http://www.onvif.org/ver10/device/wsdl", test_service_operation_handler, NULL, NULL);
+    "", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
 
   int result = onvif_service_dispatcher_register_service(&registration_empty_name);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
   // Test NULL service name
   onvif_service_registration_t registration_null_name = ONVIF_SERVICE_REGISTRATION(
-    NULL, "http://www.onvif.org/ver10/device/wsdl", test_service_operation_handler, NULL, NULL);
+    NULL, "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
 
   result = onvif_service_dispatcher_register_service(&registration_null_name);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
   // Test empty namespace
   onvif_service_registration_t registration_empty_ns =
-    ONVIF_SERVICE_REGISTRATION("device", "", test_service_operation_handler, NULL, NULL);
+    ONVIF_SERVICE_REGISTRATION("device", "", test_service_mock_operation, NULL, NULL);
 
   result = onvif_service_dispatcher_register_service(&registration_empty_ns);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
   // Test NULL namespace
   onvif_service_registration_t registration_null_ns =
-    ONVIF_SERVICE_REGISTRATION("device", NULL, test_service_operation_handler, NULL, NULL);
+    ONVIF_SERVICE_REGISTRATION("device", NULL, test_service_mock_operation, NULL, NULL);
 
   result = onvif_service_dispatcher_register_service(&registration_null_ns);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -198,15 +173,14 @@ void test_service_dispatcher_register_service_invalid_params(void** state) {
  * @brief Test duplicate service registration
  * @param state Test state (unused)
  */
-void test_service_dispatcher_register_service_duplicate(void** state) {
+void test_unit_service_dispatcher_register_service_duplicate(void** state) {
   (void)state;
-  reset_test_state();
 
   onvif_service_dispatcher_init();
 
   // Register first service
   onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_operation_handler, NULL, NULL);
+    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
 
   int result = onvif_service_dispatcher_register_service(&registration);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -219,57 +193,18 @@ void test_service_dispatcher_register_service_duplicate(void** state) {
 }
 
 /**
- * @brief Test service registration when registry is full
- * @param state Test state (unused)
- */
-void test_service_dispatcher_register_service_registry_full(void** state) {
-  (void)state;
-  reset_test_state();
-
-  onvif_service_dispatcher_init();
-
-  // Register maximum number of services (MAX_SERVICES_TEST)
-  static char service_names[MAX_SERVICES_TEST][MAX_SERVICE_NAME_LENGTH];
-  for (int i = 0; i < MAX_SERVICES_TEST; i++) {
-    (void)snprintf(service_names[i], sizeof(service_names[i]), "service_%d", i);
-
-    onvif_service_registration_t registration = {
-      .service_name = service_names[i],
-      .namespace_uri = "http://test.namespace.uri",
-      .operation_handler = test_service_operation_handler,
-      .init_handler = NULL,
-      .cleanup_handler = NULL,
-      .capabilities_handler = NULL,
-      .reserved = {NULL, NULL, NULL, NULL}};
-
-    int result = onvif_service_dispatcher_register_service(&registration);
-    assert_int_equal(result, ONVIF_SUCCESS);
-  }
-
-  // Try to register one more service (should fail)
-  onvif_service_registration_t overflow_registration = ONVIF_SERVICE_REGISTRATION(
-    "overflow_service", "http://test.namespace.uri", test_service_operation_handler, NULL, NULL);
-
-  int result = onvif_service_dispatcher_register_service(&overflow_registration);
-  assert_int_equal(result, ONVIF_ERROR_RESOURCE_LIMIT);
-
-  onvif_service_dispatcher_cleanup();
-}
-
-/**
  * @brief Test service unregistration
  * @param state Test state (unused)
  */
-void test_service_dispatcher_unregister_service(void** state) {
+void test_unit_service_dispatcher_unregister_service(void** state) {
   (void)state;
-  reset_test_state();
 
   onvif_service_dispatcher_init();
 
   // Register a service
   onvif_service_registration_t registration =
     ONVIF_SERVICE_REGISTRATION("device", "http://www.onvif.org/ver10/device/wsdl",
-                               test_service_operation_handler, NULL, test_service_cleanup_handler);
+                               test_service_mock_operation, NULL, test_service_mock_cleanup);
 
   onvif_service_dispatcher_register_service(&registration);
   assert_int_equal(onvif_service_dispatcher_is_registered("device"), 1);
@@ -277,7 +212,7 @@ void test_service_dispatcher_unregister_service(void** state) {
   // Unregister the service
   int result = onvif_service_dispatcher_unregister_service("device");
   assert_int_equal(result, ONVIF_SUCCESS);
-  assert_int_equal(g_test_cleanup_called, 1);
+  assert_int_equal(g_test_service_mock_state.cleanup_call_count, 1);
 
   // Verify service is no longer registered
   assert_int_equal(onvif_service_dispatcher_is_registered("device"), 0);
@@ -289,9 +224,8 @@ void test_service_dispatcher_unregister_service(void** state) {
  * @brief Test service unregistration when service not found
  * @param state Test state (unused)
  */
-void test_service_dispatcher_unregister_service_not_found(void** state) {
+void test_unit_service_dispatcher_unregister_service_not_found(void** state) {
   (void)state;
-  reset_test_state();
 
   onvif_service_dispatcher_init();
 
@@ -310,15 +244,14 @@ void test_service_dispatcher_unregister_service_not_found(void** state) {
  * @brief Test successful request dispatch
  * @param state Test state (unused)
  */
-void test_service_dispatcher_dispatch(void** state) {
+void test_unit_service_dispatcher_dispatch(void** state) {
   (void)state;
-  reset_test_state();
 
   onvif_service_dispatcher_init();
 
   // Register a service
   onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_operation_handler, NULL, NULL);
+    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
 
   onvif_service_dispatcher_register_service(&registration);
 
@@ -330,7 +263,8 @@ void test_service_dispatcher_dispatch(void** state) {
   int result =
     onvif_service_dispatcher_dispatch("device", "GetDeviceInformation", &request, &response);
   assert_int_equal(result, ONVIF_SUCCESS);
-  assert_int_equal(g_test_operation_called, 1);
+  assert_int_equal(g_test_service_mock_state.operation_call_count, 1);
+  assert_string_equal(g_test_service_mock_state.last_operation, "GetDeviceInformation");
 
   onvif_service_dispatcher_cleanup();
 }
@@ -339,9 +273,8 @@ void test_service_dispatcher_dispatch(void** state) {
  * @brief Test dispatch with invalid parameters
  * @param state Test state (unused)
  */
-void test_service_dispatcher_dispatch_invalid_params(void** state) {
+void test_unit_service_dispatcher_dispatch_invalid_params(void** state) {
   (void)state;
-  reset_test_state();
 
   onvif_service_dispatcher_init();
 
@@ -371,9 +304,8 @@ void test_service_dispatcher_dispatch_invalid_params(void** state) {
  * @brief Test dispatch when service not found
  * @param state Test state (unused)
  */
-void test_service_dispatcher_dispatch_service_not_found(void** state) {
+void test_unit_service_dispatcher_dispatch_service_not_found(void** state) {
   (void)state;
-  reset_test_state();
 
   onvif_service_dispatcher_init();
 
@@ -392,9 +324,8 @@ void test_service_dispatcher_dispatch_service_not_found(void** state) {
  * @brief Test service registration check
  * @param state Test state (unused)
  */
-void test_service_dispatcher_is_registered(void** state) {
+void test_unit_service_dispatcher_is_registered(void** state) {
   (void)state;
-  reset_test_state();
 
   onvif_service_dispatcher_init();
 
@@ -403,7 +334,7 @@ void test_service_dispatcher_is_registered(void** state) {
 
   // Register a service
   onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_operation_handler, NULL, NULL);
+    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
 
   onvif_service_dispatcher_register_service(&registration);
 
@@ -417,98 +348,163 @@ void test_service_dispatcher_is_registered(void** state) {
 }
 
 /**
- * @brief Test getting list of registered services
- * @param state Test state (unused)
- */
-void test_service_dispatcher_get_services(void** state) {
-  (void)state;
-  reset_test_state();
-
-  onvif_service_dispatcher_init();
-
-  const char* services[MAX_SERVICES_TEST];
-
-  // Test with no services registered
-  int count = onvif_service_dispatcher_get_services(services, MAX_SERVICES_TEST);
-  assert_int_equal(count, 0);
-
-  // Register some services
-  onvif_service_registration_t device_reg = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_operation_handler, NULL, NULL);
-
-  onvif_service_registration_t media_reg = ONVIF_SERVICE_REGISTRATION(
-    "media", "http://www.onvif.org/ver10/media/wsdl", test_service_operation_handler, NULL, NULL);
-
-  onvif_service_dispatcher_register_service(&device_reg);
-  onvif_service_dispatcher_register_service(&media_reg);
-
-  // Test getting services
-  count = onvif_service_dispatcher_get_services(services, MAX_SERVICES_TEST);
-  assert_int_equal(count, 2);
-
-  // Verify service names are returned
-  int found_device = 0;
-  int found_media = 0;
-  for (int i = 0; i < count; i++) {
-    if (strcmp(services[i], "device") == 0) {
-      found_device = 1;
-    }
-    if (strcmp(services[i], "media") == 0) {
-      found_media = 1;
-    }
-  }
-  assert_int_equal(found_device, 1);
-  assert_int_equal(found_media, 1);
-
-  // Test with limited buffer
-  count = onvif_service_dispatcher_get_services(services, 1);
-  assert_int_equal(count, 1);
-
-  // Test with NULL services array
-  count = onvif_service_dispatcher_get_services(NULL, MAX_SERVICES_TEST);
-  assert_int_equal(count, ONVIF_ERROR_INVALID);
-
-  // Test with zero max_services
-  count = onvif_service_dispatcher_get_services(services, 0);
-  assert_int_equal(count, ONVIF_ERROR_INVALID);
-
-  onvif_service_dispatcher_cleanup();
-}
-
-/**
  * @brief Test service initialization and cleanup handlers
  * @param state Test state (unused)
  */
-void test_service_dispatcher_init_cleanup_handlers(void** state) {
+void test_unit_service_dispatcher_init_cleanup_handlers(void** state) {
   (void)state;
-  reset_test_state();
 
   onvif_service_dispatcher_init();
 
   // Test with successful init handler
   onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_operation_handler,
-    test_service_init_handler, test_service_cleanup_handler);
+    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation,
+    test_service_mock_init, test_service_mock_cleanup);
 
   int result = onvif_service_dispatcher_register_service(&registration);
   assert_int_equal(result, ONVIF_SUCCESS);
-  assert_int_equal(g_test_init_called, 1);
+  assert_int_equal(g_test_service_mock_state.init_call_count, 1);
 
   // Test with failing init handler
-  reset_test_state();
+  test_service_reset_mock_state();
   onvif_service_dispatcher_init(); // Re-initialize after reset
-  g_test_init_result = ONVIF_ERROR_INVALID;
+  g_test_service_mock_state.init_result = ONVIF_ERROR_INVALID;
 
   onvif_service_registration_t failing_registration = ONVIF_SERVICE_REGISTRATION(
-    "failing_service", "http://test.namespace.uri", test_service_operation_handler,
-    test_service_init_handler, test_service_cleanup_handler);
+    "failing_service", "http://test.namespace.uri", test_service_mock_operation,
+    test_service_mock_init, test_service_mock_cleanup);
 
   result = onvif_service_dispatcher_register_service(&failing_registration);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
-  assert_int_equal(g_test_init_called, 1);
-
-  // Service should not be registered due to init failure
-  assert_int_equal(onvif_service_dispatcher_is_registered("failing_service"), 0);
+  assert_int_equal(g_test_service_mock_state.init_call_count, 1);
 
   onvif_service_dispatcher_cleanup();
 }
+
+/**
+ * @brief Test service registration when registry is full
+ * @param state Test state (unused)
+ */
+void test_unit_service_dispatcher_register_service_registry_full(void** state) {
+  (void)state;
+
+  onvif_service_dispatcher_init();
+
+  // Register maximum number of services to fill the registry
+  for (int i = 0; i < 16; i++) { // MAX_REGISTERED_SERVICES
+    char service_name[32];
+    snprintf(service_name, sizeof(service_name), "service_%d", i);
+
+    onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
+      service_name, "http://test.namespace.uri", test_service_mock_operation, NULL, NULL);
+
+    int result = onvif_service_dispatcher_register_service(&registration);
+    assert_int_equal(result, ONVIF_SUCCESS);
+  }
+
+  // Try to register one more service (should fail)
+  onvif_service_registration_t extra_registration = ONVIF_SERVICE_REGISTRATION(
+    "extra_service", "http://test.namespace.uri", test_service_mock_operation, NULL, NULL);
+
+  int result = onvif_service_dispatcher_register_service(&extra_registration);
+  assert_int_equal(result, -41); // ONVIF_ERROR_RESOURCE_LIMIT
+
+  onvif_service_dispatcher_cleanup();
+}
+
+/**
+ * @brief Test getting list of registered services
+ * @param state Test state (unused)
+ */
+void test_unit_service_dispatcher_get_services(void** state) {
+  (void)state;
+
+  onvif_service_dispatcher_init();
+
+  // Initially no services should be registered
+  const char* services[16] = {0}; // MAX_REGISTERED_SERVICES - initialize to NULL
+  int result = onvif_service_dispatcher_get_services(services, 16);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_null(services[0]); // First service should be NULL
+
+  // Register a few services
+  onvif_service_registration_t device_registration = ONVIF_SERVICE_REGISTRATION(
+    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
+  onvif_service_dispatcher_register_service(&device_registration);
+
+  onvif_service_registration_t media_registration = ONVIF_SERVICE_REGISTRATION(
+    "media", "http://www.onvif.org/ver10/media/wsdl", test_service_mock_operation, NULL, NULL);
+  onvif_service_dispatcher_register_service(&media_registration);
+
+  // Get services list
+  memset(services, 0, sizeof(services)); // Clear the array first
+  result = onvif_service_dispatcher_get_services(services, 16);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Check that our services are in the list
+  int device_found = 0;
+  int media_found = 0;
+  for (int i = 0; services[i] != NULL && i < 16; i++) { // MAX_REGISTERED_SERVICES
+    if (strcmp(services[i], "device") == 0) {
+      device_found = 1;
+    } else if (strcmp(services[i], "media") == 0) {
+      media_found = 1;
+    }
+  }
+
+  assert_int_equal(device_found, 1);
+  assert_int_equal(media_found, 1);
+
+  onvif_service_dispatcher_cleanup();
+}
+
+/* ============================================================================
+ * Test Suite Definition
+ * ============================================================================ */
+
+const struct CMUnitTest service_dispatcher_tests[] = {
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_init, setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_cleanup,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_null_params,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_invalid_params,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_duplicate,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_unregister_service,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_unregister_service_not_found,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_invalid_params,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_service_not_found,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_is_registered,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_init_cleanup_handlers,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_registry_full,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_get_services,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+};

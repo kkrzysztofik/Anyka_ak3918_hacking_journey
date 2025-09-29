@@ -106,6 +106,7 @@ struct ptz_preset {
   struct ptz_vector ptz_position;
 };
 
+int onvif_ptz_get_nodes(struct ptz_node** nodes, int* count); /**< Get all PTZ nodes. */
 int onvif_ptz_get_node(const char* node_token,
                        struct ptz_node* node); /**< Retrieve PTZ node capabilities. */
 int onvif_ptz_get_configuration(

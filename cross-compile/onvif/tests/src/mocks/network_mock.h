@@ -13,6 +13,9 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+// Include real HTTP structures to avoid duplication
+#include "networking/http/http_parser.h"
+
 /* ============================================================================
  * Mock State Management
  * ============================================================================ */
@@ -356,19 +359,10 @@ int mock_close(int sockfd);
  * ============================================================================ */
 
 /**
- * @brief Mock HTTP response structure (matches http_response_t)
+ * @brief Mock HTTP response functions
+ * We use the real http_response_t directly from http_parser.h
+ * No structure duplication - mock-specific tracking is handled through global state
  */
-typedef struct {
-  int status_code;
-  char* content_type;
-  char* body;
-  size_t body_length;
-  struct {
-    char* name;
-    char* value;
-  }* headers;
-  size_t header_count;
-} mock_http_response_t;
 
 /**
  * @brief Mock HTTP response functions
@@ -376,7 +370,7 @@ typedef struct {
 void mock_reset_last_header(void);
 const char* mock_get_last_header_name(void);
 const char* mock_get_last_header_value(void);
-void http_response_free(mock_http_response_t* response);
-int http_response_add_header(mock_http_response_t* response, const char* name, const char* value);
+void mock_http_response_free(http_response_t* response);
+int mock_http_response_add_header(http_response_t* response, const char* name, const char* value);
 
 #endif // NETWORK_MOCK_H

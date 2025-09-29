@@ -11,17 +11,17 @@
 #include "cmocka_wrapper.h"
 
 // Forward declarations of test functions
-void test_media_profile_functions(void** state);
-void test_media_video_source_functions(void** state);
-void test_media_audio_source_functions(void** state);
-void test_media_video_configuration_functions(void** state);
-void test_media_audio_configuration_functions(void** state);
-void test_media_stream_uri_functions(void** state);
-void test_media_snapshot_uri_functions(void** state);
-void test_media_multicast_functions(void** state);
-void test_media_metadata_functions(void** state);
-void test_media_error_handling(void** state);
-void test_media_initialization(void** state);
+void test_unit_media_profile_functions(void** state);
+void test_unit_media_video_source_functions(void** state);
+void test_unit_media_audio_source_functions(void** state);
+void test_unit_media_video_configuration_functions(void** state);
+void test_unit_media_audio_configuration_functions(void** state);
+void test_unit_media_stream_uri_functions(void** state);
+void test_unit_media_snapshot_uri_functions(void** state);
+void test_unit_media_multicast_functions(void** state);
+void test_unit_media_metadata_functions(void** state);
+void test_unit_media_error_handling(void** state);
+void test_unit_media_initialization(void** state);
 
 // Test constants
 #define TEST_MEDIA_PROFILE_COUNT        2

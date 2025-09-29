@@ -28,7 +28,7 @@
  * @brief Test memory manager initialization
  * @param state Test state (unused)
  */
-void test_memory_manager_init(void** state) {
+void test_unit_memory_manager_init(void** state) {
   (void)state;
 
   // Test that memory manager can be initialized
@@ -47,7 +47,7 @@ void test_memory_manager_init(void** state) {
  * @brief Test memory allocation and deallocation
  * @param state Test state (unused)
  */
-void test_memory_manager_alloc(void** state) {
+void test_unit_memory_manager_alloc(void** state) {
   (void)state;
 
   // Initialize memory manager
@@ -84,7 +84,7 @@ void test_memory_manager_alloc(void** state) {
  * @brief Test memory manager free functionality
  * @param state Test state (unused)
  */
-void test_memory_manager_free(void** state) {
+void test_unit_memory_manager_free(void** state) {
   (void)state;
 
   // Initialize memory manager
@@ -106,7 +106,7 @@ void test_memory_manager_free(void** state) {
  * @brief Test smart response builder functionality
  * @param state Test state (unused)
  */
-void test_smart_response_builder(void** state) {
+void test_unit_smart_response_builder(void** state) {
   (void)state;
 
   // Initialize for testing
@@ -134,7 +134,7 @@ void test_smart_response_builder(void** state) {
  * @brief Test memory manager statistics and logging
  * @param state Test state (unused)
  */
-void test_memory_manager_stats(void** state) {
+void test_unit_memory_manager_stats(void** state) {
   (void)state;
 
   // Initialize for testing
@@ -165,7 +165,7 @@ void test_memory_manager_stats(void** state) {
  * @brief Test memory manager under stress conditions
  * @param state Test state (unused)
  */
-void test_memory_manager_stress(void** state) {
+void test_unit_memory_manager_stress(void** state) {
   (void)state;
 
   // Initialize for testing
@@ -199,7 +199,7 @@ void test_memory_manager_stress(void** state) {
  * @brief Test dynamic buffer functionality
  * @param state Test state (unused)
  */
-void test_dynamic_buffer(void** state) {
+void test_unit_dynamic_buffer(void** state) {
   (void)state;
 
   dynamic_buffer_t buffer;

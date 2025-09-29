@@ -18,12 +18,12 @@
 #include "utils/error/error_handling.h"
 
 // Mock includes for testing
-#include "mocks/mock_buffer_pool.h"
-#include "mocks/mock_config.h"
-#include "mocks/mock_gsoap.h"
-#include "mocks/mock_platform.h"
 #include "mocks/mock_service_dispatcher.h"
-#include "mocks/mock_smart_response.h"
+#include "mocks/platform_mock.h"
+#include "mocks/config_mock.h"
+#include "mocks/gsoap_mock.h"
+#include "mocks/buffer_pool_mock.h"
+#include "mocks/smart_response_mock.h"
 
 // Test data structures
 struct test_device_info g_test_device_info = {.manufacturer = TEST_DEVICE_MANUFACTURER,
@@ -105,7 +105,7 @@ static int teardown_device_tests(void** state) {
  * @brief Test successful system reboot
  * @param state Test state (unused)
  */
-void test_device_system_reboot_success(void** state) {
+void test_unit_device_system_reboot_success(void** state) {
   (void)state;
 
   // Mock successful system reboot
@@ -122,7 +122,7 @@ void test_device_system_reboot_success(void** state) {
  * @brief Test system reboot failure
  * @param state Test state (unused)
  */
-void test_device_system_reboot_failure(void** state) {
+void test_unit_device_system_reboot_failure(void** state) {
   (void)state;
 
   // Mock failed system reboot
@@ -144,7 +144,7 @@ void test_device_system_reboot_failure(void** state) {
  * @brief Test successful device service initialization
  * @param state Test state (unused)
  */
-void test_device_init_success(void** state) {
+void test_unit_device_init_success(void** state) {
   (void)state;
 
   // Mock successful gSOAP initialization
@@ -178,7 +178,7 @@ void test_device_init_success(void** state) {
  * @brief Test device initialization with NULL config
  * @param state Test state (unused)
  */
-void test_device_init_null_config(void** state) {
+void test_unit_device_init_null_config(void** state) {
   (void)state;
 
   int result = onvif_device_init(NULL);
@@ -194,7 +194,7 @@ void test_device_init_null_config(void** state) {
  * @brief Test device initialization when already initialized
  * @param state Test state (unused)
  */
-void test_device_init_already_initialized(void** state) {
+void test_unit_device_init_already_initialized(void** state) {
   (void)state;
 
   // First initialization
@@ -220,7 +220,7 @@ void test_device_init_already_initialized(void** state) {
  * @brief Test device initialization with gSOAP failure
  * @param state Test state (unused)
  */
-void test_device_init_gsoap_failure(void** state) {
+void test_unit_device_init_gsoap_failure(void** state) {
   (void)state;
 
   // Mock gSOAP initialization failure
@@ -243,7 +243,7 @@ void test_device_init_gsoap_failure(void** state) {
  * @brief Test device initialization with buffer pool failure
  * @param state Test state (unused)
  */
-void test_device_init_buffer_pool_failure(void** state) {
+void test_unit_device_init_buffer_pool_failure(void** state) {
   (void)state;
 
   // Mock successful gSOAP but failed buffer pool
@@ -274,7 +274,7 @@ void test_device_init_buffer_pool_failure(void** state) {
  * @brief Test successful device service cleanup
  * @param state Test state (unused)
  */
-void test_device_cleanup_success(void** state) {
+void test_unit_device_cleanup_success(void** state) {
   (void)state;
 
   // First initialize the service
@@ -306,7 +306,7 @@ void test_device_cleanup_success(void** state) {
  * @brief Test device cleanup when not initialized
  * @param state Test state (unused)
  */
-void test_device_cleanup_not_initialized(void** state) {
+void test_unit_device_cleanup_not_initialized(void** state) {
   (void)state;
 
   int result = onvif_device_cleanup();
@@ -322,7 +322,7 @@ void test_device_cleanup_not_initialized(void** state) {
  * @brief Test device cleanup with unregistration failure
  * @param state Test state (unused)
  */
-void test_device_cleanup_unregister_failure(void** state) {
+void test_unit_device_cleanup_unregister_failure(void** state) {
   (void)state;
 
   // First initialize the service
@@ -359,7 +359,7 @@ void test_device_cleanup_unregister_failure(void** state) {
  * @brief Test GetDeviceInformation operation
  * @param state Test state (unused)
  */
-void test_device_handle_operation_get_device_information(void** state) {
+void test_unit_device_handle_operation_get_device_information(void** state) {
   (void)state;
 
   // Initialize service
@@ -377,7 +377,7 @@ void test_device_handle_operation_get_device_information(void** state) {
   // Mock successful operation
   mock_gsoap_set_generate_response_result(0);
   mock_gsoap_set_get_response_data_result(
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
+    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", 50);
   mock_smart_response_set_build_result(ONVIF_SUCCESS);
 
   // Create test request and response
@@ -397,7 +397,7 @@ void test_device_handle_operation_get_device_information(void** state) {
  * @brief Test GetCapabilities operation
  * @param state Test state (unused)
  */
-void test_device_handle_operation_get_capabilities(void** state) {
+void test_unit_device_handle_operation_get_capabilities(void** state) {
   (void)state;
 
   // Initialize service
@@ -415,7 +415,7 @@ void test_device_handle_operation_get_capabilities(void** state) {
   // Mock successful operation
   mock_gsoap_set_generate_response_result(0);
   mock_gsoap_set_get_response_data_result(
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
+    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", 50);
   mock_smart_response_set_build_result(ONVIF_SUCCESS);
 
   // Create test request and response
@@ -435,7 +435,7 @@ void test_device_handle_operation_get_capabilities(void** state) {
  * @brief Test GetSystemDateAndTime operation
  * @param state Test state (unused)
  */
-void test_device_handle_operation_get_system_date_time(void** state) {
+void test_unit_device_handle_operation_get_system_date_time(void** state) {
   (void)state;
 
   // Initialize service
@@ -453,7 +453,7 @@ void test_device_handle_operation_get_system_date_time(void** state) {
   // Mock successful operation
   mock_gsoap_set_generate_response_result(0);
   mock_gsoap_set_get_response_data_result(
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
+    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", 50);
   mock_smart_response_set_build_result(ONVIF_SUCCESS);
 
   // Create test request and response
@@ -473,7 +473,7 @@ void test_device_handle_operation_get_system_date_time(void** state) {
  * @brief Test GetServices operation
  * @param state Test state (unused)
  */
-void test_device_handle_operation_get_services(void** state) {
+void test_unit_device_handle_operation_get_services(void** state) {
   (void)state;
 
   // Initialize service
@@ -491,7 +491,7 @@ void test_device_handle_operation_get_services(void** state) {
   // Mock successful operation
   mock_gsoap_set_generate_response_result(0);
   mock_gsoap_set_get_response_data_result(
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
+    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", 50);
   mock_smart_response_set_build_result(ONVIF_SUCCESS);
 
   // Create test request and response
@@ -511,7 +511,7 @@ void test_device_handle_operation_get_services(void** state) {
  * @brief Test SystemReboot operation
  * @param state Test state (unused)
  */
-void test_device_handle_operation_system_reboot(void** state) {
+void test_unit_device_handle_operation_system_reboot(void** state) {
   (void)state;
 
   // Initialize service
@@ -530,7 +530,7 @@ void test_device_handle_operation_system_reboot(void** state) {
   mock_platform_set_system_result(0); // Successful reboot
   mock_gsoap_set_generate_response_result(0);
   mock_gsoap_set_get_response_data_result(
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
+    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", 50);
   mock_smart_response_set_build_result(ONVIF_SUCCESS);
 
   // Create test request and response
@@ -553,7 +553,7 @@ void test_device_handle_operation_system_reboot(void** state) {
  * @brief Test unknown operation
  * @param state Test state (unused)
  */
-void test_device_handle_operation_unknown_operation(void** state) {
+void test_unit_device_handle_operation_unknown_operation(void** state) {
   (void)state;
 
   // Initialize service
@@ -585,7 +585,7 @@ void test_device_handle_operation_unknown_operation(void** state) {
  * @brief Test operation handler with NULL operation name
  * @param state Test state (unused)
  */
-void test_device_handle_operation_null_operation(void** state) {
+void test_unit_device_handle_operation_null_operation(void** state) {
   (void)state;
 
   // Initialize service
@@ -612,7 +612,7 @@ void test_device_handle_operation_null_operation(void** state) {
  * @brief Test operation handler with NULL request
  * @param state Test state (unused)
  */
-void test_device_handle_operation_null_request(void** state) {
+void test_unit_device_handle_operation_null_request(void** state) {
   (void)state;
 
   // Initialize service
@@ -638,7 +638,7 @@ void test_device_handle_operation_null_request(void** state) {
  * @brief Test operation handler with NULL response
  * @param state Test state (unused)
  */
-void test_device_handle_operation_null_response(void** state) {
+void test_unit_device_handle_operation_null_response(void** state) {
   (void)state;
 
   // Initialize service
@@ -664,7 +664,7 @@ void test_device_handle_operation_null_response(void** state) {
  * @brief Test operation handler when not initialized
  * @param state Test state (unused)
  */
-void test_device_handle_operation_not_initialized(void** state) {
+void test_unit_device_handle_operation_not_initialized(void** state) {
   (void)state;
 
   // Don't initialize the service
@@ -687,7 +687,7 @@ void test_device_handle_operation_not_initialized(void** state) {
  * @brief Test device capabilities handler with valid capabilities
  * @param state Test state (unused)
  */
-void test_device_capabilities_handler_success(void** state) {
+void test_unit_device_capabilities_handler_success(void** state) {
   (void)state;
 
   // Test known capabilities
@@ -707,7 +707,7 @@ void test_device_capabilities_handler_success(void** state) {
  * @brief Test device capabilities handler with NULL capability
  * @param state Test state (unused)
  */
-void test_device_capabilities_handler_null_capability(void** state) {
+void test_unit_device_capabilities_handler_null_capability(void** state) {
   (void)state;
 
   // Test NULL capability name
@@ -720,7 +720,7 @@ void test_device_capabilities_handler_null_capability(void** state) {
  * @brief Test device capabilities handler with unknown capability
  * @param state Test state (unused)
  */
-void test_device_capabilities_handler_unknown_capability(void** state) {
+void test_unit_device_capabilities_handler_unknown_capability(void** state) {
   (void)state;
 
   // Test unknown capability
@@ -741,7 +741,7 @@ void test_device_capabilities_handler_unknown_capability(void** state) {
  * @brief Test device service registration success
  * @param state Test state (unused)
  */
-void test_device_service_registration_success(void** state) {
+void test_unit_device_service_registration_success(void** state) {
   (void)state;
 
   // Mock successful service registration
@@ -765,7 +765,7 @@ void test_device_service_registration_success(void** state) {
  * @brief Test device service registration with duplicate
  * @param state Test state (unused)
  */
-void test_device_service_registration_duplicate(void** state) {
+void test_unit_device_service_registration_duplicate(void** state) {
   (void)state;
 
   // Mock duplicate service registration
@@ -792,7 +792,7 @@ void test_device_service_registration_duplicate(void** state) {
  * @brief Test device service registration with invalid parameters
  * @param state Test state (unused)
  */
-void test_device_service_registration_invalid_params(void** state) {
+void test_unit_device_service_registration_invalid_params(void** state) {
   (void)state;
 
   // Test with NULL config
@@ -807,7 +807,7 @@ void test_device_service_registration_invalid_params(void** state) {
  * @brief Test device service unregistration success
  * @param state Test state (unused)
  */
-void test_device_service_unregistration_success(void** state) {
+void test_unit_device_service_unregistration_success(void** state) {
   (void)state;
 
   // Initialize service
@@ -835,7 +835,7 @@ void test_device_service_unregistration_success(void** state) {
  * @brief Test device service unregistration when not found
  * @param state Test state (unused)
  */
-void test_device_service_unregistration_not_found(void** state) {
+void test_unit_device_service_unregistration_not_found(void** state) {
   (void)state;
 
   // Initialize service
@@ -868,7 +868,7 @@ void test_device_service_unregistration_not_found(void** state) {
  * @brief Test device information business logic
  * @param state Test state (unused)
  */
-void test_device_business_logic_get_device_information(void** state) {
+void test_unit_device_business_logic_get_device_information(void** state) {
   (void)state;
 
   // This would test the business logic functions directly
@@ -892,7 +892,7 @@ void test_device_business_logic_get_device_information(void** state) {
  * @brief Test capabilities business logic
  * @param state Test state (unused)
  */
-void test_device_business_logic_get_capabilities(void** state) {
+void test_unit_device_business_logic_get_capabilities(void** state) {
   (void)state;
 
   // Test capabilities structure
@@ -910,7 +910,7 @@ void test_device_business_logic_get_capabilities(void** state) {
  * @brief Test system datetime business logic
  * @param state Test state (unused)
  */
-void test_device_business_logic_get_system_date_time(void** state) {
+void test_unit_device_business_logic_get_system_date_time(void** state) {
   (void)state;
 
   // Test time retrieval
@@ -928,7 +928,7 @@ void test_device_business_logic_get_system_date_time(void** state) {
  * @brief Test services business logic
  * @param state Test state (unused)
  */
-void test_device_business_logic_get_services(void** state) {
+void test_unit_device_business_logic_get_services(void** state) {
   (void)state;
 
   // Test services data structure
@@ -944,7 +944,7 @@ void test_device_business_logic_get_services(void** state) {
  * @brief Test system reboot business logic
  * @param state Test state (unused)
  */
-void test_device_business_logic_system_reboot(void** state) {
+void test_unit_device_business_logic_system_reboot(void** state) {
   (void)state;
 
   // Test reboot data structure
@@ -961,7 +961,7 @@ void test_device_business_logic_system_reboot(void** state) {
  * @brief Test business logic with NULL callback data
  * @param state Test state (unused)
  */
-void test_device_business_logic_null_callback_data(void** state) {
+void test_unit_device_business_logic_null_callback_data(void** state) {
   (void)state;
 
   // Test NULL callback data handling
@@ -979,7 +979,7 @@ void test_device_business_logic_null_callback_data(void** state) {
  * @brief Test device service error handling
  * @param state Test state (unused)
  */
-void test_device_error_handling(void** state) {
+void test_unit_device_error_handling(void** state) {
   (void)state;
 
   // Test various error conditions
@@ -1001,7 +1001,7 @@ void test_device_error_handling(void** state) {
  * @brief Test device service memory management
  * @param state Test state (unused)
  */
-void test_device_memory_management(void** state) {
+void test_unit_device_memory_management(void** state) {
   (void)state;
 
   // Test memory allocation and cleanup
@@ -1036,7 +1036,7 @@ void test_device_memory_management(void** state) {
  * @brief Test device service configuration handling
  * @param state Test state (unused)
  */
-void test_device_configuration_handling(void** state) {
+void test_unit_device_configuration_handling(void** state) {
   (void)state;
 
   // Test configuration retrieval
@@ -1073,55 +1073,55 @@ void test_device_configuration_handling(void** state) {
  */
 const struct CMUnitTest device_test_suite[] = {
   // System reboot tests
-  cmocka_unit_test(test_device_system_reboot_success),
-  cmocka_unit_test(test_device_system_reboot_failure),
+  cmocka_unit_test(test_unit_device_system_reboot_success),
+  cmocka_unit_test(test_unit_device_system_reboot_failure),
 
   // Initialization tests
-  cmocka_unit_test(test_device_init_success),
-  cmocka_unit_test(test_device_init_null_config),
-  cmocka_unit_test(test_device_init_already_initialized),
-  cmocka_unit_test(test_device_init_gsoap_failure),
-  cmocka_unit_test(test_device_init_buffer_pool_failure),
+  cmocka_unit_test(test_unit_device_init_success),
+  cmocka_unit_test(test_unit_device_init_null_config),
+  cmocka_unit_test(test_unit_device_init_already_initialized),
+  cmocka_unit_test(test_unit_device_init_gsoap_failure),
+  cmocka_unit_test(test_unit_device_init_buffer_pool_failure),
 
   // Cleanup tests
-  cmocka_unit_test(test_device_cleanup_success),
-  cmocka_unit_test(test_device_cleanup_not_initialized),
-  cmocka_unit_test(test_device_cleanup_unregister_failure),
+  cmocka_unit_test(test_unit_device_cleanup_success),
+  cmocka_unit_test(test_unit_device_cleanup_not_initialized),
+  cmocka_unit_test(test_unit_device_cleanup_unregister_failure),
 
   // Operation handler tests
-  cmocka_unit_test(test_device_handle_operation_get_device_information),
-  cmocka_unit_test(test_device_handle_operation_get_capabilities),
-  cmocka_unit_test(test_device_handle_operation_get_system_date_time),
-  cmocka_unit_test(test_device_handle_operation_get_services),
-  cmocka_unit_test(test_device_handle_operation_system_reboot),
-  cmocka_unit_test(test_device_handle_operation_unknown_operation),
-  cmocka_unit_test(test_device_handle_operation_null_operation),
-  cmocka_unit_test(test_device_handle_operation_null_request),
-  cmocka_unit_test(test_device_handle_operation_null_response),
-  cmocka_unit_test(test_device_handle_operation_not_initialized),
+  cmocka_unit_test(test_unit_device_handle_operation_get_device_information),
+  cmocka_unit_test(test_unit_device_handle_operation_get_capabilities),
+  cmocka_unit_test(test_unit_device_handle_operation_get_system_date_time),
+  cmocka_unit_test(test_unit_device_handle_operation_get_services),
+  cmocka_unit_test(test_unit_device_handle_operation_system_reboot),
+  cmocka_unit_test(test_unit_device_handle_operation_unknown_operation),
+  cmocka_unit_test(test_unit_device_handle_operation_null_operation),
+  cmocka_unit_test(test_unit_device_handle_operation_null_request),
+  cmocka_unit_test(test_unit_device_handle_operation_null_response),
+  cmocka_unit_test(test_unit_device_handle_operation_not_initialized),
 
   // Capabilities handler tests
-  cmocka_unit_test(test_device_capabilities_handler_success),
-  cmocka_unit_test(test_device_capabilities_handler_null_capability),
-  cmocka_unit_test(test_device_capabilities_handler_unknown_capability),
+  cmocka_unit_test(test_unit_device_capabilities_handler_success),
+  cmocka_unit_test(test_unit_device_capabilities_handler_null_capability),
+  cmocka_unit_test(test_unit_device_capabilities_handler_unknown_capability),
 
   // Service registration tests
-  cmocka_unit_test(test_device_service_registration_success),
-  cmocka_unit_test(test_device_service_registration_duplicate),
-  cmocka_unit_test(test_device_service_registration_invalid_params),
-  cmocka_unit_test(test_device_service_unregistration_success),
-  cmocka_unit_test(test_device_service_unregistration_not_found),
+  cmocka_unit_test(test_unit_device_service_registration_success),
+  cmocka_unit_test(test_unit_device_service_registration_duplicate),
+  cmocka_unit_test(test_unit_device_service_registration_invalid_params),
+  cmocka_unit_test(test_unit_device_service_unregistration_success),
+  cmocka_unit_test(test_unit_device_service_unregistration_not_found),
 
   // Business logic tests
-  cmocka_unit_test(test_device_business_logic_get_device_information),
-  cmocka_unit_test(test_device_business_logic_get_capabilities),
-  cmocka_unit_test(test_device_business_logic_get_system_date_time),
-  cmocka_unit_test(test_device_business_logic_get_services),
-  cmocka_unit_test(test_device_business_logic_system_reboot),
-  cmocka_unit_test(test_device_business_logic_null_callback_data),
+  cmocka_unit_test(test_unit_device_business_logic_get_device_information),
+  cmocka_unit_test(test_unit_device_business_logic_get_capabilities),
+  cmocka_unit_test(test_unit_device_business_logic_get_system_date_time),
+  cmocka_unit_test(test_unit_device_business_logic_get_services),
+  cmocka_unit_test(test_unit_device_business_logic_system_reboot),
+  cmocka_unit_test(test_unit_device_business_logic_null_callback_data),
 
   // Error handling and utility tests
-  cmocka_unit_test(test_device_error_handling),
-  cmocka_unit_test(test_device_memory_management),
-  cmocka_unit_test(test_device_configuration_handling),
+  cmocka_unit_test(test_unit_device_error_handling),
+  cmocka_unit_test(test_unit_device_memory_management),
+  cmocka_unit_test(test_unit_device_configuration_handling),
 };

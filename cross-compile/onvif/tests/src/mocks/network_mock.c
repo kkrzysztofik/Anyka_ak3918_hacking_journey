@@ -22,11 +22,7 @@
  * ============================================================================ */
 
 // Header pair structure to match the one in network_mock.h
-// This must match the anonymous struct in network_mock.h exactly
-typedef struct {
-  char* name;
-  char* value;
-} mock_header_pair_t;
+// No longer needed - we use real http_header_t from http_parser.h
 
 // Buffer sizes
 #define NETWORK_MOCK_HTTP_RESPONSE_BODY_SIZE 4096
@@ -747,45 +743,21 @@ const char* mock_get_last_header_value(void) {
   return value;
 }
 
-void http_response_free(mock_http_response_t* response) {
+void mock_http_response_free(http_response_t* response) {
   if (!response) {
     return;
   }
 
-  // Free headers
-  if (response->headers) {
-    for (size_t i = 0; i < response->header_count; i++) {
-      if (response->headers[i].name) {
-        free(response->headers[i].name);
-      }
-      if (response->headers[i].value) {
-        free(response->headers[i].value);
-      }
-    }
-    free(response->headers);
-    response->headers = NULL;
-  }
-
-  if (response->body) {
-    free(response->body);
-    response->body = NULL;
-  }
-
-  if (response->content_type) {
-    free(response->content_type);
-    response->content_type = NULL;
-  }
-
-  response->body_length = 0;
-  response->header_count = 0;
+  // Use real http_response_free - no duplication needed
+  http_response_free(response);
 }
 
-int http_response_add_header(mock_http_response_t* response, const char* name, const char* value) {
+int mock_http_response_add_header(http_response_t* response, const char* name, const char* value) {
   if (!response || !name || !value) {
     return -1;
   }
 
-  // Store the last header for testing
+  // Store the last header for testing (mock-specific tracking)
   pthread_mutex_lock(&g_network_mock_state.mutex);
   strncpy(g_network_mock_last_header_name, name, sizeof(g_network_mock_last_header_name) - 1);
   g_network_mock_last_header_name[sizeof(g_network_mock_last_header_name) - 1] = '\0';
@@ -793,32 +765,6 @@ int http_response_add_header(mock_http_response_t* response, const char* name, c
   g_network_mock_last_header_value[sizeof(g_network_mock_last_header_value) - 1] = '\0';
   pthread_mutex_unlock(&g_network_mock_state.mutex);
 
-  // Allocate or reallocate headers array
-  size_t new_count = response->header_count + 1;
-  mock_header_pair_t* new_headers =
-    realloc(response->headers, new_count * sizeof(mock_header_pair_t));
-
-  if (!new_headers) {
-    return -1; // Memory allocation failed
-  }
-
-  response->headers = (void*)new_headers;
-
-  // Allocate and copy header name
-  response->headers[response->header_count].name = malloc(strlen(name) + 1);
-  if (!response->headers[response->header_count].name) {
-    return -1;
-  }
-  strcpy(response->headers[response->header_count].name, name);
-
-  // Allocate and copy header value
-  response->headers[response->header_count].value = malloc(strlen(value) + 1);
-  if (!response->headers[response->header_count].value) {
-    free(response->headers[response->header_count].name);
-    return -1;
-  }
-  strcpy(response->headers[response->header_count].value, value);
-
-  response->header_count = new_count;
-  return 0;
+  // Use real http_response_add_header - no duplication needed
+  return http_response_add_header(response, name, value);
 }

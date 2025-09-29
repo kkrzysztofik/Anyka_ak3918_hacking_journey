@@ -15,30 +15,30 @@
  * @brief Test string shim functions
  * @param state Test state
  */
-void test_string_shims(void** state);
+void test_unit_string_shims(void** state);
 
 /**
  * @brief Test string validation functions
  * @param state Test state
  */
-void test_string_validation(void** state);
+void test_unit_string_validation(void** state);
 
 /**
  * @brief Test string manipulation functions
  * @param state Test state
  */
-void test_string_manipulation(void** state);
+void test_unit_string_manipulation(void** state);
 
 /**
  * @brief Test string search and comparison functions
  * @param state Test state
  */
-void test_string_search(void** state);
+void test_unit_string_search(void** state);
 
 /**
  * @brief Test string formatting functions
  * @param state Test state
  */
-void test_string_formatting(void** state);
+void test_unit_string_formatting(void** state);
 
 #endif // TEST_STRING_UTILS_H

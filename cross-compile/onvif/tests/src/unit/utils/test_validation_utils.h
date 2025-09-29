@@ -17,7 +17,7 @@
  * @brief Test common validation functions
  * @param state Test state
  */
-void test_common_validation(void** state);
+void test_unit_common_validation(void** state);
 
 /**
  * @brief Test input validation functions
@@ -29,6 +29,6 @@ void test_input_validation(void** state);
  * @brief Test audio validation functions
  * @param state Test state
  */
-void test_audio_validation(void** state);
+void test_unit_audio_validation(void** state);
 
 #endif // TEST_VALIDATION_UTILS_H

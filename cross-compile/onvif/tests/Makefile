@@ -84,20 +84,58 @@ endif
 # CMocka library for native testing
 CMOCKA_LIBS=-lcmocka -lpthread -lm $(GSOAP_LIBS) $(BASE64_LIBS)
 
-# Unit test source files (individual function testing only)
-TEST_SRCS := \
-	src/runner/test_runner.c \
-	src/unit/networking/test_http_auth.c \
-	src/unit/utils/test_simple.c \
+# Modular test runner source files
+RUNNER_UTILS_SRC = src/runner/test_utils_runner.c
+RUNNER_NETWORKING_SRC = src/runner/test_networking_runner.c
+RUNNER_PROTOCOL_SRC = src/runner/test_protocol_runner.c
+RUNNER_DISPATCHER_SRC = src/runner/test_service_dispatcher_runner.c
+RUNNER_PTZ_SRC = src/runner/test_ptz_runner.c
+RUNNER_MEDIA_SRC = src/runner/test_media_runner.c
+RUNNER_IMAGING_SRC = src/runner/test_imaging_runner.c
+RUNNER_INTEGRATION_SRC = src/runner/test_integration_runner.c
+
+# Legacy consolidated test runner (kept for compatibility)
+RUNNER_LEGACY_SRC = src/runner/test_runner.c
+
+# Test source files for each module
+UTILS_TEST_SRCS := \
 	src/unit/utils/test_memory_utils.c \
-	src/unit/utils/test_logging_utils.c \
-	src/unit/protocol/test_onvif_gsoap.c \
-	src/unit/services/common/test_service_dispatcher.c \
-	src/unit/services/media/test_media_utils.c \
-	src/unit/services/media/test_onvif_media_callbacks.c \
-	src/unit/services/imaging/test_onvif_imaging_callbacks.c \
+	src/unit/utils/test_logging_utils.c
+
+NETWORKING_TEST_SRCS := \
+	src/unit/networking/test_http_auth.c \
+	src/unit/networking/test_http_metrics_simple.c
+
+PROTOCOL_TEST_SRCS := \
+	src/unit/protocol/test_onvif_gsoap.c
+
+DISPATCHER_TEST_SRCS := \
+	src/unit/services/common/test_service_dispatcher.c
+
+PTZ_TEST_SRCS := \
 	src/unit/services/ptz/test_ptz_service.c \
-	src/unit/services/ptz/test_onvif_ptz_callbacks.c \
+	src/unit/services/ptz/test_onvif_ptz_callbacks.c
+
+MEDIA_TEST_SRCS := \
+	src/unit/services/media/test_media_utils.c \
+	src/unit/services/media/test_onvif_media_callbacks.c
+
+IMAGING_TEST_SRCS := \
+	src/unit/services/imaging/test_onvif_imaging_callbacks.c
+
+INTEGRATION_TEST_SRCS := \
+	src/integration/ptz_service_tests.c \
+	src/integration/media_service_tests.c \
+	src/integration/imaging_service_optimization_test.c
+
+# All test sources (for legacy runner)
+TEST_SRCS := $(UTILS_TEST_SRCS) $(NETWORKING_TEST_SRCS) $(PROTOCOL_TEST_SRCS) \
+             $(DISPATCHER_TEST_SRCS) $(PTZ_TEST_SRCS) $(MEDIA_TEST_SRCS) \
+             $(IMAGING_TEST_SRCS) $(INTEGRATION_TEST_SRCS)
+
+# Test helper library source files
+TEST_HELPER_SRCS := \
+	src/common/test_helpers.c
 
 # Mock source files
 MOCK_SRCS := \
@@ -105,7 +143,11 @@ MOCK_SRCS := \
 	src/mocks/network_mock.c \
 	src/mocks/platform_ptz_mock.c \
 	src/mocks/service_handler_mock.c \
-	src/mocks/mock_service_dispatcher.c
+	src/mocks/mock_service_dispatcher.c \
+	src/mocks/config_mock.c \
+	src/mocks/gsoap_mock.c \
+	src/mocks/buffer_pool_mock.c \
+	src/mocks/smart_response_mock.c
 
 # Source files from main project (for testing - exclude platform_anyka.c)
 MAIN_SRCS := \
@@ -116,42 +158,99 @@ MAIN_SRCS := \
 	../src/utils/logging/logging_utils.c \
 	../src/utils/logging/service_logging.c \
 	../src/networking/http/http_auth.c \
+	../src/networking/http/http_parser.c \
 	../src/utils/validation/common_validation.c \
 	../src/utils/validation/input_validation.c \
 	../src/utils/security/base64_utils.c \
+	../src/utils/security/security_hardening.c \
 	../src/utils/string/string_shims.c \
 	../src/services/common/service_dispatcher.c \
 	../src/services/common/onvif_service_common.c \
+	../src/services/device/onvif_device.c \
 	../src/services/media/onvif_media.c \
 	../src/services/ptz/onvif_ptz.c \
 	../src/services/imaging/onvif_imaging.c \
 	../src/utils/network/network_utils.c \
 	../src/utils/error/error_handling.c
 
-# Object files - preserve directory structure
-TEST_OBJS := $(TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
+# Object files for each module
+UTILS_TEST_OBJS := $(UTILS_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
+NETWORKING_TEST_OBJS := $(NETWORKING_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
+PROTOCOL_TEST_OBJS := $(PROTOCOL_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
+DISPATCHER_TEST_OBJS := $(DISPATCHER_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
+PTZ_TEST_OBJS := $(PTZ_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
+MEDIA_TEST_OBJS := $(MEDIA_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
+IMAGING_TEST_OBJS := $(IMAGING_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
+INTEGRATION_TEST_OBJS := $(INTEGRATION_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
+
+# Runner object files
+RUNNER_UTILS_OBJ := $(RUNNER_UTILS_SRC:src/%.c=$(OUT_DIR)/%.o)
+RUNNER_NETWORKING_OBJ := $(RUNNER_NETWORKING_SRC:src/%.c=$(OUT_DIR)/%.o)
+RUNNER_PROTOCOL_OBJ := $(RUNNER_PROTOCOL_SRC:src/%.c=$(OUT_DIR)/%.o)
+RUNNER_DISPATCHER_OBJ := $(RUNNER_DISPATCHER_SRC:src/%.c=$(OUT_DIR)/%.o)
+RUNNER_PTZ_OBJ := $(RUNNER_PTZ_SRC:src/%.c=$(OUT_DIR)/%.o)
+RUNNER_MEDIA_OBJ := $(RUNNER_MEDIA_SRC:src/%.c=$(OUT_DIR)/%.o)
+RUNNER_IMAGING_OBJ := $(RUNNER_IMAGING_SRC:src/%.c=$(OUT_DIR)/%.o)
+RUNNER_INTEGRATION_OBJ := $(RUNNER_INTEGRATION_SRC:src/%.c=$(OUT_DIR)/%.o)
+RUNNER_LEGACY_OBJ := $(RUNNER_LEGACY_SRC:src/%.c=$(OUT_DIR)/%.o)
+
+# Test helper library objects
+TEST_HELPER_OBJS := $(TEST_HELPER_SRCS:src/%.c=$(OUT_DIR)/%.o)
+
+# Mock and main project objects
 MOCK_OBJS := $(MOCK_SRCS:src/%.c=$(OUT_DIR)/%.o)
 MAIN_OBJS := $(MAIN_SRCS:../src/%.c=$(OUT_DIR)/main/%.o)
+
+# All test objects (for dependency tracking)
+TEST_OBJS := $(UTILS_TEST_OBJS) $(NETWORKING_TEST_OBJS) $(PROTOCOL_TEST_OBJS) \
+             $(DISPATCHER_TEST_OBJS) $(PTZ_TEST_OBJS) $(MEDIA_TEST_OBJS) \
+             $(IMAGING_TEST_OBJS) $(INTEGRATION_TEST_OBJS)
 
 # Dependency files for incremental builds
 TEST_DEPS := $(TEST_OBJS:$(OUT_DIR)/%.o=$(OUT_DIR)/%.d)
 MOCK_DEPS := $(MOCK_OBJS:$(OUT_DIR)/%.o=$(OUT_DIR)/%.d)
 MAIN_DEPS := $(MAIN_OBJS:$(OUT_DIR)/main/%.o=$(OUT_DIR)/main/%.d)
-ALL_DEPS := $(TEST_DEPS) $(MOCK_DEPS) $(MAIN_DEPS)
+TEST_HELPER_DEPS := $(TEST_HELPER_OBJS:$(OUT_DIR)/%.o=$(OUT_DIR)/%.d)
+RUNNER_DEPS := $(RUNNER_UTILS_OBJ:%.o=%.d) $(RUNNER_NETWORKING_OBJ:%.o=%.d) \
+               $(RUNNER_PROTOCOL_OBJ:%.o=%.d) $(RUNNER_DISPATCHER_OBJ:%.o=%.d) \
+               $(RUNNER_PTZ_OBJ:%.o=%.d) $(RUNNER_MEDIA_OBJ:%.o=%.d) \
+               $(RUNNER_IMAGING_OBJ:%.o=%.d) $(RUNNER_INTEGRATION_OBJ:%.o=%.d)
+ALL_DEPS := $(TEST_DEPS) $(MOCK_DEPS) $(MAIN_DEPS) $(TEST_HELPER_DEPS) $(RUNNER_DEPS)
 
-# Unit test executables
-TEST_TARGETS := \
-	$(OUT_DIR)/test_utils \
-	$(OUT_DIR)/test_all
+# Modular test executables
+TEST_UTILS = $(OUT_DIR)/test_utils
+TEST_NETWORKING = $(OUT_DIR)/test_networking
+TEST_PROTOCOL = $(OUT_DIR)/test_protocol
+TEST_DISPATCHER = $(OUT_DIR)/test_service_dispatcher
+TEST_PTZ = $(OUT_DIR)/test_ptz
+TEST_MEDIA = $(OUT_DIR)/test_media
+TEST_IMAGING = $(OUT_DIR)/test_imaging
+TEST_INTEGRATION = $(OUT_DIR)/test_integration
 
-.PHONY: all clean clean-deps test test-utils test-all coverage coverage-html coverage-report coverage-clean debug release compile-native-libs compile-commands incremental-build
+# Legacy consolidated test runner (kept for compatibility)
+TEST_RUNNER_LEGACY = $(OUT_DIR)/test_runner
 
-# Default target
-all: $(TEST_TARGETS)
+# All modular test targets
+MODULAR_TESTS := $(TEST_UTILS) $(TEST_NETWORKING) $(TEST_PROTOCOL) $(TEST_DISPATCHER) \
+                 $(TEST_PTZ) $(TEST_MEDIA) $(TEST_IMAGING) $(TEST_INTEGRATION)
+
+.PHONY: all clean clean-deps test test-utils test-networking test-protocol test-dispatcher \
+        test-ptz test-media test-imaging test-integration test-all test-modular test-legacy \
+        coverage coverage-html coverage-report coverage-clean debug release \
+        compile-native-libs compile-commands incremental-build help
+
+# Default target - build all modular test suites
+all: $(MODULAR_TESTS)
+	@echo "✅ All modular test suites built successfully"
 
 # Incremental build - only recompile changed files
-incremental-build: $(TEST_TARGETS)
+incremental-build: $(MODULAR_TESTS)
 	@echo "Incremental build completed - only changed files were recompiled"
+
+# Legacy test runner (for compatibility)
+test-legacy: $(TEST_RUNNER_LEGACY)
+	@echo "Running legacy consolidated test runner..."
+	@$(TEST_RUNNER_LEGACY)
 
 # Debug build
 debug:
@@ -174,12 +273,10 @@ coverage: all
 # Generate HTML coverage report
 coverage-html: coverage
 	@echo "Running tests to generate coverage data..."
-	@for test in $(TEST_TARGETS); do \
-		if [ -f $$test ]; then \
-			echo "Running $$test..."; \
-			$$test; \
-		fi; \
-	done
+	@if [ -f $(TEST_TARGET) ]; then \
+		echo "Running $(TEST_TARGET)..."; \
+		$(TEST_TARGET); \
+	fi
 	@echo "Generating HTML coverage report..."
 	@mkdir -p $(COVERAGE_DIR)
 	@$(LCOV) --capture --directory $(OUT_DIR) --output-file $(COVERAGE_INFO)
@@ -191,12 +288,10 @@ coverage-html: coverage
 # Generate coverage summary report
 coverage-report: coverage
 	@echo "Running tests to generate coverage data..."
-	@for test in $(TEST_TARGETS); do \
-		if [ -f $$test ]; then \
-			echo "Running $$test..."; \
-			$$test; \
-		fi; \
-	done
+	@if [ -f $(TEST_TARGET) ]; then \
+		echo "Running $(TEST_TARGET)..."; \
+		$(TEST_TARGET); \
+	fi
 	@echo "Generating coverage summary..."
 	@mkdir -p $(COVERAGE_DIR)
 	@$(LCOV) --capture --directory $(OUT_DIR) --output-file $(COVERAGE_INFO)
@@ -215,33 +310,107 @@ coverage-clean:
 		find $(OUT_DIR) -name "*.gcno" -delete; \
 	fi
 
-# Unit test targets
-test: all
-	@echo "Running all unit tests..."
-	@for test in $(TEST_TARGETS); do \
-		if [ -f $$test ]; then \
-			echo "Running $$test..."; \
-			$$test; \
-		fi; \
-	done
+# Modular test execution targets
+test: test-modular
 
-test-utils: $(OUT_DIR)/test_utils
-	@echo "Running utility unit tests..."
-	@$(OUT_DIR)/test_utils
+test-modular: $(MODULAR_TESTS)
+	@echo "╔════════════════════════════════════════════════════════════════╗"
+	@echo "║        Running All Modular ONVIF Test Suites                  ║"
+	@echo "╚════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@failures=0; \
+	for test_exec in $(MODULAR_TESTS); do \
+		echo "Running $$test_exec..."; \
+		$$test_exec || failures=$$((failures + 1)); \
+		echo ""; \
+	done; \
+	if [ $$failures -eq 0 ]; then \
+		echo "✅ All test suites passed!"; \
+	else \
+		echo "❌ $$failures test suite(s) failed!"; \
+		exit 1; \
+	fi
 
-test-all: $(OUT_DIR)/test_all
-	@echo "Running all unit tests..."
-	@$(OUT_DIR)/test_all
+test-utils: $(TEST_UTILS)
+	@echo "Running utility tests..."
+	@$(TEST_UTILS)
 
+test-networking: $(TEST_NETWORKING)
+	@echo "Running networking tests..."
+	@$(TEST_NETWORKING)
 
-# Unit test executable builds
-$(OUT_DIR)/test_utils: $(TEST_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
+test-protocol: $(TEST_PROTOCOL)
+	@echo "Running protocol tests..."
+	@$(TEST_PROTOCOL)
+
+test-dispatcher: $(TEST_DISPATCHER)
+	@echo "Running service dispatcher tests..."
+	@$(TEST_DISPATCHER)
+
+test-ptz: $(TEST_PTZ)
+	@echo "Running PTZ service tests..."
+	@$(TEST_PTZ)
+
+test-media: $(TEST_MEDIA)
+	@echo "Running Media service tests..."
+	@$(TEST_MEDIA)
+
+test-imaging: $(TEST_IMAGING)
+	@echo "Running Imaging service tests..."
+	@$(TEST_IMAGING)
+
+test-integration: $(TEST_INTEGRATION)
+	@echo "Running integration tests..."
+	@$(TEST_INTEGRATION)
+
+test-all: test-modular
+
+# Build rules for each modular test executable (with test helpers)
+$(TEST_UTILS): $(RUNNER_UTILS_OBJ) $(UTILS_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
+	@echo "✅ Built $@"
 
-$(OUT_DIR)/test_all: $(TEST_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
+$(TEST_NETWORKING): $(RUNNER_NETWORKING_OBJ) $(NETWORKING_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
+	@echo "✅ Built $@"
+
+$(TEST_PROTOCOL): $(RUNNER_PROTOCOL_OBJ) $(PROTOCOL_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
+	@echo "✅ Built $@"
+
+$(TEST_DISPATCHER): $(RUNNER_DISPATCHER_OBJ) $(DISPATCHER_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
+	@echo "✅ Built $@"
+
+$(TEST_PTZ): $(RUNNER_PTZ_OBJ) $(PTZ_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
+	@echo "✅ Built $@"
+
+$(TEST_MEDIA): $(RUNNER_MEDIA_OBJ) $(MEDIA_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
+	@echo "✅ Built $@"
+
+$(TEST_IMAGING): $(RUNNER_IMAGING_OBJ) $(IMAGING_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
+	@echo "✅ Built $@"
+
+$(TEST_INTEGRATION): $(RUNNER_INTEGRATION_OBJ) $(INTEGRATION_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
+	@echo "✅ Built $@"
+
+# Legacy consolidated test runner build (for compatibility, with test helpers)
+$(TEST_RUNNER_LEGACY): $(RUNNER_LEGACY_OBJ) $(TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
+	@echo "✅ Built legacy test runner $@"
 
 # Object file compilation with dependency generation
 $(OUT_DIR)/%.o: src/%.c | $(OUT_DIR)
@@ -283,20 +452,56 @@ compile-commands:
 
 # Help target
 help:
-	@echo "Available targets:"
-	@echo "  all              - Build all tests"
+	@echo "╔════════════════════════════════════════════════════════════════╗"
+	@echo "║           ONVIF Modular Test Suite - Build System             ║"
+	@echo "╚════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "📦 Build Targets:"
+	@echo "  all              - Build all modular test suites (default)"
 	@echo "  incremental-build - Build only changed files (faster for development)"
-	@echo "  test             - Build and run all tests"
-	@echo "  test-utils       - Build and run utility unit tests"
-	@echo "  test-all         - Run all unit tests"
+	@echo "  debug            - Build debug version"
+	@echo "  release          - Build release version"
+	@echo ""
+	@echo "🧪 Test Execution Targets:"
+	@echo "  test             - Run all modular test suites"
+	@echo "  test-modular     - Run all modular test suites (same as test)"
+	@echo "  test-utils       - Run utility tests only"
+	@echo "  test-networking  - Run networking tests only"
+	@echo "  test-protocol    - Run protocol (gSOAP) tests only"
+	@echo "  test-dispatcher  - Run service dispatcher tests only"
+	@echo "  test-ptz         - Run PTZ service tests only"
+	@echo "  test-media       - Run Media service tests only"
+	@echo "  test-imaging     - Run Imaging service tests only"
+	@echo "  test-integration - Run integration tests only"
+	@echo "  test-all         - Run all tests (alias for test-modular)"
+	@echo "  test-legacy      - Run legacy consolidated test runner"
+	@echo ""
+	@echo "📊 Coverage Targets:"
 	@echo "  coverage         - Build with coverage analysis"
 	@echo "  coverage-html    - Generate HTML coverage report"
 	@echo "  coverage-report  - Generate coverage summary"
 	@echo "  coverage-clean   - Clean coverage files"
-	@echo "  debug            - Build debug version"
-	@echo "  release          - Build release version"
+	@echo ""
+	@echo "🛠️  Utility Targets:"
 	@echo "  compile-native-libs - Compile native gsoap and libb64 libraries"
 	@echo "  compile-commands  - Generate compile_commands.json for test files"
-	@echo "  clean            - Clean build artifacts"
+	@echo "  clean            - Clean all build artifacts"
 	@echo "  clean-deps       - Clean dependency files only"
 	@echo "  help             - Show this help"
+	@echo ""
+	@echo "✨ Modular Test Suite Benefits:"
+	@echo "  • No forward declarations needed"
+	@echo "  • Faster incremental builds"
+	@echo "  • Better test isolation"
+	@echo "  • Can run individual test suites"
+	@echo "  • Parallel execution possible"
+	@echo ""
+	@echo "📁 Test Executables:"
+	@echo "  $(OUT_DIR)/test_utils              - Utility tests"
+	@echo "  $(OUT_DIR)/test_networking         - Networking tests"
+	@echo "  $(OUT_DIR)/test_protocol           - Protocol tests"
+	@echo "  $(OUT_DIR)/test_service_dispatcher - Service dispatcher tests"
+	@echo "  $(OUT_DIR)/test_ptz                - PTZ service tests"
+	@echo "  $(OUT_DIR)/test_media              - Media service tests"
+	@echo "  $(OUT_DIR)/test_imaging            - Imaging service tests"
+	@echo "  $(OUT_DIR)/test_integration        - Integration tests"
