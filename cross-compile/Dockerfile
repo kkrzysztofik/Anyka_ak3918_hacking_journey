@@ -1,4 +1,4 @@
-FROM ubuntu:24.04
+FROM ubuntu:24.10
 
 # Set up 32-bit architecture support
 RUN dpkg --add-architecture i386
