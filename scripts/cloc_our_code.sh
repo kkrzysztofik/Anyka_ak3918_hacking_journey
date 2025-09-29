@@ -34,7 +34,7 @@ cd "$PROJECT_ROOT"
 
 # Run cloc with exclusions
 cloc \
-    --exclude-dir=anyka_reference,gsoap,node_modules,out,lib,include,wsdl,generated,orig,toolchain,integration-tests,testspecs,verbose \
+    --exclude-dir=anyka_reference,gsoap,node_modules,out,lib,include,wsdl,generated,orig,toolchain,e2e,testspecs,verbose \
     --exclude-ext=o,so,a,log,json,ini,dat,xsd,wsdl,nsmap \
     --exclude-list-file=<(cat << 'EOF'
 # Generated files
@@ -67,7 +67,7 @@ cross-compile/onvif/*.log
 # Other external content
 orig/
 toolchain/
-integration-tests/
+e2e/
 testspecs/
 verbose/
 
