@@ -1,26 +1,32 @@
 # Technology Stack
 
 ## Project Type
+
 Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cross-compilation toolchain, SD-card development environment, and web-based management interface.
 
 ## Core Technologies
 
 ### Primary Language(s)
+
 - **Language**: C (embedded systems programming)
 - **Runtime/Compiler**: GCC cross-compiler for ARM architecture (Anyka AK3918 SoC)
 - **Language-specific tools**: GNU Make, CMake for build system, Doxygen for documentation
 
 ### Key Dependencies/Libraries
+
 - **gSOAP 2.8**: SOAP/XML processing for ONVIF services and web service communication
 - **libcurl**: HTTP client functionality for network communication
 - **libxml2**: XML parsing and generation for ONVIF protocol handling
-- **OpenSSL**: Cryptographic functions, SSL/TLS support, and secure communication
+- **CMocka**: Unit testing framework for C with mocking support (development only)
 - **Anyka SDK**: Hardware abstraction layer and device drivers for AK3918 SoC
 - **uClibc**: Embedded C library optimized for resource-constrained systems
 - **BusyBox**: Lightweight Unix utilities for embedded Linux environment
+- **gcov/lcov**: Code coverage analysis tools (development only)
 
 ### Application Architecture
+
 **Layered Architecture with Platform Abstraction**:
+
 - **Platform Layer**: Hardware abstraction for Anyka AK3918 SoC
 - **Core Services Layer**: ONVIF service implementations (Device, Media, PTZ, Imaging)
 - **Network Layer**: HTTP/SOAP, RTSP, WS-Discovery protocol implementations
@@ -28,12 +34,14 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 - **Application Layer**: Main daemon and web interface
 
 ### Data Storage
+
 - **Primary storage**: SquashFS compressed filesystem images for root filesystem
 - **Configuration**: JSON/XML configuration files stored in flash memory
 - **Caching**: In-memory caching for frequently accessed data (profiles, settings)
 - **Data formats**: XML for ONVIF SOAP messages, JSON for configuration, H.264 for video streams
 
 ### External Integrations
+
 - **ONVIF Protocol**: Full ONVIF 2.5 specification compliance for IP camera standards
 - **RTSP Streaming**: Real-time video streaming protocol for H.264 video delivery
 - **WS-Discovery**: Web Services Discovery for automatic camera detection
@@ -41,6 +49,7 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 - **UDP Multicast**: Network discovery and communication protocols
 
 ### Monitoring & Dashboard Technologies
+
 - **Dashboard Framework**: Vanilla JavaScript with HTML5/CSS3 for web interface
 - **Real-time Communication**: WebSocket for live updates and control
 - **Visualization Libraries**: Canvas API for video display, Chart.js for metrics
@@ -49,27 +58,35 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 ## Development Environment
 
 ### Build & Development Tools
+
 - **Build System**: GNU Make with cross-compilation support
 - **Package Management**: Custom toolchain with pre-compiled libraries
 - **Development workflow**: SD-card based testing, UART debugging, hot reload for web interface
 
 ### Code Quality Tools
-- **Static Analysis**: cppcheck, clang-static-analyzer, PVS-Studio
-- **Formatting**: Custom C formatting standards with 2-space indentation
-- **Testing Framework**: Custom test suite in integration-tests/ directory
+
+- **Static Analysis**: Cppcheck, Clang Static Analyzer, Snyk Code
+- **Linting**: Custom linting script (`scripts/lint_code.sh`) - MANDATORY validation
+- **Formatting**: Custom formatting script (`scripts/format_code.sh`) - MANDATORY validation
+- **Unit Testing Framework**: CMocka for isolated unit testing (MANDATORY for all utilities)
+- **E2E Testing Framework**: Python-based test suite in e2e/ directory
+- **Coverage Analysis**: gcov/lcov for test coverage reporting
 - **Documentation**: Doxygen with HTML generation for API documentation
 
 ### Version Control & Collaboration
+
 - **VCS**: Git with feature branch workflow
 - **Branching Strategy**: Feature branches with comprehensive code review
 - **Code Review Process**: Mandatory review for all changes with security and performance analysis
 
 ### Dashboard Development
+
 - **Live Reload**: File watchers for web interface development
 - **Port Management**: Configurable HTTP port (default 80) for web interface
 - **Multi-Instance Support**: Single camera per instance, multiple cameras via network
 
 ## Deployment & Distribution
+
 - **Target Platform(s)**: Anyka AK3918-based IP cameras (embedded Linux)
 - **Distribution Method**: SD-card payload system for development, flash memory for production
 - **Installation Requirements**: UART access for debugging, SD card slot for development
@@ -78,6 +95,7 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 ## Technical Requirements & Constraints
 
 ### Performance Requirements
+
 - **Response Time**: Sub-second response for all ONVIF operations
 - **Video Streaming**: Real-time H.264 streaming at 1080p@30fps
 - **Memory Usage**: Optimized for embedded systems with limited RAM (typically 64-128MB)
@@ -85,11 +103,13 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 - **Concurrent Connections**: Support for multiple simultaneous ONVIF clients
 
 ### Compatibility Requirements
+
 - **Platform Support**: Anyka AK3918 SoC with ARM architecture
 - **Dependency Versions**: gSOAP 2.8+, libcurl 7.0+, OpenSSL 1.1+
 - **Standards Compliance**: ONVIF 2.5 specification, RTSP RFC 2326, WS-Discovery
 
 ### Security & Compliance
+
 - **Security Requirements**:
   - Input validation and sanitization for all network inputs
   - Secure authentication with digest authentication
@@ -103,6 +123,7 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
   - Unauthorized access to video streams
 
 ### Scalability & Reliability
+
 - **Expected Load**: 1-10 concurrent ONVIF clients per camera
 - **Availability Requirements**: 99.9% uptime for camera services
 - **Growth Projections**: Support for additional camera models and features
@@ -110,6 +131,7 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 ## Technical Decisions & Rationale
 
 ### Decision Log
+
 1. **C Language Choice**: Chosen for embedded systems performance, direct hardware access, and compatibility with existing Anyka SDK
 2. **ONVIF 2.5 Compliance**: Industry standard for IP camera interoperability, enables integration with existing security systems
 3. **SD-card Development Environment**: Safe testing without modifying flash memory, enables rapid iteration and debugging
@@ -132,6 +154,7 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 ## Development Workflow
 
 ### Build Process
+
 ```bash
 # Build the ONVIF project
 make -C cross-compile/onvif
@@ -147,14 +170,22 @@ make -C cross-compile/onvif docs
 ```
 
 ### Testing Process
-1. **Compilation Testing**: Verify code compiles without errors or warnings
-2. **Static Analysis**: Run automated analysis tools for code quality
-3. **SD-card Testing**: Test functionality using SD-card payload system
-4. **Integration Testing**: Test with ONVIF clients and verify compliance
-5. **Performance Testing**: Measure response times and resource usage
-6. **Security Testing**: Validate input handling and security measures
+
+1. **Code Quality Validation** (MANDATORY):
+   - Linting: `./cross-compile/onvif/scripts/lint_code.sh --check`
+   - Formatting: `./cross-compile/onvif/scripts/format_code.sh --check`
+   - Function ordering and global variable placement verification
+2. **Unit Testing** (MANDATORY): `make test` - All utility functions must have unit tests
+3. **Coverage Analysis**: `make test-coverage-html` - Generate HTML coverage reports
+4. **Compilation Testing**: Verify code compiles without errors or warnings
+5. **Static Analysis**: `make static-analysis` - Run automated analysis tools
+6. **SD-card Testing**: Test functionality using SD-card payload system
+7. **E2E Testing**: Test with ONVIF clients and verify compliance (`e2e/run_tests.py`)
+8. **Performance Testing**: Measure response times and resource usage
+9. **Security Testing**: Validate input handling and security measures
 
 ### Documentation Process
+
 1. **Code Documentation**: Update Doxygen comments for all changes
 2. **API Documentation**: Generate HTML documentation from source code
 3. **User Documentation**: Update user guides and configuration instructions
@@ -163,42 +194,55 @@ make -C cross-compile/onvif docs
 ## Code Organization Standards
 
 ### Include Order (MANDATORY)
+
 1. **System headers first** (e.g., `#include <stdio.h>`, `#include <stdlib.h>`)
 2. **Third-party library headers** (e.g., `#include <curl/curl.h>`)
 3. **Project-specific headers** (e.g., `#include "platform.h"`, `#include "common.h"`)
 
 ### Global Variable Naming (MANDATORY)
+
 - **ALL global variables MUST start with `g_<module>_<variable_name>`**
 - **Module prefix** should match the source file or functional area
 - **Variable name** should be descriptive and follow snake_case convention
 
 ### File Organization
+
 - **Source files**: `onvif_<service>.c` (e.g., `onvif_device.c`)
 - **Header files**: `onvif_<service>.h` (e.g., `onvif_device.h`)
 - **Utility files**: `<category>_utils.c` (e.g., `memory_utils.c`)
+  - **MANDATORY**: Check `src/utils/` for existing functionality before implementing new code
+  - **NO code duplication allowed** - reuse existing utilities
+  - **ALL utility functions MUST have unit tests** in `tests/src/unit/`
 - **Platform files**: `platform_<platform>.c` (e.g., `platform_anyka.c`)
+- **Test files**:
+  - Unit tests: `test_unit_<module>_<functionality>.c`
+  - Integration tests: `test_integration_<service>_<functionality>.c`
 
 ## Security Architecture
 
 ### Input Validation
+
 - **All network inputs** must be validated and sanitized
 - **Buffer bounds checking** for all string operations
 - **XML/SOAP input validation** to prevent injection attacks
 - **Numeric range validation** for all parameters
 
 ### Memory Management
+
 - **Safe string operations** using `strncpy()` instead of `strcpy()`
 - **Memory initialization** with `memset()` or `calloc()`
 - **Resource cleanup** in all error paths
 - **Buffer overflow prevention** with proper bounds checking
 
 ### Authentication & Authorization
+
 - **Digest authentication** for ONVIF services
 - **Session management** with secure token handling
 - **Role-based access control** for different user types
 - **Rate limiting** for authentication attempts
 
 ### Network Security
+
 - **HTTPS/WSS support** for secure communication
 - **Input sanitization** for all network data
 - **Error message handling** without information leakage
