@@ -1,5 +1,32 @@
 # Essential Development Commands
 
+## Code Quality Validation (MANDATORY)
+```bash
+# Code linting (MANDATORY - must pass before approval)
+./cross-compile/onvif/scripts/lint_code.sh --check
+
+# Lint specific file
+./cross-compile/onvif/scripts/lint_code.sh --file src/path/to/file.c
+
+# Lint only changed files
+./cross-compile/onvif/scripts/lint_code.sh --changed
+
+# Lint with formatting check
+./cross-compile/onvif/scripts/lint_code.sh --format
+
+# Code formatting (MANDATORY - must pass before approval)
+./cross-compile/onvif/scripts/format_code.sh --check
+
+# Auto-format all files
+./cross-compile/onvif/scripts/format_code.sh
+
+# Format specific files
+./cross-compile/onvif/scripts/format_code.sh --files src/path/to/file.c
+
+# Show what would be changed (dry-run)
+./cross-compile/onvif/scripts/format_code.sh --dry-run
+```
+
 ## Primary Build Commands
 ```bash
 # Build ONVIF server (primary development target)
@@ -32,8 +59,14 @@ make -C cross-compile/onvif test-coverage
 # Generate HTML coverage report
 make -C cross-compile/onvif test-coverage-html
 
+# View coverage report
+xdg-open cross-compile/onvif/tests/coverage/html/index.html
+
 # Run tests with valgrind (memory checking)
 make -C cross-compile/onvif test-valgrind
+
+# Clean coverage files
+make -C cross-compile/onvif test-coverage-clean
 ```
 
 ## Documentation Commands (MANDATORY)
@@ -54,6 +87,9 @@ make -C cross-compile/onvif static-analysis
 make -C cross-compile/onvif clang-analyze
 make -C cross-compile/onvif cppcheck-analyze
 make -C cross-compile/onvif snyk-analyze
+
+# Generate compile_commands.json for clangd
+make -C cross-compile/onvif compile-commands
 ```
 
 ## SD Card Testing Workflow (Primary Development Method)
@@ -68,10 +104,10 @@ cp configs/anyka_cfg.ini ../../SD_card_contents/anyka_hack/onvif/
 # Deploy SD card to device and test (safe - leaves original firmware intact)
 ```
 
-## Integration Testing Commands
+## E2E Testing Commands
 ```bash
-# Run Python-based integration tests
-cd integration-tests
+# Run Python-based E2E tests
+cd e2e
 pip install -r requirements.txt
 python run_tests.py
 
@@ -79,21 +115,9 @@ python run_tests.py
 python run_tests.py --category device
 python run_tests.py --category ptz
 python run_tests.py --category media
-```
 
-## Code Quality Commands
-```bash
-# Format code
-make -C cross-compile/onvif format
-
-# Check formatting
-make -C cross-compile/onvif format-check
-
-# Lint code
-make -C cross-compile/onvif lint
-
-# Generate compile_commands.json for clangd
-make -C cross-compile/onvif compile-commands
+# Run with coverage
+python run_tests.py --coverage
 ```
 
 ## Docker Development (Alternative)
@@ -122,4 +146,18 @@ grep -r "pattern" cross-compile/onvif/src/ -n
 
 # Check file status
 test -f cross-compile/onvif/out/onvifd && echo "Binary exists" || echo "Binary missing"
+```
+
+## Common Development Workflow
+```bash
+# Full quality check and build
+./cross-compile/onvif/scripts/lint_code.sh --check && \
+./cross-compile/onvif/scripts/format_code.sh --check && \
+make -C cross-compile/onvif clean && \
+make -C cross-compile/onvif && \
+make -C cross-compile/onvif test && \
+make -C cross-compile/onvif docs
+
+# Quick build and test cycle
+make -C cross-compile/onvif && make -C cross-compile/onvif test
 ```

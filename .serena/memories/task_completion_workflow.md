@@ -10,7 +10,24 @@
 - **Use consistent naming conventions** and formatting
 - **Follow security guidelines** with input validation
 
-### 2. Build and Test Phase (MANDATORY)
+### 2. Code Quality Validation Phase (MANDATORY)
+```bash
+# Code linting (MANDATORY - must pass before approval)
+./cross-compile/onvif/scripts/lint_code.sh --check
+
+# Code formatting (MANDATORY - must pass before approval)
+./cross-compile/onvif/scripts/format_code.sh --check
+
+# Auto-format if needed
+./cross-compile/onvif/scripts/format_code.sh
+
+# Verify function ordering
+# - Definitions at top of files
+# - Execution logic at bottom
+# - Global variables at top after includes
+```
+
+### 3. Build and Test Phase (MANDATORY)
 ```bash
 # Test compilation
 make -C cross-compile/onvif clean
@@ -24,9 +41,12 @@ make -C cross-compile/onvif test-utils
 
 # Generate coverage report
 make -C cross-compile/onvif test-coverage-html
+
+# Memory leak detection
+make -C cross-compile/onvif test-valgrind
 ```
 
-### 3. Documentation Phase (MANDATORY)
+### 4. Documentation Phase (MANDATORY)
 ```bash
 # Update Doxygen documentation
 make -C cross-compile/onvif docs
@@ -35,19 +55,18 @@ make -C cross-compile/onvif docs
 test -f cross-compile/onvif/docs/html/index.html
 ```
 
-### 4. Quality Assurance Phase
+### 5. Static Analysis Phase
 ```bash
 # Run static analysis
 make -C cross-compile/onvif static-analysis
 
-# Check code formatting
-make -C cross-compile/onvif format-check
-
-# Run memory analysis if available
-make -C cross-compile/onvif test-valgrind
+# Individual tools
+make -C cross-compile/onvif clang-analyze
+make -C cross-compile/onvif cppcheck-analyze
+make -C cross-compile/onvif snyk-analyze
 ```
 
-### 5. Integration Testing Phase
+### 6. Integration Testing Phase
 ```bash
 # Copy binary to SD card payload
 cp cross-compile/onvif/out/onvifd SD_card_contents/anyka_hack/usr/bin/
@@ -58,7 +77,12 @@ cp cross-compile/onvif/configs/anyka_cfg.ini SD_card_contents/anyka_hack/onvif/
 # Test on actual device using SD card boot (primary testing method)
 ```
 
-### 6. Final Verification Checklist
+### 7. Final Verification Checklist
+- [ ] **Code linting passed** with zero errors (MANDATORY)
+- [ ] **Code formatting passed** with zero issues (MANDATORY)
+- [ ] **Function ordering verified** (definitions at top, logic at bottom)
+- [ ] **Global variables at top** after includes
+- [ ] **Test naming follows convention** (`test_unit_*` or `test_integration_*`)
 - [ ] **Code compiles** without warnings or errors
 - [ ] **Unit tests pass** (if utility functions modified)
 - [ ] **Documentation generated** successfully
@@ -87,6 +111,12 @@ cp cross-compile/onvif/configs/anyka_cfg.ini SD_card_contents/anyka_hack/onvif/
 - Place in appropriate `src/utils/` subdirectory
 - Complete Doxygen documentation
 - Thread-safe implementation where applicable
+- Test naming: `test_unit_<module>_<functionality>`
+
+### Integration Test Development
+- Place in `cross-compile/onvif/tests/src/integration/`
+- Test naming: `test_integration_<service>_<functionality>`
+- Test complete workflows and service interactions
 
 ### Platform Integration
 - Modify `cross-compile/onvif/src/platform/platform_anyka.c`
@@ -101,6 +131,8 @@ cp cross-compile/onvif/configs/anyka_cfg.ini SD_card_contents/anyka_hack/onvif/
 - Verify network security
 
 ## Error Handling During Task Completion
+- **Linting Errors**: Fix all errors before proceeding (MANDATORY)
+- **Formatting Issues**: Auto-format or fix manually before proceeding (MANDATORY)
 - **Compilation Errors**: Fix immediately, do not proceed without clean build
 - **Test Failures**: Investigate and fix before proceeding
 - **Documentation Issues**: Regenerate docs and verify completeness

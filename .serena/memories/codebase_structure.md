@@ -96,10 +96,10 @@ tests/
 └── build_native/       # Native build artifacts for tests
 ```
 
-### Integration Testing (`integration-tests/`)
+### E2E Testing (`e2e/`)
 ```
-integration-tests/
-├── tests/              # Python-based integration tests
+e2e/
+├── tests/              # Python-based E2E tests
 ├── test_data/          # Test data and configurations
 ├── logs/               # Test execution logs
 └── reports/            # Test coverage and results

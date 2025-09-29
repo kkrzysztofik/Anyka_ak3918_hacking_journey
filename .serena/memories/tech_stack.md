@@ -40,7 +40,7 @@
 
 ## Testing Frameworks
 - **Unit Testing**: CMocka framework for isolated function testing
-- **Integration Testing**: Python-based test suite with pytest
+- **E2E Testing**: Python-based test suite with pytest
 - **Coverage Analysis**: gcov/lcov for coverage reporting
 - **Memory Testing**: Valgrind integration for leak detection
 - **Static Analysis**: Multiple tools (Clang, Cppcheck, Snyk) integrated into build system

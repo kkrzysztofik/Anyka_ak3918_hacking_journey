@@ -27,7 +27,19 @@
 - **ALWAYS use predefined constants** for all function return values
 - **Module-specific constants** in module headers
 - **Global constants** in `utils/error/error_handling.h`
-- Examples: `HTTP_AUTH_SUCCESS`, `ONVIF_ERROR_INVALID`
+- **Examples**: 
+  - Success: `HTTP_AUTH_SUCCESS`, `ONVIF_SUCCESS`
+  - Errors: `HTTP_AUTH_ERROR_NULL`, `ONVIF_ERROR_INVALID`
+
+## Test Naming Conventions (MANDATORY)
+- **Unit Test Files**: `test_unit_<module>_<functionality>.c`
+  - Examples: `test_unit_memory_utils.c`, `test_unit_http_auth_verify_credentials_success.c`
+- **Integration Test Files**: `test_integration_<service>_<functionality>.c`
+  - Examples: `test_integration_ptz_absolute_move_functionality.c`
+- **Test Functions**:
+  - Unit: `test_unit_<module>_<functionality>`
+  - Integration: `test_integration_<service>_<functionality>`
+- **Enforcement**: Test runner uses naming convention to filter tests by category
 
 ## Documentation Standards (MANDATORY)
 - **Doxygen Documentation**: ALL functions must have complete documentation
@@ -38,8 +50,16 @@
 ## Code Structure
 - **Indentation**: 2 spaces consistently
 - **Functions**: Definitions at top, execution logic at bottom
+- **Global Variables**: At top of file after includes
 - **Error Handling**: Comprehensive with proper error propagation
 - **Memory Management**: Proper allocation/deallocation with error path cleanup
+
+## Code Quality Validation (MANDATORY)
+- **Linting**: All code must pass `./cross-compile/onvif/scripts/lint_code.sh --check`
+- **Formatting**: All code must pass `./cross-compile/onvif/scripts/format_code.sh --check`
+- **Function Ordering**: Verify definitions at top, execution logic at bottom
+- **Global Variable Placement**: Verify all globals at top after includes
+- **Enforcement**: Must pass before code can be approved
 
 ## Security Requirements (MANDATORY)
 - **Input Validation**: ALL user inputs validated and sanitized
