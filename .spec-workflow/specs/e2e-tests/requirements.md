@@ -2,7 +2,7 @@
 
 ## Introduction
 
-The integration test framework for the Anyka AK3918 ONVIF implementation requires comprehensive improvements to address critical issues including code duplication, poor organization, missing ONVIF compliance validation, and inadequate performance testing. This enhancement will transform the current test suite into a professional-grade framework that ensures ONVIF Profile S & T compliance, provides reliable performance metrics, and maintains code quality standards suitable for production use.
+The end-to-end (E2E) test framework for the Anyka AK3918 ONVIF implementation requires comprehensive improvements to address critical issues including code duplication, poor organization, missing ONVIF compliance validation, and inadequate performance testing. This enhancement will transform the current test suite into a professional-grade framework that ensures ONVIF Profile S & T compliance, provides reliable performance metrics, and maintains code quality standards suitable for production use.
 
 ## Alignment with Product Vision
 

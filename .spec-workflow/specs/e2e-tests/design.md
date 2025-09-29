@@ -2,7 +2,7 @@
 
 ## Overview
 
-The integration test improvements will transform the current flat, duplicated test structure into a modular, organized framework that supports comprehensive ONVIF Profile S & T compliance validation, statistical performance analysis, and maintainable code quality standards. The design leverages existing ONVIF client infrastructure while introducing clear separation of concerns, reusable utilities, and automated quality enforcement.
+The E2E test suite improvements will transform the current flat, duplicated test structure into a modular, organized framework that supports comprehensive ONVIF Profile S & T compliance validation, statistical performance analysis, and maintainable code quality standards. The design leverages existing ONVIF client infrastructure while introducing clear separation of concerns, reusable utilities, and automated quality enforcement.
 
 ## Steering Document Alignment
 
@@ -17,7 +17,7 @@ The design follows the project's established technical patterns:
 Implementation will follow project organization conventions:
 - Directory structure mirrors the main project's modular organization
 - Utilities are grouped by purpose (validation, performance, compliance)
-- Configuration management follows existing patterns from `integration-tests/config.py`
+- Configuration management follows existing patterns from `e2e/config.py`
 - Documentation standards align with the project's Doxygen requirements
 
 ## Code Reuse Analysis
@@ -31,7 +31,7 @@ Implementation will follow project organization conventions:
 
 ### Integration Points
 - **ONVIF Server**: Tests will integrate with the existing ONVIF server implementation in `cross-compile/onvif/`
-- **Device Configuration**: Will reuse existing device configuration patterns from `integration-tests/config.py`
+- **Device Configuration**: Will reuse existing device configuration patterns from `e2e/config.py`
 - **Test Execution**: Integration with existing `run_tests.py` execution framework
 - **Local Development**: Integration with local development workflows and testing processes
 
@@ -48,7 +48,7 @@ graph TD
     E --> F[Device Communication]
 
     B --> G[Unit Tests]
-    B --> H[Integration Tests]
+    B --> H[E2E Tests]
     B --> I[Performance Tests]
     B --> J[Compliance Tests]
 
@@ -94,7 +94,7 @@ graph TD
 
 #### Package and Module Structure
 ```python
-integration-tests/
+e2e/
 ├── tests/
 │   ├── unit/                    # Unit tests with mocked dependencies
 │   ├── integration/             # Integration tests with real ONVIF calls
@@ -444,7 +444,7 @@ skips = ["B101", "B601"]  # Skip assert_used and shell_injection_subprocess
 
 [tool.vulture]
 min_confidence = 80
-paths = ["integration-tests"]
+paths = ["e2e"]
 ignore_decorators = ["@pytest.fixture", "@pytest.mark.*"]
 ```
 
@@ -468,10 +468,10 @@ class QualityChecker:
         self.checks: List[Tuple[str, List[str], str]] = [
             ("Code formatting (Black)", ["black", "--check", "."], "Run: black ."),
             ("Import sorting (isort)", ["isort", "--check-only", "."], "Run: isort ."),
-            ("Linting (Pylint)", ["pylint", "integration-tests/"], "Fix issues reported"),
-            ("Type checking (mypy)", ["mypy", "integration-tests/"], "Add type hints"),
-            ("Security (Bandit)", ["bandit", "-r", "integration-tests/"], "Fix security issues"),
-            ("Dead code (Vulture)", ["vulture", "integration-tests/"], "Remove unused code"),
+            ("Linting (Pylint)", ["pylint", "e2e/"], "Fix issues reported"),
+            ("Type checking (mypy)", ["mypy", "e2e/"], "Add type hints"),
+            ("Security (Bandit)", ["bandit", "-r", "e2e/"], "Fix security issues"),
+            ("Dead code (Vulture)", ["vulture", "e2e/"], "Remove unused code"),
             ("Test coverage", ["pytest", "--cov", "--cov-fail-under=90"], "Add more tests"),
         ]
 
@@ -782,7 +782,7 @@ def test_soap_helper_create_envelope(mock_soap_request):
     assert body_content in result
 ```
 
-### Integration Testing (pytest + requests)
+### E2E Testing (pytest + requests)
 - **Approach:** Test complete ONVIF service interactions with real device communication
 - **Framework:** pytest with requests library for HTTP communication
 - **Key Flows:** Device service operations, media service streaming, PTZ control, imaging configuration
@@ -911,7 +911,7 @@ def test_profile_s_rtsp_session(profile_s_stream_validator):
 ```bash
 # scripts/setup_dev_environment.sh
 #!/bin/bash
-# Setup development environment for integration tests
+# Setup development environment for E2E tests
 
 python -m venv venv
 source venv/bin/activate
