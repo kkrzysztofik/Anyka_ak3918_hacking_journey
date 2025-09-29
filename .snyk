@@ -1,0 +1,92 @@
+# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.
+version: v1.22.1
+
+# Exclude third-party and reference code from security scanning
+exclude:
+  global:
+    # Vendor reference implementation - not maintained by us
+    - "cross-compile/anyka_reference/**"
+
+    # Third-party libraries and tools
+    - "cross-compile/gsoap/**"
+    - "toolchain/**"
+
+    # Original firmware filesystem dump - read-only reference
+    - "orig/**"
+
+    # Python virtual environment and cache files
+    - "e2e/venv/**"
+    - "e2e/__pycache__/**"
+    - "e2e/.pytest_cache/**"
+
+    # Generated reports and logs
+    - "e2e/htmlcov/**"
+    - "e2e/reports/**"
+    - "e2e/logs/**"
+
+    # Build artifacts and temporary files
+    - "**/build/**"
+    - "**/out/**"
+    - "**/bin/**"
+    - "**/obj/**"
+    - "**/Debug/**"
+    - "**/Release/**"
+    - "**/dist/**"
+    - "**/target/**"
+
+    # IDE and editor files
+    - "**/.vscode/**"
+    - "**/.idea/**"
+    - "**/*.swp"
+    - "**/*.swo"
+    - "**/*~"
+
+    # OS generated files
+    - "**/.DS_Store"
+    - "**/Thumbs.db"
+    - "**/desktop.ini"
+
+    # Archive and compressed files
+    - "**/*.zip"
+    - "**/*.tar.gz"
+    - "**/*.tar.bz2"
+    - "**/*.rar"
+    - "**/*.7z"
+
+    # Documentation that may contain third-party content
+    - "docs/reference/**"
+    - "docs/vendor/**"
+
+    # Test data that may contain third-party samples
+    - "e2e/test_data/**"
+
+    # Git and version control
+    - ".git/**"
+    - "**/.git/**"
+
+    # Node modules (if any)
+    - "**/node_modules/**"
+
+    # Python bytecode
+    - "**/*.pyc"
+    - "**/*.pyo"
+    - "**/*.pyd"
+    - "**/__pycache__/**"
+
+# Ignore specific vulnerabilities in our maintained code if needed
+# (Add specific vulnerability IDs here as they are discovered)
+ignore:
+  # Example format for ignoring specific vulnerabilities:
+  # SNYK-CC-K8S-1:
+  #   - 'path/to/file.c':
+  #       reason: 'Vulnerability not applicable to our use case'
+  #       expires: '2025-12-31T23:59:59.999Z'
+  #       created: '2025-01-27T10:00:00.000Z'
+
+# Patch specific vulnerabilities if needed
+# (Add patches here as they are identified)
+patch:
+  # Example format for patching vulnerabilities:
+  # SNYK-CC-K8S-1:
+  #   - 'path/to/file.c':
+  #       patched: '2025-01-27T10:00:00.000Z'
