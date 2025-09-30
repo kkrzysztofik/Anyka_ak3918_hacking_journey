@@ -12,11 +12,18 @@
 #   make release            - Explicitly build release version
 #   make clean              - Clean build artifacts
 #   make docs               - Generate documentation
-#   make lint               - Lint all C source files
-#   make lint-check         - Check for linting issues (exit 1 if issues found)
+#   make lint               - Lint all global C source files
+#   make lint-check         - Check for linting issues in global source files (exit 1 if issues found)
 #   make lint-dry-run       - Show what would be linted (dry run)
 #   make lint-format        - Lint with format checking
 #   make lint-errors        - Check for errors only
+#   make lint-tests         - Lint all C test source files
+#   make lint-tests-check   - Check for linting issues in test source files
+#   make lint-tests-dry-run - Show what test files would be linted (dry run)
+#   make lint-tests-format  - Lint test files with format checking
+#   make lint-tests-errors  - Check for errors in test files only
+#   make lint-all           - Lint all source files (global + test)
+#   make lint-all-check     - Check for linting issues in all source files
 #   make format             - Format all C source files
 #   make format-check       - Check if files are properly formatted
 #
@@ -111,7 +118,7 @@ SRCS := \
 
 OBJS := $(SRCS:src/%.c=$(OUT_DIR)/%.o)
 
-.PHONY = all clean debug release docs docs-clean docs-open static-analysis clang-analyze cppcheck-analyze snyk-analyze compile-commands lint lint-check lint-dry-run lint-verbose test test-utils test-all test-coverage test-coverage-html test-coverage-report test-coverage-clean
+.PHONY = all clean debug release docs docs-clean docs-open static-analysis clang-analyze cppcheck-analyze snyk-analyze compile-commands lint lint-check lint-dry-run lint-format lint-errors lint-tests lint-tests-check lint-tests-dry-run lint-tests-format lint-tests-errors lint-all lint-all-check test test-utils test-all test-coverage test-coverage-html test-coverage-report test-coverage-clean
 
 # Documentation directory
 DOCS_DIR = docs
@@ -208,17 +215,16 @@ format-dry-run:
 
 # Code linting targets
 lint:
-	@echo "Linting all C source files..."
+	@echo "Linting all global C source files..."
 	@./scripts/lint_code.sh
 
 lint-check:
-	@echo "Checking for linting issues..."
+	@echo "Checking for linting issues in global source files..."
 	@./scripts/lint_code.sh --check
 
 lint-dry-run:
 	@echo "Showing what would be linted (dry run)..."
 	@./scripts/lint_code.sh --dry-run
-
 
 lint-format:
 	@echo "Linting with format checking..."
@@ -227,6 +233,34 @@ lint-format:
 lint-errors:
 	@echo "Checking for linting errors only..."
 	@./scripts/lint_code.sh --severity error
+
+# Test code linting targets
+lint-tests:
+	@echo "Linting all C test source files..."
+	@./tests/scripts/lint_test_code.sh
+
+lint-tests-check:
+	@echo "Checking for linting issues in test source files..."
+	@./tests/scripts/lint_test_code.sh --check
+
+lint-tests-dry-run:
+	@echo "Showing what test files would be linted (dry run)..."
+	@./tests/scripts/lint_test_code.sh --dry-run
+
+lint-tests-format:
+	@echo "Linting test files with format checking..."
+	@./tests/scripts/lint_test_code.sh --format
+
+lint-tests-errors:
+	@echo "Checking for linting errors in test files only..."
+	@./tests/scripts/lint_test_code.sh --severity error
+
+# Lint all (global + test files)
+lint-all: lint lint-tests
+	@echo "Linting completed for all source files"
+
+lint-all-check: lint-check lint-tests-check
+	@echo "Linting check completed for all source files"
 
 # Testing targets
 test:

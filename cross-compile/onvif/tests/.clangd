@@ -4,10 +4,26 @@
 CompileFlags:
   # Use native GCC for unit testing (not cross-compilation)
   Compiler: gcc
+  Remove:
+    # Strip cross-compilation flags inherited from parent config
+    - --target=armv7a-unknown-linux-gnueabi
+    - --sysroot=/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool/usr/arm-anykav200-linux-uclibcgnueabi/sysroot
+    - --gcc-toolchain=/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool/usr
+    - -march=armv7-a
+    - -mfpu=neon
+    - -mfloat-abi=softfp
+    - -D__ARM_ARCH_7A__=1
+    - -D__ARM_NEON__=1
   Add:
     # Force C language mode for all files
     - -x
     - c
+
+    # Enable clang-format diagnostics
+    - -Wclang-format-violations
+    # Additional formatting-related warnings
+    - -Wformat
+    - -Wformat-security
 
     # C standard and test-specific definitions
     - -std=c99
@@ -45,10 +61,7 @@ CompileFlags:
     - -I../src/protocol
     - -I../src/utils
     - -I../src/generated
-    - -I.
-    - -I./mocks
-    - -I./unit
-    - -I./lib
+    - -I./src
 
     # Native system includes
     - -isystem
@@ -69,7 +82,7 @@ Diagnostics:
       - clang-analyzer-*
       - security-*
     CheckOptions:
-      misc-include-cleaner.IgnoreHeaders: 'cmocka.h'
+      misc-include-cleaner.IgnoreHeaders: "cmocka.h"
 
   UnusedIncludes: Strict
   MissingIncludes: Strict
@@ -85,7 +98,6 @@ Diagnostics:
   ClangTidy:
     Remove: "*"
 ---
-
 # Disable diagnostics for external include files
 If:
   PathMatch: .*/include/.*
@@ -95,7 +107,6 @@ Diagnostics:
   ClangTidy:
     Remove: "*"
 ---
-
 # Disable diagnostics for mock files (they intentionally break normal patterns)
 If:
   PathMatch: .*/mocks/.*
@@ -131,12 +142,3 @@ InlayHints:
 # Hover information
 Hover:
   ShowAKA: Yes
-
-# Clang-format integration via compile flags
-CompileFlags:
-  Add:
-    # Enable clang-format diagnostics
-    - -Wclang-format-violations
-    # Additional formatting-related warnings
-    - -Wformat
-    - -Wformat-security

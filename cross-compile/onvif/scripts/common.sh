@@ -80,6 +80,20 @@ find_all_c_files() {
         done
 }
 
+find_global_c_files() {
+    find "$PROJECT_ROOT/src" \( -name "*.c" -o -name "*.h" \) -print0 2>/dev/null | \
+        while IFS= read -r -d '' file; do
+            echo "$file"
+        done
+}
+
+find_test_c_files() {
+    find "$PROJECT_ROOT/tests/src" \( -name "*.c" -o -name "*.h" \) -print0 2>/dev/null | \
+        while IFS= read -r -d '' file; do
+            echo "$file"
+        done
+}
+
 find_c_files() {
     if [[ -n "${FILES_ONLY:-}" ]]; then
         find_specific_files

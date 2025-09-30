@@ -1,6 +1,9 @@
 # WSL2 clangd configuration for Anyka ONVIF project
 # Optimized for native Linux development environment and Cursor problems pane
 
+If:
+  PathExclude: .*/tests/.*
+
 CompileFlags:
   # Specify the C compiler explicitly
   Compiler: arm-anykav200-linux-uclibcgnueabi-gcc

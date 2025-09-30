@@ -1,6 +1,6 @@
 #!/bin/bash
-# Code linting script for ONVIF project
-# Uses clangd-tidy to perform comprehensive code analysis and linting
+# Test code linting script for ONVIF project
+# Uses clangd-tidy to perform comprehensive code analysis and linting on test files
 
 set -uo pipefail
 
@@ -10,7 +10,8 @@ set -uo pipefail
 
 # Source common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+source "$PROJECT_ROOT/scripts/common.sh"
 
 # =============================================================================
 # Script-Specific Configuration
@@ -33,8 +34,7 @@ print_usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
 
-Lint global C source files in the ONVIF project using clangd-tidy
-(Excludes test files - use tests/scripts/lint_test_code.sh for test files)
+Lint C test source files in the ONVIF project using clangd-tidy
 
 OPTIONS:
   -h, --help              Show this help message
@@ -47,12 +47,12 @@ OPTIONS:
   --severity LEVEL        Fail on severity level: error, warn, info, hint (default: hint)
 
 EXAMPLES:
-  $0                      # Lint all global C files in the project
+  $0                      # Lint all C test files in the project
   $0 --dry-run            # Show what would be linted
   $0 --check              # Check if files have linting issues
-  $0 --file src/core/main.c                    # Lint a single file
-  $0 --files src/core/main.c,src/services/device/onvif_device.c
-  $0 --changed            # Lint only changed files since last commit
+  $0 --file src/unit/utils/test_memory_utils.c    # Lint a single test file
+  $0 --files src/unit/utils/test_memory_utils.c,src/unit/services/ptz/test_ptz_service.c
+  $0 --changed            # Lint only changed test files since last commit
   $0 --format             # Also check code formatting
   $0 --severity error     # Only fail on errors
 EOF
@@ -86,14 +86,14 @@ EOF
 }
 
 check_compile_commands() {
-    if [[ ! -f "$PROJECT_ROOT/compile_commands.json" ]]; then
-        log_warning "Warning: compile_commands.json not found"
-        log_info "Generating compile_commands.json..."
-        if [[ -f "$PROJECT_ROOT/scripts/generate_compile_commands.sh" ]]; then
-            "$PROJECT_ROOT/scripts/generate_compile_commands.sh"
+    if [[ ! -f "$PROJECT_ROOT/tests/compile_commands.json" ]]; then
+        log_warning "Warning: tests/compile_commands.json not found"
+        log_info "Generating tests/compile_commands.json..."
+        if [[ -f "$PROJECT_ROOT/tests/scripts/generate_compile_commands.sh" ]]; then
+            "$PROJECT_ROOT/tests/scripts/generate_compile_commands.sh"
         else
-            log_error "Error: generate_compile_commands.sh not found"
-            log_info "Please run 'make compile-commands' to generate compile_commands.json"
+            log_error "Error: tests/scripts/generate_compile_commands.sh not found"
+            log_info "Please run 'make -C tests compile-commands' to generate tests/compile_commands.json"
             return 1
         fi
     fi
@@ -104,8 +104,8 @@ build_clangd_tidy_command() {
     local files=("$@")
     local cmd="clangd-tidy"
 
-    # Add compile commands directory
-    cmd="$cmd -p $PROJECT_ROOT"
+    # Add compile commands directory (use tests-specific compile_commands.json)
+    cmd="$cmd -p $PROJECT_ROOT/tests"
 
     # Add severity level
     cmd="$cmd --fail-on-severity $SEVERITY_LEVEL"
@@ -141,7 +141,7 @@ run_clangd_tidy() {
     # Run clangd-tidy and capture output
     if eval "$cmd" > "$temp_file" 2>&1; then
         # No issues found
-        log_success "✓ All files pass linting checks"
+        log_success "✓ All test files pass linting checks"
         rm -f "$temp_file"
         return 0
     else
@@ -160,11 +160,11 @@ lint_files() {
     local total_files=${#files[@]}
 
     if [[ $total_files -eq 0 ]]; then
-        log_warning "No C files found to lint"
+        log_warning "No C test files found to lint"
         return 0
     fi
 
-    log_info "Found $total_files C file(s) to process"
+    log_info "Found $total_files C test file(s) to process"
     echo ""
 
     # Filter out generated files
@@ -180,7 +180,7 @@ lint_files() {
     done
 
     if [[ ${#filtered_files[@]} -eq 0 ]]; then
-        log_info "No files to lint after filtering generated files"
+        log_info "No test files to lint after filtering generated files"
         return 0
     fi
 
@@ -192,7 +192,14 @@ lint_files() {
     return $exit_code
 }
 
-find_changed_files() {
+find_test_c_files() {
+    find "$PROJECT_ROOT/tests/src" \( -name "*.c" -o -name "*.h" \) -print0 2>/dev/null | \
+        while IFS= read -r -d '' file; do
+            echo "$file"
+        done
+}
+
+find_changed_test_files() {
     # Check if we're in a git repository
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
         log_error "Error: Not in a git repository"
@@ -203,11 +210,11 @@ find_changed_files() {
     local git_root
     git_root=$(git rev-parse --show-toplevel)
 
-    # Get modified, staged, and untracked files (only global source files)
+    # Get modified, staged, and untracked files (only test files)
     while IFS= read -r file; do
-        # Only include C/C++ source files in src directory (exclude tests)
+        # Only include C/C++ source files in tests directory
         # Handle both git root relative paths and working directory relative paths
-        if [[ "$file" =~ ^(cross-compile/onvif/)?src/.*\.(c|h|cpp|hpp|cc|hh)$ ]]; then
+        if [[ "$file" =~ ^(cross-compile/onvif/)?tests/.*\.(c|h|cpp|hpp|cc|hh)$ ]]; then
             # Convert to absolute path if relative
             if [[ "$file" != /* ]]; then
                 # If it starts with cross-compile/onvif/, use git root
@@ -291,11 +298,11 @@ main() {
 
         # Convert to absolute path if relative
         if [[ "$SINGLE_FILE" != /* ]]; then
-            SINGLE_FILE="$PROJECT_ROOT/$SINGLE_FILE"
+            SINGLE_FILE="$PROJECT_ROOT/tests/$SINGLE_FILE"
         fi
 
         files=("$SINGLE_FILE")
-        log_info "Linting single file: $(get_relative_path "$SINGLE_FILE")"
+        log_info "Linting single test file: $(get_relative_path "$SINGLE_FILE")"
     elif [[ -n "$FILES_ONLY" ]]; then
         # Lint specific files (comma-separated)
         IFS=',' read -ra file_array <<< "$FILES_ONLY"
@@ -308,24 +315,24 @@ main() {
             fi
             # Convert to absolute path if relative
             if [[ "$file" != /* ]]; then
-                file="$PROJECT_ROOT/$file"
+                file="$PROJECT_ROOT/tests/$file"
             fi
             files+=("$file")
         done
-        log_info "Linting specified files: ${#files[@]} file(s)"
+        log_info "Linting specified test files: ${#files[@]} file(s)"
     elif [[ "$CHANGED_FILES" == "true" ]]; then
-        # Lint only changed files since last commit
-        log_info "Finding C source files changed since last commit..."
-        mapfile -t files < <(find_changed_files)
+        # Lint only changed test files since last commit
+        log_info "Finding C test source files changed since last commit..."
+        mapfile -t files < <(find_changed_test_files)
         if [[ ${#files[@]} -eq 0 ]]; then
-            log_info "No C source files have been modified since last commit"
+            log_info "No C test source files have been modified since last commit"
             exit 0
         fi
-        log_info "Found ${#files[@]} changed C file(s) to lint"
+        log_info "Found ${#files[@]} changed C test file(s) to lint"
     else
-        # Find and lint all global C files (excluding test files)
-        log_info "Scanning for global C source files..."
-        mapfile -t files < <(find_global_c_files)
+        # Find and lint all C test files
+        log_info "Scanning for C test source files..."
+        mapfile -t files < <(find_test_c_files)
     fi
 
     # Lint the files

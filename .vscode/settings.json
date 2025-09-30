@@ -5,37 +5,37 @@
     "*.cpp": "cpp",
     "*.hpp": "cpp"
   },
-  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-  "C_Cpp.default.intelliSenseMode": "gcc-x64",
-  "C_Cpp.default.compilerPath": "/usr/bin/gcc",
-  "C_Cpp.default.cStandard": "c99",
-  "C_Cpp.default.cppStandard": "c++11",
-  "C_Cpp.default.includePath": [
-    "${workspaceFolder}/cross-compile/onvif/include",
-    "${workspaceFolder}/cross-compile/onvif/src",
-    "${workspaceFolder}/cross-compile/anyka_reference/component",
-    "${workspaceFolder}/cross-compile/anyka_reference/platform",
-    "${workspaceFolder}/cross-compile/anyka_reference/akipc/include",
-    "${workspaceFolder}/cross-compile/anyka_reference/component/include",
-    "${workspaceFolder}/cross-compile/anyka_reference/platform/include"
-  ],
-  "C_Cpp.default.defines": [
-    "ANYKA_PLATFORM=1",
-    "_POSIX_C_SOURCE=199309L",
-    "PLATFORM_LOG_LEVEL_INFO=3",
-    "DEBUG_BUILD"
-  ],
-  "C_Cpp.default.compilerArgs": [
-    "-std=c99",
-    "-D_POSIX_C_SOURCE=199309L",
-    "-DANYKA_PLATFORM=1",
-    "-g",
-    "-O0",
-    "-DDEBUG_BUILD",
-    "-Wall",
-    "-Wextra",
-    "-Wpedantic"
-  ],
+  // "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  // "C_Cpp.default.intelliSenseMode": "gcc-x64",
+  // "C_Cpp.default.compilerPath": "/usr/bin/gcc",
+  // "C_Cpp.default.cStandard": "c99",
+  // "C_Cpp.default.cppStandard": "c++11",
+  // "C_Cpp.default.includePath": [
+  //   "${workspaceFolder}/cross-compile/onvif/include",
+  //   "${workspaceFolder}/cross-compile/onvif/src",
+  //   "${workspaceFolder}/cross-compile/anyka_reference/component",
+  //   "${workspaceFolder}/cross-compile/anyka_reference/platform",
+  //   "${workspaceFolder}/cross-compile/anyka_reference/akipc/include",
+  //   "${workspaceFolder}/cross-compile/anyka_reference/component/include",
+  //   "${workspaceFolder}/cross-compile/anyka_reference/platform/include"
+  // ],
+  // "C_Cpp.default.defines": [
+  //   "ANYKA_PLATFORM=1",
+  //   "_POSIX_C_SOURCE=199309L",
+  //   "PLATFORM_LOG_LEVEL_INFO=3",
+  //   "DEBUG_BUILD"
+  // ],
+  // "C_Cpp.default.compilerArgs": [
+  //   "-std=c99",
+  //   "-D_POSIX_C_SOURCE=199309L",
+  //   "-DANYKA_PLATFORM=1",
+  //   "-g",
+  //   "-O0",
+  //   "-DDEBUG_BUILD",
+  //   "-Wall",
+  //   "-Wextra",
+  //   "-Wpedantic"
+  // ],
   // Editor settings
   "editor.tabSize": 2,
   "editor.insertSpaces": true,
@@ -67,15 +67,15 @@
   "task.quickOpen.skip": false,
   // Clangd settings for WSL2 development
   "clangd.path": "/usr/bin/clangd",
-  "clangd.arguments": [
-    "--compile-commands-dir=${workspaceFolder}/cross-compile/onvif",
-    "--header-insertion=never",
-    "--completion-style=detailed",
-    "--function-arg-placeholders=false",
-    "--fallback-style=Google",
-    "--background-index",
-    "--clang-tidy"
-  ],
+  // "clangd.arguments": [
+  //   "--compile-commands-dir=${workspaceFolder}/cross-compile/onvif",
+  //   "--header-insertion=never",
+  //   "--completion-style=detailed",
+  //   "--function-arg-placeholders=false",
+  //   "--fallback-style=Google",
+  //   "--background-index",
+  //   "--clang-tidy"
+  // ],
   "clangd.checkUpdates": true,
   "clangd.onConfigChanged": "restart",
   // Problems pane settings

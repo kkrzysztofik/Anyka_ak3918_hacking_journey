@@ -135,7 +135,8 @@ TEST_SRCS := $(UTILS_TEST_SRCS) $(NETWORKING_TEST_SRCS) $(PROTOCOL_TEST_SRCS) \
 
 # Test helper library source files
 TEST_HELPER_SRCS := \
-	src/common/test_helpers.c
+	src/common/test_helpers.c \
+	src/common/time_utils.c
 
 # Mock source files
 MOCK_SRCS := \
