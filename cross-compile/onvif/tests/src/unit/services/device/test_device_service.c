@@ -14,24 +14,28 @@
 #include <time.h>
 
 // Include the actual source files we're testing
+#include "core/config/config.h"
+#include "networking/http/http_parser.h"
 #include "services/device/onvif_device.h"
 #include "utils/error/error_handling.h"
 
 // Mock includes for testing
-#include "mocks/mock_service_dispatcher.h"
-#include "mocks/platform_mock.h"
+#include "mocks/buffer_pool_mock.h"
 #include "mocks/config_mock.h"
 #include "mocks/gsoap_mock.h"
-#include "mocks/buffer_pool_mock.h"
+#include "mocks/mock_service_dispatcher.h"
+#include "mocks/platform_mock.h"
 #include "mocks/smart_response_mock.h"
 
 // Test data structures
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 struct test_device_info g_test_device_info = {.manufacturer = TEST_DEVICE_MANUFACTURER,
                                               .model = TEST_DEVICE_MODEL,
                                               .firmware_version = TEST_DEVICE_FIRMWARE_VERSION,
                                               .serial_number = TEST_DEVICE_SERIAL_NUMBER,
                                               .hardware_id = TEST_DEVICE_HARDWARE_ID};
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 struct test_capabilities g_test_capabilities = {.has_analytics = 0,
                                                 .has_device = 1,
                                                 .has_events = 0,
@@ -42,59 +46,6 @@ struct test_capabilities g_test_capabilities = {.has_analytics = 0,
 // Global test state
 static int g_device_service_initialized = 0;   // NOLINT
 static config_manager_t* g_test_config = NULL; // NOLINT
-
-/* ============================================================================
- * Test Setup and Teardown Functions
- * ============================================================================
- */
-
-/**
- * @brief Setup function for device service tests
- * @param state Test state
- * @return 0 on success
- */
-static int setup_device_tests(void** state) {
-  (void)state;
-
-  // Initialize test configuration
-  g_test_config = mock_config_manager_create();
-  if (!g_test_config) {
-    return -1;
-  }
-
-  // Set up mock configuration values
-  mock_config_set_string(g_test_config, "device", "manufacturer", TEST_DEVICE_MANUFACTURER);
-  mock_config_set_string(g_test_config, "device", "model", TEST_DEVICE_MODEL);
-  mock_config_set_string(g_test_config, "device", "firmware_version", TEST_DEVICE_FIRMWARE_VERSION);
-  mock_config_set_string(g_test_config, "device", "serial_number", TEST_DEVICE_SERIAL_NUMBER);
-  mock_config_set_string(g_test_config, "device", "hardware_id", TEST_DEVICE_HARDWARE_ID);
-  mock_config_set_int(g_test_config, "onvif", "http_port", TEST_HTTP_PORT);
-
-  return 0;
-}
-
-/**
- * @brief Teardown function for device service tests
- * @param state Test state
- * @return 0 on success
- */
-static int teardown_device_tests(void** state) {
-  (void)state;
-
-  // Cleanup device service if initialized
-  if (g_device_service_initialized) {
-    onvif_device_cleanup();
-    g_device_service_initialized = 0;
-  }
-
-  // Cleanup test configuration
-  if (g_test_config) {
-    mock_config_manager_destroy(g_test_config);
-    g_test_config = NULL;
-  }
-
-  return 0;
-}
 
 /* ============================================================================
  * System Reboot Tests
@@ -377,7 +328,7 @@ void test_unit_device_handle_operation_get_device_information(void** state) {
   // Mock successful operation
   mock_gsoap_set_generate_response_result(0);
   mock_gsoap_set_get_response_data_result(
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", 50);
+    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", TEST_SOAP_ENVELOPE_LEN);
   mock_smart_response_set_build_result(ONVIF_SUCCESS);
 
   // Create test request and response
@@ -415,7 +366,7 @@ void test_unit_device_handle_operation_get_capabilities(void** state) {
   // Mock successful operation
   mock_gsoap_set_generate_response_result(0);
   mock_gsoap_set_get_response_data_result(
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", 50);
+    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", TEST_SOAP_ENVELOPE_LEN);
   mock_smart_response_set_build_result(ONVIF_SUCCESS);
 
   // Create test request and response
@@ -453,7 +404,7 @@ void test_unit_device_handle_operation_get_system_date_time(void** state) {
   // Mock successful operation
   mock_gsoap_set_generate_response_result(0);
   mock_gsoap_set_get_response_data_result(
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", 50);
+    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", TEST_SOAP_ENVELOPE_LEN);
   mock_smart_response_set_build_result(ONVIF_SUCCESS);
 
   // Create test request and response
@@ -491,7 +442,7 @@ void test_unit_device_handle_operation_get_services(void** state) {
   // Mock successful operation
   mock_gsoap_set_generate_response_result(0);
   mock_gsoap_set_get_response_data_result(
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", 50);
+    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", TEST_SOAP_ENVELOPE_LEN);
   mock_smart_response_set_build_result(ONVIF_SUCCESS);
 
   // Create test request and response
@@ -530,7 +481,8 @@ void test_unit_device_handle_operation_system_reboot(void** state) {
   mock_platform_set_system_result(0); // Successful reboot
   mock_gsoap_set_generate_response_result(0);
   mock_gsoap_set_get_response_data_result(
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>", 50);
+    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>",
+    50); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
   mock_smart_response_set_build_result(ONVIF_SUCCESS);
 
   // Create test request and response
@@ -875,13 +827,13 @@ void test_unit_device_business_logic_get_device_information(void** state) {
   // For now, we test the configuration retrieval logic
 
   // Test configuration retrieval
-  char manufacturer[64] = {0};
+  char manufacturer[TEST_OPERATION_NAME_LEN] = {0};
   int result = mock_config_get_string(g_test_config, "device", "manufacturer", manufacturer,
                                       sizeof(manufacturer), "Default");
   assert_int_equal(0, result);
   assert_string_equal(TEST_DEVICE_MANUFACTURER, manufacturer);
 
-  char model[64] = {0};
+  char model[TEST_OPERATION_NAME_LEN] = {0};
   result =
     mock_config_get_string(g_test_config, "device", "model", model, sizeof(model), "Default");
   assert_int_equal(0, result);
@@ -934,10 +886,10 @@ void test_unit_device_business_logic_get_services(void** state) {
   // Test services data structure
   struct test_services services = {0};
   services.include_capability = 1;
-  services.service_count = 5;
+  services.service_count = TEST_DEFAULT_SERVICE_COUNT;
 
   assert_int_equal(1, services.include_capability);
-  assert_int_equal(5, services.service_count);
+  assert_int_equal(TEST_DEFAULT_SERVICE_COUNT, services.service_count);
 }
 
 /**
@@ -1040,7 +992,7 @@ void test_unit_device_configuration_handling(void** state) {
   (void)state;
 
   // Test configuration retrieval
-  char value[64] = {0};
+  char value[TEST_OPERATION_NAME_LEN] = {0};
 
   // Test string configuration
   int result = mock_config_get_string(g_test_config, "device", "manufacturer", value, sizeof(value),
@@ -1050,12 +1002,12 @@ void test_unit_device_configuration_handling(void** state) {
 
   // Test integer configuration
   int int_value = 0;
-  result = mock_config_get_int(g_test_config, "onvif", "http_port", &int_value, 8080);
+  result = mock_config_get_int(g_test_config, "onvif", "http_port", &int_value, TEST_HTTP_PORT);
   assert_int_equal(0, result);
   assert_int_equal(TEST_HTTP_PORT, int_value);
 
   // Test fallback values
-  char fallback_value[64] = {0};
+  char fallback_value[TEST_OPERATION_NAME_LEN] = {0};
   result = mock_config_get_string(g_test_config, "nonexistent", "section", fallback_value,
                                   sizeof(fallback_value), "Fallback");
   assert_int_equal(0, result);

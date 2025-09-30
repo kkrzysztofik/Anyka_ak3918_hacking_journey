@@ -18,7 +18,7 @@
 #define TEST_ALLOC_SIZE           1024
 #define TEST_ALLOC_LAST_INDEX     (TEST_ALLOC_SIZE - 1)
 #define TEST_SMALL_ALLOC_SIZE     512
-#define TEST_LARGE_ALLOC_SIZE     (1024 * 1024)
+#define TEST_LARGE_ALLOC_SIZE     ((size_t)1024 * 1024)
 #define TEST_MEDIUM_ALLOC_SIZE_1  100
 #define TEST_MEDIUM_ALLOC_SIZE_2  200
 #define TEST_ITERATION_ALLOC_SIZE 64
@@ -231,3 +231,4 @@ void test_unit_dynamic_buffer(void** state) {
 }
 
 // Test functions are called from test_runner.c
+// Test comment

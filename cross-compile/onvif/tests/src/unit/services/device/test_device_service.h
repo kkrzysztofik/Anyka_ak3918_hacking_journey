@@ -8,6 +8,8 @@
 #ifndef TEST_DEVICE_SERVICE_H
 #define TEST_DEVICE_SERVICE_H
 
+#include <time.h>
+
 #include "cmocka_wrapper.h"
 
 // Test function declarations
@@ -58,14 +60,23 @@ void test_unit_device_configuration_handling(void** state);
 #define TEST_HTTP_PORT               8080
 #define TEST_OPERATION_NAME_LEN      64
 #define TEST_SERVICE_NAME_LEN        32
+#define TEST_SOAP_ENVELOPE_LEN       50
+#define TEST_DEFAULT_SERVICE_COUNT   5
+#define TEST_MANUFACTURER_LEN        64
+#define TEST_MODEL_LEN               64
+#define TEST_FIRMWARE_VERSION_LEN    32
+#define TEST_SERIAL_NUMBER_LEN       64
+#define TEST_HARDWARE_ID_LEN         32
+#define TEST_MAX_SERVICES            8
+#define TEST_REBOOT_MESSAGE_LEN      128
 
 // Test data structures
 struct test_device_info {
-  char manufacturer[64];
-  char model[64];
-  char firmware_version[32];
-  char serial_number[64];
-  char hardware_id[32];
+  char manufacturer[TEST_MANUFACTURER_LEN];
+  char model[TEST_MODEL_LEN];
+  char firmware_version[TEST_FIRMWARE_VERSION_LEN];
+  char serial_number[TEST_SERIAL_NUMBER_LEN];
+  char hardware_id[TEST_HARDWARE_ID_LEN];
 };
 
 struct test_capabilities {
@@ -86,11 +97,11 @@ struct test_system_datetime {
 struct test_services {
   int include_capability;
   int service_count;
-  char service_names[8][32];
+  char service_names[TEST_MAX_SERVICES][TEST_SERVICE_NAME_LEN];
 };
 
 struct test_system_reboot {
-  char message[128];
+  char message[TEST_REBOOT_MESSAGE_LEN];
   int reboot_initiated;
 };
 
