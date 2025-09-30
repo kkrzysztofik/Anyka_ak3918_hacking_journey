@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "core/config/config.h"
+
 // Mock state
 static int g_config_mock_initialized = 0;  // NOLINT
 static int g_config_validation_result = 0; // NOLINT
@@ -49,6 +51,7 @@ void mock_config_manager_destroy(config_manager_t* config) {
  * @param value String value
  * @return 0 on success
  */
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 int mock_config_set_string(config_manager_t* config, const char* section, const char* key,
                            const char* value) {
   (void)config;
@@ -66,6 +69,7 @@ int mock_config_set_string(config_manager_t* config, const char* section, const 
  * @param value Integer value
  * @return 0 on success
  */
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 int mock_config_set_int(config_manager_t* config, const char* section, const char* key, int value) {
   (void)config;
   (void)section;
@@ -84,6 +88,7 @@ int mock_config_set_int(config_manager_t* config, const char* section, const cha
  * @param default_value Default value if not found
  * @return 0 on success
  */
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 int mock_config_get_string(config_manager_t* config, const char* section, const char* key,
                            char* value, size_t size, const char* default_value) {
   (void)config;
@@ -107,6 +112,7 @@ int mock_config_get_string(config_manager_t* config, const char* section, const 
  * @param default_value Default value if not found
  * @return 0 on success
  */
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 int mock_config_get_int(config_manager_t* config, const char* section, const char* key, int* value,
                         int default_value) {
   (void)config;

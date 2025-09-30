@@ -15,12 +15,15 @@ config_manager_t* mock_config_manager_create(void);
 void mock_config_manager_destroy(config_manager_t* config);
 
 // Mock configuration set functions
-int mock_config_set_string(config_manager_t* config, const char* section, const char* key, const char* value);
+int mock_config_set_string(config_manager_t* config, const char* section, const char* key,
+                           const char* value);
 int mock_config_set_int(config_manager_t* config, const char* section, const char* key, int value);
 
 // Mock configuration get functions
-int mock_config_get_string(config_manager_t* config, const char* section, const char* key, char* value, size_t size, const char* default_value);
-int mock_config_get_int(config_manager_t* config, const char* section, const char* key, int* value, int default_value);
+int mock_config_get_string(config_manager_t* config, const char* section, const char* key,
+                           char* value, size_t size, const char* default_value);
+int mock_config_get_int(config_manager_t* config, const char* section, const char* key, int* value,
+                        int default_value);
 
 // Mock configuration validation functions
 int mock_config_validate(config_manager_t* config);

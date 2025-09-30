@@ -8,8 +8,8 @@
 #ifndef PLATFORM_PTZ_MOCK_H
 #define PLATFORM_PTZ_MOCK_H
 
-#include "../../src/platform/platform_common.h"
-#include "../../src/services/ptz/onvif_ptz.h"
+#include "platform/platform_common.h"
+#include "services/ptz/onvif_ptz.h"
 
 /* ============================================================================
  * Mock State Management

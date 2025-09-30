@@ -7,6 +7,7 @@
 
 #include "platform_mock.h"
 
+#include <bits/pthreadtypes.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -63,6 +64,7 @@ static struct {
   void* mock_system_info;
   int system_result;
   int system_call_count;
+  int vpss_call_count;
   pthread_mutex_t mutex;
 } g_platform_mock_state = {0}; // NOLINT
 
@@ -81,6 +83,7 @@ void platform_mock_init(void) {
   g_platform_mock_state.mock_time = time(NULL);
   g_platform_mock_state.mock_capabilities = NULL;
   g_platform_mock_state.mock_system_info = NULL;
+  g_platform_mock_state.vpss_call_count = 0;
 }
 
 void platform_mock_cleanup(void) {
@@ -419,11 +422,36 @@ platform_result_t platform_vi_get_fps(platform_vi_handle_t handle, int* fps) {
  * Video Processing Subsystem (VPSS) Mock Functions
  * ============================================================================ */
 
+/**
+ * @brief Get VPSS call count for testing optimization
+ * @return Number of VPSS effect_set calls
+ */
+int platform_mock_get_vpss_call_count(void) {
+  pthread_mutex_lock(&g_platform_mock_state.mutex);
+  int count = g_platform_mock_state.vpss_call_count;
+  pthread_mutex_unlock(&g_platform_mock_state.mutex);
+  return count;
+}
+
+/**
+ * @brief Reset VPSS call count for testing
+ */
+void platform_mock_reset_vpss_counters(void) {
+  pthread_mutex_lock(&g_platform_mock_state.mutex);
+  g_platform_mock_state.vpss_call_count = 0;
+  pthread_mutex_unlock(&g_platform_mock_state.mutex);
+}
+
 platform_result_t platform_vpss_effect_set(platform_vi_handle_t handle,
                                            platform_vpss_effect_t effect, int value) { // NOLINT
   (void)handle;
   (void)effect;
   (void)value;
+
+  pthread_mutex_lock(&g_platform_mock_state.mutex);
+  g_platform_mock_state.vpss_call_count++;
+  pthread_mutex_unlock(&g_platform_mock_state.mutex);
+
   return PLATFORM_SUCCESS;
 }
 
@@ -668,8 +696,8 @@ platform_result_t platform_irled_get_status(void) {
  * ============================================================================ */
 
 platform_result_t platform_snapshot_init(platform_snapshot_handle_t* handle,
-                                         platform_vi_handle_t vi_handle, int height,
-                                         int width) { // NOLINT
+                                         platform_vi_handle_t vi_handle, int height, // NOLINT
+                                         int width) {                                // NOLINT
   if (!handle) {
     return PLATFORM_ERROR_NULL;
   }

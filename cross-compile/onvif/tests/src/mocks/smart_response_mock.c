@@ -7,15 +7,12 @@
 
 #include "smart_response_mock.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
 // Mock state
-static int g_smart_response_mock_initialized = 0; //NOLINT
-static int g_smart_response_build_result = 0; //NOLINT
+static int g_smart_response_mock_initialized = 0; // NOLINT
+static int g_smart_response_build_result = 0;     // NOLINT
 
 // Call counters
-static int g_smart_response_build_call_count = 0; //NOLINT
+static int g_smart_response_build_call_count = 0; // NOLINT
 
 /**
  * @brief Set mock smart response build result

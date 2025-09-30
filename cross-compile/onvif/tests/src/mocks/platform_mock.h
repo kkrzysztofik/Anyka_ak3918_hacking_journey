@@ -173,9 +173,6 @@ int platform_log_warning(const char* format, ...);
 int mock_platform_set_system_result(int result);
 int mock_platform_get_system_call_count(void);
 
-// PTZ mock functions
-#include "platform_ptz_mock.h"
-
 /**
  * @brief Mock platform initialization function
  */
@@ -185,5 +182,16 @@ void platform_mock_init(void);
  * @brief Mock platform cleanup function
  */
 void platform_mock_cleanup(void);
+
+/**
+ * @brief Get VPSS call count for testing optimization
+ * @return Number of VPSS effect_set calls made
+ */
+int platform_mock_get_vpss_call_count(void);
+
+/**
+ * @brief Reset VPSS call counters
+ */
+void platform_mock_reset_vpss_counters(void);
 
 #endif // PLATFORM_MOCK_H

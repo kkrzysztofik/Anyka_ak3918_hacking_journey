@@ -48,8 +48,8 @@ static struct {
   int allocation_failure_enabled;
   size_t fail_after_count;
   size_t allocation_count;
-// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
-// Mock state must be mutable to track test execution state
+  // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
+  // Mock state must be mutable to track test execution state
 } g_memory_mock_state = {0};
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
@@ -209,5 +209,3 @@ void* mock_realloc(void* ptr, size_t size) {
 void mock_free_func(void* ptr) {
   mock_free(ptr);
 }
-
-
