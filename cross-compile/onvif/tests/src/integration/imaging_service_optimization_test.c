@@ -1,243 +1,342 @@
 /**
  * @file imaging_service_optimization_tests.c
- * @brief Integration tests for imaging service optimization features
+ * @brief Integration tests for imaging service optimization features using REAL implementation
  * @author kkrzysztofik
  * @date 2025
  */
 
 #include <assert.h>
+#include <bits/pthreadtypes.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
 #include <unistd.h>
 
+// TESTS
 #include "cmocka_wrapper.h"
+#include "common/time_utils.h"
 #include "imaging_service_optimization_tests.h"
+#include "mocks/platform_mock.h"
 
+// ONVIF project includes
+#include "services/common/onvif_imaging_types.h"
+#include "services/imaging/onvif_imaging.h"
+#include "utils/error/error_handling.h"
 
 // Test constants
 #define TEST_ITERATIONS                 500
 #define PARAMETER_CACHE_TEST_ITERATIONS 100
-#define BENCHMARK_THRESHOLD_US          50
+#define BENCHMARK_THRESHOLD_US          150
 #define CONCURRENT_THREADS              4
 
-// Mock imaging settings structure for testing
-typedef struct {
-  int brightness;
-  int contrast;
-  int saturation;
-  int sharpness;
-  int hue;
-} test_imaging_settings;
+// Imaging parameter test constants (descriptive names)
+#define BRIGHTNESS_BASELINE  25
+#define BRIGHTNESS_MEDIUM    50
+#define BRIGHTNESS_HIGH      75
+#define CONTRAST_BASELINE    50
+#define CONTRAST_LOW         25
+#define SATURATION_HIGH      75
+#define SATURATION_MEDIUM    30
+#define SATURATION_MIN       0
+#define SHARPNESS_LOW        -25
+#define SHARPNESS_HIGH       40
+#define SHARPNESS_MEDIUM_LOW -10
+#define HUE_SMALL_POS        10
+#define HUE_MEDIUM_POS       50
+#define HUE_SMALL_POS_ALT    5
+#define HUE_LARGE_NEG        -90
 
-// Mock function declarations (would be replaced by actual implementation)
-int test_onvif_imaging_get_settings(test_imaging_settings* settings);
-int test_onvif_imaging_set_settings(const test_imaging_settings* settings);
-int test_validate_parameter_cache_efficiency(void);
-int test_bulk_settings_validation(void);
+// Test iteration constants
+#define BULK_VALIDATION_ITERATIONS 10
+#define CONCURRENT_ITERATIONS      50
+#define WARMUP_ITERATIONS          10
 
-// Global variables for testing
-static test_imaging_settings g_test_settings = {0, 0, 0, 0, 0};
-static int g_mock_vpss_call_count = 0;
-static pthread_mutex_t g_test_mutex = PTHREAD_MUTEX_INITIALIZER;
+// Parameter range constants
+#define PARAM_RANGE_MIN   -100
+#define PARAM_RANGE_MAX   200
+#define HUE_RANGE_MIN     -180
+#define HUE_RANGE_MAX     360
+#define MICROS_PER_SECOND 1000000.0
 
-static long get_time_microseconds(void) {
-  struct timeval tv;
-  gettimeofday(&tv, NULL);
-  return tv.tv_sec * 1000000 + tv.tv_usec;
-}
+// Additional test values
+#define BRIGHTNESS_LOW        10
+#define BRIGHTNESS_LOW_MED    15
+#define BRIGHTNESS_HIGH_ALT   75
+#define CONTRAST_MEDIUM       20
+#define CONTRAST_NEG_MED      -25
+#define SATURATION_MEDIUM_ALT 50
+#define SHARPNESS_NEUTRAL     0
+#define HUE_MAX               360
+#define HUE_HALF_RANGE        180
 
-// Mock implementation with optimization simulation
-int test_onvif_imaging_get_settings(test_imaging_settings* settings) {
-  if (!settings) {
+// Thread variation constants
+#define VAR_BRIGHTNESS_STEP 10
+#define VAR_CONTRAST_STEP   15
+#define VAR_SATURATION_STEP 20
+#define VAR_SHARPNESS_STEP  25
+#define VAR_HUE_STEP        30
+
+// Expected VPSS call counts
+#define EXPECTED_VPSS_CALLS_ALL_CHANGED    5
+#define EXPECTED_VPSS_CALLS_SINGLE_CHANGED 1
+#define EXPECTED_VPSS_CALLS_NO_CHANGE      0
+
+/* moved to common/time_utils.h: test_get_time_microseconds() */
+
+/* ============================================================================
+ * Test Setup and Teardown
+ * ============================================================================ */
+
+int setup_imaging_integration(void** state) {
+  (void)state;
+
+  // Initialize platform mock
+  platform_mock_init();
+  platform_mock_reset_vpss_counters();
+
+  // Initialize real imaging service
+  int result = onvif_imaging_init(NULL);
+  if (result != ONVIF_SUCCESS) {
+    printf("Failed to initialize imaging service: %d\n", result);
     return -1;
   }
 
-  pthread_mutex_lock(&g_test_mutex);
-  *settings = g_test_settings;
-  pthread_mutex_unlock(&g_test_mutex);
-
-  // Simulate cache hit (faster response)
-  usleep(1); // 1 microsecond for cached response
   return 0;
 }
 
-int test_onvif_imaging_set_settings(const test_imaging_settings* settings) {
-  if (!settings) {
-    return -1;
-  }
+int teardown_imaging_integration(void** state) {
+  (void)state;
 
-  pthread_mutex_lock(&g_test_mutex);
+  // Cleanup real imaging service
+  onvif_imaging_cleanup();
 
-  // Simulate optimized batch update - only update changed parameters
-  int changes_count = 0;
-  if (g_test_settings.brightness != settings->brightness)
-    changes_count++;
-  if (g_test_settings.contrast != settings->contrast)
-    changes_count++;
-  if (g_test_settings.saturation != settings->saturation)
-    changes_count++;
-  if (g_test_settings.sharpness != settings->sharpness)
-    changes_count++;
-  if (g_test_settings.hue != settings->hue)
-    changes_count++;
+  // Cleanup platform mock
+  platform_mock_cleanup();
 
-  g_mock_vpss_call_count += changes_count; // Track VPSS optimization
-  g_test_settings = *settings;
-
-  pthread_mutex_unlock(&g_test_mutex);
-
-  // Simulate VPSS call time based on number of changes
-  usleep(changes_count * 2); // 2 microseconds per changed parameter
   return 0;
 }
 
-void test_integration_imaging_parameter_cache_efficiency(void** state) {
-  (void)state; // Unused parameter
-
-  printf("Test: Parameter Cache Efficiency\n");
-  printf("-------------------------------\n");
-
-  test_imaging_settings settings = {50, 25, 0, -10, 5};
-
-  // First call - cache miss
-  long start_time = get_time_microseconds();
-  int result = test_onvif_imaging_get_settings(&settings);
-  long first_call_time = get_time_microseconds() - start_time;
-
-  assert_int_equal(result, 0);
-  printf("First call time: %ld μs\n", first_call_time);
-
-  // Second call - cache hit
-  start_time = get_time_microseconds();
-  result = test_onvif_imaging_get_settings(&settings);
-  long second_call_time = get_time_microseconds() - start_time;
-
-  assert_int_equal(result, 0);
-  printf("Second call time: %ld μs\n", second_call_time);
-
-  if (second_call_time <= first_call_time) {
-    printf("✅ Parameter caching is effective (improvement: %.1fx)\n",
-           (double)first_call_time / (double)second_call_time);
-  } else {
-    printf("⚠️  Parameter caching effectiveness inconclusive\n");
-  }
-}
+/* ============================================================================
+ * Integration Test: Bulk Settings Validation Optimization
+ * ============================================================================ */
 
 void test_integration_imaging_bulk_settings_validation(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("\nTest: Bulk Settings Validation Optimization\n");
-  printf("------------------------------------------\n");
+  printf("----------------------------------------------------------\n");
 
-  test_imaging_settings identical_settings = {25, 50, 75, -25, 10};
+  struct imaging_settings settings = {
+    .brightness = BRIGHTNESS_BASELINE,
+    .contrast = CONTRAST_BASELINE,
+    .saturation = SATURATION_HIGH,
+    .sharpness = SHARPNESS_LOW,
+    .hue = HUE_SMALL_POS,
+    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
 
-  // Test validation caching with identical settings
-  long start_time = get_time_microseconds();
-  for (int i = 0; i < 10; i++) {
-    int result = test_onvif_imaging_set_settings(&identical_settings);
-    assert_int_equal(result, 0);
+  // First call - should validate and apply all parameters
+  platform_mock_reset_vpss_counters();
+  int vpss_before = platform_mock_get_vpss_call_count();
+  int result = onvif_imaging_set_settings(&settings);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  int vpss_after_first = platform_mock_get_vpss_call_count();
+
+  printf("Initial set: %d VPSS calls\n", vpss_after_first - vpss_before);
+
+  // Test validation caching with identical settings (10 iterations)
+  long start_time = test_get_time_microseconds();
+  for (int i = 0; i < BULK_VALIDATION_ITERATIONS; i++) {
+    result = onvif_imaging_set_settings(&settings);
+    assert_int_equal(result, ONVIF_SUCCESS);
   }
-  long total_time = get_time_microseconds() - start_time;
-  long avg_time = total_time / 10;
+  long total_time = test_get_time_microseconds() - start_time;
+  long avg_time = total_time / BULK_VALIDATION_ITERATIONS;
+  int vpss_after_bulk = platform_mock_get_vpss_call_count();
 
   printf("Bulk validation test completed\n");
   printf("Average time per validation: %ld μs\n", avg_time);
+  printf("VPSS calls during %d iterations: %d (should be 0)\n", BULK_VALIDATION_ITERATIONS,
+         vpss_after_bulk - vpss_after_first);
 
-  if (avg_time < 50) { // Should be fast due to validation caching
+  // Validate optimization: no VPSS calls for identical settings
+  assert_int_equal(vpss_after_bulk - vpss_after_first, 0);
+
+  if (avg_time < BENCHMARK_THRESHOLD_US) {
     printf("✅ Bulk validation optimization is effective\n");
   } else {
-    printf("⚠️  Bulk validation optimization may need improvement\n");
+    printf("⚠️  Performance: %ld μs (threshold: %d μs)\n", avg_time, BENCHMARK_THRESHOLD_US);
   }
 }
 
+/* ============================================================================
+ * Integration Test: Batch Parameter Update Optimization
+ * ============================================================================ */
+
 void test_integration_imaging_batch_parameter_update_optimization(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("\nTest: Batch Parameter Update Optimization\n");
-  printf("----------------------------------------\n");
+  printf("--------------------------------------------------------\n");
 
-  test_imaging_settings baseline_settings = {0, 0, 0, 0, 0};
-  int result = test_onvif_imaging_set_settings(&baseline_settings);
-  assert_int_equal(result, 0);
+  // Set baseline settings
+  struct imaging_settings baseline_settings = {
+    .brightness = 0,
+    .contrast = 0,
+    .saturation = 0,
+    .sharpness = 0,
+    .hue = 0,
+    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
 
-  int initial_vpss_calls = g_mock_vpss_call_count;
+  platform_mock_reset_vpss_counters();
+  int result = onvif_imaging_set_settings(&baseline_settings);
+  assert_int_equal(result, ONVIF_SUCCESS);
 
-  // Test 1: Update all parameters (should make 5 VPSS calls)
-  test_imaging_settings all_changed = {10, 20, 30, 40, 50};
-  result = test_onvif_imaging_set_settings(&all_changed);
-  assert_int_equal(result, 0);
+  int initial_vpss_calls = platform_mock_get_vpss_call_count();
+  printf("Baseline set: %d VPSS calls\n", initial_vpss_calls);
 
-  int calls_after_all_change = g_mock_vpss_call_count - initial_vpss_calls;
-  printf("VPSS calls for all parameters changed: %d\n", calls_after_all_change);
+  // Test 1: Update all 5 parameters (should make 5 VPSS calls)
+  struct imaging_settings all_changed = {
+    .brightness = BRIGHTNESS_LOW,
+    .contrast = CONTRAST_MEDIUM,
+    .saturation = SATURATION_MEDIUM,
+    .sharpness = SHARPNESS_HIGH,
+    .hue = HUE_MEDIUM_POS,
+    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
+
+  result = onvif_imaging_set_settings(&all_changed);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  int calls_after_all_change = platform_mock_get_vpss_call_count() - initial_vpss_calls;
+  printf("VPSS calls for all parameters changed: %d (expected 5)\n", calls_after_all_change);
 
   // Test 2: Update only brightness (should make 1 VPSS call)
-  test_imaging_settings brightness_only = {15, 20, 30, 40, 50}; // Only brightness changed
-  result = test_onvif_imaging_set_settings(&brightness_only);
-  assert_int_equal(result, 0);
+  struct imaging_settings brightness_only = {
+    .brightness = BRIGHTNESS_LOW_MED, // Changed
+    .contrast = CONTRAST_MEDIUM,
+    .saturation = SATURATION_MEDIUM,
+    .sharpness = SHARPNESS_HIGH,
+    .hue = HUE_MEDIUM_POS,
+    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
+
+  result = onvif_imaging_set_settings(&brightness_only);
+  assert_int_equal(result, ONVIF_SUCCESS);
 
   int calls_after_single_change =
-    g_mock_vpss_call_count - initial_vpss_calls - calls_after_all_change;
-  printf("VPSS calls for single parameter changed: %d\n", calls_after_single_change);
+    platform_mock_get_vpss_call_count() - initial_vpss_calls - calls_after_all_change;
+  printf("VPSS calls for single parameter changed: %d (expected 1)\n", calls_after_single_change);
 
   // Test 3: No changes (should make 0 VPSS calls)
-  result = test_onvif_imaging_set_settings(&brightness_only); // Same settings
-  assert_int_equal(result, 0);
+  result = onvif_imaging_set_settings(&brightness_only);
+  assert_int_equal(result, ONVIF_SUCCESS);
 
-  int calls_after_no_change = g_mock_vpss_call_count - initial_vpss_calls - calls_after_all_change -
-                              calls_after_single_change;
-  printf("VPSS calls for no parameters changed: %d\n", calls_after_no_change);
+  int calls_after_no_change = platform_mock_get_vpss_call_count() - initial_vpss_calls -
+                              calls_after_all_change - calls_after_single_change;
+  printf("VPSS calls for no parameters changed: %d (expected 0)\n", calls_after_no_change);
 
   // Validate optimization
-  if (calls_after_all_change == 5 && calls_after_single_change == 1 && calls_after_no_change == 0) {
+  if (calls_after_all_change == EXPECTED_VPSS_CALLS_ALL_CHANGED &&
+      calls_after_single_change == EXPECTED_VPSS_CALLS_SINGLE_CHANGED &&
+      calls_after_no_change == EXPECTED_VPSS_CALLS_NO_CHANGE) {
     printf("✅ Batch parameter update optimization is working perfectly\n");
   } else if (calls_after_single_change <= calls_after_all_change && calls_after_no_change == 0) {
     printf("✅ Batch parameter update optimization is effective\n");
   } else {
     printf("❌ Batch parameter update optimization needs improvement\n");
+    printf("   Expected: all=%d, single=%d, none=%d\n", EXPECTED_VPSS_CALLS_ALL_CHANGED,
+           EXPECTED_VPSS_CALLS_SINGLE_CHANGED, EXPECTED_VPSS_CALLS_NO_CHANGE);
+    printf("   Got: all=%d, single=%d, none=%d\n", calls_after_all_change,
+           calls_after_single_change, calls_after_no_change);
     fail_msg("Batch parameter update optimization failed validation");
   }
 }
 
-// Thread function for concurrent testing
-void* concurrent_imaging_test_thread(void* arg) {
+/* ============================================================================
+ * Integration Test: Parameter Cache Efficiency
+ * ============================================================================ */
+
+void test_integration_imaging_parameter_cache_efficiency(void** state) {
+  (void)state;
+
+  printf("\nTest: Parameter Cache Efficiency\n");
+  printf("-----------------------------------------------\n");
+
+  struct imaging_settings settings = {
+    .brightness = BRIGHTNESS_MEDIUM,
+    .contrast = CONTRAST_LOW,
+    .saturation = SATURATION_MIN,
+    .sharpness = SHARPNESS_MEDIUM_LOW,
+    .hue = HUE_SMALL_POS_ALT,
+    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
+
+  // First call - should validate and apply
+  long start_time = test_get_time_microseconds();
+  int result = onvif_imaging_get_settings(&settings);
+  long first_call_time = test_get_time_microseconds() - start_time;
+
+  assert_int_equal(result, ONVIF_SUCCESS);
+  printf("First call time: %ld μs\n", first_call_time);
+
+  // Second call - should use cached values
+  start_time = test_get_time_microseconds();
+  result = onvif_imaging_get_settings(&settings);
+  long second_call_time = test_get_time_microseconds() - start_time;
+
+  assert_int_equal(result, ONVIF_SUCCESS);
+  printf("Second call time: %ld μs\n", second_call_time);
+
+  if (second_call_time <= first_call_time) {
+    printf("✅ Parameter caching is effective (improvement: %.1fx)\n",
+           (double)first_call_time / (double)(second_call_time > 0 ? second_call_time : 1));
+  } else {
+    printf("⚠️  Parameter caching effectiveness inconclusive\n");
+  }
+}
+
+/* ============================================================================
+ * Integration Test: Concurrent Access
+ * ============================================================================ */
+
+static void* concurrent_imaging_test_thread(void* arg) {
   int thread_id = *(int*)arg;
-  test_imaging_settings settings;
+  struct imaging_settings settings;
 
-  for (int i = 0; i < 50; i++) {
+  for (int i = 0; i < CONCURRENT_ITERATIONS; i++) {
     // Vary settings based on thread ID and iteration
-    settings.brightness = (thread_id * 10 + i) % 200 - 100;
-    settings.contrast = (thread_id * 15 + i) % 200 - 100;
-    settings.saturation = (thread_id * 20 + i) % 200 - 100;
-    settings.sharpness = (thread_id * 25 + i) % 200 - 100;
-    settings.hue = (thread_id * 30 + i) % 360 - 180;
+    settings.brightness = (thread_id * VAR_BRIGHTNESS_STEP + i) % PARAM_RANGE_MAX + PARAM_RANGE_MIN;
+    settings.contrast = (thread_id * VAR_CONTRAST_STEP + i) % PARAM_RANGE_MAX + PARAM_RANGE_MIN;
+    settings.saturation = (thread_id * VAR_SATURATION_STEP + i) % PARAM_RANGE_MAX + PARAM_RANGE_MIN;
+    settings.sharpness = (thread_id * VAR_SHARPNESS_STEP + i) % PARAM_RANGE_MAX + PARAM_RANGE_MIN;
+    settings.hue = (thread_id * VAR_HUE_STEP + i) % HUE_RANGE_MAX + HUE_RANGE_MIN;
+    settings.daynight.mode = DAY_NIGHT_AUTO;
+    settings.daynight.enable_auto_switching = 1;
 
-    if (test_onvif_imaging_set_settings(&settings) != 0) {
+    if (onvif_imaging_set_settings(&settings) != ONVIF_SUCCESS) {
       printf("❌ Thread %d failed at iteration %d\n", thread_id, i);
-      return (void*)-1;
+      return (void*)(intptr_t)ONVIF_ERROR_INVALID; // NOLINT
     }
 
-    if (test_onvif_imaging_get_settings(&settings) != 0) {
+    if (onvif_imaging_get_settings(&settings) != ONVIF_SUCCESS) {
       printf("❌ Thread %d get_settings failed at iteration %d\n", thread_id, i);
-      return (void*)-1;
+      return (void*)(intptr_t)ONVIF_ERROR_INVALID; // NOLINT
     }
   }
 
-  return (void*)0;
+  return (void*)(intptr_t)ONVIF_SUCCESS;
 }
 
 void test_integration_imaging_concurrent_access(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("\nTest: Concurrent Imaging Access\n");
-  printf("------------------------------\n");
+  printf("----------------------------------------------\n");
 
   pthread_t threads[CONCURRENT_THREADS];
   int thread_ids[CONCURRENT_THREADS];
 
-  long start_time = get_time_microseconds();
+  long start_time = test_get_time_microseconds();
 
   // Create threads
   for (int i = 0; i < CONCURRENT_THREADS; i++) {
@@ -249,14 +348,15 @@ void test_integration_imaging_concurrent_access(void** state) {
   // Wait for threads to complete
   int failed_threads = 0;
   for (int i = 0; i < CONCURRENT_THREADS; i++) {
-    void* result;
-    pthread_join(threads[i], &result);
-    if (result != (void*)0) {
+    void* thread_return = NULL;
+    pthread_join(threads[i], &thread_return);
+    int thread_status = (int)(intptr_t)thread_return;
+    if (thread_status != ONVIF_SUCCESS) {
       failed_threads++;
     }
   }
 
-  long total_time = get_time_microseconds() - start_time;
+  long total_time = test_get_time_microseconds() - start_time;
 
   printf("Concurrent test completed in %ld μs\n", total_time);
   printf("Failed threads: %d/%d\n", failed_threads, CONCURRENT_THREADS);
@@ -265,45 +365,55 @@ void test_integration_imaging_concurrent_access(void** state) {
   printf("✅ Concurrent imaging access test passed\n");
 }
 
+/* ============================================================================
+ * Integration Test: Performance Regression
+ * ============================================================================ */
+
 void test_integration_imaging_performance_regression(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("\nTest: Performance Regression Check\n");
-  printf("---------------------------------\n");
+  printf("-------------------------------------------------\n");
 
-  test_imaging_settings test_settings = {75, -25, 50, 0, -90};
+  struct imaging_settings test_settings = {
+    .brightness = BRIGHTNESS_HIGH_ALT,
+    .contrast = CONTRAST_NEG_MED,
+    .saturation = SATURATION_MEDIUM_ALT,
+    .sharpness = SHARPNESS_NEUTRAL,
+    .hue = HUE_LARGE_NEG,
+    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
 
   // Warm up
-  for (int i = 0; i < 10; i++) {
-    int result = test_onvif_imaging_set_settings(&test_settings);
-    assert_int_equal(result, 0);
-    result = test_onvif_imaging_get_settings(&test_settings);
-    assert_int_equal(result, 0);
+  for (int i = 0; i < WARMUP_ITERATIONS; i++) {
+    int result = onvif_imaging_set_settings(&test_settings);
+    assert_int_equal(result, ONVIF_SUCCESS);
+    result = onvif_imaging_get_settings(&test_settings);
+    assert_int_equal(result, ONVIF_SUCCESS);
   }
 
   // Performance test
-  long start_time = get_time_microseconds();
+  long start_time = test_get_time_microseconds();
 
   for (int i = 0; i < TEST_ITERATIONS; i++) {
-    test_settings.brightness = (i % 200) - 100;
-    test_settings.contrast = ((i * 2) % 200) - 100;
+    test_settings.brightness = (i % PARAM_RANGE_MAX) + PARAM_RANGE_MIN;
+    test_settings.contrast = ((i * 2) % PARAM_RANGE_MAX) + PARAM_RANGE_MIN;
 
-    int result = test_onvif_imaging_set_settings(&test_settings);
-    assert_int_equal(result, 0);
+    int result = onvif_imaging_set_settings(&test_settings);
+    assert_int_equal(result, ONVIF_SUCCESS);
 
-    result = test_onvif_imaging_get_settings(&test_settings);
-    assert_int_equal(result, 0);
+    result = onvif_imaging_get_settings(&test_settings);
+    assert_int_equal(result, ONVIF_SUCCESS);
   }
 
-  long total_time = get_time_microseconds() - start_time;
-  long avg_time_per_operation = total_time / (TEST_ITERATIONS * 2); // set + get
+  long total_time = test_get_time_microseconds() - start_time;
+  long avg_time_per_operation = total_time / (long)(TEST_ITERATIONS * 2);
 
   printf("Performance Results:\n");
   printf("  Total operations: %d\n", TEST_ITERATIONS * 2);
   printf("  Total time: %ld μs\n", total_time);
   printf("  Average time per operation: %ld μs\n", avg_time_per_operation);
   printf("  Operations per second: %.2f\n",
-         (double)(TEST_ITERATIONS * 2) / (total_time / 1000000.0));
+         (double)((long)(TEST_ITERATIONS * 2)) / ((double)total_time / (double)MICROS_PER_SECOND));
 
   if (avg_time_per_operation < BENCHMARK_THRESHOLD_US) {
     printf("✅ Performance regression test passed (under %d μs threshold)\n",
@@ -314,11 +424,19 @@ void test_integration_imaging_performance_regression(void** state) {
   }
 }
 
-// Test suite definition
+/* ============================================================================
+ * Test Suite Definition
+ * ============================================================================ */
+
 const struct CMUnitTest imaging_service_optimization_tests[] = {
-  cmocka_unit_test(test_integration_imaging_parameter_cache_efficiency),
-  cmocka_unit_test(test_integration_imaging_bulk_settings_validation),
-  cmocka_unit_test(test_integration_imaging_batch_parameter_update_optimization),
-  cmocka_unit_test(test_integration_imaging_concurrent_access),
-  cmocka_unit_test(test_integration_imaging_performance_regression),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_parameter_cache_efficiency,
+                                  setup_imaging_integration, teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_bulk_settings_validation,
+                                  setup_imaging_integration, teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_batch_parameter_update_optimization,
+                                  setup_imaging_integration, teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_concurrent_access,
+                                  setup_imaging_integration, teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_performance_regression,
+                                  setup_imaging_integration, teardown_imaging_integration),
 };

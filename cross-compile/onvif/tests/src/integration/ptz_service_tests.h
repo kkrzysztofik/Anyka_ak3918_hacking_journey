@@ -14,6 +14,7 @@
 void test_integration_ptz_absolute_move_functionality(void** state);
 void test_integration_ptz_relative_move_functionality(void** state);
 void test_integration_ptz_continuous_move_functionality(void** state);
+void test_integration_ptz_continuous_move_timeout_cleanup(void** state);
 void test_integration_ptz_stop_functionality(void** state);
 
 // Test function declarations for PTZ preset management

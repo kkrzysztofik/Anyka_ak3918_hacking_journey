@@ -17,6 +17,10 @@ void test_integration_imaging_batch_parameter_update_optimization(void** state);
 void test_integration_imaging_concurrent_access(void** state);
 void test_integration_imaging_performance_regression(void** state);
 
+// Setup and teardown function declarations
+int setup_imaging_integration(void** state);
+int teardown_imaging_integration(void** state);
+
 // Test suite
 extern const struct CMUnitTest imaging_service_optimization_tests[];
 
