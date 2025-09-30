@@ -134,6 +134,14 @@ int onvif_service_dispatcher_init(void);
  */
 void onvif_service_dispatcher_cleanup(void);
 
+/**
+ * @brief Flag to indicate cleanup is in progress
+ *
+ * This flag is used by service modules to prevent recursive cleanup calls
+ * during service dispatcher shutdown.
+ */
+extern int g_cleanup_in_progress;
+
 /* ============================================================================
  * Convenience Macros for Service Registration
  * ============================================================================ */

@@ -50,6 +50,7 @@
 #define MEDIA_TOKEN_BUFFER_SIZE    64
 #define MEDIA_PROTOCOL_BUFFER_SIZE 16
 #define MEDIA_URI_BUFFER_SIZE      256
+#define MEDIA_URL_PARAM_SIZE       64
 
 // Stream path and port constants are defined in onvif_constants.h
 
@@ -171,9 +172,9 @@ static struct media_profile g_media_profiles[] = { // NOLINT
      .default_continuous_zoom_velocity_space = ""}}};
 
 // Static cached URIs for memory optimization
-static char g_cached_main_rtsp_uri[MEDIA_URI_BUFFER_SIZE] = {0};
-static char g_cached_sub_rtsp_uri[MEDIA_URI_BUFFER_SIZE] = {0};
-static int g_cached_uris_initialized = 0;
+static char g_cached_main_rtsp_uri[MEDIA_URI_BUFFER_SIZE] = {0}; // NOLINT
+static char g_cached_sub_rtsp_uri[MEDIA_URI_BUFFER_SIZE] = {0};  // NOLINT
+static int g_cached_uris_initialized = 0;                        // NOLINT
 
 /**
  * @brief Initialize cached URIs for common profiles to optimize memory usage
@@ -185,10 +186,10 @@ static int init_cached_uris(void) {
   }
 
   // Build cached RTSP URIs for common profiles
-  build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_MAIN_STREAM_PATH,
-                   g_cached_main_rtsp_uri, sizeof(g_cached_main_rtsp_uri));
-  build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_SUB_STREAM_PATH,
-                   g_cached_sub_rtsp_uri, sizeof(g_cached_sub_rtsp_uri));
+  build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_MAIN_STREAM_PATH, g_cached_main_rtsp_uri,
+                   sizeof(g_cached_main_rtsp_uri));
+  build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_SUB_STREAM_PATH, g_cached_sub_rtsp_uri,
+                   sizeof(g_cached_sub_rtsp_uri));
 
   g_cached_uris_initialized = 1;
   return ONVIF_SUCCESS;
@@ -217,7 +218,8 @@ static int get_cached_rtsp_uri(const char* profile_token, char* uri_buffer, size
     strncpy(uri_buffer, g_cached_main_rtsp_uri, buffer_size - 1);
     uri_buffer[buffer_size - 1] = '\0';
     return ONVIF_SUCCESS;
-  } else if (strcmp(profile_token, MEDIA_SUB_PROFILE_TOKEN) == 0) {
+  }
+  if (strcmp(profile_token, MEDIA_SUB_PROFILE_TOKEN) == 0) {
     strncpy(uri_buffer, g_cached_sub_rtsp_uri, buffer_size - 1);
     uri_buffer[buffer_size - 1] = '\0';
     return ONVIF_SUCCESS;
@@ -239,7 +241,8 @@ static struct media_profile* find_profile_optimized(const char* profile_token) {
   // Direct lookup for common profiles to avoid linear search
   if (strcmp(profile_token, MEDIA_MAIN_PROFILE_TOKEN) == 0) {
     return &g_media_profiles[0];
-  } else if (strcmp(profile_token, MEDIA_SUB_PROFILE_TOKEN) == 0) {
+  }
+  if (strcmp(profile_token, MEDIA_SUB_PROFILE_TOKEN) == 0) {
     return &g_media_profiles[1];
   }
 
@@ -619,7 +622,9 @@ int onvif_media_get_stream_uri(const char* profile_token, const char* protocol,
 
   /* Find the profile using optimized lookup */
   struct media_profile* profile = find_profile_optimized(profile_token);
-  ONVIF_CHECK_NULL(profile);
+  if (profile == NULL) {
+    return ONVIF_ERROR_NOT_FOUND;
+  }
 
   /* Use cached URI for RTSP/RTP protocols */
   if (strcmp(protocol, "RTSP") == 0 || strcmp(protocol, "RTP-Unicast") == 0) {
@@ -637,11 +642,27 @@ int onvif_media_get_stream_uri(const char* profile_token, const char* protocol,
       build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_SUB_STREAM_PATH, uri->uri,
                        sizeof(uri->uri));
     } else {
-      // Default to main stream for MainProfile and any other profile
       build_device_url("rtsp", ONVIF_RTSP_PORT_DEFAULT, RTSP_MAIN_STREAM_PATH, uri->uri,
                        sizeof(uri->uri));
     }
+    uri->invalid_after_connect = 0;
+    uri->invalid_after_reboot = 0;
+    uri->timeout = MEDIA_DEFAULT_TIMEOUT_SECONDS;
+    return ONVIF_SUCCESS;
+  }
 
+  // Handle other protocols
+  if (strcmp(protocol, "HTTP") == 0) {
+    build_device_url("http", ONVIF_HTTP_PORT_DEFAULT, "/onvif/streaming", uri->uri,
+                     sizeof(uri->uri));
+    // Append profile parameter
+    char profile_param[MEDIA_URL_PARAM_SIZE];
+    int written = snprintf(profile_param, sizeof(profile_param), "?profile=%s", profile_token);
+    if (written < 0 || (size_t)written >= sizeof(profile_param)) {
+      platform_log_error("Failed to format profile parameter\n");
+      return ONVIF_ERROR_INVALID;
+    }
+    strncat(uri->uri, profile_param, sizeof(uri->uri) - strlen(uri->uri) - 1);
     uri->invalid_after_connect = 0;
     uri->invalid_after_reboot = 0;
     uri->timeout = MEDIA_DEFAULT_TIMEOUT_SECONDS;

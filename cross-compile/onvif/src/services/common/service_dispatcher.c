@@ -7,6 +7,8 @@
 
 #include "services/common/service_dispatcher.h"
 
+#include <bits/pthreadtypes.h>
+#include <pthread.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,6 +43,12 @@ static service_registry_entry_t g_service_registry[MAX_REGISTERED_SERVICES]; // 
 
 /** Registry initialization flag */
 static int g_dispatcher_initialized = 0; // NOLINT
+
+/** Flag to prevent recursive cleanup calls */
+int g_cleanup_in_progress = 0; // NOLINT
+
+/** Mutex for thread-safe access to dispatcher state */
+static pthread_mutex_t g_dispatcher_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 
 /* ============================================================================
  * Private Functions
@@ -113,8 +121,11 @@ static int validate_registration(const onvif_service_registration_t* registratio
  * ============================================================================ */
 
 int onvif_service_dispatcher_init(void) {
+  pthread_mutex_lock(&g_dispatcher_mutex);
+
   if (g_dispatcher_initialized) {
     platform_log_debug("Service dispatcher already initialized");
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_SUCCESS;
   }
 
@@ -124,13 +135,20 @@ int onvif_service_dispatcher_init(void) {
   g_dispatcher_initialized = 1;
   platform_log_info("Service dispatcher initialized successfully");
 
+  pthread_mutex_unlock(&g_dispatcher_mutex);
   return ONVIF_SUCCESS;
 }
 
 void onvif_service_dispatcher_cleanup(void) {
+  pthread_mutex_lock(&g_dispatcher_mutex);
+
   if (!g_dispatcher_initialized) {
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return;
   }
+
+  // Set flag to prevent recursive cleanup
+  g_cleanup_in_progress = 1;
 
   // Call cleanup handlers for all registered services
   for (size_t i = 0; i < MAX_REGISTERED_SERVICES; i++) {
@@ -144,24 +162,36 @@ void onvif_service_dispatcher_cleanup(void) {
     }
   }
 
+  g_cleanup_in_progress = 0;
   g_dispatcher_initialized = 0;
+
+  pthread_mutex_unlock(&g_dispatcher_mutex);
+
+  // Destroy mutex after cleanup is complete
+  pthread_mutex_destroy(&g_dispatcher_mutex);
+
   platform_log_info("Service dispatcher cleanup completed");
 }
 
 int onvif_service_dispatcher_register_service(const onvif_service_registration_t* registration) {
+  pthread_mutex_lock(&g_dispatcher_mutex);
+
   if (!g_dispatcher_initialized) {
     platform_log_error("Service dispatcher not initialized");
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_ERROR_NOT_INITIALIZED;
   }
 
   int result = validate_registration(registration);
   if (result != ONVIF_SUCCESS) {
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return result;
   }
 
   // Check if service is already registered
   if (find_service_entry(registration->service_name)) {
     platform_log_error("Service already registered: %s", registration->service_name);
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_ERROR_ALREADY_EXISTS;
   }
 
@@ -169,6 +199,7 @@ int onvif_service_dispatcher_register_service(const onvif_service_registration_t
   service_registry_entry_t* entry = find_free_slot();
   if (!entry) {
     platform_log_error("Service registry is full, cannot register: %s", registration->service_name);
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_ERROR_RESOURCE_LIMIT;
   }
 
@@ -183,6 +214,7 @@ int onvif_service_dispatcher_register_service(const onvif_service_registration_t
     if (result != ONVIF_SUCCESS) {
       platform_log_error("Service initialization failed: %s", registration->service_name);
       entry->active = 0;
+      pthread_mutex_unlock(&g_dispatcher_mutex);
       return result;
     }
   }
@@ -190,60 +222,82 @@ int onvif_service_dispatcher_register_service(const onvif_service_registration_t
   platform_log_info("Service registered successfully: %s (namespace: %s)",
                     registration->service_name, registration->namespace_uri);
 
+  pthread_mutex_unlock(&g_dispatcher_mutex);
   return ONVIF_SUCCESS;
 }
 
 int onvif_service_dispatcher_unregister_service(const char* service_name) {
+  pthread_mutex_lock(&g_dispatcher_mutex);
+
   if (!g_dispatcher_initialized) {
     platform_log_error("Service dispatcher not initialized");
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_ERROR_NOT_INITIALIZED;
   }
 
   if (!service_name) {
     platform_log_error("Service name is NULL");
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_ERROR_INVALID;
   }
 
   service_registry_entry_t* entry = find_service_entry(service_name);
   if (!entry) {
     platform_log_error("Service not found: %s", service_name);
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_ERROR_NOT_FOUND;
   }
 
-  // Call cleanup handler if provided
-  if (entry->registration.cleanup_handler) {
+  // Call cleanup handler only if not already in cleanup (prevent recursion)
+  // This prevents infinite loops when cleanup handlers call unregister
+  if (entry->registration.cleanup_handler && !g_cleanup_in_progress) {
     platform_log_debug("Calling cleanup handler for service: %s", service_name);
     entry->registration.cleanup_handler();
+  } else if (g_cleanup_in_progress) {
+    platform_log_debug("Skipping cleanup handler for service: %s (already in global cleanup)",
+                       service_name);
   }
 
   entry->active = 0;
   platform_log_info("Service unregistered: %s", service_name);
 
+  pthread_mutex_unlock(&g_dispatcher_mutex);
   return ONVIF_SUCCESS;
 }
 
 int onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name,
                                       const http_request_t* request, http_response_t* response) {
+  pthread_mutex_lock(&g_dispatcher_mutex);
+
   if (!g_dispatcher_initialized) {
     platform_log_error("Service dispatcher not initialized");
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_ERROR_NOT_INITIALIZED;
   }
 
   if (!service_name || !operation_name || !request || !response) {
     platform_log_error("Invalid parameters for dispatch");
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_ERROR_INVALID;
   }
 
   service_registry_entry_t* entry = find_service_entry(service_name);
   if (!entry) {
     platform_log_error("Service not found: %s", service_name);
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_ERROR_NOT_FOUND;
   }
 
   platform_log_debug("Dispatching %s:%s to service handler", service_name, operation_name);
 
-  // Call the service operation handler
-  int result = entry->registration.operation_handler(operation_name, request, response);
+  // Store handler reference before unlocking mutex
+  onvif_service_operation_handler_t handler = entry->registration.operation_handler;
+
+  pthread_mutex_unlock(&g_dispatcher_mutex);
+
+  // Call the service operation handler without holding the mutex
+  // This allows the handler to potentially call other dispatcher functions
+  int result = handler(operation_name, request, response);
 
   if (result == ONVIF_SUCCESS) {
     platform_log_debug("Service operation completed successfully: %s:%s", service_name,
@@ -257,19 +311,28 @@ int onvif_service_dispatcher_dispatch(const char* service_name, const char* oper
 }
 
 int onvif_service_dispatcher_is_registered(const char* service_name) {
+  pthread_mutex_lock(&g_dispatcher_mutex);
+
   if (!g_dispatcher_initialized || !service_name) {
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return 0;
   }
 
-  return (find_service_entry(service_name) != NULL) ? 1 : 0;
+  int result = (find_service_entry(service_name) != NULL) ? 1 : 0;
+  pthread_mutex_unlock(&g_dispatcher_mutex);
+  return result;
 }
 
 int onvif_service_dispatcher_get_services(const char** services, size_t max_services) {
+  pthread_mutex_lock(&g_dispatcher_mutex);
+
   if (!g_dispatcher_initialized) {
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_ERROR_NOT_INITIALIZED;
   }
 
   if (!services || max_services == 0) {
+    pthread_mutex_unlock(&g_dispatcher_mutex);
     return ONVIF_ERROR_INVALID;
   }
 
@@ -281,5 +344,7 @@ int onvif_service_dispatcher_get_services(const char** services, size_t max_serv
     }
   }
 
+  pthread_mutex_unlock(&g_dispatcher_mutex);
   return (int)count;
 }
+// Test comment

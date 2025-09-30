@@ -1448,13 +1448,11 @@ int onvif_gsoap_generate_device_info_response(
   const char* model, const char* firmware_version, const char* serial_number,
   const char* hardware_id) {
   // Prepare callback data
-  device_info_callback_data_t callback_data = {
-    .manufacturer = {0},
-    .model = {0},
-    .firmware_version = {0},
-    .serial_number = {0},
-    .hardware_id = {0}
-  };
+  device_info_callback_data_t callback_data = {.manufacturer = {0},
+                                               .model = {0},
+                                               .firmware_version = {0},
+                                               .serial_number = {0},
+                                               .hardware_id = {0}};
 
   // Copy strings into the callback data structure
   strncpy(callback_data.manufacturer, manufacturer ? manufacturer : "",

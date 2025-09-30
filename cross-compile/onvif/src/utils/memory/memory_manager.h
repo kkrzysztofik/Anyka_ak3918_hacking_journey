@@ -102,6 +102,7 @@ int memory_manager_init(void);
 void memory_manager_cleanup(void);
 void memory_manager_log_stats(void);
 int memory_manager_check_leaks(void);
+size_t memory_manager_get_allocated_size(void);
 
 /* Basic allocation functions */
 void* onvif_malloc(size_t size, const char* file, int line, const char* function);

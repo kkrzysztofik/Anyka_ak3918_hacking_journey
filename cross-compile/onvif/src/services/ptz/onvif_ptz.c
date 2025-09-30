@@ -8,6 +8,7 @@
 #include "onvif_ptz.h"
 
 #include <bits/pthreadtypes.h>
+#include <errno.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -90,13 +91,16 @@ static struct ptz_preset g_ptz_presets[PTZ_MAX_PRESETS]; // NOLINT
 static int g_ptz_preset_count = 0;                       // NOLINT
 
 /* Global PTZ state variables */
-static pthread_mutex_t g_ptz_lock = PTHREAD_MUTEX_INITIALIZER; // NOLINT
-static int g_ptz_initialized = 0;                              // NOLINT
-static int g_ptz_current_pan_pos = 0;                          // NOLINT
-static int g_ptz_current_tilt_pos = 0;                         // NOLINT
-static pthread_t g_ptz_continuous_move_timer_thread = 0;       // NOLINT
-static int g_ptz_continuous_move_timeout_s = 0;                // NOLINT
-static volatile int g_ptz_continuous_move_active = 0;          // NOLINT
+static pthread_mutex_t g_ptz_lock = PTHREAD_MUTEX_INITIALIZER;     // NOLINT
+static pthread_cond_t g_ptz_timer_cond = PTHREAD_COND_INITIALIZER; // NOLINT
+static int g_ptz_initialized = 0;                                  // NOLINT
+static int g_ptz_current_pan_pos = 0;                              // NOLINT
+static int g_ptz_current_tilt_pos = 0;                             // NOLINT
+static pthread_t g_ptz_continuous_move_timer_thread = 0;           // NOLINT
+static int g_ptz_continuous_move_timeout_s = 0;                    // NOLINT
+static volatile int g_ptz_continuous_move_active = 0;              // NOLINT
+static volatile int g_ptz_timer_shutdown_requested = 0;            // NOLINT
+static int g_ptz_cleanup_in_progress = 0;                          // NOLINT
 
 /* Global buffer pool for PTZ service responses */
 static buffer_pool_t g_ptz_response_buffer_pool; // NOLINT
@@ -500,6 +504,11 @@ static const ptz_operation_entry_t g_ptz_operations[] = {{"GetConfigurations", h
  * @return ONVIF_SUCCESS on success, error code on failure
  */
 static int ptz_service_init_handler(void) {
+  /* Avoid recursive initialization when service is already active */
+  if (g_ptz_handler_state.gsoap_ctx != NULL) {
+    return ONVIF_SUCCESS;
+  }
+
   return onvif_ptz_init(NULL);
 }
 
@@ -1035,6 +1044,12 @@ int onvif_ptz_init(config_manager_t* config) {
 }
 
 void onvif_ptz_cleanup(void) {
+  if (g_ptz_cleanup_in_progress) {
+    return;
+  }
+
+  g_ptz_cleanup_in_progress = 1;
+
   error_context_t error_ctx;
   error_context_init(&error_ctx, "PTZ", "Cleanup", "service_cleanup");
 
@@ -1061,6 +1076,8 @@ void onvif_ptz_cleanup(void) {
   memory_manager_check_leaks();
 
   platform_log_info("PTZ service cleaned up and unregistered from dispatcher\n");
+
+  g_ptz_cleanup_in_progress = 0;
 }
 
 /* ============================================================================
@@ -1174,15 +1191,35 @@ static int cleanup_preset_memory(void) {
 static void* continuous_move_timeout_thread(void* unused_arg) {
   (void)unused_arg; /* Suppress unused parameter warning */
 
-  platform_sleep_ms(g_ptz_continuous_move_timeout_s * PTZ_MS_PER_SECOND);
+  /* Use condition variable with timed wait instead of sleep */
+  struct timespec timeout;
+  clock_gettime(CLOCK_REALTIME, &timeout);
+  timeout.tv_sec += g_ptz_continuous_move_timeout_s;
 
-  if (g_ptz_continuous_move_active) {
+  pthread_mutex_lock(&g_ptz_lock);
+
+  /* Wait for timeout or shutdown signal */
+  int wait_result = pthread_cond_timedwait(&g_ptz_timer_cond, &g_ptz_lock, &timeout);
+
+  /* Check if shutdown was requested */
+  if (g_ptz_timer_shutdown_requested) {
+    pthread_mutex_unlock(&g_ptz_lock);
+    return NULL;
+  }
+
+  /* If timeout occurred and continuous move is still active, stop it */
+  if (wait_result == ETIMEDOUT && g_ptz_continuous_move_active) {
     platform_log_info("PTZ continuous move timeout after %ds, stopping movement\n",
                       g_ptz_continuous_move_timeout_s);
-    ptz_adapter_stop();
+
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_LEFT);
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_RIGHT);
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_UP);
+    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
     g_ptz_continuous_move_active = 0;
   }
 
+  pthread_mutex_unlock(&g_ptz_lock);
   return NULL;
 }
 
@@ -1221,13 +1258,21 @@ int ptz_adapter_shutdown(void) {
       g_ptz_continuous_move_active = 0;
     }
 
-    /* Wait for timeout thread to finish if it exists */
+    /* Signal and wait for timeout thread to finish if it exists */
     if (g_ptz_continuous_move_timer_thread != 0) {
       pthread_t timer_thread = g_ptz_continuous_move_timer_thread;
       g_ptz_continuous_move_timer_thread = 0;
+
+      /* Signal shutdown to timer thread */
+      g_ptz_timer_shutdown_requested = 1;
+      pthread_cond_signal(&g_ptz_timer_cond);
+
       pthread_mutex_unlock(&g_ptz_lock);
       pthread_join(timer_thread, NULL);
       pthread_mutex_lock(&g_ptz_lock);
+
+      /* Reset shutdown flag for next use */
+      g_ptz_timer_shutdown_requested = 0;
     }
 
     platform_ptz_cleanup();
@@ -1379,6 +1424,7 @@ int ptz_adapter_continuous_move(int pan_velocity, int tilt_velocity, // NOLINT
   if (timeout_seconds > 0) {
     g_ptz_continuous_move_timeout_s = timeout_seconds;
     g_ptz_continuous_move_active = 1;
+    g_ptz_timer_shutdown_requested = 0; /* Reset shutdown flag for new timer */
 
     if (pthread_create(&g_ptz_continuous_move_timer_thread, NULL, continuous_move_timeout_thread,
                        NULL) != 0) {
@@ -1406,16 +1452,30 @@ int ptz_adapter_stop(void) {
 
   platform_log_info("PTZ stop all movement\n");
 
+  /* Stop all PTZ movement */
+  platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_LEFT);
+  platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_RIGHT);
+  platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_UP);
+  platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
+
   /* Clear continuous move state */
   g_ptz_continuous_move_active = 0;
 
-  /* Wait for timeout thread to finish if it exists */
+  /* Signal and wait for timeout thread to finish if it exists */
   if (g_ptz_continuous_move_timer_thread != 0) {
     pthread_t timer_thread = g_ptz_continuous_move_timer_thread;
     g_ptz_continuous_move_timer_thread = 0;
+
+    /* Signal shutdown to timer thread */
+    g_ptz_timer_shutdown_requested = 1;
+    pthread_cond_signal(&g_ptz_timer_cond);
+
     pthread_mutex_unlock(&g_ptz_lock);
     pthread_join(timer_thread, NULL);
     pthread_mutex_lock(&g_ptz_lock);
+
+    /* Reset shutdown flag for next use */
+    g_ptz_timer_shutdown_requested = 0;
   }
 
   pthread_mutex_unlock(&g_ptz_lock);

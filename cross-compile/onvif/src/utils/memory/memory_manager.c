@@ -124,6 +124,22 @@ void memory_manager_log_stats(void) {
                     total_allocated);
 }
 
+size_t memory_manager_get_allocated_size(void) {
+  if (!g_memory_manager_initialized) {
+    return 0;
+  }
+
+  size_t total_allocated = 0;
+
+  for (size_t i = 0; i < g_memory_tracker.count; i++) {
+    if (g_memory_tracker.allocations[i].ptr) {
+      total_allocated += g_memory_tracker.allocations[i].size;
+    }
+  }
+
+  return total_allocated;
+}
+
 int memory_manager_check_leaks(void) {
   if (!g_memory_manager_initialized) {
     return 0;

@@ -48,28 +48,31 @@ static int g_handler_initialized = 0; // NOLINT
 // Buffer pool for imaging service responses
 static buffer_pool_t g_imaging_response_buffer_pool; // NOLINT
 // Parameter cache optimization for frequently accessed settings
-#define IMAGING_PARAM_CACHE_SIZE 8
+#define IMAGING_PARAM_CACHE_SIZE       8
+#define IMAGING_PARAM_NAME_MAX_LENGTH  32
+#define IMAGING_PARAM_NAME_SAFE_LENGTH 31
+
 typedef struct {
-    char param_name[32];
-    int cached_value;
-    time_t cache_timestamp;
-    int is_valid;
+  char param_name[IMAGING_PARAM_NAME_MAX_LENGTH];
+  int cached_value;
+  time_t cache_timestamp;
+  int is_valid;
 } imaging_param_cache_entry_t;
 
-static imaging_param_cache_entry_t g_imaging_param_cache[IMAGING_PARAM_CACHE_SIZE];
-static pthread_mutex_t g_imaging_param_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
-static int g_imaging_param_cache_initialized = 0;
+static imaging_param_cache_entry_t g_imaging_param_cache[IMAGING_PARAM_CACHE_SIZE]; // NOLINT
+static pthread_mutex_t g_imaging_param_cache_mutex = PTHREAD_MUTEX_INITIALIZER;     // NOLINT
+static int g_imaging_param_cache_initialized = 0;                                   // NOLINT
 
 /**
  * @brief Initialize imaging parameter cache
  */
 static void init_imaging_param_cache(void) {
-    pthread_mutex_lock(&g_imaging_param_cache_mutex);
-    if (!g_imaging_param_cache_initialized) {
-        memset(g_imaging_param_cache, 0, sizeof(g_imaging_param_cache));
-        g_imaging_param_cache_initialized = 1;
-    }
-    pthread_mutex_unlock(&g_imaging_param_cache_mutex);
+  pthread_mutex_lock(&g_imaging_param_cache_mutex);
+  if (!g_imaging_param_cache_initialized) {
+    memset(g_imaging_param_cache, 0, sizeof(g_imaging_param_cache));
+    g_imaging_param_cache_initialized = 1;
+  }
+  pthread_mutex_unlock(&g_imaging_param_cache_mutex);
 }
 
 /**
@@ -79,21 +82,21 @@ static void init_imaging_param_cache(void) {
  * @return ONVIF_SUCCESS if found in cache, ONVIF_ERROR otherwise
  */
 static int get_cached_imaging_param(const char* param_name, int* cached_value) {
-    if (!param_name || !cached_value) {
-        return ONVIF_ERROR;
-    }
-
-    pthread_mutex_lock(&g_imaging_param_cache_mutex);
-    for (int i = 0; i < IMAGING_PARAM_CACHE_SIZE; i++) {
-        if (g_imaging_param_cache[i].is_valid && 
-            strcmp(g_imaging_param_cache[i].param_name, param_name) == 0) {
-            *cached_value = g_imaging_param_cache[i].cached_value;
-            pthread_mutex_unlock(&g_imaging_param_cache_mutex);
-            return ONVIF_SUCCESS;
-        }
-    }
-    pthread_mutex_unlock(&g_imaging_param_cache_mutex);
+  if (!param_name || !cached_value) {
     return ONVIF_ERROR;
+  }
+
+  pthread_mutex_lock(&g_imaging_param_cache_mutex);
+  for (int i = 0; i < IMAGING_PARAM_CACHE_SIZE; i++) {
+    if (g_imaging_param_cache[i].is_valid &&
+        strcmp(g_imaging_param_cache[i].param_name, param_name) == 0) {
+      *cached_value = g_imaging_param_cache[i].cached_value;
+      pthread_mutex_unlock(&g_imaging_param_cache_mutex);
+      return ONVIF_SUCCESS;
+    }
+  }
+  pthread_mutex_unlock(&g_imaging_param_cache_mutex);
+  return ONVIF_ERROR;
 }
 
 /**
@@ -102,38 +105,38 @@ static int get_cached_imaging_param(const char* param_name, int* cached_value) {
  * @param value Value to cache
  */
 static void cache_imaging_param(const char* param_name, int value) {
-    if (!param_name) {
-        return;
-    }
+  if (!param_name) {
+    return;
+  }
 
-    pthread_mutex_lock(&g_imaging_param_cache_mutex);
-    
-    // Find existing entry or use oldest slot
-    int target_slot = -1;
-    time_t oldest_time = time(NULL);
-    
-    for (int i = 0; i < IMAGING_PARAM_CACHE_SIZE; i++) {
-        if (!g_imaging_param_cache[i].is_valid || 
-            strcmp(g_imaging_param_cache[i].param_name, param_name) == 0) {
-            target_slot = i;
-            break;
-        }
-        if (g_imaging_param_cache[i].cache_timestamp < oldest_time) {
-            oldest_time = g_imaging_param_cache[i].cache_timestamp;
-            target_slot = i;
-        }
+  pthread_mutex_lock(&g_imaging_param_cache_mutex);
+
+  // Find existing entry or use oldest slot
+  int target_slot = -1;
+  time_t oldest_time = time(NULL);
+
+  for (int i = 0; i < IMAGING_PARAM_CACHE_SIZE; i++) {
+    if (!g_imaging_param_cache[i].is_valid ||
+        strcmp(g_imaging_param_cache[i].param_name, param_name) == 0) {
+      target_slot = i;
+      break;
     }
-    
-    if (target_slot >= 0) {
-        strncpy(g_imaging_param_cache[target_slot].param_name, param_name, 
-                sizeof(g_imaging_param_cache[target_slot].param_name) - 1);
-        g_imaging_param_cache[target_slot].param_name[31] = '\0';
-        g_imaging_param_cache[target_slot].cached_value = value;
-        g_imaging_param_cache[target_slot].cache_timestamp = time(NULL);
-        g_imaging_param_cache[target_slot].is_valid = 1;
+    if (g_imaging_param_cache[i].cache_timestamp < oldest_time) {
+      oldest_time = g_imaging_param_cache[i].cache_timestamp;
+      target_slot = i;
     }
-    
-    pthread_mutex_unlock(&g_imaging_param_cache_mutex);
+  }
+
+  if (target_slot >= 0) {
+    strncpy(g_imaging_param_cache[target_slot].param_name, param_name,
+            sizeof(g_imaging_param_cache[target_slot].param_name) - 1);
+    g_imaging_param_cache[target_slot].param_name[IMAGING_PARAM_NAME_SAFE_LENGTH] = '\0';
+    g_imaging_param_cache[target_slot].cached_value = value;
+    g_imaging_param_cache[target_slot].cache_timestamp = time(NULL);
+    g_imaging_param_cache[target_slot].is_valid = 1;
+  }
+
+  pthread_mutex_unlock(&g_imaging_param_cache_mutex);
 }
 
 /**
@@ -315,32 +318,32 @@ static int validate_imaging_settings_local(const struct imaging_settings* settin
  * @return ONVIF_SUCCESS on success, error code on failure
  */
 static int bulk_update_imaging_params(const struct imaging_settings* settings) {
-    if (!settings) {
-        return ONVIF_ERROR;
-    }
+  if (!settings) {
+    return ONVIF_ERROR;
+  }
 
-    // Validate all parameters before applying any changes
-    static struct imaging_settings last_validated_settings = {0};
-    static int validation_cache_valid = 0;
-    
-    // Check if settings match last validated settings to avoid re-validation
-    if (validation_cache_valid && 
-        memcmp(settings, &last_validated_settings, sizeof(struct imaging_settings)) == 0) {
-        // Skip validation as these exact settings were recently validated
-        return ONVIF_SUCCESS;
-    }
+  // Validate all parameters before applying any changes
+  static struct imaging_settings last_validated_settings = {0};
+  static int validation_cache_valid = 0;
 
-    // Validate new settings
-    int validation_result = validate_imaging_settings_local(settings);
-    if (validation_result != ONVIF_SUCCESS) {
-        return validation_result;
-    }
-
-    // Cache validated settings
-    last_validated_settings = *settings;
-    validation_cache_valid = 1;
-
+  // Check if settings match last validated settings to avoid re-validation
+  if (validation_cache_valid &&
+      memcmp(settings, &last_validated_settings, sizeof(struct imaging_settings)) == 0) {
+    // Skip validation as these exact settings were recently validated
     return ONVIF_SUCCESS;
+  }
+
+  // Validate new settings
+  int validation_result = validate_imaging_settings_local(settings);
+  if (validation_result != ONVIF_SUCCESS) {
+    return validation_result;
+  }
+
+  // Cache validated settings
+  last_validated_settings = *settings;
+  validation_cache_valid = 1;
+
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -349,72 +352,71 @@ static int bulk_update_imaging_params(const struct imaging_settings* settings) {
  * @return ONVIF_SUCCESS on success, error code on failure
  */
 static int optimized_batch_param_update(const struct imaging_settings* settings) {
-    if (!settings) {
-        return ONVIF_ERROR;
+  if (!settings) {
+    return ONVIF_ERROR;
+  }
+
+  // Check if any parameters actually changed to avoid unnecessary VPSS calls
+  int brightness_changed = (g_imaging_settings.brightness != settings->brightness);
+  int contrast_changed = (g_imaging_settings.contrast != settings->contrast);
+  int saturation_changed = (g_imaging_settings.saturation != settings->saturation);
+  int sharpness_changed = (g_imaging_settings.sharpness != settings->sharpness);
+  int hue_changed = (g_imaging_settings.hue != settings->hue);
+
+  if (!brightness_changed && !contrast_changed && !saturation_changed && !sharpness_changed &&
+      !hue_changed) {
+    // No changes needed
+    return ONVIF_SUCCESS;
+  }
+
+  // Apply only changed parameters to minimize VPSS calls
+  int ret = 0;
+
+  if (brightness_changed) {
+    int brightness_vpss = convert_onvif_to_vpss_brightness(settings->brightness);
+    if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_BRIGHTNESS,
+                                 brightness_vpss) != 0) {
+      platform_log_error("Failed to set brightness\n");
+      ret = -1;
     }
+  }
 
-    // Check if any parameters actually changed to avoid unnecessary VPSS calls
-    int brightness_changed = (g_imaging_settings.brightness != settings->brightness);
-    int contrast_changed = (g_imaging_settings.contrast != settings->contrast);
-    int saturation_changed = (g_imaging_settings.saturation != settings->saturation);
-    int sharpness_changed = (g_imaging_settings.sharpness != settings->sharpness);
-    int hue_changed = (g_imaging_settings.hue != settings->hue);
-
-    if (!brightness_changed && !contrast_changed && !saturation_changed && 
-        !sharpness_changed && !hue_changed) {
-        // No changes needed
-        return ONVIF_SUCCESS;
+  if (contrast_changed) {
+    int contrast_vpss = convert_onvif_to_vpss_contrast(settings->contrast);
+    if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_CONTRAST,
+                                 contrast_vpss) != 0) {
+      platform_log_error("Failed to set contrast\n");
+      ret = -1;
     }
+  }
 
-    // Apply only changed parameters to minimize VPSS calls
-    int ret = 0;
-
-    if (brightness_changed) {
-        int brightness_vpss = convert_onvif_to_vpss_brightness(settings->brightness);
-        if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_BRIGHTNESS,
-                                     brightness_vpss) != 0) {
-            platform_log_error("Failed to set brightness\n");
-            ret = -1;
-        }
+  if (saturation_changed) {
+    int saturation_vpss = convert_onvif_to_vpss_saturation(settings->saturation);
+    if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_SATURATION,
+                                 saturation_vpss) != 0) {
+      platform_log_error("Failed to set saturation\n");
+      ret = -1;
     }
+  }
 
-    if (contrast_changed) {
-        int contrast_vpss = convert_onvif_to_vpss_contrast(settings->contrast);
-        if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_CONTRAST, 
-                                     contrast_vpss) != 0) {
-            platform_log_error("Failed to set contrast\n");
-            ret = -1;
-        }
+  if (sharpness_changed) {
+    int sharpness_vpss = convert_onvif_to_vpss_sharpness(settings->sharpness);
+    if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_SHARPNESS,
+                                 sharpness_vpss) != 0) {
+      platform_log_error("Failed to set sharpness\n");
+      ret = -1;
     }
+  }
 
-    if (saturation_changed) {
-        int saturation_vpss = convert_onvif_to_vpss_saturation(settings->saturation);
-        if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_SATURATION,
-                                     saturation_vpss) != 0) {
-            platform_log_error("Failed to set saturation\n");
-            ret = -1;
-        }
+  if (hue_changed) {
+    int hue_vpss = convert_onvif_to_vpss_hue(settings->hue);
+    if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_HUE, hue_vpss) != 0) {
+      platform_log_error("Failed to set hue\n");
+      ret = -1;
     }
+  }
 
-    if (sharpness_changed) {
-        int sharpness_vpss = convert_onvif_to_vpss_sharpness(settings->sharpness);
-        if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_SHARPNESS,
-                                     sharpness_vpss) != 0) {
-            platform_log_error("Failed to set sharpness\n");
-            ret = -1;
-        }
-    }
-
-    if (hue_changed) {
-        int hue_vpss = convert_onvif_to_vpss_hue(settings->hue);
-        if (platform_vpss_effect_set(g_imaging_vi_handle, PLATFORM_VPSS_EFFECT_HUE, 
-                                     hue_vpss) != 0) {
-            platform_log_error("Failed to set hue\n");
-            ret = -1;
-        }
-    }
-
-    return ret;
+  return ret;
 }
 
 /* ============================================================================
@@ -614,26 +616,30 @@ int onvif_imaging_get_settings(struct imaging_settings* settings) {
   }
 
   // Try to get frequently accessed parameters from cache first
-  int cached_brightness, cached_contrast, cached_saturation;
-  int brightness_cached = (get_cached_imaging_param("brightness", &cached_brightness) == ONVIF_SUCCESS);
+  int cached_brightness = 0;
+  int cached_contrast = 0;
+  int cached_saturation = 0;
+  int brightness_cached =
+    (get_cached_imaging_param("brightness", &cached_brightness) == ONVIF_SUCCESS);
   int contrast_cached = (get_cached_imaging_param("contrast", &cached_contrast) == ONVIF_SUCCESS);
-  int saturation_cached = (get_cached_imaging_param("saturation", &cached_saturation) == ONVIF_SUCCESS);
+  int saturation_cached =
+    (get_cached_imaging_param("saturation", &cached_saturation) == ONVIF_SUCCESS);
 
   // Use cached values if available, otherwise use current settings
   *settings = g_imaging_settings;
-  
+
   if (brightness_cached) {
     settings->brightness = cached_brightness;
   } else {
     cache_imaging_param("brightness", settings->brightness);
   }
-  
+
   if (contrast_cached) {
     settings->contrast = cached_contrast;
   } else {
     cache_imaging_param("contrast", settings->contrast);
   }
-  
+
   if (saturation_cached) {
     settings->saturation = cached_saturation;
   } else {
@@ -673,7 +679,7 @@ int onvif_imaging_set_settings(const struct imaging_settings* settings) {
   } else {
     // Update local settings only if VPSS application succeeded
     g_imaging_settings = *settings;
-    
+
     // Update parameter cache with new values
     cache_imaging_param("brightness", settings->brightness);
     cache_imaging_param("contrast", settings->contrast);
@@ -684,13 +690,6 @@ int onvif_imaging_set_settings(const struct imaging_settings* settings) {
 
   // Update day/night configuration
   g_imaging_settings.daynight = settings->daynight;
-
-  // Save settings to configuration (imaging section)
-  if (ret == 0) {
-    // Note: Configuration saving is now handled by the centralized config
-    // system
-    platform_log_notice("Imaging settings updated successfully\n");
-  }
 
   pthread_mutex_unlock(&g_imaging_mutex);
   return ret;
