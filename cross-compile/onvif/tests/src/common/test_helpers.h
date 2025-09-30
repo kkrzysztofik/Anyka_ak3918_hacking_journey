@@ -19,8 +19,9 @@
 #ifndef TEST_HELPERS_H
 #define TEST_HELPERS_H
 
+#include <pthread.h>
 #include <stddef.h>
-#include <stdint.h>
+#include <sys/time.h>
 
 // Forward declarations for types used in function parameters
 struct http_auth_config;
@@ -29,8 +30,17 @@ struct ptz_speed;
 struct ptz_preset;
 
 #include "cmocka_wrapper.h"
+#include "networking/http/http_parser.h"
 #include "services/common/service_dispatcher.h"
-#include "utils/error/error_handling.h"
+#include "services/ptz/onvif_ptz.h" // Added for struct ptz_vector
+
+/* ============================================================================
+ * Constants
+ * ============================================================================ */
+
+// Buffer sizes for test data
+#define TEST_PARAM_DESCRIPTION_SIZE 128
+#define TEST_OPERATION_NAME_SIZE    64
 
 /* ============================================================================
  * Type Definitions
@@ -72,7 +82,7 @@ typedef struct {
  */
 typedef struct {
   /** Description of the parameter being tested (for error messages) */
-  char param_description[128];
+  char param_description[TEST_PARAM_DESCRIPTION_SIZE];
 
   /** Index of the parameter to set to NULL (0-based) */
   int param_index;
@@ -80,7 +90,6 @@ typedef struct {
   /** Expected return code when parameter is NULL */
   int expected_result;
 } null_param_test_t;
-;
 
 /**
  * @brief Configuration for mock initialization
@@ -230,7 +239,6 @@ typedef struct {
   int** counters;             // Array of counter pointers
   int counter_count;          // Number of counters
 } test_state_config_t;
-;
 
 // Test state management functions
 void test_helper_reset_state(const test_state_config_t* config);
@@ -255,7 +263,6 @@ int test_helper_ptz_create_test_position(struct ptz_vector* position, float pan,
 int test_helper_ptz_create_test_speed(struct ptz_speed* speed, float pan_tilt, float zoom);
 int test_helper_ptz_create_test_preset(struct ptz_preset* preset, const char* token,
                                        const char* name);
-;
 
 // Macro to simplify state management
 #define TEST_HELPER_DECLARE_COUNTERS(name, ...)                                                    \
@@ -283,7 +290,7 @@ typedef struct {
   int init_result;
   void* last_request;
   void* last_response;
-  char last_operation[64];
+  char last_operation[TEST_OPERATION_NAME_SIZE];
 } generic_mock_handler_state_t;
 
 // Generic mock handler functions
@@ -314,8 +321,22 @@ void test_helper_reset_generic_mock_state(generic_mock_handler_state_t* state);
                                                                                                    \
   static void service_name##_reset_mock_state(void) {                                              \
     test_helper_reset_generic_mock_state(&g_##service_name##_mock_state);                          \
-  };                                                                                               \
-  ;
+  }
+
+/* ============================================================================
+ * Memory and Performance Measurement Helpers
+ * ============================================================================ */
+
+/**
+ * @brief Get current memory usage in bytes
+ *
+ * Reads the VmRSS (Resident Set Size) from /proc/self/status on Linux systems.
+ * On non-Linux systems or if reading fails, returns 0.
+ *
+ * @return Current memory usage in bytes, or 0 if unavailable
+ * @note This is Linux-specific and may not work on other platforms
+ */
+size_t test_helper_get_memory_usage(void);
 
 /* ============================================================================
  * Mock Setup/Teardown Helpers

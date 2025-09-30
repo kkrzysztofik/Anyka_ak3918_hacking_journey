@@ -7,16 +7,36 @@
 
 #include "test_helpers.h"
 
+#include <sched.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Mock includes
-#include "../mocks/mock_service_dispatcher.h"
-#include "../mocks/platform_mock.h"
+#include "mocks/mock_service_dispatcher.h"
+#include "mocks/platform_mock.h"
+#include "mocks/platform_ptz_mock.h"
 
 // ONVIF includes
-#include "../../../src/networking/http/http_auth.h"
-#include "../../../src/utils/security/base64_utils.h"
+#include "networking/http/http_auth.h"
+#include "networking/http/http_parser.h"
+#include "platform/platform_common.h"
+#include "services/common/service_dispatcher.h" // Added for onvif_service_dispatcher_dispatch
+#include "services/ptz/onvif_ptz.h"             // Added for struct ptz_vector
+#include "utils/error/error_handling.h"         // Added for ONVIF_SUCCESS
+#include "utils/security/base64_utils.h"
+
+/* ============================================================================
+ * Constants
+ * ============================================================================ */
+
+// Buffer sizes for test data
+#define TEST_CREDENTIALS_BUFFER_SIZE  256
+#define TEST_ENCODED_BUFFER_SIZE      512
+#define TEST_LINE_BUFFER_SIZE         256
+#define TEST_MEMORY_CONVERSION_FACTOR 1024
+#define TEST_VMRSS_PREFIX_LENGTH      6
+#define TEST_STRTOUL_BASE             10
 
 /* ============================================================================
  * Service Callback Test Helpers
@@ -253,7 +273,7 @@ void test_helper_null_param_4_args(void** state, const null_param_test_t* test_c
  * @param expected_result Expected return code when parameter is NULL
  * @return null_param_test_t structure
  */
-null_param_test_t test_helper_create_null_test(const char* description, int param_index,
+null_param_test_t test_helper_create_null_test(const char* description, int param_index, // NOLINT
                                                int expected_result) {
   null_param_test_t test = {0};
   if (description) {
@@ -309,7 +329,7 @@ void test_helper_generic_cleanup_handler(generic_mock_handler_state_t* state) {
  * @return Result from operation handler
  */
 int test_helper_generic_operation_handler(generic_mock_handler_state_t* state,
-                                          const char* operation, const void* request,
+                                          const char* operation, const void* request, // NOLINT
                                           void* response) {
   if (!state) {
     return ONVIF_ERROR_INVALID;
@@ -404,7 +424,7 @@ void test_helper_reset_state(const test_state_config_t* config) {
  * @param counter_count Number of counters
  * @return test_state_config_t structure
  */
-test_state_config_t test_helper_create_state_config(void (*reset_func)(void),
+test_state_config_t test_helper_create_state_config(void (*reset_func)(void), // NOLINT
                                                     void (*cleanup_func)(void), int* counters,
                                                     int counter_count) {
   test_state_config_t config = {0};
@@ -434,14 +454,14 @@ int test_helper_http_build_basic_auth_header(const char* username, const char* p
   }
 
   // Create credentials string
-  char credentials[256];
+  char credentials[TEST_CREDENTIALS_BUFFER_SIZE];
   int written = snprintf(credentials, sizeof(credentials), "%s:%s", username, password);
   if (written >= (int)sizeof(credentials)) {
     return -1; // Truncated
   }
 
   // Encode credentials
-  char encoded[512];
+  char encoded[TEST_ENCODED_BUFFER_SIZE];
   int base64_result = onvif_util_base64_encode((const unsigned char*)credentials,
                                                strlen(credentials), encoded, sizeof(encoded));
   if (base64_result != ONVIF_SUCCESS) {
@@ -464,7 +484,9 @@ int test_helper_http_build_basic_auth_header(const char* username, const char* p
  * @param enabled Whether authentication is enabled
  * @return 0 on success, -1 on error
  */
-int test_helper_http_init_auth_config(struct http_auth_config* config, int auth_type, int enabled) {
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+int test_helper_http_init_auth_config(struct http_auth_config* config, int auth_type,
+                                      int enabled) { // NOLINT
   if (!config) {
     return -1;
   }
@@ -536,7 +558,9 @@ int test_helper_http_create_response(int status_code, http_response_t* response)
  * @param zoom Zoom value (0.0 to 1.0)
  * @return 0 on success, -1 on error
  */
-int test_helper_ptz_create_test_position(struct ptz_vector* position, float pan, float tilt,
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+int test_helper_ptz_create_test_position(struct ptz_vector* position, float pan,
+                                         float tilt, // NOLINT
                                          float zoom) {
   if (!position) {
     return -1;
@@ -561,7 +585,9 @@ int test_helper_ptz_create_test_position(struct ptz_vector* position, float pan,
  * @param zoom Zoom speed value (0.0 to 1.0)
  * @return 0 on success, -1 on error
  */
-int test_helper_ptz_create_test_speed(struct ptz_speed* speed, float pan_tilt, float zoom) {
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+int test_helper_ptz_create_test_speed(struct ptz_speed* speed, float pan_tilt,
+                                      float zoom) { // NOLINT
   if (!speed) {
     return -1;
   }
@@ -618,7 +644,7 @@ int test_helper_setup_mocks(const mock_config_t* config) {
     // PTZ adapter initialization
     // Note: This depends on platform_mock being initialized first
     if (!config->init_platform) {
-      fprintf(stderr, "Warning: PTZ adapter requires platform mock\n");
+      (void)fprintf(stderr, "Warning: PTZ adapter requires platform mock\n");
     }
   }
 
@@ -1124,4 +1150,42 @@ void test_helper_service_callback_logging_failure(void** state,
 
   // Verify failure was logged (logging would be verified by log output)
   assert_int_equal(1, mock_service_dispatcher_get_register_call_count());
+}
+
+/* ============================================================================
+ * Memory and Performance Measurement Helpers
+ * ============================================================================ */
+
+/**
+ * @brief Get current memory usage in bytes
+ *
+ * Reads the VmRSS (Resident Set Size) from /proc/self/status on Linux systems.
+ * On non-Linux systems or if reading fails, returns 0.
+ *
+ * @return Current memory usage in bytes, or 0 if unavailable
+ * @note This is Linux-specific and may not work on other platforms
+ */
+size_t test_helper_get_memory_usage(void) {
+  FILE* status_file = fopen("/proc/self/status", "r");
+  if (!status_file) {
+    return 0;
+  }
+
+  char line[TEST_LINE_BUFFER_SIZE];
+  size_t memory_kb = 0;
+
+  while (fgets(line, sizeof(line), status_file)) {
+    if (strncmp(line, "VmRSS:", TEST_VMRSS_PREFIX_LENGTH) == 0) {
+      char* endptr = NULL;
+      const char* start = line + TEST_VMRSS_PREFIX_LENGTH;
+      memory_kb = (size_t)strtoul(start, &endptr, TEST_STRTOUL_BASE);
+      if (endptr == start || *endptr != ' ') {
+        memory_kb = 0; // Invalid format
+      }
+      break;
+    }
+  }
+
+  (void)fclose(status_file);
+  return memory_kb * TEST_MEMORY_CONVERSION_FACTOR; // Convert to bytes
 }
