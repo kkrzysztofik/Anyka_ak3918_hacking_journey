@@ -156,7 +156,7 @@
   - _Requirements: 5.1, 5.2, 5.3, 5.4_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in ONVIF Device service | Task: Implement all 4 Device parsing functions following requirements 5.1-5.4 using established pattern. Note that some Device operations (GetDeviceInformation, GetSystemDateAndTime, SystemReboot) have empty request structures - still follow pattern but deserialization is simpler. Include complete documentation. | Restrictions: Must use consistent pattern even for empty requests, handle Capabilities array properly | Success: All 4 functions implemented, empty requests handled correctly, documentation complete | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 16. Create onvif_gsoap_imaging.h header with Imaging service parsing functions
+- [x] 16. Create onvif_gsoap_imaging.h header with Imaging service parsing functions
   - File: src/protocol/gsoap/onvif_gsoap_imaging.h (new file)
   - Declare 2 Imaging service parsing functions (GetImagingSettings, SetImagingSettings)
   - Add complete Doxygen documentation
@@ -165,7 +165,7 @@
   - _Requirements: 5.5, 5.6, 10.6_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in ONVIF Imaging service protocol | Task: Create onvif_gsoap_imaging.h header following requirements 5.5-5.6 and 10.6. Declare 2 Imaging service parsing functions with signature: int onvif_gsoap_parse_[operation](onvif_gsoap_context_t* ctx, struct _timg__[Operation]** out). Document VideoSourceToken and ImagingSettings fields. | Restrictions: Follow project standards, _timg__ prefix for Imaging service structures | Success: Header declares both functions, complete documentation, compiles cleanly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 17. Implement both Imaging service parsing functions in onvif_gsoap_imaging.c
+- [x] 17. Implement both Imaging service parsing functions in onvif_gsoap_imaging.c
   - File: src/protocol/gsoap/onvif_gsoap_imaging.c (new file)
   - Implement GetImagingSettings and SetImagingSettings
   - Follow established parsing pattern

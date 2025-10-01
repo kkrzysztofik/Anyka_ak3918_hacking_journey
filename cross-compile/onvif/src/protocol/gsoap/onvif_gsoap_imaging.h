@@ -1,0 +1,46 @@
+/**
+ * @file onvif_gsoap_imaging.h
+ * @brief Imaging service SOAP request parsing using gSOAP deserialization
+ * @author kkrzysztofik
+ * @date 2025
+ *
+ * This module provides Imaging service request parsing functions that use
+ * gSOAP's generated deserialization functions for proper ONVIF compliance.
+ * Imaging service operations control camera image settings including
+ * brightness, contrast, saturation, sharpness, and other visual parameters.
+ */
+
+#ifndef ONVIF_GSOAP_IMAGING_H
+#define ONVIF_GSOAP_IMAGING_H
+
+#include "generated/soapH.h"    //NOLINT
+#include "generated/soapStub.h" //NOLINT
+#include "protocol/gsoap/onvif_gsoap_core.h"
+
+/**
+ * @brief Parse GetImagingSettings ONVIF Imaging service request
+ * @param ctx gSOAP context with initialized request parsing
+ * @param out Output pointer to receive parsed GetImagingSettings structure
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Extracts VideoSourceToken to identify which video source settings to retrieve
+ * @note Response contains ImagingSettings with Brightness, Contrast, Saturation, Sharpness, etc.
+ * @note Output structure is allocated with soap_new__onvif4__GetImagingSettings()
+ */
+int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
+                                             struct _onvif4__GetImagingSettings** out);
+
+/**
+ * @brief Parse SetImagingSettings ONVIF Imaging service request
+ * @param ctx gSOAP context with initialized request parsing
+ * @param out Output pointer to receive parsed SetImagingSettings structure
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Extracts VideoSourceToken and ImagingSettings structure
+ * @note ImagingSettings contains Brightness, Contrast, ColorSaturation, Sharpness values
+ * @note May also include BacklightCompensation, Exposure, Focus, WideDynamicRange settings
+ * @note ForcePersistence flag indicates whether settings should persist across reboots
+ * @note Output structure is allocated with soap_new__onvif4__SetImagingSettings()
+ */
+int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
+                                             struct _onvif4__SetImagingSettings** out);
+
+#endif /* ONVIF_GSOAP_IMAGING_H */
