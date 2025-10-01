@@ -391,11 +391,6 @@ int platform_log_notice(const char* format, ...);
 int platform_log_info(const char* format, ...);
 int platform_log_debug(const char* format, ...);
 
-/* Utility functions */
-void platform_sleep_ms(uint32_t milliseconds);
-void platform_sleep_us(uint32_t microseconds);
-uint64_t platform_get_time_ms(void);
-
 /* System monitoring functions */
 typedef struct {
   float cpu_usage;       /**< CPU usage percentage (0-100) */

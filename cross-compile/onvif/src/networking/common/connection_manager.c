@@ -18,6 +18,7 @@
 #include "networking/common/epoll_server.h"
 #include "networking/http/http_server.h"
 #include "platform/platform.h"
+#include "utils/common/time_utils.h"
 #include "utils/memory/memory_manager.h"
 
 /* Global connection list - static for encapsulation */
@@ -88,7 +89,7 @@ connection_t* connection_create(int socket_fd, char* buffer) {
   conn->buffer_used = 0;
   conn->content_length = 0;
   conn->header_length = 0;
-  conn->last_activity = platform_get_time_ms();
+  conn->last_activity = get_time_ms();
   conn->keepalive_count = 0;
   conn->next = NULL;
   conn->prev = NULL;
@@ -137,7 +138,7 @@ int connection_is_timed_out(connection_t* conn) {
     return 1;
   }
 
-  uint64_t now = platform_get_time_ms();
+  uint64_t now = get_time_ms();
   uint64_t timeout =
     (conn->state == CONN_STATE_KEEPALIVE) ? KEEPALIVE_TIMEOUT_MS : CONNECTION_TIMEOUT_MS;
 

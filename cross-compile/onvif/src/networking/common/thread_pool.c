@@ -17,6 +17,7 @@
 #include "core/lifecycle/signal_lifecycle.h"
 #include "networking/common/connection_manager.h"
 #include "platform/platform.h"
+#include "utils/common/time_utils.h"
 #include "thread_pool.h"
 #include "utils/memory/memory_manager.h"
 
@@ -114,7 +115,7 @@ void thread_pool_cleanup(thread_pool_t* pool) {
 
   // Give threads a moment to process the shutdown signal
   platform_log_debug("Waiting for threads to process shutdown signal...\n");
-  platform_sleep_ms(200); // 200ms
+  sleep_ms(200); // 200ms
   platform_log_debug("Starting thread join process...\n");
 
   // Wait for all threads to finish with timeout

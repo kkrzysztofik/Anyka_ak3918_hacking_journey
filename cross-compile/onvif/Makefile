@@ -101,6 +101,8 @@ SRCS := \
 	src/protocol/response/onvif_service_handler.c \
 	src/generated/soapC.c \
 	src/protocol/gsoap/onvif_gsoap.c \
+	src/protocol/gsoap/onvif_gsoap_core.c \
+	src/utils/common/time_utils.c \
 	src/utils/memory/memory_manager.c \
 	src/utils/memory/smart_response_builder.c \
 	src/utils/string/string_shims.c \

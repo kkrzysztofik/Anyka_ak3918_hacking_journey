@@ -102,19 +102,45 @@ typedef enum {
  */
 
 /**
- * @brief gSOAP context using proper gSOAP structures and serialization
+ * @brief Enhanced ONVIF gSOAP context with embedded soap context
+ *
+ * This structure improves upon the original design by:
+ * - Using embedded soap context (no allocation needed)
+ * - Tracking request parsing and response generation state
+ * - Providing detailed error context for debugging
+ * - Automatic performance metric collection
  */
 typedef struct {
-  // gSOAP context
-  struct soap* soap;
+  // Embedded gSOAP context (no pointer indirection)
+  struct soap soap;
 
-  // Statistics
-  size_t total_bytes_written;     // Total bytes written
-  uint64_t generation_start_time; // Generation start timestamp
-  uint64_t generation_end_time;   // Generation end timestamp
+  // Request parsing state tracking
+  struct {
+    const char* operation_name;  // Parsed operation name (for logging)
+    bool is_initialized;         // Request parsing initialized
+    size_t request_size;         // Original request size in bytes
+    uint64_t parse_start_time;   // Parse start timestamp (microseconds)
+    uint64_t parse_end_time;     // Parse end timestamp (microseconds)
+  } request_state;
 
-  // User data
-  void* user_data; // User-defined data
+  // Response generation state tracking
+  struct {
+    size_t total_bytes_written;      // Total response bytes written
+    uint64_t generation_start_time;  // Generation start timestamp
+    uint64_t generation_end_time;    // Generation end timestamp
+    bool is_finalized;               // Response finalization complete
+  } response_state;
+
+  // Enhanced error context for debugging
+  struct {
+    int last_error_code;        // Last error code from error_handling.h
+    char error_message[256];    // Detailed error message
+    const char* error_location; // Function where error occurred
+    int soap_error_code;        // gSOAP-specific error code
+  } error_context;
+
+  // Optional user data
+  void* user_data;
 } onvif_gsoap_context_t;
 
 /* ============================================================================
@@ -568,6 +594,27 @@ bool onvif_gsoap_has_error(const onvif_gsoap_context_t* ctx);
 const char* onvif_gsoap_get_error(const onvif_gsoap_context_t* ctx);
 
 /**
+ * @brief Set error context with detailed information
+ * @param ctx Context to update
+ * @param error_code Error code from error_handling.h
+ * @param location Function name where error occurred (__func__)
+ * @param message Detailed error message
+ */
+void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const char* location,
+                            const char* message);
+
+/**
+ * @brief Get detailed error information
+ * @param ctx Context to query
+ * @param error_code Output: error code (can be NULL)
+ * @param location Output: function where error occurred (can be NULL)
+ * @param soap_error Output: gSOAP error code (can be NULL)
+ * @return Error message string
+ */
+const char* onvif_gsoap_get_detailed_error(onvif_gsoap_context_t* ctx, int* error_code,
+                                            const char** location, int* soap_error);
+
+/**
  * @brief Validate response completeness
  * @param ctx Pointer to gSOAP context structure
  * @return 0 if valid, negative error code if invalid
@@ -733,13 +780,36 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
                                      size_t request_size);
 
 /**
- * @brief Parse profile token from SOAP request using gSOAP
+ * @brief Parse profile token from PTZ SOAP request using gSOAP
  * @param ctx Pointer to gSOAP context structure
  * @param token Buffer to store the extracted token
  * @param token_size Size of the token buffer
  * @return 0 on success, negative error code on failure
+ * @note Specialized for PTZ requests - expects ProfileToken in PTZ namespace
  */
-int onvif_gsoap_parse_profile_token(onvif_gsoap_context_t* ctx, char* token, size_t token_size);
+int onvif_gsoap_parse_ptz_profile_token(onvif_gsoap_context_t* ctx, char* token, size_t token_size);
+
+/**
+ * @brief Parse profile token from Media SOAP request using gSOAP
+ * @param ctx Pointer to gSOAP context structure
+ * @param token Buffer to store the extracted token
+ * @param token_size Size of the token buffer
+ * @return 0 on success, negative error code on failure
+ * @note Specialized for Media requests - expects ProfileToken in Media namespace
+ */
+int onvif_gsoap_parse_media_profile_token(onvif_gsoap_context_t* ctx, char* token,
+                                          size_t token_size);
+
+/**
+ * @brief Parse profile token from Snapshot SOAP request using gSOAP
+ * @param ctx Pointer to gSOAP context structure
+ * @param token Buffer to store the extracted token
+ * @param token_size Size of the token buffer
+ * @return 0 on success, negative error code on failure
+ * @note Specialized for Snapshot requests - expects ProfileToken in Snapshot namespace
+ */
+int onvif_gsoap_parse_snapshot_profile_token(onvif_gsoap_context_t* ctx, char* token,
+                                             size_t token_size);
 
 /**
  * @brief Parse configuration token from SOAP request using gSOAP

@@ -24,7 +24,9 @@
 #include <unistd.h>
 
 #include "platform/platform.h"
+#include "utils/common/time_utils.h"
 #include "platform/platform_common.h"
+#include "utils/common/time_utils.h"
 #include "rtsp_auth.h"
 #include "rtsp_rtp.h"
 #include "rtsp_sdp.h"
@@ -231,7 +233,7 @@ int rtsp_multistream_server_add_stream(rtsp_multistream_server_t* server, const 
 
   // Wait for first frame to be captured and encoded
   platform_log_debug("Waiting for first frame encoding for stream %s\n", path);
-  platform_sleep_ms(200); // Allow time for first frame
+  sleep_ms(200); // Allow time for first frame
 
   stream->encoder_initialized = true;
 
@@ -598,7 +600,7 @@ static int rtsp_multistream_get_video_stream_with_retry(rtsp_multistream_server_
       if (retry_count < max_retries - 1) {
         // Use shorter delay during shutdown
         int delay_ms = (server && !server->running) ? 5 : 20;
-        platform_sleep_ms(delay_ms);
+        sleep_ms(delay_ms);
       }
     }
 
@@ -959,7 +961,7 @@ static void* rtsp_multistream_encoder_thread(void* arg) {
     // Use safe mutex lock with timeout and corruption recovery
     if (pthread_mutex_lock(&server->streams_mutex) != 0) {
       // Mutex lock failed, wait and continue
-      platform_sleep_ms(10);
+      sleep_ms(10);
       continue;
     }
 
@@ -984,7 +986,7 @@ static void* rtsp_multistream_encoder_thread(void* arg) {
 
     // Use shorter sleep and check shutdown more frequently
     for (int i = 0; i < 10 && server->running; i++) {
-      platform_sleep_ms(1); // 1ms sleep, check 10 times
+      sleep_ms(1); // 1ms sleep, check 10 times
     }
   }
 
@@ -1012,7 +1014,7 @@ static void* rtsp_multistream_audio_thread(void* arg) {
     pthread_mutex_unlock(&server->streams_mutex);
 
     // Small delay to prevent busy waiting
-    platform_sleep_ms(10); // 10ms
+    sleep_ms(10); // 10ms
   }
 
   platform_log_notice("Multi-stream RTSP audio thread finished\n");
@@ -1082,7 +1084,7 @@ static void* rtsp_multistream_timeout_thread(void* arg) {
       break;
     }
 
-    platform_sleep_ms(10000);
+    sleep_ms(10000);
   }
 
   platform_log_notice("Multi-stream RTSP timeout thread finished\n");

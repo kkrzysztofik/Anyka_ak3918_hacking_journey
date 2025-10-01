@@ -25,6 +25,7 @@
 #include "networking/common/thread_pool.h"
 #include "networking/http/http_server.h"
 #include "platform/platform.h"
+#include "utils/common/time_utils.h"
 
 /* Global epoll state */
 static int g_epoll_fd = -1;      // NOLINT
@@ -113,7 +114,7 @@ void epoll_server_cleanup(void) {
   }
 
   // Give the epoll loop a moment to detect the shutdown signal
-  platform_sleep_ms(100); // 100ms
+  sleep_ms(100); // 100ms
 
   platform_log_info("Epoll server cleaned up\n");
 }
@@ -251,7 +252,7 @@ static void handle_client_event(struct epoll_event* event) {
  * @param last_cleanup Pointer to last cleanup timestamp
  */
 static void perform_periodic_cleanup(uint64_t* last_cleanup) {
-  uint64_t now = platform_get_time_ms();
+  uint64_t now = get_time_ms();
   if (now - *last_cleanup > g_cleanup_interval) { // Use configured interval
     connection_cleanup_timed_out();
 
@@ -272,7 +273,7 @@ static void perform_periodic_cleanup(uint64_t* last_cleanup) {
 void* epoll_server_loop(void* arg) {
   (void)arg;
   struct epoll_event events[EPOLL_MAX_EVENTS];
-  uint64_t last_cleanup = platform_get_time_ms();
+  uint64_t last_cleanup = get_time_ms();
 
   platform_log_info("Epoll event loop started\n");
 

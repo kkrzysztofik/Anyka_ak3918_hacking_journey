@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 #include "platform/platform.h"
+#include "utils/common/time_utils.h"
 #include "rtsp_types.h"
 
 /* ==================== RTCP Functions ==================== */
@@ -249,7 +250,7 @@ void* rtcp_thread(void* arg) {
     }
 
     // Small delay to prevent busy waiting
-    platform_sleep_ms(100); // 100ms
+    sleep_ms(100); // 100ms
   }
 
   platform_log_notice("RTCP thread finished\n");

@@ -32,6 +32,7 @@
 #include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
+#include "utils/common/time_utils.h"
 #include "protocol/gsoap/onvif_gsoap.h"
 #include "services/common/onvif_types.h"
 #include "services/device/onvif_device.h"
@@ -1205,7 +1206,7 @@ int http_server_process_request(int client_fd) {
   }
 
   // Record request start time for latency measurement
-  uint64_t request_start_time = platform_get_time_ms();
+  uint64_t request_start_time = get_time_ms();
 
   // Get client IP address
   char client_ip_str[HTTP_CLIENT_IP_BUFFER_SIZE] = "unknown";
@@ -1250,7 +1251,7 @@ int http_server_process_request(int client_fd) {
   }
 
   // Record performance metrics
-  uint64_t request_end_time = platform_get_time_ms();
+  uint64_t request_end_time = get_time_ms();
   uint64_t latency_ms = request_end_time - request_start_time;
   size_t response_size = (result == ONVIF_SUCCESS) ? response.body_length : 0;
   int status_code = (result == ONVIF_SUCCESS) ? HTTP_STATUS_OK : HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -1384,7 +1385,7 @@ int http_metrics_init(void) {
   }
 
   // Set start time
-  g_http_server.metrics.metrics_start_time = platform_get_time_ms();
+  g_http_server.metrics.metrics_start_time = get_time_ms();
 
   return ONVIF_SUCCESS;
 }

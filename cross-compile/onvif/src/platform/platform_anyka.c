@@ -36,6 +36,7 @@
 #include "list.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
+#include "utils/common/time_utils.h"
 #include "utils/logging/platform_logging.h"
 
 /* Error type constants for enhanced error logging */
@@ -368,7 +369,7 @@ void platform_cleanup(void) {
       }
     }
 
-    platform_sleep_ms(10);
+    sleep_ms(10);
     timeout_count++;
   }
 
@@ -395,7 +396,7 @@ void platform_cleanup(void) {
                              "(result=%d)\n",
                              retry_count + 1, capture_result);
         if (retry_count < max_retries - 1) {
-          platform_sleep_ms(200); // Wait before retry
+          sleep_ms(200); // Wait before retry
         }
       } else {
         platform_log_debug("platform_cleanup: Video capture stopped successfully\n");
@@ -412,7 +413,7 @@ void platform_cleanup(void) {
     // Give the system more time to process the capture stop and clean up
     // internal threads
     platform_log_debug("platform_cleanup: Waiting for VI system to stabilize...\n");
-    platform_sleep_ms(500); // Increased delay for thread cleanup
+    sleep_ms(500); // Increased delay for thread cleanup
   }
 
   platform_venc_cleanup(g_venc_handle);
@@ -596,7 +597,7 @@ platform_result_t platform_vi_start_global_capture(platform_vi_handle_t handle) 
   platform_log_debug("platform_vi_start_global_capture: Starting global video capture...\n");
 
   // Add delay to allow VI system to fully initialize
-  platform_sleep_ms(500); // 500ms delay for VI initialization
+  sleep_ms(500); // 500ms delay for VI initialization
 
   // Try to start video capture with retry mechanism
   int capture_result = -1;
@@ -610,7 +611,7 @@ platform_result_t platform_vi_start_global_capture(platform_vi_handle_t handle) 
                            "failed (result=%d)\n",
                            retry_count + 1, capture_result);
       if (retry_count < max_retries - 1) {
-        platform_sleep_ms(300); // Wait before retry
+        sleep_ms(300); // Wait before retry
       }
     }
     retry_count++;
@@ -626,7 +627,7 @@ platform_result_t platform_vi_start_global_capture(platform_vi_handle_t handle) 
   // Additional delay after starting capture to ensure it's ready
   platform_log_debug("platform_vi_start_global_capture: Video capture started, waiting for "
                      "stabilization...\n");
-  platform_sleep_ms(200); // 200ms delay for capture stabilization
+  sleep_ms(200); // 200ms delay for capture stabilization
 
   platform_log_info("platform_vi_start_global_capture: Global video capture started "
                     "successfully\n");
@@ -1744,14 +1745,6 @@ int platform_log_debug(const char* format, ...) {
   return result;
 }
 
-/* Utility functions */
-void platform_sleep_ms(uint32_t milliseconds) {
-  struct timespec time_spec;
-  time_spec.tv_sec = (time_t)(milliseconds / 1000);
-  time_spec.tv_nsec = (long)((milliseconds % 1000) * 1000000);
-  nanosleep(&time_spec, NULL);
-}
-
 /**
  * @brief Internal function to retrieve video stream with consolidated logic
  * @param stream_handle Handle to get stream from (encoder or stream handle)
@@ -1864,19 +1857,6 @@ static void release_video_stream_internal(void* stream_handle, platform_venc_str
   } else {
     platform_log_debug("release_video_stream_internal: Stream released successfully\n");
   }
-}
-
-void platform_sleep_us(uint32_t microseconds) {
-  struct timespec time_spec;
-  time_spec.tv_sec = (time_t)(microseconds / 1000000);
-  time_spec.tv_nsec = (long)((microseconds % 1000000) * 1000);
-  nanosleep(&time_spec, NULL);
-}
-
-uint64_t platform_get_time_ms(void) {
-  struct timespec time_spec;
-  clock_gettime(CLOCK_MONOTONIC, &time_spec);
-  return (uint64_t)time_spec.tv_sec * 1000 + time_spec.tv_nsec / 1000000;
 }
 
 /* Video Encoder Stream functions (for RTSP) */
@@ -2252,7 +2232,7 @@ platform_result_t platform_aenc_get_stream(platform_aenc_stream_handle_t handle,
   //             available (retry %u/%u)\n",
   //                               retry_count + 1, max_retries);
   //             if (retry_count < max_retries - 1) {
-  //                 platform_sleep_ms(50); // 50ms delay for audio data
+  //                 sleep_ms(50); // 50ms delay for audio data
   //             }
   //         }
   //     } else {
@@ -2261,7 +2241,7 @@ platform_result_t platform_aenc_get_stream(platform_aenc_stream_handle_t handle,
   //         failed (retry %u/%u, result=%d)\n",
   //                           retry_count + 1, max_retries, result);
   //         if (retry_count < max_retries - 1) {
-  //             platform_sleep_ms(100); // 100ms delay for errors
+  //             sleep_ms(100); // 100ms delay for errors
   //         }
   //     }
 
@@ -2563,7 +2543,7 @@ static void platform_venc_update_statistics( // NOLINT
   if (!statistics->statistics_active) {
     statistics->statistics_active = true;
     statistics->start_timestamp = timestamp_ms;
-    statistics->last_calc_time = platform_get_time_ms();
+    statistics->last_calc_time = get_time_ms();
     statistics->min_frame_size = UINT32_MAX;
     statistics->max_frame_size = 0;
     platform_log_debug("VENC_STATS: Statistics collection started at timestamp %llu\n",
@@ -2599,7 +2579,7 @@ static void platform_venc_update_statistics( // NOLINT
   }
 
   // Calculate bitrate and FPS periodically (every 2 seconds like reference)
-  uint64_t current_time = platform_get_time_ms();
+  uint64_t current_time = get_time_ms();
   uint64_t time_diff = current_time - statistics->last_calc_time;
 
   if (time_diff >= 2000) { // 2 seconds
@@ -2753,7 +2733,7 @@ static void platform_venc_log_fps_switch(uint32_t old_fps, uint32_t new_fps, con
   g_venc_perf.previous_sensor_fps = old_fps;
   g_venc_perf.sensor_fps = new_fps;
   g_venc_perf.fps_switch_detected = true;
-  g_venc_perf.last_fps_switch_time = platform_get_time_ms();
+  g_venc_perf.last_fps_switch_time = get_time_ms();
 }
 
 /**
@@ -2963,7 +2943,7 @@ static int get_stream_with_retry(void* stream_handle, struct video_stream* anyka
   // encoder thread startup and first frame capture
   if (max_retries > 0) {
     platform_log_debug("get_stream_with_retry: Initial delay for encoder startup\n");
-    platform_sleep_ms(100); // Initial delay for encoder startup
+    sleep_ms(100); // Initial delay for encoder startup
   }
 
   while (retry_count < max_retries) {
@@ -2986,7 +2966,7 @@ static int get_stream_with_retry(void* stream_handle, struct video_stream* anyka
     // Calculate and apply delay before next retry
     if (retry_count < max_retries - 1) {
       uint32_t delay_ms = calculate_retry_delay(result, retry_count);
-      platform_sleep_ms(delay_ms);
+      sleep_ms(delay_ms);
     }
 
     retry_count++;

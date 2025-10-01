@@ -187,7 +187,7 @@ static int handle_get_snapshot_uri(const service_handler_config_t* config,
   // Parse profile token from request using gsoap parser
   char profile_token[32];
   int parse_result =
-    onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, sizeof(profile_token));
+    onvif_gsoap_parse_snapshot_profile_token(gsoap_ctx, profile_token, sizeof(profile_token));
   if (parse_result != ONVIF_SUCCESS) {
     return onvif_gsoap_generate_fault_response(gsoap_ctx, "soap:Server", "Invalid profile token",
                                                NULL, NULL, NULL, 0);

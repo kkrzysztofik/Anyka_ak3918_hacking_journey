@@ -743,7 +743,7 @@ static int parse_profile_token(onvif_gsoap_context_t* gsoap_ctx, char* token, si
     return ONVIF_ERROR_INVALID;
   }
 
-  return onvif_gsoap_parse_profile_token(gsoap_ctx, token, token_size);
+  return onvif_gsoap_parse_media_profile_token(gsoap_ctx, token, token_size);
 }
 
 static int parse_protocol(onvif_gsoap_context_t* gsoap_ctx, char* protocol, size_t protocol_size) {

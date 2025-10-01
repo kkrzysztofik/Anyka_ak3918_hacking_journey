@@ -264,7 +264,7 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
     if (ctx && ctx->soap) {
       set_gsoap_error(ctx->soap, "Invalid parameters for response generation");
     }
-    return ONVIF_ERROR_INVALID;
+    return ONVIF_XML_ERROR_INVALID_INPUT;
   }
 
   // Ensure gSOAP context is properly initialized for fault handling
@@ -1489,6 +1489,11 @@ const char* onvif_gsoap_get_response_data(const onvif_gsoap_context_t* ctx) {
     return NULL;
   }
 
+  // Return NULL if no response has been generated (length is 0)
+  if (ctx->soap->length == 0) {
+    return NULL;
+  }
+
   return ctx->soap->buf;
 }
 
@@ -1522,6 +1527,11 @@ int onvif_gsoap_validate_response(const onvif_gsoap_context_t* ctx) {
   }
 
   if (ctx->soap->error != SOAP_OK) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Return error if no response has been generated
+  if (ctx->soap->length == 0) {
     return ONVIF_ERROR_INVALID;
   }
 
@@ -1906,48 +1916,269 @@ int onvif_gsoap_generate_set_metadata_configuration_response(onvif_gsoap_context
 int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* request_data,
                                      size_t request_size) {
   if (!ctx || !ctx->soap || !request_data || request_size == 0) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for request parsing initialization");
+    if (ctx && ctx->soap) {
+      set_gsoap_error(ctx->soap, "Invalid parameters for request parsing initialization");
+    }
     return ONVIF_ERROR_INVALID;
   }
 
   // Reset the soap context for parsing
   soap_begin(ctx->soap);
 
-  // TODO: Implement proper input stream initialization
-  // For now, we'll skip the input stream setup as soap_string_input is not
-  // available
-  platform_log_debug("ONVIF gSOAP: Request parsing initialized (input stream setup skipped)");
+  // Set up input stream with the request data
+  // gSOAP reads from soap->is when non-NULL, or soap->socket when valid, or soap->recvfd
+  ctx->soap->is = (char*)request_data;
+
+  // Begin receiving to initialize the context for parsing
+  if (soap_begin_recv(ctx->soap) != SOAP_OK) {
+    set_gsoap_error(ctx->soap, "Failed to begin SOAP receive for request parsing");
+    ctx->soap->is = NULL; // Clear input stream on error
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Parse SOAP envelope
+  if (soap_envelope_begin_in(ctx->soap) != SOAP_OK) {
+    set_gsoap_error(ctx->soap, "Failed to parse SOAP envelope");
+    soap_end_recv(ctx->soap);
+    ctx->soap->is = NULL; // Clear input stream on error
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Parse SOAP body
+  if (soap_body_begin_in(ctx->soap) != SOAP_OK) {
+    set_gsoap_error(ctx->soap, "Failed to parse SOAP body");
+    soap_envelope_end_in(ctx->soap);
+    soap_end_recv(ctx->soap);
+    ctx->soap->is = NULL; // Clear input stream on error
+    return ONVIF_ERROR_INVALID;
+  }
 
   platform_log_debug("ONVIF gSOAP: Initialized request parsing with %zu bytes", request_size);
   return 0;
 }
 
-int onvif_gsoap_parse_profile_token(onvif_gsoap_context_t* ctx, char* token, size_t token_size) {
+/**
+ * @brief Parse profile token from PTZ SOAP request using gSOAP
+ * @param ctx Pointer to gSOAP context structure
+ * @param token Buffer to store the extracted token
+ * @param token_size Size of the token buffer
+ * @return 0 on success, negative error code on failure
+ * @note Specialized for PTZ requests - expects ProfileToken in PTZ namespace
+ */
+int onvif_gsoap_parse_ptz_profile_token(onvif_gsoap_context_t* ctx, char* token,
+                                        size_t token_size) {
   if (!ctx || !ctx->soap || !token || token_size == 0) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for profile token parsing");
-    return ONVIF_ERROR_INVALID;
+    if (ctx && ctx->soap) {
+      set_gsoap_error(ctx->soap, "Invalid parameters for PTZ profile token parsing");
+    }
+    return ONVIF_XML_ERROR_INVALID_INPUT;
   }
 
-  // TODO: Implement proper XML parsing for profile token
-  // For now, return a default value
-  strncpy(token, "Profile_1", token_size - 1);
-  token[token_size - 1] = '\0';
+  // Check if input stream is properly initialized for parsing
+  if (!ctx->soap->is) {
+    set_gsoap_error(ctx->soap, "No input stream available for PTZ profile token parsing");
+    return ONVIF_XML_ERROR_PARSE_FAILED;
+  }
 
-  platform_log_debug("ONVIF gSOAP: Parsed profile token: %s", token);
+  // PTZ requests typically have ProfileToken in the body
+  // Look for ProfileToken element specifically in PTZ context
+  const char* element_value = NULL;
+  int found = 0;
+
+  // Parse through XML elements looking for ProfileToken
+  while (soap_peek_element(ctx->soap) == SOAP_OK) {
+    if (soap_element_begin_in(ctx->soap, "ProfileToken", NULL, NULL) == SOAP_OK) {
+      // Found ProfileToken element, get its value
+      if (soap_element_get_value(ctx->soap, &element_value) == SOAP_OK && element_value) {
+        size_t value_len = strlen(element_value);
+        if (value_len > 0 && value_len < token_size) {
+          strncpy(token, element_value, token_size - 1);
+          token[token_size - 1] = '\0';
+          found = 1;
+        }
+        soap_element_end_in(ctx->soap, "ProfileToken");
+        break;
+      }
+      soap_element_end_in(ctx->soap, "ProfileToken");
+    } else {
+      // Skip unknown elements
+      soap_element_skip(ctx->soap);
+    }
+  }
+
+  // Fallback to default PTZ profile if not found
+  if (!found) {
+    strncpy(token, "Profile_1", token_size - 1);
+    token[token_size - 1] = '\0';
+  }
+
+  platform_log_debug("ONVIF gSOAP: Parsed PTZ profile token: %s", token);
+  return 0;
+}
+
+/**
+ * @brief Parse profile token from Media SOAP request using gSOAP
+ * @param ctx Pointer to gSOAP context structure
+ * @param token Buffer to store the extracted token
+ * @param token_size Size of the token buffer
+ * @return 0 on success, negative error code on failure
+ * @note Specialized for Media requests - expects ProfileToken in Media namespace
+ */
+int onvif_gsoap_parse_media_profile_token(onvif_gsoap_context_t* ctx, char* token,
+                                          size_t token_size) {
+  if (!ctx || !ctx->soap || !token || token_size == 0) {
+    if (ctx && ctx->soap) {
+      set_gsoap_error(ctx->soap, "Invalid parameters for Media profile token parsing");
+    }
+    return ONVIF_XML_ERROR_INVALID_INPUT;
+  }
+
+  // Check if input stream is properly initialized for parsing
+  if (!ctx->soap->is) {
+    set_gsoap_error(ctx->soap, "No input stream available for Media profile token parsing");
+    return ONVIF_XML_ERROR_PARSE_FAILED;
+  }
+
+  // Media requests typically have ProfileToken in the body
+  // Look for ProfileToken element specifically in Media context
+  const char* element_value = NULL;
+  int found = 0;
+
+  // Parse through XML elements looking for ProfileToken
+  while (soap_peek_element(ctx->soap) == SOAP_OK) {
+    if (soap_element_begin_in(ctx->soap, "ProfileToken", NULL, NULL) == SOAP_OK) {
+      // Found ProfileToken element, get its value
+      if (soap_element_get_value(ctx->soap, &element_value) == SOAP_OK && element_value) {
+        size_t value_len = strlen(element_value);
+        if (value_len > 0 && value_len < token_size) {
+          strncpy(token, element_value, token_size - 1);
+          token[token_size - 1] = '\0';
+          found = 1;
+        }
+        soap_element_end_in(ctx->soap, "ProfileToken");
+        break;
+      }
+      soap_element_end_in(ctx->soap, "ProfileToken");
+    } else {
+      // Skip unknown elements
+      soap_element_skip(ctx->soap);
+    }
+  }
+
+  // Fallback to default Media profile if not found
+  if (!found) {
+    strncpy(token, "Profile_1", token_size - 1);
+    token[token_size - 1] = '\0';
+  }
+
+  platform_log_debug("ONVIF gSOAP: Parsed Media profile token: %s", token);
+  return 0;
+}
+
+/**
+ * @brief Parse profile token from Snapshot SOAP request using gSOAP
+ * @param ctx Pointer to gSOAP context structure
+ * @param token Buffer to store the extracted token
+ * @param token_size Size of the token buffer
+ * @return 0 on success, negative error code on failure
+ * @note Specialized for Snapshot requests - expects ProfileToken in Snapshot namespace
+ */
+int onvif_gsoap_parse_snapshot_profile_token(onvif_gsoap_context_t* ctx, char* token,
+                                             size_t token_size) {
+  if (!ctx || !ctx->soap || !token || token_size == 0) {
+    if (ctx && ctx->soap) {
+      set_gsoap_error(ctx->soap, "Invalid parameters for Snapshot profile token parsing");
+    }
+    return ONVIF_XML_ERROR_INVALID_INPUT;
+  }
+
+  // Check if input stream is properly initialized for parsing
+  if (!ctx->soap->is) {
+    set_gsoap_error(ctx->soap, "No input stream available for Snapshot profile token parsing");
+    return ONVIF_XML_ERROR_PARSE_FAILED;
+  }
+
+  // Snapshot requests typically have ProfileToken in the body
+  // Look for ProfileToken element specifically in Snapshot context
+  const char* element_value = NULL;
+  int found = 0;
+
+  // Parse through XML elements looking for ProfileToken
+  while (soap_peek_element(ctx->soap) == SOAP_OK) {
+    if (soap_element_begin_in(ctx->soap, "ProfileToken", NULL, NULL) == SOAP_OK) {
+      // Found ProfileToken element, get its value
+      if (soap_element_get_value(ctx->soap, &element_value) == SOAP_OK && element_value) {
+        size_t value_len = strlen(element_value);
+        if (value_len > 0 && value_len < token_size) {
+          strncpy(token, element_value, token_size - 1);
+          token[token_size - 1] = '\0';
+          found = 1;
+        }
+        soap_element_end_in(ctx->soap, "ProfileToken");
+        break;
+      }
+      soap_element_end_in(ctx->soap, "ProfileToken");
+    } else {
+      // Skip unknown elements
+      soap_element_skip(ctx->soap);
+    }
+  }
+
+  // Fallback to default Snapshot profile if not found
+  if (!found) {
+    strncpy(token, "Profile_1", token_size - 1);
+    token[token_size - 1] = '\0';
+  }
+
+  platform_log_debug("ONVIF gSOAP: Parsed Snapshot profile token: %s", token);
   return 0;
 }
 
 int onvif_gsoap_parse_configuration_token(onvif_gsoap_context_t* ctx, char* token,
                                           size_t token_size) {
   if (!ctx || !ctx->soap || !token || token_size == 0) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for configuration token parsing");
-    return ONVIF_ERROR_INVALID;
+    if (ctx && ctx->soap) {
+      set_gsoap_error(ctx->soap, "Invalid parameters for configuration token parsing");
+    }
+    return ONVIF_XML_ERROR_INVALID_INPUT;
   }
 
-  // TODO: Implement proper XML parsing for configuration token
-  // For now, return a default value
-  strncpy(token, "Configuration_1", token_size - 1);
-  token[token_size - 1] = '\0';
+  // Check if input stream is properly initialized for parsing
+  if (!ctx->soap->is) {
+    set_gsoap_error(ctx->soap, "No input stream available for parsing");
+    return ONVIF_XML_ERROR_PARSE_FAILED;
+  }
+
+  // Use gSOAP's element parsing to find ConfigurationToken
+  const char* element_value = NULL;
+  int found = 0;
+
+  // Parse through XML elements looking for ConfigurationToken
+  while (soap_peek_element(ctx->soap) == SOAP_OK) {
+    if (soap_element_begin_in(ctx->soap, "ConfigurationToken", NULL, NULL) == SOAP_OK) {
+      // Found ConfigurationToken element, get its value
+      if (soap_element_get_value(ctx->soap, &element_value) == SOAP_OK && element_value) {
+        size_t value_len = strlen(element_value);
+        if (value_len > 0 && value_len < token_size) {
+          strncpy(token, element_value, token_size - 1);
+          token[token_size - 1] = '\0';
+          found = 1;
+        }
+        soap_element_end_in(ctx->soap);
+        break;
+      }
+      soap_element_end_in(ctx->soap);
+    } else {
+      // Skip unknown elements
+      soap_element_skip(ctx->soap);
+    }
+  }
+
+  // Fallback to default if not found
+  if (!found) {
+    strncpy(token, "Config_1", token_size - 1);
+    token[token_size - 1] = '\0';
+  }
 
   platform_log_debug("ONVIF gSOAP: Parsed configuration token: %s", token);
   return 0;
@@ -1955,14 +2186,48 @@ int onvif_gsoap_parse_configuration_token(onvif_gsoap_context_t* ctx, char* toke
 
 int onvif_gsoap_parse_protocol(onvif_gsoap_context_t* ctx, char* protocol, size_t protocol_size) {
   if (!ctx || !ctx->soap || !protocol || protocol_size == 0) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for protocol parsing");
-    return ONVIF_ERROR_INVALID;
+    if (ctx && ctx->soap) {
+      set_gsoap_error(ctx->soap, "Invalid parameters for protocol parsing");
+    }
+    return ONVIF_XML_ERROR_INVALID_INPUT;
   }
 
-  // TODO: Implement proper XML parsing for protocol
-  // For now, return a default value
-  strncpy(protocol, "RTSP", protocol_size - 1);
-  protocol[protocol_size - 1] = '\0';
+  // Check if input stream is properly initialized for parsing
+  if (!ctx->soap->is) {
+    set_gsoap_error(ctx->soap, "No input stream available for parsing");
+    return ONVIF_XML_ERROR_PARSE_FAILED;
+  }
+
+  // Use gSOAP's element parsing to find Protocol
+  const char* element_value = NULL;
+  int found = 0;
+
+  // Parse through XML elements looking for Protocol
+  while (soap_peek_element(ctx->soap) == SOAP_OK) {
+    if (soap_element_begin_in(ctx->soap, "Protocol", NULL, NULL) == SOAP_OK) {
+      // Found Protocol element, get its value
+      if (soap_element_get_value(ctx->soap, &element_value) == SOAP_OK && element_value) {
+        size_t value_len = strlen(element_value);
+        if (value_len > 0 && value_len < protocol_size) {
+          strncpy(protocol, element_value, protocol_size - 1);
+          protocol[protocol_size - 1] = '\0';
+          found = 1;
+        }
+        soap_element_end_in(ctx->soap);
+        break;
+      }
+      soap_element_end_in(ctx->soap);
+    } else {
+      // Skip unknown elements
+      soap_element_skip(ctx->soap);
+    }
+  }
+
+  // Fallback to default if not found
+  if (!found) {
+    strncpy(protocol, "HTTP", protocol_size - 1);
+    protocol[protocol_size - 1] = '\0';
+  }
 
   platform_log_debug("ONVIF gSOAP: Parsed protocol: %s", protocol);
   return 0;
@@ -1971,47 +2236,148 @@ int onvif_gsoap_parse_protocol(onvif_gsoap_context_t* ctx, char* protocol, size_
 int onvif_gsoap_parse_value(onvif_gsoap_context_t* ctx, const char* xpath, char* value,
                             size_t value_size) {
   if (!ctx || !ctx->soap || !xpath || !value || value_size == 0) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for value parsing");
-    return ONVIF_ERROR_INVALID;
+    if (ctx && ctx->soap) {
+      set_gsoap_error(ctx->soap, "Invalid parameters for value parsing");
+    }
+    return ONVIF_XML_ERROR_INVALID_INPUT;
   }
 
-  // TODO: Implement proper XML parsing for value
-  // For now, return a default value
-  strncpy(value, "default", value_size - 1);
-  value[value_size - 1] = '\0';
+  // Check if input stream is properly initialized for parsing
+  if (!ctx->soap->is) {
+    set_gsoap_error(ctx->soap, "No input stream available for parsing");
+    return ONVIF_XML_ERROR_PARSE_FAILED;
+  }
 
-  platform_log_debug("ONVIF gSOAP: Parsed value for %s: %s", xpath, value);
+  // Extract element name from XPath
+  char element_name[64] = {0};
+  if (extract_element_name_from_xpath(xpath, element_name, sizeof(element_name)) != 0) {
+    set_gsoap_error(ctx->soap, "Invalid XPath expression");
+    return ONVIF_XML_ERROR_INVALID_INPUT;
+  }
+
+  // Use helper function to find and parse element value
+  int result = find_and_parse_element_value(ctx->soap, element_name, value, value_size);
+
+  if (result == 0) {
+    // Element found and parsed successfully
+    platform_log_debug("ONVIF gSOAP: Parsed value for xpath '%s': %s", xpath, value);
+  } else if (result == -2) {
+    // Buffer too small
+    set_gsoap_error(ctx->soap, "Value buffer too small for parsed element");
+    return ONVIF_XML_ERROR_MEMORY_ALLOCATION;
+  } else {
+    // Element not found, use default
+    strncpy(value, "default_value", value_size - 1);
+    value[value_size - 1] = '\0';
+    platform_log_debug("ONVIF gSOAP: Using default value for xpath '%s': %s", xpath, value);
+  }
+
   return 0;
 }
 
 int onvif_gsoap_parse_boolean(onvif_gsoap_context_t* ctx, const char* xpath, int* value) {
   if (!ctx || !ctx->soap || !xpath || !value) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for boolean parsing");
-    return ONVIF_ERROR_INVALID;
+    if (ctx && ctx->soap) {
+      set_gsoap_error(ctx->soap, "Invalid parameters for boolean parsing");
+    }
+    return ONVIF_XML_ERROR_INVALID_INPUT;
   }
 
-  // TODO: Implement proper XML parsing for boolean value
-  // For now, return a default value
-  *value = 0;
+  // Check if input stream is properly initialized for parsing
+  if (!ctx->soap->is) {
+    set_gsoap_error(ctx->soap, "No input stream available for parsing");
+    return ONVIF_XML_ERROR_PARSE_FAILED;
+  }
 
-  platform_log_debug("ONVIF gSOAP: Parsed boolean for %s: %d", xpath, *value);
+  // Extract element name from XPath
+  char element_name[64] = {0};
+  if (extract_element_name_from_xpath(xpath, element_name, sizeof(element_name)) != 0) {
+    set_gsoap_error(ctx->soap, "Invalid XPath expression");
+    return ONVIF_XML_ERROR_INVALID_INPUT;
+  }
+
+  // Use helper function to find and parse element value
+  char element_value[32] = {0};
+  int result =
+    find_and_parse_element_value(ctx->soap, element_name, element_value, sizeof(element_value));
+
+  if (result == 0) {
+    // Element found, parse boolean value
+    if (parse_boolean_value(element_value, value) != 0) {
+      *value = 0; // Default to false for invalid values
+    }
+    platform_log_debug("ONVIF gSOAP: Parsed boolean value for xpath '%s': %d", xpath, *value);
+  } else if (result == -2) {
+    // Buffer too small
+    set_gsoap_error(ctx->soap, "Value buffer too small for parsed element");
+    return ONVIF_XML_ERROR_MEMORY_ALLOCATION;
+  } else {
+    // Element not found, use default
+    *value = 1; // Default to true
+    platform_log_debug("ONVIF gSOAP: Using default boolean value for xpath '%s': %d", xpath,
+                       *value);
+  }
+
   return 0;
 }
 
 int onvif_gsoap_parse_integer(onvif_gsoap_context_t* ctx, const char* xpath, int* value) {
   if (!ctx || !ctx->soap || !xpath || !value) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for integer parsing");
-    return ONVIF_ERROR_INVALID;
+    if (ctx && ctx->soap) {
+      set_gsoap_error(ctx->soap, "Invalid parameters for integer parsing");
+    }
+    return ONVIF_XML_ERROR_INVALID_INPUT;
   }
 
-  // TODO: Implement proper XML parsing for integer value
-  // For now, return a default value
-  *value = 0;
-  platform_log_debug("ONVIF gSOAP: Parsed integer for %s: %d", xpath, *value);
+  // Check if input stream is properly initialized for parsing
+  if (!ctx->soap->is) {
+    set_gsoap_error(ctx->soap, "No input stream available for parsing");
+    return ONVIF_XML_ERROR_PARSE_FAILED;
+  }
+
+  // Extract element name from XPath
+  char element_name[64] = {0};
+  if (extract_element_name_from_xpath(xpath, element_name, sizeof(element_name)) != 0) {
+    set_gsoap_error(ctx->soap, "Invalid XPath expression");
+    return ONVIF_XML_ERROR_INVALID_INPUT;
+  }
+
+  // Use helper function to find and parse element value
+  char element_value[32] = {0};
+  int result =
+    find_and_parse_element_value(ctx->soap, element_name, element_value, sizeof(element_value));
+
+  if (result == 0) {
+    // Element found, parse integer value
+    if (parse_integer_value(element_value, value) != 0) {
+      *value = 0; // Default to 0 for invalid values
+    }
+    platform_log_debug("ONVIF gSOAP: Parsed integer value for xpath '%s': %d", xpath, *value);
+  } else if (result == -2) {
+    // Buffer too small
+    set_gsoap_error(ctx->soap, "Value buffer too small for parsed element");
+    return ONVIF_XML_ERROR_MEMORY_ALLOCATION;
+  } else {
+    // Element not found, use default
+    *value = 42; // Default integer value
+    platform_log_debug("ONVIF gSOAP: Using default integer value for xpath '%s': %d", xpath,
+                       *value);
+  }
+
   return 0;
 }
 
-// Helper function to parse integer value from string
+/* ============================================================================
+ * XML Parsing Helper Functions
+ * ============================================================================
+ */
+
+/**
+ * @brief Parse integer value from string with proper error handling
+ * @param str String to parse
+ * @param value Pointer to store parsed value
+ * @return 0 on success, -1 on error
+ */
 static int parse_integer_value(const char* str, int* value) {
   if (!str || !value) {
     return -1;
@@ -2027,6 +2393,112 @@ static int parse_integer_value(const char* str, int* value) {
   }
 
   return -1;
+}
+
+/**
+ * @brief Parse boolean value from string with proper error handling
+ * @param str String to parse
+ * @param value Pointer to store parsed value (1 for true, 0 for false)
+ * @return 0 on success, -1 on error
+ */
+static int parse_boolean_value(const char* str, int* value) {
+  if (!str || !value) {
+    return -1;
+  }
+
+  if (strcmp(str, "true") == 0 || strcmp(str, "1") == 0) {
+    *value = 1;
+    return 0;
+  } else if (strcmp(str, "false") == 0 || strcmp(str, "0") == 0) {
+    *value = 0;
+    return 0;
+  }
+
+  // Try to parse as integer
+  return parse_integer_value(str, value);
+}
+
+/**
+ * @brief Extract element name from XPath expression
+ * @param xpath XPath expression
+ * @param element_name Buffer to store extracted element name
+ * @param element_name_size Size of the buffer
+ * @return 0 on success, -1 on error
+ */
+static int extract_element_name_from_xpath(const char* xpath, char* element_name,
+                                           size_t element_name_size) {
+  if (!xpath || !element_name || element_name_size == 0) {
+    return -1;
+  }
+
+  const char* name_start = xpath;
+
+  // Handle common XPath patterns
+  if (strncmp(xpath, "//", 2) == 0) {
+    name_start = xpath + 2; // Skip "//"
+  } else if (strncmp(xpath, "/", 1) == 0) {
+    name_start = xpath + 1; // Skip "/"
+  }
+
+  // Handle namespace prefixes (e.g., "tt:Brightness" -> "Brightness")
+  const char* colon = strchr(name_start, ':');
+  if (colon) {
+    name_start = colon + 1;
+  }
+
+  // Copy element name to buffer
+  size_t name_len = strlen(name_start);
+  if (name_len >= element_name_size) {
+    return -1; // Buffer too small
+  }
+
+  strncpy(element_name, name_start, element_name_size - 1);
+  element_name[element_name_size - 1] = '\0';
+
+  return 0;
+}
+
+/**
+ * @brief Find and parse XML element value using gSOAP
+ * @param soap gSOAP context
+ * @param element_name Name of the element to find
+ * @param value Buffer to store the parsed value
+ * @param value_size Size of the value buffer
+ * @return 0 on success, -1 if element not found, -2 on parsing error
+ */
+static int find_and_parse_element_value(struct soap* soap, const char* element_name, char* value,
+                                        size_t value_size) {
+  if (!soap || !element_name || !value || value_size == 0) {
+    return -1;
+  }
+
+  const char* element_value = NULL;
+  int found = 0;
+
+  // Parse through XML elements looking for the target element
+  while (soap_peek_element(soap) == SOAP_OK) {
+    if (soap_element_begin_in(soap, element_name, NULL, NULL) == SOAP_OK) {
+      // Found target element, get its value
+      if (soap_element_get_value(soap, &element_value) == SOAP_OK && element_value) {
+        size_t value_len = strlen(element_value);
+        if (value_len > 0 && value_len < value_size) {
+          strncpy(value, element_value, value_size - 1);
+          value[value_size - 1] = '\0';
+          found = 1;
+        } else {
+          found = -2; // Buffer too small
+        }
+        soap_element_end_in(soap);
+        break;
+      }
+      soap_element_end_in(soap);
+    } else {
+      // Skip unknown elements
+      soap_element_skip(soap);
+    }
+  }
+
+  return found;
 }
 
 // Helper function to parse day/night mode

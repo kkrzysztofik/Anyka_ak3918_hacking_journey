@@ -594,7 +594,7 @@ static int ptz_absolute_move_business_logic(const service_handler_config_t* conf
   }
 
   // Parse profile token from request using gSOAP
-  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
+  int result = onvif_gsoap_parse_ptz_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
   if (result != 0) {
     buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
     return error_handle_parameter(error_ctx, "profile_token", "invalid", response);
@@ -676,7 +676,7 @@ static int get_ptz_presets_business_logic(const service_handler_config_t* config
   }
 
   // Parse profile token from request using gSOAP
-  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
+  int result = onvif_gsoap_parse_ptz_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
   if (result != 0) {
     buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
     return error_handle_parameter(error_ctx, "profile_token", "invalid", response);
@@ -720,7 +720,7 @@ static int set_ptz_preset_business_logic(const service_handler_config_t* config,
   }
 
   // Parse profile token from request using gSOAP
-  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
+  int result = onvif_gsoap_parse_ptz_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
   if (result != 0) {
     buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
     return error_handle_parameter(error_ctx, "profile_token", "invalid", response);
@@ -791,7 +791,7 @@ static int goto_ptz_preset_business_logic(const service_handler_config_t* config
   }
 
   // Parse profile token from request using gSOAP
-  int result = onvif_gsoap_parse_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
+  int result = onvif_gsoap_parse_ptz_profile_token(gsoap_ctx, profile_token, PTZ_TOKEN_MAX_LENGTH);
   if (result != 0) {
     buffer_pool_return(&g_ptz_response_buffer_pool, profile_token);
     return error_handle_parameter(error_ctx, "profile_token", "invalid", response);
