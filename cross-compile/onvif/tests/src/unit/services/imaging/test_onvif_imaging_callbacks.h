@@ -64,23 +64,7 @@ void test_imaging_callback_unregistration_not_initialized(void** state);
  */
 void test_imaging_callback_unregistration_failure(void** state);
 
-/**
- * @brief Test imaging service callback dispatch success
- * @param state Test state (unused)
- */
-void test_imaging_callback_dispatch_success(void** state);
-
-/**
- * @brief Test imaging service callback dispatch when not initialized
- * @param state Test state (unused)
- */
-void test_imaging_callback_dispatch_not_initialized(void** state);
-
-/**
- * @brief Test imaging service callback dispatch with null parameters
- * @param state Test state (unused)
- */
-void test_imaging_callback_dispatch_null_params(void** state);
+/* Dispatch tests REMOVED - moved to test_service_dispatcher.c */
 
 /**
  * @brief Run imaging service callback tests

@@ -176,43 +176,14 @@ void test_unit_media_callback_unregistration_failure(void** state) {
 }
 
 /* ============================================================================
- * Media Service Dispatch Tests (MIGRATED)
+ * Media Service Dispatch Tests - REMOVED
  * ============================================================================ */
 
 /**
- * @brief Test media service dispatch success (MIGRATED)
- *
- * BEFORE: 20+ lines of manual mock setup and verification
- * AFTER: 1 line using helper function
+ * @note Dispatcher-specific tests have been moved to test_service_dispatcher.c
+ * where they belong. Media service tests now focus solely on media-specific
+ * callback registration and handling behavior.
  */
-void test_unit_media_callback_dispatch_success(void** state) {
-  // Media service dispatch tests can use the standard dispatch helper
-  // For now, we'll use the registration success as a placeholder
-  // TODO: Implement media-specific dispatch helpers if needed
-  test_helper_service_registration_success(state, &g_media_service_config);
-}
-
-/**
- * @brief Test media service dispatch when not initialized (MIGRATED)
- *
- * BEFORE: 15+ lines
- * AFTER: 1 line
- */
-void test_unit_media_callback_dispatch_not_initialized(void** state) {
-  // Test dispatch when service not initialized
-  test_helper_service_registration_success(state, &g_media_service_config);
-}
-
-/**
- * @brief Test media service dispatch with null parameters (MIGRATED)
- *
- * BEFORE: 10+ lines
- * AFTER: 1 line
- */
-void test_unit_media_callback_dispatch_null_params(void** state) {
-  // Test dispatch with null parameters
-  test_helper_service_registration_null_config(state, &g_media_service_config);
-}
 
 /* ============================================================================
  * Test Suite Definition
@@ -241,14 +212,6 @@ const struct CMUnitTest media_callback_tests[] = {
   cmocka_unit_test_setup_teardown(test_unit_media_callback_unregistration_not_initialized,
                                   setup_media_callback_tests, teardown_media_callback_tests),
   cmocka_unit_test_setup_teardown(test_unit_media_callback_unregistration_failure,
-                                  setup_media_callback_tests, teardown_media_callback_tests),
-
-  // Dispatch tests (MIGRATED - using helper functions)
-  cmocka_unit_test_setup_teardown(test_unit_media_callback_dispatch_success,
-                                  setup_media_callback_tests, teardown_media_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_media_callback_dispatch_not_initialized,
-                                  setup_media_callback_tests, teardown_media_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_media_callback_dispatch_null_params,
                                   setup_media_callback_tests, teardown_media_callback_tests),
 };
 

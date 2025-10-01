@@ -11,6 +11,7 @@
 #include "cmocka_wrapper.h"
 #include "common/test_helpers.h"
 #include "networking/http/http_auth.h"
+#include "utils/error/error_handling.h"
 
 // Create mock handlers using the new macro system
 TEST_HELPER_CREATE_MOCK_HANDLERS(http_auth)
@@ -124,7 +125,7 @@ void test_unit_http_auth_validate_basic_null_params(void** state) {
  */
 void test_unit_http_auth_init_null_params(void** state) {
   null_param_test_t tests[] = {
-    test_helper_create_null_test("config parameter", 0, HTTP_AUTH_ERROR_INVALID),
+    test_helper_create_null_test("config parameter", 0, HTTP_AUTH_ERROR_NULL),
   };
 
   test_helper_null_parameters(state, "http_auth_init", test_http_auth_init_with_null, tests, 1);
@@ -466,6 +467,11 @@ void test_unit_http_auth_validate_basic_invalid_credentials(void** state) {
 
   int result = http_auth_validate_basic(&request, &config, "admin", "password");
   assert_int_equal(result, HTTP_AUTH_UNAUTHENTICATED);
+
+  // Cleanup allocated memory
+  free(request.headers[0].name);
+  free(request.headers[0].value);
+  free(request.headers);
 }
 
 /**
@@ -491,6 +497,11 @@ void test_unit_http_auth_validate_basic_success(void** state) {
 
   int result = http_auth_validate_basic(&request, &config, "admin", "password");
   assert_int_equal(result, HTTP_AUTH_SUCCESS);
+
+  // Cleanup allocated memory
+  free(request.headers[0].name);
+  free(request.headers[0].value);
+  free(request.headers);
 }
 
 /**
@@ -516,6 +527,11 @@ void test_unit_http_auth_validate_basic_parse_failure(void** state) {
 
   int result = http_auth_validate_basic(&request, &config, "admin", "password");
   assert_int_equal(result, HTTP_AUTH_ERROR_PARSE_FAILED);
+
+  // Cleanup allocated memory
+  free(request.headers[0].name);
+  free(request.headers[0].value);
+  free(request.headers);
 }
 
 /**

@@ -30,9 +30,6 @@ void test_unit_media_callback_double_initialization(void** state);
 void test_unit_media_callback_unregistration_success(void** state);
 void test_unit_media_callback_unregistration_not_initialized(void** state);
 void test_unit_media_callback_unregistration_failure(void** state);
-void test_unit_media_callback_dispatch_success(void** state);
-void test_unit_media_callback_dispatch_not_initialized(void** state);
-void test_unit_media_callback_dispatch_null_params(void** state);
 
 /**
  * @brief Global test setup
@@ -90,9 +87,6 @@ int main(int argc, char* argv[]) {
     cmocka_unit_test(test_unit_media_callback_unregistration_success),
     cmocka_unit_test(test_unit_media_callback_unregistration_not_initialized),
     cmocka_unit_test(test_unit_media_callback_unregistration_failure),
-    cmocka_unit_test(test_unit_media_callback_dispatch_success),
-    cmocka_unit_test(test_unit_media_callback_dispatch_not_initialized),
-    cmocka_unit_test(test_unit_media_callback_dispatch_null_params),
   };
 
   int test_count = sizeof(tests) / sizeof(tests[0]);

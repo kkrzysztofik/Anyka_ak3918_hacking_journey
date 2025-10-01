@@ -118,13 +118,13 @@ void test_unit_smart_response_builder(void** state) {
   // Just test that the function doesn't crash and returns some value
   assert_true(estimated_size > 0); // Should return positive size for valid content
 
-  // Test with empty content (should return 0 or some default)
+  // Test with empty content (should return 0 for empty string)
   size_t empty_size = smart_response_estimate_size("");
-  (void)empty_size; // Suppress unused variable warning - just test function doesn't crash
+  assert_int_equal(empty_size, 0); // Empty string has length 0
 
-  // Test with NULL content (should handle gracefully)
+  // Test with NULL content (should handle gracefully and return 0)
   size_t null_size = smart_response_estimate_size(NULL);
-  (void)null_size; // Suppress unused variable warning - just test function doesn't crash
+  assert_int_equal(null_size, 0); // NULL handling returns 0
 
   // Cleanup
   memory_manager_cleanup();
@@ -155,8 +155,8 @@ void test_unit_memory_manager_stats(void** state) {
 
   // Test leak checking after cleanup (should be 0 leaks)
   int leak_result = memory_manager_check_leaks();
-  // Just verify function doesn't crash, don't check specific return value
-  (void)leak_result; // Suppress unused variable warning
+  // Verify no memory leaks after proper cleanup
+  assert_int_equal(leak_result, 0); // Should return 0 when no leaks detected
 
   memory_manager_cleanup();
 }
@@ -187,9 +187,9 @@ void test_unit_memory_manager_stress(void** state) {
     ONVIF_FREE(pointers[i]);
   }
 
-  // Final check - just verify function doesn't crash
+  // Final check - verify no memory leaks after stress test
   int leak_result = memory_manager_check_leaks();
-  (void)leak_result; // Don't check return value, just ensure it doesn't crash
+  assert_int_equal(leak_result, 0); // Should return 0 when all memory is properly freed
 
   // Cleanup
   memory_manager_cleanup();

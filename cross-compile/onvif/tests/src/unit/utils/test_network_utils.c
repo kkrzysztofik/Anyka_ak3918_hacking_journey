@@ -217,8 +217,9 @@ static void test_hostname_resolution(void** state) {
 
   // Test resolving localhost
   int result = onvif_resolve_hostname("localhost", ip_address, sizeof(ip_address));
-  // Result may vary depending on system, so just check it doesn't crash
-  (void)result;
+  // Should either succeed (return 0) or return a specific error code
+  // Platform-dependent but should handle gracefully
+  assert_true(result == ONVIF_SUCCESS || result < 0);
 
   // Test resolving with NULL hostname
   result = onvif_resolve_hostname(NULL, ip_address, sizeof(ip_address));
@@ -249,9 +250,11 @@ static void test_network_interface_enumeration(void** state) {
 
   // Test enumerating network interfaces
   int result = onvif_enumerate_network_interfaces(interfaces, 10, &interface_count);
-  // Result may vary depending on system, so just check it doesn't crash
-  (void)result;
-  (void)interface_count;
+  // Should either succeed or return error, and count should be valid
+  assert_true(result == ONVIF_SUCCESS || result < 0);
+  if (result == ONVIF_SUCCESS) {
+    assert_true(interface_count >= 0 && interface_count <= 10);
+  }
 
   // Test with NULL interfaces array
   result = onvif_enumerate_network_interfaces(NULL, 10, &interface_count);
@@ -313,7 +316,8 @@ static void test_socket_operations(void** state) {
   // Test binding socket (may fail if address is in use)
   if (tcp_socket >= 0) {
     int result = onvif_bind_socket(tcp_socket, "127.0.0.1", 0); // Port 0 = any available
-    (void)result; // May succeed or fail depending on system state
+    // Should either succeed or return specific error code
+    assert_true(result == ONVIF_SUCCESS || result < 0);
 
     // Close socket
     onvif_close_socket(tcp_socket);
@@ -384,8 +388,8 @@ static void test_network_statistics(void** state) {
 
   // Test getting network statistics
   int result = onvif_get_network_statistics(&stats);
-  // Result may vary depending on system capabilities
-  (void)result;
+  // Should either succeed or return specific error code based on system capabilities
+  assert_true(result == ONVIF_SUCCESS || result < 0);
 
   // Test with NULL stats pointer
   result = onvif_get_network_statistics(NULL);

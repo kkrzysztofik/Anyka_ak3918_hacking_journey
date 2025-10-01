@@ -1189,3 +1189,57 @@ size_t test_helper_get_memory_usage(void) {
   (void)fclose(status_file);
   return memory_kb * TEST_MEMORY_CONVERSION_FACTOR; // Convert to bytes
 }
+
+/* ============================================================================
+ * Generic Mock Framework Helpers
+ * ============================================================================ */
+
+int test_helper_init_generic_mock(generic_mock_t* mock, const char* name) {
+  if (!mock) {
+    return -1;
+  }
+
+  if (name) {
+    strncpy(mock->name, name, sizeof(mock->name) - 1);
+    mock->name[sizeof(mock->name) - 1] = '\0';
+  }
+
+  return generic_mock_init(mock);
+}
+
+void test_helper_cleanup_generic_mock(generic_mock_t* mock) {
+  generic_mock_cleanup(mock);
+}
+
+void test_helper_reset_generic_mock(generic_mock_t* mock) {
+  generic_mock_reset(mock);
+}
+
+int test_helper_set_mock_operation_result(generic_mock_t* mock, int operation_index,
+                                          int result_code) {
+  return generic_mock_set_operation_result(mock, operation_index, result_code);
+}
+
+int test_helper_get_mock_operation_count(const generic_mock_t* mock, int operation_index) {
+  return generic_mock_get_operation_call_count(mock, operation_index);
+}
+
+void test_helper_assert_mock_operation_called(const generic_mock_t* mock, int operation_index,
+                                              int expected_count, const char* operation_name) {
+  int actual_count = generic_mock_get_operation_call_count(mock, operation_index);
+
+  if (actual_count != expected_count) {
+    fail_msg("Mock operation '%s' call count mismatch: expected %d calls, got %d calls",
+             operation_name ? operation_name : "unknown", expected_count, actual_count);
+  }
+
+  assert_int_equal(actual_count, expected_count);
+}
+
+void test_helper_enable_mock_error(generic_mock_t* mock, int error_code) {
+  generic_mock_enable_error_simulation(mock, error_code);
+}
+
+void test_helper_disable_mock_error(generic_mock_t* mock) {
+  generic_mock_disable_error_simulation(mock);
+}

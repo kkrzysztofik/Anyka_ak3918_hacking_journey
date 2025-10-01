@@ -1,6 +1,6 @@
 /**
  * @file buffer_pool_mock.c
- * @brief Implementation of buffer pool mock functions
+ * @brief Implementation of buffer pool mock functions using generic mock framework
  * @author kkrzysztofik
  * @date 2025
  */
@@ -10,134 +10,101 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Mock state
-static int g_buffer_pool_mock_initialized = 0; // NOLINT
-static int g_buffer_pool_init_result = 0;      // NOLINT
-static int g_buffer_pool_cleanup_result = 0;   // NOLINT
+#include "../common/generic_mock_framework.h"
 
-// Call counters
-static int g_buffer_pool_init_call_count = 0;    // NOLINT
-static int g_buffer_pool_cleanup_call_count = 0; // NOLINT
+/* ============================================================================
+ * Mock Operations
+ * ============================================================================ */
 
-/**
- * @brief Set mock buffer pool init result
- * @param result Result to return
- * @return 0 on success
- */
+enum buffer_pool_operations {
+  BUFFER_POOL_OP_INIT = 0,
+  BUFFER_POOL_OP_CLEANUP,
+  BUFFER_POOL_OP_GET,
+  BUFFER_POOL_OP_RETURN,
+  BUFFER_POOL_OP_GET_STATS,
+  BUFFER_POOL_OP_COUNT
+};
+
+/* ============================================================================
+ * Mock Instance
+ * ============================================================================ */
+
+// Create mock instance using generic framework
+GENERIC_MOCK_CREATE(buffer_pool, BUFFER_POOL_OP_COUNT);
+
+/* ============================================================================
+ * Mock Control Functions
+ * ============================================================================ */
+
 int mock_buffer_pool_set_init_result(int result) {
-  g_buffer_pool_init_result = result;
-  return 0;
+  return generic_mock_set_operation_result(&buffer_pool_mock, BUFFER_POOL_OP_INIT, result);
 }
 
-/**
- * @brief Set mock buffer pool cleanup result
- * @param result Result to return
- * @return 0 on success
- */
 int mock_buffer_pool_set_cleanup_result(int result) {
-  g_buffer_pool_cleanup_result = result;
-  return 0;
+  return generic_mock_set_operation_result(&buffer_pool_mock, BUFFER_POOL_OP_CLEANUP, result);
 }
 
-/**
- * @brief Get mock buffer pool init call count
- * @return Number of init calls
- */
 int mock_buffer_pool_get_init_call_count(void) {
-  return g_buffer_pool_init_call_count;
+  return generic_mock_get_operation_call_count(&buffer_pool_mock, BUFFER_POOL_OP_INIT);
 }
 
-/**
- * @brief Get mock buffer pool cleanup call count
- * @return Number of cleanup calls
- */
 int mock_buffer_pool_get_cleanup_call_count(void) {
-  return g_buffer_pool_cleanup_call_count;
+  return generic_mock_get_operation_call_count(&buffer_pool_mock, BUFFER_POOL_OP_CLEANUP);
 }
 
-/**
- * @brief Initialize buffer pool mock
- */
 void buffer_pool_mock_init(void) {
-  g_buffer_pool_mock_initialized = 1;
-  g_buffer_pool_init_result = 0;
-  g_buffer_pool_cleanup_result = 0;
-  g_buffer_pool_init_call_count = 0;
-  g_buffer_pool_cleanup_call_count = 0;
+  generic_mock_init(&buffer_pool_mock);
+
+  // Set default results
+  mock_buffer_pool_set_init_result(0);
+  mock_buffer_pool_set_cleanup_result(0);
+  generic_mock_set_operation_result(&buffer_pool_mock, BUFFER_POOL_OP_GET, 0);
+  generic_mock_set_operation_result(&buffer_pool_mock, BUFFER_POOL_OP_RETURN, 0);
+  generic_mock_set_operation_result(&buffer_pool_mock, BUFFER_POOL_OP_GET_STATS, 0);
 }
 
-/**
- * @brief Cleanup buffer pool mock
- */
 void buffer_pool_mock_cleanup(void) {
-  g_buffer_pool_mock_initialized = 0;
-  g_buffer_pool_init_result = 0;
-  g_buffer_pool_cleanup_result = 0;
-  g_buffer_pool_init_call_count = 0;
-  g_buffer_pool_cleanup_call_count = 0;
+  generic_mock_cleanup(&buffer_pool_mock);
 }
 
 /* ============================================================================
  * Buffer Pool Actual Functions
  * ============================================================================ */
 
-/**
- * @brief Mock buffer pool initialization
- * @param pool Buffer pool to initialize
- * @return 0 on success
- */
 int buffer_pool_init(buffer_pool_t* pool) {
   (void)pool;
-  g_buffer_pool_init_call_count++;
-  return g_buffer_pool_init_result;
+  return generic_mock_execute_operation(&buffer_pool_mock, BUFFER_POOL_OP_INIT, pool);
 }
 
-/**
- * @brief Mock buffer pool cleanup
- * @param pool Buffer pool to cleanup
- */
 void buffer_pool_cleanup(buffer_pool_t* pool) {
   (void)pool;
-  g_buffer_pool_cleanup_call_count++;
+  (void)generic_mock_execute_operation(&buffer_pool_mock, BUFFER_POOL_OP_CLEANUP, pool);
 }
 
-/**
- * @brief Mock buffer pool get
- * @param pool Buffer pool
- * @return Mock buffer pointer
- */
 void* buffer_pool_get(buffer_pool_t* pool) {
   (void)pool;
+  (void)generic_mock_execute_operation(&buffer_pool_mock, BUFFER_POOL_OP_GET, pool);
   return malloc(1024); // Mock buffer
 }
 
-/**
- * @brief Mock buffer pool return
- * @param pool Buffer pool
- * @param buffer Buffer to return
- */
 void buffer_pool_return(buffer_pool_t* pool, void* buffer) {
   (void)pool;
+  (void)generic_mock_execute_operation(&buffer_pool_mock, BUFFER_POOL_OP_RETURN, pool);
   if (buffer) {
     free(buffer);
   }
 }
 
-/**
- * @brief Mock buffer pool get stats
- * @param pool Buffer pool
- * @param used Used buffer count
- * @param total Total buffer count
- * @param memory_used Memory used
- * @return 0 on success
- */
 int buffer_pool_get_stats(buffer_pool_t* pool, int* used, int* total, size_t* memory_used) {
   (void)pool;
+  (void)generic_mock_execute_operation(&buffer_pool_mock, BUFFER_POOL_OP_GET_STATS, pool);
+
   if (used)
     *used = 5;
   if (total)
     *total = 10;
   if (memory_used)
     *memory_used = 5120; // 5 * 1024
+
   return 0;
 }

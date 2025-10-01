@@ -176,54 +176,14 @@ void test_unit_imaging_callback_unregistration_failure(void** state) {
 }
 
 /* ============================================================================
- * Imaging Service Dispatch Tests (MIGRATED)
+ * Imaging Service Dispatch Tests - REMOVED
  * ============================================================================ */
 
 /**
- * @brief Test imaging service dispatch success (MIGRATED)
- *
- * BEFORE: 20+ lines of manual mock setup and verification
- * AFTER: 1 line using helper function
+ * @note Dispatcher-specific tests have been moved to test_service_dispatcher.c
+ * where they belong. Imaging service tests now focus solely on imaging-specific
+ * callback registration and handling behavior.
  */
-void test_unit_imaging_callback_dispatch_success(void** state) {
-  // Imaging service dispatch tests can use the standard dispatch helper
-  // For now, we'll use the registration success as a placeholder
-  // TODO: Implement imaging-specific dispatch helpers if needed
-  test_helper_service_registration_success(state, &g_imaging_service_config);
-}
-
-/**
- * @brief Test imaging service dispatch when not initialized (MIGRATED)
- *
- * BEFORE: 15+ lines
- * AFTER: 1 line
- */
-void test_imaging_callback_dispatch_not_initialized(void** state) {
-  // Test dispatch when service not initialized
-  test_helper_service_registration_success(state, &g_imaging_service_config);
-}
-
-/**
- * @brief Test imaging service dispatch with null parameters (MIGRATED)
- *
- * BEFORE: 10+ lines
- * AFTER: 1 line
- */
-void test_imaging_callback_dispatch_null_params(void** state) {
-  // Test dispatch with null parameters
-  test_helper_service_registration_null_config(state, &g_imaging_service_config);
-}
-
-/**
- * @brief Test imaging service dispatch with unknown operation (MIGRATED)
- *
- * BEFORE: 20+ lines
- * AFTER: 1 line
- */
-void test_imaging_callback_dispatch_unknown_operation(void** state) {
-  // Test dispatch with unknown operation
-  test_helper_service_registration_success(state, &g_imaging_service_config);
-}
 
 /* ============================================================================
  * Test Suite Definition
@@ -252,16 +212,6 @@ const struct CMUnitTest imaging_callback_tests[] = {
   cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_not_initialized,
                                   setup_imaging_callback_tests, teardown_imaging_callback_tests),
   cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_failure,
-                                  setup_imaging_callback_tests, teardown_imaging_callback_tests),
-
-  // Dispatch tests (MIGRATED - using helper functions)
-  cmocka_unit_test_setup_teardown(test_unit_imaging_callback_dispatch_success,
-                                  setup_imaging_callback_tests, teardown_imaging_callback_tests),
-  cmocka_unit_test_setup_teardown(test_imaging_callback_dispatch_not_initialized,
-                                  setup_imaging_callback_tests, teardown_imaging_callback_tests),
-  cmocka_unit_test_setup_teardown(test_imaging_callback_dispatch_null_params,
-                                  setup_imaging_callback_tests, teardown_imaging_callback_tests),
-  cmocka_unit_test_setup_teardown(test_imaging_callback_dispatch_unknown_operation,
                                   setup_imaging_callback_tests, teardown_imaging_callback_tests),
 };
 

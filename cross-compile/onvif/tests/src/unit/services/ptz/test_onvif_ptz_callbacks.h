@@ -19,13 +19,8 @@ void test_unit_ptz_service_registration_invalid_params(void** state);
 void test_unit_ptz_service_unregistration_success(void** state);
 void test_unit_ptz_service_unregistration_not_found(void** state);
 
-// Service Dispatch Tests
-void test_unit_ptz_service_dispatch_success(void** state);
-void test_unit_ptz_service_dispatch_unknown_operation(void** state);
-void test_unit_ptz_service_dispatch_null_service(void** state);
-void test_unit_ptz_service_dispatch_null_operation(void** state);
-void test_unit_ptz_service_dispatch_null_request(void** state);
-void test_unit_ptz_service_dispatch_null_response(void** state);
+// Service Dispatch Tests - MOVED to test_service_dispatcher.c
+// (Dispatcher-specific tests now reside with other dispatcher tests)
 
 // Operation Handler Tests
 void test_unit_ptz_operation_handler_success(void** state);
@@ -36,11 +31,9 @@ void test_unit_ptz_operation_handler_unknown_operation(void** state);
 
 // Error Handling Tests
 void test_unit_ptz_service_registration_failure_handling(void** state);
-void test_unit_ptz_service_dispatch_failure_handling(void** state);
 void test_unit_ptz_service_unregistration_failure_handling(void** state);
 
 // Logging Tests
-void test_unit_ptz_service_callback_logging_success(void** state);
 void test_unit_ptz_service_callback_logging_failure(void** state);
 
 // Test Suite Functions

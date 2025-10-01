@@ -39,6 +39,10 @@ void test_unit_http_metrics_cpu_overhead(void** state);
 void test_unit_http_metrics_retrieval_performance(void** state);
 void test_unit_http_metrics_realistic_patterns(void** state);
 
+// Setup/Teardown functions for metrics tests
+int setup_http_metrics_tests(void** state);
+int teardown_http_metrics_tests(void** state);
+
 /**
  * @brief Global test setup
  * @param state Test state
@@ -94,15 +98,22 @@ int main(int argc, char* argv[]) {
     cmocka_unit_test(test_unit_http_auth_create_401_response),
     cmocka_unit_test(test_unit_http_auth_create_401_response_invalid_realm),
 
-    // HTTP metrics tests
+    // HTTP metrics tests (with proper setup/teardown for test isolation)
     cmocka_unit_test(test_unit_http_metrics_init_cleanup),
-    cmocka_unit_test(test_unit_http_metrics_recording_accuracy),
-    cmocka_unit_test(test_unit_http_metrics_null_handling),
-    cmocka_unit_test(test_unit_http_metrics_connection_updates),
-    cmocka_unit_test(test_unit_http_metrics_concurrency),
-    cmocka_unit_test(test_unit_http_metrics_cpu_overhead),
-    cmocka_unit_test(test_unit_http_metrics_retrieval_performance),
-    cmocka_unit_test(test_unit_http_metrics_realistic_patterns),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_recording_accuracy,
+                                    setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_null_handling,
+                                    setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_connection_updates,
+                                    setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_concurrency,
+                                    setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_cpu_overhead,
+                                    setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_retrieval_performance,
+                                    setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_realistic_patterns,
+                                    setup_http_metrics_tests, teardown_http_metrics_tests),
   };
 
   int test_count = sizeof(tests) / sizeof(tests[0]);

@@ -24,4 +24,12 @@ void test_unit_service_dispatcher_is_registered(void** state);
 void test_unit_service_dispatcher_get_services(void** state);
 void test_unit_service_dispatcher_init_cleanup_handlers(void** state);
 
+// Service Dispatch with Multiple Services Tests (moved from service callbacks)
+void test_unit_service_dispatcher_dispatch_with_registered_service(void** state);
+void test_unit_service_dispatcher_dispatch_unknown_operation(void** state);
+void test_unit_service_dispatcher_dispatch_null_service_name(void** state);
+void test_unit_service_dispatcher_dispatch_null_operation_name(void** state);
+void test_unit_service_dispatcher_dispatch_null_request_param(void** state);
+void test_unit_service_dispatcher_dispatch_null_response_param(void** state);
+
 #endif /* TEST_SERVICE_DISPATCHER_H */

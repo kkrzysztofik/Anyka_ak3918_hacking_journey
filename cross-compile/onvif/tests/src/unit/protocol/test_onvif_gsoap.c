@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "cmocka_wrapper.h"
+#include "utils/error/error_handling.h"
 #include "generated/soapH.h"
 
 // Include the module under test
@@ -148,9 +149,9 @@ void test_unit_onvif_gsoap_generate_fault_response(void** state) {
   // Test with NULL context first - function should create temporary context
   int result =
     onvif_gsoap_generate_fault_response(NULL, "soap:Server", "Test fault", NULL, NULL, NULL, 0);
-  // Function handles NULL context by creating temporary context, so should succeed or fail
-  // gracefully
-  (void)result; // Don't assert specific behavior as it depends on gSOAP state
+  // Function handles NULL context by creating temporary context internally
+  // Should succeed (return 0) or return a specific error code
+  assert_true(result == ONVIF_SUCCESS || result < 0); // Either success or error code
 
   // Initialize context
   result = onvif_gsoap_init(&ctx);
@@ -160,13 +161,13 @@ void test_unit_onvif_gsoap_generate_fault_response(void** state) {
     // Test fault response generation
     result = onvif_gsoap_generate_fault_response(&ctx, "soap:Server", "Test fault message", NULL,
                                                  NULL, NULL, 0);
-    // May succeed or fail depending on gSOAP state
-    (void)result;
+    // Should succeed with valid context and fault string
+    assert_int_equal(result, ONVIF_SUCCESS);
 
-    // Test with NULL fault string (function provides default message)
+    // Test with NULL fault string (should return error - fault string is required)
     result = onvif_gsoap_generate_fault_response(&ctx, "soap:Client", NULL, NULL, NULL, NULL, 0);
-    // Function handles NULL gracefully with default message, so may return 0
-    (void)result;
+    // NULL fault string should return ONVIF_ERROR_INVALID
+    assert_int_equal(result, ONVIF_ERROR_INVALID);
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -198,13 +199,13 @@ void test_unit_onvif_gsoap_generate_device_info_response(void** state) {
     // Test device info response generation
     result = onvif_gsoap_generate_device_info_response(&ctx, "TestManufacturer", "TestModel",
                                                        "1.0.0", "TEST123456", "HW001");
-    // May succeed or fail depending on gSOAP state and platform functions
-    (void)result;
+    // Should succeed with valid context and parameters
+    assert_int_equal(result, ONVIF_SUCCESS);
 
-    // Test with NULL parameters (function provides default empty strings)
+    // Test with NULL parameters (function should handle gracefully with defaults)
     result = onvif_gsoap_generate_device_info_response(&ctx, NULL, "Model", "1.0", "SN", "HW");
-    // Function handles NULL gracefully with default values, so may return 0
-    (void)result;
+    // Function handles NULL gracefully by using empty string defaults
+    assert_int_equal(result, ONVIF_SUCCESS);
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -233,10 +234,11 @@ void test_unit_onvif_gsoap_get_response_data(void** state) {
 
   // Only test if initialization succeeded
   if (result == 0) {
-    // Test with initialized but unused context
+    // Test with initialized but unused context (no response generated yet)
     response_data = onvif_gsoap_get_response_data(&ctx);
-    // Response data may be NULL or empty before any response is generated
-    (void)response_data; // Don't assert specific value
+    // Response data should be NULL or empty before any response is generated
+    // Just verify the function returns without crashing - value depends on gSOAP init state
+    assert_true(response_data == NULL || strlen(response_data) == 0);
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -265,9 +267,10 @@ void test_unit_onvif_gsoap_get_response_length(void** state) {
 
   // Only test if initialization succeeded
   if (result == 0) {
-    // Test with initialized context
+    // Test with initialized context (no response generated yet)
     length = onvif_gsoap_get_response_length(&ctx);
-    (void)length; // Just verify function doesn't crash
+    // Length should be 0 before any response is generated
+    assert_int_equal(length, 0);
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -296,10 +299,10 @@ void test_unit_onvif_gsoap_has_error(void** state) {
 
   // Only test if initialization succeeded
   if (result == 0) {
-    // Test with initialized context - may or may not have error depending on gSOAP state
+    // Test with initialized clean context (should not have error)
     has_error = onvif_gsoap_has_error(&ctx);
-    // Don't assert specific error state as it depends on gSOAP initialization
-    (void)has_error; // Just verify function doesn't crash
+    // Freshly initialized context should not have errors
+    assert_false(has_error);
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -330,8 +333,8 @@ void test_unit_onvif_gsoap_get_error(void** state) {
   if (result == 0) {
     // Test with clean context (should have no error)
     error_msg = onvif_gsoap_get_error(&ctx);
-    // Error message may be NULL for clean context
-    (void)error_msg; // Don't assert specific value
+    // Error message should be NULL for a clean, freshly initialized context
+    assert_null(error_msg);
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -361,10 +364,10 @@ void test_unit_onvif_gsoap_validate_response(void** state) {
 
   // Only test if initialization succeeded
   if (result == 0) {
-    // Test validation with initialized context
+    // Test validation with initialized context (no response generated)
     result = onvif_gsoap_validate_response(&ctx);
-    // Don't assert specific value as it depends on context state
-    (void)result;
+    // Should return error since no response has been generated yet
+    assert_true(result < 0);
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -405,8 +408,9 @@ void test_unit_onvif_gsoap_extract_operation_name(void** state) {
   // Test with valid but minimal request
   result = onvif_gsoap_extract_operation_name(test_request, strlen(test_request), operation_name,
                                               sizeof(operation_name));
-  // May succeed or fail depending on implementation complexity
-  (void)result; // Don't assert specific value
+  // Should either succeed (return 0) or return specific error code
+  // Accept success or implementation-specific error
+  assert_true(result == 0 || result < 0);
 }
 
 /**
@@ -443,8 +447,8 @@ void test_unit_onvif_gsoap_init_request_parsing(void** state) {
 
     // Test with valid request
     result = onvif_gsoap_init_request_parsing(&ctx, test_request, strlen(test_request));
-    // May succeed or fail depending on implementation
-    (void)result;
+    // Should either succeed or return specific error code
+    assert_true(result == 0 || result < 0);
 
     // Cleanup
     onvif_gsoap_cleanup(&ctx);
@@ -484,8 +488,8 @@ void test_unit_onvif_gsoap_parse_profile_token(void** state) {
 
   // Test with uninitialized request parsing (should fail)
   result = onvif_gsoap_parse_profile_token(&ctx, token, sizeof(token));
-  // Should fail since no request has been parsed
-  (void)result;
+  // Should fail since no request has been parsed - expect error code
+  assert_true(result < 0);
 
   // Cleanup
   onvif_gsoap_cleanup(&ctx);

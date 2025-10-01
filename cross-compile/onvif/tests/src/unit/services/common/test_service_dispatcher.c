@@ -10,7 +10,9 @@
 
 #include "cmocka_wrapper.h"
 #include "common/test_helpers.h"
+#include "networking/http/http_parser.h"
 #include "services/common/service_dispatcher.h"
+#include "utils/error/error_handling.h"
 
 // Create mock handlers using the new macro system
 TEST_HELPER_CREATE_MOCK_HANDLERS(test_service)
@@ -459,6 +461,165 @@ void test_unit_service_dispatcher_get_services(void** state) {
 }
 
 /* ============================================================================
+ * Service Dispatch with Multiple Services Tests (Moved from service callbacks)
+ * ============================================================================ */
+
+/**
+ * @brief Test service dispatch with valid operation
+ * @param state Test state (unused)
+ *
+ * @note Moved from test_onvif_ptz_callbacks.c - generalized for dispatcher testing
+ */
+void test_unit_service_dispatcher_dispatch_with_registered_service(void** state) {
+  (void)state;
+
+  onvif_service_dispatcher_init();
+
+  // Register a test service
+  onvif_service_registration_t test_registration = ONVIF_SERVICE_REGISTRATION(
+    "test_service", "http://www.onvif.org/ver10/test/wsdl", test_service_mock_operation, NULL, NULL);
+
+  int result = onvif_service_dispatcher_register_service(&test_registration);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Create test request/response
+  http_request_t request = {0};
+  http_response_t response = {0};
+
+  // Test dispatch through service dispatcher
+  result = onvif_service_dispatcher_dispatch("test_service", "TestOperation", &request, &response);
+
+  // Verify dispatch completed (actual return depends on mock implementation)
+  assert_true(result == ONVIF_SUCCESS || result == ONVIF_ERROR);
+
+  // Verify mock was called
+  assert_int_equal(1, g_test_service_mock_state.operation_call_count);
+
+  onvif_service_dispatcher_cleanup();
+}
+
+/**
+ * @brief Test service dispatch with unknown operation
+ * @param state Test state (unused)
+ *
+ * @note Moved from test_onvif_ptz_callbacks.c - generalized for dispatcher testing
+ */
+void test_unit_service_dispatcher_dispatch_unknown_operation(void** state) {
+  (void)state;
+
+  onvif_service_dispatcher_init();
+
+  // Register a test service
+  onvif_service_registration_t test_registration = ONVIF_SERVICE_REGISTRATION(
+    "test_service", "http://www.onvif.org/ver10/test/wsdl", test_service_mock_operation, NULL, NULL);
+
+  int result = onvif_service_dispatcher_register_service(&test_registration);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Create test request/response
+  http_request_t request = {0};
+  http_response_t response = {0};
+
+  // Test dispatch with unknown operation
+  result = onvif_service_dispatcher_dispatch("test_service", "UnknownOperation", &request, &response);
+
+  // Should return error or success depending on mock implementation
+  assert_true(result == ONVIF_SUCCESS || result == ONVIF_ERROR || result == ONVIF_ERROR_NOT_FOUND);
+
+  onvif_service_dispatcher_cleanup();
+}
+
+/**
+ * @brief Test service dispatch with NULL service name
+ * @param state Test state (unused)
+ *
+ * @note Moved from test_onvif_ptz_callbacks.c
+ */
+void test_unit_service_dispatcher_dispatch_null_service_name(void** state) {
+  (void)state;
+
+  onvif_service_dispatcher_init();
+
+  // Create test request/response
+  http_request_t request = {0};
+  http_response_t response = {0};
+
+  // Test dispatch with NULL service name
+  int result = onvif_service_dispatcher_dispatch(NULL, "TestOperation", &request, &response);
+
+  assert_int_equal(ONVIF_ERROR_INVALID, result);
+
+  onvif_service_dispatcher_cleanup();
+}
+
+/**
+ * @brief Test service dispatch with NULL operation name
+ * @param state Test state (unused)
+ *
+ * @note Moved from test_onvif_ptz_callbacks.c
+ */
+void test_unit_service_dispatcher_dispatch_null_operation_name(void** state) {
+  (void)state;
+
+  onvif_service_dispatcher_init();
+
+  // Create test request/response
+  http_request_t request = {0};
+  http_response_t response = {0};
+
+  // Test dispatch with NULL operation name
+  int result = onvif_service_dispatcher_dispatch("test_service", NULL, &request, &response);
+
+  assert_int_equal(ONVIF_ERROR_INVALID, result);
+
+  onvif_service_dispatcher_cleanup();
+}
+
+/**
+ * @brief Test service dispatch with NULL request
+ * @param state Test state (unused)
+ *
+ * @note Moved from test_onvif_ptz_callbacks.c
+ */
+void test_unit_service_dispatcher_dispatch_null_request_param(void** state) {
+  (void)state;
+
+  onvif_service_dispatcher_init();
+
+  // Create test response
+  http_response_t response = {0};
+
+  // Test dispatch with NULL request
+  int result = onvif_service_dispatcher_dispatch("test_service", "TestOperation", NULL, &response);
+
+  assert_int_equal(ONVIF_ERROR_INVALID, result);
+
+  onvif_service_dispatcher_cleanup();
+}
+
+/**
+ * @brief Test service dispatch with NULL response
+ * @param state Test state (unused)
+ *
+ * @note Moved from test_onvif_ptz_callbacks.c
+ */
+void test_unit_service_dispatcher_dispatch_null_response_param(void** state) {
+  (void)state;
+
+  onvif_service_dispatcher_init();
+
+  // Create test request
+  http_request_t request = {0};
+
+  // Test dispatch with NULL response
+  int result = onvif_service_dispatcher_dispatch("test_service", "TestOperation", &request, NULL);
+
+  assert_int_equal(ONVIF_ERROR_INVALID, result);
+
+  onvif_service_dispatcher_cleanup();
+}
+
+/* ============================================================================
  * Test Suite Definition
  * ============================================================================ */
 
@@ -505,6 +666,26 @@ const struct CMUnitTest service_dispatcher_tests[] = {
                                   setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
   cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_get_services,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+
+  // Service Dispatch with Multiple Services Tests (moved from service callbacks)
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_with_registered_service,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_unknown_operation,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_service_name,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_operation_name,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_request_param,
+                                  setup_service_dispatcher_tests,
+                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_response_param,
                                   setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
 };

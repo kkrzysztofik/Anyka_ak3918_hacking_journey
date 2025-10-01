@@ -157,127 +157,14 @@ void test_unit_ptz_service_unregistration_not_found(void** state) {
 }
 
 /* ============================================================================
- * PTZ Service Dispatch Tests (MANUAL IMPLEMENTATION)
- * ============================================================================ */
-
-/**
- * @brief Test PTZ service dispatch with valid operation
- * @param state Test state (unused)
- */
-void test_unit_ptz_service_dispatch_success(void** state) {
-  (void)state;
-
-  // Mock successful service registration and dispatch
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
-  mock_service_dispatcher_set_dispatch_result(ONVIF_SUCCESS);
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
-
-  // Initialize PTZ service
-  int result = onvif_ptz_init(NULL);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test dispatch through service dispatcher
-  result = onvif_service_dispatcher_dispatch(TEST_PTZ_SERVICE_NAME, TEST_PTZ_OPERATION,
-                                             &g_test_request, &g_test_response);
-
-  // Note: This will likely return an error due to missing gSOAP context
-  // but we're testing the dispatch mechanism
-  assert_true(result == ONVIF_SUCCESS || result == ONVIF_ERROR);
-
-  // Verify dispatch was called
-  assert_int_equal(1, mock_service_dispatcher_get_dispatch_call_count());
-  assert_string_equal(mock_service_dispatcher_get_last_dispatch_service(), TEST_PTZ_SERVICE_NAME);
-  assert_string_equal(mock_service_dispatcher_get_last_dispatch_operation(), TEST_PTZ_OPERATION);
-}
-
-/**
- * @brief Test PTZ service dispatch with unknown operation
- * @param state Test state (unused)
- */
-void test_unit_ptz_service_dispatch_unknown_operation(void** state) {
-  (void)state;
-
-  // Mock successful service registration
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
-
-  // Initialize PTZ service
-  int result = onvif_ptz_init(NULL);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test dispatch with unknown operation
-  result = onvif_service_dispatcher_dispatch(TEST_PTZ_SERVICE_NAME, TEST_PTZ_UNKNOWN_OPERATION,
-                                             &g_test_request, &g_test_response);
-
-  // Should return error for unknown operation
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
-
-  // Verify dispatch was called
-  assert_int_equal(1, mock_service_dispatcher_get_dispatch_call_count());
-  assert_string_equal(mock_service_dispatcher_get_last_dispatch_service(), TEST_PTZ_SERVICE_NAME);
-  assert_string_equal(mock_service_dispatcher_get_last_dispatch_operation(),
-                      TEST_PTZ_UNKNOWN_OPERATION);
-}
-
-/**
- * @brief Test PTZ service dispatch with NULL service name
- * @param state Test state (unused)
- */
-void test_unit_ptz_service_dispatch_null_service(void** state) {
-  (void)state;
-
-  // Test dispatch with NULL service name
-  int result =
-    onvif_service_dispatcher_dispatch(NULL, TEST_PTZ_OPERATION, &g_test_request, &g_test_response);
-
-  assert_int_equal(ONVIF_ERROR_INVALID, result);
-}
-
-/**
- * @brief Test PTZ service dispatch with NULL operation name
- * @param state Test state (unused)
- */
-void test_unit_ptz_service_dispatch_null_operation(void** state) {
-  (void)state;
-
-  // Test dispatch with NULL operation name
-  int result = onvif_service_dispatcher_dispatch(TEST_PTZ_SERVICE_NAME, NULL, &g_test_request,
-                                                 &g_test_response);
-
-  assert_int_equal(ONVIF_ERROR_INVALID, result);
-}
-
-/**
- * @brief Test PTZ service dispatch with NULL request
- * @param state Test state (unused)
- */
-void test_unit_ptz_service_dispatch_null_request(void** state) {
-  (void)state;
-
-  // Test dispatch with NULL request
-  int result = onvif_service_dispatcher_dispatch(TEST_PTZ_SERVICE_NAME, TEST_PTZ_OPERATION, NULL,
-                                                 &g_test_response);
-
-  assert_int_equal(ONVIF_ERROR_INVALID, result);
-}
-
-/**
- * @brief Test PTZ service dispatch with NULL response
- * @param state Test state (unused)
- */
-void test_unit_ptz_service_dispatch_null_response(void** state) {
-  (void)state;
-
-  // Test dispatch with NULL response
-  int result = onvif_service_dispatcher_dispatch(TEST_PTZ_SERVICE_NAME, TEST_PTZ_OPERATION,
-                                                 &g_test_request, NULL);
-
-  assert_int_equal(ONVIF_ERROR_INVALID, result);
-}
-
-/* ============================================================================
  * PTZ Service Operation Handler Tests (MANUAL IMPLEMENTATION)
  * ============================================================================ */
+
+/**
+ * @note Dispatcher-specific tests (dispatch with NULL params, etc.) have been moved
+ * to test_service_dispatcher.c where they belong. These tests focus on PTZ-specific
+ * operation handler behavior.
+ */
 
 /**
  * @brief Test PTZ operation handler with valid operation
@@ -374,32 +261,6 @@ void test_unit_ptz_service_registration_failure_handling(void** state) {
 }
 
 /**
- * @brief Test PTZ service dispatch failure handling
- * @param state Test state (unused)
- */
-void test_unit_ptz_service_dispatch_failure_handling(void** state) {
-  (void)state;
-
-  // Mock successful registration but dispatch failure
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
-  mock_service_dispatcher_set_dispatch_result(ONVIF_ERROR);
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
-
-  // Initialize PTZ service
-  int result = onvif_ptz_init(NULL);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test dispatch failure
-  result = onvif_service_dispatcher_dispatch(TEST_PTZ_SERVICE_NAME, TEST_PTZ_OPERATION,
-                                             &g_test_request, &g_test_response);
-
-  assert_int_equal(ONVIF_ERROR, result);
-
-  // Verify dispatch was called
-  assert_int_equal(1, mock_service_dispatcher_get_dispatch_call_count());
-}
-
-/**
  * @brief Test PTZ service unregistration failure handling
  * @param state Test state (unused)
  */
@@ -425,31 +286,6 @@ void test_unit_ptz_service_unregistration_failure_handling(void** state) {
 /* ============================================================================
  * PTZ Service Logging Tests (MANUAL IMPLEMENTATION)
  * ============================================================================ */
-
-/**
- * @brief Test PTZ service callback logging for success paths
- * @param state Test state (unused)
- */
-void test_unit_ptz_service_callback_logging_success(void** state) {
-  (void)state;
-
-  // Mock successful operations
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
-  mock_service_dispatcher_set_dispatch_result(ONVIF_SUCCESS);
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
-
-  // Initialize PTZ service
-  int result = onvif_ptz_init(NULL);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test dispatch (should log success)
-  result = onvif_service_dispatcher_dispatch(TEST_PTZ_SERVICE_NAME, TEST_PTZ_OPERATION,
-                                             &g_test_request, &g_test_response);
-
-  // Verify operations completed (logging would be verified by log output)
-  assert_true(result == ONVIF_SUCCESS || result == ONVIF_ERROR);
-  assert_int_equal(1, mock_service_dispatcher_get_dispatch_call_count());
-}
 
 /**
  * @brief Test PTZ service callback logging for failure paths
@@ -489,20 +325,6 @@ const struct CMUnitTest ptz_callback_tests[] = {
   cmocka_unit_test_setup_teardown(test_unit_ptz_service_unregistration_not_found,
                                   setup_ptz_callback_tests, teardown_ptz_callback_tests),
 
-  // Service Dispatch Tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_dispatch_success, setup_ptz_callback_tests,
-                                  teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_dispatch_unknown_operation,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_dispatch_null_service,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_dispatch_null_operation,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_dispatch_null_request,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_dispatch_null_response,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-
   // Operation Handler Tests
   cmocka_unit_test_setup_teardown(test_unit_ptz_operation_handler_success, setup_ptz_callback_tests,
                                   teardown_ptz_callback_tests),
@@ -518,14 +340,10 @@ const struct CMUnitTest ptz_callback_tests[] = {
   // Error Handling Tests
   cmocka_unit_test_setup_teardown(test_unit_ptz_service_registration_failure_handling,
                                   setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_dispatch_failure_handling,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
   cmocka_unit_test_setup_teardown(test_unit_ptz_service_unregistration_failure_handling,
                                   setup_ptz_callback_tests, teardown_ptz_callback_tests),
 
   // Logging Tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_callback_logging_success,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
   cmocka_unit_test_setup_teardown(test_unit_ptz_service_callback_logging_failure,
                                   setup_ptz_callback_tests, teardown_ptz_callback_tests),
 };
