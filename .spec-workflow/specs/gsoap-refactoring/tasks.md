@@ -138,7 +138,7 @@
 
 ## Phase 4: Device & Imaging Services Implementation
 
-- [ ] 14. Create onvif_gsoap_device.h header with Device service parsing functions
+- [x] 14. Create onvif_gsoap_device.h header with Device service parsing functions
   - File: src/protocol/gsoap/onvif_gsoap_device.h (new file)
   - Declare 4 Device service parsing functions (GetDeviceInformation, GetCapabilities, GetSystemDateAndTime, SystemReboot)
   - Add complete Doxygen documentation
@@ -147,7 +147,7 @@
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 10.6_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in ONVIF Device service protocol | Task: Create onvif_gsoap_device.h header following requirements 5.1-5.4 and 10.6. Declare 4 Device service parsing functions with signature: int onvif_gsoap_parse_[operation](onvif_gsoap_context_t* ctx, struct _tds__[Operation]** out). Add complete Doxygen documentation. | Restrictions: Follow project standards, _tds__ prefix for Device service structures, include file header | Success: Header declares all 4 Device functions, complete documentation, compiles cleanly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 15. Implement all 4 Device service parsing functions in onvif_gsoap_device.c
+- [x] 15. Implement all 4 Device service parsing functions in onvif_gsoap_device.c
   - File: src/protocol/gsoap/onvif_gsoap_device.c (new file)
   - Implement GetDeviceInformation, GetCapabilities, GetSystemDateAndTime, SystemReboot
   - Follow established parsing pattern
