@@ -24,15 +24,14 @@
 #include <unistd.h>
 
 #include "platform/platform.h"
-#include "utils/common/time_utils.h"
 #include "platform/platform_common.h"
-#include "utils/common/time_utils.h"
 #include "rtsp_auth.h"
 #include "rtsp_rtp.h"
 #include "rtsp_sdp.h"
 #include "rtsp_session.h"
 #include "rtsp_types.h"
 #include "services/common/video_config_types.h"
+#include "utils/common/time_utils.h"
 
 /* Forward declarations */
 static void* rtsp_multistream_accept_thread(void* arg);

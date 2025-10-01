@@ -113,8 +113,7 @@ void generic_mock_reset(generic_mock_t* mock) {
  * Operation Management
  * ============================================================================ */
 
-int generic_mock_set_operation_result(generic_mock_t* mock, int operation_index,
-                                      int result_code) {
+int generic_mock_set_operation_result(generic_mock_t* mock, int operation_index, int result_code) {
   if (!mock || !mock->initialized || operation_index < 0 ||
       operation_index >= mock->operation_count) {
     return -1;

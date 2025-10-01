@@ -17,8 +17,8 @@
 #include "core/lifecycle/signal_lifecycle.h"
 #include "networking/common/connection_manager.h"
 #include "platform/platform.h"
-#include "utils/common/time_utils.h"
 #include "thread_pool.h"
+#include "utils/common/time_utils.h"
 #include "utils/memory/memory_manager.h"
 
 /* Forward declaration for connection processing */

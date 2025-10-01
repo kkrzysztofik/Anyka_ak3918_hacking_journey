@@ -72,35 +72,35 @@
 #define TEST_SPEED_ZOOM            0.0f
 
 // Test timeout constants
-#define TEST_TIMEOUT_MS             5000
-#define TEST_TIMEOUT_NONE           0
-#define TEST_TIMEOUT_1000MS         1000
-#define TEST_TIMEOUT_2000MS         2000
-#define TEST_TIMEOUT_500MS          500
+#define TEST_TIMEOUT_MS     5000
+#define TEST_TIMEOUT_NONE   0
+#define TEST_TIMEOUT_1000MS 1000
+#define TEST_TIMEOUT_2000MS 2000
+#define TEST_TIMEOUT_500MS  500
 
 // Test delay constants (for sleep/timing)
-#define TEST_DELAY_1200MS           1200
-#define TEST_DELAY_200MS            200
-#define TEST_DELAY_10MS             10
-#define TEST_DELAY_50MS             50
-#define TEST_DELAY_100MS            100
-#define TEST_DELAY_250MS            250
-#define TEST_DELAY_750MS            750
-#define TEST_DELAY_900MS            900
+#define TEST_DELAY_1200MS 1200
+#define TEST_DELAY_200MS  200
+#define TEST_DELAY_10MS   10
+#define TEST_DELAY_50MS   50
+#define TEST_DELAY_100MS  100
+#define TEST_DELAY_250MS  250
+#define TEST_DELAY_750MS  750
+#define TEST_DELAY_900MS  900
 
 // Test iteration constants
-#define TEST_STRESS_ITERATIONS      50
-#define TEST_MEMORY_CYCLES          3
-#define TEST_MEMORY_PRESETS         5
-#define TEST_CONCURRENT_OPS         10
-#define TEST_BUFFER_POOL_OPS        3
-#define TEST_LOOP_COUNT_3           3
-#define TEST_LOOP_COUNT_10          10
+#define TEST_STRESS_ITERATIONS 50
+#define TEST_MEMORY_CYCLES     3
+#define TEST_MEMORY_PRESETS    5
+#define TEST_CONCURRENT_OPS    10
+#define TEST_BUFFER_POOL_OPS   3
+#define TEST_LOOP_COUNT_3      3
+#define TEST_LOOP_COUNT_10     10
 
 // Test string constants
-#define TEST_STRING_LONG_SIZE       512
-#define TEST_PRESET_NAME_SIZE       256
-#define TEST_PRESET_TOKEN_SIZE      64
+#define TEST_STRING_LONG_SIZE        512
+#define TEST_PRESET_NAME_SIZE        256
+#define TEST_PRESET_TOKEN_SIZE       64
 #define TEST_PRESET_NAME_BUFFER_SIZE 32
 
 /**
@@ -336,7 +336,7 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
 
   // Test stop called at various points during timeout
   printf("  [TEST CASE] Stop at various timing points during timeout\n");
-  int test_delays[] = {TEST_DELAY_50MS, TEST_DELAY_100MS, TEST_DELAY_250MS,
+  int test_delays[] = {TEST_DELAY_50MS,    TEST_DELAY_100MS, TEST_DELAY_250MS,
                        TEST_TIMEOUT_500MS, TEST_DELAY_750MS, TEST_DELAY_900MS};
   for (size_t i = 0; i < sizeof(test_delays) / sizeof(test_delays[0]); i++) {
     result = onvif_ptz_continuous_move(TEST_PROFILE_TOKEN, &velocity, TEST_TIMEOUT_1000MS);
@@ -584,8 +584,8 @@ void test_integration_ptz_memory_usage_improvements(void** state) {
   printf("  [TEST CASE] Multiple PTZ operations (memory leak check)\n");
   for (int i = 0; i < TEST_CONCURRENT_OPS; i++) {
     struct ptz_vector position;
-    test_helper_ptz_create_test_position(&position, (float)(i % 2), (float)(i % 3) * TEST_MULTIPLIER_0_5F,
-                                         TEST_POSITION_ZOOM);
+    test_helper_ptz_create_test_position(&position, (float)(i % 2),
+                                         (float)(i % 3) * TEST_MULTIPLIER_0_5F, TEST_POSITION_ZOOM);
 
     int result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &position, NULL);
     assert_int_equal(result, ONVIF_SUCCESS);
@@ -728,8 +728,8 @@ void test_integration_ptz_concurrent_operations(void** state) {
   printf("  [TEST CASE] Rapid sequential operations (concurrent access simulation)\n");
   for (int i = 0; i < TEST_MEMORY_PRESETS; i++) {
     struct ptz_vector position;
-    test_helper_ptz_create_test_position(&position, (float)i * TEST_MULTIPLIER_0_2F, (float)i * TEST_MULTIPLIER_0_1F,
-                                         TEST_POSITION_ZOOM);
+    test_helper_ptz_create_test_position(&position, (float)i * TEST_MULTIPLIER_0_2F,
+                                         (float)i * TEST_MULTIPLIER_0_1F, TEST_POSITION_ZOOM);
 
     int result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &position, NULL);
     assert_int_equal(result, ONVIF_SUCCESS);
@@ -771,8 +771,8 @@ void test_integration_ptz_stress_testing(void** state) {
 
     // Move to position
     struct ptz_vector position;
-    test_helper_ptz_create_test_position(&position, (float)(i % 2), (float)(i % 3) * TEST_MULTIPLIER_0_5F,
-                                         TEST_POSITION_ZOOM);
+    test_helper_ptz_create_test_position(&position, (float)(i % 2),
+                                         (float)(i % 3) * TEST_MULTIPLIER_0_5F, TEST_POSITION_ZOOM);
 
     result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &position, NULL);
     assert_int_equal(result, ONVIF_SUCCESS);
@@ -822,8 +822,8 @@ void test_integration_ptz_memory_leak_detection(void** state) {
   printf("  [TEST CASE] Various PTZ operations (absolute and relative moves)\n");
   for (int i = 0; i < TEST_CONCURRENT_OPS; i++) {
     struct ptz_vector position;
-    test_helper_ptz_create_test_position(&position, (float)i * TEST_MULTIPLIER_0_1F, (float)i * TEST_MULTIPLIER_0_05F,
-                                         TEST_POSITION_ZOOM);
+    test_helper_ptz_create_test_position(&position, (float)i * TEST_MULTIPLIER_0_1F,
+                                         (float)i * TEST_MULTIPLIER_0_05F, TEST_POSITION_ZOOM);
 
     int result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &position, NULL);
     assert_int_equal(result, ONVIF_SUCCESS);

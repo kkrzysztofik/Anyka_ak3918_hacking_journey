@@ -32,14 +32,14 @@
 #include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
-#include "utils/common/time_utils.h"
-#include "protocol/gsoap/onvif_gsoap.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
 #include "services/common/onvif_types.h"
 #include "services/device/onvif_device.h"
 #include "services/imaging/onvif_imaging.h"
 #include "services/media/onvif_media.h"
 #include "services/ptz/onvif_ptz.h"
 #include "services/snapshot/onvif_snapshot.h"
+#include "utils/common/time_utils.h"
 #include "utils/error/error_handling.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
@@ -244,7 +244,7 @@ static const char* extract_operation_name(const char* body) {
   int result =
     onvif_gsoap_extract_operation_name(body, body_length, operation_name, sizeof(operation_name));
 
-  if (result == ONVIF_XML_SUCCESS) {
+  if (result == ONVIF_SUCCESS) {
     service_log_context_t log_ctx;
     http_log_init_context(&log_ctx, NULL, "gsoap_extract", SERVICE_LOG_DEBUG);
     service_log_debug(&log_ctx, "gSOAP extracted operation name: %s", operation_name);

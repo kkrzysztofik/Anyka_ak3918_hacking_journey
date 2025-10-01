@@ -57,7 +57,7 @@
  * Constants
  * ============================================================================ */
 
-#define GENERIC_MOCK_NAME_MAX_LEN 64
+#define GENERIC_MOCK_NAME_MAX_LEN   64
 #define GENERIC_MOCK_MAX_OPERATIONS 32
 
 /* ============================================================================

@@ -476,8 +476,9 @@ void test_unit_service_dispatcher_dispatch_with_registered_service(void** state)
   onvif_service_dispatcher_init();
 
   // Register a test service
-  onvif_service_registration_t test_registration = ONVIF_SERVICE_REGISTRATION(
-    "test_service", "http://www.onvif.org/ver10/test/wsdl", test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t test_registration =
+    ONVIF_SERVICE_REGISTRATION("test_service", "http://www.onvif.org/ver10/test/wsdl",
+                               test_service_mock_operation, NULL, NULL);
 
   int result = onvif_service_dispatcher_register_service(&test_registration);
   assert_int_equal(ONVIF_SUCCESS, result);
@@ -510,8 +511,9 @@ void test_unit_service_dispatcher_dispatch_unknown_operation(void** state) {
   onvif_service_dispatcher_init();
 
   // Register a test service
-  onvif_service_registration_t test_registration = ONVIF_SERVICE_REGISTRATION(
-    "test_service", "http://www.onvif.org/ver10/test/wsdl", test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t test_registration =
+    ONVIF_SERVICE_REGISTRATION("test_service", "http://www.onvif.org/ver10/test/wsdl",
+                               test_service_mock_operation, NULL, NULL);
 
   int result = onvif_service_dispatcher_register_service(&test_registration);
   assert_int_equal(ONVIF_SUCCESS, result);
@@ -521,7 +523,8 @@ void test_unit_service_dispatcher_dispatch_unknown_operation(void** state) {
   http_response_t response = {0};
 
   // Test dispatch with unknown operation
-  result = onvif_service_dispatcher_dispatch("test_service", "UnknownOperation", &request, &response);
+  result =
+    onvif_service_dispatcher_dispatch("test_service", "UnknownOperation", &request, &response);
 
   // Should return error or success depending on mock implementation
   assert_true(result == ONVIF_SUCCESS || result == ONVIF_ERROR || result == ONVIF_ERROR_NOT_FOUND);

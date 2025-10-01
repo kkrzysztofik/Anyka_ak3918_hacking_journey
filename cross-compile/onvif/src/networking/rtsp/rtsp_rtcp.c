@@ -19,8 +19,8 @@
 #include <unistd.h>
 
 #include "platform/platform.h"
-#include "utils/common/time_utils.h"
 #include "rtsp_types.h"
+#include "utils/common/time_utils.h"
 
 /* ==================== RTCP Functions ==================== */
 

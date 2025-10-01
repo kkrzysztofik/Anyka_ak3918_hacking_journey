@@ -10,8 +10,8 @@
 #include <string.h>
 
 #include "cmocka_wrapper.h"
-#include "utils/error/error_handling.h"
 #include "generated/soapH.h"
+#include "utils/error/error_handling.h"
 
 // Include the module under test
 #include "protocol/gsoap/onvif_gsoap.h"
