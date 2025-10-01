@@ -105,7 +105,7 @@
   - _Requirements: 3.2, 3.3, 3.4, 3.5, 3.6_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in gSOAP and ONVIF Media service | Task: Implement 5 remaining Media service parsing functions following requirements 3.2-3.6. Use identical pattern from onvif_gsoap_parse_get_profiles(). For each: validate parameters, check initialization, set operation name, allocate with soap_new__trt__[Operation](), deserialize with soap_read__trt__[Operation](), track timing, handle errors with onvif_gsoap_set_error(). | Restrictions: Must use identical pattern for consistency, each function must be self-contained, proper gSOAP structure types for each operation | Success: All 5 functions implemented correctly, consistent error handling, proper timing tracking, follows established pattern, no code duplication beyond pattern structure | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 11. Add Doxygen file header and function documentation to onvif_gsoap_media.c
+- [x] 11. Add Doxygen file header and function documentation to onvif_gsoap_media.c
   - File: src/protocol/gsoap/onvif_gsoap_media.c
   - Add file header with @file, @brief, @author, @date tags
   - Ensure all functions have complete Doxygen comments

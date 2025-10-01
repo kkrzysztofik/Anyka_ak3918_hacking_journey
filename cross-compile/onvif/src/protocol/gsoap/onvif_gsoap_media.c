@@ -6,6 +6,17 @@
  *
  * This module implements Media service request parsing functions using
  * gSOAP's generated deserialization for proper ONVIF compliance.
+ *
+ * All parsing functions follow a consistent pattern:
+ * 1. Validate input parameters (NULL checks)
+ * 2. Verify request parsing is initialized
+ * 3. Set operation name and start timing
+ * 4. Allocate gSOAP structure using soap_new__trt__[Operation]()
+ * 5. Deserialize SOAP request using soap_read__trt__[Operation]()
+ * 6. Record completion time
+ *
+ * The parsed structures are managed by the gSOAP context and should not
+ * be manually freed by the caller.
  */
 
 #include "protocol/gsoap/onvif_gsoap_media.h"
@@ -21,7 +32,9 @@
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed GetProfiles structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note GetProfiles has no parameters, but structure must still be parsed
+ * @note Parses struct _trt__GetProfiles from SOAP envelope
+ * @note GetProfiles has no request parameters (empty structure)
+ * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx,
                                     struct _trt__GetProfiles** out) {
@@ -72,7 +85,9 @@ int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx,
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed GetStreamUri structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Extracts ProfileToken and StreamSetup fields
+ * @note Parses struct _trt__GetStreamUri from SOAP envelope
+ * @note Extracts ProfileToken (char*) and StreamSetup (Protocol, Transport) fields
+ * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx,
                                       struct _trt__GetStreamUri** out) {
@@ -123,7 +138,9 @@ int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx,
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed CreateProfile structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Extracts Name and Token fields for profile creation
+ * @note Parses struct _trt__CreateProfile from SOAP envelope
+ * @note Extracts Name (char*) and Token (char*) fields for profile creation
+ * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx,
                                       struct _trt__CreateProfile** out) {
@@ -174,7 +191,9 @@ int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx,
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed DeleteProfile structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Extracts ProfileToken field for profile deletion
+ * @note Parses struct _trt__DeleteProfile from SOAP envelope
+ * @note Extracts ProfileToken (char*) field for profile deletion
+ * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx,
                                       struct _trt__DeleteProfile** out) {
@@ -225,7 +244,9 @@ int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx,
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed SetVideoSourceConfiguration structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Extracts Configuration and ForcePersistence fields
+ * @note Parses struct _trt__SetVideoSourceConfiguration from SOAP envelope
+ * @note Extracts Configuration (Name, Token, Bounds, SourceToken) and ForcePersistence (bool)
+ * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
                                                struct _trt__SetVideoSourceConfiguration** out) {
@@ -276,7 +297,9 @@ int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed SetVideoEncoderConfiguration structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Extracts Configuration and ForcePersistence fields
+ * @note Parses struct _trt__SetVideoEncoderConfiguration from SOAP envelope
+ * @note Extracts Configuration (Name, Token, Encoding, Resolution, Quality, RateControl) and ForcePersistence (bool)
+ * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_set_video_encoder_config(onvif_gsoap_context_t* ctx,
                                                 struct _trt__SetVideoEncoderConfiguration** out) {
