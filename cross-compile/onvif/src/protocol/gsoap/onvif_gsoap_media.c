@@ -36,8 +36,7 @@
  * @note GetProfiles has no request parameters (empty structure)
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx,
-                                    struct _trt__GetProfiles** out) {
+int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct _trt__GetProfiles** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -49,8 +48,7 @@ int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -89,8 +87,7 @@ int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx,
  * @note Extracts ProfileToken (char*) and StreamSetup (Protocol, Transport) fields
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx,
-                                      struct _trt__GetStreamUri** out) {
+int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx, struct _trt__GetStreamUri** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -102,8 +99,7 @@ int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -142,8 +138,7 @@ int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx,
  * @note Extracts Name (char*) and Token (char*) fields for profile creation
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx,
-                                      struct _trt__CreateProfile** out) {
+int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx, struct _trt__CreateProfile** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -155,8 +150,7 @@ int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -195,8 +189,7 @@ int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx,
  * @note Extracts ProfileToken (char*) field for profile deletion
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx,
-                                      struct _trt__DeleteProfile** out) {
+int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx, struct _trt__DeleteProfile** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -208,8 +201,7 @@ int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -249,7 +241,7 @@ int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx,
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
-                                               struct _trt__SetVideoSourceConfiguration** out) {
+                                              struct _trt__SetVideoSourceConfiguration** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -261,8 +253,7 @@ int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -298,11 +289,12 @@ int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
  * @param out Output pointer to receive parsed SetVideoEncoderConfiguration structure
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Parses struct _trt__SetVideoEncoderConfiguration from SOAP envelope
- * @note Extracts Configuration (Name, Token, Encoding, Resolution, Quality, RateControl) and ForcePersistence (bool)
+ * @note Extracts Configuration (Name, Token, Encoding, Resolution, Quality, RateControl) and
+ * ForcePersistence (bool)
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_set_video_encoder_config(onvif_gsoap_context_t* ctx,
-                                                struct _trt__SetVideoEncoderConfiguration** out) {
+                                               struct _trt__SetVideoEncoderConfiguration** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -314,8 +306,7 @@ int onvif_gsoap_parse_set_video_encoder_config(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -719,15 +710,15 @@ int media_set_metadata_config_response_callback(struct soap* soap, void* user_da
 int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
                                            const struct media_profile* profiles,
                                            int profile_count) {
-  if (!ctx || !ctx->soap || !profiles || profile_count <= 0) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for profiles response");
+  if (!ctx || !ctx || !profiles || profile_count <= 0) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_profiles_response",
+                          "Invalid parameters for profiles response");
     return ONVIF_ERROR_INVALID;
   }
 
-  media_profiles_callback_data_t callback_data = {
-    .profiles = profiles,
-    .profile_count = profile_count
-  };
+  media_profiles_callback_data_t callback_data = {.profiles = profiles,
+                                                  .profile_count = profile_count};
 
   return onvif_gsoap_generate_response_with_callback(ctx, media_profiles_response_callback,
                                                      &callback_data);
@@ -735,12 +726,14 @@ int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
 
 int onvif_gsoap_generate_stream_uri_response(onvif_gsoap_context_t* ctx,
                                              const struct stream_uri* uri) {
-  if (!ctx || !ctx->soap || !uri) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for stream URI response");
+  if (!ctx || !ctx || !uri) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_stream_uri_response",
+                          "Invalid parameters for stream URI response");
     return ONVIF_ERROR_INVALID;
   }
 
-  media_stream_uri_callback_data_t callback_data = { .uri = uri };
+  media_stream_uri_callback_data_t callback_data = {.uri = uri};
 
   return onvif_gsoap_generate_response_with_callback(ctx, media_stream_uri_response_callback,
                                                      &callback_data);
@@ -748,78 +741,84 @@ int onvif_gsoap_generate_stream_uri_response(onvif_gsoap_context_t* ctx,
 
 int onvif_gsoap_generate_create_profile_response(onvif_gsoap_context_t* ctx,
                                                  const struct media_profile* profile) {
-  if (!ctx || !ctx->soap || !profile) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for create profile response");
+  if (!ctx || !ctx || !profile) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_create_profile_response",
+                          "Invalid parameters for create profile response");
     return ONVIF_ERROR_INVALID;
   }
 
-  media_create_profile_callback_data_t callback_data = { .profile = profile };
+  media_create_profile_callback_data_t callback_data = {.profile = profile};
 
   return onvif_gsoap_generate_response_with_callback(ctx, media_create_profile_response_callback,
                                                      &callback_data);
 }
 
 int onvif_gsoap_generate_delete_profile_response(onvif_gsoap_context_t* ctx) {
-  if (!ctx || !ctx->soap) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for delete profile response");
+  if (!ctx || !ctx) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_delete_profile_response",
+                          "Invalid parameters for delete profile response");
     return ONVIF_ERROR_INVALID;
   }
 
-  media_delete_profile_callback_data_t callback_data = { .message = "" };
+  media_delete_profile_callback_data_t callback_data = {.message = ""};
 
   return onvif_gsoap_generate_response_with_callback(ctx, media_delete_profile_response_callback,
                                                      &callback_data);
 }
 
 int onvif_gsoap_generate_set_video_source_configuration_response(onvif_gsoap_context_t* ctx) {
-  if (!ctx || !ctx->soap) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL,
+  if (!ctx || !ctx) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_set_video_source_configuration_response",
                           "Invalid parameters for set video source configuration response");
     return ONVIF_ERROR_INVALID;
   }
 
-  media_set_video_source_config_callback_data_t callback_data = { .message = "" };
+  media_set_video_source_config_callback_data_t callback_data = {.message = ""};
 
-  return onvif_gsoap_generate_response_with_callback(ctx,
-                                                     media_set_video_source_config_response_callback,
-                                                     &callback_data);
+  return onvif_gsoap_generate_response_with_callback(
+    ctx, media_set_video_source_config_response_callback, &callback_data);
 }
 
 int onvif_gsoap_generate_set_video_encoder_configuration_response(onvif_gsoap_context_t* ctx) {
-  if (!ctx || !ctx->soap) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL,
+  if (!ctx || !ctx) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_set_video_encoder_configuration_response",
                           "Invalid parameters for set video encoder configuration response");
     return ONVIF_ERROR_INVALID;
   }
 
-  media_set_video_encoder_config_callback_data_t callback_data = { .message = "" };
+  media_set_video_encoder_config_callback_data_t callback_data = {.message = ""};
 
-  return onvif_gsoap_generate_response_with_callback(ctx,
-                                                     media_set_video_encoder_config_response_callback,
-                                                     &callback_data);
+  return onvif_gsoap_generate_response_with_callback(
+    ctx, media_set_video_encoder_config_response_callback, &callback_data);
 }
 
 int onvif_gsoap_generate_start_multicast_streaming_response(onvif_gsoap_context_t* ctx) {
-  if (!ctx || !ctx->soap) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL,
+  if (!ctx || !ctx) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_start_multicast_streaming_response",
                           "Invalid parameters for start multicast streaming response");
     return ONVIF_ERROR_INVALID;
   }
 
-  media_start_multicast_callback_data_t callback_data = { .message = "" };
+  media_start_multicast_callback_data_t callback_data = {.message = ""};
 
   return onvif_gsoap_generate_response_with_callback(ctx, media_start_multicast_response_callback,
                                                      &callback_data);
 }
 
 int onvif_gsoap_generate_stop_multicast_streaming_response(onvif_gsoap_context_t* ctx) {
-  if (!ctx || !ctx->soap) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL,
+  if (!ctx || !ctx) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_stop_multicast_streaming_response",
                           "Invalid parameters for stop multicast streaming response");
     return ONVIF_ERROR_INVALID;
   }
 
-  media_stop_multicast_callback_data_t callback_data = { .message = "" };
+  media_stop_multicast_callback_data_t callback_data = {.message = ""};
 
   return onvif_gsoap_generate_response_with_callback(ctx, media_stop_multicast_response_callback,
                                                      &callback_data);
@@ -827,32 +826,30 @@ int onvif_gsoap_generate_stop_multicast_streaming_response(onvif_gsoap_context_t
 
 int onvif_gsoap_generate_get_metadata_configurations_response(
   onvif_gsoap_context_t* ctx, const struct metadata_configuration* configs, int count) {
-  if (!ctx || !ctx->soap || !configs || count < 0) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL,
+  if (!ctx || !ctx || !configs || count < 0) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_get_metadata_configurations_response",
                           "Invalid parameters for get metadata configurations response");
     return ONVIF_ERROR_INVALID;
   }
 
-  media_get_metadata_configs_callback_data_t callback_data = {
-    .configs = configs,
-    .config_count = count
-  };
+  media_get_metadata_configs_callback_data_t callback_data = {.configs = configs,
+                                                              .config_count = count};
 
-  return onvif_gsoap_generate_response_with_callback(ctx,
-                                                     media_get_metadata_configs_response_callback,
-                                                     &callback_data);
+  return onvif_gsoap_generate_response_with_callback(
+    ctx, media_get_metadata_configs_response_callback, &callback_data);
 }
 
 int onvif_gsoap_generate_set_metadata_configuration_response(onvif_gsoap_context_t* ctx) {
-  if (!ctx || !ctx->soap) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL,
+  if (!ctx || !ctx) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_set_metadata_configuration_response",
                           "Invalid parameters for set metadata configuration response");
     return ONVIF_ERROR_INVALID;
   }
 
-  media_set_metadata_config_callback_data_t callback_data = { .message = "" };
+  media_set_metadata_config_callback_data_t callback_data = {.message = ""};
 
-  return onvif_gsoap_generate_response_with_callback(ctx,
-                                                     media_set_metadata_config_response_callback,
-                                                     &callback_data);
+  return onvif_gsoap_generate_response_with_callback(
+    ctx, media_set_metadata_config_response_callback, &callback_data);
 }

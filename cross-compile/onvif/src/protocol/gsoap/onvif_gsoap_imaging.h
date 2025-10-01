@@ -28,7 +28,7 @@
  * @note Output structure is allocated with soap_new__onvif4__GetImagingSettings()
  */
 int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
-                                             struct _onvif4__GetImagingSettings** out);
+                                           struct _onvif4__GetImagingSettings** out);
 
 /**
  * @brief Parse SetImagingSettings ONVIF Imaging service request
@@ -42,7 +42,41 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
  * @note Output structure is allocated with soap_new__onvif4__SetImagingSettings()
  */
 int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
-                                             struct _onvif4__SetImagingSettings** out);
+                                           struct _onvif4__SetImagingSettings** out);
+
+/* ============================================================================
+ * Imaging Service Response Callback Data Structures
+ * ============================================================================
+ */
+
+/**
+ * @brief Callback data structure for imaging settings response
+ */
+typedef struct {
+  const struct imaging_settings* settings;
+} imaging_settings_callback_data_t;
+
+/**
+ * @brief Callback data structure for set imaging settings response
+ */
+typedef struct {
+  const char* message;
+} set_imaging_settings_callback_data_t;
+
+/* ============================================================================
+ * Imaging Service Response Callback Functions
+ * ============================================================================
+ */
+
+/**
+ * @brief Imaging settings response callback function
+ */
+int imaging_settings_response_callback(struct soap* soap, void* user_data);
+
+/**
+ * @brief Set imaging settings response callback function
+ */
+int set_imaging_settings_response_callback(struct soap* soap, void* user_data);
 
 /* ============================================================================
  * Imaging Service Utility Functions

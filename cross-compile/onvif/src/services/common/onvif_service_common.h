@@ -12,7 +12,7 @@
 #include "generated/soapH.h"
 #include "networking/http/http_parser.h"
 #include "onvif_types.h"
-#include "protocol/gsoap/onvif_gsoap.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
 #include "protocol/response/onvif_service_handler.h"
 #include "utils/error/error_handling.h"
 #include "utils/logging/service_logging.h"

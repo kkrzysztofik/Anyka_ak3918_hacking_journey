@@ -16,8 +16,8 @@
 #include "utils/common/time_utils.h"
 #include "utils/error/error_handling.h"
 
-/* External namespace table from gSOAP generated code */
-extern struct Namespace namespaces[];
+/* Include gSOAP namespace table */
+#include "generated/DeviceBinding.nsmap"
 
 /**
  * @brief Initialize gSOAP context with embedded soap structure
@@ -85,7 +85,7 @@ void onvif_gsoap_reset(onvif_gsoap_context_t* ctx) {
  * @return ONVIF_SUCCESS on success, error code otherwise
  */
 int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* request_xml,
-                                      size_t xml_size) {
+                                     size_t xml_size) {
   if (!ctx || !request_xml || xml_size == 0) {
     if (ctx) {
       onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
@@ -118,7 +118,7 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
  * @param message Detailed error message
  */
 void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const char* location,
-                            const char* message) {
+                           const char* message) {
   if (!ctx) {
     return;
   }
@@ -144,7 +144,7 @@ void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const cha
  * @return Error message string
  */
 const char* onvif_gsoap_get_detailed_error(onvif_gsoap_context_t* ctx, int* error_code,
-                                            const char** location, int* soap_error) {
+                                           const char** location, int* soap_error) {
   if (!ctx) {
     return "Invalid context";
   }

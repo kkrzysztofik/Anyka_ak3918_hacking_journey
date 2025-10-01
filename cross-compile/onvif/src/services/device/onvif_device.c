@@ -17,7 +17,9 @@
 #include "networking/common/buffer_pool.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
-#include "protocol/gsoap/onvif_gsoap.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
+#include "protocol/gsoap/onvif_gsoap_device.h"
+#include "protocol/gsoap/onvif_gsoap_response.h"
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_service_common.h"
 #include "services/common/onvif_types.h"
@@ -321,7 +323,7 @@ static int get_system_date_time_business_logic(const service_handler_config_t* c
   }
 
   // Set datetime data
-  datetime_data->tm_info = tm_info;
+  datetime_data->tm_info = *tm_info;
 
   // Generate response using gSOAP callback
   int result = onvif_gsoap_generate_response_with_callback(

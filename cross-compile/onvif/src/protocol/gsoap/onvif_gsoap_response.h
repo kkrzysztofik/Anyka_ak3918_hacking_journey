@@ -8,6 +8,7 @@
 #ifndef ONVIF_GSOAP_RESPONSE_H
 #define ONVIF_GSOAP_RESPONSE_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "generated/soapH.h"    //NOLINT
@@ -31,7 +32,6 @@ typedef int (*onvif_response_callback_t)(struct soap* soap, void* user_data);
  * @note Ensures fault structure is available for error handling
  */
 int onvif_gsoap_validate_context(struct soap* soap);
-
 
 /**
  * @brief Begins response serialization
@@ -116,9 +116,8 @@ const char* onvif_gsoap_get_response_data(const onvif_gsoap_context_t* ctx);
 size_t onvif_gsoap_get_response_length(const onvif_gsoap_context_t* ctx);
 
 /**
- * @brief Check if context has error  
+ * @brief Check if context has error
  * @param ctx gSOAP context
  * @return true if error exists, false otherwise
  */
 bool onvif_gsoap_has_error(const onvif_gsoap_context_t* ctx);
-

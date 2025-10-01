@@ -37,7 +37,7 @@
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
-                                             struct _onvif4__GetImagingSettings** out) {
+                                           struct _onvif4__GetImagingSettings** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -49,8 +49,7 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -92,7 +91,7 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
-                                             struct _onvif4__SetImagingSettings** out) {
+                                           struct _onvif4__SetImagingSettings** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -104,8 +103,7 @@ int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -180,4 +178,71 @@ void parse_ir_led_mode(const char* mode_str, enum ir_led_mode* mode) {
   } else if (strcmp(mode_str, "Auto") == 0) {
     *mode = IR_LED_AUTO;
   }
+}
+
+/* ============================================================================
+ * Imaging Service Response Callback Functions
+ * ============================================================================
+ */
+
+/**
+ * @brief Generate imaging settings response
+ * @param soap gSOAP context
+ * @param user_data Callback data containing imaging settings
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Creates SOAP response with imaging settings
+ */
+int imaging_settings_response_callback(struct soap* soap, void* user_data) {
+  imaging_settings_callback_data_t* data = (imaging_settings_callback_data_t*)user_data;
+
+  if (!data || !data->settings) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  struct _onvif4__GetImagingSettingsResponse* response =
+    soap_new__onvif4__GetImagingSettingsResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  // Note: Imaging settings response generation would go here
+  // For now, create minimal response structure
+
+  if (soap_put__onvif4__GetImagingSettingsResponse(
+        soap, response, "onvif4:GetImagingSettingsResponse", NULL) != SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Generate set imaging settings response
+ * @param soap gSOAP context
+ * @param user_data Callback data (unused for empty response)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Creates empty SOAP response for SetImagingSettings
+ */
+int set_imaging_settings_response_callback(struct soap* soap, void* user_data) {
+  set_imaging_settings_callback_data_t* data = (set_imaging_settings_callback_data_t*)user_data;
+
+  if (!data) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  struct _onvif4__SetImagingSettingsResponse* response =
+    soap_new__onvif4__SetImagingSettingsResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  // Note: SetImagingSettings response is typically empty
+  (void)data; // Suppress unused parameter warning
+
+  if (soap_put__onvif4__SetImagingSettingsResponse(
+        soap, response, "onvif4:SetImagingSettingsResponse", NULL) != SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
 }

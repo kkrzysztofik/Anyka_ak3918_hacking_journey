@@ -28,7 +28,7 @@
  * @note Output structure is allocated with soap_new__tds__GetDeviceInformation()
  */
 int onvif_gsoap_parse_get_device_information(onvif_gsoap_context_t* ctx,
-                                               struct _tds__GetDeviceInformation** out);
+                                             struct _tds__GetDeviceInformation** out);
 
 /**
  * @brief Parse GetCapabilities ONVIF Device service request
@@ -41,7 +41,7 @@ int onvif_gsoap_parse_get_device_information(onvif_gsoap_context_t* ctx,
  * @note Output structure is allocated with soap_new__tds__GetCapabilities()
  */
 int onvif_gsoap_parse_get_capabilities(onvif_gsoap_context_t* ctx,
-                                         struct _tds__GetCapabilities** out);
+                                       struct _tds__GetCapabilities** out);
 
 /**
  * @brief Parse GetSystemDateAndTime ONVIF Device service request
@@ -53,7 +53,7 @@ int onvif_gsoap_parse_get_capabilities(onvif_gsoap_context_t* ctx,
  * @note Output structure is allocated with soap_new__tds__GetSystemDateAndTime()
  */
 int onvif_gsoap_parse_get_system_date_and_time(onvif_gsoap_context_t* ctx,
-                                                 struct _tds__GetSystemDateAndTime** out);
+                                               struct _tds__GetSystemDateAndTime** out);
 
 /**
  * @brief Parse SystemReboot ONVIF Device service request
@@ -64,8 +64,87 @@ int onvif_gsoap_parse_get_system_date_and_time(onvif_gsoap_context_t* ctx,
  * @note Response contains reboot message indicating when system will restart
  * @note Output structure is allocated with soap_new__tds__SystemReboot()
  */
-int onvif_gsoap_parse_system_reboot(onvif_gsoap_context_t* ctx,
-                                      struct _tds__SystemReboot** out);
+int onvif_gsoap_parse_system_reboot(onvif_gsoap_context_t* ctx, struct _tds__SystemReboot** out);
+
+/* ============================================================================
+ * Device Service Response Callback Data Structures
+ * ============================================================================
+ */
+
+#define DEVICE_MANUFACTURER_MAX_LEN 128
+#define DEVICE_MODEL_MAX_LEN        128
+#define FIRMWARE_VERSION_MAX_LEN    64
+#define SERIAL_NUMBER_MAX_LEN       64
+#define HARDWARE_ID_MAX_LEN         64
+
+/**
+ * @brief Callback data structure for device info response
+ */
+typedef struct {
+  char manufacturer[DEVICE_MANUFACTURER_MAX_LEN];
+  char model[DEVICE_MODEL_MAX_LEN];
+  char firmware_version[FIRMWARE_VERSION_MAX_LEN];
+  char serial_number[SERIAL_NUMBER_MAX_LEN];
+  char hardware_id[HARDWARE_ID_MAX_LEN];
+} device_info_callback_data_t;
+
+/**
+ * @brief Callback data structure for capabilities response
+ */
+typedef struct {
+  const void* capabilities;
+} capabilities_callback_data_t;
+
+/**
+ * @brief Callback data structure for system datetime response
+ */
+typedef struct {
+  struct tm tm_info;
+} system_datetime_callback_data_t;
+
+/**
+ * @brief Callback data structure for services response
+ */
+typedef struct {
+  int include_capability;
+} services_callback_data_t;
+
+/**
+ * @brief Callback data structure for system reboot response
+ */
+typedef struct {
+  const char* message;
+} system_reboot_callback_data_t;
+
+/* ============================================================================
+ * Device Service Response Callback Functions
+ * ============================================================================
+ */
+
+/**
+ * @brief Device info response callback function
+ */
+int device_info_response_callback(struct soap* soap, void* user_data);
+
+/**
+ * @brief Capabilities response callback function
+ */
+int capabilities_response_callback(struct soap* soap, void* user_data);
+
+/**
+ * @brief System datetime response callback function
+ */
+int system_datetime_response_callback(struct soap* soap, void* user_data);
+
+/**
+ * @brief Services response callback function
+ */
+int services_response_callback(struct soap* soap, void* user_data);
+
+/**
+ * @brief System reboot response callback function
+ */
+int system_reboot_response_callback(struct soap* soap, void* user_data);
 
 /* ============================================================================
  * Device Service Response Generation Functions
@@ -83,11 +162,8 @@ int onvif_gsoap_parse_system_reboot(onvif_gsoap_context_t* ctx,
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Generates Device service GetDeviceInformation response containing device identity
  */
-int onvif_gsoap_generate_device_info_response(onvif_gsoap_context_t* ctx,
-                                              const char* manufacturer,
-                                              const char* model,
-                                              const char* firmware_version,
-                                              const char* serial_number,
-                                              const char* hardware_id);
+int onvif_gsoap_generate_device_info_response(onvif_gsoap_context_t* ctx, const char* manufacturer,
+                                              const char* model, const char* firmware_version,
+                                              const char* serial_number, const char* hardware_id);
 
 #endif /* ONVIF_GSOAP_DEVICE_H */

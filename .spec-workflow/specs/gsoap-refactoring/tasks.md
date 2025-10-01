@@ -252,20 +252,20 @@
   - Add declarations with complete Doxygen documentation
   - Purpose: Complete Imaging service with parsing functions
 
-- [ ] 20.7. Update code to use specific modular headers
+- [x] 20.7. Update code to use specific modular headers
   - Update service_dispatcher.c, http_server.c and other files
   - Replace onvif_gsoap.h includes with specific module headers
   - Include only: onvif_gsoap_core.h, onvif_gsoap_media.h, onvif_gsoap_ptz.h, onvif_gsoap_device.h, onvif_gsoap_imaging.h, onvif_gsoap_response.h as needed
   - Purpose: Remove dependency on monolithic header
 
-- [ ] 20.8. Update Makefile
+- [x] 20.8. Update Makefile
   - File: cross-compile/onvif/Makefile
   - Add to SOURCES: src/protocol/gsoap/onvif_gsoap_response.c
   - Remove from SOURCES: src/protocol/gsoap/onvif_gsoap.c
   - Verify build: make clean && make
   - Purpose: Update build system for modular structure
 
-- [ ] 20.9. Delete monolithic files
+- [x] 20.9. Delete monolithic files
   - Delete: src/protocol/gsoap/onvif_gsoap.c
   - Delete: src/protocol/gsoap/onvif_gsoap.h
   - Verify no compilation errors
@@ -274,7 +274,7 @@
 
 ## Phase 6: Service Layer Updates
 
-- [ ] 21. Update Media service action handlers to use new parsing functions
+- [x] 21. Update Media service action handlers to use new parsing functions
   - File: src/services/media/onvif_media.c
   - Update each Media action handler to use new parsing API
   - Replace manual token parsing with: onvif_gsoap_parse_get_profiles(), onvif_gsoap_parse_get_stream_uri(), onvif_gsoap_parse_create_profile(), onvif_gsoap_parse_delete_profile(), onvif_gsoap_parse_set_video_source_config(), onvif_gsoap_parse_set_video_encoder_config()
@@ -284,7 +284,7 @@
   - _Leverage: New onvif_gsoap_media.h API, existing action handler patterns_
   - _Requirements: 6.1, 6.2_
 
-- [ ] 22. Update PTZ service action handlers to use new parsing functions
+- [x] 22. Update PTZ service action handlers to use new parsing functions
   - File: src/services/ptz/onvif_ptz.c
   - Update each PTZ action handler to use new parsing API
   - Replace manual parsing with: onvif_gsoap_parse_get_nodes(), onvif_gsoap_parse_absolute_move(), onvif_gsoap_parse_get_presets(), onvif_gsoap_parse_set_preset(), onvif_gsoap_parse_goto_preset(), onvif_gsoap_parse_remove_preset()
@@ -295,7 +295,7 @@
   - _Leverage: New onvif_gsoap_ptz.h API, existing PTZ action handler patterns_
   - _Requirements: 6.3_
 
-- [ ] 23. Update Device and Imaging service action handlers to use new parsing functions
+- [x] 23. Update Device and Imaging service action handlers to use new parsing functions
   - File: src/services/device/onvif_device.c
   - File: src/services/imaging/onvif_imaging.c
   - Update Device action handlers: onvif_gsoap_parse_get_device_information(), onvif_gsoap_parse_get_capabilities(), onvif_gsoap_parse_get_system_date_and_time(), onvif_gsoap_parse_system_reboot()

@@ -36,8 +36,7 @@
  * @note Retrieves PTZ node information including capabilities
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx,
-                                 struct _onvif3__GetNodes** out) {
+int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _onvif3__GetNodes** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -49,8 +48,7 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -90,7 +88,7 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx,
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
-                                     struct _onvif3__AbsoluteMove** out) {
+                                    struct _onvif3__AbsoluteMove** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -102,8 +100,7 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -142,8 +139,7 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
  * @note Extracts ProfileToken to retrieve configured presets
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx,
-                                   struct _onvif3__GetPresets** out) {
+int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _onvif3__GetPresets** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -155,8 +151,7 @@ int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -196,8 +191,7 @@ int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx,
  * @note If PresetToken is NULL, creates new preset; otherwise updates existing
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx,
-                                  struct _onvif3__SetPreset** out) {
+int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _onvif3__SetPreset** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -209,8 +203,7 @@ int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -250,8 +243,7 @@ int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx,
  * @note PresetToken identifies which preset position to move to
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx,
-                                   struct _onvif3__GotoPreset** out) {
+int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _onvif3__GotoPreset** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -263,8 +255,7 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -305,7 +296,7 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx,
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
-                                     struct _onvif3__RemovePreset** out) {
+                                    struct _onvif3__RemovePreset** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -317,8 +308,7 @@ int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request parsing not initialized");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -366,21 +356,22 @@ int ptz_nodes_response_callback(struct soap* soap, void* user_data) {
   }
 
   response->__sizePTZNode = data->count;
-  response->PTZNode = soap_new_onvif3__PTZNode(soap, data->count);
+  response->PTZNode = soap_new_tt__PTZNode(soap, data->count);
   if (!response->PTZNode) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   for (int i = 0; i < data->count; i++) {
     const struct ptz_node* src_node = &data->nodes[i];
-    struct onvif3__PTZNode* node = &response->PTZNode[i];
+    struct tt__PTZNode* node = &response->PTZNode[i];
 
     node->token = soap_strdup(soap, src_node->token);
     node->Name = soap_strdup(soap, src_node->name);
-    node->FixedHomePosition = src_node->fixed_home_position ? xsd__boolean__true_ : xsd__boolean__false_;
+    node->FixedHomePosition = src_node->home_supported ? xsd__boolean__true_ : xsd__boolean__false_;
   }
 
-  if (soap_put__onvif3__GetNodesResponse(soap, response, "onvif3:GetNodesResponse", NULL) != SOAP_OK) {
+  if (soap_put__onvif3__GetNodesResponse(soap, response, "onvif3:GetNodesResponse", NULL) !=
+      SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -399,7 +390,8 @@ int ptz_absolute_move_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  if (soap_put__onvif3__AbsoluteMoveResponse(soap, response, "onvif3:AbsoluteMoveResponse", NULL) != SOAP_OK) {
+  if (soap_put__onvif3__AbsoluteMoveResponse(soap, response, "onvif3:AbsoluteMoveResponse", NULL) !=
+      SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -418,37 +410,40 @@ int ptz_presets_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  response->__sizePreset = data->count;
-  response->Preset = soap_new_onvif3__PTZPreset(soap, data->count);
-  if (!response->Preset) {
+  response->__sizePTZPreset = data->count;
+  response->PTZPreset = soap_new_tt__PTZPreset(soap, data->count);
+  if (!response->PTZPreset) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   for (int i = 0; i < data->count; i++) {
     const struct ptz_preset* src_preset = &data->presets[i];
-    struct onvif3__PTZPreset* preset = &response->Preset[i];
+    struct tt__PTZPreset* preset = &response->PTZPreset[i];
 
     preset->token = soap_strdup(soap, src_preset->token);
     preset->Name = soap_strdup(soap, src_preset->name);
-    
-    preset->PTZPosition = soap_new_onvif3__PTZVector(soap, 1);
+
+    preset->PTZPosition = soap_new_tt__PTZVector(soap, 1);
     if (preset->PTZPosition) {
-      preset->PTZPosition->PanTilt = soap_new_onvif3__Vector2D(soap, 1);
+      preset->PTZPosition->PanTilt = soap_new_tt__Vector2D(soap, 1);
       if (preset->PTZPosition->PanTilt) {
-        preset->PTZPosition->PanTilt->x = src_preset->position.pan;
-        preset->PTZPosition->PanTilt->y = src_preset->position.tilt;
-        preset->PTZPosition->PanTilt->space = soap_strdup(soap, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace");
+        preset->PTZPosition->PanTilt->x = src_preset->ptz_position.pan_tilt.x;
+        preset->PTZPosition->PanTilt->y = src_preset->ptz_position.pan_tilt.y;
+        preset->PTZPosition->PanTilt->space =
+          soap_strdup(soap, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace");
       }
-      
-      preset->PTZPosition->Zoom = soap_new_onvif3__Vector1D(soap, 1);
+
+      preset->PTZPosition->Zoom = soap_new_tt__Vector1D(soap, 1);
       if (preset->PTZPosition->Zoom) {
-        preset->PTZPosition->Zoom->x = src_preset->position.zoom;
-        preset->PTZPosition->Zoom->space = soap_strdup(soap, "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace");
+        preset->PTZPosition->Zoom->x = src_preset->ptz_position.zoom;
+        preset->PTZPosition->Zoom->space =
+          soap_strdup(soap, "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace");
       }
     }
   }
 
-  if (soap_put__onvif3__GetPresetsResponse(soap, response, "onvif3:GetPresetsResponse", NULL) != SOAP_OK) {
+  if (soap_put__onvif3__GetPresetsResponse(soap, response, "onvif3:GetPresetsResponse", NULL) !=
+      SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -467,9 +462,12 @@ int ptz_set_preset_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  response->PresetToken = soap_strdup(soap, data->preset_token);
+  // Note: SetPresetResponse struct is empty in ONVIF spec
+  // The preset token is returned in the SetPreset request parsing, not in response generation
+  (void)data; // Suppress unused parameter warning
 
-  if (soap_put__onvif3__SetPresetResponse(soap, response, "onvif3:SetPresetResponse", NULL) != SOAP_OK) {
+  if (soap_put__onvif3__SetPresetResponse(soap, response, "onvif3:SetPresetResponse", NULL) !=
+      SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -488,7 +486,8 @@ int ptz_goto_preset_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  if (soap_put__onvif3__GotoPresetResponse(soap, response, "onvif3:GotoPresetResponse", NULL) != SOAP_OK) {
+  if (soap_put__onvif3__GotoPresetResponse(soap, response, "onvif3:GotoPresetResponse", NULL) !=
+      SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -501,70 +500,72 @@ int ptz_goto_preset_response_callback(struct soap* soap, void* user_data) {
  */
 
 int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
-                                            const struct ptz_node* nodes,
-                                            int count) {
-  if (!ctx || !ctx->soap || !nodes || count <= 0) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for get nodes response");
+                                            const struct ptz_node* nodes, int count) {
+  if (!ctx || !ctx || !nodes || count <= 0) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_get_nodes_response",
+                          "Invalid parameters for get nodes response");
     return ONVIF_ERROR_INVALID;
   }
 
-  ptz_nodes_callback_data_t callback_data = {
-    .nodes = nodes,
-    .count = count
-  };
+  ptz_nodes_callback_data_t callback_data = {.nodes = nodes, .count = count};
 
   return onvif_gsoap_generate_response_with_callback(ctx, ptz_nodes_response_callback,
                                                      &callback_data);
 }
 
 int onvif_gsoap_generate_absolute_move_response(onvif_gsoap_context_t* ctx) {
-  if (!ctx || !ctx->soap) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for absolute move response");
+  if (!ctx || !ctx) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_absolute_move_response",
+                          "Invalid parameters for absolute move response");
     return ONVIF_ERROR_INVALID;
   }
 
-  ptz_absolute_move_callback_data_t callback_data = { .message = "" };
+  ptz_absolute_move_callback_data_t callback_data = {.message = ""};
 
   return onvif_gsoap_generate_response_with_callback(ctx, ptz_absolute_move_response_callback,
                                                      &callback_data);
 }
 
 int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
-                                              const struct ptz_preset* presets,
-                                              int count) {
-  if (!ctx || !ctx->soap || !presets || count < 0) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for get presets response");
+                                              const struct ptz_preset* presets, int count) {
+  if (!ctx || !ctx || !presets || count < 0) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_get_presets_response",
+                          "Invalid parameters for get presets response");
     return ONVIF_ERROR_INVALID;
   }
 
-  ptz_presets_callback_data_t callback_data = {
-    .presets = presets,
-    .count = count
-  };
+  ptz_presets_callback_data_t callback_data = {.presets = presets, .count = count};
 
   return onvif_gsoap_generate_response_with_callback(ctx, ptz_presets_response_callback,
                                                      &callback_data);
 }
 
 int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const char* preset_token) {
-  if (!ctx || !ctx->soap || !preset_token) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for set preset response");
+  if (!ctx || !ctx || !preset_token) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_set_preset_response",
+                          "Invalid parameters for set preset response");
     return ONVIF_ERROR_INVALID;
   }
 
-  ptz_set_preset_callback_data_t callback_data = { .preset_token = preset_token };
+  ptz_set_preset_callback_data_t callback_data = {.preset_token = preset_token};
 
   return onvif_gsoap_generate_response_with_callback(ctx, ptz_set_preset_response_callback,
                                                      &callback_data);
 }
 
 int onvif_gsoap_generate_goto_preset_response(onvif_gsoap_context_t* ctx) {
-  if (!ctx || !ctx->soap) {
-    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for goto preset response");
+  if (!ctx || !ctx) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_goto_preset_response",
+                          "Invalid parameters for goto preset response");
     return ONVIF_ERROR_INVALID;
   }
 
-  ptz_goto_preset_callback_data_t callback_data = { .message = "" };
+  ptz_goto_preset_callback_data_t callback_data = {.message = ""};
 
   return onvif_gsoap_generate_response_with_callback(ctx, ptz_goto_preset_response_callback,
                                                      &callback_data);

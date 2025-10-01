@@ -20,7 +20,8 @@
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
-#include "protocol/gsoap/onvif_gsoap.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
+#include "protocol/gsoap/onvif_gsoap_response.h"
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_types.h"
 #include "services/media/onvif_media.h"
@@ -175,82 +176,13 @@ int onvif_snapshot_get_uri(const char* profile_token, struct stream_uri* uri) {
 }
 
 /* Service handler action implementations */
-static int handle_get_snapshot_uri(const service_handler_config_t* config,
-                                   const http_request_t* request, http_response_t* response,
-                                   onvif_gsoap_context_t* gsoap_ctx) {
-  (void)request; // Suppress unused parameter warning
-  // Basic parameter validation
-  if (!config || !response || !gsoap_ctx) {
-    return ONVIF_ERROR_NULL;
-  }
-
-  // Parse profile token from request using gsoap parser
-  char profile_token[32];
-  int parse_result =
-    onvif_gsoap_parse_snapshot_profile_token(gsoap_ctx, profile_token, sizeof(profile_token));
-  if (parse_result != ONVIF_SUCCESS) {
-    return onvif_gsoap_generate_fault_response(gsoap_ctx, "soap:Server", "Invalid profile token",
-                                               NULL, NULL, NULL, 0);
-  }
-
-  // Get snapshot URI using existing function
-  struct stream_uri uri;
-  int result = onvif_snapshot_get_uri(profile_token, &uri);
-
-  if (result != ONVIF_SUCCESS) {
-    return onvif_gsoap_generate_fault_response(gsoap_ctx, "soap:Server", "Internal server error",
-                                               NULL, NULL, NULL, 0);
-  }
-
-  // Generate simple SOAP response
-  char response_buffer[1024];
-  int response_len =
-    snprintf(response_buffer, sizeof(response_buffer),
-             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-             "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" "
-             "xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\" "
-             "xmlns:tt=\"http://www.onvif.org/ver10/schema\">\n"
-             "  <soap:Body>\n"
-             "    <timg:GetSnapshotUriResponse>\n"
-             "      <timg:MediaUri>\n"
-             "        <tt:Uri>%s</tt:Uri>\n"
-             "        <tt:InvalidAfterConnect>%s</tt:InvalidAfterConnect>\n"
-             "        <tt:InvalidAfterReboot>%s</tt:InvalidAfterReboot>\n"
-             "        <tt:Timeout>PT%dS</tt:Timeout>\n"
-             "      </timg:MediaUri>\n"
-             "    </timg:GetSnapshotUriResponse>\n"
-             "  </soap:Body>\n"
-             "</soap:Envelope>\n",
-             uri.uri, uri.invalid_after_connect ? "true" : "false",
-             uri.invalid_after_reboot ? "true" : "false", uri.timeout);
-
-  if (response_len >= (int)sizeof(response_buffer)) {
-    return onvif_gsoap_generate_fault_response(gsoap_ctx, "soap:Server", "Response too large", NULL,
-                                               NULL, NULL, 0);
-  }
-
-  // Allocate response buffer if not already allocated
-  if (!response->body) {
-    response->body = ONVIF_MALLOC(ONVIF_RESPONSE_BUFFER_SIZE);
-    if (!response->body) {
-      return onvif_gsoap_generate_fault_response(gsoap_ctx, "soap:Server",
-                                                 "Memory allocation failed", NULL, NULL, NULL, 0);
-    }
-  }
-
-  // Copy response to output
-  strncpy(response->body, response_buffer, ONVIF_RESPONSE_BUFFER_SIZE - 1);
-  response->body[ONVIF_RESPONSE_BUFFER_SIZE - 1] = '\0';
-  response->body_length = strlen(response->body);
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
-
-  return ONVIF_SUCCESS;
-}
+// NOTE: GetSnapshotUri has been removed - it belongs in the imaging service
+// Snapshot service only handles actual JPEG snapshot retrieval from video frames via HTTP GET
 
 /* Action definitions */
 static const service_action_def_t snapshot_actions[] = {
-  {"GetSnapshotUri", handle_get_snapshot_uri, 1}};
+  // No SOAP actions - snapshot service only serves JPEG files via HTTP GET, not SOAP requests
+};
 
 /* Service handler functions */
 int onvif_snapshot_service_init(config_manager_t* config) {

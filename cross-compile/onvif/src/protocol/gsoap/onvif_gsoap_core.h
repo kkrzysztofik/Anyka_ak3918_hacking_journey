@@ -22,17 +22,21 @@
 /* gSOAP context defined below */
 
 /* ============================================================================
- * gSOAP Context Structure
+ * gSOAP Context
+ * Structure
  * ============================================================================
  */
 
 /**
  * @brief Enhanced ONVIF gSOAP context with embedded soap context
  *
- * This structure improves upon the original design by:
+ * This structure improves
+ * upon the original design by:
  * - Using embedded soap context (no allocation needed)
- * - Tracking request parsing and response generation state
- * - Providing detailed error context for debugging
+ * -
+ * Tracking request parsing and response generation state
+ * - Providing detailed error context for
+ * debugging
  * - Automatic performance metric collection
  */
 typedef struct onvif_gsoap_context_s {
@@ -41,19 +45,19 @@ typedef struct onvif_gsoap_context_s {
 
   /* Request parsing state tracking */
   struct {
-    const char* operation_name;  /* Parsed operation name (for logging) */
-    bool is_initialized;         /* Request parsing initialized */
-    size_t request_size;         /* Original request size in bytes */
-    uint64_t parse_start_time;   /* Parse start timestamp (microseconds) */
-    uint64_t parse_end_time;     /* Parse end timestamp (microseconds) */
+    const char* operation_name; /* Parsed operation name (for logging) */
+    bool is_initialized;        /* Request parsing initialized */
+    size_t request_size;        /* Original request size in bytes */
+    uint64_t parse_start_time;  /* Parse start timestamp (microseconds) */
+    uint64_t parse_end_time;    /* Parse end timestamp (microseconds) */
   } request_state;
 
   /* Response generation state tracking */
   struct {
-    size_t total_bytes_written;      /* Total response bytes written */
-    uint64_t generation_start_time;  /* Generation start timestamp */
-    uint64_t generation_end_time;    /* Generation end timestamp */
-    bool is_finalized;               /* Response finalization complete */
+    size_t total_bytes_written;     /* Total response bytes written */
+    uint64_t generation_start_time; /* Generation start timestamp */
+    uint64_t generation_end_time;   /* Generation end timestamp */
+    bool is_finalized;              /* Response finalization complete */
   } response_state;
 
   /* Enhanced error context for debugging */
@@ -69,10 +73,10 @@ typedef struct onvif_gsoap_context_s {
 } onvif_gsoap_context_t;
 
 /* ============================================================================
- * gSOAP Core Functions
+ * gSOAP Core
+ * Functions
  * ============================================================================
  */
-
 
 /**
  * @brief Initialize gSOAP context with embedded soap structure
@@ -104,7 +108,7 @@ void onvif_gsoap_reset(onvif_gsoap_context_t* ctx);
  * @note Sets up soap input stream and marks request_state as initialized
  */
 int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* request_xml,
-                                      size_t xml_size);
+                                     size_t xml_size);
 
 /**
  * @brief Set error context with detailed information
@@ -114,7 +118,7 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
  * @param message Detailed error message
  */
 void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const char* location,
-                            const char* message);
+                           const char* message);
 
 /**
  * @brief Get detailed error information
@@ -125,7 +129,7 @@ void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const cha
  * @return Error message string
  */
 const char* onvif_gsoap_get_detailed_error(onvif_gsoap_context_t* ctx, int* error_code,
-                                            const char** location, int* soap_error);
+                                           const char** location, int* soap_error);
 
 /**
  * @brief Check if context has error

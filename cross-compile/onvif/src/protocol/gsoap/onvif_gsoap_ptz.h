@@ -27,8 +27,7 @@
  * @note Retrieves PTZ node information including capabilities and supported features
  * @note Output structure is allocated with soap_new__onvif3__GetNodes()
  */
-int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx,
-                                 struct _onvif3__GetNodes** out);
+int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _onvif3__GetNodes** out);
 
 /**
  * @brief Parse AbsoluteMove ONVIF PTZ service request
@@ -39,8 +38,7 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx,
  * @note Position coordinates include x, y, and zoom values in PTZ coordinate space
  * @note Output structure is allocated with soap_new__onvif3__AbsoluteMove()
  */
-int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
-                                     struct _onvif3__AbsoluteMove** out);
+int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx, struct _onvif3__AbsoluteMove** out);
 
 /**
  * @brief Parse GetPresets ONVIF PTZ service request
@@ -50,8 +48,7 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
  * @note Extracts ProfileToken to retrieve all configured presets for the profile
  * @note Output structure is allocated with soap_new__onvif3__GetPresets()
  */
-int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx,
-                                   struct _onvif3__GetPresets** out);
+int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _onvif3__GetPresets** out);
 
 /**
  * @brief Parse SetPreset ONVIF PTZ service request
@@ -62,8 +59,7 @@ int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx,
  * @note If PresetToken is NULL, creates a new preset; otherwise updates existing preset
  * @note Output structure is allocated with soap_new__onvif3__SetPreset()
  */
-int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx,
-                                  struct _onvif3__SetPreset** out);
+int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _onvif3__SetPreset** out);
 
 /**
  * @brief Parse GotoPreset ONVIF PTZ service request
@@ -74,8 +70,7 @@ int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx,
  * @note PresetToken identifies which preset position to move to
  * @note Output structure is allocated with soap_new__onvif3__GotoPreset()
  */
-int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx,
-                                   struct _onvif3__GotoPreset** out);
+int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _onvif3__GotoPreset** out);
 
 /**
  * @brief Parse RemovePreset ONVIF PTZ service request
@@ -86,8 +81,7 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx,
  * @note PresetToken identifies which preset to remove from the profile
  * @note Output structure is allocated with soap_new__onvif3__RemovePreset()
  */
-int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
-                                     struct _onvif3__RemovePreset** out);
+int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx, struct _onvif3__RemovePreset** out);
 
 /* ============================================================================
  * PTZ Service Response Generation Functions
@@ -179,8 +173,7 @@ int ptz_goto_preset_response_callback(struct soap* soap, void* user_data);
  * @return 0 on success, error code on failure
  */
 int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
-                                            const struct ptz_node* nodes,
-                                            int count);
+                                            const struct ptz_node* nodes, int count);
 
 /**
  * @brief Generate PTZ AbsoluteMove response
@@ -197,8 +190,7 @@ int onvif_gsoap_generate_absolute_move_response(onvif_gsoap_context_t* ctx);
  * @return 0 on success, error code on failure
  */
 int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
-                                              const struct ptz_preset* presets,
-                                              int count);
+                                              const struct ptz_preset* presets, int count);
 
 /**
  * @brief Generate PTZ SetPreset response
@@ -206,8 +198,7 @@ int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
  * @param preset_token Token of the created/updated preset
  * @return 0 on success, error code on failure
  */
-int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx,
-                                             const char* preset_token);
+int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const char* preset_token);
 
 /**
  * @brief Generate PTZ GotoPreset response

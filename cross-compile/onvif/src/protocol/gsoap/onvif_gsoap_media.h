@@ -26,8 +26,7 @@
  * @note Caller must check request_state.is_initialized before calling
  * @note Output structure is allocated with soap_new__trt__GetProfiles()
  */
-int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx,
-                                    struct _trt__GetProfiles** out);
+int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct _trt__GetProfiles** out);
 
 /**
  * @brief Parse GetStreamUri ONVIF Media service request
@@ -37,8 +36,7 @@ int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx,
  * @note Extracts ProfileToken and StreamSetup (Protocol, Transport) fields
  * @note Output structure is allocated with soap_new__trt__GetStreamUri()
  */
-int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx,
-                                      struct _trt__GetStreamUri** out);
+int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx, struct _trt__GetStreamUri** out);
 
 /**
  * @brief Parse CreateProfile ONVIF Media service request
@@ -48,8 +46,7 @@ int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx,
  * @note Extracts Name and Token fields for profile creation
  * @note Output structure is allocated with soap_new__trt__CreateProfile()
  */
-int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx,
-                                      struct _trt__CreateProfile** out);
+int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx, struct _trt__CreateProfile** out);
 
 /**
  * @brief Parse DeleteProfile ONVIF Media service request
@@ -59,8 +56,7 @@ int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx,
  * @note Extracts ProfileToken field for profile deletion
  * @note Output structure is allocated with soap_new__trt__DeleteProfile()
  */
-int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx,
-                                      struct _trt__DeleteProfile** out);
+int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx, struct _trt__DeleteProfile** out);
 
 /**
  * @brief Parse SetVideoSourceConfiguration ONVIF Media service request
@@ -71,18 +67,19 @@ int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx,
  * @note Output structure is allocated with soap_new__trt__SetVideoSourceConfiguration()
  */
 int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
-                                               struct _trt__SetVideoSourceConfiguration** out);
+                                              struct _trt__SetVideoSourceConfiguration** out);
 
 /**
  * @brief Parse SetVideoEncoderConfiguration ONVIF Media service request
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed SetVideoEncoderConfiguration structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Extracts Configuration (Name, Token, Encoding, Resolution, Quality, RateControl) and ForcePersistence
+ * @note Extracts Configuration (Name, Token, Encoding, Resolution, Quality, RateControl) and
+ * ForcePersistence
  * @note Output structure is allocated with soap_new__trt__SetVideoEncoderConfiguration()
  */
 int onvif_gsoap_parse_set_video_encoder_config(onvif_gsoap_context_t* ctx,
-                                                struct _trt__SetVideoEncoderConfiguration** out);
+                                               struct _trt__SetVideoEncoderConfiguration** out);
 
 /* ============================================================================
  * Media Service Response Generation Functions
@@ -249,8 +246,7 @@ int media_set_metadata_config_response_callback(struct soap* soap, void* user_da
  * @return 0 on success, error code on failure
  */
 int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
-                                           const struct media_profile* profiles,
-                                           int profile_count);
+                                           const struct media_profile* profiles, int profile_count);
 
 /**
  * @brief Generate Media GetStreamUri response

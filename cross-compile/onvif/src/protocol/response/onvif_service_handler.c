@@ -61,7 +61,7 @@ int onvif_service_handler_init(onvif_service_handler_instance_t* handler,
     return ONVIF_ERROR;
   }
 
-  if (onvif_gsoap_init(handler->gsoap_ctx) != ONVIF_XML_SUCCESS) {
+  if (onvif_gsoap_init(handler->gsoap_ctx) != ONVIF_SUCCESS) {
     ONVIF_FREE(handler->gsoap_ctx);
     ONVIF_FREE(handler->actions);
     return ONVIF_ERROR;

@@ -100,8 +100,8 @@ SRCS := \
 	src/networking/discovery/ws_discovery.c \
 	src/protocol/response/onvif_service_handler.c \
 	src/generated/soapC.c \
-	src/protocol/gsoap/onvif_gsoap.c \
 	src/protocol/gsoap/onvif_gsoap_core.c \
+	src/protocol/gsoap/onvif_gsoap_response.c \
 	src/protocol/gsoap/onvif_gsoap_media.c \
 	src/protocol/gsoap/onvif_gsoap_ptz.c \
 	src/protocol/gsoap/onvif_gsoap_device.c \

@@ -20,7 +20,9 @@
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
-#include "protocol/gsoap/onvif_gsoap.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
+#include "protocol/gsoap/onvif_gsoap_imaging.h"
+#include "protocol/gsoap/onvif_gsoap_response.h"
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_imaging_types.h"
 #include "services/common/onvif_types.h"
@@ -956,13 +958,16 @@ static int handle_get_imaging_settings(const service_handler_config_t* config,
     return error_handle_system(&error_ctx, result, "init_request_parsing", response);
   }
 
-  // Parse video source token from request using gSOAP
-  char video_source_token[IMAGING_TOKEN_BUFFER_SIZE] = "VideoSource0";
-  result = onvif_gsoap_parse_value(gsoap_ctx, "//tt:VideoSourceToken", video_source_token,
-                                   sizeof(video_source_token));
-  if (result != 0) {
-    platform_log_warning("Failed to parse video source token, using default\n");
+  // Parse GetImagingSettings request using new gSOAP parsing function
+  struct _onvif4__GetImagingSettings* get_settings_req = NULL;
+  result = onvif_gsoap_parse_get_imaging_settings(gsoap_ctx, &get_settings_req);
+  if (result != ONVIF_SUCCESS || !get_settings_req) {
+    return error_handle_system(&error_ctx, result, "parse_get_imaging_settings", response);
   }
+
+  // Extract video source token from parsed request (use default if not provided)
+  const char* video_source_token =
+    get_settings_req->VideoSourceToken ? get_settings_req->VideoSourceToken : "VideoSource0";
 
   // Get current imaging settings
   struct imaging_settings settings;
@@ -1026,12 +1031,27 @@ static int handle_set_imaging_settings(const service_handler_config_t* config,
     return error_handle_system(&error_ctx, result, "init_request_parsing", response);
   }
 
-  // Parse imaging settings from request using gSOAP
-  struct imaging_settings settings;
-  result = onvif_gsoap_parse_imaging_settings(gsoap_ctx, &settings);
-  if (result != 0) {
-    return error_handle_system(&error_ctx, result, "parse_imaging_settings", response);
+  // Parse SetImagingSettings request using new gSOAP parsing function
+  struct _onvif4__SetImagingSettings* set_settings_req = NULL;
+  result = onvif_gsoap_parse_set_imaging_settings(gsoap_ctx, &set_settings_req);
+  if (result != ONVIF_SUCCESS || !set_settings_req || !set_settings_req->ImagingSettings) {
+    return error_handle_system(&error_ctx, result, "parse_set_imaging_settings", response);
   }
+
+  // Extract imaging settings from parsed request (fields are float pointers)
+  struct imaging_settings settings;
+  settings.brightness = set_settings_req->ImagingSettings->Brightness
+                          ? (int)*set_settings_req->ImagingSettings->Brightness
+                          : 50;
+  settings.contrast = set_settings_req->ImagingSettings->Contrast
+                        ? (int)*set_settings_req->ImagingSettings->Contrast
+                        : 50;
+  settings.saturation = set_settings_req->ImagingSettings->ColorSaturation
+                          ? (int)*set_settings_req->ImagingSettings->ColorSaturation
+                          : 50;
+  settings.sharpness = set_settings_req->ImagingSettings->Sharpness
+                         ? (int)*set_settings_req->ImagingSettings->Sharpness
+                         : 50;
 
   // Validate imaging settings
   result = validate_imaging_settings_local(&settings);
