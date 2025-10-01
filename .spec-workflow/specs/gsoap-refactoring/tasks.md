@@ -117,7 +117,7 @@
 
 ## Phase 3: PTZ Service Implementation
 
-- [ ] 12. Create onvif_gsoap_ptz.h header with PTZ service parsing functions
+- [x] 12. Create onvif_gsoap_ptz.h header with PTZ service parsing functions
   - File: src/protocol/gsoap/onvif_gsoap_ptz.h (new file)
   - Declare 6 PTZ service parsing functions (GetNodes, AbsoluteMove, GetPresets, SetPreset, GotoPreset, RemovePreset)
   - Add complete Doxygen documentation
@@ -126,7 +126,7 @@
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 10.6_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in ONVIF PTZ protocol and gSOAP | Task: Create onvif_gsoap_ptz.h header following requirements 4.1-4.6 and 10.6. Declare 6 PTZ service parsing functions with signature: int onvif_gsoap_parse_[operation](onvif_gsoap_context_t* ctx, struct _tptz__[Operation]** out). Add complete Doxygen documentation including PTZ-specific notes about Position, Speed, and PresetToken fields. | Restrictions: Follow project standards, consistent naming, proper gSOAP structure types (_tptz__ prefix), include file header | Success: Header declares all 6 PTZ functions correctly, PTZ-specific documentation, compiles cleanly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 13. Implement all 6 PTZ service parsing functions in onvif_gsoap_ptz.c
+- [x] 13. Implement all 6 PTZ service parsing functions in onvif_gsoap_ptz.c
   - File: src/protocol/gsoap/onvif_gsoap_ptz.c (new file)
   - Implement GetNodes, AbsoluteMove, GetPresets, SetPreset, GotoPreset, RemovePreset
   - Follow established parsing pattern from Media service
