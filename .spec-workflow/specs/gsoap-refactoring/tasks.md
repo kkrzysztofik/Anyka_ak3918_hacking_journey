@@ -176,7 +176,7 @@
 
 ## Phase 5: Remove Legacy Code
 
-- [ ] 18. Delete obsolete manual parsing functions from onvif_gsoap.c
+- [x] 18. Delete obsolete manual parsing functions from onvif_gsoap.c
   - File: src/protocol/gsoap/onvif_gsoap.c
   - Delete all `onvif_gsoap_parse_*_token()` functions (PTZ, Media, Snapshot profile tokens)
   - Delete `onvif_gsoap_parse_value()`, `onvif_gsoap_parse_boolean()`, `onvif_gsoap_parse_integer()`
@@ -187,7 +187,7 @@
   - _Requirements: 1.1, 1.2, 1.3_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with code refactoring expertise | Task: Delete all manual parsing functions from onvif_gsoap.c following requirements 1.1-1.3. Remove: onvif_gsoap_parse_ptz_profile_token, onvif_gsoap_parse_media_profile_token, onvif_gsoap_parse_snapshot_profile_token, onvif_gsoap_parse_configuration_token, onvif_gsoap_parse_protocol, onvif_gsoap_parse_value, onvif_gsoap_parse_boolean, onvif_gsoap_parse_integer, and all helper functions. Keep response generation functions intact. | Restrictions: Do not delete response generation functions, do not delete context management functions (those moved to core), verify no other code calls these functions before deletion | Success: ~800 lines of manual parsing code removed, file compiles after deletion, only new API remains, no dangling function calls | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 19. Remove obsolete function declarations from onvif_gsoap.h
+- [x] 19. Remove obsolete function declarations from onvif_gsoap.h
   - File: src/protocol/gsoap/onvif_gsoap.h
   - Delete declarations for all removed manual parsing functions
   - Keep response generation function declarations
@@ -196,7 +196,7 @@
   - _Requirements: 1.4_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with header maintenance expertise | Task: Remove obsolete function declarations from onvif_gsoap.h following requirement 1.4. Delete declarations for all manual parsing functions removed in task 18. Keep response generation declarations. Verify header is consistent with implementation. | Restrictions: Do not remove response generation declarations, maintain proper include structure, keep typedef and struct definitions needed by other code | Success: Header only declares functions that exist in implementation, no compilation errors, header is clean and consistent | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 20. Update main onvif_gsoap.h to include service module headers
+- [x] 20. Update main onvif_gsoap.h to include service module headers
   - File: src/protocol/gsoap/onvif_gsoap.h
   - Add includes for onvif_gsoap_core.h, onvif_gsoap_media.h, onvif_gsoap_ptz.h, onvif_gsoap_device.h, onvif_gsoap_imaging.h
   - Maintain as central header for all gSOAP functionality

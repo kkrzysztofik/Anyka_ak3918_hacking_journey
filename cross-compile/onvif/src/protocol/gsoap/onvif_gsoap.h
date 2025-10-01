@@ -23,6 +23,13 @@
 #include "services/media/onvif_media.h"
 #include "services/ptz/onvif_ptz.h"
 
+/* Include service-specific gSOAP parsing modules */
+#include "protocol/gsoap/onvif_gsoap_core.h"
+#include "protocol/gsoap/onvif_gsoap_media.h"
+#include "protocol/gsoap/onvif_gsoap_ptz.h"
+#include "protocol/gsoap/onvif_gsoap_device.h"
+#include "protocol/gsoap/onvif_gsoap_imaging.h"
+
 /* ============================================================================
  * Error Codes
  * ============================================================================
@@ -778,86 +785,6 @@ int onvif_gsoap_generate_goto_preset_response(onvif_gsoap_context_t* ctx);
  */
 int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* request_data,
                                      size_t request_size);
-
-/**
- * @brief Parse profile token from PTZ SOAP request using gSOAP
- * @param ctx Pointer to gSOAP context structure
- * @param token Buffer to store the extracted token
- * @param token_size Size of the token buffer
- * @return 0 on success, negative error code on failure
- * @note Specialized for PTZ requests - expects ProfileToken in PTZ namespace
- */
-int onvif_gsoap_parse_ptz_profile_token(onvif_gsoap_context_t* ctx, char* token, size_t token_size);
-
-/**
- * @brief Parse profile token from Media SOAP request using gSOAP
- * @param ctx Pointer to gSOAP context structure
- * @param token Buffer to store the extracted token
- * @param token_size Size of the token buffer
- * @return 0 on success, negative error code on failure
- * @note Specialized for Media requests - expects ProfileToken in Media namespace
- */
-int onvif_gsoap_parse_media_profile_token(onvif_gsoap_context_t* ctx, char* token,
-                                          size_t token_size);
-
-/**
- * @brief Parse profile token from Snapshot SOAP request using gSOAP
- * @param ctx Pointer to gSOAP context structure
- * @param token Buffer to store the extracted token
- * @param token_size Size of the token buffer
- * @return 0 on success, negative error code on failure
- * @note Specialized for Snapshot requests - expects ProfileToken in Snapshot namespace
- */
-int onvif_gsoap_parse_snapshot_profile_token(onvif_gsoap_context_t* ctx, char* token,
-                                             size_t token_size);
-
-/**
- * @brief Parse configuration token from SOAP request using gSOAP
- * @param ctx Pointer to gSOAP context structure
- * @param token Buffer to store the extracted token
- * @param token_size Size of the token buffer
- * @return 0 on success, negative error code on failure
- */
-int onvif_gsoap_parse_configuration_token(onvif_gsoap_context_t* ctx, char* token,
-                                          size_t token_size);
-
-/**
- * @brief Parse protocol from SOAP request using gSOAP
- * @param ctx Pointer to gSOAP context structure
- * @param protocol Buffer to store the extracted protocol
- * @param protocol_size Size of the protocol buffer
- * @return 0 on success, negative error code on failure
- */
-int onvif_gsoap_parse_protocol(onvif_gsoap_context_t* ctx, char* protocol, size_t protocol_size);
-
-/**
- * @brief Parse value from SOAP request using gSOAP XPath
- * @param ctx Pointer to gSOAP context structure
- * @param xpath XPath expression to find the value
- * @param value Buffer to store the extracted value
- * @param value_size Size of the value buffer
- * @return 0 on success, negative error code on failure
- */
-int onvif_gsoap_parse_value(onvif_gsoap_context_t* ctx, const char* xpath, char* value,
-                            size_t value_size);
-
-/**
- * @brief Parse boolean value from SOAP request using gSOAP XPath
- * @param ctx Pointer to gSOAP context structure
- * @param xpath XPath expression to find the value
- * @param value Pointer to store the extracted boolean value
- * @return 0 on success, negative error code on failure
- */
-int onvif_gsoap_parse_boolean(onvif_gsoap_context_t* ctx, const char* xpath, int* value);
-
-/**
- * @brief Parse integer value from SOAP request using gSOAP XPath
- * @param ctx Pointer to gSOAP context structure
- * @param xpath XPath expression to find the value
- * @param value Pointer to store the extracted integer value
- * @return 0 on success, negative error code on failure
- */
-int onvif_gsoap_parse_integer(onvif_gsoap_context_t* ctx, const char* xpath, int* value);
 
 /**
  * @brief Parse imaging settings from SOAP request using gSOAP
