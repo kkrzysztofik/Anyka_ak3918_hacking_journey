@@ -32,7 +32,7 @@
   - _Requirements: 9.6_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in resource cleanup and gSOAP library | Task: Implement onvif_gsoap_cleanup() function following requirement 9.6 using soap_destroy(), soap_end(), and soap_done() on embedded context. Clear all state tracking structures with memset. Ensure no memory leaks from gSOAP managed memory. | Restrictions: Must not use soap_free(), must call cleanup functions in correct order (destroy, end, done), must handle NULL context gracefully | Success: Function cleans up gSOAP resources properly, all state is cleared, no memory leaks detected with valgrind, handles NULL input safely | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 4. Implement enhanced error reporting functions in onvif_gsoap_core.c
+- [x] 4. Implement enhanced error reporting functions in onvif_gsoap_core.c
   - File: src/protocol/gsoap/onvif_gsoap_core.c
   - Implement `onvif_gsoap_set_error()` to store detailed error context
   - Implement `onvif_gsoap_get_detailed_error()` to retrieve full error info
@@ -42,7 +42,7 @@
   - _Requirements: 9.7_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in error handling and debugging support | Task: Implement error reporting functions following requirement 9.7. Create onvif_gsoap_set_error() to store error_code, location (__func__), message (via snprintf), and soap_error_code. Create onvif_gsoap_get_detailed_error() to return error message and output error details through pointer parameters. Update existing error functions to use new error_context structure. | Restrictions: Must safely handle NULL pointers, message buffer must not overflow (use snprintf), error location must be captured from caller context | Success: Functions store and retrieve complete error context, NULL parameters handled safely, error messages are properly formatted and bounded, existing error API remains functional | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 5. Update onvif_gsoap_init_request_parsing() for state tracking in onvif_gsoap_core.c
+- [x] 5. Update onvif_gsoap_init_request_parsing() for state tracking in onvif_gsoap_core.c
   - File: src/protocol/gsoap/onvif_gsoap_core.c
   - Update function to set `request_state.is_initialized = true`
   - Store `request_state.request_size`
@@ -53,7 +53,7 @@
   - _Requirements: 9.8, 9.9_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in gSOAP request parsing and state management | Task: Update onvif_gsoap_init_request_parsing() following requirements 9.8 and 9.9 to set request_state.is_initialized, store request_size, and capture parse_start_time using get_timestamp_us(). Configure embedded soap context for parsing (soap_begin(), set soap.is pointer). Handle initialization errors properly. | Restrictions: Must validate context before accessing members, must properly configure soap input stream for embedded context, must handle errors and set error_context | Success: Function properly initializes request parsing state, all state fields are set correctly, soap input stream configured for embedded context, invalid state detection works, errors are tracked | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 6. Create onvif_gsoap_core.h header file
+- [x] 6. Create onvif_gsoap_core.h header file
   - File: src/protocol/gsoap/onvif_gsoap_core.h (new file)
   - Declare all core initialization, cleanup, and error functions
   - Include necessary gSOAP and project headers
@@ -63,7 +63,7 @@
   - _Requirements: 10.5, 10.6_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in API design and documentation | Task: Create onvif_gsoap_core.h header following requirements 10.5 and 10.6. Declare all core functions (init, cleanup, reset, error handling, request parsing initialization). Include complete Doxygen documentation with @brief, @param, @return, @note tags following AGENTS.md standards. Use include guards. | Restrictions: Must not expose internal implementation details, follow project include path standards (relative from src/), maintain consistent function naming, use proper Doxygen format | Success: Header compiles cleanly, all functions properly declared, complete Doxygen documentation, follows project standards, can be included by service modules | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 7. Update Makefile to compile new modular structure
+- [x] 7. Update Makefile to compile new modular structure
   - File: cross-compile/onvif/Makefile
   - Add onvif_gsoap_core.c to SOURCES
   - Add future service module files (media, ptz, device, imaging) to SOURCES
@@ -75,7 +75,7 @@
 
 ## Phase 2: Media Service Implementation
 
-- [ ] 8. Create onvif_gsoap_media.h header with Media service parsing functions
+- [x] 8. Create onvif_gsoap_media.h header with Media service parsing functions
   - File: src/protocol/gsoap/onvif_gsoap_media.h (new file)
   - Declare 6 Media service parsing functions (GetProfiles, GetStreamUri, CreateProfile, DeleteProfile, SetVideoSourceConfig, SetVideoEncoderConfig)
   - Add complete Doxygen documentation
@@ -85,7 +85,7 @@
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 10.6_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in ONVIF protocol and gSOAP | Task: Create onvif_gsoap_media.h header following requirements 3.1-3.6 and 10.6. Declare 6 Media service parsing functions with signature: int onvif_gsoap_parse_[operation](onvif_gsoap_context_t* ctx, struct _trt__[Operation]** out). Add complete Doxygen documentation. Include necessary headers. Use include guards. | Restrictions: Follow project include path standards, consistent function naming (lowercase with underscores), proper pointer types for output parameters, include Doxygen file header | Success: Header declares all 6 functions correctly, complete documentation, compiles without errors, proper include structure | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 9. Implement onvif_gsoap_parse_get_profiles() in onvif_gsoap_media.c
+- [x] 9. Implement onvif_gsoap_parse_get_profiles() in onvif_gsoap_media.c
   - File: src/protocol/gsoap/onvif_gsoap_media.c (new file)
   - Implement parsing function using soap_read__trt__GetProfiles()
   - Follow parsing function pattern from design document
