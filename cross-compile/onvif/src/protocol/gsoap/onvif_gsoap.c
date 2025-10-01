@@ -11,6 +11,7 @@
  */
 
 #include "protocol/gsoap/onvif_gsoap.h"
+#include "protocol/gsoap/onvif_gsoap_response.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -72,50 +73,6 @@ static char g_onvif_gsoap_error_msg[ONVIF_GSOAP_ERROR_MSG_SIZE] = {0}; // NOLINT
  */
 
 /**
- * @brief Validate and initialize gSOAP context for proper fault handling
- * @param soap gSOAP context to validate
- * @return 0 on success, ONVIF_ERROR_INVALID if soap is NULL, ONVIF_ERROR_MEMORY_ALLOCATION if fault
- * allocation fails
- */
-static int validate_gsoap_context(struct soap* soap) {
-  if (!soap) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Ensure fault structure is available for error handling
-  if (!soap->fault) {
-    soap->fault = soap_new_SOAP_ENV__Fault(soap, 1);
-    if (!soap->fault) {
-      return ONVIF_ERROR_MEMORY_ALLOCATION;
-    }
-  }
-
-  return 0;
-}
-
-/**
- * @brief Set error message for the gSOAP context
- * @param soap gSOAP context
- * @param format Error message format string
- * @param ... Format arguments
- */
-static void set_gsoap_error(struct soap* soap, const char* format, ...) {
-  va_list args;
-  va_start(args, format);
-  (void)vsnprintf(g_onvif_gsoap_error_msg, sizeof(g_onvif_gsoap_error_msg), format, args);
-  va_end(args);
-
-  if (soap) {
-    soap->error = SOAP_FAULT;
-    // Ensure fault structure exists before accessing it
-    if (validate_gsoap_context(soap) == 0 && soap->fault) {
-      soap->fault->faultstring = soap_strdup(soap, g_onvif_gsoap_error_msg);
-    }
-  }
-  platform_log_error("ONVIF gSOAP Error: %s", g_onvif_gsoap_error_msg);
-}
-
-/**
  * @brief Get current timestamp in microseconds
  * @return Current timestamp in microseconds
  */
@@ -130,34 +87,6 @@ static uint64_t get_timestamp_us(void) {
  * gSOAP Context Management
  * ============================================================================
  */
-
-int onvif_gsoap_init(onvif_gsoap_context_t* ctx) {
-  if (!ctx) {
-    platform_log_error("ONVIF gSOAP: NULL context pointer");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Initialize context structure
-  memset(ctx, 0, sizeof(onvif_gsoap_context_t));
-
-  // Initialize gSOAP context
-  ctx->soap = soap_new();
-  if (!ctx->soap) {
-    platform_log_error("ONVIF gSOAP: Failed to create soap context");
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-
-  // Configure gSOAP context
-  soap_set_mode(ctx->soap, SOAP_C_UTFSTRING);
-  soap_set_namespaces(ctx->soap, namespaces);
-
-  // Initialize statistics
-  ctx->generation_start_time = get_timestamp_us();
-  ctx->total_bytes_written = 0;
-
-  platform_log_debug("ONVIF gSOAP: Initialized with soap context");
-  return 0;
-}
 
 void onvif_gsoap_cleanup(onvif_gsoap_context_t* ctx) {
   if (!ctx) {
@@ -201,7 +130,7 @@ void onvif_gsoap_reset(onvif_gsoap_context_t* ctx) {
 
 int onvif_gsoap_serialize_response(onvif_gsoap_context_t* ctx, void* response_data) {
   if (!ctx || !ctx->soap || !response_data) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for serialize response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for serialize response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -210,7 +139,7 @@ int onvif_gsoap_serialize_response(onvif_gsoap_context_t* ctx, void* response_da
 
   // Begin SOAP response
   if (soap_begin_send(ctx->soap) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to begin SOAP send");
+    onvif_gsoap_set_error(ctx->soap, "Failed to begin SOAP send");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -220,13 +149,13 @@ int onvif_gsoap_serialize_response(onvif_gsoap_context_t* ctx, void* response_da
 
 int onvif_gsoap_finalize_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
-    set_gsoap_error(ctx->soap, "NULL context pointer");
+    onvif_gsoap_set_error(ctx->soap, "NULL context pointer");
     return ONVIF_ERROR_INVALID;
   }
 
   // End SOAP response
   if (soap_end_send(ctx->soap) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to end SOAP send");
+    onvif_gsoap_set_error(ctx->soap, "Failed to end SOAP send");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -262,13 +191,13 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
                                                 void* user_data) {
   if (!ctx || !ctx->soap || !callback) {
     if (ctx && ctx->soap) {
-      set_gsoap_error(ctx->soap, "Invalid parameters for response generation");
+      onvif_gsoap_set_error(ctx->soap, "Invalid parameters for response generation");
     }
     return ONVIF_XML_ERROR_INVALID_INPUT;
   }
 
   // Ensure gSOAP context is properly initialized for fault handling
-  if (validate_gsoap_context(ctx->soap) != 0) {
+  if (onvif_gsoap_validate_context(ctx->soap) != 0) {
     platform_log_error("ONVIF gSOAP: Failed to initialize fault handling context");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
@@ -280,20 +209,20 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
 
   // Begin SOAP send with string output mode
   if (soap_begin_send(ctx->soap) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to begin SOAP send");
+    onvif_gsoap_set_error(ctx->soap, "Failed to begin SOAP send");
     ctx->soap->os = NULL;
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   // Use gSOAP's proper envelope functions for complete SOAP envelope generation
   if (soap_envelope_begin_out(ctx->soap) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to begin SOAP envelope");
+    onvif_gsoap_set_error(ctx->soap, "Failed to begin SOAP envelope");
     ctx->soap->os = NULL;
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   if (soap_body_begin_out(ctx->soap) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to begin SOAP body");
+    onvif_gsoap_set_error(ctx->soap, "Failed to begin SOAP body");
     ctx->soap->os = NULL;
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
@@ -301,25 +230,25 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
   // Call the endpoint-specific callback to generate the response content
   int callback_result = callback(ctx->soap, user_data);
   if (callback_result != 0) {
-    set_gsoap_error(ctx->soap, "Callback failed to generate response content");
+    onvif_gsoap_set_error(ctx->soap, "Callback failed to generate response content");
     ctx->soap->os = NULL;
     return callback_result;
   }
 
   if (soap_body_end_out(ctx->soap) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to end SOAP body");
+    onvif_gsoap_set_error(ctx->soap, "Failed to end SOAP body");
     ctx->soap->os = NULL;
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   if (soap_envelope_end_out(ctx->soap) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to end SOAP envelope");
+    onvif_gsoap_set_error(ctx->soap, "Failed to end SOAP envelope");
     ctx->soap->os = NULL;
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   if (soap_end_send(ctx->soap) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to end SOAP send");
+    onvif_gsoap_set_error(ctx->soap, "Failed to end SOAP send");
     ctx->soap->os = NULL;
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
@@ -335,11 +264,11 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
       ctx->soap->buf[sizeof(ctx->soap->buf) - 1] = '\0';
       ctx->soap->length = response_len;
     } else {
-      set_gsoap_error(ctx->soap, "Response too large for buffer");
+      onvif_gsoap_set_error(ctx->soap, "Response too large for buffer");
       return ONVIF_ERROR_SERIALIZATION_FAILED;
     }
   } else {
-    set_gsoap_error(ctx->soap, "No output string generated");
+    onvif_gsoap_set_error(ctx->soap, "No output string generated");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -1547,14 +1476,14 @@ int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
                                            const struct media_profile* profiles,
                                            int profile_count) {
   if (!ctx || !ctx->soap || !profiles || profile_count <= 0) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for profiles response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for profiles response");
     return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__GetProfilesResponse* response = soap_new__trt__GetProfilesResponse(ctx->soap, 1);
   if (!response) {
-    set_gsoap_error(ctx->soap, "Failed to allocate profiles response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate profiles response");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
@@ -1562,7 +1491,7 @@ int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
   response->__sizeProfiles = profile_count;
   response->Profiles = soap_new_tt__Profile(ctx->soap, profile_count);
   if (!response->Profiles) {
-    set_gsoap_error(ctx->soap, "Failed to allocate profiles array");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate profiles array");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
@@ -1586,7 +1515,7 @@ int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
   // Serialize response
   if (soap_put__trt__GetProfilesResponse(ctx->soap, response, "trt:GetProfilesResponse", NULL) !=
       SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to serialize profiles response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize profiles response");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -1597,21 +1526,21 @@ int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
 int onvif_gsoap_generate_stream_uri_response(onvif_gsoap_context_t* ctx,
                                              const struct stream_uri* uri) {
   if (!ctx || !ctx->soap || !uri) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for stream URI response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for stream URI response");
     return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__GetStreamUriResponse* response = soap_new__trt__GetStreamUriResponse(ctx->soap, 1);
   if (!response) {
-    set_gsoap_error(ctx->soap, "Failed to allocate stream URI response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate stream URI response");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create MediaUri structure
   response->MediaUri = soap_new_tt__MediaUri(ctx->soap, 1);
   if (!response->MediaUri) {
-    set_gsoap_error(ctx->soap, "Failed to allocate MediaUri structure");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate MediaUri structure");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
@@ -1624,7 +1553,7 @@ int onvif_gsoap_generate_stream_uri_response(onvif_gsoap_context_t* ctx,
   // Serialize response
   if (soap_put__trt__GetStreamUriResponse(ctx->soap, response, "trt:GetStreamUriResponse", NULL) !=
       SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to serialize stream URI response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize stream URI response");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -1635,21 +1564,21 @@ int onvif_gsoap_generate_stream_uri_response(onvif_gsoap_context_t* ctx,
 int onvif_gsoap_generate_create_profile_response(onvif_gsoap_context_t* ctx,
                                                  const struct media_profile* profile) {
   if (!ctx || !ctx->soap || !profile) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for create profile response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for create profile response");
     return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure
   struct _trt__CreateProfileResponse* response = soap_new__trt__CreateProfileResponse(ctx->soap, 1);
   if (!response) {
-    set_gsoap_error(ctx->soap, "Failed to allocate create profile response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate create profile response");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Create Profile structure
   response->Profile = soap_new_tt__Profile(ctx->soap, 1);
   if (!response->Profile) {
-    set_gsoap_error(ctx->soap, "Failed to allocate Profile structure");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate Profile structure");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
@@ -1676,7 +1605,7 @@ int onvif_gsoap_generate_create_profile_response(onvif_gsoap_context_t* ctx,
   // Serialize response
   if (soap_put__trt__CreateProfileResponse(ctx->soap, response, "trt:CreateProfileResponse",
                                            NULL) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to serialize create profile response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize create profile response");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -1686,21 +1615,21 @@ int onvif_gsoap_generate_create_profile_response(onvif_gsoap_context_t* ctx,
 
 int onvif_gsoap_generate_delete_profile_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for delete profile response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for delete profile response");
     return ONVIF_ERROR_INVALID;
   }
 
   // Create response structure (empty response for DeleteProfile)
   struct _trt__DeleteProfileResponse* response = soap_new__trt__DeleteProfileResponse(ctx->soap, 1);
   if (!response) {
-    set_gsoap_error(ctx->soap, "Failed to allocate delete profile response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate delete profile response");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__DeleteProfileResponse(ctx->soap, response, "trt:DeleteProfileResponse",
                                            NULL) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to serialize delete profile response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize delete profile response");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -1710,7 +1639,7 @@ int onvif_gsoap_generate_delete_profile_response(onvif_gsoap_context_t* ctx) {
 
 int onvif_gsoap_generate_set_video_source_configuration_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for set video source configuration response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for set video source configuration response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -1718,14 +1647,14 @@ int onvif_gsoap_generate_set_video_source_configuration_response(onvif_gsoap_con
   struct _trt__SetVideoSourceConfigurationResponse* response =
     soap_new__trt__SetVideoSourceConfigurationResponse(ctx->soap, 1);
   if (!response) {
-    set_gsoap_error(ctx->soap, "Failed to allocate set video source configuration response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate set video source configuration response");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__SetVideoSourceConfigurationResponse(
         ctx->soap, response, "trt:SetVideoSourceConfigurationResponse", NULL) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to serialize set video source configuration response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize set video source configuration response");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -1735,7 +1664,7 @@ int onvif_gsoap_generate_set_video_source_configuration_response(onvif_gsoap_con
 
 int onvif_gsoap_generate_set_video_encoder_configuration_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for set video encoder configuration response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for set video encoder configuration response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -1743,14 +1672,14 @@ int onvif_gsoap_generate_set_video_encoder_configuration_response(onvif_gsoap_co
   struct _trt__SetVideoEncoderConfigurationResponse* response =
     soap_new__trt__SetVideoEncoderConfigurationResponse(ctx->soap, 1);
   if (!response) {
-    set_gsoap_error(ctx->soap, "Failed to allocate set video encoder configuration response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate set video encoder configuration response");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__SetVideoEncoderConfigurationResponse(
         ctx->soap, response, "trt:SetVideoEncoderConfigurationResponse", NULL) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to serialize set video encoder configuration response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize set video encoder configuration response");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -1760,7 +1689,7 @@ int onvif_gsoap_generate_set_video_encoder_configuration_response(onvif_gsoap_co
 
 int onvif_gsoap_generate_start_multicast_streaming_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for start multicast streaming response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for start multicast streaming response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -1768,14 +1697,14 @@ int onvif_gsoap_generate_start_multicast_streaming_response(onvif_gsoap_context_
   struct _trt__StartMulticastStreamingResponse* response =
     soap_new__trt__StartMulticastStreamingResponse(ctx->soap, 1);
   if (!response) {
-    set_gsoap_error(ctx->soap, "Failed to allocate start multicast streaming response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate start multicast streaming response");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__StartMulticastStreamingResponse(
         ctx->soap, response, "trt:StartMulticastStreamingResponse", NULL) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to serialize start multicast streaming response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize start multicast streaming response");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -1785,7 +1714,7 @@ int onvif_gsoap_generate_start_multicast_streaming_response(onvif_gsoap_context_
 
 int onvif_gsoap_generate_stop_multicast_streaming_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for stop multicast streaming response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for stop multicast streaming response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -1793,14 +1722,14 @@ int onvif_gsoap_generate_stop_multicast_streaming_response(onvif_gsoap_context_t
   struct _trt__StopMulticastStreamingResponse* response =
     soap_new__trt__StopMulticastStreamingResponse(ctx->soap, 1);
   if (!response) {
-    set_gsoap_error(ctx->soap, "Failed to allocate stop multicast streaming response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate stop multicast streaming response");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__StopMulticastStreamingResponse(
         ctx->soap, response, "trt:StopMulticastStreamingResponse", NULL) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to serialize stop multicast streaming response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize stop multicast streaming response");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -1811,7 +1740,7 @@ int onvif_gsoap_generate_stop_multicast_streaming_response(onvif_gsoap_context_t
 int onvif_gsoap_generate_get_metadata_configurations_response(
   onvif_gsoap_context_t* ctx, const struct metadata_configuration* configs, int count) {
   if (!ctx || !ctx->soap || !configs || count < 0) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for get metadata configurations response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for get metadata configurations response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -1819,7 +1748,7 @@ int onvif_gsoap_generate_get_metadata_configurations_response(
   struct _trt__GetMetadataConfigurationsResponse* response =
     soap_new__trt__GetMetadataConfigurationsResponse(ctx->soap, 1);
   if (!response) {
-    set_gsoap_error(ctx->soap, "Failed to allocate get metadata configurations response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate get metadata configurations response");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
@@ -1830,7 +1759,7 @@ int onvif_gsoap_generate_get_metadata_configurations_response(
     // Allocate array of metadata configurations
     response->Configurations = soap_new_tt__MetadataConfiguration(ctx->soap, count);
     if (!response->Configurations) {
-      set_gsoap_error(ctx->soap, "Failed to allocate metadata configurations array");
+      onvif_gsoap_set_error(ctx->soap, "Failed to allocate metadata configurations array");
       return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
 
@@ -1873,7 +1802,7 @@ int onvif_gsoap_generate_get_metadata_configurations_response(
   // Serialize response
   if (soap_put__trt__GetMetadataConfigurationsResponse(
         ctx->soap, response, "trt:GetMetadataConfigurationsResponse", NULL) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to serialize get metadata configurations response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize get metadata configurations response");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -1885,7 +1814,7 @@ int onvif_gsoap_generate_get_metadata_configurations_response(
 
 int onvif_gsoap_generate_set_metadata_configuration_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for set metadata configuration response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for set metadata configuration response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -1893,14 +1822,14 @@ int onvif_gsoap_generate_set_metadata_configuration_response(onvif_gsoap_context
   struct _trt__SetMetadataConfigurationResponse* response =
     soap_new__trt__SetMetadataConfigurationResponse(ctx->soap, 1);
   if (!response) {
-    set_gsoap_error(ctx->soap, "Failed to allocate set metadata configuration response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate set metadata configuration response");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   // Serialize response (empty structure)
   if (soap_put__trt__SetMetadataConfigurationResponse(
         ctx->soap, response, "trt:SetMetadataConfigurationResponse", NULL) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to serialize set metadata configuration response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize set metadata configuration response");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -1912,50 +1841,6 @@ int onvif_gsoap_generate_set_metadata_configuration_response(onvif_gsoap_context
  * Request Parsing Functions
  * ============================================================================
  */
-
-int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* request_data,
-                                     size_t request_size) {
-  if (!ctx || !ctx->soap || !request_data || request_size == 0) {
-    if (ctx && ctx->soap) {
-      set_gsoap_error(ctx->soap, "Invalid parameters for request parsing initialization");
-    }
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Reset the soap context for parsing
-  soap_begin(ctx->soap);
-
-  // Set up input stream with the request data
-  // gSOAP reads from soap->is when non-NULL, or soap->socket when valid, or soap->recvfd
-  ctx->soap->is = (char*)request_data;
-
-  // Begin receiving to initialize the context for parsing
-  if (soap_begin_recv(ctx->soap) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to begin SOAP receive for request parsing");
-    ctx->soap->is = NULL; // Clear input stream on error
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Parse SOAP envelope
-  if (soap_envelope_begin_in(ctx->soap) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to parse SOAP envelope");
-    soap_end_recv(ctx->soap);
-    ctx->soap->is = NULL; // Clear input stream on error
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Parse SOAP body
-  if (soap_body_begin_in(ctx->soap) != SOAP_OK) {
-    set_gsoap_error(ctx->soap, "Failed to parse SOAP body");
-    soap_envelope_end_in(ctx->soap);
-    soap_end_recv(ctx->soap);
-    ctx->soap->is = NULL; // Clear input stream on error
-    return ONVIF_ERROR_INVALID;
-  }
-
-  platform_log_debug("ONVIF gSOAP: Initialized request parsing with %zu bytes", request_size);
-  return 0;
-}
 
 
 // Helper function to parse day/night mode
@@ -1991,7 +1876,7 @@ static void parse_ir_led_mode(const char* mode_str, enum ir_led_mode* mode) {
 int onvif_gsoap_parse_imaging_settings(onvif_gsoap_context_t* ctx,
                                        struct imaging_settings* settings) {
   if (!ctx || !ctx->soap || !settings) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for imaging settings parsing");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for imaging settings parsing");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -2314,7 +2199,7 @@ int onvif_gsoap_generate_fault_response( // NOLINT
 int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
                                             const struct ptz_node* nodes, int count) {
   if (!ctx || !ctx->soap || !nodes || count <= 0) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for GetNodes response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for GetNodes response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -2325,7 +2210,7 @@ int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
   // Allocate array for PTZ nodes
   response.PTZNode = soap_new_tt__PTZNode(ctx->soap, count);
   if (!response.PTZNode) {
-    set_gsoap_error(ctx->soap, "Failed to allocate PTZ nodes array");
+    onvif_gsoap_set_error(ctx->soap, "Failed to allocate PTZ nodes array");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
@@ -2382,7 +2267,7 @@ int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
   // Serialize response
   soap_serialize__onvif3__GetNodesResponse(ctx->soap, &response);
   if (soap_put__onvif3__GetNodesResponse(ctx->soap, &response, "onvif3:GetNodesResponse", NULL)) {
-    set_gsoap_error(ctx->soap, "Failed to serialize GetNodes response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize GetNodes response");
     return ONVIF_ERROR_IO;
   }
 
@@ -2395,7 +2280,7 @@ int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
  */
 int onvif_gsoap_generate_absolute_move_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for AbsoluteMove response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for AbsoluteMove response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -2407,7 +2292,7 @@ int onvif_gsoap_generate_absolute_move_response(onvif_gsoap_context_t* ctx) {
   soap_serialize__onvif3__AbsoluteMoveResponse(ctx->soap, &response);
   if (soap_put__onvif3__AbsoluteMoveResponse(ctx->soap, &response, "onvif3:AbsoluteMoveResponse",
                                              NULL)) {
-    set_gsoap_error(ctx->soap, "Failed to serialize AbsoluteMove response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize AbsoluteMove response");
     return ONVIF_ERROR_IO;
   }
 
@@ -2421,7 +2306,7 @@ int onvif_gsoap_generate_absolute_move_response(onvif_gsoap_context_t* ctx) {
 int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
                                               const struct ptz_preset* presets, int count) {
   if (!ctx || !ctx->soap || !presets || count < 0) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for GetPresets response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for GetPresets response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -2433,7 +2318,7 @@ int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
     // Allocate array for PTZ presets
     response.PTZPreset = soap_new_tt__PTZPreset(ctx->soap, count);
     if (!response.PTZPreset) {
-      set_gsoap_error(ctx->soap, "Failed to allocate PTZ presets array");
+      onvif_gsoap_set_error(ctx->soap, "Failed to allocate PTZ presets array");
       return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
 
@@ -2478,7 +2363,7 @@ int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
   soap_serialize__onvif3__GetPresetsResponse(ctx->soap, &response);
   if (soap_put__onvif3__GetPresetsResponse(ctx->soap, &response, "onvif3:GetPresetsResponse",
                                            NULL)) {
-    set_gsoap_error(ctx->soap, "Failed to serialize GetPresets response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize GetPresets response");
     return ONVIF_ERROR_IO;
   }
 
@@ -2491,7 +2376,7 @@ int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
  */
 int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const char* preset_token) {
   if (!ctx || !ctx->soap || !preset_token) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for SetPreset response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for SetPreset response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -2504,7 +2389,7 @@ int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const c
   // Serialize response
   soap_serialize__onvif3__SetPresetResponse(ctx->soap, &response);
   if (soap_put__onvif3__SetPresetResponse(ctx->soap, &response, "onvif3:SetPresetResponse", NULL)) {
-    set_gsoap_error(ctx->soap, "Failed to serialize SetPreset response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize SetPreset response");
     return ONVIF_ERROR_IO;
   }
 
@@ -2517,7 +2402,7 @@ int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const c
  */
 int onvif_gsoap_generate_goto_preset_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx->soap) {
-    set_gsoap_error(ctx->soap, "Invalid parameters for GotoPreset response");
+    onvif_gsoap_set_error(ctx->soap, "Invalid parameters for GotoPreset response");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -2529,7 +2414,7 @@ int onvif_gsoap_generate_goto_preset_response(onvif_gsoap_context_t* ctx) {
   soap_serialize__onvif3__GotoPresetResponse(ctx->soap, &response);
   if (soap_put__onvif3__GotoPresetResponse(ctx->soap, &response, "onvif3:GotoPresetResponse",
                                            NULL)) {
-    set_gsoap_error(ctx->soap, "Failed to serialize GotoPreset response");
+    onvif_gsoap_set_error(ctx->soap, "Failed to serialize GotoPreset response");
     return ONVIF_ERROR_IO;
   }
 

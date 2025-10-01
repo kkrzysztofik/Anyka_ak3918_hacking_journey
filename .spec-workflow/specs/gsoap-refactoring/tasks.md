@@ -205,37 +205,107 @@
   - _Requirements: 10.7_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with header organization expertise | Task: Update onvif_gsoap.h to include all service module headers following requirement 10.7. Add includes for onvif_gsoap_core.h, onvif_gsoap_media.h, onvif_gsoap_ptz.h, onvif_gsoap_device.h, onvif_gsoap_imaging.h using relative paths from src/. This provides backward compatibility - code including onvif_gsoap.h gets access to all APIs. | Restrictions: Use relative include paths (protocol/gsoap/onvif_gsoap_*.h), maintain include guards, preserve existing typedef and struct definitions | Success: Main header includes all service headers, provides unified API access, compiles without errors or warnings | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
+## Phase 5B: Complete Modular Response Generation Architecture
+
+- [x] 20.1. Create onvif_gsoap_response.h/.c for generic response utilities
+  - File: src/protocol/gsoap/onvif_gsoap_response.h (new file)
+  - File: src/protocol/gsoap/onvif_gsoap_response.c (new file)
+  - Move from onvif_gsoap.c: validate_gsoap_context, set_gsoap_error, serialize_response, finalize_response, generate_response_with_callback, validate_response, extract_operation_name, generate_fault_response
+  - Add complete Doxygen documentation
+  - Purpose: Generic response generation utilities used by all services
+  - _Requirements: Modular architecture, code reuse_
+
+- [x] 20.2. Remove duplicate functions from onvif_gsoap.c
+  - File: src/protocol/gsoap/onvif_gsoap.c
+  - Remove duplicate onvif_gsoap_init() (already in onvif_gsoap_core.c)
+  - Remove duplicate onvif_gsoap_init_request_parsing() (already in onvif_gsoap_core.c)
+  - Purpose: Eliminate code duplication before migration
+
+- [ ] 20.3. Add response generation to Media module
+  - File: src/protocol/gsoap/onvif_gsoap_media.h
+  - File: src/protocol/gsoap/onvif_gsoap_media.c
+  - Move 10 response functions from onvif_gsoap.c
+  - Add declarations with complete Doxygen documentation
+  - Include onvif_gsoap_response.h
+  - Purpose: Complete Media service (6 parsing + 10 response = 16 functions)
+
+- [ ] 20.4. Add response generation to PTZ module
+  - File: src/protocol/gsoap/onvif_gsoap_ptz.h
+  - File: src/protocol/gsoap/onvif_gsoap_ptz.c
+  - Move 5 response functions from onvif_gsoap.c
+  - Add declarations with complete Doxygen documentation
+  - Include onvif_gsoap_response.h
+  - Purpose: Complete PTZ service (6 parsing + 5 response = 11 functions)
+
+- [ ] 20.5. Add response generation to Device module
+  - File: src/protocol/gsoap/onvif_gsoap_device.h
+  - File: src/protocol/gsoap/onvif_gsoap_device.c
+  - Move 1 response function from onvif_gsoap.c
+  - Add declaration with complete Doxygen documentation
+  - Include onvif_gsoap_response.h
+  - Purpose: Complete Device service (4 parsing + 1 response = 5 functions)
+
+- [ ] 20.6. Complete Imaging module
+  - File: src/protocol/gsoap/onvif_gsoap_imaging.h
+  - File: src/protocol/gsoap/onvif_gsoap_imaging.c
+  - Move parse_daynight_mode, parse_ir_led_mode, onvif_gsoap_parse_imaging_settings from onvif_gsoap.c
+  - Add declarations with complete Doxygen documentation
+  - Purpose: Complete Imaging service with parsing functions
+
+- [ ] 20.7. Update code to use specific modular headers
+  - Update service_dispatcher.c, http_server.c and other files
+  - Replace onvif_gsoap.h includes with specific module headers
+  - Include only: onvif_gsoap_core.h, onvif_gsoap_media.h, onvif_gsoap_ptz.h, onvif_gsoap_device.h, onvif_gsoap_imaging.h, onvif_gsoap_response.h as needed
+  - Purpose: Remove dependency on monolithic header
+
+- [ ] 20.8. Update Makefile
+  - File: cross-compile/onvif/Makefile
+  - Add to SOURCES: src/protocol/gsoap/onvif_gsoap_response.c
+  - Remove from SOURCES: src/protocol/gsoap/onvif_gsoap.c
+  - Verify build: make clean && make
+  - Purpose: Update build system for modular structure
+
+- [ ] 20.9. Delete monolithic files
+  - Delete: src/protocol/gsoap/onvif_gsoap.c
+  - Delete: src/protocol/gsoap/onvif_gsoap.h
+  - Verify no compilation errors
+  - Basic sanity check of functionality
+  - Purpose: Complete transition to fully modular architecture
+
 ## Phase 6: Service Layer Updates
 
-- [ ] 21. Update service_dispatcher.c to use new Media parsing functions
-  - File: src/services/common/service_dispatcher.c
-  - Replace calls to `onvif_gsoap_parse_media_profile_token()` with `onvif_gsoap_parse_get_stream_uri()`, etc.
-  - Update Media service handlers to receive parsed request structures
-  - Extract data from structures instead of token buffers
-  - Purpose: Integrate new Media parsing API with service layer
-  - _Leverage: New onvif_gsoap_media.h API, existing service handler patterns_
+- [ ] 21. Update Media service action handlers to use new parsing functions
+  - File: src/services/media/onvif_media.c
+  - Update each Media action handler to use new parsing API
+  - Replace manual token parsing with: onvif_gsoap_parse_get_profiles(), onvif_gsoap_parse_get_stream_uri(), onvif_gsoap_parse_create_profile(), onvif_gsoap_parse_delete_profile(), onvif_gsoap_parse_set_video_source_config(), onvif_gsoap_parse_set_video_encoder_config()
+  - Extract data from parsed structures (e.g., request->ProfileToken, request->StreamSetup->Protocol)
+  - Include: onvif_gsoap_media.h
+  - Purpose: Integrate new Media parsing API with Media service
+  - _Leverage: New onvif_gsoap_media.h API, existing action handler patterns_
   - _Requirements: 6.1, 6.2_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in service architecture and ONVIF protocol | Task: Update service_dispatcher.c to use new Media parsing functions following requirements 6.1-6.2. Replace manual token parsing with calls to onvif_gsoap_parse_get_profiles(), onvif_gsoap_parse_get_stream_uri(), etc. Update service handlers to accept struct _trt__* parameters. Extract tokens and data from parsed structures (e.g., request->ProfileToken). Handle parsing errors properly. | Restrictions: Must maintain existing service handler logic, only change how requests are parsed and data is extracted, preserve error handling behavior | Success: Media service uses new parsing API, data extracted from structures correctly, service handlers work with parsed requests, integration tested | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 22. Update service_dispatcher.c to use new PTZ parsing functions
-  - File: src/services/common/service_dispatcher.c
-  - Replace calls to `onvif_gsoap_parse_ptz_profile_token()` with `onvif_gsoap_parse_absolute_move()`, etc.
-  - Update PTZ service handlers to receive parsed request structures
-  - Extract ProfileToken, Position, Speed, PresetToken from structures
-  - Purpose: Integrate new PTZ parsing API with service layer
-  - _Leverage: New onvif_gsoap_ptz.h API, existing PTZ service handler patterns_
+- [ ] 22. Update PTZ service action handlers to use new parsing functions
+  - File: src/services/ptz/onvif_ptz.c
+  - Update each PTZ action handler to use new parsing API
+  - Replace manual parsing with: onvif_gsoap_parse_get_nodes(), onvif_gsoap_parse_absolute_move(), onvif_gsoap_parse_get_presets(), onvif_gsoap_parse_set_preset(), onvif_gsoap_parse_goto_preset(), onvif_gsoap_parse_remove_preset()
+  - Extract ProfileToken, Position (PanTilt/Zoom), Speed, PresetToken from parsed structures
+  - Handle optional fields safely (Speed can be NULL)
+  - Include: onvif_gsoap_ptz.h
+  - Purpose: Integrate new PTZ parsing API with PTZ service
+  - _Leverage: New onvif_gsoap_ptz.h API, existing PTZ action handler patterns_
   - _Requirements: 6.3_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in ONVIF PTZ protocol | Task: Update service_dispatcher.c to use new PTZ parsing functions following requirement 6.3. Replace manual parsing with calls to onvif_gsoap_parse_get_nodes(), onvif_gsoap_parse_absolute_move(), onvif_gsoap_parse_get_presets(), etc. Update PTZ handlers to accept struct _tptz__* parameters. Extract ProfileToken from request->ProfileToken, extract Position from request->Position->PanTilt and request->Position->Zoom, extract PresetToken from request->PresetToken. | Restrictions: Must handle optional fields safely (Speed can be NULL), maintain PTZ control logic, preserve coordinate space handling | Success: PTZ service uses new parsing API, Position and Speed extracted correctly, preset operations work, PTZ movements tested | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 23. Update service_dispatcher.c to use new Device and Imaging parsing functions
-  - File: src/services/common/service_dispatcher.c
-  - Integrate Device service parsing (GetDeviceInformation, GetCapabilities, GetSystemDateAndTime, SystemReboot)
-  - Integrate Imaging service parsing (GetImagingSettings, SetImagingSettings)
-  - Update handlers to use parsed structures
+- [ ] 23. Update Device and Imaging service action handlers to use new parsing functions
+  - File: src/services/device/onvif_device.c
+  - File: src/services/imaging/onvif_imaging.c
+  - Update Device action handlers: onvif_gsoap_parse_get_device_information(), onvif_gsoap_parse_get_capabilities(), onvif_gsoap_parse_get_system_date_and_time(), onvif_gsoap_parse_system_reboot()
+  - Update Imaging action handlers: onvif_gsoap_parse_get_imaging_settings(), onvif_gsoap_parse_set_imaging_settings()
+  - Handle empty request structures (GetDeviceInformation, GetSystemDateAndTime, SystemReboot)
+  - Extract Category array from GetCapabilities, VideoSourceToken and ImagingSettings from Imaging operations
+  - Include: onvif_gsoap_device.h, onvif_gsoap_imaging.h
   - Purpose: Complete service layer integration for all ONVIF services
   - _Leverage: New onvif_gsoap_device.h and onvif_gsoap_imaging.h APIs_
   - _Requirements: 6.4_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in ONVIF Device and Imaging services | Task: Update service_dispatcher.c to use new Device and Imaging parsing functions following requirement 6.4. For Device: call parsing functions for GetDeviceInformation, GetCapabilities (extract Category array), GetSystemDateAndTime, SystemReboot. For Imaging: call parsing functions and extract VideoSourceToken and ImagingSettings (Brightness, Contrast, etc.). Update handlers accordingly. | Restrictions: Handle empty request structures properly (some Device operations), handle Capabilities array safely, validate ImagingSettings ranges | Success: All Device and Imaging operations use new parsing API, data extracted correctly, handlers work properly, tested | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
 ## Phase 7: Test Infrastructure
 
