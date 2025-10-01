@@ -95,7 +95,7 @@
   - _Requirements: 3.1_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in gSOAP deserialization and ONVIF protocol | Task: Implement onvif_gsoap_parse_get_profiles() following requirement 3.1 and design document parsing pattern. Validate parameters, check request_state.is_initialized, set operation_name and parse_start_time, call soap_new__trt__GetProfiles(), call soap_read__trt__GetProfiles(), set parse_end_time, use onvif_gsoap_set_error() on failures. Return appropriate error codes. | Restrictions: Must follow exact parsing pattern from design, must validate all inputs, must track timing, must use onvif_gsoap_set_error() for all errors | Success: Function parses valid requests successfully, invalid inputs return proper errors, timing is tracked, error context is set on failures, follows design pattern exactly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 10. Implement remaining 5 Media service parsing functions in onvif_gsoap_media.c
+- [x] 10. Implement remaining 5 Media service parsing functions in onvif_gsoap_media.c
   - File: src/protocol/gsoap/onvif_gsoap_media.c
   - Implement GetStreamUri, CreateProfile, DeleteProfile, SetVideoSourceConfig, SetVideoEncoderConfig
   - Follow consistent parsing pattern for all functions
