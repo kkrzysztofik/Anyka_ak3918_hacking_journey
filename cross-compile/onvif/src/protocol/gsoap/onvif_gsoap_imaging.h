@@ -16,6 +16,7 @@
 #include "generated/soapH.h"    //NOLINT
 #include "generated/soapStub.h" //NOLINT
 #include "protocol/gsoap/onvif_gsoap_core.h"
+#include "services/imaging/onvif_imaging.h"
 
 /**
  * @brief Parse GetImagingSettings ONVIF Imaging service request
@@ -42,5 +43,28 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
  */
 int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
                                              struct _onvif4__SetImagingSettings** out);
+
+/* ============================================================================
+ * Imaging Service Utility Functions
+ * ============================================================================
+ */
+
+/**
+ * @brief Parse day/night mode string to enum value
+ * @param mode_str String representation ("Auto", "Day", "Night")
+ * @param mode Output pointer to receive parsed day_night_mode enum
+ * @note Converts ONVIF day/night mode string to internal enum representation
+ * @note If mode_str is NULL or unrecognized, mode is unchanged
+ */
+void parse_daynight_mode(const char* mode_str, enum day_night_mode* mode);
+
+/**
+ * @brief Parse IR LED mode string to enum value
+ * @param mode_str String representation ("Off", "On", "Auto")
+ * @param mode Output pointer to receive parsed ir_led_mode enum
+ * @note Converts ONVIF IR LED mode string to internal enum representation
+ * @note If mode_str is NULL or unrecognized, mode is unchanged
+ */
+void parse_ir_led_mode(const char* mode_str, enum ir_led_mode* mode);
 
 #endif /* ONVIF_GSOAP_IMAGING_H */

@@ -134,3 +134,50 @@ int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
 
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * Imaging Service Utility Functions
+ * ============================================================================
+ */
+
+/**
+ * @brief Parse day/night mode string to enum value
+ * @param mode_str String representation ("Auto", "Day", "Night")
+ * @param mode Output pointer to receive parsed day_night_mode enum
+ * @note Converts ONVIF day/night mode string to internal enum representation
+ * @note If mode_str is NULL or unrecognized, mode is unchanged
+ */
+void parse_daynight_mode(const char* mode_str, enum day_night_mode* mode) {
+  if (!mode_str || !mode) {
+    return;
+  }
+
+  if (strcmp(mode_str, "Auto") == 0) {
+    *mode = DAY_NIGHT_AUTO;
+  } else if (strcmp(mode_str, "Day") == 0) {
+    *mode = DAY_NIGHT_DAY;
+  } else if (strcmp(mode_str, "Night") == 0) {
+    *mode = DAY_NIGHT_NIGHT;
+  }
+}
+
+/**
+ * @brief Parse IR LED mode string to enum value
+ * @param mode_str String representation ("Off", "On", "Auto")
+ * @param mode Output pointer to receive parsed ir_led_mode enum
+ * @note Converts ONVIF IR LED mode string to internal enum representation
+ * @note If mode_str is NULL or unrecognized, mode is unchanged
+ */
+void parse_ir_led_mode(const char* mode_str, enum ir_led_mode* mode) {
+  if (!mode_str || !mode) {
+    return;
+  }
+
+  if (strcmp(mode_str, "Off") == 0) {
+    *mode = IR_LED_OFF;
+  } else if (strcmp(mode_str, "On") == 0) {
+    *mode = IR_LED_ON;
+  } else if (strcmp(mode_str, "Auto") == 0) {
+    *mode = IR_LED_AUTO;
+  }
+}

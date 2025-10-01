@@ -16,6 +16,7 @@
 #include "generated/soapH.h"    //NOLINT
 #include "generated/soapStub.h" //NOLINT
 #include "protocol/gsoap/onvif_gsoap_core.h"
+#include "protocol/gsoap/onvif_gsoap_response.h"
 
 /**
  * @brief Parse GetDeviceInformation ONVIF Device service request
@@ -65,5 +66,28 @@ int onvif_gsoap_parse_get_system_date_and_time(onvif_gsoap_context_t* ctx,
  */
 int onvif_gsoap_parse_system_reboot(onvif_gsoap_context_t* ctx,
                                       struct _tds__SystemReboot** out);
+
+/* ============================================================================
+ * Device Service Response Generation Functions
+ * ============================================================================
+ */
+
+/**
+ * @brief Generate GetDeviceInformation response
+ * @param ctx gSOAP context for response generation
+ * @param manufacturer Device manufacturer name
+ * @param model Device model name
+ * @param firmware_version Firmware version string
+ * @param serial_number Device serial number
+ * @param hardware_id Hardware identifier
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Generates Device service GetDeviceInformation response containing device identity
+ */
+int onvif_gsoap_generate_device_info_response(onvif_gsoap_context_t* ctx,
+                                              const char* manufacturer,
+                                              const char* model,
+                                              const char* firmware_version,
+                                              const char* serial_number,
+                                              const char* hardware_id);
 
 #endif /* ONVIF_GSOAP_DEVICE_H */

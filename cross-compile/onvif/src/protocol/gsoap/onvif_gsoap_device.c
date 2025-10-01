@@ -241,3 +241,112 @@ int onvif_gsoap_parse_system_reboot(onvif_gsoap_context_t* ctx,
 
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * Device Service Response Generation
+ * ============================================================================
+ */
+
+/* Device info maximum string lengths */
+#define DEVICE_MANUFACTURER_MAX_LEN 128
+#define DEVICE_MODEL_MAX_LEN 128
+#define FIRMWARE_VERSION_MAX_LEN 64
+#define SERIAL_NUMBER_MAX_LEN 64
+#define HARDWARE_ID_MAX_LEN 64
+
+/**
+ * @brief Callback data structure for device info response
+ */
+typedef struct {
+  char manufacturer[DEVICE_MANUFACTURER_MAX_LEN];
+  char model[DEVICE_MODEL_MAX_LEN];
+  char firmware_version[FIRMWARE_VERSION_MAX_LEN];
+  char serial_number[SERIAL_NUMBER_MAX_LEN];
+  char hardware_id[HARDWARE_ID_MAX_LEN];
+} device_info_callback_data_t;
+
+/**
+ * @brief Callback function for device info response generation
+ * @param soap gSOAP context
+ * @param user_data Pointer to device_info_callback_data_t
+ * @return 0 on success, negative error code on failure
+ */
+static int device_info_response_callback(struct soap* soap, void* user_data) {
+  device_info_callback_data_t* data = (device_info_callback_data_t*)user_data;
+
+  if (!data) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  /* Create response structure */
+  struct _tds__GetDeviceInformationResponse* response =
+    soap_new__tds__GetDeviceInformationResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  /* Fill response data */
+  response->Manufacturer = soap_strdup(soap, data->manufacturer);
+  response->Model = soap_strdup(soap, data->model);
+  response->FirmwareVersion = soap_strdup(soap, data->firmware_version);
+  response->SerialNumber = soap_strdup(soap, data->serial_number);
+  response->HardwareId = soap_strdup(soap, data->hardware_id);
+
+  /* Serialize response within SOAP body */
+  if (soap_put__tds__GetDeviceInformationResponse(
+        soap, response, "tds:GetDeviceInformationResponse", "") != SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return 0;
+}
+
+/**
+ * @brief Generate GetDeviceInformation response
+ * @param ctx gSOAP context for response generation
+ * @param manufacturer Device manufacturer name
+ * @param model Device model name
+ * @param firmware_version Firmware version string
+ * @param serial_number Device serial number
+ * @param hardware_id Hardware identifier
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Generates Device service GetDeviceInformation response containing device identity
+ */
+int onvif_gsoap_generate_device_info_response(
+  onvif_gsoap_context_t* ctx,
+  const char* manufacturer,
+  const char* model,
+  const char* firmware_version,
+  const char* serial_number,
+  const char* hardware_id) {
+  /* Prepare callback data */
+  device_info_callback_data_t callback_data = {.manufacturer = {0},
+                                               .model = {0},
+                                               .firmware_version = {0},
+                                               .serial_number = {0},
+                                               .hardware_id = {0}};
+
+  /* Copy strings into the callback data structure */
+  strncpy(callback_data.manufacturer, manufacturer ? manufacturer : "",
+          sizeof(callback_data.manufacturer) - 1);
+  callback_data.manufacturer[sizeof(callback_data.manufacturer) - 1] = '\0';
+
+  strncpy(callback_data.model, model ? model : "", sizeof(callback_data.model) - 1);
+  callback_data.model[sizeof(callback_data.model) - 1] = '\0';
+
+  strncpy(callback_data.firmware_version, firmware_version ? firmware_version : "",
+          sizeof(callback_data.firmware_version) - 1);
+  callback_data.firmware_version[sizeof(callback_data.firmware_version) - 1] = '\0';
+
+  strncpy(callback_data.serial_number, serial_number ? serial_number : "",
+          sizeof(callback_data.serial_number) - 1);
+  callback_data.serial_number[sizeof(callback_data.serial_number) - 1] = '\0';
+
+  strncpy(callback_data.hardware_id, hardware_id ? hardware_id : "",
+          sizeof(callback_data.hardware_id) - 1);
+  callback_data.hardware_id[sizeof(callback_data.hardware_id) - 1] = '\0';
+
+  /* Use the generic response generation with callback */
+  return onvif_gsoap_generate_response_with_callback(ctx, device_info_response_callback,
+                                                     &callback_data);
+}

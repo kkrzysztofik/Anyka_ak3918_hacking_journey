@@ -237,7 +237,7 @@
   - Include onvif_gsoap_response.h
   - Purpose: Complete PTZ service (6 parsing + 5 response = 11 functions)
 
-- [ ] 20.5. Add response generation to Device module
+- [x] 20.5. Add response generation to Device module
   - File: src/protocol/gsoap/onvif_gsoap_device.h
   - File: src/protocol/gsoap/onvif_gsoap_device.c
   - Move 1 response function from onvif_gsoap.c
@@ -245,7 +245,7 @@
   - Include onvif_gsoap_response.h
   - Purpose: Complete Device service (4 parsing + 1 response = 5 functions)
 
-- [ ] 20.6. Complete Imaging module
+- [x] 20.6. Complete Imaging module
   - File: src/protocol/gsoap/onvif_gsoap_imaging.h
   - File: src/protocol/gsoap/onvif_gsoap_imaging.c
   - Move parse_daynight_mode, parse_ir_led_mode, onvif_gsoap_parse_imaging_settings from onvif_gsoap.c

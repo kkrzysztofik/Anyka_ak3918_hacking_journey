@@ -117,7 +117,7 @@ typedef enum {
  * - Providing detailed error context for debugging
  * - Automatic performance metric collection
  */
-typedef struct {
+typedef struct onvif_gsoap_context_s {
   // Embedded gSOAP context (no pointer indirection)
   struct soap soap;
 

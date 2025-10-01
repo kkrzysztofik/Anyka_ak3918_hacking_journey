@@ -10,7 +10,11 @@
 
 #include <stddef.h>
 
-#include "protocol/gsoap/onvif_gsoap.h"
+#include "generated/soapH.h"    //NOLINT
+#include "generated/soapStub.h" //NOLINT
+
+/* Forward declaration to avoid circular dependencies */
+typedef struct onvif_gsoap_context_s onvif_gsoap_context_t;
 
 /**
  * @brief Callback function type for response generation
