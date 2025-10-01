@@ -221,7 +221,7 @@
   - Remove duplicate onvif_gsoap_init_request_parsing() (already in onvif_gsoap_core.c)
   - Purpose: Eliminate code duplication before migration
 
-- [ ] 20.3. Add response generation to Media module
+- [x] 20.3. Add response generation to Media module
   - File: src/protocol/gsoap/onvif_gsoap_media.h
   - File: src/protocol/gsoap/onvif_gsoap_media.c
   - Move 10 response functions from onvif_gsoap.c
@@ -229,7 +229,7 @@
   - Include onvif_gsoap_response.h
   - Purpose: Complete Media service (6 parsing + 10 response = 16 functions)
 
-- [ ] 20.4. Add response generation to PTZ module
+- [x] 20.4. Add response generation to PTZ module
   - File: src/protocol/gsoap/onvif_gsoap_ptz.h
   - File: src/protocol/gsoap/onvif_gsoap_ptz.c
   - Move 5 response functions from onvif_gsoap.c

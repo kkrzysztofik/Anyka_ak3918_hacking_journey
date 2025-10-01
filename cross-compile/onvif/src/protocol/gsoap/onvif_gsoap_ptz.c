@@ -347,3 +347,225 @@ int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
 
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * PTZ Service Response Generation - Callback Functions
+ * ============================================================================
+ */
+
+int ptz_nodes_response_callback(struct soap* soap, void* user_data) {
+  ptz_nodes_callback_data_t* data = (ptz_nodes_callback_data_t*)user_data;
+
+  if (!data || !data->nodes) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  struct _onvif3__GetNodesResponse* response = soap_new__onvif3__GetNodesResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  response->__sizePTZNode = data->count;
+  response->PTZNode = soap_new_onvif3__PTZNode(soap, data->count);
+  if (!response->PTZNode) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  for (int i = 0; i < data->count; i++) {
+    const struct ptz_node* src_node = &data->nodes[i];
+    struct onvif3__PTZNode* node = &response->PTZNode[i];
+
+    node->token = soap_strdup(soap, src_node->token);
+    node->Name = soap_strdup(soap, src_node->name);
+    node->FixedHomePosition = src_node->fixed_home_position ? xsd__boolean__true_ : xsd__boolean__false_;
+  }
+
+  if (soap_put__onvif3__GetNodesResponse(soap, response, "onvif3:GetNodesResponse", NULL) != SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+int ptz_absolute_move_response_callback(struct soap* soap, void* user_data) {
+  ptz_absolute_move_callback_data_t* data = (ptz_absolute_move_callback_data_t*)user_data;
+
+  if (!data) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  struct _onvif3__AbsoluteMoveResponse* response = soap_new__onvif3__AbsoluteMoveResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  if (soap_put__onvif3__AbsoluteMoveResponse(soap, response, "onvif3:AbsoluteMoveResponse", NULL) != SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+int ptz_presets_response_callback(struct soap* soap, void* user_data) {
+  ptz_presets_callback_data_t* data = (ptz_presets_callback_data_t*)user_data;
+
+  if (!data || !data->presets) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  struct _onvif3__GetPresetsResponse* response = soap_new__onvif3__GetPresetsResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  response->__sizePreset = data->count;
+  response->Preset = soap_new_onvif3__PTZPreset(soap, data->count);
+  if (!response->Preset) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  for (int i = 0; i < data->count; i++) {
+    const struct ptz_preset* src_preset = &data->presets[i];
+    struct onvif3__PTZPreset* preset = &response->Preset[i];
+
+    preset->token = soap_strdup(soap, src_preset->token);
+    preset->Name = soap_strdup(soap, src_preset->name);
+    
+    preset->PTZPosition = soap_new_onvif3__PTZVector(soap, 1);
+    if (preset->PTZPosition) {
+      preset->PTZPosition->PanTilt = soap_new_onvif3__Vector2D(soap, 1);
+      if (preset->PTZPosition->PanTilt) {
+        preset->PTZPosition->PanTilt->x = src_preset->position.pan;
+        preset->PTZPosition->PanTilt->y = src_preset->position.tilt;
+        preset->PTZPosition->PanTilt->space = soap_strdup(soap, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace");
+      }
+      
+      preset->PTZPosition->Zoom = soap_new_onvif3__Vector1D(soap, 1);
+      if (preset->PTZPosition->Zoom) {
+        preset->PTZPosition->Zoom->x = src_preset->position.zoom;
+        preset->PTZPosition->Zoom->space = soap_strdup(soap, "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace");
+      }
+    }
+  }
+
+  if (soap_put__onvif3__GetPresetsResponse(soap, response, "onvif3:GetPresetsResponse", NULL) != SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+int ptz_set_preset_response_callback(struct soap* soap, void* user_data) {
+  ptz_set_preset_callback_data_t* data = (ptz_set_preset_callback_data_t*)user_data;
+
+  if (!data || !data->preset_token) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  struct _onvif3__SetPresetResponse* response = soap_new__onvif3__SetPresetResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  response->PresetToken = soap_strdup(soap, data->preset_token);
+
+  if (soap_put__onvif3__SetPresetResponse(soap, response, "onvif3:SetPresetResponse", NULL) != SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+int ptz_goto_preset_response_callback(struct soap* soap, void* user_data) {
+  ptz_goto_preset_callback_data_t* data = (ptz_goto_preset_callback_data_t*)user_data;
+
+  if (!data) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  struct _onvif3__GotoPresetResponse* response = soap_new__onvif3__GotoPresetResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  if (soap_put__onvif3__GotoPresetResponse(soap, response, "onvif3:GotoPresetResponse", NULL) != SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
+ * PTZ Service Response Generation - Public API Functions
+ * ============================================================================
+ */
+
+int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
+                                            const struct ptz_node* nodes,
+                                            int count) {
+  if (!ctx || !ctx->soap || !nodes || count <= 0) {
+    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for get nodes response");
+    return ONVIF_ERROR_INVALID;
+  }
+
+  ptz_nodes_callback_data_t callback_data = {
+    .nodes = nodes,
+    .count = count
+  };
+
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_nodes_response_callback,
+                                                     &callback_data);
+}
+
+int onvif_gsoap_generate_absolute_move_response(onvif_gsoap_context_t* ctx) {
+  if (!ctx || !ctx->soap) {
+    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for absolute move response");
+    return ONVIF_ERROR_INVALID;
+  }
+
+  ptz_absolute_move_callback_data_t callback_data = { .message = "" };
+
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_absolute_move_response_callback,
+                                                     &callback_data);
+}
+
+int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
+                                              const struct ptz_preset* presets,
+                                              int count) {
+  if (!ctx || !ctx->soap || !presets || count < 0) {
+    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for get presets response");
+    return ONVIF_ERROR_INVALID;
+  }
+
+  ptz_presets_callback_data_t callback_data = {
+    .presets = presets,
+    .count = count
+  };
+
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_presets_response_callback,
+                                                     &callback_data);
+}
+
+int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const char* preset_token) {
+  if (!ctx || !ctx->soap || !preset_token) {
+    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for set preset response");
+    return ONVIF_ERROR_INVALID;
+  }
+
+  ptz_set_preset_callback_data_t callback_data = { .preset_token = preset_token };
+
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_set_preset_response_callback,
+                                                     &callback_data);
+}
+
+int onvif_gsoap_generate_goto_preset_response(onvif_gsoap_context_t* ctx) {
+  if (!ctx || !ctx->soap) {
+    onvif_gsoap_set_error(ctx ? ctx->soap : NULL, "Invalid parameters for goto preset response");
+    return ONVIF_ERROR_INVALID;
+  }
+
+  ptz_goto_preset_callback_data_t callback_data = { .message = "" };
+
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_goto_preset_response_callback,
+                                                     &callback_data);
+}
