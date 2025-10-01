@@ -32,14 +32,6 @@ typedef int (*onvif_response_callback_t)(struct soap* soap, void* user_data);
  */
 int onvif_gsoap_validate_context(struct soap* soap);
 
-/**
- * @brief Sets gSOAP error with formatted message
- * @param soap gSOAP context
- * @param format Printf-style format string
- * @param ... Variable arguments for format string
- * @note Sets SOAP_FAULT error and logs error message
- */
-void onvif_gsoap_set_error(struct soap* soap, const char* format, ...);
 
 /**
  * @brief Begins response serialization
@@ -108,3 +100,25 @@ int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* 
                                         size_t buffer_size);
 
 #endif // ONVIF_GSOAP_RESPONSE_H
+
+/**
+ * @brief Get response data from context
+ * @param ctx gSOAP context
+ * @return Response data string, or NULL if no response
+ */
+const char* onvif_gsoap_get_response_data(const onvif_gsoap_context_t* ctx);
+
+/**
+ * @brief Get response data length from context
+ * @param ctx gSOAP context
+ * @return Response data length in bytes
+ */
+size_t onvif_gsoap_get_response_length(const onvif_gsoap_context_t* ctx);
+
+/**
+ * @brief Check if context has error  
+ * @param ctx gSOAP context
+ * @return true if error exists, false otherwise
+ */
+bool onvif_gsoap_has_error(const onvif_gsoap_context_t* ctx);
+

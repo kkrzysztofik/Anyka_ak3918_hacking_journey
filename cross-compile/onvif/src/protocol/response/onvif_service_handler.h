@@ -14,7 +14,7 @@
 #include "core/config/config.h"
 #include "generated/soapH.h"
 #include "networking/http/http_parser.h"
-#include "protocol/gsoap/onvif_gsoap.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
 #include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
 

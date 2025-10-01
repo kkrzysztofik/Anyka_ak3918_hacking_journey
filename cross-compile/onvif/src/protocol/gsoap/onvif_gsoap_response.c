@@ -459,3 +459,52 @@ int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* 
 
   return result;
 }
+
+/* ============================================================================
+ * Response Utility Functions
+ * ============================================================================
+ */
+
+/**
+ * @brief Get response data from context
+ * @param ctx gSOAP context
+ * @return Response data string, or NULL if no response
+ */
+const char* onvif_gsoap_get_response_data(const onvif_gsoap_context_t* ctx) {
+  if (!ctx) {
+    return NULL;
+  }
+
+  /* Return NULL if no response has been generated (length is 0) */
+  if (ctx->soap.length == 0) {
+    return NULL;
+  }
+
+  return ctx->soap.buf;
+}
+
+/**
+ * @brief Get response data length from context
+ * @param ctx gSOAP context
+ * @return Response data length in bytes
+ */
+size_t onvif_gsoap_get_response_length(const onvif_gsoap_context_t* ctx) {
+  if (!ctx) {
+    return 0;
+  }
+
+  return ctx->soap.length;
+}
+
+/**
+ * @brief Check if context has error
+ * @param ctx gSOAP context
+ * @return true if error exists, false otherwise
+ */
+bool onvif_gsoap_has_error(const onvif_gsoap_context_t* ctx) {
+  if (!ctx) {
+    return true;
+  }
+
+  return ctx->soap.error != SOAP_OK;
+}

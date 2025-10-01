@@ -19,7 +19,60 @@
 #include "generated/soapStub.h" //NOLINT
 
 /* Include the main header for the context structure definition */
-#include "protocol/gsoap/onvif_gsoap.h"
+/* gSOAP context defined below */
+
+/* ============================================================================
+ * gSOAP Context Structure
+ * ============================================================================
+ */
+
+/**
+ * @brief Enhanced ONVIF gSOAP context with embedded soap context
+ *
+ * This structure improves upon the original design by:
+ * - Using embedded soap context (no allocation needed)
+ * - Tracking request parsing and response generation state
+ * - Providing detailed error context for debugging
+ * - Automatic performance metric collection
+ */
+typedef struct onvif_gsoap_context_s {
+  /* Embedded gSOAP context (no pointer indirection) */
+  struct soap soap;
+
+  /* Request parsing state tracking */
+  struct {
+    const char* operation_name;  /* Parsed operation name (for logging) */
+    bool is_initialized;         /* Request parsing initialized */
+    size_t request_size;         /* Original request size in bytes */
+    uint64_t parse_start_time;   /* Parse start timestamp (microseconds) */
+    uint64_t parse_end_time;     /* Parse end timestamp (microseconds) */
+  } request_state;
+
+  /* Response generation state tracking */
+  struct {
+    size_t total_bytes_written;      /* Total response bytes written */
+    uint64_t generation_start_time;  /* Generation start timestamp */
+    uint64_t generation_end_time;    /* Generation end timestamp */
+    bool is_finalized;               /* Response finalization complete */
+  } response_state;
+
+  /* Enhanced error context for debugging */
+  struct {
+    int last_error_code;        /* Last error code from error_handling.h */
+    char error_message[256];    /* Detailed error message */
+    const char* error_location; /* Function where error occurred */
+    int soap_error_code;        /* gSOAP-specific error code */
+  } error_context;
+
+  /* Optional user data */
+  void* user_data;
+} onvif_gsoap_context_t;
+
+/* ============================================================================
+ * gSOAP Core Functions
+ * ============================================================================
+ */
+
 
 /**
  * @brief Initialize gSOAP context with embedded soap structure
