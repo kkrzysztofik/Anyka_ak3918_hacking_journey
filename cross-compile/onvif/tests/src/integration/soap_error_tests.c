@@ -110,7 +110,7 @@ void test_integration_soap_error_invalid_xml(void** state) {
   // Step 7: Cleanup resources
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -160,7 +160,7 @@ void test_integration_soap_error_missing_param(void** state) {
   // Step 7: Cleanup resources
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -213,7 +213,7 @@ void test_integration_soap_error_wrong_operation(void** state) {
   // Step 7: Cleanup resources
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -261,6 +261,6 @@ void test_integration_soap_error_malformed_envelope(void** state) {
   // Step 7: Cleanup resources
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }

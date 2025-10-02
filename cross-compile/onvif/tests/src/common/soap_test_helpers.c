@@ -8,11 +8,53 @@
 #define _XOPEN_SOURCE 700
 
 #include "soap_test_helpers.h"
-#include "utils/error/error_handling.h"
-#include "generated/soapH.h"
+
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
+
+#include "generated/soapH.h"
+#include "utils/error/error_handling.h"
+
+/* ============================================================================
+ * Buffer Reading Support for SOAP Response Parsing
+ * ============================================================================ */
+
+/**
+ * @brief Structure to track buffer reading state
+ */
+typedef struct {
+  const char* buffer;  // Source buffer
+  size_t size;         // Total buffer size
+  size_t position;     // Current read position
+} buffer_read_state_t;
+
+/**
+ * @brief Receive callback for reading from memory buffer
+ * @param soap gSOAP runtime context
+ * @param buf Buffer to read into
+ * @param len Maximum bytes to read
+ * @return Number of bytes read, or 0 for EOF
+ */
+static size_t frecv_buffer(struct soap* soap, char* buf, size_t len) {
+  buffer_read_state_t* state = (buffer_read_state_t*)soap->user;
+  if (!state || !buf) {
+    return 0;
+  }
+
+  // Calculate how many bytes are remaining in the buffer
+  size_t remaining = state->size - state->position;
+  if (remaining == 0) {
+    return 0;  // EOF
+  }
+
+  // Read up to len bytes from the buffer
+  size_t to_read = (len < remaining) ? len : remaining;
+  memcpy(buf, state->buffer + state->position, to_read);
+  state->position += to_read;
+
+  return to_read;
+}
 
 /* ============================================================================
  * HTTP Request Builder Implementation
@@ -107,8 +149,7 @@ void soap_test_free_request(http_request_t* request) {
  * SOAP Response Parser Implementation
  * ============================================================================ */
 
-int soap_test_init_response_parsing(onvif_gsoap_context_t* ctx,
-                                    const http_response_t* response) {
+int soap_test_init_response_parsing(onvif_gsoap_context_t* ctx, const http_response_t* response) {
   if (!ctx || !response || !response->body) {
     return ONVIF_ERROR_INVALID;
   }
@@ -119,14 +160,38 @@ int soap_test_init_response_parsing(onvif_gsoap_context_t* ctx,
     return result;
   }
 
-  // Initialize parsing with response body
-  result = onvif_gsoap_init_request_parsing(ctx, response->body, response->body_length);
-  if (result != ONVIF_SUCCESS) {
+  // Allocate buffer read state structure using regular malloc
+  // This will be freed when test cleanup is called
+  buffer_read_state_t* read_state = (buffer_read_state_t*)malloc(sizeof(buffer_read_state_t));
+  if (!read_state) {
     onvif_gsoap_cleanup(ctx);
-    return result;
+    return ONVIF_ERROR_MEMORY;
   }
 
+  // Point directly to response body (no copy needed - it's already in memory)
+  read_state->buffer = response->body;
+  read_state->size = response->body_length;
+  read_state->position = 0;
+
+  // Configure gSOAP to read from buffer
+  // The soap_read__* macros will call soap_begin_recv() which will use these settings
+  ctx->soap.user = read_state;
+  ctx->soap.frecv = frecv_buffer;
+  ctx->soap.recvfd = -1;
+
   return ONVIF_SUCCESS;
+}
+
+void soap_test_cleanup_response_parsing(onvif_gsoap_context_t* ctx) {
+  if (!ctx) {
+    return;
+  }
+
+  // Free the buffer_read_state_t that was allocated in soap_test_init_response_parsing
+  if (ctx->soap.user) {
+    free(ctx->soap.user);
+    ctx->soap.user = NULL;
+  }
 }
 
 int soap_test_parse_get_profiles_response(onvif_gsoap_context_t* ctx,
@@ -136,8 +201,8 @@ int soap_test_parse_get_profiles_response(onvif_gsoap_context_t* ctx,
   }
 
   // Allocate response structure
-  *response = (struct _trt__GetProfilesResponse*)soap_malloc(&ctx->soap,
-                                                             sizeof(struct _trt__GetProfilesResponse));
+  *response = (struct _trt__GetProfilesResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _trt__GetProfilesResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -160,8 +225,8 @@ int soap_test_parse_get_nodes_response(onvif_gsoap_context_t* ctx,
   }
 
   // Allocate response structure (PTZ uses onvif3 namespace)
-  *response = (struct _onvif3__GetNodesResponse*)soap_malloc(&ctx->soap,
-                                                             sizeof(struct _onvif3__GetNodesResponse));
+  *response = (struct _onvif3__GetNodesResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _onvif3__GetNodesResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -185,7 +250,7 @@ int soap_test_parse_get_device_info_response(onvif_gsoap_context_t* ctx,
 
   // Allocate response structure
   *response = (struct _tds__GetDeviceInformationResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _tds__GetDeviceInformationResponse));
+    &ctx->soap, sizeof(struct _tds__GetDeviceInformationResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -212,8 +277,8 @@ int soap_test_parse_get_stream_uri_response(onvif_gsoap_context_t* ctx,
   }
 
   // Allocate response structure
-  *response = (struct _trt__GetStreamUriResponse*)soap_malloc(&ctx->soap,
-                                                              sizeof(struct _trt__GetStreamUriResponse));
+  *response = (struct _trt__GetStreamUriResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _trt__GetStreamUriResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -236,8 +301,8 @@ int soap_test_parse_create_profile_response(onvif_gsoap_context_t* ctx,
   }
 
   // Allocate response structure
-  *response = (struct _trt__CreateProfileResponse*)soap_malloc(&ctx->soap,
-                                                               sizeof(struct _trt__CreateProfileResponse));
+  *response = (struct _trt__CreateProfileResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _trt__CreateProfileResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -260,8 +325,8 @@ int soap_test_parse_delete_profile_response(onvif_gsoap_context_t* ctx,
   }
 
   // Allocate response structure
-  *response = (struct _trt__DeleteProfileResponse*)soap_malloc(&ctx->soap,
-                                                               sizeof(struct _trt__DeleteProfileResponse));
+  *response = (struct _trt__DeleteProfileResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _trt__DeleteProfileResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -277,15 +342,15 @@ int soap_test_parse_delete_profile_response(onvif_gsoap_context_t* ctx,
   return ONVIF_SUCCESS;
 }
 
-int soap_test_parse_set_video_source_config_response(onvif_gsoap_context_t* ctx,
-                                                     struct _trt__SetVideoSourceConfigurationResponse** response) {
+int soap_test_parse_set_video_source_config_response(
+  onvif_gsoap_context_t* ctx, struct _trt__SetVideoSourceConfigurationResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
   *response = (struct _trt__SetVideoSourceConfigurationResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _trt__SetVideoSourceConfigurationResponse));
+    &ctx->soap, sizeof(struct _trt__SetVideoSourceConfigurationResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -301,15 +366,15 @@ int soap_test_parse_set_video_source_config_response(onvif_gsoap_context_t* ctx,
   return ONVIF_SUCCESS;
 }
 
-int soap_test_parse_set_video_encoder_config_response(onvif_gsoap_context_t* ctx,
-                                                      struct _trt__SetVideoEncoderConfigurationResponse** response) {
+int soap_test_parse_set_video_encoder_config_response(
+  onvif_gsoap_context_t* ctx, struct _trt__SetVideoEncoderConfigurationResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
   *response = (struct _trt__SetVideoEncoderConfigurationResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _trt__SetVideoEncoderConfigurationResponse));
+    &ctx->soap, sizeof(struct _trt__SetVideoEncoderConfigurationResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -325,15 +390,15 @@ int soap_test_parse_set_video_encoder_config_response(onvif_gsoap_context_t* ctx
   return ONVIF_SUCCESS;
 }
 
-int soap_test_parse_get_metadata_configs_response(onvif_gsoap_context_t* ctx,
-                                                  struct _trt__GetMetadataConfigurationsResponse** response) {
+int soap_test_parse_get_metadata_configs_response(
+  onvif_gsoap_context_t* ctx, struct _trt__GetMetadataConfigurationsResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
   *response = (struct _trt__GetMetadataConfigurationsResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _trt__GetMetadataConfigurationsResponse));
+    &ctx->soap, sizeof(struct _trt__GetMetadataConfigurationsResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -349,15 +414,15 @@ int soap_test_parse_get_metadata_configs_response(onvif_gsoap_context_t* ctx,
   return ONVIF_SUCCESS;
 }
 
-int soap_test_parse_set_metadata_config_response(onvif_gsoap_context_t* ctx,
-                                                 struct _trt__SetMetadataConfigurationResponse** response) {
+int soap_test_parse_set_metadata_config_response(
+  onvif_gsoap_context_t* ctx, struct _trt__SetMetadataConfigurationResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
   *response = (struct _trt__SetMetadataConfigurationResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _trt__SetMetadataConfigurationResponse));
+    &ctx->soap, sizeof(struct _trt__SetMetadataConfigurationResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -373,15 +438,15 @@ int soap_test_parse_set_metadata_config_response(onvif_gsoap_context_t* ctx,
   return ONVIF_SUCCESS;
 }
 
-int soap_test_parse_start_multicast_response(onvif_gsoap_context_t* ctx,
-                                             struct _trt__StartMulticastStreamingResponse** response) {
+int soap_test_parse_start_multicast_response(
+  onvif_gsoap_context_t* ctx, struct _trt__StartMulticastStreamingResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
   *response = (struct _trt__StartMulticastStreamingResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _trt__StartMulticastStreamingResponse));
+    &ctx->soap, sizeof(struct _trt__StartMulticastStreamingResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -397,15 +462,15 @@ int soap_test_parse_start_multicast_response(onvif_gsoap_context_t* ctx,
   return ONVIF_SUCCESS;
 }
 
-int soap_test_parse_stop_multicast_response(onvif_gsoap_context_t* ctx,
-                                            struct _trt__StopMulticastStreamingResponse** response) {
+int soap_test_parse_stop_multicast_response(
+  onvif_gsoap_context_t* ctx, struct _trt__StopMulticastStreamingResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
   *response = (struct _trt__StopMulticastStreamingResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _trt__StopMulticastStreamingResponse));
+    &ctx->soap, sizeof(struct _trt__StopMulticastStreamingResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -433,7 +498,7 @@ int soap_test_parse_absolute_move_response(onvif_gsoap_context_t* ctx,
 
   // Allocate response structure
   *response = (struct _onvif3__AbsoluteMoveResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _onvif3__AbsoluteMoveResponse));
+    &ctx->soap, sizeof(struct _onvif3__AbsoluteMoveResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -457,7 +522,7 @@ int soap_test_parse_get_presets_response(onvif_gsoap_context_t* ctx,
 
   // Allocate response structure
   *response = (struct _onvif3__GetPresetsResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _onvif3__GetPresetsResponse));
+    &ctx->soap, sizeof(struct _onvif3__GetPresetsResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -481,7 +546,7 @@ int soap_test_parse_set_preset_response(onvif_gsoap_context_t* ctx,
 
   // Allocate response structure
   *response = (struct _onvif3__SetPresetResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _onvif3__SetPresetResponse));
+    &ctx->soap, sizeof(struct _onvif3__SetPresetResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -505,7 +570,7 @@ int soap_test_parse_goto_preset_response(onvif_gsoap_context_t* ctx,
 
   // Allocate response structure
   *response = (struct _onvif3__GotoPresetResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _onvif3__GotoPresetResponse));
+    &ctx->soap, sizeof(struct _onvif3__GotoPresetResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -529,7 +594,7 @@ int soap_test_parse_remove_preset_response(onvif_gsoap_context_t* ctx,
 
   // Allocate response structure
   *response = (struct _onvif3__RemovePresetResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _onvif3__RemovePresetResponse));
+    &ctx->soap, sizeof(struct _onvif3__RemovePresetResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -557,7 +622,7 @@ int soap_test_parse_get_capabilities_response(onvif_gsoap_context_t* ctx,
 
   // Allocate response structure
   *response = (struct _tds__GetCapabilitiesResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _tds__GetCapabilitiesResponse));
+    &ctx->soap, sizeof(struct _tds__GetCapabilitiesResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -573,15 +638,15 @@ int soap_test_parse_get_capabilities_response(onvif_gsoap_context_t* ctx,
   return ONVIF_SUCCESS;
 }
 
-int soap_test_parse_get_system_date_time_response(onvif_gsoap_context_t* ctx,
-                                                  struct _tds__GetSystemDateAndTimeResponse** response) {
+int soap_test_parse_get_system_date_time_response(
+  onvif_gsoap_context_t* ctx, struct _tds__GetSystemDateAndTimeResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
   *response = (struct _tds__GetSystemDateAndTimeResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _tds__GetSystemDateAndTimeResponse));
+    &ctx->soap, sizeof(struct _tds__GetSystemDateAndTimeResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -605,7 +670,7 @@ int soap_test_parse_get_services_response(onvif_gsoap_context_t* ctx,
 
   // Allocate response structure
   *response = (struct _tds__GetServicesResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _tds__GetServicesResponse));
+    &ctx->soap, sizeof(struct _tds__GetServicesResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -629,7 +694,7 @@ int soap_test_parse_system_reboot_response(onvif_gsoap_context_t* ctx,
 
   // Allocate response structure
   *response = (struct _tds__SystemRebootResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _tds__SystemRebootResponse));
+    &ctx->soap, sizeof(struct _tds__SystemRebootResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
@@ -649,15 +714,15 @@ int soap_test_parse_system_reboot_response(onvif_gsoap_context_t* ctx,
  * Imaging Service - Additional Response Parsers
  * ============================================================================ */
 
-int soap_test_parse_set_imaging_settings_response(onvif_gsoap_context_t* ctx,
-                                                  struct _onvif4__SetImagingSettingsResponse** response) {
+int soap_test_parse_set_imaging_settings_response(
+  onvif_gsoap_context_t* ctx, struct _onvif4__SetImagingSettingsResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
   *response = (struct _onvif4__SetImagingSettingsResponse*)soap_malloc(
-      &ctx->soap, sizeof(struct _onvif4__SetImagingSettingsResponse));
+    &ctx->soap, sizeof(struct _onvif4__SetImagingSettingsResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }

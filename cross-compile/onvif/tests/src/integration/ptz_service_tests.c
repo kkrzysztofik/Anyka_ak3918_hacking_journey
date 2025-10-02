@@ -724,7 +724,7 @@ void test_integration_ptz_get_nodes_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -770,7 +770,7 @@ void test_integration_ptz_absolute_move_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -819,7 +819,7 @@ void test_integration_ptz_get_presets_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -868,7 +868,7 @@ void test_integration_ptz_set_preset_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -914,7 +914,7 @@ void test_integration_ptz_goto_preset_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -960,7 +960,7 @@ void test_integration_ptz_remove_preset_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 

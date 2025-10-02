@@ -138,9 +138,9 @@ void test_integration_device_init_cleanup_lifecycle(void** state) {
   onvif_device_cleanup();
 
   free(config);
-  
+
   // Note: Don't cleanup dispatcher - keep it alive for next tests
-  
+
   memory_manager_cleanup();
 }
 
@@ -169,6 +169,11 @@ void test_integration_device_get_device_information_fields_validation(void** sta
   assert_non_null(strstr(response.body, "FirmwareVersion"));
   assert_non_null(strstr(response.body, "SerialNumber"));
   assert_non_null(strstr(response.body, "HardwareId"));
+
+  // Cleanup: Free response body if it was heap-allocated
+  if (response.body != response_buffer) {
+    ONVIF_FREE(response.body);
+  }
 }
 
 /**
@@ -191,6 +196,11 @@ void test_integration_device_get_capabilities_specific_category(void** state) {
 
   // Verify Device capabilities are present
   assert_non_null(strstr(response.body, "Device"));
+
+  // Cleanup: Free response body if it was heap-allocated
+  if (response.body != response_buffer) {
+    ONVIF_FREE(response.body);
+  }
 }
 
 /**
@@ -215,6 +225,11 @@ void test_integration_device_get_capabilities_multiple_categories(void** state) 
   assert_non_null(strstr(response.body, "Device"));
   assert_non_null(strstr(response.body, "Media"));
   assert_non_null(strstr(response.body, "PTZ"));
+
+  // Cleanup: Free response body if it was heap-allocated
+  if (response.body != response_buffer) {
+    ONVIF_FREE(response.body);
+  }
 }
 
 /**
@@ -238,6 +253,11 @@ void test_integration_device_get_system_date_time_timezone(void** state) {
 
   // Verify timezone information is present
   assert_non_null(strstr(response.body, "TimeZone"));
+
+  // Cleanup: Free response body if it was heap-allocated
+  if (response.body != response_buffer) {
+    ONVIF_FREE(response.body);
+  }
 }
 
 /**
@@ -261,6 +281,11 @@ void test_integration_device_get_system_date_time_dst(void** state) {
 
   // Verify DST information is present
   assert_non_null(strstr(response.body, "DaylightSavings"));
+
+  // Cleanup: Free response body if it was heap-allocated
+  if (response.body != response_buffer) {
+    ONVIF_FREE(response.body);
+  }
 }
 
 /**
@@ -283,6 +308,11 @@ void test_integration_device_get_services_namespaces(void** state) {
 
   // Verify namespace information is present
   assert_non_null(strstr(response.body, "Namespace"));
+
+  // Cleanup: Free response body if it was heap-allocated
+  if (response.body != response_buffer) {
+    ONVIF_FREE(response.body);
+  }
 }
 
 /**
@@ -364,14 +394,18 @@ static void* concurrent_get_device_information_thread(void* arg) {
   http_request_t request;
   memset(&request, 0, sizeof(http_request_t));
 
-  char response_buffer[4096];
   http_response_t response;
   memset(&response, 0, sizeof(http_response_t));
-  response.body = response_buffer;
+  // DON'T pre-allocate response.body - service will allocate it
 
   // Execute GetDeviceInformation
   int result =
     onvif_device_handle_operation(TEST_OPERATION_GET_DEVICE_INFORMATION, &request, &response);
+
+  // Free the response body allocated by the service
+  if (response.body) {
+    ONVIF_FREE(response.body);
+  }
 
   // Store result in thread argument
   int* thread_result = malloc(sizeof(int));
@@ -415,13 +449,17 @@ static void* concurrent_get_capabilities_thread(void* arg) {
   http_request_t request;
   memset(&request, 0, sizeof(http_request_t));
 
-  char response_buffer[8192];
   http_response_t response;
   memset(&response, 0, sizeof(http_response_t));
-  response.body = response_buffer;
+  // DON'T pre-allocate response.body - service will allocate it
 
   // Execute GetCapabilities
   int result = onvif_device_handle_operation(TEST_OPERATION_GET_CAPABILITIES, &request, &response);
+
+  // Free the response body allocated by the service
+  if (response.body) {
+    ONVIF_FREE(response.body);
+  }
 
   int* thread_result = malloc(sizeof(int));
   *thread_result = result;
@@ -464,10 +502,9 @@ static void* concurrent_mixed_operations_thread(void* arg) {
   http_request_t request;
   memset(&request, 0, sizeof(http_request_t));
 
-  char response_buffer[8192];
   http_response_t response;
   memset(&response, 0, sizeof(http_response_t));
-  response.body = response_buffer;
+  // DON'T pre-allocate response.body - service will allocate it
 
   const char* operations[] = {TEST_OPERATION_GET_DEVICE_INFORMATION,
                               TEST_OPERATION_GET_CAPABILITIES, TEST_OPERATION_GET_SYSTEM_DATE_TIME,
@@ -477,6 +514,11 @@ static void* concurrent_mixed_operations_thread(void* arg) {
 
   // Execute operation
   int result = onvif_device_handle_operation(operation, &request, &response);
+
+  // Free the response body allocated by the service
+  if (response.body) {
+    ONVIF_FREE(response.body);
+  }
 
   int* thread_result = malloc(sizeof(int));
   *thread_result = result;
@@ -581,10 +623,11 @@ void test_integration_device_get_device_info_soap(void** state) {
   assert_non_null(device_info_response->FirmwareVersion);
 
   // Step 9: Cleanup resources
+  soap_test_cleanup_response_parsing(&ctx);
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -595,9 +638,8 @@ void test_integration_device_get_capabilities_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request("GetCapabilities",
-                                                     SOAP_DEVICE_GET_CAPABILITIES,
-                                                     "/onvif/device_service");
+  http_request_t* request = soap_test_create_request(
+    "GetCapabilities", SOAP_DEVICE_GET_CAPABILITIES, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -634,7 +676,7 @@ void test_integration_device_get_capabilities_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -645,9 +687,8 @@ void test_integration_device_get_system_date_time_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request("GetSystemDateAndTime",
-                                                     SOAP_DEVICE_GET_SYSTEM_DATE_AND_TIME,
-                                                     "/onvif/device_service");
+  http_request_t* request = soap_test_create_request(
+    "GetSystemDateAndTime", SOAP_DEVICE_GET_SYSTEM_DATE_AND_TIME, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -684,7 +725,7 @@ void test_integration_device_get_system_date_time_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -695,9 +736,8 @@ void test_integration_device_get_services_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope (using DEVICE_GET_CAPABILITIES as placeholder)
-  http_request_t* request = soap_test_create_request("GetServices",
-                                                     SOAP_DEVICE_GET_CAPABILITIES,
-                                                     "/onvif/device_service");
+  http_request_t* request =
+    soap_test_create_request("GetServices", SOAP_DEVICE_GET_CAPABILITIES, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -734,7 +774,7 @@ void test_integration_device_get_services_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -745,9 +785,8 @@ void test_integration_device_system_reboot_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request("SystemReboot",
-                                                     SOAP_DEVICE_SYSTEM_REBOOT,
-                                                     "/onvif/device_service");
+  http_request_t* request =
+    soap_test_create_request("SystemReboot", SOAP_DEVICE_SYSTEM_REBOOT, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -784,7 +823,7 @@ void test_integration_device_system_reboot_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -827,10 +866,10 @@ const struct CMUnitTest device_service_tests[] = {
                                   device_service_teardown),
 
   // SOAP integration tests (full HTTP/SOAP layer validation)
-  cmocka_unit_test_setup_teardown(test_integration_device_get_device_info_soap, device_service_setup,
-                                  device_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_soap, device_service_setup,
-                                  device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_device_info_soap,
+                                  device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_soap,
+                                  device_service_setup, device_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_soap,
                                   device_service_setup, device_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_device_get_services_soap, device_service_setup,

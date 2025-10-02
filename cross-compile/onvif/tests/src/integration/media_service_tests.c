@@ -373,8 +373,8 @@ void test_integration_media_concurrent_profile_operations(void** state) {
   // Create profiles
   for (int i = 0; i < profile_count; i++) {
     snprintf(profile_tokens[i], sizeof(profile_tokens[i]), "ConcurrentProfile%d", i);
-    int result = onvif_media_create_profile(profile_tokens[i], "Concurrent Test Profile",
-                                            &profiles[i]);
+    int result =
+      onvif_media_create_profile(profile_tokens[i], "Concurrent Test Profile", &profiles[i]);
     assert_int_equal(ONVIF_SUCCESS, result);
   }
 
@@ -497,7 +497,7 @@ void test_integration_media_get_profiles_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -551,7 +551,7 @@ void test_integration_media_get_stream_uri_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -598,7 +598,7 @@ void test_integration_media_delete_profile_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -618,8 +618,7 @@ void test_integration_media_set_video_source_config_soap(void** state) {
   memset(&response, 0, sizeof(http_response_t));
 
   // Step 3: Call service handler
-  int result =
-    onvif_media_handle_request("SetVideoSourceConfiguration", request, &response);
+  int result = onvif_media_handle_request("SetVideoSourceConfiguration", request, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Step 4: Validate HTTP response
@@ -645,7 +644,7 @@ void test_integration_media_set_video_source_config_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -665,8 +664,7 @@ void test_integration_media_set_video_encoder_config_soap(void** state) {
   memset(&response, 0, sizeof(http_response_t));
 
   // Step 3: Call service handler
-  int result =
-    onvif_media_handle_request("SetVideoEncoderConfiguration", request, &response);
+  int result = onvif_media_handle_request("SetVideoEncoderConfiguration", request, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Step 4: Validate HTTP response
@@ -692,7 +690,7 @@ void test_integration_media_set_video_encoder_config_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -741,7 +739,7 @@ void test_integration_media_get_metadata_configs_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -787,7 +785,7 @@ void test_integration_media_set_metadata_config_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -833,7 +831,7 @@ void test_integration_media_start_multicast_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -879,7 +877,7 @@ void test_integration_media_stop_multicast_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -929,7 +927,7 @@ void test_integration_media_create_profile_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 

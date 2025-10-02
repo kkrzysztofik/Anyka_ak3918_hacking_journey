@@ -27,6 +27,7 @@
 #include "services/common/onvif_imaging_types.h"
 #include "services/imaging/onvif_imaging.h"
 #include "utils/error/error_handling.h"
+#include "utils/memory/memory_manager.h"
 
 // SOAP test helpers
 #include "common/soap_test_helpers.h"
@@ -486,7 +487,8 @@ void test_integration_imaging_get_settings_soap(void** state) {
 
   // Step 8: Verify response contains ImagingSettings with valid brightness value
   char brightness_value[64] = {0};
-  result = soap_test_extract_element_text(response.body, "Brightness", brightness_value, sizeof(brightness_value));
+  result = soap_test_extract_element_text(response.body, "Brightness", brightness_value,
+                                          sizeof(brightness_value));
   if (result == ONVIF_SUCCESS) {
     assert_true(strlen(brightness_value) > 0);
   }
@@ -494,7 +496,7 @@ void test_integration_imaging_get_settings_soap(void** state) {
   // Step 9: Cleanup resources
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 
@@ -505,9 +507,8 @@ void test_integration_imaging_set_settings_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request("SetImagingSettings",
-                                                     SOAP_IMAGING_SET_IMAGING_SETTINGS,
-                                                     "/onvif/imaging_service");
+  http_request_t* request = soap_test_create_request(
+    "SetImagingSettings", SOAP_IMAGING_SET_IMAGING_SETTINGS, "/onvif/imaging_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -541,7 +542,7 @@ void test_integration_imaging_set_settings_soap(void** state) {
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
-    free(response.body);
+    ONVIF_FREE(response.body);
   }
 }
 

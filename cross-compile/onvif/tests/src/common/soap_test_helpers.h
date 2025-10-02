@@ -74,10 +74,17 @@ void soap_test_free_request(http_request_t* request);
  * @param ctx gSOAP context to initialize (output)
  * @param response HTTP response containing SOAP envelope
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Caller must call onvif_gsoap_cleanup() when done
+ * @note Caller must call soap_test_cleanup_response_parsing() and onvif_gsoap_cleanup() when done
  */
 int soap_test_init_response_parsing(onvif_gsoap_context_t* ctx,
                                     const http_response_t* response);
+
+/**
+ * @brief Cleanup response parsing resources
+ * @param ctx gSOAP context to cleanup
+ * @note Must be called before onvif_gsoap_cleanup()
+ */
+void soap_test_cleanup_response_parsing(onvif_gsoap_context_t* ctx);
 
 /**
  * @brief Parse SOAP response for Media GetProfiles
