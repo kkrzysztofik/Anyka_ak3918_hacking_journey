@@ -25,10 +25,10 @@
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Extracts VideoSourceToken to identify which video source settings to retrieve
  * @note Response contains ImagingSettings with Brightness, Contrast, Saturation, Sharpness, etc.
- * @note Output structure is allocated with soap_new__onvif4__GetImagingSettings()
+ * @note Output structure is allocated with soap_new__timg__GetImagingSettings()
  */
 int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
-                                           struct _onvif4__GetImagingSettings** out);
+                                           struct _timg__GetImagingSettings** out);
 
 /**
  * @brief Parse SetImagingSettings ONVIF Imaging service request
@@ -39,10 +39,10 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
  * @note ImagingSettings contains Brightness, Contrast, ColorSaturation, Sharpness values
  * @note May also include BacklightCompensation, Exposure, Focus, WideDynamicRange settings
  * @note ForcePersistence flag indicates whether settings should persist across reboots
- * @note Output structure is allocated with soap_new__onvif4__SetImagingSettings()
+ * @note Output structure is allocated with soap_new__timg__SetImagingSettings()
  */
 int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
-                                           struct _onvif4__SetImagingSettings** out);
+                                           struct _timg__SetImagingSettings** out);
 
 /* ============================================================================
  * Imaging Service Response Callback Data Structures

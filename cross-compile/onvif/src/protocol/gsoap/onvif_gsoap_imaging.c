@@ -11,8 +11,8 @@
  * 1. Validate input parameters (NULL checks)
  * 2. Verify request parsing is initialized
  * 3. Set operation name and start timing
- * 4. Allocate gSOAP structure using soap_new__onvif4__[Operation]()
- * 5. Deserialize SOAP request using soap_read__onvif4__[Operation]()
+ * 4. Allocate gSOAP structure using soap_new__timg__[Operation]()
+ * 5. Deserialize SOAP request using soap_read__timg__[Operation]()
  * 6. Record completion time
  *
  * The parsed structures are managed by the gSOAP context and should not
@@ -32,12 +32,12 @@
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed GetImagingSettings structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Parses struct _onvif4__GetImagingSettings from SOAP envelope
+ * @note Parses struct _timg__GetImagingSettings from SOAP envelope
  * @note Extracts VideoSourceToken to identify which video source settings to retrieve
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
-                                           struct _onvif4__GetImagingSettings** out) {
+                                           struct _timg__GetImagingSettings** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -58,7 +58,7 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
   ctx->request_state.parse_start_time = get_timestamp_us();
 
   /* 4. Allocate structure using gSOAP managed memory */
-  *out = soap_new__onvif4__GetImagingSettings(&ctx->soap, -1);
+  *out = soap_new__timg__GetImagingSettings(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
                           "Failed to allocate GetImagingSettings request structure");
@@ -66,7 +66,7 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__onvif4__GetImagingSettings(&ctx->soap, *out) != SOAP_OK) {
+  if (soap_read__timg__GetImagingSettings(&ctx->soap, *out) != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GetImagingSettings SOAP request");
@@ -84,14 +84,14 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed SetImagingSettings structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Parses struct _onvif4__SetImagingSettings from SOAP envelope
+ * @note Parses struct _timg__SetImagingSettings from SOAP envelope
  * @note Extracts VideoSourceToken and ImagingSettings structure
  * @note ImagingSettings contains Brightness, Contrast, ColorSaturation, Sharpness
  * @note May include BacklightCompensation, Exposure, Focus, WideDynamicRange
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
-                                           struct _onvif4__SetImagingSettings** out) {
+                                           struct _timg__SetImagingSettings** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -112,7 +112,7 @@ int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
   ctx->request_state.parse_start_time = get_timestamp_us();
 
   /* 4. Allocate structure using gSOAP managed memory */
-  *out = soap_new__onvif4__SetImagingSettings(&ctx->soap, -1);
+  *out = soap_new__timg__SetImagingSettings(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
                           "Failed to allocate SetImagingSettings request structure");
@@ -120,7 +120,7 @@ int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__onvif4__SetImagingSettings(&ctx->soap, *out) != SOAP_OK) {
+  if (soap_read__timg__SetImagingSettings(&ctx->soap, *out) != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse SetImagingSettings SOAP request");
@@ -199,8 +199,8 @@ int imaging_settings_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_INVALID;
   }
 
-  struct _onvif4__GetImagingSettingsResponse* response =
-    soap_new__onvif4__GetImagingSettingsResponse(soap, 1);
+  struct _timg__GetImagingSettingsResponse* response =
+    soap_new__timg__GetImagingSettingsResponse(soap, 1);
   if (!response) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
@@ -208,8 +208,8 @@ int imaging_settings_response_callback(struct soap* soap, void* user_data) {
   // Note: Imaging settings response generation would go here
   // For now, create minimal response structure
 
-  if (soap_put__onvif4__GetImagingSettingsResponse(
-        soap, response, "onvif4:GetImagingSettingsResponse", NULL) != SOAP_OK) {
+  if (soap_put__timg__GetImagingSettingsResponse(
+        soap, response, "timg:GetImagingSettingsResponse", NULL) != SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -230,8 +230,8 @@ int set_imaging_settings_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_INVALID;
   }
 
-  struct _onvif4__SetImagingSettingsResponse* response =
-    soap_new__onvif4__SetImagingSettingsResponse(soap, 1);
+  struct _timg__SetImagingSettingsResponse* response =
+    soap_new__timg__SetImagingSettingsResponse(soap, 1);
   if (!response) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
@@ -239,8 +239,8 @@ int set_imaging_settings_response_callback(struct soap* soap, void* user_data) {
   // Note: SetImagingSettings response is typically empty
   (void)data; // Suppress unused parameter warning
 
-  if (soap_put__onvif4__SetImagingSettingsResponse(
-        soap, response, "onvif4:SetImagingSettingsResponse", NULL) != SOAP_OK) {
+  if (soap_put__timg__SetImagingSettingsResponse(
+        soap, response, "timg:SetImagingSettingsResponse", NULL) != SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 

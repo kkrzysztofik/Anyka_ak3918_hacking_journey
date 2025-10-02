@@ -17,9 +17,9 @@ SOAP_NMAC struct Namespace namespaces[] = {
         { "wstop", "http://docs.oasis-open.org/wsn/t-1", NULL, NULL },
         { "xmime5", "http://www.w3.org/2005/05/xmlmime", NULL, NULL },
         { "tt", "http://www.onvif.org/ver10/schema", NULL, NULL },
-        { "onvif3", "http://www.onvif.org/ver10/ptz/wsdl", NULL, NULL },
-        { "onvif4", "http://www.onvif.org/ver10/imaging/wsdl", NULL, NULL },
         { "tds", "http://www.onvif.org/ver10/device/wsdl", NULL, NULL },
+        { "timg", "http://www.onvif.org/ver20/imaging/wsdl", NULL, NULL },
+        { "tptz", "http://www.onvif.org/ver20/ptz/wsdl", NULL, NULL },
         { "trt", "http://www.onvif.org/ver10/media/wsdl", NULL, NULL },
         { NULL, NULL, NULL, NULL} /* end of namespaces[] */
     };

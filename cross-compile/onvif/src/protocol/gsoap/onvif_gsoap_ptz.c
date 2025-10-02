@@ -11,8 +11,8 @@
  * 1. Validate input parameters (NULL checks)
  * 2. Verify request parsing is initialized
  * 3. Set operation name and start timing
- * 4. Allocate gSOAP structure using soap_new__onvif3__[Operation]()
- * 5. Deserialize SOAP request using soap_read__onvif3__[Operation]()
+ * 4. Allocate gSOAP structure using soap_new__tptz__[Operation]()
+ * 5. Deserialize SOAP request using soap_read__tptz__[Operation]()
  * 6. Record completion time
  *
  * The parsed structures are managed by the gSOAP context and should not
@@ -32,11 +32,11 @@
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed GetNodes structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Parses struct _onvif3__GetNodes from SOAP envelope
+ * @note Parses struct _tptz__GetNodes from SOAP envelope
  * @note Retrieves PTZ node information including capabilities
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _onvif3__GetNodes** out) {
+int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _tptz__GetNodes** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -57,7 +57,7 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _onvif3__GetN
   ctx->request_state.parse_start_time = get_timestamp_us();
 
   /* 4. Allocate structure using gSOAP managed memory */
-  *out = soap_new__onvif3__GetNodes(&ctx->soap, -1);
+  *out = soap_new__tptz__GetNodes(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
                           "Failed to allocate GetNodes request structure");
@@ -65,7 +65,7 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _onvif3__GetN
   }
 
   /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__onvif3__GetNodes(&ctx->soap, *out) != SOAP_OK) {
+  if (soap_read__tptz__GetNodes(&ctx->soap, *out) != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GetNodes SOAP request");
@@ -83,12 +83,12 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _onvif3__GetN
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed AbsoluteMove structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Parses struct _onvif3__AbsoluteMove from SOAP envelope
+ * @note Parses struct _tptz__AbsoluteMove from SOAP envelope
  * @note Extracts ProfileToken, Position (PanTilt and Zoom), and optional Speed
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
-                                    struct _onvif3__AbsoluteMove** out) {
+                                    struct _tptz__AbsoluteMove** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -109,7 +109,7 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
   ctx->request_state.parse_start_time = get_timestamp_us();
 
   /* 4. Allocate structure using gSOAP managed memory */
-  *out = soap_new__onvif3__AbsoluteMove(&ctx->soap, -1);
+  *out = soap_new__tptz__AbsoluteMove(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
                           "Failed to allocate AbsoluteMove request structure");
@@ -117,7 +117,7 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__onvif3__AbsoluteMove(&ctx->soap, *out) != SOAP_OK) {
+  if (soap_read__tptz__AbsoluteMove(&ctx->soap, *out) != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse AbsoluteMove SOAP request");
@@ -135,11 +135,11 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed GetPresets structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Parses struct _onvif3__GetPresets from SOAP envelope
+ * @note Parses struct _tptz__GetPresets from SOAP envelope
  * @note Extracts ProfileToken to retrieve configured presets
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _onvif3__GetPresets** out) {
+int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _tptz__GetPresets** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -160,7 +160,7 @@ int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _onvif3__Ge
   ctx->request_state.parse_start_time = get_timestamp_us();
 
   /* 4. Allocate structure using gSOAP managed memory */
-  *out = soap_new__onvif3__GetPresets(&ctx->soap, -1);
+  *out = soap_new__tptz__GetPresets(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
                           "Failed to allocate GetPresets request structure");
@@ -168,7 +168,7 @@ int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _onvif3__Ge
   }
 
   /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__onvif3__GetPresets(&ctx->soap, *out) != SOAP_OK) {
+  if (soap_read__tptz__GetPresets(&ctx->soap, *out) != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GetPresets SOAP request");
@@ -186,12 +186,12 @@ int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _onvif3__Ge
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed SetPreset structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Parses struct _onvif3__SetPreset from SOAP envelope
+ * @note Parses struct _tptz__SetPreset from SOAP envelope
  * @note Extracts ProfileToken and optional PresetToken/PresetName
  * @note If PresetToken is NULL, creates new preset; otherwise updates existing
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _onvif3__SetPreset** out) {
+int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _tptz__SetPreset** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -212,7 +212,7 @@ int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _onvif3__Set
   ctx->request_state.parse_start_time = get_timestamp_us();
 
   /* 4. Allocate structure using gSOAP managed memory */
-  *out = soap_new__onvif3__SetPreset(&ctx->soap, -1);
+  *out = soap_new__tptz__SetPreset(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
                           "Failed to allocate SetPreset request structure");
@@ -220,7 +220,7 @@ int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _onvif3__Set
   }
 
   /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__onvif3__SetPreset(&ctx->soap, *out) != SOAP_OK) {
+  if (soap_read__tptz__SetPreset(&ctx->soap, *out) != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse SetPreset SOAP request");
@@ -238,12 +238,12 @@ int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _onvif3__Set
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed GotoPreset structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Parses struct _onvif3__GotoPreset from SOAP envelope
+ * @note Parses struct _tptz__GotoPreset from SOAP envelope
  * @note Extracts ProfileToken, PresetToken, and optional Speed
  * @note PresetToken identifies which preset position to move to
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _onvif3__GotoPreset** out) {
+int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _tptz__GotoPreset** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -264,7 +264,7 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _onvif3__Go
   ctx->request_state.parse_start_time = get_timestamp_us();
 
   /* 4. Allocate structure using gSOAP managed memory */
-  *out = soap_new__onvif3__GotoPreset(&ctx->soap, -1);
+  *out = soap_new__tptz__GotoPreset(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
                           "Failed to allocate GotoPreset request structure");
@@ -272,7 +272,7 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _onvif3__Go
   }
 
   /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__onvif3__GotoPreset(&ctx->soap, *out) != SOAP_OK) {
+  if (soap_read__tptz__GotoPreset(&ctx->soap, *out) != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GotoPreset SOAP request");
@@ -290,13 +290,13 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _onvif3__Go
  * @param ctx gSOAP context with initialized request parsing
  * @param out Output pointer to receive parsed RemovePreset structure
  * @return ONVIF_SUCCESS on success, error code otherwise
- * @note Parses struct _onvif3__RemovePreset from SOAP envelope
+ * @note Parses struct _tptz__RemovePreset from SOAP envelope
  * @note Extracts ProfileToken and PresetToken for preset deletion
  * @note PresetToken identifies which preset to remove from profile
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
-                                    struct _onvif3__RemovePreset** out) {
+                                    struct _tptz__RemovePreset** out) {
   /* 1. Validate parameters */
   if (!ctx || !out) {
     if (ctx) {
@@ -317,7 +317,7 @@ int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
   ctx->request_state.parse_start_time = get_timestamp_us();
 
   /* 4. Allocate structure using gSOAP managed memory */
-  *out = soap_new__onvif3__RemovePreset(&ctx->soap, -1);
+  *out = soap_new__tptz__RemovePreset(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
                           "Failed to allocate RemovePreset request structure");
@@ -325,7 +325,7 @@ int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__onvif3__RemovePreset(&ctx->soap, *out) != SOAP_OK) {
+  if (soap_read__tptz__RemovePreset(&ctx->soap, *out) != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse RemovePreset SOAP request");
@@ -350,7 +350,7 @@ int ptz_nodes_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_INVALID;
   }
 
-  struct _onvif3__GetNodesResponse* response = soap_new__onvif3__GetNodesResponse(soap, 1);
+  struct _tptz__GetNodesResponse* response = soap_new__tptz__GetNodesResponse(soap, 1);
   if (!response) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
@@ -370,7 +370,7 @@ int ptz_nodes_response_callback(struct soap* soap, void* user_data) {
     node->FixedHomePosition = src_node->home_supported ? xsd__boolean__true_ : xsd__boolean__false_;
   }
 
-  if (soap_put__onvif3__GetNodesResponse(soap, response, "onvif3:GetNodesResponse", NULL) !=
+  if (soap_put__tptz__GetNodesResponse(soap, response, "tptz:GetNodesResponse", NULL) !=
       SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
@@ -385,12 +385,12 @@ int ptz_absolute_move_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_INVALID;
   }
 
-  struct _onvif3__AbsoluteMoveResponse* response = soap_new__onvif3__AbsoluteMoveResponse(soap, 1);
+  struct _tptz__AbsoluteMoveResponse* response = soap_new__tptz__AbsoluteMoveResponse(soap, 1);
   if (!response) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  if (soap_put__onvif3__AbsoluteMoveResponse(soap, response, "onvif3:AbsoluteMoveResponse", NULL) !=
+  if (soap_put__tptz__AbsoluteMoveResponse(soap, response, "tptz:AbsoluteMoveResponse", NULL) !=
       SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
@@ -405,20 +405,20 @@ int ptz_presets_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_INVALID;
   }
 
-  struct _onvif3__GetPresetsResponse* response = soap_new__onvif3__GetPresetsResponse(soap, 1);
+  struct _tptz__GetPresetsResponse* response = soap_new__tptz__GetPresetsResponse(soap, 1);
   if (!response) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  response->__sizePTZPreset = data->count;
-  response->PTZPreset = soap_new_tt__PTZPreset(soap, data->count);
-  if (!response->PTZPreset) {
+  response->__sizePreset = data->count;
+  response->Preset = soap_new_tt__PTZPreset(soap, data->count);
+  if (!response->Preset) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
   for (int i = 0; i < data->count; i++) {
     const struct ptz_preset* src_preset = &data->presets[i];
-    struct tt__PTZPreset* preset = &response->PTZPreset[i];
+    struct tt__PTZPreset* preset = &response->Preset[i];
 
     preset->token = soap_strdup(soap, src_preset->token);
     preset->Name = soap_strdup(soap, src_preset->name);
@@ -442,7 +442,7 @@ int ptz_presets_response_callback(struct soap* soap, void* user_data) {
     }
   }
 
-  if (soap_put__onvif3__GetPresetsResponse(soap, response, "onvif3:GetPresetsResponse", NULL) !=
+  if (soap_put__tptz__GetPresetsResponse(soap, response, "tptz:GetPresetsResponse", NULL) !=
       SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
@@ -457,7 +457,7 @@ int ptz_set_preset_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_INVALID;
   }
 
-  struct _onvif3__SetPresetResponse* response = soap_new__onvif3__SetPresetResponse(soap, 1);
+  struct _tptz__SetPresetResponse* response = soap_new__tptz__SetPresetResponse(soap, 1);
   if (!response) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
@@ -466,7 +466,7 @@ int ptz_set_preset_response_callback(struct soap* soap, void* user_data) {
   // The preset token is returned in the SetPreset request parsing, not in response generation
   (void)data; // Suppress unused parameter warning
 
-  if (soap_put__onvif3__SetPresetResponse(soap, response, "onvif3:SetPresetResponse", NULL) !=
+  if (soap_put__tptz__SetPresetResponse(soap, response, "tptz:SetPresetResponse", NULL) !=
       SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
@@ -481,12 +481,12 @@ int ptz_goto_preset_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_INVALID;
   }
 
-  struct _onvif3__GotoPresetResponse* response = soap_new__onvif3__GotoPresetResponse(soap, 1);
+  struct _tptz__GotoPresetResponse* response = soap_new__tptz__GotoPresetResponse(soap, 1);
   if (!response) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  if (soap_put__onvif3__GotoPresetResponse(soap, response, "onvif3:GotoPresetResponse", NULL) !=
+  if (soap_put__tptz__GotoPresetResponse(soap, response, "tptz:GotoPresetResponse", NULL) !=
       SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }

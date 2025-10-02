@@ -25,6 +25,7 @@
 #include "protocol/gsoap/onvif_gsoap_response.h"
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_imaging_types.h"
+#include "services/common/onvif_service_common.h"
 #include "services/common/onvif_types.h"
 #include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
@@ -908,6 +909,67 @@ void onvif_imaging_service_cleanup(void) {
 }
 
 /* ============================================================================
+ * Service Operation Definitions (Following PTZ Pattern)
+ * ============================================================================ */
+
+/**
+ * @brief GetImagingSettings business logic
+ */
+static int get_imaging_settings_business_logic(const service_handler_config_t* config, // NOLINT
+                                                const http_request_t* request,
+                                                http_response_t* response,              // NOLINT
+                                                onvif_gsoap_context_t* gsoap_ctx,
+                                                service_log_context_t* log_ctx,
+                                                error_context_t* error_ctx,             // NOLINT
+                                                void* callback_data) {
+  (void)config;
+
+  // Initialize gSOAP context for request parsing
+  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
+  if (result != 0) {
+    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result,
+                                  "Failed to initialize gSOAP request parsing");
+    return ONVIF_ERROR;
+  }
+
+  // Parse GetImagingSettings request
+  struct _timg__GetImagingSettings* get_settings_req = NULL;
+  result = onvif_gsoap_parse_get_imaging_settings(gsoap_ctx, &get_settings_req);
+  if (result != ONVIF_SUCCESS) {
+    service_log_operation_failure(log_ctx, "parse_get_imaging_settings", result,
+                                  "Failed to parse GetImagingSettings request");
+    return result;
+  }
+
+  // Get current imaging settings
+  struct imaging_settings settings;
+  result = onvif_imaging_get_settings(&settings);
+  if (result != ONVIF_SUCCESS) {
+    service_log_operation_failure(log_ctx, "get_imaging_settings", result,
+                                  "Failed to get imaging settings");
+    return result;
+  }
+
+  // Update callback data
+  imaging_settings_callback_data_t* data = (imaging_settings_callback_data_t*)callback_data;
+  data->settings = &settings;
+
+  service_log_operation_success(log_ctx, "Imaging settings retrieved");
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief GetImagingSettings service operation definition
+ */
+static const onvif_service_operation_t get_imaging_settings_operation = {
+  .service_name = "Imaging",
+  .operation_name = "GetImagingSettings",
+  .operation_context = "settings_retrieval",
+  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                .execute_business_logic = get_imaging_settings_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
+
+/* ============================================================================
  * Action Handlers
  * ============================================================================ */
 
@@ -915,74 +977,13 @@ void onvif_imaging_service_cleanup(void) {
 static int handle_get_imaging_settings(const service_handler_config_t* config,
                                        const http_request_t* request, http_response_t* response,
                                        onvif_gsoap_context_t* gsoap_ctx) {
-  // Initialize error and logging context
-  error_context_t error_ctx;
-  error_context_init(&error_ctx, "Imaging", "GetImagingSettings", "settings_retrieval");
+  // Prepare callback data for imaging settings
+  imaging_settings_callback_data_t callback_data = {.settings = NULL};
 
-  service_log_context_t log_ctx;
-  service_log_init_context(&log_ctx, "Imaging", "GetImagingSettings", SERVICE_LOG_INFO);
-
-  // Enhanced parameter validation
-  if (!config) {
-    return error_handle_parameter(&error_ctx, "config", "missing", response);
-  }
-  if (!response) {
-    return error_handle_parameter(&error_ctx, "response", "missing", response);
-  }
-  if (!gsoap_ctx) {
-    return error_handle_parameter(&error_ctx, "gsoap_ctx", "missing", response);
-  }
-
-  // Initialize gSOAP request parsing
-  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, request->body_length);
-  if (result != 0) {
-    return error_handle_system(&error_ctx, result, "init_request_parsing", response);
-  }
-
-  // Parse GetImagingSettings request using new gSOAP parsing function
-  struct _onvif4__GetImagingSettings* get_settings_req = NULL;
-  result = onvif_gsoap_parse_get_imaging_settings(gsoap_ctx, &get_settings_req);
-  if (result != ONVIF_SUCCESS || !get_settings_req) {
-    return error_handle_system(&error_ctx, result, "parse_get_imaging_settings", response);
-  }
-
-  // Extract video source token from parsed request (use default if not provided)
-  const char* video_source_token =
-    get_settings_req->VideoSourceToken ? get_settings_req->VideoSourceToken : "VideoSource0";
-
-  // Get current imaging settings
-  struct imaging_settings settings;
-  result = onvif_imaging_get_settings(&settings);
-  if (result != ONVIF_SUCCESS) {
-    return error_handle_system(&error_ctx, result, "get_imaging_settings", response);
-  }
-
-  // Generate SOAP response with gSOAP and smart response builder
-  imaging_settings_callback_data_t callback_data = {.settings = &settings};
-  result = onvif_gsoap_generate_response_with_callback(
-    gsoap_ctx, imaging_settings_response_callback, &callback_data);
-  if (result != ONVIF_SUCCESS) {
-    return error_handle_system(&error_ctx, result, "generate_imaging_settings_response", response);
-  }
-
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "get_response_data", response);
-  }
-
-  size_t estimated_size = smart_response_estimate_size(soap_response);
-  if (smart_response_build(response, soap_response, estimated_size,
-                           &g_imaging_response_buffer_pool) != ONVIF_SUCCESS) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "smart_response_build", response);
-  }
-
-  // Set response headers
-  response->status_code = IMAGING_HTTP_STATUS_OK;
-  response->content_type = "application/soap+xml; charset=utf-8";
-
-  service_log_info(&log_ctx, "Successfully retrieved imaging settings for token: %s\n",
-                   video_source_token);
-  return ONVIF_SUCCESS;
+  // Use the enhanced callback-based handler
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
+                                           &get_imaging_settings_operation,
+                                           imaging_settings_response_callback, &callback_data);
 }
 
 static int handle_set_imaging_settings(const service_handler_config_t* config,
@@ -1013,7 +1014,7 @@ static int handle_set_imaging_settings(const service_handler_config_t* config,
   }
 
   // Parse SetImagingSettings request using new gSOAP parsing function
-  struct _onvif4__SetImagingSettings* set_settings_req = NULL;
+  struct _timg__SetImagingSettings* set_settings_req = NULL;
   result = onvif_gsoap_parse_set_imaging_settings(gsoap_ctx, &set_settings_req);
   if (result != ONVIF_SUCCESS || !set_settings_req || !set_settings_req->ImagingSettings) {
     return error_handle_system(&error_ctx, result, "parse_set_imaging_settings", response);

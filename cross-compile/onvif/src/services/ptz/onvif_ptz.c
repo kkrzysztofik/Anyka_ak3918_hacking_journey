@@ -488,7 +488,7 @@ typedef struct {
 /**
  * @brief PTZ service operation dispatch table
  */
-static const ptz_operation_entry_t g_ptz_operations[] = {{"GetConfigurations", handle_get_nodes},
+static const ptz_operation_entry_t g_ptz_operations[] = {{"GetNodes", handle_get_nodes},
                                                          {"AbsoluteMove", handle_absolute_move},
                                                          {"GetPresets", handle_get_presets},
                                                          {"SetPreset", handle_set_preset},
@@ -542,25 +542,25 @@ static const onvif_service_registration_t g_ptz_service_registration = {
  */
 static int get_ptz_nodes_business_logic(const service_handler_config_t* config, // NOLINT
                                         const http_request_t* request,          // NOLINT
-                                        http_response_t* response,
+                                        http_response_t* response,              // NOLINT
                                         onvif_gsoap_context_t* gsoap_ctx, // NOLINT
-                                        service_log_context_t* log_ctx, error_context_t* error_ctx,
+                                        service_log_context_t* log_ctx, error_context_t* error_ctx, // NOLINT
                                         void* callback_data) {
   // Initialize gSOAP context for request parsing
   int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
   if (result != 0) {
     service_log_operation_failure(log_ctx, "gsoap_request_parsing", result,
                                   "Failed to initialize gSOAP request parsing");
-    return error_handle_system(error_ctx, ONVIF_ERROR, "gsoap_init", response);
+    return ONVIF_ERROR;
   }
 
   // Parse GetNodes request (empty request structure)
-  struct _onvif3__GetNodes* get_nodes_req = NULL;
+  struct _tptz__GetNodes* get_nodes_req = NULL;
   result = onvif_gsoap_parse_get_nodes(gsoap_ctx, &get_nodes_req);
   if (result != ONVIF_SUCCESS) {
     service_log_operation_failure(log_ctx, "parse_get_nodes", result,
                                   "Failed to parse GetNodes request");
-    return error_handle_parameter(error_ctx, "GetNodes", "parse_failed", response);
+    return result;
   }
 
   // Get PTZ nodes using existing function
@@ -569,7 +569,9 @@ static int get_ptz_nodes_business_logic(const service_handler_config_t* config, 
   result = onvif_ptz_get_nodes(&nodes, &count);
 
   if (result != ONVIF_SUCCESS) {
-    return error_handle_system(error_ctx, result, "get_nodes", response);
+    service_log_operation_failure(log_ctx, "get_nodes", result,
+                                  "Failed to get PTZ nodes");
+    return result;
   }
 
   // Update callback data
@@ -600,7 +602,7 @@ static int ptz_absolute_move_business_logic(const service_handler_config_t* conf
   }
 
   // Parse AbsoluteMove request using new gSOAP parsing function
-  struct _onvif3__AbsoluteMove* absolute_move_req = NULL;
+  struct _tptz__AbsoluteMove* absolute_move_req = NULL;
   result = onvif_gsoap_parse_absolute_move(gsoap_ctx, &absolute_move_req);
   if (result != ONVIF_SUCCESS || !absolute_move_req) {
     service_log_operation_failure(log_ctx, "parse_absolute_move", result,
@@ -614,12 +616,12 @@ static int ptz_absolute_move_business_logic(const service_handler_config_t* conf
   }
   const char* profile_token = absolute_move_req->ProfileToken;
 
-  // Extract position from Destination
+  // Extract position from Position field
   struct ptz_vector position;
   memset(&position, 0, sizeof(position));
-  if (absolute_move_req->Destination && absolute_move_req->Destination->PanTilt) {
-    position.pan_tilt.x = absolute_move_req->Destination->PanTilt->x;
-    position.pan_tilt.y = absolute_move_req->Destination->PanTilt->y;
+  if (absolute_move_req->Position && absolute_move_req->Position->PanTilt) {
+    position.pan_tilt.x = absolute_move_req->Position->PanTilt->x;
+    position.pan_tilt.y = absolute_move_req->Position->PanTilt->y;
   }
 
   // Execute PTZ movement using the existing function
@@ -650,7 +652,7 @@ static int get_ptz_presets_business_logic(const service_handler_config_t* config
   }
 
   // Parse GetPresets request using new gSOAP parsing function
-  struct _onvif3__GetPresets* get_presets_req = NULL;
+  struct _tptz__GetPresets* get_presets_req = NULL;
   result = onvif_gsoap_parse_get_presets(gsoap_ctx, &get_presets_req);
   if (result != ONVIF_SUCCESS || !get_presets_req) {
     service_log_operation_failure(log_ctx, "parse_get_presets", result,
@@ -699,7 +701,7 @@ static int set_ptz_preset_business_logic(const service_handler_config_t* config,
   }
 
   // Parse SetPreset request using new gSOAP parsing function
-  struct _onvif3__SetPreset* set_preset_req = NULL;
+  struct _tptz__SetPreset* set_preset_req = NULL;
   result = onvif_gsoap_parse_set_preset(gsoap_ctx, &set_preset_req);
   if (result != ONVIF_SUCCESS || !set_preset_req) {
     service_log_operation_failure(log_ctx, "parse_set_preset", result,
@@ -758,7 +760,7 @@ static int goto_ptz_preset_business_logic(const service_handler_config_t* config
   }
 
   // Parse GotoPreset request using new gSOAP parsing function
-  struct _onvif3__GotoPreset* goto_preset_req = NULL;
+  struct _tptz__GotoPreset* goto_preset_req = NULL;
   result = onvif_gsoap_parse_goto_preset(gsoap_ctx, &goto_preset_req);
   if (result != ONVIF_SUCCESS || !goto_preset_req) {
     service_log_operation_failure(log_ctx, "parse_goto_preset", result,
@@ -798,10 +800,11 @@ static int goto_ptz_preset_business_logic(const service_handler_config_t* config
  */
 static const onvif_service_operation_t get_ptz_nodes_operation = {
   .service_name = "PTZ",
-  .operation_name = "GetConfigurations",
+  .operation_name = "GetNodes",
   .operation_context = "nodes_retrieval",
   .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
-                .execute_business_logic = get_ptz_nodes_business_logic}};
+                .execute_business_logic = get_ptz_nodes_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
 
 /**
  * @brief PTZ absolute move service operation definition
@@ -811,7 +814,8 @@ static const onvif_service_operation_t ptz_absolute_move_operation = {
   .operation_name = "AbsoluteMove",
   .operation_context = "ptz_movement",
   .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
-                .execute_business_logic = ptz_absolute_move_business_logic}};
+                .execute_business_logic = ptz_absolute_move_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
 
 /**
  * @brief PTZ presets service operation definition
@@ -821,7 +825,8 @@ static const onvif_service_operation_t get_ptz_presets_operation = {
   .operation_name = "GetPresets",
   .operation_context = "presets_retrieval",
   .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
-                .execute_business_logic = get_ptz_presets_business_logic}};
+                .execute_business_logic = get_ptz_presets_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
 
 /**
  * @brief PTZ set preset service operation definition
@@ -831,7 +836,8 @@ static const onvif_service_operation_t set_ptz_preset_operation = {
   .operation_name = "SetPreset",
   .operation_context = "preset_creation",
   .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
-                .execute_business_logic = set_ptz_preset_business_logic}};
+                .execute_business_logic = set_ptz_preset_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
 
 /**
  * @brief PTZ goto preset service operation definition
@@ -841,7 +847,8 @@ static const onvif_service_operation_t goto_ptz_preset_operation = {
   .operation_name = "GotoPreset",
   .operation_context = "preset_movement",
   .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
-                .execute_business_logic = goto_ptz_preset_business_logic}};
+                .execute_business_logic = goto_ptz_preset_business_logic,
+                .post_process_response = onvif_util_standard_post_process}};
 
 /* ============================================================================
  * Action Handlers

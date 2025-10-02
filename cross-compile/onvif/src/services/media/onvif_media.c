@@ -1114,10 +1114,10 @@ static int handle_set_metadata_configuration(const service_handler_config_t* con
 /**
  * @brief Business logic callback for GetProfiles operation
  */
-static int get_profiles_business_logic(const service_handler_config_t* config,
-                                       const http_request_t* request, http_response_t* response,
+static int get_profiles_business_logic(const service_handler_config_t* config,            // NOLINT
+                                       const http_request_t* request, http_response_t* response, // NOLINT
                                        onvif_gsoap_context_t* gsoap_ctx,
-                                       service_log_context_t* log_ctx, error_context_t* error_ctx,
+                                       service_log_context_t* log_ctx, error_context_t* error_ctx, // NOLINT
                                        void* callback_data) {
   (void)config;
   (void)error_ctx;
@@ -1141,7 +1141,7 @@ static int get_profiles_business_logic(const service_handler_config_t* config,
   if (result != ONVIF_SUCCESS) {
     service_log_operation_failure(log_ctx, "parse_get_profiles", result,
                                   "Failed to parse GetProfiles request");
-    return error_handle_parameter(error_ctx, "GetProfiles", "parse_failed", response);
+    return result;
   }
 
   media_profiles_callback_data_t* profile_data = (media_profiles_callback_data_t*)callback_data;
@@ -1149,33 +1149,6 @@ static int get_profiles_business_logic(const service_handler_config_t* config,
   // Set callback data with existing profiles
   profile_data->profiles = g_media_profiles;
   profile_data->profile_count = MEDIA_PROFILE_COUNT_DEFAULT;
-
-  // Generate response using gSOAP callback
-  result = onvif_gsoap_generate_response_with_callback(gsoap_ctx, media_profiles_response_callback,
-                                                       callback_data);
-  if (result != 0) {
-    service_log_operation_failure(log_ctx, "gsoap_response_generation", result,
-                                  "Failed to generate gSOAP response");
-    return ONVIF_ERROR;
-  }
-
-  // Get the generated SOAP response from gSOAP
-  const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
-  if (!soap_response) {
-    service_log_operation_failure(log_ctx, "soap_response_retrieval", -1,
-                                  "Failed to retrieve SOAP response data");
-    return ONVIF_ERROR;
-  }
-
-  // Use smart response builder for final output with memory optimization
-  size_t estimated_size = smart_response_estimate_size(soap_response);
-  result =
-    smart_response_build(response, soap_response, estimated_size, &g_media_response_buffer_pool);
-  if (result != ONVIF_SUCCESS) {
-    service_log_operation_failure(log_ctx, "smart_response_build", result,
-                                  "Failed to build smart response");
-    return result;
-  }
 
   service_log_info(log_ctx, "GetProfiles request completed successfully");
   return ONVIF_SUCCESS;
