@@ -18,6 +18,13 @@ void test_integration_uri_caching_optimization(void** state);
 void test_integration_media_memory_efficiency(void** state);
 void test_integration_concurrent_stream_uri_access(void** state);
 void test_integration_stress_test_optimization(void** state);
+void test_integration_media_platform_integration(void** state);
+
+// New test function declarations for enhanced coverage
+void test_integration_media_delete_profile_operation(void** state);
+void test_integration_media_error_invalid_profile_token(void** state);
+void test_integration_media_concurrent_profile_operations(void** state);
+void test_integration_media_request_response_validation(void** state);
 
 // Test suite
 extern const struct CMUnitTest media_service_optimization_tests[];

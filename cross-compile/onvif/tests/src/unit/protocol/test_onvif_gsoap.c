@@ -1,6 +1,6 @@
 /**
  * @file test_onvif_gsoap.c
- * @brief Unit tests for ONVIF gSOAP module
+ * @brief Unit tests for ONVIF gSOAP parsing module
  * @author kkrzysztofik
  * @date 2025
  */
@@ -10,20 +10,50 @@
 #include <string.h>
 
 #include "cmocka_wrapper.h"
+#include "data/soap_test_envelopes.h"
 #include "generated/soapH.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
+#include "protocol/gsoap/onvif_gsoap_device.h"
+#include "protocol/gsoap/onvif_gsoap_imaging.h"
+#include "protocol/gsoap/onvif_gsoap_media.h"
+#include "protocol/gsoap/onvif_gsoap_ptz.h"
 #include "utils/error/error_handling.h"
 
-// Include the module under test
-#include "protocol/gsoap/onvif_gsoap.h"
 
-// Test constants for magic numbers
-#define TEST_BYTES_WRITTEN     100
-#define TEST_START_TIME        12345
-#define TEST_END_TIME          67890
-#define TEST_BUFFER_SIZE       64
-#define TEST_SMALL_BUFFER_SIZE 32
-#define TEST_LARGE_BUFFER_SIZE 128
-#define TEST_HEADER_SIZE       100
+/* ============================================================================
+ * Helper Functions
+ * ============================================================================ */
+
+/**
+ * @brief Helper function to set up context for parsing tests
+ * @param ctx gSOAP context to initialize
+ * @param soap_request SOAP request envelope string
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ */
+static int setup_parsing_test(onvif_gsoap_context_t* ctx, const char* soap_request) {
+  if (!ctx || !soap_request) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Initialize context
+  int result = onvif_gsoap_init(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  // Initialize request parsing
+  result = onvif_gsoap_init_request_parsing(ctx, soap_request, strlen(soap_request));
+  if (result != ONVIF_SUCCESS) {
+    onvif_gsoap_cleanup(ctx);
+    return result;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
+ * Core Context Tests
+ * ============================================================================ */
 
 /**
  * @brief Test gSOAP context initialization
@@ -35,26 +65,19 @@ void test_unit_onvif_gsoap_init(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
-  // Test initialization - in test environment, gSOAP might fail
+  // Test successful initialization
   int result = onvif_gsoap_init(&ctx);
+  assert_int_equal(result, ONVIF_SUCCESS);
 
-  // Accept either success or failure, but verify behavior is consistent
-  if (result == 0) {
-    // If initialization succeeded, verify context is set up correctly
-    assert_non_null(ctx.soap);
-    assert_int_equal(ctx.total_bytes_written, 0);
-    assert_true(ctx.generation_start_time > 0); // Should be set to current timestamp
-    assert_int_equal(ctx.generation_end_time, 0);
-    assert_null(ctx.user_data);
+  // Verify request_state is initialized to false
+  assert_false(ctx.request_state.is_initialized);
+  assert_int_equal(ctx.request_state.request_size, 0);
 
-    // Cleanup if successful
-    onvif_gsoap_cleanup(&ctx);
-  } else {
-    // If initialization failed, verify it returned a proper error code
-    assert_true(result < 0);
-    // Context should remain zero'd if init failed
-    assert_null(ctx.soap);
-  }
+  // Verify error_context is clear
+  assert_int_equal(ctx.error_context.last_error_code, ONVIF_SUCCESS);
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
 }
 
 /**
@@ -66,8 +89,7 @@ void test_unit_onvif_gsoap_init_null(void** state) {
 
   // Test initialization with NULL context
   int result = onvif_gsoap_init(NULL);
-  // Function should return a negative error code (either -1 or -EINVAL)
-  assert_true(result < 0);
+  assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
 /**
@@ -82,868 +104,713 @@ void test_unit_onvif_gsoap_cleanup(void** state) {
 
   // Initialize and then cleanup
   int result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
+  assert_int_equal(result, ONVIF_SUCCESS);
 
   // Cleanup should not crash
   onvif_gsoap_cleanup(&ctx);
 
-  // Context should be reset after cleanup
-  assert_null(ctx.soap);
+  // Verify state is cleared
+  assert_false(ctx.request_state.is_initialized);
 
   // Test cleanup with NULL pointer (should not crash)
   onvif_gsoap_cleanup(NULL);
 }
 
+/* ============================================================================
+ * Media Service Parsing Tests
+ * ============================================================================ */
+
 /**
- * @brief Test gSOAP context reset
+ * @brief Test parsing GetProfiles request
  * @param state Test state (unused)
  */
-void test_unit_onvif_gsoap_reset(void** state) {
+void test_unit_onvif_gsoap_parse_get_profiles(void** state) {
   (void)state;
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+  struct _trt__GetProfiles* request = NULL;
 
-  // Initialize context
+  // Test with NULL context
+  int result = onvif_gsoap_parse_get_profiles(NULL, &request);
+  assert_int_equal(result, ONVIF_ERROR_INVALID);
+
+  // Test with NULL output pointer
+  result = onvif_gsoap_parse_get_profiles(&ctx, NULL);
+  assert_int_equal(result, ONVIF_ERROR_INVALID);
+
+  // Setup parsing test
+  result = setup_parsing_test(&ctx, SOAP_MEDIA_GET_PROFILES);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_get_profiles(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify operation name was set
+  assert_string_equal(ctx.request_state.operation_name, "GetProfiles");
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing GetStreamUri request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_get_stream_uri(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _trt__GetStreamUri* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_MEDIA_GET_STREAM_URI);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_get_stream_uri(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->ProfileToken);
+  assert_string_equal(request->ProfileToken, "profile_1");
+
+  assert_non_null(request->StreamSetup);
+  assert_non_null(request->StreamSetup->Transport);
+  // Protocol is an enum, not a pointer
+  assert_int_equal(request->StreamSetup->Transport->Protocol, 0); // RTSP = 0
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing CreateProfile request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_create_profile(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _trt__CreateProfile* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_MEDIA_CREATE_PROFILE);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_create_profile(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->Name);
+  assert_string_equal(request->Name, "TestProfile");
+
+  if (request->Token) {
+    assert_string_equal(request->Token, "test_profile_token");
+  }
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing DeleteProfile request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_delete_profile(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _trt__DeleteProfile* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_MEDIA_DELETE_PROFILE);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_delete_profile(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->ProfileToken);
+  assert_string_equal(request->ProfileToken, "profile_to_delete");
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing SetVideoSourceConfiguration request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_set_video_source_config(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _trt__SetVideoSourceConfiguration* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_MEDIA_SET_VIDEO_SOURCE_CONFIG);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_set_video_source_config(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->Configuration);
+  assert_non_null(request->Configuration->token);
+  assert_string_equal(request->Configuration->token, "video_src_config_1");
+
+  // ForcePersistence is a boolean enum (required field in this operation)
+  assert_int_equal(request->ForcePersistence, xsd__boolean__true_);
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing SetVideoEncoderConfiguration request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_set_video_encoder_config(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _trt__SetVideoEncoderConfiguration* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_MEDIA_SET_VIDEO_ENCODER_CONFIG);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_set_video_encoder_config(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->Configuration);
+  assert_non_null(request->Configuration->token);
+  assert_string_equal(request->Configuration->token, "video_enc_config_1");
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/* ============================================================================
+ * PTZ Service Parsing Tests
+ * ============================================================================ */
+
+/**
+ * @brief Test parsing GetNodes request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_get_nodes(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _onvif3__GetNodes* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_PTZ_GET_NODES);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_get_nodes(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing AbsoluteMove request with speed
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_absolute_move(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _onvif3__AbsoluteMove* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_PTZ_ABSOLUTE_MOVE);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_absolute_move(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->ProfileToken);
+  assert_string_equal(request->ProfileToken, "ptz_profile_1");
+
+  // AbsoluteMove uses Destination, not Position
+  assert_non_null(request->Destination);
+  assert_non_null(request->Destination->PanTilt);
+  assert_true(request->Destination->PanTilt->x >= 0.4 && request->Destination->PanTilt->x <= 0.6);
+  assert_true(request->Destination->PanTilt->y >= 0.2 && request->Destination->PanTilt->y <= 0.4);
+
+  // Speed is optional but should be present in this test
+  if (request->Speed) {
+    assert_non_null(request->Speed->PanTilt);
+  }
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing AbsoluteMove request without speed (optional field)
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_absolute_move_no_speed(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _onvif3__AbsoluteMove* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_PTZ_ABSOLUTE_MOVE_NO_SPEED);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_absolute_move(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify required fields
+  assert_non_null(request->ProfileToken);
+  assert_non_null(request->Destination);
+
+  // Speed should be NULL (optional field not provided)
+  // Note: gSOAP may still allocate it, so we just verify parsing succeeded
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing GetPresets request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_get_presets(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _onvif3__GetPresets* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_PTZ_GET_PRESETS);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_get_presets(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->ProfileToken);
+  assert_string_equal(request->ProfileToken, "ptz_profile_1");
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing SetPreset request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_set_preset(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _onvif3__SetPreset* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_PTZ_SET_PRESET);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_set_preset(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->ProfileToken);
+  assert_string_equal(request->ProfileToken, "ptz_profile_1");
+
+  if (request->PresetName) {
+    assert_string_equal(request->PresetName, "HomePosition");
+  }
+
+  if (request->PresetToken) {
+    assert_string_equal(request->PresetToken, "preset_1");
+  }
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing GotoPreset request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_goto_preset(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _onvif3__GotoPreset* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_PTZ_GOTO_PRESET);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_goto_preset(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->ProfileToken);
+  assert_string_equal(request->ProfileToken, "ptz_profile_1");
+
+  assert_non_null(request->PresetToken);
+  assert_string_equal(request->PresetToken, "preset_1");
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing RemovePreset request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_remove_preset(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _onvif3__RemovePreset* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_PTZ_REMOVE_PRESET);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_remove_preset(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->ProfileToken);
+  assert_string_equal(request->ProfileToken, "ptz_profile_1");
+
+  assert_non_null(request->PresetToken);
+  assert_string_equal(request->PresetToken, "preset_to_delete");
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/* ============================================================================
+ * Device Service Parsing Tests
+ * ============================================================================ */
+
+/**
+ * @brief Test parsing GetDeviceInformation request (empty request)
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_get_device_information(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _tds__GetDeviceInformation* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_DEVICE_GET_DEVICE_INFORMATION);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request (empty request body)
+  result = onvif_gsoap_parse_get_device_information(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing GetCapabilities request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_get_capabilities(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _tds__GetCapabilities* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_DEVICE_GET_CAPABILITIES);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_get_capabilities(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields - Category array
+  if (request->__sizeCategory > 0) {
+    assert_non_null(request->Category);
+    assert_int_equal(request->Category[0], 0); // All = 0
+  }
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing GetSystemDateAndTime request (empty request)
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_get_system_date_and_time(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _tds__GetSystemDateAndTime* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_DEVICE_GET_SYSTEM_DATE_AND_TIME);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request (empty request body)
+  result = onvif_gsoap_parse_get_system_date_and_time(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing SystemReboot request (empty request)
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_system_reboot(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _tds__SystemReboot* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_DEVICE_SYSTEM_REBOOT);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request (empty request body)
+  result = onvif_gsoap_parse_system_reboot(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/* ============================================================================
+ * Imaging Service Parsing Tests
+ * ============================================================================ */
+
+/**
+ * @brief Test parsing GetImagingSettings request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_get_imaging_settings(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _onvif4__GetImagingSettings* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_IMAGING_GET_IMAGING_SETTINGS);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_get_imaging_settings(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->VideoSourceToken);
+  assert_string_equal(request->VideoSourceToken, "video_source_0");
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing SetImagingSettings request
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_set_imaging_settings(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _onvif4__SetImagingSettings* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_IMAGING_SET_IMAGING_SETTINGS);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse valid request
+  result = onvif_gsoap_parse_set_imaging_settings(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify parsed fields
+  assert_non_null(request->VideoSourceToken);
+  assert_string_equal(request->VideoSourceToken, "video_source_0");
+
+  assert_non_null(request->ImagingSettings);
+  if (request->ImagingSettings->Brightness) {
+    assert_true(*request->ImagingSettings->Brightness >= 45.0 &&
+                *request->ImagingSettings->Brightness <= 55.0);
+  }
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/* ============================================================================
+ * Error Handling Tests
+ * ============================================================================ */
+
+/**
+ * @brief Test parsing with invalid XML
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_invalid_xml(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _trt__GetProfiles* request = NULL;
+
+  // Setup parsing test with invalid XML
+  int result = setup_parsing_test(&ctx, SOAP_INVALID_XML);
+  // Should fail during parsing initialization or parsing
+  if (result == ONVIF_SUCCESS) {
+    result = onvif_gsoap_parse_get_profiles(&ctx, &request);
+  }
+
+  // Expect failure
+  assert_true(result != ONVIF_SUCCESS);
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing with invalid namespace
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_invalid_namespace(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _trt__GetProfiles* request = NULL;
+
+  // Setup parsing test with invalid namespace
+  int result = setup_parsing_test(&ctx, SOAP_INVALID_NAMESPACE);
+  // Should fail during parsing
+  if (result == ONVIF_SUCCESS) {
+    result = onvif_gsoap_parse_get_profiles(&ctx, &request);
+  }
+
+  // Expect failure
+  assert_true(result != ONVIF_SUCCESS);
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing with missing required parameter
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_missing_required_param(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _trt__GetStreamUri* request = NULL;
+
+  // Setup parsing test
+  int result = setup_parsing_test(&ctx, SOAP_MISSING_REQUIRED_PARAM);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Parse request - should succeed but ProfileToken will be NULL
+  result = onvif_gsoap_parse_get_stream_uri(&ctx, &request);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(request);
+
+  // Verify ProfileToken is NULL (missing required parameter)
+  assert_null(request->ProfileToken);
+
+  // Cleanup
+  onvif_gsoap_cleanup(&ctx);
+}
+
+/**
+ * @brief Test parsing without initialization
+ * @param state Test state (unused)
+ */
+void test_unit_onvif_gsoap_parse_without_initialization(void** state) {
+  (void)state;
+
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  struct _trt__GetProfiles* request = NULL;
+
+  // Initialize context but NOT request parsing
   int result = onvif_gsoap_init(&ctx);
+  assert_int_equal(result, ONVIF_SUCCESS);
 
-  // Only test reset if initialization succeeded
-  if (result == 0) {
-    // Modify some fields
-    ctx.total_bytes_written = TEST_BYTES_WRITTEN;
-    ctx.generation_start_time = TEST_START_TIME;
-    ctx.generation_end_time = TEST_END_TIME;
+  // Try to parse without calling onvif_gsoap_init_request_parsing
+  result = onvif_gsoap_parse_get_profiles(&ctx, &request);
 
-    // Reset context
-    onvif_gsoap_reset(&ctx);
-
-    // Statistics should be reset
-    assert_int_equal(ctx.total_bytes_written, 0);
-    assert_true(ctx.generation_start_time > 0); // Should be set to current timestamp
-    // Note: generation_end_time is not reset by the reset function
-
-    // But soap context should still be valid
-    assert_non_null(ctx.soap);
-
-    // Cleanup
-    onvif_gsoap_cleanup(&ctx);
-  } else {
-    // If init failed, skip this test
-    skip();
-  }
-
-  // Test reset with NULL pointer (should not crash)
-  onvif_gsoap_reset(NULL);
-}
-
-/**
- * @brief Test fault response generation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_fault_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context first - function should create temporary context
-  int result =
-    onvif_gsoap_generate_fault_response(NULL, "soap:Server", "Test fault", NULL, NULL, NULL, 0);
-  // Function handles NULL context by creating temporary context internally
-  // Should succeed (return 0) or return a specific error code
-  assert_true(result == ONVIF_SUCCESS || result < 0); // Either success or error code
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-
-  // Only test if initialization succeeded
-  if (result == 0) {
-    // Test fault response generation
-    result = onvif_gsoap_generate_fault_response(&ctx, "soap:Server", "Test fault message", NULL,
-                                                 NULL, NULL, 0);
-    // Should succeed with valid context and fault string
-    assert_int_equal(result, ONVIF_SUCCESS);
-
-    // Test with NULL fault string (should return error - fault string is required)
-    result = onvif_gsoap_generate_fault_response(&ctx, "soap:Client", NULL, NULL, NULL, NULL, 0);
-    // NULL fault string should return ONVIF_ERROR_INVALID
-    assert_int_equal(result, ONVIF_ERROR_INVALID);
-
-    // Cleanup
-    onvif_gsoap_cleanup(&ctx);
-  } else {
-    // If init failed, skip the main test
-    skip();
-  }
-}
-
-/**
- * @brief Test device info response generation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_device_info_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context first
-  int result = onvif_gsoap_generate_device_info_response(NULL, "Mfg", "Model", "1.0", "SN", "HW");
-  assert_true(result < 0); // Should return negative error code
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-
-  // Only test if initialization succeeded
-  if (result == 0) {
-    // Test device info response generation
-    result = onvif_gsoap_generate_device_info_response(&ctx, "TestManufacturer", "TestModel",
-                                                       "1.0.0", "TEST123456", "HW001");
-    // Should succeed with valid context and parameters
-    assert_int_equal(result, ONVIF_SUCCESS);
-
-    // Test with NULL parameters (function should handle gracefully with defaults)
-    result = onvif_gsoap_generate_device_info_response(&ctx, NULL, "Model", "1.0", "SN", "HW");
-    // Function handles NULL gracefully by using empty string defaults
-    assert_int_equal(result, ONVIF_SUCCESS);
-
-    // Cleanup
-    onvif_gsoap_cleanup(&ctx);
-  } else {
-    // If init failed, skip the main test
-    skip();
-  }
-}
-
-/**
- * @brief Test response data retrieval
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_get_response_data(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  const char* response_data = onvif_gsoap_get_response_data(NULL);
-  assert_null(response_data);
-
-  // Initialize context
-  int result = onvif_gsoap_init(&ctx);
-
-  // Only test if initialization succeeded
-  if (result == 0) {
-    // Test with initialized but unused context (no response generated yet)
-    response_data = onvif_gsoap_get_response_data(&ctx);
-    // Response data should be NULL or empty before any response is generated
-    // Just verify the function returns without crashing - value depends on gSOAP init state
-    assert_true(response_data == NULL || strlen(response_data) == 0);
-
-    // Cleanup
-    onvif_gsoap_cleanup(&ctx);
-  } else {
-    // If init failed, skip the main test
-    skip();
-  }
-}
-
-/**
- * @brief Test response length retrieval
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_get_response_length(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  size_t length = onvif_gsoap_get_response_length(NULL);
-  assert_int_equal(length, 0);
-
-  // Initialize context
-  int result = onvif_gsoap_init(&ctx);
-
-  // Only test if initialization succeeded
-  if (result == 0) {
-    // Test with initialized context (no response generated yet)
-    length = onvif_gsoap_get_response_length(&ctx);
-    // Length should be 0 before any response is generated
-    assert_int_equal(length, 0);
-
-    // Cleanup
-    onvif_gsoap_cleanup(&ctx);
-  } else {
-    // If init failed, skip the main test
-    skip();
-  }
-}
-
-/**
- * @brief Test error checking functionality
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_has_error(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context (should return true indicating error)
-  bool has_error = onvif_gsoap_has_error(NULL);
-  assert_true(has_error);
-
-  // Initialize context
-  int result = onvif_gsoap_init(&ctx);
-
-  // Only test if initialization succeeded
-  if (result == 0) {
-    // Test with initialized clean context (should not have error)
-    has_error = onvif_gsoap_has_error(&ctx);
-    // Freshly initialized context should not have errors
-    assert_false(has_error);
-
-    // Cleanup
-    onvif_gsoap_cleanup(&ctx);
-  } else {
-    // If init failed, skip the main test
-    skip();
-  }
-}
-
-/**
- * @brief Test error message retrieval
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_get_error(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  const char* error_msg = onvif_gsoap_get_error(NULL);
-  assert_null(error_msg);
-
-  // Initialize context
-  int result = onvif_gsoap_init(&ctx);
-
-  // Only test if initialization succeeded
-  if (result == 0) {
-    // Test with clean context (should have no error)
-    error_msg = onvif_gsoap_get_error(&ctx);
-    // Error message should be NULL for a clean, freshly initialized context
-    assert_null(error_msg);
-
-    // Cleanup
-    onvif_gsoap_cleanup(&ctx);
-  } else {
-    // If init failed, skip the main test
-    skip();
-  }
-}
-
-/**
- * @brief Test response validation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_validate_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  int result = onvif_gsoap_validate_response(NULL);
-  // Accept any negative error code
-  assert_true(result < 0);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-
-  // Only test if initialization succeeded
-  if (result == 0) {
-    // Test validation with initialized context (no response generated)
-    result = onvif_gsoap_validate_response(&ctx);
-    // Should return error since no response has been generated yet
-    assert_true(result < 0);
-
-    // Cleanup
-    onvif_gsoap_cleanup(&ctx);
-  } else {
-    // If init failed, skip the main test
-    skip();
-  }
-}
-
-/**
- * @brief Test operation name extraction
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_extract_operation_name(void** state) {
-  (void)state;
-
-  char operation_name[TEST_BUFFER_SIZE];
-
-  // Test with NULL request data
-  int result = onvif_gsoap_extract_operation_name(NULL, 0, operation_name, sizeof(operation_name));
-  // Accept any negative error code
-  assert_true(result < 0);
-
-  // Test with NULL operation name buffer
-  const char* test_request =
-    "<soap:Envelope><soap:Body><GetDeviceInformation/></soap:Body></soap:Envelope>";
-  result =
-    onvif_gsoap_extract_operation_name(test_request, strlen(test_request), NULL, TEST_BUFFER_SIZE);
-  // Accept any negative error code
-  assert_true(result < 0);
-
-  // Test with zero buffer size
-  result =
-    onvif_gsoap_extract_operation_name(test_request, strlen(test_request), operation_name, 0);
-  // Accept any negative error code
-  assert_true(result < 0);
-
-  // Test with valid but minimal request
-  result = onvif_gsoap_extract_operation_name(test_request, strlen(test_request), operation_name,
-                                              sizeof(operation_name));
-  // Should either succeed (return 0) or return specific error code
-  // Accept success or implementation-specific error
-  assert_true(result == 0 || result < 0);
-}
-
-/**
- * @brief Test request parsing initialization
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_init_request_parsing(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  const char* test_request =
-    "<soap:Envelope><soap:Body><GetDeviceInformation/></soap:Body></soap:Envelope>";
-  int result = onvif_gsoap_init_request_parsing(NULL, test_request, strlen(test_request));
-  // Accept any negative error code
-  assert_true(result < 0);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-
-  // Only test if initialization succeeded
-  if (result == 0) {
-    // Test with NULL request data
-    result = onvif_gsoap_init_request_parsing(&ctx, NULL, TEST_HEADER_SIZE);
-    // Accept any negative error code
-    assert_true(result < 0);
-
-    // Test with zero size
-    result = onvif_gsoap_init_request_parsing(&ctx, test_request, 0);
-    // Accept any negative error code
-    assert_true(result < 0);
-
-    // Test with valid request
-    result = onvif_gsoap_init_request_parsing(&ctx, test_request, strlen(test_request));
-    // Should either succeed or return specific error code
-    assert_true(result == 0 || result < 0);
-
-    // Cleanup
-    onvif_gsoap_cleanup(&ctx);
-  } else {
-    // If init failed, skip the main test
-    skip();
-  }
-}
-
-/**
- * @brief Test profile token parsing
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_parse_profile_token(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  char token[TEST_BUFFER_SIZE];
-
-  // Test with NULL context
-  int result = onvif_gsoap_parse_profile_token(NULL, token, sizeof(token));
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL token buffer
-  result = onvif_gsoap_parse_profile_token(&ctx, NULL, sizeof(token));
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Test with zero buffer size
-  result = onvif_gsoap_parse_profile_token(&ctx, token, 0);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Test with uninitialized request parsing (should fail)
-  result = onvif_gsoap_parse_profile_token(&ctx, token, sizeof(token));
-  // Should fail since no request has been parsed - expect error code
-  assert_true(result < 0);
+  // Should fail - request_state.is_initialized is false
+  assert_int_equal(result, ONVIF_ERROR_INVALID);
 
   // Cleanup
   onvif_gsoap_cleanup(&ctx);
 }
 
-/**
- * @brief Test configuration token parsing
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_parse_configuration_token(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  char token[TEST_BUFFER_SIZE];
-
-  // Test with NULL context
-  int result = onvif_gsoap_parse_configuration_token(NULL, token, sizeof(token));
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL token buffer
-  result = onvif_gsoap_parse_configuration_token(&ctx, NULL, sizeof(token));
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Test with zero buffer size
-  result = onvif_gsoap_parse_configuration_token(&ctx, token, 0);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test protocol parsing
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_parse_protocol(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  char protocol[TEST_SMALL_BUFFER_SIZE];
-
-  // Test with NULL context
-  int result = onvif_gsoap_parse_protocol(NULL, protocol, sizeof(protocol));
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL protocol buffer
-  result = onvif_gsoap_parse_protocol(&ctx, NULL, sizeof(protocol));
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Test with zero buffer size
-  result = onvif_gsoap_parse_protocol(&ctx, protocol, 0);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test generic value parsing
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_parse_value(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  char value[TEST_LARGE_BUFFER_SIZE] = {0};
-
-  // Test with NULL context
-  int result = onvif_gsoap_parse_value(NULL, "//test", value, sizeof(value));
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL xpath
-  result = onvif_gsoap_parse_value(&ctx, NULL, value, sizeof(value));
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Test with NULL value buffer
-  result = onvif_gsoap_parse_value(&ctx, "//test", NULL, sizeof(value));
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Test with zero buffer size
-  result = onvif_gsoap_parse_value(&ctx, "//test", value, 0);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test boolean value parsing
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_parse_boolean(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  int value = 0;
-
-  // Test with NULL context
-  int result = onvif_gsoap_parse_boolean(NULL, "//test", &value);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL xpath
-  result = onvif_gsoap_parse_boolean(&ctx, NULL, &value);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Test with NULL value pointer
-  result = onvif_gsoap_parse_boolean(&ctx, "//test", NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test integer value parsing
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_parse_integer(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  int value = 0;
-
-  // Test with NULL context
-  int result = onvif_gsoap_parse_integer(NULL, "//test", &value);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL xpath
-  result = onvif_gsoap_parse_integer(&ctx, NULL, &value);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Test with NULL value pointer
-  result = onvif_gsoap_parse_integer(&ctx, "//test", NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-// Simple test callback function
-static int test_callback(struct soap* soap, void* user_data) {
-  (void)soap;
-  (void)user_data;
-  return 0;
-}
-
-/**
- * @brief Test response generation with callback
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_response_with_callback(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  int result = onvif_gsoap_generate_response_with_callback(NULL, test_callback, NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL callback
-  result = onvif_gsoap_generate_response_with_callback(&ctx, NULL, NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Test with valid callback
-  result = onvif_gsoap_generate_response_with_callback(&ctx, test_callback, NULL);
-  assert_int_equal(result, 0);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test profiles response generation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_profiles_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  int result = onvif_gsoap_generate_profiles_response(NULL, NULL, 0);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL profiles (empty response)
-  result = onvif_gsoap_generate_profiles_response(&ctx, NULL, 0);
-  assert_int_equal(result, 0);
-
-  // Test with negative count
-  result = onvif_gsoap_generate_profiles_response(&ctx, NULL, -1);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test stream URI response generation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_stream_uri_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  int result = onvif_gsoap_generate_stream_uri_response(NULL, NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL URI
-  result = onvif_gsoap_generate_stream_uri_response(&ctx, NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test create profile response generation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_create_profile_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  int result = onvif_gsoap_generate_create_profile_response(NULL, NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL profile
-  result = onvif_gsoap_generate_create_profile_response(&ctx, NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test delete profile response generation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_delete_profile_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  int result = onvif_gsoap_generate_delete_profile_response(NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with valid context
-  result = onvif_gsoap_generate_delete_profile_response(&ctx);
-  assert_int_equal(result, 0);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test PTZ nodes response generation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_get_nodes_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  int result = onvif_gsoap_generate_get_nodes_response(NULL, NULL, 0);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL nodes (empty response)
-  result = onvif_gsoap_generate_get_nodes_response(&ctx, NULL, 0);
-  assert_int_equal(result, 0);
-
-  // Test with negative count
-  result = onvif_gsoap_generate_get_nodes_response(&ctx, NULL, -1);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test PTZ absolute move response generation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_absolute_move_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  int result = onvif_gsoap_generate_absolute_move_response(NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with valid context
-  result = onvif_gsoap_generate_absolute_move_response(&ctx);
-  assert_int_equal(result, 0);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test PTZ presets response generation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_get_presets_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  int result = onvif_gsoap_generate_get_presets_response(NULL, NULL, 0);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL presets (empty response)
-  result = onvif_gsoap_generate_get_presets_response(&ctx, NULL, 0);
-  assert_int_equal(result, 0);
-
-  // Test with negative count
-  result = onvif_gsoap_generate_get_presets_response(&ctx, NULL, -1);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test PTZ set preset response generation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_set_preset_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  int result = onvif_gsoap_generate_set_preset_response(NULL, "preset1");
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with NULL preset token
-  result = onvif_gsoap_generate_set_preset_response(&ctx, NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Test with valid preset token
-  result = onvif_gsoap_generate_set_preset_response(&ctx, "preset1");
-  assert_int_equal(result, 0);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-/**
- * @brief Test PTZ goto preset response generation
- * @param state Test state (unused)
- */
-void test_unit_onvif_gsoap_generate_goto_preset_response(void** state) {
-  (void)state;
-
-  onvif_gsoap_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-
-  // Test with NULL context
-  int result = onvif_gsoap_generate_goto_preset_response(NULL);
-  assert_int_equal(result, ONVIF_XML_ERROR_INVALID_INPUT);
-
-  // Initialize context
-  result = onvif_gsoap_init(&ctx);
-  assert_int_equal(result, 0);
-
-  // Test with valid context
-  result = onvif_gsoap_generate_goto_preset_response(&ctx);
-  assert_int_equal(result, 0);
-
-  // Cleanup
-  onvif_gsoap_cleanup(&ctx);
-}
-
-// Test functions are called from test_runner.c
+/* ============================================================================
+ * Test functions are registered in test_protocol_runner.c
+ * ============================================================================ */

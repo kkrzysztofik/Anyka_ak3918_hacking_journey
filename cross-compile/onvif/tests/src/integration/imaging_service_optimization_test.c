@@ -5,6 +5,8 @@
  * @date 2025
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include <assert.h>
 #include <bits/pthreadtypes.h>
 #include <pthread.h>
@@ -25,6 +27,12 @@
 #include "services/common/onvif_imaging_types.h"
 #include "services/imaging/onvif_imaging.h"
 #include "utils/error/error_handling.h"
+
+// SOAP test helpers
+#include "common/soap_test_helpers.h"
+#include "data/soap_test_envelopes.h"
+#include "networking/http/http_parser.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
 
 // Test constants
 #define TEST_ITERATIONS                 500
@@ -93,12 +101,21 @@
 int setup_imaging_integration(void** state) {
   (void)state;
 
+  // Initialize buffer pool mock
+
+  // Initialize service dispatcher
+  int result = onvif_service_dispatcher_init();
+  if (result != ONVIF_SUCCESS) {
+    printf("Failed to initialize service dispatcher: %d\n", result);
+    return -1;
+  }
+
   // Initialize platform mock
   platform_mock_init();
   platform_mock_reset_vpss_counters();
 
   // Initialize real imaging service
-  int result = onvif_imaging_init(NULL);
+  result = onvif_imaging_init(NULL);
   if (result != ONVIF_SUCCESS) {
     printf("Failed to initialize imaging service: %d\n", result);
     return -1;
@@ -110,8 +127,11 @@ int setup_imaging_integration(void** state) {
 int teardown_imaging_integration(void** state) {
   (void)state;
 
-  // Cleanup real imaging service
+  // Cleanup real imaging service (this unregisters from dispatcher)
   onvif_imaging_cleanup();
+
+  // Note: Don't cleanup dispatcher - keep it alive for next test
+  // The dispatcher mutex gets destroyed and can't be reinitialized
 
   // Cleanup platform mock
   platform_mock_cleanup();
@@ -424,6 +444,107 @@ void test_integration_imaging_performance_regression(void** state) {
   }
 }
 
+/**
+ * @brief Pilot SOAP test for Imaging GetImagingSettings operation
+ * Tests SOAP envelope parsing and response structure validation
+ * Note: This is a standalone test that validates SOAP structure without full service initialization
+ */
+void test_integration_imaging_get_settings_soap(void** state) {
+  (void)state;
+
+  // Step 1: Create SOAP request envelope
+  http_request_t* request = soap_test_create_request(
+    "GetImagingSettings", SOAP_IMAGING_GET_IMAGING_SETTINGS, "/onvif/imaging_service");
+  assert_non_null(request);
+
+  // Step 2: Validate request structure
+  assert_non_null(request->body);
+  assert_true(strstr(request->body, "GetImagingSettings") != NULL);
+
+  // Step 3: Prepare response structure
+  http_response_t response;
+  memset(&response, 0, sizeof(http_response_t));
+
+  // Step 4: Call actual service handler (integration test)
+  int result = onvif_imaging_handle_operation("GetImagingSettings", request, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Step 5: Validate HTTP response structure
+  assert_int_equal(200, response.status_code);
+  assert_non_null(response.body);
+  assert_true(response.body_length > 0);
+
+  // Step 6: Check for SOAP faults
+  char fault_code[256] = {0};
+  char fault_string[512] = {0};
+  int has_fault = soap_test_check_soap_fault(&response, fault_code, fault_string);
+  assert_int_equal(0, has_fault);
+
+  // Step 7: Validate SOAP response contains expected elements
+  assert_true(strstr(response.body, "GetImagingSettingsResponse") != NULL);
+  assert_true(strstr(response.body, "Brightness") != NULL);
+
+  // Step 8: Verify response contains ImagingSettings with valid brightness value
+  char brightness_value[64] = {0};
+  result = soap_test_extract_element_text(response.body, "Brightness", brightness_value, sizeof(brightness_value));
+  if (result == ONVIF_SUCCESS) {
+    assert_true(strlen(brightness_value) > 0);
+  }
+
+  // Step 9: Cleanup resources
+  soap_test_free_request(request);
+  if (response.body) {
+    free(response.body);
+  }
+}
+
+/**
+ * @brief SOAP test for Imaging SetImagingSettings operation
+ */
+void test_integration_imaging_set_settings_soap(void** state) {
+  (void)state;
+
+  // Step 1: Create SOAP request envelope
+  http_request_t* request = soap_test_create_request("SetImagingSettings",
+                                                     SOAP_IMAGING_SET_IMAGING_SETTINGS,
+                                                     "/onvif/imaging_service");
+  assert_non_null(request);
+
+  // Step 2: Prepare response structure
+  http_response_t response;
+  memset(&response, 0, sizeof(http_response_t));
+
+  // Step 3: Call service handler
+  int result = onvif_imaging_handle_operation("SetImagingSettings", request, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Step 4: Validate HTTP response
+  assert_int_equal(200, response.status_code);
+  assert_non_null(response.body);
+
+  // Step 5: Check for SOAP faults
+  int has_fault = soap_test_check_soap_fault(&response, NULL, NULL);
+  assert_int_equal(0, has_fault);
+
+  // Step 6: Parse SOAP response
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(onvif_gsoap_context_t));
+  result = soap_test_init_response_parsing(&ctx, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  struct _onvif4__SetImagingSettingsResponse* settings_response = NULL;
+  result = soap_test_parse_set_imaging_settings_response(&ctx, &settings_response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_non_null(settings_response);
+
+  // Step 7: Cleanup
+  onvif_gsoap_cleanup(&ctx);
+  soap_test_free_request(request);
+  if (response.body) {
+    free(response.body);
+  }
+}
+
 /* ============================================================================
  * Test Suite Definition
  * ============================================================================ */
@@ -435,8 +556,16 @@ const struct CMUnitTest imaging_service_optimization_tests[] = {
                                   setup_imaging_integration, teardown_imaging_integration),
   cmocka_unit_test_setup_teardown(test_integration_imaging_batch_parameter_update_optimization,
                                   setup_imaging_integration, teardown_imaging_integration),
-  cmocka_unit_test_setup_teardown(test_integration_imaging_concurrent_access,
-                                  setup_imaging_integration, teardown_imaging_integration),
   cmocka_unit_test_setup_teardown(test_integration_imaging_performance_regression,
+                                  setup_imaging_integration, teardown_imaging_integration),
+
+  // SOAP integration tests (full HTTP/SOAP layer validation)
+  cmocka_unit_test_setup_teardown(test_integration_imaging_get_settings_soap,
+                                  setup_imaging_integration, teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_set_settings_soap,
+                                  setup_imaging_integration, teardown_imaging_integration),
+
+  // Concurrent tests (may hang - placed at end)
+  cmocka_unit_test_setup_teardown(test_integration_imaging_concurrent_access,
                                   setup_imaging_integration, teardown_imaging_integration),
 };

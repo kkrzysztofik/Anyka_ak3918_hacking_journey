@@ -10,36 +10,43 @@
 
 #include "cmocka_wrapper.h"
 
-// Forward declarations for test_onvif_gsoap.c
+// Forward declarations for test_onvif_gsoap.c - Core context tests
 void test_unit_onvif_gsoap_init(void** state);
 void test_unit_onvif_gsoap_init_null(void** state);
 void test_unit_onvif_gsoap_cleanup(void** state);
-void test_unit_onvif_gsoap_reset(void** state);
-void test_unit_onvif_gsoap_generate_fault_response(void** state);
-void test_unit_onvif_gsoap_generate_device_info_response(void** state);
-void test_unit_onvif_gsoap_get_response_data(void** state);
-void test_unit_onvif_gsoap_get_response_length(void** state);
-void test_unit_onvif_gsoap_has_error(void** state);
-void test_unit_onvif_gsoap_get_error(void** state);
-void test_unit_onvif_gsoap_validate_response(void** state);
-void test_unit_onvif_gsoap_extract_operation_name(void** state);
-void test_unit_onvif_gsoap_init_request_parsing(void** state);
-void test_unit_onvif_gsoap_parse_profile_token(void** state);
-void test_unit_onvif_gsoap_parse_configuration_token(void** state);
-void test_unit_onvif_gsoap_parse_protocol(void** state);
-void test_unit_onvif_gsoap_parse_value(void** state);
-void test_unit_onvif_gsoap_parse_boolean(void** state);
-void test_unit_onvif_gsoap_parse_integer(void** state);
-void test_unit_onvif_gsoap_generate_response_with_callback(void** state);
-void test_unit_onvif_gsoap_generate_profiles_response(void** state);
-void test_unit_onvif_gsoap_generate_stream_uri_response(void** state);
-void test_unit_onvif_gsoap_generate_create_profile_response(void** state);
-void test_unit_onvif_gsoap_generate_delete_profile_response(void** state);
-void test_unit_onvif_gsoap_generate_get_nodes_response(void** state);
-void test_unit_onvif_gsoap_generate_absolute_move_response(void** state);
-void test_unit_onvif_gsoap_generate_get_presets_response(void** state);
-void test_unit_onvif_gsoap_generate_set_preset_response(void** state);
-void test_unit_onvif_gsoap_generate_goto_preset_response(void** state);
+
+// Media service parsing tests
+void test_unit_onvif_gsoap_parse_get_profiles(void** state);
+void test_unit_onvif_gsoap_parse_get_stream_uri(void** state);
+void test_unit_onvif_gsoap_parse_create_profile(void** state);
+void test_unit_onvif_gsoap_parse_delete_profile(void** state);
+void test_unit_onvif_gsoap_parse_set_video_source_config(void** state);
+void test_unit_onvif_gsoap_parse_set_video_encoder_config(void** state);
+
+// PTZ service parsing tests
+void test_unit_onvif_gsoap_parse_get_nodes(void** state);
+void test_unit_onvif_gsoap_parse_absolute_move(void** state);
+void test_unit_onvif_gsoap_parse_absolute_move_no_speed(void** state);
+void test_unit_onvif_gsoap_parse_get_presets(void** state);
+void test_unit_onvif_gsoap_parse_set_preset(void** state);
+void test_unit_onvif_gsoap_parse_goto_preset(void** state);
+void test_unit_onvif_gsoap_parse_remove_preset(void** state);
+
+// Device service parsing tests
+void test_unit_onvif_gsoap_parse_get_device_information(void** state);
+void test_unit_onvif_gsoap_parse_get_capabilities(void** state);
+void test_unit_onvif_gsoap_parse_get_system_date_and_time(void** state);
+void test_unit_onvif_gsoap_parse_system_reboot(void** state);
+
+// Imaging service parsing tests
+void test_unit_onvif_gsoap_parse_get_imaging_settings(void** state);
+void test_unit_onvif_gsoap_parse_set_imaging_settings(void** state);
+
+// Error handling tests
+void test_unit_onvif_gsoap_parse_invalid_xml(void** state);
+void test_unit_onvif_gsoap_parse_invalid_namespace(void** state);
+void test_unit_onvif_gsoap_parse_missing_required_param(void** state);
+void test_unit_onvif_gsoap_parse_without_initialization(void** state);
 
 /**
  * @brief Global test setup
@@ -71,41 +78,49 @@ int main(int argc, char* argv[]) {
   (void)argc;
   (void)argv;
 
-  printf("ONVIF Protocol Tests (gSOAP)\n");
-  printf("============================\n\n");
+  printf("ONVIF Protocol Tests (gSOAP Parsing)\n");
+  printf("====================================\n\n");
 
   clock_t start_time = clock();
 
   const struct CMUnitTest tests[] = {
+    // Core context tests
     cmocka_unit_test(test_unit_onvif_gsoap_init),
     cmocka_unit_test(test_unit_onvif_gsoap_init_null),
     cmocka_unit_test(test_unit_onvif_gsoap_cleanup),
-    cmocka_unit_test(test_unit_onvif_gsoap_reset),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_fault_response),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_device_info_response),
-    cmocka_unit_test(test_unit_onvif_gsoap_get_response_data),
-    cmocka_unit_test(test_unit_onvif_gsoap_get_response_length),
-    cmocka_unit_test(test_unit_onvif_gsoap_has_error),
-    cmocka_unit_test(test_unit_onvif_gsoap_get_error),
-    cmocka_unit_test(test_unit_onvif_gsoap_validate_response),
-    cmocka_unit_test(test_unit_onvif_gsoap_extract_operation_name),
-    cmocka_unit_test(test_unit_onvif_gsoap_init_request_parsing),
-    cmocka_unit_test(test_unit_onvif_gsoap_parse_profile_token),
-    cmocka_unit_test(test_unit_onvif_gsoap_parse_configuration_token),
-    cmocka_unit_test(test_unit_onvif_gsoap_parse_protocol),
-    cmocka_unit_test(test_unit_onvif_gsoap_parse_value),
-    cmocka_unit_test(test_unit_onvif_gsoap_parse_boolean),
-    cmocka_unit_test(test_unit_onvif_gsoap_parse_integer),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_response_with_callback),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_profiles_response),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_stream_uri_response),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_create_profile_response),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_delete_profile_response),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_get_nodes_response),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_absolute_move_response),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_get_presets_response),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_set_preset_response),
-    cmocka_unit_test(test_unit_onvif_gsoap_generate_goto_preset_response),
+
+    // Media service parsing tests
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_get_profiles),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_get_stream_uri),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_create_profile),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_delete_profile),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_set_video_source_config),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_set_video_encoder_config),
+
+    // PTZ service parsing tests
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_get_nodes),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_absolute_move),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_absolute_move_no_speed),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_get_presets),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_set_preset),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_goto_preset),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_remove_preset),
+
+    // Device service parsing tests
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_get_device_information),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_get_capabilities),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_get_system_date_and_time),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_system_reboot),
+
+    // Imaging service parsing tests
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_get_imaging_settings),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_set_imaging_settings),
+
+    // Error handling tests
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_invalid_xml),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_invalid_namespace),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_missing_required_param),
+    cmocka_unit_test(test_unit_onvif_gsoap_parse_without_initialization),
   };
 
   int test_count = sizeof(tests) / sizeof(tests[0]);

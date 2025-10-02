@@ -38,6 +38,8 @@ typedef struct {
   char* buffers[BUFFER_POOL_SIZE];
   int available[BUFFER_POOL_SIZE];
   int count;
+  int initialized;       // Flag to track buffer pool initialization state
+  int mutex_initialized; // Flag to track mutex initialization state
   pthread_mutex_t mutex; // Static mutex instead of dynamic allocation
   // Thread-safe statistics counters
   volatile int hits;             // Use volatile for thread safety

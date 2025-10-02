@@ -18,9 +18,9 @@
 #   VERBOSE    - Verbose output: '1' for verbose, '0' for quiet (default: 0)
 
 # Native compilation for unit tests (development machine)
-# Use native GCC for testing on development machine
-CC=gcc
-CPP=g++
+# Use native GCC with ccache for faster incremental builds
+CC := ccache gcc
+CPP := ccache g++
 
 # Build configuration
 BUILD_TYPE ?= debug
@@ -63,6 +63,10 @@ INCLUDES=../include ../src src $(NATIVE_INCLUDES)
 
 # Output directory
 OUT_DIR=out
+
+# Parallel builds with load average limiting to prevent memory issues
+# Use all available cores but limit based on load average
+MAKEFLAGS += -j$(shell nproc) -l$(shell echo "$$(nproc) * 1.5" | bc)
 
 # Native libraries for unit testing (prefer native over cross-compiled)
 NATIVE_LIB_DIR = lib
@@ -126,7 +130,9 @@ IMAGING_TEST_SRCS := \
 INTEGRATION_TEST_SRCS := \
 	src/integration/ptz_service_tests.c \
 	src/integration/media_service_tests.c \
-	src/integration/imaging_service_optimization_test.c
+	src/integration/imaging_service_optimization_test.c \
+	src/integration/device_service_tests.c \
+	src/integration/soap_error_tests.c
 
 # All test sources (for legacy runner)
 TEST_SRCS := $(UTILS_TEST_SRCS) $(NETWORKING_TEST_SRCS) $(PROTOCOL_TEST_SRCS) \
@@ -137,9 +143,10 @@ TEST_SRCS := $(UTILS_TEST_SRCS) $(NETWORKING_TEST_SRCS) $(PROTOCOL_TEST_SRCS) \
 TEST_HELPER_SRCS := \
 	src/common/test_helpers.c \
 	src/common/time_utils.c \
-	src/common/generic_mock_framework.c
+	src/common/generic_mock_framework.c \
+	src/common/soap_test_helpers.c
 
-# Mock source files
+# Mock source files (for unit tests)
 MOCK_SRCS := \
 	src/mocks/platform_mock.c \
 	src/mocks/network_mock.c \
@@ -151,16 +158,34 @@ MOCK_SRCS := \
 	src/mocks/buffer_pool_mock.c \
 	src/mocks/smart_response_mock.c
 
+# Mock source files for integration tests (exclude buffer_pool_mock - use real implementation)
+MOCK_SRCS_INTEGRATION := \
+	src/mocks/platform_mock.c \
+	src/mocks/network_mock.c \
+	src/mocks/platform_ptz_mock.c \
+	src/mocks/service_handler_mock.c \
+	src/mocks/mock_service_dispatcher.c \
+	src/mocks/config_mock.c \
+	src/mocks/gsoap_mock.c \
+	src/mocks/smart_response_mock.c
+
 # Source files from main project (for testing - exclude platform_anyka.c)
 MAIN_SRCS := \
 	../src/utils/memory/memory_manager.c \
+	../src/utils/common/time_utils.c \
 	../src/utils/memory/smart_response_builder.c \
-	../src/protocol/gsoap/onvif_gsoap.c \
+	../src/protocol/gsoap/onvif_gsoap_core.c \
+	../src/protocol/gsoap/onvif_gsoap_response.c \
+	../src/protocol/gsoap/onvif_gsoap_media.c \
+	../src/protocol/gsoap/onvif_gsoap_ptz.c \
+	../src/protocol/gsoap/onvif_gsoap_device.c \
+	../src/protocol/gsoap/onvif_gsoap_imaging.c \
 	../src/generated/soapC.c \
 	../src/utils/logging/logging_utils.c \
 	../src/utils/logging/service_logging.c \
 	../src/networking/http/http_auth.c \
 	../src/networking/http/http_parser.c \
+	../src/networking/common/buffer_pool.c \
 	../src/utils/validation/common_validation.c \
 	../src/utils/validation/input_validation.c \
 	../src/utils/security/base64_utils.c \
@@ -201,6 +226,7 @@ TEST_HELPER_OBJS := $(TEST_HELPER_SRCS:src/%.c=$(OUT_DIR)/%.o)
 
 # Mock and main project objects
 MOCK_OBJS := $(MOCK_SRCS:src/%.c=$(OUT_DIR)/%.o)
+MOCK_OBJS_INTEGRATION := $(MOCK_SRCS_INTEGRATION:src/%.c=$(OUT_DIR)/%.o)
 MAIN_OBJS := $(MAIN_SRCS:../src/%.c=$(OUT_DIR)/main/%.o)
 
 # All test objects (for dependency tracking)
@@ -403,7 +429,7 @@ $(TEST_IMAGING): $(RUNNER_IMAGING_OBJ) $(IMAGING_TEST_OBJS) $(TEST_HELPER_OBJS) 
 	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
 	@echo "✅ Built $@"
 
-$(TEST_INTEGRATION): $(RUNNER_INTEGRATION_OBJ) $(INTEGRATION_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
+$(TEST_INTEGRATION): $(RUNNER_INTEGRATION_OBJ) $(INTEGRATION_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS_INTEGRATION) $(MAIN_OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
 	@echo "✅ Built $@"
@@ -425,6 +451,12 @@ $(OUT_DIR)/main/%.o: ../src/%.c | $(OUT_DIR)
 	@mkdir -p $(dir $@)
 	@mkdir -p $(dir $(OUT_DIR)/main/$*.d)
 	$(CC) $(CFLAGS) -MT $@ -MMD -MP -MF $(OUT_DIR)/main/$*.d $(INCLUDES:%=-I%) -c $< -o $@ -pipe
+
+# Special fast compilation rule for soapC.c (no optimization, no warnings for generated code)
+$(OUT_DIR)/main/generated/soapC.o: ../src/generated/soapC.c | $(OUT_DIR)
+	@echo "Compiling soapC.c (optimized for speed)..."
+	@mkdir -p $(dir $@)
+	$(CC) $(BASE_CFLAGS) -O0 -w $(TEST_CFLAGS) $(INCLUDES:%=-I%) -c $< -o $@ -pipe
 
 # Create output directory
 $(OUT_DIR):

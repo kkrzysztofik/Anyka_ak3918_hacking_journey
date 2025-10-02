@@ -5,6 +5,8 @@
  * @date 2025
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include "ptz_service_tests.h"
 
 #include <pthread.h>
@@ -26,6 +28,11 @@
 
 // Test helper includes
 #include "common/test_helpers.h"
+
+// SOAP test helpers
+#include "common/soap_test_helpers.h"
+#include "data/soap_test_envelopes.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
 
 // Mock includes
 #include "mocks/platform_mock.h"
@@ -118,6 +125,12 @@ int ptz_service_setup(void** state) {
   // Initialize memory manager for tracking
   memory_manager_init();
 
+  // Initialize buffer pool mock
+
+  // Initialize service dispatcher
+  int result = onvif_service_dispatcher_init();
+  assert_int_equal(ONVIF_SUCCESS, result);
+
   // Initialize platform mock for PTZ operations
   platform_mock_init();
   platform_ptz_mock_init();
@@ -132,10 +145,10 @@ int ptz_service_setup(void** state) {
   memset(config, 0, sizeof(config_manager_t));
 
   // Initialize PTZ adapter
-  int result = ptz_adapter_init();
+  result = ptz_adapter_init();
   assert_int_equal(0, result);
 
-  // Initialize PTZ service (dispatcher already initialized globally)
+  // Initialize PTZ service (dispatcher already initialized)
   result = onvif_ptz_init(config);
   assert_int_equal(ONVIF_SUCCESS, result);
 
@@ -163,11 +176,12 @@ int ptz_service_teardown(void** state) {
   // Free config first, before leak checking
   free(config);
 
-  // Cleanup PTZ service (this calls memory_manager_check_leaks internally)
+  // Cleanup PTZ service (this unregisters from dispatcher)
   onvif_ptz_cleanup();
   ptz_adapter_shutdown();
 
-  // Note: Service dispatcher is cleaned up globally in teardown_global_tests
+  // Note: Don't cleanup dispatcher - keep it alive for next test
+  // The dispatcher mutex gets destroyed and can't be reinitialized
 
   platform_ptz_mock_cleanup();
   platform_mock_cleanup();
@@ -207,6 +221,51 @@ void test_integration_ptz_absolute_move_functionality(void** state) {
   assert_int_equal(result, ONVIF_ERROR_NULL);
 
   printf("✅ PTZ absolute move functionality tests passed\n");
+}
+
+// Test PTZ GetNodes Operation
+void test_integration_ptz_get_nodes_operation(void** state) {
+  (void)state; // Unused parameter
+
+  printf("Testing PTZ GetNodes operation...\n");
+
+  // Test getting PTZ nodes
+  printf("  [TEST CASE] Get PTZ nodes\n");
+  struct ptz_node* nodes = NULL;
+  int count = 0;
+  int result = onvif_ptz_get_nodes(&nodes, &count);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_non_null(nodes);
+  assert_int_equal(count, 1); // System has one PTZ node
+
+  // Verify node structure
+  printf("  [TEST CASE] Verify node structure fields\n");
+  assert_non_null(nodes[0].token);
+  assert_true(strlen(nodes[0].token) > 0);
+  assert_string_equal(nodes[0].token, "PTZNode0");
+
+  assert_non_null(nodes[0].name);
+  assert_true(strlen(nodes[0].name) > 0);
+  assert_string_equal(nodes[0].name, "PTZ Node");
+
+  // Verify supported PTZ spaces
+  printf("  [TEST CASE] Verify absolute pan/tilt position space\n");
+  assert_non_null(nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.uri);
+  assert_true(nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.min <
+              nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.max);
+  assert_true(nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.min <
+              nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.max);
+
+  // Test error handling with NULL parameters
+  printf("  [TEST CASE] Error handling - NULL nodes parameter\n");
+  result = onvif_ptz_get_nodes(NULL, &count);
+  assert_int_not_equal(result, ONVIF_SUCCESS);
+
+  printf("  [TEST CASE] Error handling - NULL count parameter\n");
+  result = onvif_ptz_get_nodes(&nodes, NULL);
+  assert_int_not_equal(result, ONVIF_SUCCESS);
+
+  printf("✅ PTZ GetNodes operation tests passed\n");
 }
 
 // Test PTZ Relative Move Functionality
@@ -835,8 +894,308 @@ void test_integration_ptz_memory_leak_detection(void** state) {
   printf("✅ PTZ memory leak detection tests passed\n");
 }
 
+/**
+ * @brief Pilot SOAP test for PTZ GetNodes operation
+ * Tests SOAP envelope parsing and response structure validation
+ * Note: This is a standalone test that validates SOAP structure without full service initialization
+ */
+void test_integration_ptz_get_nodes_soap(void** state) {
+  (void)state;
+
+  // Step 1: Create SOAP request envelope
+  http_request_t* request =
+    soap_test_create_request("GetNodes", SOAP_PTZ_GET_NODES, "/onvif/ptz_service");
+  assert_non_null(request);
+
+  // Step 2: Validate request structure
+  assert_non_null(request->body);
+  assert_true(strstr(request->body, "GetNodes") != NULL);
+
+  // Step 3: Prepare response structure
+  http_response_t response;
+  memset(&response, 0, sizeof(http_response_t));
+
+  // Step 4: Call actual service handler (integration test)
+  int result = onvif_ptz_handle_operation("GetNodes", request, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Step 5: Validate HTTP response structure
+  assert_int_equal(200, response.status_code);
+  assert_non_null(response.body);
+  assert_true(response.body_length > 0);
+
+  // Step 6: Check for SOAP faults
+  char fault_code[256] = {0};
+  char fault_string[512] = {0};
+  int has_fault = soap_test_check_soap_fault(&response, fault_code, fault_string);
+  assert_int_equal(0, has_fault);
+
+  // Step 7: Parse SOAP response
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(onvif_gsoap_context_t));
+  result = soap_test_init_response_parsing(&ctx, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  struct _onvif3__GetNodesResponse* nodes_response = NULL;
+  result = soap_test_parse_get_nodes_response(&ctx, &nodes_response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_non_null(nodes_response);
+
+  // Step 8: Validate response data
+  assert_non_null(nodes_response->PTZNode);
+  assert_true(nodes_response->__sizePTZNode >= 1);
+  assert_non_null(nodes_response->PTZNode[0].token);
+
+  // Step 9: Cleanup resources
+  onvif_gsoap_cleanup(&ctx);
+  soap_test_free_request(request);
+  if (response.body) {
+    free(response.body);
+  }
+}
+
+/**
+ * @brief SOAP test for PTZ AbsoluteMove operation
+ */
+void test_integration_ptz_absolute_move_soap(void** state) {
+  (void)state;
+
+  // Step 1: Create SOAP request envelope
+  http_request_t* request =
+    soap_test_create_request("AbsoluteMove", SOAP_PTZ_ABSOLUTE_MOVE, "/onvif/ptz_service");
+  assert_non_null(request);
+
+  // Step 2: Prepare response structure
+  http_response_t response;
+  memset(&response, 0, sizeof(http_response_t));
+
+  // Step 3: Call service handler
+  int result = onvif_ptz_handle_operation("AbsoluteMove", request, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Step 4: Validate HTTP response
+  assert_int_equal(200, response.status_code);
+  assert_non_null(response.body);
+
+  // Step 5: Check for SOAP faults
+  int has_fault = soap_test_check_soap_fault(&response, NULL, NULL);
+  assert_int_equal(0, has_fault);
+
+  // Step 6: Parse SOAP response
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(onvif_gsoap_context_t));
+  result = soap_test_init_response_parsing(&ctx, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  struct _onvif3__AbsoluteMoveResponse* move_response = NULL;
+  result = soap_test_parse_absolute_move_response(&ctx, &move_response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_non_null(move_response);
+
+  // Step 7: Cleanup
+  onvif_gsoap_cleanup(&ctx);
+  soap_test_free_request(request);
+  if (response.body) {
+    free(response.body);
+  }
+}
+
+/**
+ * @brief SOAP test for PTZ GetPresets operation
+ */
+void test_integration_ptz_get_presets_soap(void** state) {
+  (void)state;
+
+  // Step 1: Create SOAP request envelope
+  http_request_t* request =
+    soap_test_create_request("GetPresets", SOAP_PTZ_GET_PRESETS, "/onvif/ptz_service");
+  assert_non_null(request);
+
+  // Step 2: Prepare response structure
+  http_response_t response;
+  memset(&response, 0, sizeof(http_response_t));
+
+  // Step 3: Call service handler
+  int result = onvif_ptz_handle_operation("GetPresets", request, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Step 4: Validate HTTP response
+  assert_int_equal(200, response.status_code);
+  assert_non_null(response.body);
+
+  // Step 5: Check for SOAP faults
+  int has_fault = soap_test_check_soap_fault(&response, NULL, NULL);
+  assert_int_equal(0, has_fault);
+
+  // Step 6: Parse SOAP response
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(onvif_gsoap_context_t));
+  result = soap_test_init_response_parsing(&ctx, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  struct _onvif3__GetPresetsResponse* presets_response = NULL;
+  result = soap_test_parse_get_presets_response(&ctx, &presets_response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_non_null(presets_response);
+
+  // Step 7: Validate response data - presets array should exist
+  assert_true(presets_response->__sizePTZPreset >= 0);
+
+  // Step 8: Cleanup
+  onvif_gsoap_cleanup(&ctx);
+  soap_test_free_request(request);
+  if (response.body) {
+    free(response.body);
+  }
+}
+
+/**
+ * @brief SOAP test for PTZ SetPreset operation
+ */
+void test_integration_ptz_set_preset_soap(void** state) {
+  (void)state;
+
+  // Step 1: Create SOAP request envelope
+  http_request_t* request =
+    soap_test_create_request("SetPreset", SOAP_PTZ_SET_PRESET, "/onvif/ptz_service");
+  assert_non_null(request);
+
+  // Step 2: Prepare response structure
+  http_response_t response;
+  memset(&response, 0, sizeof(http_response_t));
+
+  // Step 3: Call service handler
+  int result = onvif_ptz_handle_operation("SetPreset", request, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Step 4: Validate HTTP response
+  assert_int_equal(200, response.status_code);
+  assert_non_null(response.body);
+
+  // Step 5: Check for SOAP faults
+  int has_fault = soap_test_check_soap_fault(&response, NULL, NULL);
+  assert_int_equal(0, has_fault);
+
+  // Step 6: Parse SOAP response
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(onvif_gsoap_context_t));
+  result = soap_test_init_response_parsing(&ctx, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  struct _onvif3__SetPresetResponse* preset_response = NULL;
+  result = soap_test_parse_set_preset_response(&ctx, &preset_response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_non_null(preset_response);
+
+  // Step 7: Validate response data - token field exists
+  // Note: SetPresetResponse contains token field, no validation needed here
+
+  // Step 8: Cleanup
+  onvif_gsoap_cleanup(&ctx);
+  soap_test_free_request(request);
+  if (response.body) {
+    free(response.body);
+  }
+}
+
+/**
+ * @brief SOAP test for PTZ GotoPreset operation
+ */
+void test_integration_ptz_goto_preset_soap(void** state) {
+  (void)state;
+
+  // Step 1: Create SOAP request envelope
+  http_request_t* request =
+    soap_test_create_request("GotoPreset", SOAP_PTZ_GOTO_PRESET, "/onvif/ptz_service");
+  assert_non_null(request);
+
+  // Step 2: Prepare response structure
+  http_response_t response;
+  memset(&response, 0, sizeof(http_response_t));
+
+  // Step 3: Call service handler
+  int result = onvif_ptz_handle_operation("GotoPreset", request, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Step 4: Validate HTTP response
+  assert_int_equal(200, response.status_code);
+  assert_non_null(response.body);
+
+  // Step 5: Check for SOAP faults
+  int has_fault = soap_test_check_soap_fault(&response, NULL, NULL);
+  assert_int_equal(0, has_fault);
+
+  // Step 6: Parse SOAP response
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(onvif_gsoap_context_t));
+  result = soap_test_init_response_parsing(&ctx, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  struct _onvif3__GotoPresetResponse* goto_response = NULL;
+  result = soap_test_parse_goto_preset_response(&ctx, &goto_response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_non_null(goto_response);
+
+  // Step 7: Cleanup
+  onvif_gsoap_cleanup(&ctx);
+  soap_test_free_request(request);
+  if (response.body) {
+    free(response.body);
+  }
+}
+
+/**
+ * @brief SOAP test for PTZ RemovePreset operation
+ */
+void test_integration_ptz_remove_preset_soap(void** state) {
+  (void)state;
+
+  // Step 1: Create SOAP request envelope
+  http_request_t* request =
+    soap_test_create_request("RemovePreset", SOAP_PTZ_REMOVE_PRESET, "/onvif/ptz_service");
+  assert_non_null(request);
+
+  // Step 2: Prepare response structure
+  http_response_t response;
+  memset(&response, 0, sizeof(http_response_t));
+
+  // Step 3: Call service handler
+  int result = onvif_ptz_handle_operation("RemovePreset", request, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Step 4: Validate HTTP response
+  assert_int_equal(200, response.status_code);
+  assert_non_null(response.body);
+
+  // Step 5: Check for SOAP faults
+  int has_fault = soap_test_check_soap_fault(&response, NULL, NULL);
+  assert_int_equal(0, has_fault);
+
+  // Step 6: Parse SOAP response
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(onvif_gsoap_context_t));
+  result = soap_test_init_response_parsing(&ctx, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  struct _onvif3__RemovePresetResponse* remove_response = NULL;
+  result = soap_test_parse_remove_preset_response(&ctx, &remove_response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_non_null(remove_response);
+
+  // Step 7: Cleanup
+  onvif_gsoap_cleanup(&ctx);
+  soap_test_free_request(request);
+  if (response.body) {
+    free(response.body);
+  }
+}
+
 // Test suite definition
 const struct CMUnitTest ptz_service_optimization_tests[] = {
+  // PTZ Node Information Tests
+  cmocka_unit_test_setup_teardown(test_integration_ptz_get_nodes_operation, ptz_service_setup,
+                                  ptz_service_teardown),
+
   // PTZ Movement Operations Tests
   cmocka_unit_test_setup_teardown(test_integration_ptz_absolute_move_functionality,
                                   ptz_service_setup, ptz_service_teardown),
@@ -872,10 +1231,26 @@ const struct CMUnitTest ptz_service_optimization_tests[] = {
                                   ptz_service_teardown),
 
   // PTZ Service Performance Tests
-  cmocka_unit_test_setup_teardown(test_integration_ptz_concurrent_operations, ptz_service_setup,
-                                  ptz_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_ptz_stress_testing, ptz_service_setup,
                                   ptz_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_ptz_memory_leak_detection, ptz_service_setup,
+                                  ptz_service_teardown),
+
+  // SOAP integration tests (full HTTP/SOAP layer validation)
+  cmocka_unit_test_setup_teardown(test_integration_ptz_get_nodes_soap, ptz_service_setup,
+                                  ptz_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_absolute_move_soap, ptz_service_setup,
+                                  ptz_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_get_presets_soap, ptz_service_setup,
+                                  ptz_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_set_preset_soap, ptz_service_setup,
+                                  ptz_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_goto_preset_soap, ptz_service_setup,
+                                  ptz_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_remove_preset_soap, ptz_service_setup,
+                                  ptz_service_teardown),
+
+  // Concurrent tests (may hang - placed at end)
+  cmocka_unit_test_setup_teardown(test_integration_ptz_concurrent_operations, ptz_service_setup,
                                   ptz_service_teardown),
 };

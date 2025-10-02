@@ -674,17 +674,25 @@ int onvif_device_init(config_manager_t* config) {
   // Initialize gSOAP context for device service
   g_device_handler.gsoap_ctx = ONVIF_MALLOC(sizeof(onvif_gsoap_context_t));
   if (!g_device_handler.gsoap_ctx) {
+    platform_log_error("Failed to allocate gSOAP context for device service (size: %zu bytes)\n",
+                       sizeof(onvif_gsoap_context_t));
     return ONVIF_ERROR;
   }
 
-  if (onvif_gsoap_init(g_device_handler.gsoap_ctx) != ONVIF_SUCCESS) {
+  int gsoap_result = onvif_gsoap_init(g_device_handler.gsoap_ctx);
+  if (gsoap_result != ONVIF_SUCCESS) {
+    platform_log_error("Failed to initialize gSOAP context for device service (error: %d)\n",
+                       gsoap_result);
     ONVIF_FREE(g_device_handler.gsoap_ctx);
     g_device_handler.gsoap_ctx = NULL;
     return ONVIF_ERROR;
   }
 
   // Initialize buffer pool for medium-sized responses
-  if (buffer_pool_init(&g_device_response_buffer_pool) != 0) {
+  int pool_result = buffer_pool_init(&g_device_response_buffer_pool);
+  if (pool_result != 0) {
+    platform_log_error("Failed to initialize buffer pool for device service (error: %d)\n",
+                       pool_result);
     onvif_gsoap_cleanup(g_device_handler.gsoap_ctx);
     ONVIF_FREE(g_device_handler.gsoap_ctx);
     g_device_handler.gsoap_ctx = NULL;

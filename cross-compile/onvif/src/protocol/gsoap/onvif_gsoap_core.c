@@ -78,6 +78,42 @@ void onvif_gsoap_reset(onvif_gsoap_context_t* ctx) {
 }
 
 /**
+ * @brief Structure to track buffer reading state
+ */
+typedef struct {
+  const char* buffer;     /* Source buffer */
+  size_t size;            /* Total buffer size */
+  size_t position;        /* Current read position */
+} buffer_read_state_t;
+
+/**
+ * @brief Receive callback for reading from memory buffer
+ * @param soap gSOAP runtime context
+ * @param buf Buffer to read into
+ * @param len Maximum bytes to read
+ * @return Number of bytes read, or 0 for EOF, or -1 for error
+ */
+static size_t frecv_buffer(struct soap* soap, char* buf, size_t len) {
+  buffer_read_state_t* state = (buffer_read_state_t*)soap->user;
+  if (!state || !buf) {
+    return 0;
+  }
+
+  /* Calculate how many bytes are remaining in the buffer */
+  size_t remaining = state->size - state->position;
+  if (remaining == 0) {
+    return 0; /* EOF */
+  }
+
+  /* Read up to len bytes from the buffer */
+  size_t to_read = (len < remaining) ? len : remaining;
+  memcpy(buf, state->buffer + state->position, to_read);
+  state->position += to_read;
+
+  return to_read;
+}
+
+/**
  * @brief Initialize request parsing for the context
  * @param ctx Context to initialize for parsing
  * @param request_xml SOAP request XML data
@@ -97,10 +133,43 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
   /* Configure soap context for parsing from buffer */
   soap_begin(&ctx->soap);
 
-  /* Set up input stream for parsing */
-  ctx->soap.is = (const char*)request_xml;
-  ctx->soap.buflen = xml_size;
-  ctx->soap.bufidx = 0;
+  /* Allocate and copy the request XML to soap-managed memory
+   * This ensures the buffer remains valid during parsing */
+  char* buffer = (char*)soap_malloc(&ctx->soap, xml_size + 1);
+  if (!buffer) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
+                          "Failed to allocate buffer for request");
+    return ONVIF_ERROR_MEMORY;
+  }
+
+  memcpy(buffer, request_xml, xml_size);
+  buffer[xml_size] = '\0';
+
+  /* Allocate buffer read state structure */
+  buffer_read_state_t* read_state = (buffer_read_state_t*)soap_malloc(
+    &ctx->soap, sizeof(buffer_read_state_t));
+  if (!read_state) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
+                          "Failed to allocate read state");
+    return ONVIF_ERROR_MEMORY;
+  }
+
+  read_state->buffer = buffer;
+  read_state->size = xml_size;
+  read_state->position = 0;
+
+  /* Configure gSOAP to read from the buffer using frecv callback
+   * This is the standard way to parse from memory in gSOAP */
+  ctx->soap.user = read_state;          /* Store read state in user field */
+  ctx->soap.frecv = frecv_buffer;       /* Set custom receive callback */
+  ctx->soap.recvfd = -1;                /* No file descriptor */
+
+  /* Initialize receive mode */
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
+                          "Failed to initialize SOAP receive mode");
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
 
   /* Update request state */
   ctx->request_state.is_initialized = true;

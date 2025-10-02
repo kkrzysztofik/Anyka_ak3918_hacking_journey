@@ -19,13 +19,40 @@
  */
 int buffer_pool_init(buffer_pool_t* pool) {
   if (!pool) {
+    printf("ERROR: buffer_pool_init: NULL pool pointer\n");
+    platform_log_error("buffer_pool_init: NULL pool pointer\n");
     return -1;
   }
 
-  // Use static mutex instead of dynamic allocation
-  if (pthread_mutex_init(&pool->mutex, NULL) != 0) {
-    platform_log_error("Failed to initialize buffer pool mutex\n");
-    return -1;
+  printf("DEBUG: buffer_pool_init: Starting initialization (initialized=%d, mutex_initialized=%d)\n",
+         pool->initialized, pool->mutex_initialized);
+  platform_log_debug("buffer_pool_init: Starting initialization (initialized=%d, mutex_initialized=%d)\n",
+                     pool->initialized, pool->mutex_initialized);
+
+  // Check if already initialized - allow idempotent initialization
+  if (pool->initialized) {
+    printf("DEBUG: Buffer pool already initialized, skipping reinitialization\n");
+    platform_log_debug("Buffer pool already initialized, skipping reinitialization\n");
+    return 0;
+  }
+
+  // Initialize mutex only if not already initialized
+  if (!pool->mutex_initialized) {
+    // First initialization - init the mutex
+    printf("DEBUG: Initializing buffer pool mutex...\n");
+    platform_log_debug("Initializing buffer pool mutex...\n");
+    int mutex_result = pthread_mutex_init(&pool->mutex, NULL);
+    if (mutex_result != 0) {
+      printf("ERROR: Failed to initialize buffer pool mutex (errno=%d)\n", mutex_result);
+      platform_log_error("Failed to initialize buffer pool mutex (errno=%d)\n", mutex_result);
+      return -1;
+    }
+    pool->mutex_initialized = 1;
+    printf("DEBUG: Buffer pool mutex initialized successfully\n");
+    platform_log_debug("Buffer pool mutex initialized successfully\n");
+  } else {
+    printf("DEBUG: Buffer pool mutex already initialized, reusing\n");
+    platform_log_debug("Buffer pool mutex already initialized, reusing\n");
   }
 
   for (int i = 0; i < BUFFER_POOL_SIZE; i++) {
@@ -35,8 +62,9 @@ int buffer_pool_init(buffer_pool_t* pool) {
       // Clean up already allocated buffers
       for (int j = 0; j < i; j++) {
         free(pool->buffers[j]);
+        pool->buffers[j] = NULL;
       }
-      pthread_mutex_destroy(&pool->mutex);
+      // Note: Don't destroy mutex on error - it will be reused or cleaned up later
       return -1;
     }
     pool->available[i] = 1;
@@ -48,6 +76,9 @@ int buffer_pool_init(buffer_pool_t* pool) {
   pool->hits = 0;
   pool->misses = 0;
   pool->peak_utilization = 0;
+
+  // Mark as initialized
+  pool->initialized = 1;
 
   platform_log_info("Buffer pool initialized with %d buffers\n", BUFFER_POOL_SIZE);
   return 0;
@@ -62,6 +93,12 @@ void buffer_pool_cleanup(buffer_pool_t* pool) {
     return;
   }
 
+  // Check if not initialized - allow idempotent cleanup
+  if (!pool->initialized) {
+    platform_log_debug("Buffer pool not initialized, skipping cleanup\n");
+    return;
+  }
+
   for (int i = 0; i < BUFFER_POOL_SIZE; i++) {
     if (pool->buffers[i]) {
       free(pool->buffers[i]);
@@ -69,9 +106,14 @@ void buffer_pool_cleanup(buffer_pool_t* pool) {
     }
   }
 
-  pthread_mutex_destroy(&pool->mutex);
+  // NOTE: Do NOT destroy the mutex to allow reinitialization
+  // The mutex will be reused on next init call
+  // pthread_mutex_destroy(&pool->mutex);  // Commented out for idempotent init/cleanup
 
-  platform_log_info("Buffer pool cleaned up\n");
+  // Reset initialized flag to allow reinitialization
+  pool->initialized = 0;
+
+  platform_log_info("Buffer pool cleaned up (mutex preserved for reinitialization)\n");
 }
 
 /**
