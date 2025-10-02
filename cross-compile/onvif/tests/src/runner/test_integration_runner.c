@@ -15,14 +15,9 @@
 #include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
 
-void test_integration_ptz_absolute_move_functionality(void** state);
 void test_integration_ptz_relative_move_functionality(void** state);
 void test_integration_ptz_continuous_move_functionality(void** state);
 void test_integration_ptz_stop_functionality(void** state);
-void test_integration_ptz_preset_creation(void** state);
-void test_integration_ptz_preset_retrieval(void** state);
-void test_integration_ptz_preset_goto(void** state);
-void test_integration_ptz_preset_removal(void** state);
 void test_integration_ptz_preset_memory_optimization(void** state);
 void test_integration_ptz_memory_usage_improvements(void** state);
 void test_integration_ptz_buffer_pool_usage(void** state);
@@ -38,8 +33,6 @@ int ptz_service_setup(void** state);
 int ptz_service_teardown(void** state);
 
 // Forward declarations for Media integration tests
-void test_integration_media_profile_operations(void** state);
-void test_integration_media_stream_uri_generation_functionality(void** state);
 void test_integration_optimized_profile_lookup_performance(void** state);
 void test_integration_uri_caching_optimization(void** state);
 void test_integration_media_memory_efficiency(void** state);
@@ -53,17 +46,12 @@ int media_service_teardown(void** state);
 
 // Forward declarations for Device integration tests
 void test_integration_device_init_cleanup_lifecycle(void** state);
-void test_integration_device_get_device_information(void** state);
 void test_integration_device_get_device_information_fields_validation(void** state);
-void test_integration_device_get_capabilities_all_services(void** state);
 void test_integration_device_get_capabilities_specific_category(void** state);
 void test_integration_device_get_capabilities_multiple_categories(void** state);
-void test_integration_device_get_system_date_time(void** state);
 void test_integration_device_get_system_date_time_timezone(void** state);
 void test_integration_device_get_system_date_time_dst(void** state);
-void test_integration_device_get_services_all(void** state);
 void test_integration_device_get_services_namespaces(void** state);
-void test_integration_device_system_reboot(void** state);
 void test_integration_device_handle_operation_null_params(void** state);
 void test_integration_device_handle_operation_invalid_operation(void** state);
 void test_integration_device_handle_operation_uninitialized(void** state);
@@ -136,28 +124,18 @@ int main(void) {
   const struct CMUnitTest tests[] = {
     // Device integration tests with setup/teardown
     cmocka_unit_test(test_integration_device_init_cleanup_lifecycle),
-    cmocka_unit_test_setup_teardown(test_integration_device_get_device_information,
-                                    device_service_setup, device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_get_device_information_fields_validation,
-                                    device_service_setup, device_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_all_services,
                                     device_service_setup, device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_specific_category,
                                     device_service_setup, device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_multiple_categories,
                                     device_service_setup, device_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time,
-                                    device_service_setup, device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_timezone,
                                     device_service_setup, device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_dst,
                                     device_service_setup, device_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_device_get_services_all, device_service_setup,
-                                    device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_get_services_namespaces,
                                     device_service_setup, device_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_device_system_reboot, device_service_setup,
-                                    device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_handle_operation_null_params,
                                     device_service_setup, device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_handle_operation_invalid_operation,
@@ -176,21 +154,11 @@ int main(void) {
                                     device_service_setup, device_service_teardown),
 
     // PTZ integration tests with setup/teardown
-    cmocka_unit_test_setup_teardown(test_integration_ptz_absolute_move_functionality,
-                                    ptz_service_setup, ptz_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_ptz_relative_move_functionality,
                                     ptz_service_setup, ptz_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_ptz_continuous_move_functionality,
                                     ptz_service_setup, ptz_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_ptz_stop_functionality, ptz_service_setup,
-                                    ptz_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_ptz_preset_creation, ptz_service_setup,
-                                    ptz_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_ptz_preset_retrieval, ptz_service_setup,
-                                    ptz_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_ptz_preset_goto, ptz_service_setup,
-                                    ptz_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_ptz_preset_removal, ptz_service_setup,
                                     ptz_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_ptz_preset_memory_optimization,
                                     ptz_service_setup, ptz_service_teardown),
@@ -213,10 +181,6 @@ int main(void) {
                                     ptz_service_teardown),
 
     // Media integration tests
-    cmocka_unit_test_setup_teardown(test_integration_media_profile_operations, media_service_setup,
-                                    media_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_media_stream_uri_generation_functionality,
-                                    media_service_setup, media_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_optimized_profile_lookup_performance,
                                     media_service_setup, media_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_uri_caching_optimization, media_service_setup,

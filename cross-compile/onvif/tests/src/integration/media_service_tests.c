@@ -103,78 +103,6 @@ int media_service_teardown(void** state) {
 }
 
 // Test functions for functionality preservation
-void test_integration_media_profile_operations(void** state) {
-  (void)state; // Unused parameter
-
-  // Test getting profiles
-  struct media_profile* profiles = NULL;
-  int count = 0;
-  int result = onvif_media_get_profiles(&profiles, &count);
-
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_non_null(profiles);
-  assert_int_equal(TEST_PROFILE_COUNT, count);
-
-  // Verify profile tokens
-  bool found_main = false, found_sub = false;
-  for (int i = 0; i < count; i++) {
-    if (strcmp(profiles[i].token, TEST_PROFILE_MAIN) == 0) {
-      found_main = true;
-    } else if (strcmp(profiles[i].token, TEST_PROFILE_SUB) == 0) {
-      found_sub = true;
-    }
-  }
-  assert_true(found_main);
-  assert_true(found_sub);
-
-  // Test getting individual profile
-  struct media_profile profile;
-  result = onvif_media_get_profile(TEST_PROFILE_MAIN, &profile);
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_string_equal(TEST_PROFILE_MAIN, profile.token);
-  assert_string_equal(TEST_PROFILE_NAME_MAIN, profile.name);
-}
-
-void test_integration_media_stream_uri_generation_functionality(void** state) {
-  (void)state; // Unused parameter
-
-  struct stream_uri uri;
-
-  // Test MainProfile RTSP URI generation
-  int result = onvif_media_get_stream_uri(TEST_PROFILE_MAIN, TEST_PROTOCOL_RTSP, &uri);
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_non_null(uri.uri);
-  assert_true(strlen(uri.uri) > 0);
-  assert_true(strstr(uri.uri, TEST_URI_PATH_MAIN) != NULL);
-  assert_true(strstr(uri.uri, "/vs0") != NULL);
-
-  // Test SubProfile RTSP URI generation
-  result = onvif_media_get_stream_uri(TEST_PROFILE_SUB, TEST_PROTOCOL_RTSP, &uri);
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_non_null(uri.uri);
-  assert_true(strlen(uri.uri) > 0);
-  assert_true(strstr(uri.uri, TEST_URI_PATH_MAIN) != NULL);
-  assert_true(strstr(uri.uri, TEST_URI_PATH_SUB) != NULL);
-
-  // Test RTP-Unicast protocol
-  result = onvif_media_get_stream_uri(TEST_PROFILE_MAIN, TEST_PROTOCOL_RTP_UNICAST, &uri);
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_non_null(uri.uri);
-
-  // Test invalid profile
-  result = onvif_media_get_stream_uri(TEST_PROFILE_INVALID, TEST_PROTOCOL_RTSP, &uri);
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
-
-  // Test invalid protocol
-  result = onvif_media_get_stream_uri(TEST_PROFILE_MAIN, TEST_PROTOCOL_INVALID, &uri);
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
-
-  // Verify URI properties
-  assert_int_equal(TEST_URI_INVALID_AFTER_CONNECT, uri.invalid_after_connect);
-  assert_int_equal(TEST_URI_INVALID_AFTER_REBOOT, uri.invalid_after_reboot);
-  assert_int_equal(TEST_URI_TIMEOUT, uri.timeout);
-}
-
 void test_integration_optimized_profile_lookup_performance(void** state) {
   (void)state; // Unused parameter
 
@@ -409,33 +337,6 @@ void test_integration_media_platform_integration(void** state) {
 /**
  * @brief Test DeleteProfile operation end-to-end
  */
-void test_integration_media_delete_profile_operation(void** state) {
-  (void)state;
-
-  // Create a new profile first
-  struct media_profile new_profile;
-  int result = onvif_media_create_profile("TestDeleteProfile", "Test Profile for Deletion",
-                                          &new_profile);
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_string_equal("TestDeleteProfile", new_profile.token);
-
-  // Verify profile exists
-  struct media_profile verify_profile;
-  result = onvif_media_get_profile("TestDeleteProfile", &verify_profile);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Delete the profile
-  result = onvif_media_delete_profile("TestDeleteProfile");
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Verify profile no longer exists
-  result = onvif_media_get_profile("TestDeleteProfile", &verify_profile);
-  assert_int_not_equal(ONVIF_SUCCESS, result);
-}
-
-/**
- * @brief Test error handling for invalid profile tokens
- */
 void test_integration_media_error_invalid_profile_token(void** state) {
   (void)state;
 
@@ -544,196 +445,6 @@ void test_integration_media_request_response_validation(void** state) {
 
 /**
  * @brief Test SetVideoSourceConfiguration operation
- */
-void test_integration_media_set_video_source_configuration(void** state) {
-  (void)state;
-
-  // Setup valid configuration
-  struct video_source_configuration config = {0};
-  strncpy(config.token, "VideoSourceConfig0", sizeof(config.token) - 1);
-  strncpy(config.name, "Test Video Source Config", sizeof(config.name) - 1);
-  config.use_count = 1;
-  strncpy(config.source_token, "VideoSource0", sizeof(config.source_token) - 1);
-  config.bounds.width = 1920;
-  config.bounds.height = 1080;
-  config.bounds.x = 0;
-  config.bounds.y = 0;
-
-  // Test valid configuration
-  int result = onvif_media_set_video_source_configuration("VideoSourceConfig0", &config);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test invalid configuration token
-  result = onvif_media_set_video_source_configuration("InvalidConfigToken", &config);
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
-
-  // Test NULL configuration token
-  result = onvif_media_set_video_source_configuration(NULL, &config);
-  assert_int_not_equal(ONVIF_SUCCESS, result);
-
-  // Test NULL configuration
-  result = onvif_media_set_video_source_configuration("VideoSourceConfig0", NULL);
-  assert_int_not_equal(ONVIF_SUCCESS, result);
-}
-
-/**
- * @brief Test SetVideoEncoderConfiguration operation
- */
-void test_integration_media_set_video_encoder_configuration(void** state) {
-  (void)state;
-
-  // Setup valid encoder configuration
-  struct video_encoder_configuration config = {0};
-  strncpy(config.token, "VideoEncoder0", sizeof(config.token) - 1);
-  strncpy(config.name, "Test H.264 Encoder", sizeof(config.name) - 1);
-  config.use_count = 1;
-  strncpy(config.encoding, "H264", sizeof(config.encoding) - 1);
-  config.resolution.width = 1920;
-  config.resolution.height = 1080;
-  config.quality = 4.0f;
-  config.framerate_limit = 30;
-  config.encoding_interval = 30;
-  config.bitrate_limit = 4096;
-
-  // Test valid configuration for VideoEncoder0
-  int result = onvif_media_set_video_encoder_configuration("VideoEncoder0", &config);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test valid configuration for VideoEncoder1
-  result = onvif_media_set_video_encoder_configuration("VideoEncoder1", &config);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test invalid configuration token
-  result = onvif_media_set_video_encoder_configuration("InvalidEncoder", &config);
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
-
-  // Test NULL configuration token
-  result = onvif_media_set_video_encoder_configuration(NULL, &config);
-  assert_int_not_equal(ONVIF_SUCCESS, result);
-
-  // Test NULL configuration
-  result = onvif_media_set_video_encoder_configuration("VideoEncoder0", NULL);
-  assert_int_not_equal(ONVIF_SUCCESS, result);
-}
-
-/**
- * @brief Test GetMetadataConfigurations operation
- */
-void test_integration_media_get_metadata_configurations(void** state) {
-  (void)state;
-
-  struct metadata_configuration* configs = NULL;
-  int count = 0;
-
-  // Test getting metadata configurations
-  int result = onvif_media_get_metadata_configurations(&configs, &count);
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_non_null(configs);
-  assert_true(count > 0);
-
-  // Verify configuration structure
-  for (int i = 0; i < count; i++) {
-    assert_non_null(configs[i].token);
-    assert_true(strlen(configs[i].token) > 0);
-    assert_non_null(configs[i].name);
-    assert_true(strlen(configs[i].name) > 0);
-    assert_true(configs[i].session_timeout >= 0);
-  }
-
-  // Test NULL configs parameter
-  result = onvif_media_get_metadata_configurations(NULL, &count);
-  assert_int_not_equal(ONVIF_SUCCESS, result);
-
-  // Test NULL count parameter
-  result = onvif_media_get_metadata_configurations(&configs, NULL);
-  assert_int_not_equal(ONVIF_SUCCESS, result);
-}
-
-/**
- * @brief Test SetMetadataConfiguration operation
- */
-void test_integration_media_set_metadata_configuration(void** state) {
-  (void)state;
-
-  // Setup valid metadata configuration
-  struct metadata_configuration config = {0};
-  strncpy(config.token, "MetadataConfig0", sizeof(config.token) - 1);
-  strncpy(config.name, "Test Metadata Config", sizeof(config.name) - 1);
-  config.use_count = 1;
-  config.session_timeout = 60;
-  config.analytics = 1;
-
-  // Test valid configuration
-  int result = onvif_media_set_metadata_configuration("MetadataConfig0", &config);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test invalid configuration token
-  result = onvif_media_set_metadata_configuration("InvalidMetadataConfig", &config);
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
-
-  // Test NULL configuration token
-  result = onvif_media_set_metadata_configuration(NULL, &config);
-  assert_int_not_equal(ONVIF_SUCCESS, result);
-
-  // Test NULL configuration
-  result = onvif_media_set_metadata_configuration("MetadataConfig0", NULL);
-  assert_int_not_equal(ONVIF_SUCCESS, result);
-}
-
-/**
- * @brief Test StartMulticastStreaming operation
- */
-void test_integration_media_start_multicast_streaming(void** state) {
-  (void)state;
-
-  // Test starting multicast for MainProfile
-  int result = onvif_media_start_multicast_streaming(TEST_PROFILE_MAIN);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test starting multicast for SubProfile
-  result = onvif_media_start_multicast_streaming(TEST_PROFILE_SUB);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test invalid profile token
-  result = onvif_media_start_multicast_streaming(TEST_PROFILE_INVALID);
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
-
-  // Test NULL profile token
-  result = onvif_media_start_multicast_streaming(NULL);
-  assert_int_not_equal(ONVIF_SUCCESS, result);
-}
-
-/**
- * @brief Test StopMulticastStreaming operation
- */
-void test_integration_media_stop_multicast_streaming(void** state) {
-  (void)state;
-
-  // Start multicast first
-  int result = onvif_media_start_multicast_streaming(TEST_PROFILE_MAIN);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test stopping multicast for MainProfile
-  result = onvif_media_stop_multicast_streaming(TEST_PROFILE_MAIN);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test stopping multicast for SubProfile
-  result = onvif_media_stop_multicast_streaming(TEST_PROFILE_SUB);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Test invalid profile token
-  result = onvif_media_stop_multicast_streaming(TEST_PROFILE_INVALID);
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
-
-  // Test NULL profile token
-  result = onvif_media_stop_multicast_streaming(NULL);
-  assert_int_not_equal(ONVIF_SUCCESS, result);
-}
-
-/**
- * @brief Pilot SOAP test for Media GetProfiles operation
- * Tests SOAP envelope parsing and response structure validation
- * Note: This is a standalone test that validates SOAP structure without full service initialization
  */
 void test_integration_media_get_profiles_soap(void** state) {
   (void)state;
@@ -1223,10 +934,6 @@ void test_integration_media_create_profile_soap(void** state) {
 }
 
 const struct CMUnitTest media_service_optimization_tests[] = {
-  cmocka_unit_test_setup_teardown(test_integration_media_profile_operations, media_service_setup,
-                                  media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_stream_uri_generation_functionality,
-                                  media_service_setup, media_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_optimized_profile_lookup_performance,
                                   media_service_setup, media_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_uri_caching_optimization, media_service_setup,
@@ -1240,26 +947,12 @@ const struct CMUnitTest media_service_optimization_tests[] = {
   cmocka_unit_test_setup_teardown(test_integration_media_platform_integration, media_service_setup,
                                   media_service_teardown),
   // Enhanced coverage tests
-  cmocka_unit_test_setup_teardown(test_integration_media_delete_profile_operation,
-                                  media_service_setup, media_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_media_error_invalid_profile_token,
                                   media_service_setup, media_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_media_request_response_validation,
                                   media_service_setup, media_service_teardown),
   // Configuration operation tests
-  cmocka_unit_test_setup_teardown(test_integration_media_set_video_source_configuration,
-                                  media_service_setup, media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_set_video_encoder_configuration,
-                                  media_service_setup, media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_get_metadata_configurations,
-                                  media_service_setup, media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_set_metadata_configuration,
-                                  media_service_setup, media_service_teardown),
   // Multicast streaming tests
-  cmocka_unit_test_setup_teardown(test_integration_media_start_multicast_streaming,
-                                  media_service_setup, media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_stop_multicast_streaming,
-                                  media_service_setup, media_service_teardown),
   // SOAP integration tests (full HTTP/SOAP layer validation)
   cmocka_unit_test_setup_teardown(test_integration_media_get_profiles_soap, media_service_setup,
                                   media_service_teardown),

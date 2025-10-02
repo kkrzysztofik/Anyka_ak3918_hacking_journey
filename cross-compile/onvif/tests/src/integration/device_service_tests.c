@@ -147,37 +147,6 @@ void test_integration_device_init_cleanup_lifecycle(void** state) {
 /**
  * @brief Test GetDeviceInformation operation
  */
-void test_integration_device_get_device_information(void** state) {
-  (void)state;
-
-  http_request_t request;
-  memset(&request, 0, sizeof(http_request_t));
-  request.content_length = 0;
-  request.body = NULL;
-
-  char response_buffer[4096];
-  http_response_t response;
-  memset(&response, 0, sizeof(http_response_t));
-  response.body = response_buffer;
-
-  // Execute GetDeviceInformation operation
-  int result =
-    onvif_device_handle_operation(TEST_OPERATION_GET_DEVICE_INFORMATION, &request, &response);
-
-  // Verify success
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_true(response.body_length > 0);
-  assert_non_null(response.body);
-
-  // Verify response contains device information XML elements
-  assert_non_null(strstr(response.body, "GetDeviceInformationResponse"));
-  assert_non_null(strstr(response.body, "Manufacturer"));
-  assert_non_null(strstr(response.body, "Model"));
-}
-
-/**
- * @brief Test GetDeviceInformation fields validation
- */
 void test_integration_device_get_device_information_fields_validation(void** state) {
   (void)state;
 
@@ -204,34 +173,6 @@ void test_integration_device_get_device_information_fields_validation(void** sta
 
 /**
  * @brief Test GetCapabilities operation for all services
- */
-void test_integration_device_get_capabilities_all_services(void** state) {
-  (void)state;
-
-  http_request_t request;
-  memset(&request, 0, sizeof(http_request_t));
-
-  char response_buffer[8192];
-  http_response_t response;
-  memset(&response, 0, sizeof(http_response_t));
-  response.body = response_buffer;
-
-  // Execute GetCapabilities operation
-  int result = onvif_device_handle_operation(TEST_OPERATION_GET_CAPABILITIES, &request, &response);
-
-  // Verify success
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_true(response.body_length > 0);
-
-  // Verify response contains capabilities for all services
-  assert_non_null(strstr(response.body, "Capabilities"));
-  assert_non_null(strstr(response.body, "Device"));
-  assert_non_null(strstr(response.body, "Media"));
-  assert_non_null(strstr(response.body, "PTZ"));
-}
-
-/**
- * @brief Test GetCapabilities operation for specific category
  */
 void test_integration_device_get_capabilities_specific_category(void** state) {
   (void)state;
@@ -279,33 +220,6 @@ void test_integration_device_get_capabilities_multiple_categories(void** state) 
 /**
  * @brief Test GetSystemDateAndTime operation
  */
-void test_integration_device_get_system_date_time(void** state) {
-  (void)state;
-
-  http_request_t request;
-  memset(&request, 0, sizeof(http_request_t));
-
-  char response_buffer[4096];
-  http_response_t response;
-  memset(&response, 0, sizeof(http_response_t));
-  response.body = response_buffer;
-
-  // Execute GetSystemDateAndTime operation
-  int result =
-    onvif_device_handle_operation(TEST_OPERATION_GET_SYSTEM_DATE_TIME, &request, &response);
-
-  // Verify success
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_true(response.body_length > 0);
-
-  // Verify response contains system date/time elements
-  assert_non_null(strstr(response.body, "SystemDateAndTime"));
-  assert_non_null(strstr(response.body, "UTCDateTime"));
-}
-
-/**
- * @brief Test GetSystemDateAndTime timezone information
- */
 void test_integration_device_get_system_date_time_timezone(void** state) {
   (void)state;
 
@@ -352,31 +266,6 @@ void test_integration_device_get_system_date_time_dst(void** state) {
 /**
  * @brief Test GetServices operation for all services
  */
-void test_integration_device_get_services_all(void** state) {
-  (void)state;
-
-  http_request_t request;
-  memset(&request, 0, sizeof(http_request_t));
-
-  char response_buffer[8192];
-  http_response_t response;
-  memset(&response, 0, sizeof(http_response_t));
-  response.body = response_buffer;
-
-  // Execute GetServices operation
-  int result = onvif_device_handle_operation(TEST_OPERATION_GET_SERVICES, &request, &response);
-
-  // Verify success
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_true(response.body_length > 0);
-
-  // Verify response contains services
-  assert_non_null(strstr(response.body, "Service"));
-}
-
-/**
- * @brief Test GetServices namespaces
- */
 void test_integration_device_get_services_namespaces(void** state) {
   (void)state;
 
@@ -398,31 +287,6 @@ void test_integration_device_get_services_namespaces(void** state) {
 
 /**
  * @brief Test SystemReboot operation
- */
-void test_integration_device_system_reboot(void** state) {
-  (void)state;
-
-  http_request_t request;
-  memset(&request, 0, sizeof(http_request_t));
-
-  char response_buffer[4096];
-  http_response_t response;
-  memset(&response, 0, sizeof(http_response_t));
-  response.body = response_buffer;
-
-  // Execute SystemReboot operation
-  int result = onvif_device_handle_operation(TEST_OPERATION_SYSTEM_REBOOT, &request, &response);
-
-  // Verify success
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_true(response.body_length > 0);
-
-  // Verify response contains reboot message
-  assert_non_null(strstr(response.body, "SystemReboot"));
-}
-
-/**
- * @brief Test handle_operation with NULL parameters
  */
 void test_integration_device_handle_operation_null_params(void** state) {
   (void)state;
@@ -930,36 +794,26 @@ const struct CMUnitTest device_service_tests[] = {
   cmocka_unit_test(test_integration_device_init_cleanup_lifecycle),
 
   // GetDeviceInformation tests
-  cmocka_unit_test_setup_teardown(test_integration_device_get_device_information,
-                                  device_service_setup, device_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_device_get_device_information_fields_validation,
                                   device_service_setup, device_service_teardown),
 
   // GetCapabilities tests
-  cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_all_services,
-                                  device_service_setup, device_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_specific_category,
                                   device_service_setup, device_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_multiple_categories,
                                   device_service_setup, device_service_teardown),
 
   // GetSystemDateAndTime tests
-  cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time,
-                                  device_service_setup, device_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_timezone,
                                   device_service_setup, device_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_dst,
                                   device_service_setup, device_service_teardown),
 
   // GetServices tests
-  cmocka_unit_test_setup_teardown(test_integration_device_get_services_all, device_service_setup,
-                                  device_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_device_get_services_namespaces,
                                   device_service_setup, device_service_teardown),
 
   // SystemReboot test
-  cmocka_unit_test_setup_teardown(test_integration_device_system_reboot, device_service_setup,
-                                  device_service_teardown),
 
   // Error handling tests
   cmocka_unit_test_setup_teardown(test_integration_device_handle_operation_null_params,

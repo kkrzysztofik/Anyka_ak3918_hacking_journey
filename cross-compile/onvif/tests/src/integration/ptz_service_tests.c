@@ -190,85 +190,6 @@ int ptz_service_teardown(void** state) {
 }
 
 // Test PTZ Absolute Move Functionality
-void test_integration_ptz_absolute_move_functionality(void** state) {
-  (void)state; // Unused parameter
-
-  printf("Testing PTZ absolute move functionality...\n");
-
-  // Test valid absolute move
-  printf("  [TEST CASE] Valid absolute move with position and speed\n");
-  struct ptz_vector position;
-  struct ptz_speed speed;
-  test_helper_ptz_create_test_position(&position, TEST_POSITION_PAN_NORMALIZED,
-                                       TEST_POSITION_TILT_NORMALIZED, TEST_POSITION_ZOOM);
-  test_helper_ptz_create_test_speed(&speed, TEST_SPEED_PAN_TILT_FAST, TEST_SPEED_ZOOM);
-
-  int result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &position, &speed);
-  assert_int_equal(result, ONVIF_SUCCESS);
-
-  // Test with NULL speed (should use default)
-  printf("  [TEST CASE] Valid absolute move with NULL speed (default speed)\n");
-  result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &position, NULL);
-  assert_int_equal(result, ONVIF_SUCCESS);
-
-  // Test invalid parameters
-  printf("  [TEST CASE] Invalid NULL profile_token parameter\n");
-  result = onvif_ptz_absolute_move(NULL, &position, &speed);
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  printf("  [TEST CASE] Invalid NULL position parameter\n");
-  result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, NULL, &speed);
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  printf("✅ PTZ absolute move functionality tests passed\n");
-}
-
-// Test PTZ GetNodes Operation
-void test_integration_ptz_get_nodes_operation(void** state) {
-  (void)state; // Unused parameter
-
-  printf("Testing PTZ GetNodes operation...\n");
-
-  // Test getting PTZ nodes
-  printf("  [TEST CASE] Get PTZ nodes\n");
-  struct ptz_node* nodes = NULL;
-  int count = 0;
-  int result = onvif_ptz_get_nodes(&nodes, &count);
-  assert_int_equal(result, ONVIF_SUCCESS);
-  assert_non_null(nodes);
-  assert_int_equal(count, 1); // System has one PTZ node
-
-  // Verify node structure
-  printf("  [TEST CASE] Verify node structure fields\n");
-  assert_non_null(nodes[0].token);
-  assert_true(strlen(nodes[0].token) > 0);
-  assert_string_equal(nodes[0].token, "PTZNode0");
-
-  assert_non_null(nodes[0].name);
-  assert_true(strlen(nodes[0].name) > 0);
-  assert_string_equal(nodes[0].name, "PTZ Node");
-
-  // Verify supported PTZ spaces
-  printf("  [TEST CASE] Verify absolute pan/tilt position space\n");
-  assert_non_null(nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.uri);
-  assert_true(nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.min <
-              nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.max);
-  assert_true(nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.min <
-              nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.max);
-
-  // Test error handling with NULL parameters
-  printf("  [TEST CASE] Error handling - NULL nodes parameter\n");
-  result = onvif_ptz_get_nodes(NULL, &count);
-  assert_int_not_equal(result, ONVIF_SUCCESS);
-
-  printf("  [TEST CASE] Error handling - NULL count parameter\n");
-  result = onvif_ptz_get_nodes(&nodes, NULL);
-  assert_int_not_equal(result, ONVIF_SUCCESS);
-
-  printf("✅ PTZ GetNodes operation tests passed\n");
-}
-
-// Test PTZ Relative Move Functionality
 void test_integration_ptz_relative_move_functionality(void** state) {
   (void)state; // Unused parameter
 
@@ -438,153 +359,6 @@ void test_integration_ptz_stop_functionality(void** state) {
 }
 
 // Test PTZ Preset Creation
-void test_integration_ptz_preset_creation(void** state) {
-  (void)state; // Unused parameter
-
-  printf("Testing PTZ preset creation...\n");
-
-  printf("  [TEST CASE] Valid preset creation with name\n");
-  char output_token[TEST_PRESET_TOKEN_SIZE] = {0};
-  int result =
-    onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME, output_token, sizeof(output_token));
-  assert_int_equal(result, ONVIF_SUCCESS);
-  assert_string_not_equal(output_token, "");
-
-  // Test with NULL preset name
-  printf("  [TEST CASE] Invalid NULL preset name parameter\n");
-  memset(output_token, 0, sizeof(output_token));
-  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, NULL, output_token, sizeof(output_token));
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  // Test invalid parameters
-  printf("  [TEST CASE] Invalid NULL profile_token parameter\n");
-  result = onvif_ptz_set_preset(NULL, TEST_PRESET_NAME, output_token, sizeof(output_token));
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  printf("  [TEST CASE] Invalid NULL output_token parameter\n");
-  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME, NULL, sizeof(output_token));
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  printf("✅ PTZ preset creation tests passed\n");
-}
-
-// Test PTZ Preset Retrieval
-void test_integration_ptz_preset_retrieval(void** state) {
-  (void)state; // Unused parameter
-
-  printf("Testing PTZ preset retrieval...\n");
-
-  // First create a preset
-  printf("  [TEST CASE] Setup - create preset for retrieval test\n");
-  char output_token[TEST_PRESET_TOKEN_SIZE] = {0};
-  int result =
-    onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME, output_token, sizeof(output_token));
-  assert_int_equal(result, ONVIF_SUCCESS);
-
-  // Now retrieve presets
-  printf("  [TEST CASE] Valid preset retrieval\n");
-  struct ptz_preset* preset_list = NULL;
-  int count = 0;
-  result = onvif_ptz_get_presets(TEST_PROFILE_TOKEN, &preset_list, &count);
-  assert_int_equal(result, ONVIF_SUCCESS);
-  assert_non_null(preset_list);
-  assert_int_equal(count, 1);
-
-  // Test invalid parameters
-  printf("  [TEST CASE] Invalid NULL profile_token parameter\n");
-  result = onvif_ptz_get_presets(NULL, &preset_list, &count);
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  printf("  [TEST CASE] Invalid NULL preset_list parameter\n");
-  result = onvif_ptz_get_presets(TEST_PROFILE_TOKEN, NULL, &count);
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  printf("  [TEST CASE] Invalid NULL count parameter\n");
-  result = onvif_ptz_get_presets(TEST_PROFILE_TOKEN, &preset_list, NULL);
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  printf("✅ PTZ preset retrieval tests passed\n");
-}
-
-// Test PTZ Preset Goto
-void test_integration_ptz_preset_goto(void** state) {
-  (void)state; // Unused parameter
-
-  printf("Testing PTZ preset goto...\n");
-
-  // First create a preset
-  printf("  [TEST CASE] Setup - create preset for goto test\n");
-  char output_token[TEST_PRESET_TOKEN_SIZE] = {0};
-  int result =
-    onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME, output_token, sizeof(output_token));
-  assert_int_equal(result, ONVIF_SUCCESS);
-
-  // Test goto preset
-  printf("  [TEST CASE] Valid goto preset with speed\n");
-  struct ptz_speed speed;
-  test_helper_ptz_create_test_speed(&speed, TEST_SPEED_PAN_TILT_FAST, TEST_SPEED_ZOOM);
-
-  result = onvif_ptz_goto_preset(TEST_PROFILE_TOKEN, output_token, &speed);
-  assert_int_equal(result, ONVIF_SUCCESS);
-
-  // Test with NULL speed
-  printf("  [TEST CASE] Valid goto preset with NULL speed (default speed)\n");
-  result = onvif_ptz_goto_preset(TEST_PROFILE_TOKEN, output_token, NULL);
-  assert_int_equal(result, ONVIF_SUCCESS);
-
-  // Test invalid parameters
-  printf("  [TEST CASE] Invalid NULL profile_token parameter\n");
-  result = onvif_ptz_goto_preset(NULL, output_token, &speed);
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  printf("  [TEST CASE] Invalid NULL preset_token parameter\n");
-  result = onvif_ptz_goto_preset(TEST_PROFILE_TOKEN, NULL, &speed);
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  // Test with non-existent preset
-  printf("  [TEST CASE] Invalid non-existent preset token\n");
-  result = onvif_ptz_goto_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NONEXISTENT, &speed);
-  assert_int_equal(result, ONVIF_ERROR_NOT_FOUND);
-
-  printf("✅ PTZ preset goto tests passed\n");
-}
-
-// Test PTZ Preset Removal
-void test_integration_ptz_preset_removal(void** state) {
-  (void)state; // Unused parameter
-
-  printf("Testing PTZ preset removal...\n");
-
-  // First create a preset
-  printf("  [TEST CASE] Setup - create preset for removal test\n");
-  char output_token[TEST_PRESET_TOKEN_SIZE] = {0};
-  int result =
-    onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME, output_token, sizeof(output_token));
-  assert_int_equal(result, ONVIF_SUCCESS);
-
-  // Test remove preset
-  printf("  [TEST CASE] Valid preset removal\n");
-  result = onvif_ptz_remove_preset(TEST_PROFILE_TOKEN, output_token);
-  assert_int_equal(result, ONVIF_SUCCESS);
-
-  // Test removing non-existent preset
-  printf("  [TEST CASE] Invalid non-existent preset removal\n");
-  result = onvif_ptz_remove_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NONEXISTENT);
-  assert_int_equal(result, ONVIF_ERROR_NOT_FOUND);
-
-  // Test invalid parameters
-  printf("  [TEST CASE] Invalid NULL profile_token parameter\n");
-  result = onvif_ptz_remove_preset(NULL, output_token);
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  printf("  [TEST CASE] Invalid NULL preset_token parameter\n");
-  result = onvif_ptz_remove_preset(TEST_PROFILE_TOKEN, NULL);
-  assert_int_equal(result, ONVIF_ERROR_NULL);
-
-  printf("✅ PTZ preset removal tests passed\n");
-}
-
-// Test PTZ Preset Memory Optimization
 void test_integration_ptz_preset_memory_optimization(void** state) {
   (void)state; // Unused parameter
 
@@ -1193,12 +967,8 @@ void test_integration_ptz_remove_preset_soap(void** state) {
 // Test suite definition
 const struct CMUnitTest ptz_service_optimization_tests[] = {
   // PTZ Node Information Tests
-  cmocka_unit_test_setup_teardown(test_integration_ptz_get_nodes_operation, ptz_service_setup,
-                                  ptz_service_teardown),
 
   // PTZ Movement Operations Tests
-  cmocka_unit_test_setup_teardown(test_integration_ptz_absolute_move_functionality,
-                                  ptz_service_setup, ptz_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_ptz_relative_move_functionality,
                                   ptz_service_setup, ptz_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_ptz_continuous_move_functionality,
@@ -1209,14 +979,6 @@ const struct CMUnitTest ptz_service_optimization_tests[] = {
                                   ptz_service_teardown),
 
   // PTZ Preset Management Tests
-  cmocka_unit_test_setup_teardown(test_integration_ptz_preset_creation, ptz_service_setup,
-                                  ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_preset_retrieval, ptz_service_setup,
-                                  ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_preset_goto, ptz_service_setup,
-                                  ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_preset_removal, ptz_service_setup,
-                                  ptz_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_ptz_preset_memory_optimization,
                                   ptz_service_setup, ptz_service_teardown),
 

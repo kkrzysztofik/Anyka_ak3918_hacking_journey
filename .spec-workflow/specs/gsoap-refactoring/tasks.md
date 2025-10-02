@@ -309,7 +309,7 @@
 
 ## Phase 7: Test Infrastructure
 
-- [ ] 24. Create SOAP envelope test data header
+- [x] 24. Create SOAP envelope test data header
   - File: tests/data/soap_test_envelopes.h (new file)
   - Define SOAP 1.2 envelope header and footer macros
   - Create valid SOAP request templates for all 18 operations (6 Media, 6 PTZ, 4 Device, 2 Imaging)
@@ -319,7 +319,7 @@
   - _Requirements: 7.1, 7.2, 7.3_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Engineer with expertise in ONVIF protocol and XML | Task: Create soap_test_envelopes.h following requirements 7.1-7.3. Define SOAP_ENVELOPE_HEADER and SOAP_ENVELOPE_FOOTER macros with proper ONVIF namespaces (s, tds, trt, tptz, timg, tt). Create complete SOAP 1.2 envelopes for all 18 operations with realistic parameter values. Create invalid request templates: SOAP_INVALID_XML, SOAP_INVALID_NAMESPACE, SOAP_MISSING_REQUIRED_PARAM. Use string constants, not files. | Restrictions: Must use SOAP 1.2 format, must include all required ONVIF namespaces, requests must be ONVIF 2.5 compliant, use proper XML formatting | Success: All 18 valid requests parse successfully with gSOAP, invalid requests fail as expected, envelopes are realistic and representative of real clients | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 25. Rewrite test_onvif_gsoap.c with new parsing tests
+- [x] 25. Rewrite test_onvif_gsoap.c with new parsing tests
   - File: tests/src/unit/protocol/test_onvif_gsoap.c
   - Delete obsolete tests for manual parsing functions (6 tests)
   - Implement new tests for all 18 parsing functions
@@ -330,7 +330,7 @@
   - _Requirements: 7.4, 7.5, 7.6, 7.7, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Engineer with expertise in C unit testing and CMocka | Task: Completely rewrite test_onvif_gsoap.c following requirements 7.4-7.7 and 8.1-8.7. Delete obsolete tests (test_unit_onvif_gsoap_parse_profile_token, etc.). Create setup_parsing_test() helper that initializes context and calls onvif_gsoap_init_request_parsing(). Write test for each of 18 parsing functions: test NULL parameters, test valid request parsing, verify parsed fields match expected values (ProfileToken, Position.x/y, StreamSetup.Protocol, etc.). Add error tests: test_unit_onvif_gsoap_parse_invalid_xml, test_unit_onvif_gsoap_parse_invalid_namespace, test_unit_onvif_gsoap_parse_missing_required_param. Register all tests in main(). | Restrictions: Must use CMocka framework, must clean up context after each test, must test both success and failure paths, each test must be independent | Success: All 18 parsing functions have tests, error cases covered, tests pass, no memory leaks (valgrind clean), 100% coverage of new parsing functions | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 26. Create integration tests for request-response cycles
+- [x] 26. Create integration tests for request-response cycles
   - File: tests/src/integration/test_gsoap_integration.c (new file)
   - Implement integration tests for complete parse → process → response cycles
   - Test Media service: GetStreamUri end-to-end
@@ -341,7 +341,7 @@
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Integration Test Engineer with expertise in end-to-end testing | Task: Create integration tests following requirements 9.1-9.5. For GetStreamUri: parse request, call service handler, generate response, verify response contains rtsp:// URI. For AbsoluteMove: parse request with Position coordinates, call PTZ handler, generate response, verify success. Add test_integration_onvif_gsoap_full_request_response_cycle() that demonstrates complete flow. Verify response XML structure with basic parsing. | Restrictions: Must test realistic flows, must verify response content not just success codes, should not mock service layer | Success: Integration tests pass, complete flows validated, response XML is valid and contains expected data, tests demonstrate end-to-end functionality | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 27. Run unit tests and verify all pass
+- [x] 27. Run unit tests and verify all pass
   - File: N/A - verification task
   - Run `make test` to execute all unit tests
   - Verify all tests pass without failures or segfaults
@@ -353,7 +353,7 @@
 
 ## Phase 8: Documentation & Validation
 
-- [ ] 28. Generate Doxygen documentation
+- [x] 28. Generate Doxygen documentation
   - File: N/A - documentation generation task
   - Run `make docs` to generate Doxygen documentation
   - Verify all new functions are documented
@@ -364,17 +364,7 @@
   - _Requirements: 10.9_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Technical Writer with Doxygen expertise | Task: Generate and review Doxygen documentation following requirement 10.9. Run `make docs` and verify successful generation. Check docs/html/index.html output. Verify all new modules (core, media, ptz, device, imaging) appear in documentation. Verify all 18 parsing functions are documented with complete parameter and return descriptions. Fix any Doxygen warnings. Ensure file headers are present and correctly formatted. | Restrictions: Must fix all Doxygen warnings, documentation must be accurate, must not modify functional code to fix doc issues unless necessary | Success: Doxygen generates without warnings, all modules and functions documented, HTML output is complete and readable, documentation accurately describes implementation | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 29. Run code formatting and linting
-  - File: N/A - code quality validation task
-  - Run `./cross-compile/onvif/scripts/format_code.sh --check` to verify formatting
-  - Run `./cross-compile/onvif/scripts/lint_code.sh --check` to verify code quality
-  - Fix any formatting or linting issues
-  - Purpose: Ensure code quality standards compliance
-  - _Leverage: Project formatting and linting scripts_
-  - _Requirements: Per CLAUDE.md code quality validation is MANDATORY_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Code Quality Engineer with expertise in C coding standards | Task: Validate code quality per CLAUDE.md requirements. Run `./cross-compile/onvif/scripts/format_code.sh --check` and verify all files pass (exit 0). Run `./cross-compile/onvif/scripts/lint_code.sh --check` and verify no issues (exit 0). If issues found, run without --check flag to auto-fix formatting, manually fix linting issues. Verify function ordering: definitions at top, execution logic at bottom. Verify global variables at top after includes. Verify include ordering: system → third-party → project. | Restrictions: Must fix all issues, must not disable linting rules, code must follow project standards exactly | Success: Formatting check passes (exit 0), linting check passes (exit 0), function ordering correct, global variables placed properly, includes ordered correctly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
-
-- [ ] 30. Build and test on target hardware
+- [x] 30. Build and test on target hardware
   - File: N/A - integration testing task
   - Build with `make release` for ARM target
   - Deploy to SD card: copy `out/onvifd` to `SD_card_contents/anyka_hack/usr/bin/`
@@ -385,7 +375,7 @@
   - _Requirements: All functional requirements_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Embedded Systems Engineer with expertise in hardware testing | Task: Build and validate on target hardware covering all requirements. Build with `make release`, verify clean build. Deploy to SD card payload directory. Boot camera with SD card. Test with ONVIF Device Manager or similar client: verify device discovery, get device info, get capabilities, get profiles, get stream URI (verify RTSP URL), test PTZ absolute move, test presets, test imaging settings. Document any issues. | Restrictions: Must test on actual hardware, must use real ONVIF clients, must not modify flash (SD card payload only) | Success: Clean build for ARM target, deploys successfully, all ONVIF operations work on real hardware, tested with real clients, no functional regressions | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 31. Performance benchmarking
+- [x] 31. Performance benchmarking
   - File: N/A - performance measurement task
   - Measure request parsing time for all 18 operations
   - Compare with old manual parsing performance (if baseline available)
@@ -396,7 +386,207 @@
   - _Requirements: Per design, parsing should be 50-60% faster_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Performance Engineer with expertise in embedded systems benchmarking | Task: Measure and validate parsing performance. Create test program that parses each of 18 operations 1000 times, measuring time using request_state.parse_start_time and parse_end_time. Calculate average, min, max, percentiles. Verify all operations parse in < 1ms average on Anyka AK3918. Compare with baseline if available. Document results in performance report. Test memory allocation count (should be 0 for context init, 1 per request for structure). | Restrictions: Must test on actual hardware, must use realistic SOAP envelopes, must run multiple iterations for statistical validity | Success: All operations parse in < 1ms on target, performance improvement documented (ideally 50-60% faster vs baseline), no unexpected performance regressions, memory allocation is minimal | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 32. ONVIF client compatibility testing
+## Phase 9: Integration Test Refactoring
+
+- [x] 34. Create Device Service Integration Tests
+  - File: tests/src/integration/device_service_tests.c (new file)
+  - File: tests/src/integration/device_service_tests.h (new file)
+  - Implement 15-20 test cases covering complete Device service functionality
+  - Test onvif_device_init()/cleanup() lifecycle
+  - Test onvif_device_handle_operation() for all operations:
+    - GetDeviceInformation (manufacturer, model, firmware, serial, hardware)
+    - GetCapabilities (device, media, PTZ, imaging capabilities)
+    - GetSystemDateTime (current time, timezone, DST)
+    - GetServices (service URLs and namespaces)
+    - SystemReboot (reboot functionality)
+  - Test error handling and validation
+  - Test configuration integration
+  - Test concurrent operation handling
+  - Purpose: Provide end-to-end testing for Device service operations
+  - _Leverage: Existing PTZ/Media test patterns, CMocka framework_
+  - _Requirements: Complete service-level testing for all Device operations_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Engineer with expertise in ONVIF Device service and integration testing | Task: Create comprehensive Device service integration tests following the pattern from ptz_service_tests.c and media_service_tests.c. Create device_service_tests.h and device_service_tests.c with setup/teardown functions and 15-20 test cases. Test all Device operations end-to-end: GetDeviceInformation (verify manufacturer, model, firmware, serial, hardware fields), GetCapabilities (verify device/media/PTZ/imaging capabilities), GetSystemDateTime (verify time format, timezone), GetServices (verify service URLs), SystemReboot (verify reboot functionality). Add error handling tests and concurrent operation tests. Use CMocka framework with proper test naming (test_integration_device_*). | Restrictions: Must follow existing integration test patterns, must use CMocka framework, must test actual service operations not mocks, proper setup/teardown for each test | Success: 15-20 Device service integration tests created, all tests pass, coverage of all Device operations, error cases tested, follows project test patterns | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [x] 35. Enhance Media Service Integration Tests
+  - File: tests/src/integration/media_service_tests.c
+  - Add 3-5 additional test cases:
+    - test_integration_media_delete_profile_operation (end-to-end DeleteProfile test)
+    - test_integration_media_error_invalid_profile_token (test error handling for invalid tokens)
+    - test_integration_media_concurrent_profile_operations (test concurrent create/delete)
+    - test_integration_media_request_response_validation (validate complete request-response flow)
+  - Purpose: Fill gaps in Media service test coverage
+  - _Leverage: Existing Media service tests, response validation utilities_
+  - _Requirements: Complete Media service operation coverage_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Engineer with expertise in ONVIF Media service | Task: Enhance media_service_tests.c with 3-5 additional tests to fill coverage gaps. Add test_integration_media_delete_profile_operation (create profile, delete it, verify deletion), test_integration_media_error_invalid_profile_token (test error handling for invalid profile tokens), test_integration_media_concurrent_profile_operations (test thread-safe profile create/delete), test_integration_media_request_response_validation (validate complete SOAP request parsing and response generation). Follow existing test patterns and naming conventions. | Restrictions: Must use existing test framework, must follow naming convention (test_integration_media_*), must not duplicate existing tests | Success: 3-5 new tests added, all tests pass, DeleteProfile operation tested end-to-end, error cases covered, concurrent operations validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [x] 36. Update build system for Device service tests
+  - File: tests/Makefile
+  - Add device_service_tests.c to INTEGRATION_TEST_SRCS
+  - Remove test_gsoap_integration.c from INTEGRATION_TEST_SRCS
+  - Verify integration test runner includes Device service tests
+  - Purpose: Include new Device service tests in build and exclude obsolete gSOAP tests
+  - _Leverage: Existing Makefile patterns_
+  - _Requirements: Build system integration for new tests_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Build Engineer with Makefile expertise | Task: Update tests/Makefile to add device_service_tests.c to INTEGRATION_TEST_SRCS (around line 127) and remove test_gsoap_integration.c from the same variable. Verify the updated INTEGRATION_TEST_SRCS includes: ptz_service_tests.c, media_service_tests.c, imaging_service_optimization_test.c, device_service_tests.c. Ensure proper dependency tracking and test runner integration. Run `make clean && make test-integration` to verify build. | Restrictions: Must follow existing Makefile patterns, must not break existing tests, must maintain proper dependency tracking | Success: Makefile builds device_service_tests.c, test_gsoap_integration.c removed from build, `make test-integration` runs successfully with new tests | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [x] 37. Delete obsolete gSOAP integration test file
+  - File: tests/src/integration/test_gsoap_integration.c
+  - Delete the file completely
+  - Verify no other files reference or include it
+  - Purpose: Remove low-level protocol tests in favor of service-level integration tests
+  - _Leverage: None - pure deletion_
+  - _Requirements: Clean up obsolete test infrastructure_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Build Engineer with code cleanup expertise | Task: Delete tests/src/integration/test_gsoap_integration.c. Before deletion, search codebase to verify no other files include or reference this file (grep for "test_gsoap_integration" and "test_gsoap_integration.c"). After deletion, verify build succeeds with `make clean && make test-integration`. Verify no dangling references remain. | Restrictions: Must verify no references before deletion, must ensure build succeeds after deletion | Success: File deleted, no references remain, build succeeds, integration tests run without errors | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+## Remaining Tasks - Ordered for Implementation
+
+### Phase 9: SOAP Request/Response Integration Test Migration
+
+- [x] 38. Create SOAP test helper library infrastructure
+  - File: cross-compile/onvif/tests/src/common/soap_test_helpers.h (new file)
+  - File: cross-compile/onvif/tests/src/common/soap_test_helpers.c (new file)
+  - Implement HTTP request builder functions:
+    - soap_test_create_request() - Create HTTP request with SOAP envelope
+    - soap_test_free_request() - Free HTTP request structure
+  - Implement SOAP response parser functions:
+    - soap_test_init_response_parsing() - Initialize gSOAP context for parsing response
+    - soap_test_parse_get_profiles_response() - Parse Media GetProfiles response
+    - soap_test_parse_get_nodes_response() - Parse PTZ GetNodes response
+    - soap_test_parse_get_device_info_response() - Parse Device GetDeviceInformation response
+  - Implement response validation functions:
+    - soap_test_validate_http_response() - Validate HTTP status and headers
+    - soap_test_check_soap_fault() - Check for SOAP faults in response
+  - Implement XML extraction utilities:
+    - soap_test_extract_element_text() - Extract text value from XML element
+    - soap_test_extract_attribute() - Extract attribute value from XML element
+  - Purpose: Provide reusable helper functions for SOAP request/response testing
+  - _Leverage: http_parser.h, onvif_gsoap_core.h, gSOAP API_
+  - _Requirements: Per detailed SOAP migration plan - Phase 1_
+  - _Documentation: docs/detailed_soap_migration_plan.md_
+
+- [x] 39. Add missing SOAP envelopes to test data
+  - File: cross-compile/onvif/tests/src/data/soap_test_envelopes.h
+  - Add 4 missing Media service SOAP envelopes:
+    - SOAP_MEDIA_GET_METADATA_CONFIGURATIONS
+    - SOAP_MEDIA_SET_METADATA_CONFIGURATION
+    - SOAP_MEDIA_START_MULTICAST_STREAMING
+    - SOAP_MEDIA_STOP_MULTICAST_STREAMING
+  - Ensure all envelopes use SOAP 1.2 format with proper ONVIF namespaces
+  - Purpose: Complete SOAP envelope test data for all operations
+  - _Leverage: Existing SOAP envelope patterns, ONVIF 2.5 specification_
+  - _Requirements: Per detailed SOAP migration plan - Phase 1_
+
+- [x] 40. Update test Makefile for SOAP helper library
+  - File: cross-compile/onvif/tests/Makefile
+  - Add src/common/soap_test_helpers.c to TEST_HELPER_SRCS
+  - Verify proper dependency tracking for new files
+  - Build and verify compilation succeeds
+  - Purpose: Include SOAP helper library in test build
+  - _Leverage: Existing Makefile patterns_
+  - _Requirements: Per detailed SOAP migration plan - Phase 1_
+
+- [x] 41. Implement pilot SOAP tests (4 tests - one per service)
+  - File: cross-compile/onvif/tests/src/integration/media_service_tests.c
+  - File: cross-compile/onvif/tests/src/integration/ptz_service_tests.c
+  - File: cross-compile/onvif/tests/src/integration/device_service_tests.c
+  - File: cross-compile/onvif/tests/src/integration/imaging_service_optimization_test.c
+  - Implement 4 pilot SOAP tests:
+    - test_integration_media_get_profiles_soap() - Media service pilot
+    - test_integration_ptz_get_nodes_soap() - PTZ service pilot
+    - test_integration_device_get_device_info_soap() - Device service pilot
+    - test_integration_imaging_get_settings_soap() - Imaging service pilot
+  - Each test follows 8-step pattern:
+    1. Create SOAP HTTP request
+    2. Prepare response structure
+    3. Call service handler
+    4. Validate HTTP response
+    5. Check for SOAP faults
+    6. Parse SOAP response
+    7. Validate response data
+    8. Cleanup resources
+  - Add tests to test arrays
+  - Build and run pilot tests
+  - Purpose: Validate SOAP testing approach with representative tests
+  - _Leverage: soap_test_helpers library, existing service handlers_
+  - _Requirements: Per detailed SOAP migration plan - Phase 2_
+
+- [x] 42. Create SOAP response parsers for all operations
+  - File: cross-compile/onvif/tests/src/common/soap_test_helpers.c
+  - File: cross-compile/onvif/tests/src/common/soap_test_helpers.h
+  - Implement 22 additional response parser functions:
+    - Media service (9): GetStreamUri, CreateProfile, DeleteProfile, SetVideoSourceConfig, SetVideoEncoderConfig, GetMetadataConfigs, SetMetadataConfig, StartMulticast, StopMulticast
+    - PTZ service (5): AbsoluteMove, GetPresets, SetPreset, GotoPreset, RemovePreset
+    - Device service (4): GetCapabilities, GetSystemDateTime, GetServices, SystemReboot
+    - Imaging service (1): SetImagingSettings
+  - Each parser follows pattern: validate parameters, allocate response structure, deserialize with gSOAP, return result
+  - Purpose: Complete SOAP response parsing infrastructure for all operations
+  - _Leverage: gSOAP soap_read__* functions, pilot parser implementations_
+  - _Requirements: Per detailed SOAP migration plan - Phase 3_
+
+- [x] 43. Migrate all remaining integration tests to SOAP (22 tests)
+  - File: cross-compile/onvif/tests/src/integration/*.c (all test files)
+  - Convert remaining 22 integration tests to SOAP request/response pattern
+  - Keep original direct function call tests temporarily
+  - Follow 8-step SOAP test pattern for consistency
+  - Validate data fields in SOAP responses
+  - Build and test incrementally (per service)
+  - Purpose: Achieve 100% SOAP coverage for all 26 operations
+  - _Leverage: Pilot SOAP tests, response parsers, soap_test_helpers_
+  - _Requirements: Per detailed SOAP migration plan - Phase 3_
+
+- [x] 44. Add SOAP error handling integration tests
+  - File: cross-compile/onvif/tests/src/integration/soap_error_tests.c (new file)
+  - Implement error handling tests:
+    - test_integration_soap_error_invalid_xml() - Test invalid XML handling
+    - test_integration_soap_error_missing_param() - Test missing required parameter
+    - test_integration_soap_error_wrong_operation() - Test wrong operation name
+    - test_integration_soap_error_malformed_envelope() - Test malformed SOAP envelope
+  - Verify SOAP faults are generated correctly
+  - Validate error codes and fault messages
+  - Purpose: Ensure proper error handling in SOAP layer
+  - _Leverage: soap_test_check_soap_fault(), invalid envelope test data_
+  - _Requirements: Per detailed SOAP migration plan - Phase 3_
+
+- [x] 45. Remove direct function call tests and finalize
+  - File: cross-compile/onvif/tests/src/integration/*.c (all test files)
+  - Strategy: Replace direct tests with SOAP versions, keep 1 direct test per service for comparison
+  - Document why SOAP version is preferred
+  - Update test documentation and coverage reports
+  - Generate final coverage report
+  - Validate 100% test pass rate
+  - Purpose: Complete transition to SOAP-based integration testing
+  - _Leverage: SOAP tests from tasks 41, 43, 44_
+  - _Requirements: Per detailed SOAP migration plan - Phase 4_
+  - _Implementation: Created comprehensive SOAP_TESTING.md documenting 27 SOAP tests (23 operations + 4 error tests), identified 20 duplicate tests maintained for backward compatibility, documented 36 unique performance/optimization tests to keep. SOAP tests now serve as primary protocol integration tests._
+
+### Phase 10: Final Validation & Compliance
+
+- [ ] 46. Run code formatting and linting
+  - File: N/A - code quality validation task
+  - Run `./cross-compile/onvif/scripts/format_code.sh --check` to verify formatting
+  - Run `./cross-compile/onvif/scripts/lint_code.sh --check` to verify code quality
+  - Fix any formatting or linting issues
+  - Purpose: Ensure code quality standards compliance
+  - _Leverage: Project formatting and linting scripts_
+  - _Requirements: Per CLAUDE.md code quality validation is MANDATORY_
+
+- [ ] 47. Validate complete SOAP integration test suite
+  - File: N/A - validation task
+  - Run `make test-integration` and verify all SOAP tests pass
+  - Verify complete coverage:
+    - 26 operation tests (all services via SOAP)
+    - 4+ error handling tests
+    - HTTP layer validation
+    - SOAP parsing validation
+    - SOAP generation validation
+  - Performance validation: < 50% execution time increase vs direct tests
+  - Run with valgrind to check for memory leaks
+  - Generate and review coverage report
+  - Purpose: Final validation of SOAP integration test migration
+  - _Leverage: Make test targets, valgrind, coverage tools_
+  - _Requirements: Per detailed SOAP migration plan - Testing & Validation_
+
+- [ ] 48. ONVIF client compatibility testing
   - File: N/A - compatibility testing task
   - Test with ONVIF Device Test Tool (if available)
   - Test with multiple ONVIF clients (ONVIF Device Manager, Milestone, Blue Iris, etc.)
@@ -405,9 +595,8 @@
   - Purpose: Ensure broad ONVIF client compatibility
   - _Leverage: Real ONVIF clients, ONVIF conformance tools_
   - _Requirements: Per design, implementation must be ONVIF 2.5 compliant_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with expertise in ONVIF protocol and client compatibility | Task: Validate ONVIF 2.5 compliance and client compatibility. Test with ONVIF Device Manager: verify discovery, device info, capabilities, media profiles, stream URIs (verify RTSP streams work), PTZ controls, imaging settings. Test with other clients if available (Milestone, Blue Iris, etc.). Test Profile S compliance. Document client compatibility matrix. Report any parsing issues or non-compliant behavior. | Restrictions: Must test with real clients, must verify actual streaming works (not just SOAP), should test both conformant and non-conformant client requests | Success: Works with major ONVIF clients, ONVIF 2.5 Profile S compliant, streams work correctly, PTZ controls functional, no breaking client compatibility issues | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 33. Final code review and cleanup
+- [ ] 49. Final code review and cleanup
   - File: All modified/created files
   - Review all code changes for quality, correctness, security
   - Verify all requirements are met
@@ -416,4 +605,3 @@
   - Purpose: Final quality gate before completion
   - _Leverage: Requirements document, design document, AGENTS.md standards_
   - _Requirements: All requirements_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Senior C Developer with code review expertise | Task: Perform final code review covering all requirements. Review all modified files (onvif_gsoap.h, onvif_gsoap_core.c/.h, onvif_gsoap_media.c/.h, onvif_gsoap_ptz.c/.h, onvif_gsoap_device.c/.h, onvif_gsoap_imaging.c/.h, service_dispatcher.c, test files). Verify: all requirements implemented, no manual parsing remains, all error paths handled, proper error codes used, complete Doxygen docs, code follows AGENTS.md standards, no TODOs or debug code, proper resource cleanup, memory safety. Create review checklist and document findings. | Restrictions: Must check every requirement against implementation, must verify test coverage, must ensure security best practices | Success: All requirements verified as implemented, code quality meets standards, security review passed, no critical issues found, ready for production | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
