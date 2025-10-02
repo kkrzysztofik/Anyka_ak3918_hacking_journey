@@ -626,9 +626,11 @@ void test_integration_device_get_device_info_soap(void** state) {
   soap_test_cleanup_response_parsing(&ctx);
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
-  if (response.body) {
-    ONVIF_FREE(response.body);
-  }
+
+  // Always free response body - it was allocated by the service handler
+  assert_non_null(response.body);  // Ensure we have something to free
+  ONVIF_FREE(response.body);
+  response.body = NULL;
 }
 
 /**

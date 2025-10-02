@@ -17,43 +17,37 @@
 #include "utils/error/error_handling.h"
 
 /* ============================================================================
- * Buffer Reading Support for SOAP Response Parsing
+ * SOAP Response Parsing Support
  * ============================================================================ */
 
 /**
- * @brief Structure to track buffer reading state
+ * @brief State for parsing SOAP response from memory buffer
  */
 typedef struct {
-  const char* buffer;  // Source buffer
-  size_t size;         // Total buffer size
-  size_t position;     // Current read position
-} buffer_read_state_t;
+  const char* data;
+  size_t length;
+  size_t position;
+} soap_buffer_state_t;
 
 /**
- * @brief Receive callback for reading from memory buffer
- * @param soap gSOAP runtime context
- * @param buf Buffer to read into
- * @param len Maximum bytes to read
- * @return Number of bytes read, or 0 for EOF
+ * @brief Custom frecv callback for gSOAP to read from memory buffer
  */
-static size_t frecv_buffer(struct soap* soap, char* buf, size_t len) {
-  buffer_read_state_t* state = (buffer_read_state_t*)soap->user;
-  if (!state || !buf) {
+static size_t soap_frecv_from_buffer(struct soap* soap, char* buf, size_t len) {
+  soap_buffer_state_t* state = (soap_buffer_state_t*)soap->user;
+  if (!state || !buf || len == 0) {
     return 0;
   }
 
-  // Calculate how many bytes are remaining in the buffer
-  size_t remaining = state->size - state->position;
+  size_t remaining = state->length - state->position;
   if (remaining == 0) {
     return 0;  // EOF
   }
 
-  // Read up to len bytes from the buffer
-  size_t to_read = (len < remaining) ? len : remaining;
-  memcpy(buf, state->buffer + state->position, to_read);
-  state->position += to_read;
+  size_t to_copy = (len < remaining) ? len : remaining;
+  memcpy(buf, state->data + state->position, to_copy);
+  state->position += to_copy;
 
-  return to_read;
+  return to_copy;
 }
 
 /* ============================================================================
@@ -160,24 +154,20 @@ int soap_test_init_response_parsing(onvif_gsoap_context_t* ctx, const http_respo
     return result;
   }
 
-  // Allocate buffer read state structure using regular malloc
-  // This will be freed when test cleanup is called
-  buffer_read_state_t* read_state = (buffer_read_state_t*)malloc(sizeof(buffer_read_state_t));
-  if (!read_state) {
+  // Allocate and initialize buffer state for parsing
+  soap_buffer_state_t* state = (soap_buffer_state_t*)malloc(sizeof(soap_buffer_state_t));
+  if (!state) {
     onvif_gsoap_cleanup(ctx);
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Point directly to response body (no copy needed - it's already in memory)
-  read_state->buffer = response->body;
-  read_state->size = response->body_length;
-  read_state->position = 0;
+  state->data = response->body;
+  state->length = response->body_length;
+  state->position = 0;
 
-  // Configure gSOAP to read from buffer
-  // The soap_read__* macros will call soap_begin_recv() which will use these settings
-  ctx->soap.user = read_state;
-  ctx->soap.frecv = frecv_buffer;
-  ctx->soap.recvfd = -1;
+  // Set up gSOAP to use our buffer reading callback
+  ctx->soap.user = state;
+  ctx->soap.frecv = soap_frecv_from_buffer;
 
   return ONVIF_SUCCESS;
 }
@@ -187,7 +177,7 @@ void soap_test_cleanup_response_parsing(onvif_gsoap_context_t* ctx) {
     return;
   }
 
-  // Free the buffer_read_state_t that was allocated in soap_test_init_response_parsing
+  // Free the buffer state that was allocated in init_response_parsing
   if (ctx->soap.user) {
     free(ctx->soap.user);
     ctx->soap.user = NULL;
@@ -258,8 +248,28 @@ int soap_test_parse_get_device_info_response(onvif_gsoap_context_t* ctx,
   // Initialize response structure
   soap_default__tds__GetDeviceInformationResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__tds__GetDeviceInformationResponse(&ctx->soap, *response) != SOAP_OK) {
+  // Begin receiving and parse the complete message
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Navigate to the Body element
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Deserialize the response element from the body
+  if (soap_in__tds__GetDeviceInformationResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Close body and envelope
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Finish receiving
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
