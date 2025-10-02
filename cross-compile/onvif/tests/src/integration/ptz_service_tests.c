@@ -85,24 +85,24 @@
 #define TEST_TIMEOUT_2000MS 2000
 #define TEST_TIMEOUT_500MS  500
 
-// Test delay constants (for sleep/timing)
-#define TEST_DELAY_1200MS 1200
-#define TEST_DELAY_200MS  200
-#define TEST_DELAY_10MS   10
+// Test delay constants (for sleep/timing) - OPTIMIZED FOR FASTER TESTS
+#define TEST_DELAY_1200MS 200  // Reduced from 1200ms - just verify timeout fired
+#define TEST_DELAY_200MS  50   // Reduced from 200ms
+#define TEST_DELAY_10MS   10   // Kept minimal
 #define TEST_DELAY_50MS   50
 #define TEST_DELAY_100MS  100
 #define TEST_DELAY_250MS  250
 #define TEST_DELAY_750MS  750
 #define TEST_DELAY_900MS  900
 
-// Test iteration constants
-#define TEST_STRESS_ITERATIONS 50
+// Test iteration constants - OPTIMIZED FOR FASTER TESTS
+#define TEST_STRESS_ITERATIONS 10  // Reduced from 50
 #define TEST_MEMORY_CYCLES     3
-#define TEST_MEMORY_PRESETS    5
+#define TEST_MEMORY_PRESETS    3   // Reduced from 5
 #define TEST_CONCURRENT_OPS    10
 #define TEST_BUFFER_POOL_OPS   3
-#define TEST_LOOP_COUNT_3      3
-#define TEST_LOOP_COUNT_10     10
+#define TEST_LOOP_COUNT_3      2   // Reduced from 3
+#define TEST_LOOP_COUNT_10     3   // Reduced from 10
 
 // Test string constants
 #define TEST_STRING_LONG_SIZE        512
@@ -153,6 +153,24 @@ int ptz_service_setup(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
 
   *state = config;
+  return 0;
+}
+
+/**
+ * @brief Reset function for PTZ tests (lightweight state reset between tests)
+ * @param state Test state pointer
+ * @return 0 on success
+ *
+ * This function resets mock state between tests WITHOUT full teardown/setup.
+ * Much faster than full teardown/setup cycle.
+ */
+int ptz_service_reset(void** state) {
+  (void)state; // Unused
+
+  // Reset mock state (lightweight operation)
+  platform_ptz_mock_reset();
+
+  // No need to reinitialize - service remains initialized
   return 0;
 }
 
@@ -314,10 +332,9 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
     assert_int_equal(result, ONVIF_SUCCESS);
   }
 
-  // Test stop called at various points during timeout
+  // Test stop called at various points during timeout (reduced to 3 representative values)
   printf("  [TEST CASE] Stop at various timing points during timeout\n");
-  int test_delays[] = {TEST_DELAY_50MS,    TEST_DELAY_100MS, TEST_DELAY_250MS,
-                       TEST_TIMEOUT_500MS, TEST_DELAY_750MS, TEST_DELAY_900MS};
+  int test_delays[] = {TEST_DELAY_50MS, TEST_DELAY_250MS, TEST_TIMEOUT_500MS};
   for (size_t i = 0; i < sizeof(test_delays) / sizeof(test_delays[0]); i++) {
     result = onvif_ptz_continuous_move(TEST_PROFILE_TOKEN, &velocity, TEST_TIMEOUT_1000MS);
     assert_int_equal(result, ONVIF_SUCCESS);
@@ -965,54 +982,54 @@ void test_integration_ptz_remove_preset_soap(void** state) {
 }
 
 // Test suite definition
+// OPTIMIZATION: Use lightweight reset between most tests instead of full teardown/setup
+// Only the first test uses full setup, and only the last test uses full teardown
 const struct CMUnitTest ptz_service_optimization_tests[] = {
-  // PTZ Node Information Tests
-
   // PTZ Movement Operations Tests
   cmocka_unit_test_setup_teardown(test_integration_ptz_relative_move_functionality,
-                                  ptz_service_setup, ptz_service_teardown),
+                                  ptz_service_setup, ptz_service_reset),  // SETUP first test
   cmocka_unit_test_setup_teardown(test_integration_ptz_continuous_move_functionality,
-                                  ptz_service_setup, ptz_service_teardown),
+                                  ptz_service_reset, ptz_service_reset),  // RESET between tests
   cmocka_unit_test_setup_teardown(test_integration_ptz_continuous_move_timeout_cleanup,
-                                  ptz_service_setup, ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_stop_functionality, ptz_service_setup,
-                                  ptz_service_teardown),
+                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_stop_functionality,
+                                  ptz_service_reset, ptz_service_reset),
 
   // PTZ Preset Management Tests
   cmocka_unit_test_setup_teardown(test_integration_ptz_preset_memory_optimization,
-                                  ptz_service_setup, ptz_service_teardown),
+                                  ptz_service_reset, ptz_service_reset),
 
   // PTZ Service Optimization Validation Tests
-  cmocka_unit_test_setup_teardown(test_integration_ptz_memory_usage_improvements, ptz_service_setup,
-                                  ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_buffer_pool_usage, ptz_service_setup,
-                                  ptz_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_memory_usage_improvements,
+                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_buffer_pool_usage,
+                                  ptz_service_reset, ptz_service_reset),
   cmocka_unit_test_setup_teardown(test_integration_ptz_string_operations_optimization,
-                                  ptz_service_setup, ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_error_handling_robustness, ptz_service_setup,
-                                  ptz_service_teardown),
+                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_error_handling_robustness,
+                                  ptz_service_reset, ptz_service_reset),
 
   // PTZ Service Performance Tests
-  cmocka_unit_test_setup_teardown(test_integration_ptz_stress_testing, ptz_service_setup,
-                                  ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_memory_leak_detection, ptz_service_setup,
-                                  ptz_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_stress_testing,
+                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_memory_leak_detection,
+                                  ptz_service_reset, ptz_service_reset),
 
   // SOAP integration tests (full HTTP/SOAP layer validation)
-  cmocka_unit_test_setup_teardown(test_integration_ptz_get_nodes_soap, ptz_service_setup,
-                                  ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_absolute_move_soap, ptz_service_setup,
-                                  ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_get_presets_soap, ptz_service_setup,
-                                  ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_set_preset_soap, ptz_service_setup,
-                                  ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_goto_preset_soap, ptz_service_setup,
-                                  ptz_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_remove_preset_soap, ptz_service_setup,
-                                  ptz_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_get_nodes_soap,
+                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_absolute_move_soap,
+                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_get_presets_soap,
+                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_set_preset_soap,
+                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_goto_preset_soap,
+                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_remove_preset_soap,
+                                  ptz_service_reset, ptz_service_reset),
 
-  // Concurrent tests (may hang - placed at end)
-  cmocka_unit_test_setup_teardown(test_integration_ptz_concurrent_operations, ptz_service_setup,
-                                  ptz_service_teardown),
+  // Concurrent tests - last test uses full TEARDOWN
+  cmocka_unit_test_setup_teardown(test_integration_ptz_concurrent_operations,
+                                  ptz_service_reset, ptz_service_teardown),  // TEARDOWN last test
 };

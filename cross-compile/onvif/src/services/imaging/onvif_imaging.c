@@ -43,7 +43,6 @@ static int g_imaging_initialized = 0;                               // NOLINT
 // Imaging service configuration and state
 static struct {
   service_handler_config_t config;
-  onvif_gsoap_context_t* gsoap_ctx;
 } g_imaging_handler = {0};            // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 static int g_handler_initialized = 0; // NOLINT
 
@@ -426,15 +425,6 @@ static int optimized_batch_param_update(const struct imaging_settings* settings)
  * ============================================================================ */
 
 /**
- * @brief Imaging service initialization handler
- * @return ONVIF_SUCCESS on success, error code on failure
- */
-static int imaging_service_init_handler(void) {
-  // gSOAP context is already initialized in onvif_imaging_service_init
-  return ONVIF_SUCCESS;
-}
-
-/**
  * @brief Imaging service cleanup handler
  */
 static void imaging_service_cleanup_handler(void) {
@@ -467,7 +457,7 @@ static const onvif_service_registration_t g_imaging_service_registration = {
   .service_name = "imaging",
   .namespace_uri = "http://www.onvif.org/ver20/imaging/wsdl",
   .operation_handler = onvif_imaging_handle_operation,
-  .init_handler = imaging_service_init_handler,
+  .init_handler = NULL, // Service is initialized explicitly before registration
   .cleanup_handler = imaging_service_cleanup_handler,
   .capabilities_handler = imaging_service_capabilities_handler,
   .reserved = {NULL, NULL, NULL, NULL}};
@@ -514,16 +504,29 @@ int onvif_imaging_handle_operation(const char* operation_name, const http_reques
     return ONVIF_ERROR_INVALID;
   }
 
+  // Allocate per-request gSOAP context for thread safety
+  onvif_gsoap_context_t gsoap_ctx;
+  int init_result = onvif_gsoap_init(&gsoap_ctx);
+  if (init_result != ONVIF_SUCCESS) {
+    platform_log_error("Failed to initialize gSOAP context for Imaging request (error: %d)\n",
+                       init_result);
+    return ONVIF_ERROR_MEMORY;
+  }
+
   // Dispatch using lookup table for O(n) performance with small constant factor
+  int result = ONVIF_ERROR_NOT_FOUND;
   for (size_t i = 0; i < IMAGING_OPERATIONS_COUNT; i++) {
     if (strcmp(operation_name, g_imaging_operations[i].operation_name) == 0) {
-      return g_imaging_operations[i].handler(&g_imaging_handler.config, request, response,
-                                             g_imaging_handler.gsoap_ctx);
+      result =
+        g_imaging_operations[i].handler(&g_imaging_handler.config, request, response, &gsoap_ctx);
+      break;
     }
   }
 
-  // Operation not found
-  return ONVIF_ERROR_NOT_FOUND;
+  // Cleanup gSOAP context
+  onvif_gsoap_cleanup(&gsoap_ctx);
+
+  return result;
 }
 
 /* ============================================================================
@@ -864,22 +867,7 @@ int onvif_imaging_service_init(config_manager_t* config) {
   g_imaging_handler.config.enable_validation = 1;
   g_imaging_handler.config.enable_logging = 1;
 
-  // Initialize gSOAP context for imaging service
-  g_imaging_handler.gsoap_ctx = ONVIF_MALLOC(sizeof(onvif_gsoap_context_t));
-  if (!g_imaging_handler.gsoap_ctx) {
-    return ONVIF_ERROR;
-  }
-
-  if (onvif_gsoap_init(g_imaging_handler.gsoap_ctx) != ONVIF_SUCCESS) {
-    ONVIF_FREE(g_imaging_handler.gsoap_ctx);
-    g_imaging_handler.gsoap_ctx = NULL;
-    return ONVIF_ERROR;
-  }
-
   if (buffer_pool_init(&g_imaging_response_buffer_pool) != 0) {
-    onvif_gsoap_cleanup(g_imaging_handler.gsoap_ctx);
-    ONVIF_FREE(g_imaging_handler.gsoap_ctx);
-    g_imaging_handler.gsoap_ctx = NULL;
     return ONVIF_ERROR;
   }
 
@@ -909,13 +897,6 @@ void onvif_imaging_service_cleanup(void) {
     platform_log_error("Failed to unregister imaging service from dispatcher: %d\n",
                        unregister_result);
     // Don't fail cleanup for this, but log the error
-  }
-
-  // Cleanup gSOAP context
-  if (g_imaging_handler.gsoap_ctx) {
-    onvif_gsoap_cleanup(g_imaging_handler.gsoap_ctx);
-    ONVIF_FREE(g_imaging_handler.gsoap_ctx);
-    g_imaging_handler.gsoap_ctx = NULL;
   }
 
   buffer_pool_cleanup(&g_imaging_response_buffer_pool);

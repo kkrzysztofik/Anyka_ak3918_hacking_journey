@@ -499,6 +499,8 @@ void test_integration_device_concurrent_get_capabilities(void** state) {
 static void* concurrent_mixed_operations_thread(void* arg) {
   int operation_index = *(int*)arg;
 
+  printf("[DEBUG] Thread %d: Starting\n", operation_index);
+
   http_request_t request;
   memset(&request, 0, sizeof(http_request_t));
 
@@ -512,13 +514,20 @@ static void* concurrent_mixed_operations_thread(void* arg) {
 
   const char* operation = operations[operation_index % 4];
 
+  printf("[DEBUG] Thread %d: Executing operation '%s'\n", operation_index, operation);
+
   // Execute operation
   int result = onvif_device_handle_operation(operation, &request, &response);
 
+  printf("[DEBUG] Thread %d: Operation completed with result %d\n", operation_index, result);
+
   // Free the response body allocated by the service
   if (response.body) {
+    printf("[DEBUG] Thread %d: Freeing response body\n", operation_index);
     ONVIF_FREE(response.body);
   }
+
+  printf("[DEBUG] Thread %d: Completed successfully\n", operation_index);
 
   int* thread_result = malloc(sizeof(int));
   *thread_result = result;
@@ -532,27 +541,38 @@ static void* concurrent_mixed_operations_thread(void* arg) {
 void test_integration_device_concurrent_mixed_operations(void** state) {
   (void)state;
 
+  printf("[DEBUG] Test: Starting concurrent mixed operations test with %d threads\n", TEST_CONCURRENT_OPS);
+
   pthread_t threads[TEST_CONCURRENT_OPS];
   int thread_args[TEST_CONCURRENT_OPS];
   int i;
 
   // Launch concurrent mixed operations
+  printf("[DEBUG] Test: Launching %d threads...\n", TEST_CONCURRENT_OPS);
   for (i = 0; i < TEST_CONCURRENT_OPS; i++) {
     thread_args[i] = i;
     int result =
       pthread_create(&threads[i], NULL, concurrent_mixed_operations_thread, &thread_args[i]);
     assert_int_equal(0, result);
+    printf("[DEBUG] Test: Thread %d created successfully\n", i);
   }
+
+  printf("[DEBUG] Test: All threads launched, waiting for completion...\n");
 
   // Wait for all threads and verify results
   for (i = 0; i < TEST_CONCURRENT_OPS; i++) {
+    printf("[DEBUG] Test: Waiting for thread %d to complete...\n", i);
     void* thread_return;
     pthread_join(threads[i], &thread_return);
 
+    printf("[DEBUG] Test: Thread %d joined, checking result...\n", i);
     int* result = (int*)thread_return;
     assert_int_equal(ONVIF_SUCCESS, *result);
     free(result);
+    printf("[DEBUG] Test: Thread %d result verified successfully\n", i);
   }
+
+  printf("[DEBUG] Test: All threads completed successfully\n");
 }
 
 /**

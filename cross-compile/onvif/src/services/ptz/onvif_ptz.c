@@ -447,7 +447,6 @@ int onvif_ptz_goto_preset(const char* profile_token, // NOLINT
 // PTZ service configuration and state
 static struct {
   service_handler_config_t config;
-  onvif_gsoap_context_t* gsoap_ctx;
 } g_ptz_handler_state = {0}; // NOLINT
 
 /* ============================================================================
@@ -502,19 +501,6 @@ static const ptz_operation_entry_t g_ptz_operations[] = {{"GetConfigurations", h
  * ============================================================================ */
 
 /**
- * @brief PTZ service initialization handler
- * @return ONVIF_SUCCESS on success, error code on failure
- */
-static int ptz_service_init_handler(void) {
-  /* Avoid recursive initialization when service is already active */
-  if (g_ptz_handler_state.gsoap_ctx != NULL) {
-    return ONVIF_SUCCESS;
-  }
-
-  return onvif_ptz_init(NULL);
-}
-
-/**
  * @brief PTZ service cleanup handler
  */
 static void ptz_service_cleanup_handler(void) {
@@ -542,7 +528,7 @@ static const onvif_service_registration_t g_ptz_service_registration = {
   .service_name = "ptz",
   .namespace_uri = "http://www.onvif.org/ver10/ptz/wsdl",
   .operation_handler = onvif_ptz_handle_operation,
-  .init_handler = ptz_service_init_handler,
+  .init_handler = NULL, // Service is initialized explicitly before registration
   .cleanup_handler = ptz_service_cleanup_handler,
   .capabilities_handler = ptz_service_capabilities_handler,
   .reserved = {NULL, NULL, NULL, NULL}};
@@ -937,16 +923,29 @@ int onvif_ptz_handle_operation(const char* operation_name, const http_request_t*
     return ONVIF_ERROR_INVALID;
   }
 
+  // Allocate per-request gSOAP context for thread safety
+  onvif_gsoap_context_t gsoap_ctx;
+  int init_result = onvif_gsoap_init(&gsoap_ctx);
+  if (init_result != ONVIF_SUCCESS) {
+    platform_log_error("Failed to initialize gSOAP context for PTZ request (error: %d)\n",
+                       init_result);
+    return ONVIF_ERROR_MEMORY;
+  }
+
   // Dispatch using lookup table for O(n) performance with small constant factor
+  int result = ONVIF_ERROR_NOT_FOUND;
   for (size_t i = 0; i < PTZ_OPERATIONS_COUNT; i++) {
     if (strcmp(operation_name, g_ptz_operations[i].operation_name) == 0) {
-      return g_ptz_operations[i].handler(&g_ptz_handler_state.config, request, response,
-                                         g_ptz_handler_state.gsoap_ctx);
+      result =
+        g_ptz_operations[i].handler(&g_ptz_handler_state.config, request, response, &gsoap_ctx);
+      break;
     }
   }
 
-  // Operation not found
-  return ONVIF_ERROR_NOT_FOUND;
+  // Cleanup gSOAP context
+  onvif_gsoap_cleanup(&gsoap_ctx);
+
+  return result;
 }
 
 /**
@@ -980,26 +979,9 @@ int onvif_ptz_init(config_manager_t* config) {
   g_ptz_handler_state.config.enable_validation = 1;
   g_ptz_handler_state.config.enable_logging = 1;
 
-  // Initialize gSOAP context for PTZ service
-  g_ptz_handler_state.gsoap_ctx = ONVIF_MALLOC(sizeof(onvif_gsoap_context_t));
-  if (!g_ptz_handler_state.gsoap_ctx) {
-    platform_log_error("Failed to allocate gSOAP context for PTZ service\n");
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-
-  if (onvif_gsoap_init(g_ptz_handler_state.gsoap_ctx) != ONVIF_SUCCESS) {
-    ONVIF_FREE(g_ptz_handler_state.gsoap_ctx);
-    g_ptz_handler_state.gsoap_ctx = NULL;
-    platform_log_error("Failed to initialize gSOAP context for PTZ service\n");
-    return ONVIF_ERROR;
-  }
-
   // Initialize buffer pool for PTZ service responses
   if (buffer_pool_init(&g_ptz_response_buffer_pool) != 0) {
     platform_log_error("Failed to initialize PTZ response buffer pool\n");
-    onvif_gsoap_cleanup(g_ptz_handler_state.gsoap_ctx);
-    ONVIF_FREE(g_ptz_handler_state.gsoap_ctx);
-    g_ptz_handler_state.gsoap_ctx = NULL;
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
@@ -1028,13 +1010,6 @@ void onvif_ptz_cleanup(void) {
 
   // Unregister from standardized service dispatcher
   onvif_service_dispatcher_unregister_service("ptz");
-
-  // Cleanup gSOAP context
-  if (g_ptz_handler_state.gsoap_ctx) {
-    onvif_gsoap_cleanup(g_ptz_handler_state.gsoap_ctx);
-    ONVIF_FREE(g_ptz_handler_state.gsoap_ctx);
-    g_ptz_handler_state.gsoap_ctx = NULL;
-  }
 
   // Cleanup buffer pool
   buffer_pool_cleanup(&g_ptz_response_buffer_pool);

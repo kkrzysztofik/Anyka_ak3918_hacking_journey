@@ -124,8 +124,9 @@ int main(void) {
   const struct CMUnitTest tests[] = {
     // Device integration tests with setup/teardown
     cmocka_unit_test(test_integration_device_init_cleanup_lifecycle),
-    cmocka_unit_test_setup_teardown(test_integration_device_get_device_information_fields_validation,
-                                    device_service_setup, device_service_teardown),
+    cmocka_unit_test_setup_teardown(
+      test_integration_device_get_device_information_fields_validation, device_service_setup,
+      device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_specific_category,
                                     device_service_setup, device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_multiple_categories,
@@ -141,11 +142,11 @@ int main(void) {
     cmocka_unit_test_setup_teardown(test_integration_device_handle_operation_invalid_operation,
                                     device_service_setup, device_service_teardown),
     cmocka_unit_test(test_integration_device_handle_operation_uninitialized),
-    cmocka_unit_test_setup_teardown(test_integration_device_config_integration, device_service_setup,
-                                    device_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_device_config_integration,
+                                    device_service_setup, device_service_teardown),
     // SOAP pilot test with proper service initialization - placed before concurrent tests
-    cmocka_unit_test_setup_teardown(test_integration_device_get_device_info_soap, device_service_setup,
-                                    device_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_device_get_device_info_soap,
+                                    device_service_setup, device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_concurrent_get_device_information,
                                     device_service_setup, device_service_teardown),
     cmocka_unit_test_setup_teardown(test_integration_device_concurrent_get_capabilities,

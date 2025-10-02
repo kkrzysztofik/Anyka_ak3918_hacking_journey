@@ -70,7 +70,7 @@ static struct device_capabilities dev_caps = {.has_analytics = 0, // NOLINT
 // Device service configuration and state
 static struct {
   service_handler_config_t config;
-  onvif_gsoap_context_t* gsoap_ctx;
+  // Note: gsoap_ctx removed - gSOAP contexts are now allocated per-request for thread safety
 } g_device_handler = // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
   {0};
 static int g_handler_initialized = 0; // NOLINT
@@ -626,15 +626,6 @@ static int handle_system_reboot(const service_handler_config_t* config,
  */
 
 /**
- * @brief Device service initialization handler
- * @return ONVIF_SUCCESS on success, error code on failure
- */
-static int device_service_init_handler(void) {
-  // Buffer pool and gSOAP context are already initialized in onvif_device_init
-  return ONVIF_SUCCESS;
-}
-
-/**
  * @brief Device service cleanup handler
  */
 static void device_service_cleanup_handler(void) {
@@ -669,7 +660,7 @@ static const onvif_service_registration_t g_device_service_registration = {
   .service_name = "device",
   .namespace_uri = "http://www.onvif.org/ver10/device/wsdl",
   .operation_handler = onvif_device_handle_operation,
-  .init_handler = device_service_init_handler,
+  .init_handler = NULL, // Service is initialized explicitly before registration
   .cleanup_handler = device_service_cleanup_handler,
   .capabilities_handler = device_service_capabilities_handler,
   .reserved = {NULL, NULL, NULL, NULL}};
@@ -698,31 +689,11 @@ int onvif_device_init(config_manager_t* config) {
   g_device_handler.config.enable_validation = 1;
   g_device_handler.config.enable_logging = 1;
 
-  // Initialize gSOAP context for device service
-  g_device_handler.gsoap_ctx = ONVIF_MALLOC(sizeof(onvif_gsoap_context_t));
-  if (!g_device_handler.gsoap_ctx) {
-    platform_log_error("Failed to allocate gSOAP context for device service (size: %zu bytes)\n",
-                       sizeof(onvif_gsoap_context_t));
-    return ONVIF_ERROR;
-  }
-
-  int gsoap_result = onvif_gsoap_init(g_device_handler.gsoap_ctx);
-  if (gsoap_result != ONVIF_SUCCESS) {
-    platform_log_error("Failed to initialize gSOAP context for device service (error: %d)\n",
-                       gsoap_result);
-    ONVIF_FREE(g_device_handler.gsoap_ctx);
-    g_device_handler.gsoap_ctx = NULL;
-    return ONVIF_ERROR;
-  }
-
   // Initialize buffer pool for medium-sized responses
   int pool_result = buffer_pool_init(&g_device_response_buffer_pool);
   if (pool_result != 0) {
     platform_log_error("Failed to initialize buffer pool for device service (error: %d)\n",
                        pool_result);
-    onvif_gsoap_cleanup(g_device_handler.gsoap_ctx);
-    ONVIF_FREE(g_device_handler.gsoap_ctx);
-    g_device_handler.gsoap_ctx = NULL;
     return ONVIF_ERROR;
   }
 
@@ -768,13 +739,6 @@ int onvif_device_cleanup(void) {
 
   // Cleanup buffer pool (returns void, so we can't check for errors)
   buffer_pool_cleanup(&g_device_response_buffer_pool);
-
-  // Cleanup gSOAP context
-  if (g_device_handler.gsoap_ctx) {
-    onvif_gsoap_cleanup(g_device_handler.gsoap_ctx);
-    ONVIF_FREE(g_device_handler.gsoap_ctx);
-    g_device_handler.gsoap_ctx = NULL;
-  }
 
   g_handler_initialized = 0;
   return result;
@@ -825,14 +789,26 @@ int onvif_device_handle_operation(const char* operation_name, const http_request
     return ONVIF_ERROR_INVALID;
   }
 
+  // Allocate per-request gSOAP context for thread safety
+  onvif_gsoap_context_t gsoap_ctx;
+  int init_result = onvif_gsoap_init(&gsoap_ctx);
+  if (init_result != ONVIF_SUCCESS) {
+    platform_log_error("Failed to initialize gSOAP context for request (error: %d)\n", init_result);
+    return ONVIF_ERROR_MEMORY;
+  }
+
   // Dispatch using lookup table for O(n) performance with small constant factor
+  int result = ONVIF_ERROR_NOT_FOUND;
   for (size_t i = 0; i < DEVICE_OPERATIONS_COUNT; i++) {
     if (strcmp(operation_name, g_device_operations[i].operation_name) == 0) {
-      return g_device_operations[i].handler(&g_device_handler.config, request, response,
-                                            g_device_handler.gsoap_ctx);
+      result =
+        g_device_operations[i].handler(&g_device_handler.config, request, response, &gsoap_ctx);
+      break;
     }
   }
 
-  // Operation not found
-  return ONVIF_ERROR_NOT_FOUND;
+  // Cleanup gSOAP context
+  onvif_gsoap_cleanup(&gsoap_ctx);
+
+  return result;
 }
