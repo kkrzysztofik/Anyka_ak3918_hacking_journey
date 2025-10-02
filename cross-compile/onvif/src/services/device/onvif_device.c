@@ -28,6 +28,7 @@
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
 #include "utils/memory/smart_response_builder.h"
+#include "utils/network/network_utils.h"
 
 /* ============================================================================
  * Device Service Specific Utility Functions
@@ -551,6 +552,19 @@ static int handle_get_capabilities(const service_handler_config_t* config,
   // Prepare callback data for capabilities
   capabilities_callback_data_t callback_data = {0};
 
+  // Get device IP address
+  if (get_local_ip_address(callback_data.device_ip, sizeof(callback_data.device_ip)) != 0) {
+    // Fallback to localhost if IP retrieval fails
+    snprintf(callback_data.device_ip, sizeof(callback_data.device_ip), "localhost");
+  }
+
+  // Get HTTP port from configuration with fallback to default
+  if (config && config->config && config->config->app_config) {
+    callback_data.http_port = config->config->app_config->onvif.http_port;
+  } else {
+    callback_data.http_port = DEFAULT_HTTP_PORT;
+  }
+
   // Use the enhanced callback-based handler
   return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
                                            &get_capabilities_operation,
@@ -574,6 +588,19 @@ static int handle_get_services(const service_handler_config_t* config,
                                onvif_gsoap_context_t* gsoap_ctx) {
   // Prepare callback data for services
   services_callback_data_t callback_data = {0};
+
+  // Get device IP address
+  if (get_local_ip_address(callback_data.device_ip, sizeof(callback_data.device_ip)) != 0) {
+    // Fallback to localhost if IP retrieval fails
+    snprintf(callback_data.device_ip, sizeof(callback_data.device_ip), "localhost");
+  }
+
+  // Get HTTP port from configuration with fallback to default
+  if (config && config->config && config->config->app_config) {
+    callback_data.http_port = config->config->app_config->onvif.http_port;
+  } else {
+    callback_data.http_port = DEFAULT_HTTP_PORT;
+  }
 
   // Use the enhanced callback-based handler
   return onvif_util_handle_service_request(config, request, response, gsoap_ctx,

@@ -349,9 +349,6 @@ int memory_safe_snprintf(char* dest, size_t dest_size, const char* format, ...) 
     return result;
   }
 
-  // For complex format strings, implement manual string building to avoid hangs
-  platform_log_debug("memory_safe_snprintf: manual building for format: %s\n", format);
-
   char* pos = dest;
   size_t remaining = dest_size - 1; // Leave space for null terminator
   const char* fmt = format;
@@ -382,7 +379,6 @@ int memory_safe_snprintf(char* dest, size_t dest_size, const char* format, ...) 
   *pos = '\0';
 
   int result = pos - dest;
-  platform_log_debug("memory_safe_snprintf: manual build returned %d\n", result);
 
   if (result < 0) {
     platform_log_error("Manual string building failed at %s:%d\n", __FILE__, __LINE__);
