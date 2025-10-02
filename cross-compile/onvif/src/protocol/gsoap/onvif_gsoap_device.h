@@ -93,6 +93,8 @@ typedef struct {
  */
 typedef struct {
   const void* capabilities;
+  int http_port;
+  char device_ip[64];
 } capabilities_callback_data_t;
 
 /**
@@ -107,6 +109,8 @@ typedef struct {
  */
 typedef struct {
   int include_capability;
+  int http_port;
+  char device_ip[64];
 } services_callback_data_t;
 
 /**

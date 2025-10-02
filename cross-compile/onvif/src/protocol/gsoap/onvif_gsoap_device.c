@@ -72,33 +72,188 @@ int device_info_response_callback(struct soap* soap, void* user_data) {
 }
 
 /**
- * @brief Capabilities response callback function (stub)
+ * @brief Capabilities response callback function
  */
 int capabilities_response_callback(struct soap* soap, void* user_data) {
-  (void)soap;
-  (void)user_data;
-  /* TODO: Implement capabilities response generation */
-  return ONVIF_ERROR_NOT_IMPLEMENTED;
+  if (!soap || !user_data) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  capabilities_callback_data_t* data = (capabilities_callback_data_t*)user_data;
+
+  /* Create response structure */
+  struct _tds__GetCapabilitiesResponse* response =
+    soap_new__tds__GetCapabilitiesResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  /* Create capabilities structure */
+  response->Capabilities = soap_new_tt__Capabilities(soap, 1);
+  if (!response->Capabilities) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  /* Build service URLs using configured device IP and port */
+  char device_xaddr[256];
+  char media_xaddr[256];
+  char ptz_xaddr[256];
+  snprintf(device_xaddr, sizeof(device_xaddr), "http://%s:%d/onvif/device_service",
+           data->device_ip, data->http_port);
+  snprintf(media_xaddr, sizeof(media_xaddr), "http://%s:%d/onvif/media_service",
+           data->device_ip, data->http_port);
+  snprintf(ptz_xaddr, sizeof(ptz_xaddr), "http://%s:%d/onvif/ptz_service",
+           data->device_ip, data->http_port);
+
+  /* Create device capabilities */
+  response->Capabilities->Device = soap_new_tt__DeviceCapabilities(soap, 1);
+  if (!response->Capabilities->Device) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  /* Set device capabilities XAddr */
+  response->Capabilities->Device->XAddr = soap_strdup(soap, device_xaddr);
+
+  /* Create media capabilities */
+  response->Capabilities->Media = soap_new_tt__MediaCapabilities(soap, 1);
+  if (!response->Capabilities->Media) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  response->Capabilities->Media->XAddr = soap_strdup(soap, media_xaddr);
+
+  /* Create PTZ capabilities */
+  response->Capabilities->PTZ = soap_new_tt__PTZCapabilities(soap, 1);
+  if (!response->Capabilities->PTZ) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  response->Capabilities->PTZ->XAddr = soap_strdup(soap, ptz_xaddr);
+
+  /* Serialize response within SOAP body */
+  if (soap_put__tds__GetCapabilitiesResponse(soap, response, "tds:GetCapabilitiesResponse", "") !=
+      SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return 0;
 }
 
 /**
- * @brief System datetime response callback function (stub)
+ * @brief System datetime response callback function
  */
 int system_datetime_response_callback(struct soap* soap, void* user_data) {
-  (void)soap;
-  (void)user_data;
-  /* TODO: Implement system datetime response generation */
-  return ONVIF_ERROR_NOT_IMPLEMENTED;
+  if (!soap || !user_data) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  system_datetime_callback_data_t* data = (system_datetime_callback_data_t*)user_data;
+
+  /* Create response structure */
+  struct _tds__GetSystemDateAndTimeResponse* response =
+    soap_new__tds__GetSystemDateAndTimeResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  /* Create system date time structure */
+  response->SystemDateAndTime = soap_new_tt__SystemDateTime(soap, 1);
+  if (!response->SystemDateAndTime) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  /* Set date time type to NTP or Manual */
+  response->SystemDateAndTime->DateTimeType = tt__SetDateTimeType__Manual;
+
+  /* Create UTC date time */
+  response->SystemDateAndTime->UTCDateTime = soap_new_tt__DateTime(soap, 1);
+  if (!response->SystemDateAndTime->UTCDateTime) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  /* Set time */
+  response->SystemDateAndTime->UTCDateTime->Time = soap_new_tt__Time(soap, 1);
+  if (!response->SystemDateAndTime->UTCDateTime->Time) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  response->SystemDateAndTime->UTCDateTime->Time->Hour = data->tm_info.tm_hour;
+  response->SystemDateAndTime->UTCDateTime->Time->Minute = data->tm_info.tm_min;
+  response->SystemDateAndTime->UTCDateTime->Time->Second = data->tm_info.tm_sec;
+
+  /* Set date */
+  response->SystemDateAndTime->UTCDateTime->Date = soap_new_tt__Date(soap, 1);
+  if (!response->SystemDateAndTime->UTCDateTime->Date) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  response->SystemDateAndTime->UTCDateTime->Date->Year = data->tm_info.tm_year + 1900;
+  response->SystemDateAndTime->UTCDateTime->Date->Month = data->tm_info.tm_mon + 1;
+  response->SystemDateAndTime->UTCDateTime->Date->Day = data->tm_info.tm_mday;
+
+  /* Set timezone information */
+  response->SystemDateAndTime->TimeZone = soap_new_tt__TimeZone(soap, 1);
+  if (!response->SystemDateAndTime->TimeZone) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  response->SystemDateAndTime->TimeZone->TZ = soap_strdup(soap, "UTC");
+
+  /* Serialize response within SOAP body */
+  if (soap_put__tds__GetSystemDateAndTimeResponse(
+        soap, response, "tds:GetSystemDateAndTimeResponse", "") != SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return 0;
 }
 
 /**
- * @brief Services response callback function (stub)
+ * @brief Services response callback function
  */
 int services_response_callback(struct soap* soap, void* user_data) {
-  (void)soap;
-  (void)user_data;
-  /* TODO: Implement services response generation */
-  return ONVIF_ERROR_NOT_IMPLEMENTED;
+  if (!soap || !user_data) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  services_callback_data_t* data = (services_callback_data_t*)user_data;
+
+  /* Create response structure */
+  struct _tds__GetServicesResponse* response = soap_new__tds__GetServicesResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  /* Allocate array for services - providing Device service for now */
+  response->__sizeService = 1;
+  response->Service = (struct tds__Service*)soap_malloc(soap, sizeof(struct tds__Service));
+  if (!response->Service) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  /* Build device service URL using configured device IP and port */
+  char device_service_xaddr[256];
+  snprintf(device_service_xaddr, sizeof(device_service_xaddr),
+           "http://%s:%d/onvif/device_service", data->device_ip, data->http_port);
+
+  /* Set device service information */
+  response->Service[0].Namespace = soap_strdup(soap, "http://www.onvif.org/ver10/device/wsdl");
+  response->Service[0].XAddr = soap_strdup(soap, device_service_xaddr);
+  response->Service[0].Version = soap_new_tt__OnvifVersion(soap, 1);
+  if (!response->Service[0].Version) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  response->Service[0].Version->Major = 2;
+  response->Service[0].Version->Minor = 5;
+
+  /* Serialize response within SOAP body */
+  if (soap_put__tds__GetServicesResponse(soap, response, "tds:GetServicesResponse", "") !=
+      SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return 0;
 }
 
 /**
