@@ -23,6 +23,7 @@ You are reviewing the **ONVIF 2.5 implementation for Anyka AK3918 cameras** - a 
 - [ ] **Variable Naming** - Consistent naming conventions throughout
 - [ ] **Global Variable Naming** - **MANDATORY**: All global variables must start with `g_<module>_<variable_name>`
 - [ ] **Global Variable Placement** - **MANDATORY**: All global variables must be placed at the top of the file after includes and before function definitions
+- [ ] **Return Code Constants** - **MANDATORY**: NEVER use magic numbers (`return 0`, `return -1`), ALWAYS use predefined constants (`ONVIF_SUCCESS`, `HTTP_AUTH_ERROR_NULL`, etc.)
 - [ ] **Doxygen Documentation** - Complete function documentation with @brief, @param, @return, @note
 - [ ] **File Headers** - Consistent Doxygen file headers with @file, @brief, @author, @date tags
 - [ ] **Utility Usage** - Check for code duplication, proper use of existing utilities in `src/utils/`
@@ -78,6 +79,24 @@ You are reviewing the **ONVIF 2.5 implementation for Anyka AK3918 cameras** - a 
 - [ ] **Dependency Management** - Proper include dependencies and circular dependency prevention
 - [ ] **File Size** - Reasonable file sizes with clear single responsibility
 
+#### **8. Unit Testing & Test Naming Convention (MANDATORY)**
+- [ ] **Unit Test Coverage** - ALL utility functions must have corresponding unit tests using CMocka framework
+- [ ] **Unit Test Naming** - **MANDATORY**: Follow `test_unit_<module>_<functionality>` pattern (e.g., `test_unit_memory_manager_init`)
+- [ ] **Integration Test Naming** - **MANDATORY**: Follow `test_integration_<service>_<functionality>` pattern (e.g., `test_integration_ptz_absolute_move`)
+- [ ] **Test Cases** - Tests must cover success cases, error cases, and edge conditions
+- [ ] **Coverage Reports** - Run `make test-coverage-html` to generate and verify coverage
+- [ ] **Test Execution** - All tests must pass on development machine (native compilation)
+- [ ] **CMocka Usage** - Proper use of CMocka assertions and mocking capabilities
+
+#### **9. Build System & Code Quality Tools Integration**
+- [ ] **compile_commands.json** - Verify exists and is current for clangd support
+- [ ] **Linting Script** - Run `./cross-compile/onvif/scripts/lint_code.sh --check` and address all issues
+- [ ] **Formatting Script** - Run `./cross-compile/onvif/scripts/format_code.sh --check` and fix formatting
+- [ ] **Function Ordering** - Verify definitions at top, execution logic at bottom
+- [ ] **Build Success** - Code must compile without errors using `make` command
+- [ ] **Static Analysis** - Run `make static-analysis` and address critical issues
+- [ ] **Documentation Build** - Run `make docs` and verify Doxygen output
+
 #### **Include Path Format Guidelines (MANDATORY)**
 - **MANDATORY**: All project includes must use relative paths from `src/` directory
 - **CORRECT format**: `#include "services/common/video_config_types.h"`
@@ -125,6 +144,32 @@ You are reviewing the **ONVIF 2.5 implementation for Anyka AK3918 cameras** - a 
   static char device_name[64] = {0};
   static struct media_profile* profiles[MAX_PROFILES] = {NULL};
   static pthread_mutex_t ptz_mutex = PTHREAD_MUTEX_INITIALIZER;
+  ```
+
+#### **Return Code Constants Guidelines (MANDATORY)**
+- **MANDATORY**: NEVER use magic numbers for return codes
+- **Always use predefined constants** for all function return values
+- **Module-specific constants** defined in module headers (e.g., `HTTP_AUTH_SUCCESS`, `HTTP_AUTH_ERROR_NULL`)
+- **Global constants** defined in `utils/error/error_handling.h` (e.g., `ONVIF_SUCCESS`, `ONVIF_ERROR_INVALID`)
+- **Rationale**:
+  - Improves code readability and maintainability
+  - Makes error handling explicit and self-documenting
+  - Prevents confusion between different return value meanings
+  - Enables consistent error handling across modules
+- **Enforcement**: Code review process must verify constant usage instead of magic numbers
+- **Examples**:
+  ```c
+  // ✅ CORRECT - Using predefined constants
+  return HTTP_AUTH_SUCCESS;
+  return HTTP_AUTH_ERROR_NULL;
+  return ONVIF_SUCCESS;
+  return ONVIF_ERROR_INVALID;
+
+  // ❌ INCORRECT - Using magic numbers
+  return 0;
+  return -1;
+  return -2;
+  return 1;
   ```
 
 #### **Global Variable Placement Guidelines (MANDATORY)**
@@ -182,6 +227,43 @@ You are reviewing the **ONVIF 2.5 implementation for Anyka AK3918 cameras** - a 
 - **Utility files**: `<category>_utils.c` (e.g., `memory_utils.c`)
 - **Platform files**: `platform_<platform>.c` (e.g., `platform_anyka.c`)
 
+#### **Test Naming Convention Standards (MANDATORY)**
+- **Unit Test Naming** - **MANDATORY**: All unit tests must follow `test_unit_<module>_<functionality>` pattern
+  - **Examples**:
+    - `test_unit_memory_manager_init` - Unit test for memory manager initialization
+    - `test_unit_http_auth_verify_credentials_success` - Unit test for successful credential verification
+    - `test_unit_validation_token_format` - Unit test for token format validation
+- **Integration Test Naming** - **MANDATORY**: All integration tests must follow `test_integration_<service>_<functionality>` pattern
+  - **Examples**:
+    - `test_integration_ptz_absolute_move_functionality` - Integration test for PTZ absolute movement
+    - `test_integration_media_profile_operations` - Integration test for media profile operations
+    - `test_integration_device_capabilities_retrieval` - Integration test for device capabilities
+- **Rationale**:
+  - Test runner uses naming convention to filter and categorize tests
+  - Enables selective test execution (unit vs integration)
+  - Improves test organization and maintainability
+  - Makes test purpose clear and explicit
+- **Enforcement**: Test runner validates naming patterns and categorizes accordingly
+
+#### **NOLINT Suppression Guidelines**
+- **Use //NOLINT sparingly** - Only when linter suggestions conflict with legitimate design requirements
+- **Common Valid Uses**:
+  - Global variables that must be mutable for state management: `static int g_discovery_running = 0; //NOLINT`
+  - Function parameters where order is semantically correct but linter suggests reordering
+  - Intentional design patterns that trigger false positives
+- **Documentation Required**: ALWAYS add comment explaining why NOLINT is used
+- **Review Required**: All NOLINT usage must be justified during code review
+- **Examples**:
+  ```c
+  // ✅ CORRECT - NOLINT with justification
+  static int g_discovery_running = 0; //NOLINT - Mutable state required for discovery service
+
+  int onvif_ptz_stop(const char *profile_token, int stop_pan_tilt, int stop_zoom) //NOLINT - Parameter order matches ONVIF spec
+
+  // ❌ INCORRECT - NOLINT without justification
+  static int g_device_count = 0; //NOLINT
+  ```
+
 #### **File Header Standards (MANDATORY)**
 - **Consistent File Headers**: **ALL source and header files MUST have consistent Doxygen file headers**
   - **Required format** (based on `onvif_constants.h` template):
@@ -201,6 +283,32 @@ You are reviewing the **ONVIF 2.5 implementation for Anyka AK3918 cameras** - a 
   - **Placement**: File header must be the first content in the file (after any include guards)
   - **Consistency**: All files must follow this exact format and structure
   - **Validation**: File headers are checked during code review and must be present in all new files
+
+#### **Protocol Layer Review Guidelines (gSOAP/ONVIF)**
+- [ ] **gSOAP API Usage** - Verify proper use of generated gSOAP functions instead of manual XML parsing
+- [ ] **Type-Safe Deserialization** - Use `soap_read_*` functions for complete SOAP envelope processing
+- [ ] **Request Structure Access** - Access structured request data instead of extracting individual tokens
+- [ ] **Service Modularity** - Separate gSOAP implementations by service (Media, PTZ, Device, Imaging)
+- [ ] **SOAP Context Initialization** - Proper configuration of `soap->is`, `soap->buflen`, `soap->bufidx`
+- [ ] **Memory Management** - Proper cleanup of gSOAP-allocated structures using `soap_end()` and `soap_done()`
+- [ ] **Error Handling** - Use ONVIF-compliant SOAP faults and error codes
+- [ ] **XML Validation** - Let gSOAP handle XML validation instead of manual string parsing
+- **Common Anti-Patterns to Avoid**:
+  ```c
+  // ❌ BAD - Manual XML token extraction
+  onvif_gsoap_parse_profile_token(soap, &profile_token);
+
+  // ✅ GOOD - Use gSOAP-generated deserialization
+  struct _trt__GetStreamUri *request = soap_new__trt__GetStreamUri(soap, -1);
+  if (soap_read__trt__GetStreamUri(soap, request) == SOAP_OK) {
+      // Access structured data: request->ProfileToken
+  }
+  ```
+- **Rationale**:
+  - Eliminates ~800 lines of manual XML parsing code
+  - Uses validated gSOAP-generated functions for ONVIF compliance
+  - Provides type-safe access to request/response data
+  - Reduces security vulnerabilities from manual string manipulation
 
 ### ��️ **Review Methodology**
 
@@ -239,29 +347,67 @@ You are reviewing the **ONVIF 2.5 implementation for Anyka AK3918 cameras** - a 
 
 ### 📊 **Review Output Format**
 
+#### **Overall Review Summary**
+```markdown
+## ONVIF Project Code Review Summary
+
+### Build & Test Validation
+- **Build Status**: [✅ Success / ❌ Failed]
+- **Unit Tests**: [✅ All Passing / ❌ X failed / ⚠️ Not run]
+- **Test Coverage**: [XX% line coverage, XX% function coverage]
+- **Linting Status**: [✅ Clean / ❌ X issues / ⚠️ Not run]
+- **Formatting Status**: [✅ Compliant / ❌ Issues found / ⚠️ Not run]
+- **Static Analysis**: [✅ No critical issues / ❌ X critical, X high]
+
+### Code Quality Metrics
+- **Total Files Reviewed**: [count]
+- **Return Code Constant Compliance**: [✅ 100% / ❌ XX violations]
+- **Global Variable Naming**: [✅ Compliant / ❌ XX violations]
+- **Include Path Format**: [✅ Compliant / ❌ XX violations]
+- **Test Naming Convention**: [✅ Compliant / ❌ XX violations]
+- **Code Duplication**: [✅ None detected / ⚠️ XX instances]
+- **Doxygen Documentation**: [✅ Complete / ⚠️ XX functions missing]
+
+### Security & Compliance
+- **ONVIF 2.5 Compliance**: [✅ Compliant / ⚠️ Issues found]
+- **Security Vulnerabilities**: [✅ None / ⚠️ XX low / ❌ XX high]
+- **Memory Safety**: [✅ No leaks detected / ⚠️ Potential issues]
+- **Input Validation**: [✅ Comprehensive / ⚠️ Gaps identified]
+```
+
+#### **Individual Issue Format**
+
 For each issue found, provide:
 
 ```markdown
-## 🔍 **Issue Category**: [Code Quality/Security/Performance/Architecture/ONVIF Compliance]
+## 🔍 **Issue Category**: [Code Quality/Security/Performance/Architecture/ONVIF Compliance/Testing]
 
 ### **Issue**: [Brief description]
 - **File**: `path/to/file.c`
 - **Lines**: [line numbers]
 - **Severity**: [Critical/High/Medium/Low]
 - **CWE**: [if applicable]
+- **Rule**: [Linter rule or coding standard violated]
 - **Description**: [Detailed explanation]
 - **Current Code**: [code snippet]
 - **Recommendation**: [specific fix suggestion]
 - **Example Fix**: [code example if applicable]
+- **Impact**: [Performance/Security/Maintainability impact]
 ```
 
 ### 🔧 **Linter Output Integration**
 
 #### **Linter Issue Categories**
-- **Syntax Errors** - Compilation-blocking issues that must be fixed immediately
-- **Style Violations** - Code formatting, naming conventions, and style guide compliance
-- **Warning Messages** - Potential issues that should be addressed for code quality
-- **Info Messages** - Suggestions for improvement or best practices
+- **Error** - Critical issues that must be fixed immediately (compilation failures, undefined behavior)
+- **Warning** - Important issues that should be addressed (potential bugs, security concerns)
+- **Info** - Code quality improvements and best practice suggestions
+- **Hint** - Minor style suggestions and optimization opportunities
+
+#### **Linter Severity Levels (clangd-tidy)**
+- **--severity error** - Fail only on errors (critical issues)
+- **--severity warn** - Fail on warnings and errors (recommended for code review)
+- **--severity info** - Fail on info, warnings, and errors
+- **--severity hint** - Fail on all issues including hints (strictest mode)
 
 #### **Linter Output Format**
 For each linter issue, provide:
@@ -282,14 +428,65 @@ For each linter issue, provide:
 
 #### **Linter Analysis Commands**
 ```bash
-# Run linter analysis on ONVIF project
-read_lints cross-compile/onvif/
+# Run comprehensive linter analysis (all files)
+./cross-compile/onvif/scripts/lint_code.sh
 
-# Run linter on specific files
-read_lints cross-compile/onvif/src/services/device/onvif_device.c
+# Check for linting issues (exits 1 if issues found)
+./cross-compile/onvif/scripts/lint_code.sh --check
 
-# Run linter on multiple directories
-read_lints cross-compile/onvif/src/services/ cross-compile/onvif/src/platform/
+# Lint specific file
+./cross-compile/onvif/scripts/lint_code.sh --file src/services/device/onvif_device.c
+
+# Lint only changed files since last commit
+./cross-compile/onvif/scripts/lint_code.sh --changed
+
+# Also check code formatting compliance
+./cross-compile/onvif/scripts/lint_code.sh --format
+
+# Fail only on errors (not warnings/info/hints)
+./cross-compile/onvif/scripts/lint_code.sh --severity error
+
+# Dry run mode (show what would be linted)
+./cross-compile/onvif/scripts/lint_code.sh --dry-run
+```
+
+#### **Code Formatting Commands**
+```bash
+# Format all C files
+./cross-compile/onvif/scripts/format_code.sh
+
+# Check formatting without making changes (exits 1 if issues)
+./cross-compile/onvif/scripts/format_code.sh --check
+
+# Format specific files
+./cross-compile/onvif/scripts/format_code.sh --files src/core/main.c,src/services/device/onvif_device.c
+
+# Dry run mode (show what would be changed)
+./cross-compile/onvif/scripts/format_code.sh --dry-run
+```
+
+#### **Unit Testing Commands (MANDATORY)**
+```bash
+# Install CMocka dependencies
+./cross-compile/onvif/tests/install_dependencies.sh
+
+# Run all unit tests
+make test
+
+# Run utility unit tests only
+make test-utils
+
+# Run tests with coverage analysis
+make test-coverage
+
+# Generate HTML coverage report
+make test-coverage-html
+
+# Generate coverage summary
+make test-coverage-report
+
+# Clean coverage files
+make test-coverage-clean
 ```
 
 ### 🎯 **Success Criteria**
@@ -299,20 +496,57 @@ A successful review should:
 - ✅ **Ensure ONVIF 2.5 compliance**
 - ✅ **Verify proper platform abstraction**
 - ✅ **Confirm code quality standards adherence**
-- ✅ **Address all linter errors and critical warnings**
+- ✅ **Address all linter errors and critical warnings** (`lint_code.sh --check` passes)
+- ✅ **Verify code formatting compliance** (`format_code.sh --check` passes)
+- ✅ **Validate all unit tests pass** (`make test` succeeds)
+- ✅ **Verify test coverage** meets requirements (`make test-coverage-html`)
+- ✅ **Confirm proper return code constant usage** (no magic numbers)
+- ✅ **Validate test naming conventions** (unit/integration patterns followed)
 - ✅ **Provide actionable improvement recommendations**
 - ✅ **Validate build and documentation processes**
+- ✅ **Verify compile_commands.json is current** for clangd support
 
 ### 🚀 **Additional Considerations**
 
 - **Bash Commands** - All terminal operations must use bash syntax (WSL Ubuntu environment)
-- **Docker Integration** - Verify Docker build process works correctly
-- **Documentation** - Ensure Doxygen documentation is complete and up-to-date
+- **Native Build Process** - Verify native cross-compilation builds work correctly (`make` command)
+- **Documentation** - Ensure Doxygen documentation is complete and up-to-date (`make docs`)
 - **Utility Functions** - Check for proper use of existing utilities to avoid code duplication
 - **Memory Management** - Verify proper resource cleanup and leak prevention
 - **Thread Safety** - Ensure all concurrent operations are properly synchronized
 - **Linter Integration** - Run linter analysis as part of the review process and address all issues
 - **Code Quality** - Ensure linter compliance maintains high code quality standards
+- **Unit Testing** - ALL utility functions must have corresponding CMocka tests
+- **SD Card Testing** - Validate SD card payload deployment for safe device testing
+- **Return Code Constants** - NEVER use magic numbers, ALWAYS use predefined constants
+
+### 📦 **SD Card Testing Workflow Validation**
+
+When reviewing code changes, verify the SD card testing workflow can be followed:
+
+```bash
+# 1. Build the ONVIF binary
+cd cross-compile/onvif && make
+
+# 2. Verify binary exists
+test -f out/onvifd && echo "Build successful"
+
+# 3. Copy to SD card payload
+cp out/onvifd ../../SD_card_contents/anyka_hack/usr/bin/
+
+# 4. Copy configuration if changed
+cp configs/anyka_cfg.ini ../../SD_card_contents/anyka_hack/onvif/
+
+# 5. Deploy to SD card and test on actual device
+# (Safe testing - leaves original firmware intact)
+```
+
+**Validation Checklist**:
+- [ ] Binary builds successfully without errors
+- [ ] File size is reasonable for embedded system
+- [ ] Dependencies are properly linked
+- [ ] Configuration files are up-to-date
+- [ ] SD card payload structure is maintained
 
 ### 🔧 **Code Duplication Detection & Utility Usage**
 
