@@ -730,7 +730,7 @@
   - _Requirements: Remove old custom mock implementations_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Build Engineer with code cleanup expertise | Task: Remove old platform mock files following CMocka best practices. Delete platform_mock.h and platform_mock.c completely. Update tests/Makefile to remove src/mocks/platform_mock.c from MOCK_SRCS. Search codebase to verify no other files include or reference platform_mock.h. After deletion, verify build succeeds with `make clean && make test`. Verify no dangling references remain. | Restrictions: Must verify no references before deletion, must ensure build succeeds after deletion, must not break existing functionality | Success: Old platform mock files completely removed, no references remain, build succeeds, tests pass with CMocka-based mocks | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 59. Update test helper files to use CMocka patterns
+- [x] 59. Update test helper files to use CMocka patterns
   - File: cross-compile/onvif/tests/src/common/test_helpers.h
   - File: cross-compile/onvif/tests/src/common/test_helpers.c
   - Remove custom mock configuration functions
@@ -743,7 +743,7 @@
 
 ### Phase 11D: Integration Test Updates
 
-- [ ] 60. Update integration tests to use CMocka patterns
+- [x] 60. Update integration tests to use CMocka patterns
   - File: cross-compile/onvif/tests/src/integration/ptz_service_tests.c
   - File: cross-compile/onvif/tests/src/integration/media_service_tests.c
   - File: cross-compile/onvif/tests/src/integration/device_service_tests.c
@@ -758,19 +758,198 @@
 
 ### Phase 11E: Validation and Documentation
 
-- [ ] 61. Run comprehensive test suite validation
-  - File: N/A - validation task
-  - Run `make test` to execute all unit tests
-  - Run `make test-integration` to execute all integration tests
-  - Verify all tests pass with CMocka patterns
-  - Run `make test-valgrind` to check for memory leaks
-  - Verify no custom mock framework usage remains
-  - Purpose: Validate complete CMocka migration
-  - _Leverage: CMocka test framework, valgrind, test suite_
+- [ ] 61. Validate basic unit test suite
+  - File: cross-compile/onvif/tests/src/unit/test_basic.c
+  - Run `make test-unit SUITE=basic`
+  - Investigate and resolve any failing basic suite tests
+  - Ensure CMocka expectations replace legacy mock usage
+  - Purpose: Verify foundational test harness using CMocka
+  - _Leverage: CMocka framework, cross-compile/onvif/tests/src/unit/test_basic.c_
   - _Requirements: All tests must pass with CMocka patterns only_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with expertise in test validation and CMocka | Task: Execute comprehensive test suite validation following CMocka best practices. Run `make test` and verify all unit tests pass (0 failures). Run `make test-integration` and verify all integration tests pass. Run `make test-valgrind` and verify no memory leaks detected. Search codebase to verify no custom mock framework usage remains (grep for "generic_mock", "platform_mock_init", "test_helper_setup_mocks"). Verify all tests use CMocka patterns exclusively. If tests fail, analyze failures and fix issues. | Restrictions: Must achieve 100% test pass rate, must have zero memory leaks, must have zero custom mock framework usage | Success: All tests pass (100%), valgrind reports no memory leaks, no custom mock framework usage, all tests use CMocka patterns | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer focused on unit testing and gSOAP migrations | Task: Execute and repair the `basic` unit suite using `make test-unit SUITE=basic`. Update tests in cross-compile/onvif/tests/src/unit/test_basic.c to follow CMocka expectations and resolve any failures uncovered by the suite. Ensure helper usage aligns with new test helpers and no legacy mock framework calls remain. | Restrictions: Do not disable or skip tests, rely only on CMocka helper macros, keep assertions aligned with project conventions | Success: `make test-unit SUITE=basic` passes cleanly, no references to custom mock framework remain, tests document intended behavior | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 62. Update test documentation for CMocka patterns
+- [ ] 62. Validate memory utility unit test suite
+  - File: cross-compile/onvif/tests/src/unit/utils/test_memory_utils.c
+  - Run `make test-unit SUITE=memory-utils`
+  - Audit memory utility tests for CMocka compliance
+  - Fix any failures by updating expectations and assertions
+  - Purpose: Ensure memory utilities are validated with CMocka only
+  - _Leverage: CMocka framework, cross-compile/onvif/tests/src/unit/utils/test_memory_utils.c_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in utility validation | Task: Run `make test-unit SUITE=memory-utils` and update cross-compile/onvif/tests/src/unit/utils/test_memory_utils.c so each case uses CMocka patterns for parameter validation and return values. Resolve failures by aligning with new memory utility behavior and ensure helper macros replace legacy mock operations. | Restrictions: Do not change production memory utility APIs, avoid suppressing failures, only use approved CMocka helpers | Success: Memory utility suite passes without failures, all mocks rely on CMocka expectations, no references to removed mock framework remain | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 63. Validate logging utility unit test suite
+  - File: cross-compile/onvif/tests/src/unit/utils/test_logging_utils.c
+  - Run `make test-unit SUITE=logging-utils`
+  - Review logging assertions for new helper usage
+  - Update tests to track expected log outputs via CMocka
+  - Purpose: Confirm logging utilities follow standardized mocks
+  - _Leverage: CMocka framework, cross-compile/onvif/tests/src/unit/utils/test_logging_utils.c_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer focusing on logging validation | Task: Execute `make test-unit SUITE=logging-utils` and refactor cross-compile/onvif/tests/src/unit/utils/test_logging_utils.c to use CMocka expectations for log capture and error handling. Fix any failing assertions introduced by the migration and keep coverage intact. | Restrictions: Maintain existing logging semantics, avoid custom mock helpers, do not remove assertions guarding error paths | Success: Logging utility suite passes with zero failures, all mocks use CMocka primitives, logging assertions remain comprehensive | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 64. Validate HTTP authentication unit test suite
+  - File: cross-compile/onvif/tests/src/unit/networking/test_http_auth.c
+  - Run `make test-unit SUITE=http-auth`
+  - Replace legacy mock usage with CMocka expectations
+  - Fix any credential validation regressions
+  - Purpose: Ensure HTTP authentication tests operate under CMocka
+  - _Leverage: CMocka framework, cross-compile/onvif/tests/src/unit/networking/test_http_auth.c_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with HTTP authentication expertise | Task: Run `make test-unit SUITE=http-auth` and update cross-compile/onvif/tests/src/unit/networking/test_http_auth.c to replace any legacy mock infrastructure with CMocka expectations. Resolve failures by aligning mocks with platform mock helpers and ensure credential edge cases stay covered. | Restrictions: Do not weaken authentication coverage, avoid bypassing security checks, leverage platform_mock helpers for wrapped functions | Success: HTTP authentication suite passes, all mocks rely on CMocka, coverage for success/error cases remains intact | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 65. Validate HTTP metrics unit test suite
+  - File: cross-compile/onvif/tests/src/unit/networking/test_http_metrics.c
+  - File: cross-compile/onvif/tests/src/unit/networking/test_http_metrics_suite.c
+  - Run `make test-unit SUITE=http-metrics`
+  - Update metrics expectations to use CMocka helpers
+  - Investigate throughput/latency metric edge cases
+  - Purpose: Ensure HTTP metrics reporting remains correct with CMocka
+  - _Leverage: CMocka framework, HTTP metrics unit tests, platform mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer concentrating on HTTP telemetry | Task: Execute `make test-unit SUITE=http-metrics` and refactor cross-compile/onvif/tests/src/unit/networking/test_http_metrics.c plus the suite harness to rely exclusively on CMocka expectations. Repair any failures by ensuring counters, timers, and error paths assert correctly using helper macros. | Restrictions: Keep metric thresholds unchanged unless required by migration, do not stub out functionality, enforce parameter validation with check_expected() | Success: HTTP metrics suite passes, metrics assertions rely on CMocka, no legacy mock code remains | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 66. Validate gSOAP protocol unit test suite
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap.c
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_gsoap_protocol_suite.c
+  - Run `make test-unit SUITE=gsoap-protocol`
+  - Ensure SOAP interactions use wrapped CMocka mocks
+  - Fix serialization/deserialization expectations
+  - Purpose: Guarantee gSOAP protocol coverage after refactor
+  - _Leverage: CMocka framework, gSOAP protocol unit tests, platform mock wrappers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with gSOAP protocol expertise | Task: Run `make test-unit SUITE=gsoap-protocol` and update cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap.c plus its suite harness to align with embedded context changes and CMocka expectations. Repair serialization/deserialization checks and confirm wrapped functions use expect_function_call() and will_return() correctly. | Restrictions: Preserve coverage for error paths, do not bypass SOAP memory management validation, avoid reintroducing pointer-based context assumptions | Success: gSOAP protocol suite passes with zero failures, all mocks rely on CMocka primitives, coverage tracks embedded context behavior | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 67. Validate service dispatcher unit test suite
+  - File: cross-compile/onvif/tests/src/unit/services/common/test_service_dispatcher.c
+  - File: cross-compile/onvif/tests/src/unit/services/common/test_service_dispatcher_suite.c
+  - Run `make test-unit SUITE=service-dispatcher`
+  - Confirm registration lifecycle expectations use CMocka
+  - Resolve dispatcher state assertions impacted by migration
+  - Purpose: Ensure service dispatcher behavior remains verified
+  - _Leverage: CMocka framework, service dispatcher unit tests, platform mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer focusing on service orchestration | Task: Execute `make test-unit SUITE=service-dispatcher` and refactor dispatcher tests to rely on CMocka expectations for register/unregister flows. Repair any failures caused by embedded context changes and ensure dispatcher state transitions are fully asserted. | Restrictions: Keep dispatcher public API unchanged, avoid weakening negative test cases, ensure call tracking uses expect_function_call() | Success: Service dispatcher suite passes cleanly, registration tests leverage CMocka, no references to deprecated mocks remain | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 68. Validate PTZ service unit test suite
+  - File: cross-compile/onvif/tests/src/unit/services/ptz/test_ptz_service.c
+  - File: cross-compile/onvif/tests/src/unit/services/ptz/test_ptz_unit_suite.c
+  - Run `make test-unit SUITE=ptz-service`
+  - Convert PTZ service expectations to CMocka patterns
+  - Address failures around PTZ move and preset scenarios
+  - Purpose: Maintain PTZ service coverage with new mocks
+  - _Leverage: CMocka framework, PTZ service unit tests, platform PTZ mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in PTZ services | Task: Run `make test-unit SUITE=ptz-service` and update PTZ service unit tests to use expect_value() and will_return() for PTZ adapter interactions. Resolve failures ensuring presets, limits, and error handling align with refactored code. | Restrictions: Do not change PTZ public APIs, keep speed and bounds checks intact, rely on platform mock wrappers | Success: PTZ service suite passes, mocks are pure CMocka, PTZ behavior is fully asserted | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 69. Validate PTZ callbacks unit test suite
+  - File: cross-compile/onvif/tests/src/unit/services/ptz/test_onvif_ptz_callbacks.c
+  - File: cross-compile/onvif/tests/src/unit/services/ptz/test_ptz_callbacks_suite.c
+  - Run `make test-unit SUITE=ptz-callbacks`
+  - Ensure callback registration tests rely on CMocka expectations
+  - Fix callback failure handling cases impacted by migration
+  - Purpose: Confirm PTZ callbacks interact correctly with dispatcher mocks
+  - _Leverage: CMocka framework, PTZ callback unit tests, dispatcher mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with PTZ callback focus | Task: Execute `make test-unit SUITE=ptz-callbacks` and refactor callback tests to use expect_function_call(), expect_value(), and will_return() for dispatcher and adapter interactions. Resolve failures introduced by embedded context changes and ensure unregister paths stay covered. | Restrictions: Preserve callback coverage breadth, avoid ignoring failure paths, do not reintroduce generic mock helpers | Success: PTZ callback suite passes, all expectations use CMocka, dispatcher/adapter interactions validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 70. Validate PTZ adapter unit test suite
+  - File: cross-compile/onvif/tests/src/unit/ptz_adapter_tests.c
+  - Run `make test-unit SUITE=ptz-adapter`
+  - Align adapter wrapper expectations with CMocka patterns
+  - Verify pan/tilt/zoom parameter validation coverage
+  - Purpose: Ensure PTZ adapter remains compliant with refactored mocks
+  - _Leverage: CMocka framework, PTZ adapter unit tests, platform PTZ mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer responsible for PTZ adapter validation | Task: Run `make test-unit SUITE=ptz-adapter` and update PTZ adapter tests to exclusively use CMocka expectations for platform wrappers. Resolve failures around absolute/relative moves and speed checks while keeping coverage for error paths. | Restrictions: Do not loosen adapter validation logic, avoid removing edge-case tests, follow naming conventions for mocks | Success: PTZ adapter suite passes, all mocks use CMocka, coverage spans success and error flows | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 71. Validate media utility unit test suite
+  - File: cross-compile/onvif/tests/src/unit/services/media/test_media_utils.c
+  - Run `make test-unit SUITE=media-utils`
+  - Update media utility expectations to CMocka conventions
+  - Fix any media configuration edge case failures
+  - Purpose: Preserve media utility correctness under new mocks
+  - _Leverage: CMocka framework, media utility unit tests, platform media mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer focused on media utilities | Task: Execute `make test-unit SUITE=media-utils` and refactor media utility tests to replace legacy mocks with CMocka expectations. Address failures related to stream profiles, encoders, and error handling introduced by the migration. | Restrictions: Maintain validation of resolution and bitrate constraints, avoid skipping problematic tests, keep helper usage consistent | Success: Media utility suite passes fully, mocks use CMocka, all edge cases remain covered | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 72. Validate media callbacks unit test suite
+  - File: cross-compile/onvif/tests/src/unit/services/media/test_onvif_media_callbacks.c
+  - File: cross-compile/onvif/tests/src/unit/services/media/test_media_callbacks_suite.c
+  - Run `make test-unit SUITE=media-callbacks`
+  - Ensure media callback registration uses CMocka expectations
+  - Resolve failures involving dispatcher or encoder interactions
+  - Purpose: Verify media callbacks integrate correctly after migration
+  - _Leverage: CMocka framework, media callback unit tests, dispatcher mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with media callback specialization | Task: Run `make test-unit SUITE=media-callbacks` and rewrite media callback expectations to use CMocka primitives for dispatcher and encoder mocks. Fix failures tied to preset/stream registration and ensure deregistration flows remain validated. | Restrictions: Keep callback assertions comprehensive, avoid removal of negative tests, depend solely on platform mock wrappers | Success: Media callback suite passes, mocks are pure CMocka, dispatcher interactions validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 73. Validate imaging callbacks unit test suite
+  - File: cross-compile/onvif/tests/src/unit/services/imaging/test_onvif_imaging_callbacks.c
+  - File: cross-compile/onvif/tests/src/unit/services/imaging/test_imaging_callbacks_suite.c
+  - Run `make test-unit SUITE=imaging-callbacks`
+  - Convert imaging callback expectations to CMocka patterns
+  - Fix imaging settings and error path assertions
+  - Purpose: Ensure imaging callbacks honor new mocking approach
+  - _Leverage: CMocka framework, imaging callback unit tests, dispatcher mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with imaging service expertise | Task: Execute `make test-unit SUITE=imaging-callbacks` and refactor imaging callback tests to use expect_value(), expect_string(), and will_return() for dispatcher and platform interactions. Resolve failures covering brightness/contrast updates and ensure cleanup paths are asserted. | Restrictions: Preserve imaging validation depth, avoid disabling flaky tests, rely solely on approved mock helpers | Success: Imaging callback suite passes, all expectations use CMocka, imaging error handling verified | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 74. Validate PTZ integration test suite
+  - File: cross-compile/onvif/tests/src/integration/ptz_service_tests.c
+  - File: cross-compile/onvif/tests/src/integration/ptz_integration_suite.c
+  - Run `make test-integration SUITE=ptz-integration`
+  - Update integration harness to rely on CMocka expectations
+  - Investigate PTZ workflow issues introduced by migration
+  - Purpose: Ensure PTZ integration flows remain stable with new mocks
+  - _Leverage: CMocka framework, PTZ integration tests, platform PTZ mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Integration QA Engineer for PTZ functionality | Task: Run `make test-integration SUITE=ptz-integration` and refactor PTZ integration tests to use CMocka expectations for adapter and dispatcher interactions. Debug and resolve move/preset workflow failures resulting from the gSOAP migration. | Restrictions: Keep integration coverage intact, do not mock out network flows beyond approved wrappers, ensure expect_function_call() usage captures critical path | Success: PTZ integration suite passes, mocks use CMocka, PTZ workflows validated end-to-end | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 75. Validate media integration test suite
+  - File: cross-compile/onvif/tests/src/integration/media_service_tests.c
+  - File: cross-compile/onvif/tests/src/integration/media_integration_suite.c
+  - Run `make test-integration SUITE=media-integration`
+  - Align media integration expectations with CMocka wrappers
+  - Fix streaming and profile failures uncovered by migration
+  - Purpose: Maintain media pipeline reliability with new mocks
+  - _Leverage: CMocka framework, media integration tests, platform media mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Integration QA Engineer for media streaming | Task: Execute `make test-integration SUITE=media-integration` and refactor media integration tests to depend exclusively on CMocka expectations. Resolve failures around stream URI handling, encoder setup, and teardown sequences introduced by the migration. | Restrictions: Preserve full integration coverage, avoid bypassing RTSP/HTTP flows, use expect_value() and will_return() for platform hooks | Success: Media integration suite passes, mocks use CMocka, streaming scenarios validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 76. Validate device integration test suite
+  - File: cross-compile/onvif/tests/src/integration/device_service_tests.c
+  - File: cross-compile/onvif/tests/src/integration/device_integration_suite.c
+  - Run `make test-integration SUITE=device-integration`
+  - Ensure device discovery/configuration expectations use CMocka
+  - Fix failures involving system info and capabilities
+  - Purpose: Confirm device service integration after migration
+  - _Leverage: CMocka framework, device integration tests, platform device mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Integration QA Engineer for device services | Task: Run `make test-integration SUITE=device-integration` and refactor device integration tests to use CMocka expectations for system info, capabilities, and discovery flows. Resolve failures triggered by the embedded gSOAP context and ensure capability assertions remain intact. | Restrictions: Keep device endpoints fully validated, do not stub out capability checks, rely on approved platform mocks | Success: Device integration suite passes, mocks use CMocka, device workflows validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 77. Validate imaging integration test suite
+  - File: cross-compile/onvif/tests/src/integration/imaging_service_optimization_test.c
+  - File: cross-compile/onvif/tests/src/integration/imaging_integration_suite.c
+  - Run `make test-integration SUITE=imaging-integration`
+  - Migrate imaging integration expectations to CMocka patterns
+  - Address failures around imaging settings updates
+  - Purpose: Ensure imaging integration remains stable under new mocks
+  - _Leverage: CMocka framework, imaging integration tests, platform imaging mock helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Integration QA Engineer for imaging services | Task: Execute `make test-integration SUITE=imaging-integration` and refactor imaging integration tests to use CMocka expectations for platform imaging operations. Fix failures related to brightness/contrast adjustments, presets, and error handling. | Restrictions: Keep imaging operations fully validated, avoid reducing parameter coverage, use expect_string() for token checks | Success: Imaging integration suite passes, mocks use CMocka, imaging workflows validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 78. Validate SOAP error handling integration test suite
+  - File: cross-compile/onvif/tests/src/integration/soap_error_tests.c
+  - Run `make test-integration SUITE=soap-errors`
+  - Ensure error path expectations rely on CMocka helpers
+  - Fix failures covering SOAP fault propagation
+  - Purpose: Confirm SOAP error handling remains robust post-migration
+  - _Leverage: CMocka framework, SOAP error integration tests, gSOAP protocol helpers_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Integration QA Engineer focusing on error handling | Task: Run `make test-integration SUITE=soap-errors` and refactor SOAP error tests to use CMocka expectations for fault injection and propagation. Resolve failures to ensure detailed error information surfaces correctly through the new context. | Restrictions: Maintain coverage for negative SOAP paths, avoid suppressing assertions, depend solely on CMocka helpers | Success: SOAP error suite passes, mocks use CMocka, fault propagation verified | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 79. Update test documentation for CMocka patterns
   - File: cross-compile/onvif/tests/README.md
   - Update documentation to reflect CMocka best practices
   - Remove references to custom mock framework
@@ -781,7 +960,7 @@
   - _Requirements: Document CMocka best practices and usage_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Technical Writer with expertise in CMocka and test documentation | Task: Update tests/README.md to document CMocka best practices. Remove all references to custom mock framework. Add section on CMocka usage patterns: will_return() and mock() pairs, expect_value() and check_expected() for parameter validation, expect_function_call() and function_called() for call tracking, linker wrapping with --wrap option. Add examples of common CMocka patterns used in the project. Update build instructions to mention linker wrapping. Document helper macros from platform_mock.h. | Restrictions: Must remove all custom mock framework references, must document CMocka patterns accurately, must provide useful examples | Success: Documentation updated for CMocka, custom mock framework references removed, CMocka patterns documented with examples, build instructions updated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 63. Create CMocka best practices guide
+- [ ] 80. Create CMocka best practices guide
   - File: cross-compile/onvif/tests/CMOCKA_BEST_PRACTICES.md (new file)
   - Document CMocka best practices used in the project
   - Provide examples of common patterns
@@ -794,7 +973,7 @@
 
 ### Phase 11F: Performance and Quality Validation
 
-- [ ] 64. Validate CMocka migration performance impact
+- [ ] 81. Validate CMocka migration performance impact
   - File: N/A - performance validation task
   - Measure test execution time before and after CMocka migration
   - Verify no significant performance degradation
@@ -805,7 +984,7 @@
   - _Requirements: Maintain or improve test performance_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Performance Engineer with expertise in test performance and CMocka | Task: Validate CMocka migration performance impact. Measure test execution time: run `time make test` and `time make test-integration` before and after migration. Measure memory usage during test execution with valgrind --tool=massif. Verify no significant performance degradation (target: < 10% increase in execution time). Document performance metrics: execution time, memory usage, test count. Compare with baseline if available. | Restrictions: Must measure actual performance impact, must not significantly degrade test performance, must document results | Success: Performance impact measured and documented, no significant degradation, memory usage acceptable, performance metrics documented | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 65. Final code quality validation for CMocka migration
+- [ ] 82. Final code quality validation for CMocka migration
   - File: N/A - code quality validation task
   - Run `./cross-compile/onvif/scripts/format_code.sh --check` to verify formatting
   - Run `./cross-compile/onvif/scripts/lint_code.sh --check` to verify code quality

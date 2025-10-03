@@ -91,27 +91,6 @@ typedef struct {
   int expected_result;
 } null_param_test_t;
 
-/**
- * @brief Configuration for mock initialization
- *
- * Specifies which mocks need to be initialized for a test.
- */
-typedef struct {
-  /** Initialize service dispatcher mock */
-  int init_service_dispatcher;
-
-  /** Initialize platform mock */
-  int init_platform;
-
-  /** Initialize PTZ adapter mock */
-  int init_ptz_adapter;
-
-  /** Initialize network mock */
-  int init_network;
-
-  /** Initialize config mock */
-  int init_config;
-} mock_config_t;
 
 /* ============================================================================
  * Service Callback Test Helpers
@@ -342,31 +321,9 @@ size_t test_helper_get_memory_usage(void);
  * Mock Setup/Teardown Helpers
  * ============================================================================ */
 
-/**
- * @brief Initialize mocks according to configuration
- *
- * This helper initializes all required mocks based on the provided configuration.
- *
- * @param config Mock configuration
- * @return 0 on success, error code on failure
+/* NOTE: Custom mock framework helpers have been removed as part of CMocka migration.
+ * Use CMocka's built-in mocking patterns (will_return, expect_function_call) directly.
  */
-int test_helper_setup_mocks(const mock_config_t* config);
-
-/**
- * @brief Cleanup all mocks
- *
- * This helper cleans up all initialized mocks.
- *
- * @param config Mock configuration (specifies which mocks to cleanup)
- */
-void test_helper_teardown_mocks(const mock_config_t* config);
-
-/**
- * @brief Reset all mock call counters
- *
- * This helper resets all mock call counters to zero.
- */
-void test_helper_reset_mock_counters(void);
 
 /* ============================================================================
  * Common Assertion Helpers
@@ -443,14 +400,6 @@ service_test_config_t test_helper_create_service_config(const char* service_name
                                                         int (*init_func)(void*),
                                                         void (*cleanup_func)(void));
 
-/**
- * @brief Create a standard mock configuration for service tests
- *
- * @param include_platform Whether to include platform mock
- * @param include_ptz Whether to include PTZ adapter mock
- * @return Initialized mock_config_t structure
- */
-mock_config_t test_helper_create_standard_mock_config(int include_platform, int include_ptz);
 
 // Service Dispatch Helpers
 void test_helper_service_dispatch_success(void** state, const service_test_config_t* config,

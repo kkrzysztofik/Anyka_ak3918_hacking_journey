@@ -50,12 +50,12 @@ void test_helper_service_registration_success(void** state, const service_test_c
   assert_non_null(config->service_name);
   assert_non_null(config->init_func);
 
-  // Mock successful service registration
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
+  // Mock successful service registration (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
 
-  // Mock successful platform initialization if required
+  // Mock successful platform initialization if required (pure CMocka pattern)
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service (which registers it)
@@ -78,12 +78,12 @@ void test_helper_service_registration_duplicate(void** state, const service_test
   assert_non_null(config);
   assert_non_null(config->init_func);
 
-  // Mock duplicate service registration
-  mock_service_dispatcher_set_register_result(ONVIF_ERROR_DUPLICATE);
+  // Mock duplicate service registration (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_ERROR_DUPLICATE);
 
-  // Mock successful platform initialization if required
+  // Mock successful platform initialization if required (pure CMocka pattern)
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service (which attempts registration)
@@ -102,12 +102,12 @@ void test_helper_service_registration_null_config(void** state,
   assert_non_null(config);
   assert_non_null(config->init_func);
 
-  // Mock successful service registration
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
+  // Mock successful service registration (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
 
-  // Mock successful platform initialization if required
+  // Mock successful platform initialization if required (pure CMocka pattern)
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service with NULL config (should still work for most services)
@@ -124,12 +124,12 @@ void test_helper_service_registration_dispatcher_failure(void** state,
   assert_non_null(config);
   assert_non_null(config->init_func);
 
-  // Mock service registration failure
-  mock_service_dispatcher_set_register_result(ONVIF_ERROR_INVALID);
+  // Mock service registration failure (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_ERROR_INVALID);
 
-  // Mock successful platform initialization if required
+  // Mock successful platform initialization if required (pure CMocka pattern)
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service (which attempts registration)
@@ -148,18 +148,18 @@ void test_helper_service_unregistration_success(void** state, const service_test
   assert_non_null(config->init_func);
   assert_non_null(config->cleanup_func);
 
-  // First register the service
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
+  // First register the service (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
 
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   int init_result = config->init_func(NULL);
   assert_int_equal(config->expected_init_success, init_result);
 
-  // Mock successful unregistration
-  mock_service_dispatcher_set_unregister_result(ONVIF_SUCCESS);
+  // Mock successful unregistration (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
   // Cleanup service (which unregisters it)
   config->cleanup_func();
@@ -176,8 +176,8 @@ void test_helper_service_unregistration_not_initialized(void** state,
   assert_non_null(config);
   assert_non_null(config->cleanup_func);
 
-  // Mock unregistration (service was never initialized)
-  mock_service_dispatcher_set_unregister_result(ONVIF_ERROR_NOT_FOUND);
+  // Mock unregistration (service was never initialized) (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_ERROR_NOT_FOUND);
 
   // Cleanup service without initializing first
   config->cleanup_func();
@@ -630,46 +630,6 @@ int test_helper_ptz_create_test_preset(struct ptz_preset* preset, const char* to
  * Mock Setup/Teardown Helpers
  * ============================================================================ */
 
-int test_helper_setup_mocks(const mock_config_t* config) {
-  assert_non_null(config);
-
-  if (config->init_service_dispatcher) {
-    mock_service_dispatcher_init();
-  }
-
-  if (config->init_ptz_adapter) {
-    // PTZ adapter initialization
-    // Note: This depends on platform_mock being initialized first
-    // CMocka handles mock state automatically - no init needed
-    if (!config->init_platform) {
-      (void)fprintf(stderr, "Warning: PTZ adapter requires platform mock\n");
-    }
-  }
-
-  // Additional mocks can be initialized here as needed
-
-  return 0;
-}
-
-void test_helper_teardown_mocks(const mock_config_t* config) {
-  assert_non_null(config);
-
-  // Cleanup in reverse order of initialization
-
-  if (config->init_ptz_adapter) {
-    // PTZ adapter cleanup
-    // CMocka handles mock cleanup automatically - no cleanup needed
-  }
-
-  if (config->init_service_dispatcher) {
-    mock_service_dispatcher_cleanup();
-  }
-}
-
-void test_helper_reset_mock_counters(void) {
-  mock_service_dispatcher_init(); // Reinitializing resets counters
-}
-
 /* ============================================================================
  * Common Assertion Helpers
  * ============================================================================ */
@@ -744,18 +704,6 @@ service_test_config_t test_helper_create_service_config(const char* service_name
   return config;
 }
 
-mock_config_t test_helper_create_standard_mock_config(int include_platform, int include_ptz) {
-  mock_config_t config = {
-    .init_service_dispatcher = 1, // Always needed for service tests
-    .init_platform = include_platform,
-    .init_ptz_adapter = include_ptz,
-    .init_network = 0,
-    .init_config = 0,
-  };
-
-  return config;
-}
-
 /* ============================================================================
  * Service Dispatch Helpers
  * ============================================================================ */
@@ -773,11 +721,11 @@ void test_helper_service_dispatch_success(void** state, const service_test_confi
                                           http_response_t* response) {
   (void)state;
 
-  // Mock successful service registration and dispatch
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
-  mock_service_dispatcher_set_dispatch_result(ONVIF_SUCCESS);
+  // Mock successful service registration and dispatch (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
+  will_return(__wrap_onvif_service_dispatcher_dispatch, ONVIF_SUCCESS);
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service
@@ -811,10 +759,10 @@ void test_helper_service_dispatch_unknown_operation(void** state,
                                                     http_response_t* response) {
   (void)state;
 
-  // Mock successful service registration
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
+  // Mock successful service registration (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service
@@ -919,9 +867,9 @@ void test_helper_operation_handler_success(void** state, const service_test_conf
                                            http_response_t* response) {
   (void)state;
 
-  // Mock successful platform initialization
+  // Mock successful platform initialization (pure CMocka pattern)
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service
@@ -1013,10 +961,10 @@ void test_helper_service_registration_failure_handling(void** state,
                                                        int error_code) {
   (void)state;
 
-  // Mock registration failure
-  mock_service_dispatcher_set_register_result(error_code);
+  // Mock registration failure (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, error_code);
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service (should fail)
@@ -1041,11 +989,11 @@ void test_helper_service_dispatch_failure_handling(void** state,
                                                    http_response_t* response) {
   (void)state;
 
-  // Mock successful registration but dispatch failure
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
-  mock_service_dispatcher_set_dispatch_result(ONVIF_ERROR);
+  // Mock successful registration but dispatch failure (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
+  will_return(__wrap_onvif_service_dispatcher_dispatch, ONVIF_ERROR);
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service
@@ -1070,11 +1018,11 @@ void test_helper_service_unregistration_failure_handling(void** state,
                                                          const service_test_config_t* config) {
   (void)state;
 
-  // Mock successful registration but unregistration failure
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
-  mock_service_dispatcher_set_unregister_result(ONVIF_ERROR);
+  // Mock successful registration but unregistration failure (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
+  will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_ERROR);
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service
@@ -1105,11 +1053,11 @@ void test_helper_service_callback_logging_success(void** state, const service_te
                                                   http_response_t* response) {
   (void)state;
 
-  // Mock successful operations
-  mock_service_dispatcher_set_register_result(ONVIF_SUCCESS);
-  mock_service_dispatcher_set_dispatch_result(ONVIF_SUCCESS);
+  // Mock successful operations (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
+  will_return(__wrap_onvif_service_dispatcher_dispatch, ONVIF_SUCCESS);
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service
@@ -1133,10 +1081,10 @@ void test_helper_service_callback_logging_failure(void** state,
                                                   const service_test_config_t* config) {
   (void)state;
 
-  // Mock failure operations
-  mock_service_dispatcher_set_register_result(ONVIF_ERROR);
+  // Mock failure operations (pure CMocka pattern)
+  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_ERROR);
   if (config->requires_platform_init) {
-    platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
   }
 
   // Initialize service (should fail)

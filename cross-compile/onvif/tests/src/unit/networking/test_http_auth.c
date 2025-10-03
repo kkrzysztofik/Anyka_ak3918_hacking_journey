@@ -26,9 +26,8 @@ TEST_HELPER_DECLARE_COUNTERS(http_auth, 0, 0, 0, 0)
 static int setup_http_auth_tests(void** state) {
   (void)state;
 
-  // Create standard mock configuration
-  mock_config_t mock_config = test_helper_create_standard_mock_config(0, 0);
-  test_helper_setup_mocks(&mock_config);
+  // Initialize service dispatcher mock (pure CMocka pattern)
+  mock_service_dispatcher_init();
 
   http_auth_reset_mock_state();
   reset_http_auth_state();
@@ -38,9 +37,8 @@ static int setup_http_auth_tests(void** state) {
 static int teardown_http_auth_tests(void** state) {
   (void)state;
 
-  // Create standard mock configuration for cleanup
-  mock_config_t mock_config = test_helper_create_standard_mock_config(0, 0);
-  test_helper_teardown_mocks(&mock_config);
+  // Cleanup service dispatcher mock (pure CMocka pattern)
+  mock_service_dispatcher_cleanup();
   return 0;
 }
 

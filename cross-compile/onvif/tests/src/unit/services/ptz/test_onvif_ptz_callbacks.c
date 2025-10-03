@@ -48,11 +48,8 @@ static http_response_t g_test_response; // NOLINT
 int setup_ptz_callback_tests(void** state) {
   (void)state;
 
-  // Create mock configuration for platform layer
-  mock_config_t mock_config = test_helper_create_standard_mock_config(1, 1);
-
-  // Setup platform mocks (hardware abstraction)
-  test_helper_setup_mocks(&mock_config);
+  // Initialize service dispatcher mock (pure CMocka pattern)
+  mock_service_dispatcher_init();
 
   // Initialize service dispatcher (REAL implementation for integration testing)
   onvif_service_dispatcher_init();
@@ -83,9 +80,8 @@ int teardown_ptz_callback_tests(void** state) {
   // Cleanup service dispatcher (real implementation)
   onvif_service_dispatcher_cleanup();
 
-  // Cleanup platform mocks
-  mock_config_t mock_config = test_helper_create_standard_mock_config(1, 1);
-  test_helper_teardown_mocks(&mock_config);
+  // Cleanup service dispatcher mock (pure CMocka pattern)
+  mock_service_dispatcher_cleanup();
 
   return 0;
 }

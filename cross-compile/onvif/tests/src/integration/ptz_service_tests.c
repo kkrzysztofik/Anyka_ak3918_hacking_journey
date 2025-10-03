@@ -133,10 +133,12 @@ int ptz_service_setup(void** state) {
 
   // Initialize platform mock for PTZ operations
   platform_ptz_mock_init();
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
-  platform_mock_set_ptz_move_result(PLATFORM_SUCCESS);
-  platform_mock_set_ptz_stop_result(PLATFORM_SUCCESS);
-  platform_mock_set_ptz_preset_result(PLATFORM_SUCCESS);
+
+  // Configure CMocka expectations for PTZ operations (pure CMocka pattern)
+  will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
+  will_return(__wrap_platform_ptz_set_degree, PLATFORM_SUCCESS);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+  will_return(__wrap_platform_ptz_move_to_position, PLATFORM_SUCCESS);
 
   // Initialize PTZ service with mock config
   config_manager_t* config = malloc(sizeof(config_manager_t));

@@ -48,11 +48,8 @@ static service_test_config_t g_media_service_config;
 static int setup_media_callback_tests(void** state) {
   (void)state;
 
-  // Create standard mock configuration (no platform/PTZ needed for Media)
-  mock_config_t mock_config = test_helper_create_standard_mock_config(0, 0);
-
-  // Setup all mocks with one call
-  test_helper_setup_mocks(&mock_config);
+  // Initialize service dispatcher mock (pure CMocka pattern)
+  mock_service_dispatcher_init();
 
   // Create service test configuration (reusable)
   g_media_service_config =
@@ -78,9 +75,8 @@ static int teardown_media_callback_tests(void** state) {
   // Cleanup service
   onvif_media_cleanup();
 
-  // Teardown all mocks with one call
-  mock_config_t mock_config = test_helper_create_standard_mock_config(0, 0);
-  test_helper_teardown_mocks(&mock_config);
+  // Cleanup service dispatcher mock (pure CMocka pattern)
+  mock_service_dispatcher_cleanup();
 
   return 0;
 }
