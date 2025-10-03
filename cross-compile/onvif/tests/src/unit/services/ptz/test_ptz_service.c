@@ -8,7 +8,6 @@
 #include "cmocka_wrapper.h"
 #include "common/test_helpers.h"
 #include "mocks/platform_mock_cmocka.h"
-#include "mocks/platform_ptz_mock.h"
 #include "platform/platform_common.h"
 #include "services/ptz/onvif_ptz.h"
 #include "utils/error/error_handling.h"
@@ -186,7 +185,7 @@ void test_ptz_absolute_move_with_null(void** state, const null_param_test_t* tes
     result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, NULL, &TEST_SPEED);
     break;
   case 2: // NULL speed parameter (should succeed with default speed)
-    platform_mock_set_ptz_move_result(PLATFORM_SUCCESS);
+    will_return(__wrap_platform_ptz_set_degree, PLATFORM_SUCCESS);
     result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &TEST_POSITION, NULL);
     break;
   default:

@@ -357,8 +357,12 @@ platform_result_t __wrap_platform_aenc_release_stream(void* aenc_handle,
  * PTZ Functions
  * ============================================================================ */
 
+// Forward declaration
+void platform_ptz_mock_record_init(void);
+
 platform_result_t __wrap_platform_ptz_init(void) {
   function_called();
+  platform_ptz_mock_record_init();
   return (platform_result_t)mock();
 }
 

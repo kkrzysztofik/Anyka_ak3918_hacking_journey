@@ -1,6 +1,6 @@
 /**
  * @file mock_service_dispatcher_cmocka.h
- * @brief CMocka-based mock header for service dispatcher testing
+ * @brief Pure CMocka service dispatcher mock with helper functions
  * @author kkrzysztofik
  * @date 2025
  */
@@ -37,18 +37,108 @@ int __wrap_onvif_service_dispatcher_init(void);
  */
 void __wrap_onvif_service_dispatcher_cleanup(void);
 
+/**
+ * @brief CMocka wrapped version of onvif_service_dispatcher_dispatch
+ */
+int __wrap_onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name,
+                                              void* request, void* response);
+
 /* ============================================================================
- * Helper Functions for Test Setup
+ * Mock State Management
+ * ============================================================================ */
+
+/**
+ * @brief Initialize mock service dispatcher state
+ * @note Resets all call counters and tracked data
+ */
+void mock_service_dispatcher_init(void);
+
+/**
+ * @brief Cleanup mock service dispatcher state
+ * @note This is a no-op with CMocka - state is managed automatically
+ */
+void mock_service_dispatcher_cleanup(void);
+
+/* ============================================================================
+ * Mock Result Configuration (wraps will_return)
+ * ============================================================================ */
+
+/**
+ * @brief Set result for next service registration call
+ * @param result Result code to return from __wrap_onvif_service_dispatcher_register_service
+ */
+void mock_service_dispatcher_set_register_result(int result);
+
+/**
+ * @brief Set result for next service unregistration call
+ * @param result Result code to return from __wrap_onvif_service_dispatcher_unregister_service
+ */
+void mock_service_dispatcher_set_unregister_result(int result);
+
+/**
+ * @brief Set result for next service dispatch call
+ * @param result Result code to return from __wrap_onvif_service_dispatcher_dispatch
+ */
+void mock_service_dispatcher_set_dispatch_result(int result);
+
+/* ============================================================================
+ * Mock Call Tracking
+ * ============================================================================ */
+
+/**
+ * @brief Get number of times register service was called
+ * @return Call count
+ */
+int mock_service_dispatcher_get_register_call_count(void);
+
+/**
+ * @brief Get number of times unregister service was called
+ * @return Call count
+ */
+int mock_service_dispatcher_get_unregister_call_count(void);
+
+/**
+ * @brief Get number of times dispatch was called
+ * @return Call count
+ */
+int mock_service_dispatcher_get_dispatch_call_count(void);
+
+/* ============================================================================
+ * Mock Data Retrieval
+ * ============================================================================ */
+
+/**
+ * @brief Get last service registration data
+ * @return Pointer to last registration or NULL
+ */
+const onvif_service_registration_t* mock_service_dispatcher_get_last_registration(void);
+
+/**
+ * @brief Get last dispatched service name
+ * @return Service name string or NULL
+ */
+const char* mock_service_dispatcher_get_last_dispatch_service(void);
+
+/**
+ * @brief Get last dispatched operation name
+ * @return Operation name string or NULL
+ */
+const char* mock_service_dispatcher_get_last_dispatch_operation(void);
+
+/* ============================================================================
+ * Legacy Helper Functions (for backward compatibility)
  * ============================================================================ */
 
 /**
  * @brief Set the last registration data for verification
+ * @note Legacy function - now handled automatically in __wrap function
  */
 void mock_service_dispatcher_set_last_registration(
   const onvif_service_registration_t* registration);
 
 /**
  * @brief Set the last unregister service name for verification
+ * @note Legacy function - now handled automatically in __wrap function
  */
 void mock_service_dispatcher_set_last_unregister_service(const char* service_name);
 

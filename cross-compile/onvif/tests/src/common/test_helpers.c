@@ -13,10 +13,10 @@
 #include <string.h>
 
 // Mock includes
-#include "mocks/mock_service_dispatcher.h"
+#include "mocks/mock_service_dispatcher_cmocka.h"
 #include "mocks/platform_mock_cmocka.h"
 #include "mocks/platform_ptz_mock.h"
-#include "mocks/ptz_adapter_mock.h"
+#include "mocks/ptz_adapter_mock_cmocka.h"
 
 // ONVIF includes
 #include "networking/http/http_auth.h"
@@ -640,10 +640,10 @@ int test_helper_setup_mocks(const mock_config_t* config) {
   if (config->init_ptz_adapter) {
     // PTZ adapter initialization
     // Note: This depends on platform_mock being initialized first
+    // CMocka handles mock state automatically - no init needed
     if (!config->init_platform) {
       (void)fprintf(stderr, "Warning: PTZ adapter requires platform mock\n");
     }
-    ptz_adapter_mock_init();
   }
 
   // Additional mocks can be initialized here as needed
@@ -658,7 +658,7 @@ void test_helper_teardown_mocks(const mock_config_t* config) {
 
   if (config->init_ptz_adapter) {
     // PTZ adapter cleanup
-    ptz_adapter_mock_cleanup();
+    // CMocka handles mock cleanup automatically - no cleanup needed
   }
 
   if (config->init_service_dispatcher) {

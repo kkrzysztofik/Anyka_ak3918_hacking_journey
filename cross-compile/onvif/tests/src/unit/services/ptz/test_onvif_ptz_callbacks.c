@@ -17,7 +17,9 @@
 #include "utils/error/error_handling.h"
 
 // Mock includes
+#include "../../../mocks/platform_mock_cmocka.h"
 #include "../../../mocks/platform_ptz_mock.h"
+#include "platform/adapters/ptz_adapter.h"
 
 /* ============================================================================
  * Test Configuration

@@ -710,7 +710,7 @@
 
 ### Phase 11C: Remove Custom Mock Framework
 
-- [ ] 57. Remove custom generic mock framework
+- [x] 57. Remove custom generic mock framework
   - File: cross-compile/onvif/tests/src/common/generic_mock_framework.h
   - File: cross-compile/onvif/tests/src/common/generic_mock_framework.c
   - Delete both files completely
@@ -720,7 +720,7 @@
   - _Requirements: Remove all custom mock framework code_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Build Engineer with code cleanup expertise | Task: Remove custom generic mock framework following CMocka best practices. Delete generic_mock_framework.h and generic_mock_framework.c completely. Update tests/Makefile to remove src/common/generic_mock_framework.c from TEST_HELPER_SRCS. Search codebase to verify no other files include or reference generic_mock_framework. After deletion, verify build succeeds with `make clean && make test`. Verify no dangling references remain. | Restrictions: Must verify no references before deletion, must ensure build succeeds after deletion, must not break existing functionality | Success: Custom mock framework completely removed, no references remain, build succeeds, tests pass with CMocka-only mocking | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 58. Remove old platform mock files
+- [x] 58. Remove old platform mock files
   - File: cross-compile/onvif/tests/src/mocks/platform_mock.h
   - File: cross-compile/onvif/tests/src/mocks/platform_mock.c
   - Delete both files completely

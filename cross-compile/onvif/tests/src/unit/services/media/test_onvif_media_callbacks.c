@@ -18,7 +18,7 @@
 #include "../../../common/test_helpers.h"
 
 // Mock includes
-#include "../../../mocks/mock_service_dispatcher.h"
+#include "../../../mocks/mock_service_dispatcher_cmocka.h"
 
 /* ============================================================================
  * Test Constants

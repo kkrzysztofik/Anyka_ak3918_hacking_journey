@@ -251,31 +251,25 @@ TEST_HELPER_SRCS := \
 # Mock source files (for unit tests)
 MOCK_SRCS := \
 	src/mocks/platform_mock_cmocka.c \
-	src/mocks/network_mock_cmocka.c \
 	src/mocks/platform_ptz_mock.c \
-	src/mocks/ptz_adapter_mock.c \
+	src/mocks/network_mock_cmocka.c \
 	src/mocks/ptz_adapter_mock_cmocka.c \
-	src/mocks/mock_service_dispatcher.c \
 	src/mocks/mock_service_dispatcher_cmocka.c \
 	src/mocks/config_mock_cmocka.c \
 	src/mocks/buffer_pool_mock_cmocka.c \
 	src/mocks/smart_response_mock_cmocka.c \
 	src/mocks/gsoap_mock_cmocka.c \
-	src/mocks/memory_mock.c
 
 # Mock source files for integration tests (exclude buffer_pool_mock - use real implementation)
 MOCK_SRCS_INTEGRATION := \
 	src/mocks/platform_mock_cmocka.c \
-	src/mocks/network_mock_cmocka.c \
 	src/mocks/platform_ptz_mock.c \
-	src/mocks/ptz_adapter_mock.c \
+	src/mocks/network_mock_cmocka.c \
 	src/mocks/ptz_adapter_mock_cmocka.c \
-	src/mocks/mock_service_dispatcher.c \
 	src/mocks/mock_service_dispatcher_cmocka.c \
 	src/mocks/config_mock_cmocka.c \
 	src/mocks/smart_response_mock_cmocka.c \
 	src/mocks/gsoap_mock_cmocka.c \
-	src/mocks/memory_mock.c
 
 # Source files from main project (for testing - exclude platform_anyka.c - use platform mocks)
 MAIN_SRCS := \
