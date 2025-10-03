@@ -1,9 +1,11 @@
 # Anyka AK3918 ONVIF Project - Coding Standards and Conventions
 
 ## Project Overview
+
 This repository contains comprehensive reverse-engineering work and custom firmware development for Anyka AK3918-based IP cameras. It includes cross-compilation tools, SD-card bootable payloads, root filesystem modifications, and detailed documentation for understanding and extending camera functionality.
 
 ## Development Environment (MANDATORY)
+
 - **Primary OS**: WSL2 with Ubuntu
 - **Shell**: **MANDATORY** - All terminal commands MUST use bash syntax
 - **Cross-compilation**: Use native cross-compilation tools and toolchain
@@ -11,7 +13,8 @@ This repository contains comprehensive reverse-engineering work and custom firmw
 
 ## File Organization (MANDATORY)
 
-### Include Order (strict ordering for all C files):
+### Include Order (strict ordering for all C files)
+
 1. **System headers first** (e.g., `#include <stdio.h>`, `#include <stdlib.h>`)
 2. **Third-party library headers** (e.g., `#include <curl/curl.h>`)
 3. **Project-specific headers** (e.g., `#include "platform.h"`, `#include "common.h"`)
@@ -21,14 +24,16 @@ This repository contains comprehensive reverse-engineering work and custom firmw
 - Use include guards (`#ifndef HEADER_H` / `#define HEADER_H` / `#endif`) or `#pragma once`
 - Avoid unnecessary includes and circular dependencies
 
-### Include Path Format (MANDATORY for all project headers):
+### Include Path Format (MANDATORY for all project headers)
+
 - **ALWAYS use relative paths from `src/` directory** for all project includes
 - **CORRECT format**: `#include "services/common/video_config_types.h"`
 - **INCORRECT format**: `#include "../../services/common/video_config_types.h"`
 - **Rationale**: Consistent, maintainable, and IDE-friendly include paths
 - **Enforcement**: Makefile and clangd configuration enforce this rule
 
-### Source File Structure & Organization (MANDATORY):
+### Source File Structure & Organization (MANDATORY)
+
 ```
 src/
 ├── core/                    # Core system components
@@ -69,30 +74,34 @@ src/
 
 ## Variable Naming Conventions (MANDATORY)
 
-### Global Variable Naming Convention (MANDATORY):
+### Global Variable Naming Convention (MANDATORY)
+
 - **ALL global variables MUST start with `g_<module>_<variable_name>`**
 - **Module prefix** should match the source file or functional area (e.g., `g_onvif_`, `g_platform_`, `g_media_`)
 - **Variable name** should be descriptive and follow snake_case convention
 - **Examples**:
+
   ```c
   // ✅ CORRECT - Global variables with module prefix
   static int g_onvif_device_count = 0;
   static char g_platform_device_name[64] = {0};
   static struct media_profile* g_media_profiles[MAX_PROFILES] = {NULL};
-  
+
   // ❌ INCORRECT - Global variables without module prefix
   static int device_count = 0;
   static char device_name[64] = {0};
   static struct media_profile* profiles[MAX_PROFILES] = {NULL};
   ```
 
-### Global Variable Placement (MANDATORY):
+### Global Variable Placement (MANDATORY)
+
 - **ALL global variables MUST be placed at the top of the file** after includes and before any function definitions
 - **Grouping**: Group related global variables together with blank lines between groups
 - **Initialization**: Initialize global variables at declaration when possible
 - **Documentation**: Add comments explaining the purpose of each global variable
 
-### Other Naming Conventions:
+### Other Naming Conventions
+
 - **Functions**: snake_case with module prefix (e.g., `onvif_util_validate_token`)
 - **Constants**: UPPER_CASE with module prefix (e.g., `ONVIF_SUCCESS`, `HTTP_AUTH_ERROR_NULL`)
 - **Local Variables**: snake_case
@@ -104,24 +113,27 @@ src/
 
 ## Return Code Standards (MANDATORY)
 
-### Return Code Constants (MANDATORY):
+### Return Code Constants (MANDATORY)
+
 - **NEVER use magic numbers** for return codes (e.g., `return -1`, `return 0`)
 - **ALWAYS use predefined constants** for all function return values
 - **Module-specific constants** should be defined in the module's header file
 - **Global constants** should be defined in `utils/error/error_handling.h`
 - **Examples**:
+
   ```c
   // ✅ CORRECT - Using predefined constants
   return HTTP_AUTH_SUCCESS;
   return HTTP_AUTH_ERROR_NULL;
   return ONVIF_SUCCESS;
   return ONVIF_ERROR_INVALID;
-  
+
   // ❌ INCORRECT - Using magic numbers
   return 0;
   return -1;
   return -2;
   ```
+
 - **Constant naming convention**:
   - Success: `MODULE_SUCCESS` (e.g., `HTTP_AUTH_SUCCESS`, `ONVIF_SUCCESS`)
   - Errors: `MODULE_ERROR_TYPE` (e.g., `HTTP_AUTH_ERROR_NULL`, `ONVIF_ERROR_INVALID`)
@@ -129,7 +141,8 @@ src/
 
 ## Test Naming Conventions (MANDATORY)
 
-### Test Naming Convention (MANDATORY):
+### Test Naming Convention (MANDATORY)
+
 - **Unit tests**: Must follow `test_unit_<module>_<functionality>` pattern
 - **Integration tests**: Must follow `test_integration_<service>_<functionality>` pattern
 - **Examples**:
@@ -138,7 +151,8 @@ src/
 - **Enforcement**: Test runner uses naming convention to filter tests by category
 - **Consistency**: All test functions must follow this naming pattern for proper categorization
 
-### Unit Testing (MANDATORY):
+### Unit Testing (MANDATORY)
+
 - **Test Suite**: 196 tests across 17 suites (129 unit tests, 67 integration tests)
 - **ALL utility functions** must have corresponding unit tests
 - **Tests must cover** success cases, error cases, and edge conditions
@@ -152,7 +166,8 @@ src/
 
 ## Documentation Standards (MANDATORY)
 
-### Doxygen Documentation (MANDATORY):
+### Doxygen Documentation (MANDATORY)
+
 - **ALL code changes MUST include updated Doxygen documentation**
 - **Function documentation**: Every public function must have complete Doxygen comments including `@brief`, `@param`, `@return`, and `@note` where applicable
 - **File headers**: Each source file must have a Doxygen file header with `@file`, `@brief`, `@author`, and `@date` tags
@@ -161,9 +176,11 @@ src/
 - **Documentation validation**: **MANDATORY** - Verify that all new/changed functions appear correctly in the generated HTML documentation
 - **Consistency**: Follow the existing Doxygen style used throughout the ONVIF project
 
-### File Header Standards (MANDATORY):
+### File Header Standards (MANDATORY)
+
 - **Consistent File Headers**: **ALL source and header files MUST have consistent Doxygen file headers**
 - **Required format** (based on `onvif_constants.h` template):
+
   ```c
   /**
    * @file filename.h
@@ -172,6 +189,7 @@ src/
    * @date 2025
    */
   ```
+
 - **Header requirements**:
   - `@file` - Must match the actual filename
   - `@brief` - Concise description of the file's purpose and functionality
@@ -183,13 +201,15 @@ src/
 
 ## Code Structure and Organization
 
-### Code Organization:
+### Code Organization
+
 - **Consistent 2-space indentation**
 - **Consistent variable naming**
 - **Proper spacing and formatting**
 - **Functions ordered with definitions at the top of files and execution logic at the bottom**
 
-### Function Order Compliance (MANDATORY):
+### Function Order Compliance (MANDATORY)
+
 - **Verify function ordering** follows project guidelines: definitions at top, execution logic at bottom
 - **Check global variables** are placed at the top of files after includes
 - **Validate include ordering**: system headers → third-party → project headers
@@ -200,7 +220,8 @@ src/
 
 ## Utility Usage and Code Reuse (MANDATORY)
 
-### Utility Usage (MANDATORY):
+### Utility Usage (MANDATORY)
+
 - **ALWAYS use existing utilities** - Check `src/utils/` directory for available utility functions before implementing new code
 - **NO code duplication** - If similar functionality exists elsewhere, refactor to use shared utilities
 - **Create utilities for common operations** - When implementing functionality that might be reused, create utility functions
@@ -211,7 +232,8 @@ src/
   - Must include proper error handling and validation
   - Must be thread-safe if applicable
 
-### Code Duplication Prevention (MANDATORY):
+### Code Duplication Prevention (MANDATORY)
+
 - **DRY Principle** - Don't Repeat Yourself - Any code that appears in multiple places MUST be refactored into utilities
 - **Common patterns to avoid duplicating**:
   - String manipulation and validation
@@ -225,7 +247,8 @@ src/
 
 ## Security Guidelines (MANDATORY)
 
-### Input Validation (MANDATORY):
+### Input Validation (MANDATORY)
+
 - **ALL user inputs must be properly validated and sanitized**:
   - Check for NULL pointers before dereferencing
   - Validate string lengths and bounds
@@ -233,7 +256,8 @@ src/
   - Validate numeric ranges and types
   - Check for buffer overflows in all string operations
 
-### Buffer Management (MANDATORY):
+### Buffer Management (MANDATORY)
+
 - **Prevent buffer overflows and underflows**:
   - Use `strncpy()` instead of `strcpy()`
   - Always null-terminate strings
@@ -241,7 +265,8 @@ src/
   - Use fixed-size buffers with proper bounds checking
   - Avoid `scanf()` with unbounded format strings
 
-### Memory Security (MANDATORY):
+### Memory Security (MANDATORY)
+
 - **Prevent memory-related vulnerabilities**:
   - Initialize all allocated memory with `memset()` or `calloc()`
   - Free all allocated resources in error paths
@@ -249,7 +274,8 @@ src/
   - Validate pointer arithmetic safety
   - Use stack variables when possible, heap when necessary
 
-### Network Security (MANDATORY):
+### Network Security (MANDATORY)
+
 - **Secure network communications**:
   - Validate all network input before processing
   - Use proper error message handling (no information leakage)
@@ -257,7 +283,8 @@ src/
   - Use secure communication protocols (HTTPS, WSS)
   - Validate SOAP/XML input to prevent injection
 
-### Authentication & Authorization (MANDATORY):
+### Authentication & Authorization (MANDATORY)
+
 - Implement proper credential handling
 - Use secure password storage mechanisms
 - Validate session management
@@ -266,7 +293,8 @@ src/
 
 ## Code Quality Validation (MANDATORY)
 
-### Code Linting (MANDATORY):
+### Code Linting (MANDATORY)
+
 - **Run linting script**: `./cross-compile/onvif/scripts/lint_code.sh` after implementation
 - **Check specific files**: `./cross-compile/onvif/scripts/lint_code.sh --file src/path/to/file.c`
 - **Check changed files**: `./cross-compile/onvif/scripts/lint_code.sh --changed`
@@ -277,7 +305,8 @@ src/
 - **Linting covers**: Code style, potential bugs, performance issues, security concerns, and best practices
 - **Integration**: Linting is integrated with clangd-tidy for comprehensive analysis
 
-### Code Formatting (MANDATORY):
+### Code Formatting (MANDATORY)
+
 - **Run formatting script**: `./cross-compile/onvif/scripts/format_code.sh` after implementation
 - **Check specific files**: `./cross-compile/onvif/scripts/format_code.sh --files src/path/to/file.c`
 - **Check only mode**: `./cross-compile/onvif/scripts/format_code.sh --check` (exits 1 if formatting issues found)
@@ -286,7 +315,8 @@ src/
 - **Formatting covers**: Indentation, spacing, brace placement, line length, and consistent style
 - **Integration**: Uses clang-format with project-specific configuration
 
-### Static Analysis & Testing Requirements (MANDATORY):
+### Static Analysis & Testing Requirements (MANDATORY)
+
 - **Compilation Testing** - ALL code changes must compile successfully:
   - Use native build: `make -C cross-compile/onvif`
   - Fix all compiler warnings and errors
@@ -319,7 +349,8 @@ src/
 
 ## NOLINT Usage Guidelines
 
-### NOLINT Suppression (MANDATORY):
+### NOLINT Suppression (MANDATORY)
+
 - **Use `//NOLINT` comments** for linter warnings when the suggested changes don't make sense from an implementation perspective
 - **Example**: `static int g_discovery_running = 0; //NOLINT` for warnings about non-const global variables that need to be mutable
 - **Example**: `int onvif_ptz_stop(const char *profile_token, int stop_pan_tilt, int stop_zoom) //NOLINT` for warnings about adjacent parameters of similar type that are easily swapped by mistake when changing the order doesn't make sense from implementation perspective
@@ -329,34 +360,39 @@ src/
 
 ## ONVIF Compliance Requirements (MANDATORY)
 
-### Service Implementation (MANDATORY):
+### Service Implementation (MANDATORY)
+
 - **Complete implementation of all required services**:
   - **Device Service**: Device information, capabilities, system date/time
   - **Media Service**: Profile management, stream URIs, video/audio configurations
   - **PTZ Service**: Pan/tilt/zoom control, preset management, continuous move
   - **Imaging Service**: Image settings, brightness, contrast, saturation controls
 
-### SOAP Protocol (MANDATORY):
+### SOAP Protocol (MANDATORY)
+
 - **Proper XML/SOAP request/response handling**:
   - Correct XML namespace usage
   - Proper SOAP envelope structure
   - ONVIF-compliant error codes and messages
   - Proper content-type headers
 
-### WS-Discovery (MANDATORY):
+### WS-Discovery (MANDATORY)
+
 - **Correct multicast discovery implementation**:
   - Proper UDP multicast socket handling
   - Correct discovery message format
   - Proper device announcement and probe responses
 
-### RTSP Streaming (MANDATORY):
+### RTSP Streaming (MANDATORY)
+
 - **Proper H.264 stream generation and delivery**:
   - Correct SDP format for stream descriptions
   - Proper RTP packetization
   - Correct stream URI generation
   - Proper authentication for RTSP streams
 
-### Error Codes (MANDATORY):
+### Error Codes (MANDATORY)
+
 - **ONVIF-compliant error reporting**:
   - Use standard ONVIF error codes
   - Provide meaningful error messages
@@ -364,14 +400,16 @@ src/
 
 ## Development Workflow (MANDATORY)
 
-### Pre-Development Checklist:
+### Pre-Development Checklist
+
 - [ ] **Understand the task** - Read requirements carefully and ask clarifying questions
 - [ ] **Check existing code** - Review related files and utilities before implementing
 - [ ] **Plan the approach** - Break down complex tasks into smaller, manageable steps
 - [ ] **Identify dependencies** - Understand what other components might be affected
 - [ ] **Review coding standards** - Ensure compliance with project guidelines
 
-### Development Process:
+### Development Process
+
 1. **Code Implementation**:
    - Follow include ordering standards strictly
    - Use existing utilities to avoid code duplication
@@ -410,7 +448,8 @@ src/
 
 ## Bash Command Reference (MANDATORY)
 
-### Build and Compilation Commands:
+### Build and Compilation Commands
+
 ```bash
 # Build the ONVIF project
 make -C cross-compile/onvif
@@ -428,7 +467,8 @@ make -C cross-compile/onvif onvifd
 make -C cross-compile/onvif docs
 ```
 
-### Code Quality Commands (MANDATORY):
+### Code Quality Commands (MANDATORY)
+
 ```bash
 # Code Linting (MANDATORY after implementation)
 ./cross-compile/onvif/scripts/lint_code.sh                    # Lint all C files
@@ -445,7 +485,8 @@ make -C cross-compile/onvif docs
 ./cross-compile/onvif/scripts/format_code.sh --dry-run        # Show what would be changed
 ```
 
-### Unit Testing Commands (MANDATORY):
+### Unit Testing Commands (MANDATORY)
+
 ```bash
 # Install unit test dependencies
 ./cross-compile/onvif/tests/install_dependencies.sh
@@ -489,7 +530,8 @@ make test-coverage-clean
 
 ## Quality Assurance Checklist
 
-### Before approving any code changes, verify:
+### Before approving any code changes, verify
+
 - [ ] **Bash syntax** used in all commands
 - [ ] **Native builds** work correctly
 - [ ] **Include ordering** follows standards
@@ -529,7 +571,8 @@ make test-coverage-clean
 
 ## Agent Instructions
 
-### When Working on This Project:
+### When Working on This Project
+
 1. **ALWAYS use bash** for all terminal commands and file operations
 2. **ALWAYS use native cross-compilation** for development tasks and building
 3. **ALWAYS test compilation** using the native make command before suggesting changes
@@ -541,7 +584,8 @@ make test-coverage-clean
 9. **Reference the `cross-compile/anyka_reference/akipc/` tree** when reverse-engineering or implementing new features
 10. **Use SD-card testing** as the primary development workflow
 
-### Documentation Workflow (MANDATORY):
+### Documentation Workflow (MANDATORY)
+
 1. Make code changes
 2. Update Doxygen comments for all modified functions
 3. Update file headers if needed
@@ -551,7 +595,8 @@ make test-coverage-clean
 7. **Perform comprehensive code review**
 8. Commit changes
 
-### Error Handling & Debugging Guidelines (MANDATORY):
+### Error Handling & Debugging Guidelines (MANDATORY)
+
 - **Error Code Strategy** - Use consistent error handling throughout
 - **Debugging Tools** - Use appropriate debugging techniques
 - **Logging Strategy** - Implement comprehensive logging
