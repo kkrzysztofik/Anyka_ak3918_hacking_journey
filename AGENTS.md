@@ -46,7 +46,11 @@ The project focuses on creating a fully ONVIF 2.5 compliant implementation while
 - **Use native cross-compilation tools**: `make -C cross-compile/<project>` - This ensures consistent builds in the WSL Ubuntu environment.
 - **Test compilation** before committing changes - Always verify that code compiles successfully before making changes.
 - **SD-card testing** is the primary development workflow for device testing - Copy compiled binaries to the SD card payload and boot the device with the SD card to test functionality.
-- **Unit testing** is **MANDATORY** for all utility functions - Run `make test` to execute unit tests before committing changes.
+- **Unit testing** is **MANDATORY** for all utility functions:
+  - Run all tests: `make test` (196 tests across 17 suites)
+  - Run specific suites: `make test SUITE=ptz-service,http-auth`
+  - List available suites: `make test-list`
+  - Filter by type: `make test-unit` or `make test-integration`
 - **E2E testing** can be done using the test suite in `e2e/` directory.
 
 ## Development Environment
@@ -606,7 +610,14 @@ When reviewing ONVIF project code, **ALWAYS** follow this comprehensive review p
 
 - **Unit Testing** - **MANDATORY** for all utility functions:
 
-  - Run unit tests: `make test` or `make test-utils`
+  - **Test Suite**: 196 tests across 17 suites (129 unit tests, 67 integration tests)
+  - **Run all tests**: `make test` (from project root or tests directory)
+  - **Run unit tests only**: `make test-unit`
+  - **Run integration tests only**: `make test-integration`
+  - **List available test suites**: `make test-list`
+  - **Run specific suite**: `make test SUITE=ptz-service`
+  - **Run multiple suites**: `make test SUITE=ptz-service,ptz-callbacks,ptz-integration`
+  - **Filter by type and suite**: `make test-unit SUITE=http-auth,http-metrics`
   - All utility functions must have corresponding unit tests
   - Tests must cover success cases, error cases, and edge conditions
   - Use CMocka framework for isolated unit testing

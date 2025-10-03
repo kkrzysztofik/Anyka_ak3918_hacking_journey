@@ -124,7 +124,7 @@ SRCS := \
 
 OBJS := $(SRCS:src/%.c=$(OUT_DIR)/%.o)
 
-.PHONY = all clean debug release docs docs-clean docs-open static-analysis clang-analyze cppcheck-analyze snyk-analyze compile-commands lint lint-check lint-dry-run lint-format lint-errors lint-tests lint-tests-check lint-tests-dry-run lint-tests-format lint-tests-errors lint-all lint-all-check test test-utils test-all test-coverage test-coverage-html test-coverage-report test-coverage-clean
+.PHONY = all clean debug release docs docs-clean docs-open static-analysis clang-analyze cppcheck-analyze snyk-analyze compile-commands lint lint-check lint-dry-run lint-format lint-errors lint-tests lint-tests-check lint-tests-dry-run lint-tests-format lint-tests-errors lint-all lint-all-check test test-unit test-integration test-list test-coverage test-coverage-html test-coverage-report test-coverage-clean
 
 # Documentation directory
 DOCS_DIR = docs
@@ -268,18 +268,42 @@ lint-all: lint lint-tests
 lint-all-check: lint-check lint-tests-check
 	@echo "Linting check completed for all source files"
 
-# Testing targets
+# Testing targets with optional SUITE parameter
+# Usage:
+#   make test                    - Run all tests (196 tests)
+#   make test SUITE=ptz-service  - Run specific suite
+#   make test-unit               - Run all unit tests (129 tests)
+#   make test-unit SUITE=http-*  - Run specific unit test suites
 test:
-	@echo "Running unit tests..."
+ifdef SUITE
+	@echo "Running tests for suite: $(SUITE)..."
+	@$(MAKE) -C tests test SUITE=$(SUITE)
+else
+	@echo "Running all tests..."
 	@$(MAKE) -C tests test
+endif
 
-test-utils:
-	@echo "Running utility unit tests..."
-	@$(MAKE) -C tests test-utils
+test-unit:
+ifdef SUITE
+	@echo "Running unit tests for suite: $(SUITE)..."
+	@$(MAKE) -C tests test-unit SUITE=$(SUITE)
+else
+	@echo "Running unit tests..."
+	@$(MAKE) -C tests test-unit
+endif
 
-test-all:
-	@echo "Running all unit tests..."
-	@$(MAKE) -C tests test-all
+test-integration:
+ifdef SUITE
+	@echo "Running integration tests for suite: $(SUITE)..."
+	@$(MAKE) -C tests test-integration SUITE=$(SUITE)
+else
+	@echo "Running integration tests..."
+	@$(MAKE) -C tests test-integration
+endif
+
+test-list:
+	@echo "Listing available test suites..."
+	@$(MAKE) -C tests test-list
 
 test-coverage:
 	@echo "Running tests with coverage analysis..."

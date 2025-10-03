@@ -88,20 +88,9 @@ endif
 # CMocka library for native testing
 CMOCKA_LIBS=-lcmocka -lpthread -lm $(GSOAP_LIBS) $(BASE64_LIBS)
 
-# Modular test runner source files
-RUNNER_UTILS_SRC = src/runner/test_utils_runner.c
-RUNNER_NETWORKING_SRC = src/runner/test_networking_runner.c
-RUNNER_PROTOCOL_SRC = src/runner/test_protocol_runner.c
-RUNNER_DISPATCHER_SRC = src/runner/test_service_dispatcher_runner.c
-RUNNER_PTZ_SRC = src/runner/test_ptz_runner.c
-RUNNER_MEDIA_SRC = src/runner/test_media_runner.c
-RUNNER_IMAGING_SRC = src/runner/test_imaging_runner.c
-RUNNER_INTEGRATION_SRC = src/runner/test_integration_runner.c
-
-# New dynamic test runner with filtering
+# Dynamic test runner with filtering (replaces all old individual runners)
 RUNNER_DYNAMIC_SRC = src/runner/test_runner.c
 
-# Test suite registry sources
 # Test suite registry sources for dynamic test runner
 TEST_SUITE_REGISTRY_SRCS := \
 	src/common/test_suites.c \
@@ -112,8 +101,6 @@ TEST_SUITE_REGISTRY_SRCS := \
 	src/integration/media_integration_suite.c \
 	src/integration/device_integration_suite.c \
 	src/integration/imaging_integration_suite.c
-# Legacy consolidated test runner (kept for compatibility - DEPRECATED)
-RUNNER_LEGACY_SRC = src/runner/test_runner.c.old
 
 # Test source files for each module
 UTILS_TEST_SRCS := \
@@ -228,17 +215,8 @@ MEDIA_TEST_OBJS := $(MEDIA_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
 IMAGING_TEST_OBJS := $(IMAGING_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
 INTEGRATION_TEST_OBJS := $(INTEGRATION_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
 
-# Runner object files
-RUNNER_UTILS_OBJ := $(RUNNER_UTILS_SRC:src/%.c=$(OUT_DIR)/%.o)
-RUNNER_NETWORKING_OBJ := $(RUNNER_NETWORKING_SRC:src/%.c=$(OUT_DIR)/%.o)
-RUNNER_PROTOCOL_OBJ := $(RUNNER_PROTOCOL_SRC:src/%.c=$(OUT_DIR)/%.o)
-RUNNER_DISPATCHER_OBJ := $(RUNNER_DISPATCHER_SRC:src/%.c=$(OUT_DIR)/%.o)
-RUNNER_PTZ_OBJ := $(RUNNER_PTZ_SRC:src/%.c=$(OUT_DIR)/%.o)
-RUNNER_MEDIA_OBJ := $(RUNNER_MEDIA_SRC:src/%.c=$(OUT_DIR)/%.o)
-RUNNER_IMAGING_OBJ := $(RUNNER_IMAGING_SRC:src/%.c=$(OUT_DIR)/%.o)
-RUNNER_INTEGRATION_OBJ := $(RUNNER_INTEGRATION_SRC:src/%.c=$(OUT_DIR)/%.o)
+# Dynamic test runner object file
 RUNNER_DYNAMIC_OBJ := $(RUNNER_DYNAMIC_SRC:src/%.c=$(OUT_DIR)/%.o)
-RUNNER_LEGACY_OBJ := $(RUNNER_LEGACY_SRC:src/%.c=$(OUT_DIR)/%.o)
 
 # Test suite registry object files
 TEST_SUITE_REGISTRY_OBJS := $(TEST_SUITE_REGISTRY_SRCS:src/%.c=$(OUT_DIR)/%.o)
@@ -261,51 +239,19 @@ TEST_DEPS := $(TEST_OBJS:$(OUT_DIR)/%.o=$(OUT_DIR)/%.d)
 MOCK_DEPS := $(MOCK_OBJS:$(OUT_DIR)/%.o=$(OUT_DIR)/%.d)
 MAIN_DEPS := $(MAIN_OBJS:$(OUT_DIR)/main/%.o=$(OUT_DIR)/main/%.d)
 TEST_HELPER_DEPS := $(TEST_HELPER_OBJS:$(OUT_DIR)/%.o=$(OUT_DIR)/%.d)
-RUNNER_DEPS := $(RUNNER_UTILS_OBJ:%.o=%.d) $(RUNNER_NETWORKING_OBJ:%.o=%.d) \
-               $(RUNNER_PROTOCOL_OBJ:%.o=%.d) $(RUNNER_DISPATCHER_OBJ:%.o=%.d) \
-               $(RUNNER_PTZ_OBJ:%.o=%.d) $(RUNNER_MEDIA_OBJ:%.o=%.d) \
-               $(RUNNER_IMAGING_OBJ:%.o=%.d) $(RUNNER_INTEGRATION_OBJ:%.o=%.d)
+RUNNER_DEPS := $(RUNNER_DYNAMIC_OBJ:%.o=%.d)
 ALL_DEPS := $(TEST_DEPS) $(MOCK_DEPS) $(MAIN_DEPS) $(TEST_HELPER_DEPS) $(RUNNER_DEPS)
 
-# Modular test executables
-TEST_UTILS = $(OUT_DIR)/test_utils
-TEST_NETWORKING = $(OUT_DIR)/test_networking
-TEST_PROTOCOL = $(OUT_DIR)/test_protocol
-TEST_DISPATCHER = $(OUT_DIR)/test_service_dispatcher
-TEST_PTZ = $(OUT_DIR)/test_ptz
-TEST_MEDIA = $(OUT_DIR)/test_media
-TEST_IMAGING = $(OUT_DIR)/test_imaging
-TEST_INTEGRATION = $(OUT_DIR)/test_integration
+# Dynamic test runner executable
+TEST_RUNNER = $(OUT_DIR)/test_runner
 
-# New dynamic test runner with filtering
-TEST_RUNNER_DYNAMIC = $(OUT_DIR)/test_runner
-
-# Legacy consolidated test runner (kept for compatibility - DEPRECATED)
-TEST_RUNNER_LEGACY = $(OUT_DIR)/test_runner_legacy
-
-# All modular test targets
-MODULAR_TESTS := $(TEST_UTILS) $(TEST_NETWORKING) $(TEST_PROTOCOL) $(TEST_DISPATCHER) \
-                 $(TEST_PTZ) $(TEST_MEDIA) $(TEST_IMAGING) $(TEST_INTEGRATION)
-
-.PHONY: all clean clean-deps test test-utils test-networking test-protocol test-dispatcher \
-        test-ptz test-media test-imaging test-integration test-all test-modular test-legacy \
-        test-dynamic test-dynamic-unit test-dynamic-integration test-dynamic-list \
-        test-dynamic-ptz test-dynamic-media \
+.PHONY: all clean clean-deps test test-unit test-integration test-list \
         coverage coverage-html coverage-report coverage-clean debug release \
-        compile-native-libs compile-commands incremental-build help
+        compile-native-libs compile-commands help
 
-# Default target - build new dynamic test runner and all modular test suites
-all: $(TEST_RUNNER_DYNAMIC) $(MODULAR_TESTS)
-	@echo "✅ Dynamic test runner and all modular test suites built successfully"
-
-# Incremental build - only recompile changed files
-incremental-build: $(MODULAR_TESTS)
-	@echo "Incremental build completed - only changed files were recompiled"
-
-# Legacy test runner (for compatibility)
-test-legacy: $(TEST_RUNNER_LEGACY)
-	@echo "Running legacy consolidated test runner..."
-	@$(TEST_RUNNER_LEGACY)
+# Default target - build dynamic test runner
+all: $(TEST_RUNNER)
+	@echo "✅ Dynamic test runner built successfully"
 
 # Debug build
 debug:
@@ -365,138 +311,47 @@ coverage-clean:
 		find $(OUT_DIR) -name "*.gcno" -delete; \
 	fi
 
-# Modular test execution targets
-test: test-modular
+# Test execution targets with optional SUITE parameter
+# Usage:
+#   make test                    - Run all tests
+#   make test SUITE=ptz-service  - Run specific suite
+#   make test-unit SUITE=ptz-*   - Run all PTZ unit tests
+test: $(TEST_RUNNER)
+ifdef SUITE
+	@echo "Running tests for suite: $(SUITE)..."
+	@$(TEST_RUNNER) --suite=$(SUITE)
+else
+	@echo "Running all tests..."
+	@$(TEST_RUNNER)
+endif
 
-test-modular: $(MODULAR_TESTS)
-	@echo "╔════════════════════════════════════════════════════════════════╗"
-	@echo "║        Running All Modular ONVIF Test Suites                  ║"
-	@echo "╚════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@failures=0; \
-	for test_exec in $(MODULAR_TESTS); do \
-		echo "Running $$test_exec..."; \
-		$$test_exec || failures=$$((failures + 1)); \
-		echo ""; \
-	done; \
-	if [ $$failures -eq 0 ]; then \
-		echo "✅ All test suites passed!"; \
-	else \
-		echo "❌ $$failures test suite(s) failed!"; \
-		exit 1; \
-	fi
-
-test-utils: $(TEST_UTILS)
-	@echo "Running utility tests..."
-	@$(TEST_UTILS)
-
-test-networking: $(TEST_NETWORKING)
-	@echo "Running networking tests..."
-	@$(TEST_NETWORKING)
-
-test-protocol: $(TEST_PROTOCOL)
-	@echo "Running protocol tests..."
-	@$(TEST_PROTOCOL)
-
-test-dispatcher: $(TEST_DISPATCHER)
-	@echo "Running service dispatcher tests..."
-	@$(TEST_DISPATCHER)
-
-test-ptz: $(TEST_PTZ)
-	@echo "Running PTZ service tests..."
-	@$(TEST_PTZ)
-
-test-media: $(TEST_MEDIA)
-	@echo "Running Media service tests..."
-	@$(TEST_MEDIA)
-
-test-imaging: $(TEST_IMAGING)
-	@echo "Running Imaging service tests..."
-	@$(TEST_IMAGING)
-
-test-integration: $(TEST_INTEGRATION)
-	@echo "Running integration tests..."
-	@$(TEST_INTEGRATION)
-
-test-all: test-modular
-
-# Dynamic test runner targets with filtering
-test-dynamic: $(TEST_RUNNER_DYNAMIC)
-	@echo "Running all tests with dynamic runner..."
-	@$(TEST_RUNNER_DYNAMIC)
-
-test-dynamic-unit: $(TEST_RUNNER_DYNAMIC)
+test-unit: $(TEST_RUNNER)
+ifdef SUITE
+	@echo "Running unit tests for suite: $(SUITE)..."
+	@$(TEST_RUNNER) --type=unit --suite=$(SUITE)
+else
 	@echo "Running unit tests only..."
-	@$(TEST_RUNNER_DYNAMIC) --type=unit
+	@$(TEST_RUNNER) --type=unit
+endif
 
-test-dynamic-integration: $(TEST_RUNNER_DYNAMIC)
+test-integration: $(TEST_RUNNER)
+ifdef SUITE
+	@echo "Running integration tests for suite: $(SUITE)..."
+	@$(TEST_RUNNER) --type=integration --suite=$(SUITE)
+else
 	@echo "Running integration tests only..."
-	@$(TEST_RUNNER_DYNAMIC) --type=integration
+	@$(TEST_RUNNER) --type=integration
+endif
 
-test-dynamic-list: $(TEST_RUNNER_DYNAMIC)
+test-list: $(TEST_RUNNER)
 	@echo "Listing available test suites..."
-	@$(TEST_RUNNER_DYNAMIC) --list
+	@$(TEST_RUNNER) --list
 
-test-dynamic-ptz: $(TEST_RUNNER_DYNAMIC)
-	@echo "Running PTZ tests (unit + integration)..."
-	@$(TEST_RUNNER_DYNAMIC) --suite=ptz-service,ptz-adapter,ptz-callbacks,ptz-integration
-
-test-dynamic-media: $(TEST_RUNNER_DYNAMIC)
-	@echo "Running Media tests (unit + integration)..."
-	@$(TEST_RUNNER_DYNAMIC) --suite=media-utils,media-callbacks,media-integration
-
-# Build rules for each modular test executable (with test helpers)
-$(TEST_UTILS): $(RUNNER_UTILS_OBJ) $(UTILS_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
-	@echo "✅ Built $@"
-
-$(TEST_NETWORKING): $(RUNNER_NETWORKING_OBJ) $(NETWORKING_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
-	@echo "✅ Built $@"
-
-$(TEST_PROTOCOL): $(RUNNER_PROTOCOL_OBJ) $(PROTOCOL_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
-	@echo "✅ Built $@"
-
-$(TEST_DISPATCHER): $(RUNNER_DISPATCHER_OBJ) $(DISPATCHER_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
-	@echo "✅ Built $@"
-
-$(TEST_PTZ): $(RUNNER_PTZ_OBJ) $(PTZ_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
-	@echo "✅ Built $@"
-
-$(TEST_MEDIA): $(RUNNER_MEDIA_OBJ) $(MEDIA_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
-	@echo "✅ Built $@"
-
-$(TEST_IMAGING): $(RUNNER_IMAGING_OBJ) $(IMAGING_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
-	@echo "✅ Built $@"
-
-$(TEST_INTEGRATION): $(RUNNER_INTEGRATION_OBJ) $(INTEGRATION_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS_INTEGRATION) $(MAIN_OBJS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
-	@echo "✅ Built $@"
-
-# New dynamic test runner with filtering support
-$(TEST_RUNNER_DYNAMIC): $(RUNNER_DYNAMIC_OBJ) $(TEST_SUITE_REGISTRY_OBJS) $(TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS_INTEGRATION) $(MAIN_OBJS)
+# Dynamic test runner build rule
+$(TEST_RUNNER): $(RUNNER_DYNAMIC_OBJ) $(TEST_SUITE_REGISTRY_OBJS) $(TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS_INTEGRATION) $(MAIN_OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
 	@echo "✅ Built dynamic test runner $@"
-
-# Legacy consolidated test runner build (for compatibility, with test helpers - DEPRECATED)
-$(TEST_RUNNER_LEGACY): $(RUNNER_LEGACY_OBJ) $(TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
-	@echo "✅ Built legacy test runner $@"
 
 # Object file compilation with dependency generation
 $(OUT_DIR)/%.o: src/%.c | $(OUT_DIR)
@@ -545,28 +400,30 @@ compile-commands:
 # Help target
 help:
 	@echo "╔════════════════════════════════════════════════════════════════╗"
-	@echo "║           ONVIF Modular Test Suite - Build System             ║"
+	@echo "║           ONVIF Dynamic Test Runner - Build System            ║"
 	@echo "╚════════════════════════════════════════════════════════════════╝"
 	@echo ""
 	@echo "📦 Build Targets:"
-	@echo "  all              - Build all modular test suites (default)"
-	@echo "  incremental-build - Build only changed files (faster for development)"
+	@echo "  all              - Build dynamic test runner (default)"
 	@echo "  debug            - Build debug version"
 	@echo "  release          - Build release version"
 	@echo ""
 	@echo "🧪 Test Execution Targets:"
-	@echo "  test             - Run all modular test suites"
-	@echo "  test-modular     - Run all modular test suites (same as test)"
-	@echo "  test-utils       - Run utility tests only"
-	@echo "  test-networking  - Run networking tests only"
-	@echo "  test-protocol    - Run protocol (gSOAP) tests only"
-	@echo "  test-dispatcher  - Run service dispatcher tests only"
-	@echo "  test-ptz         - Run PTZ service tests only"
-	@echo "  test-media       - Run Media service tests only"
-	@echo "  test-imaging     - Run Imaging service tests only"
-	@echo "  test-integration - Run integration tests only"
-	@echo "  test-all         - Run all tests (alias for test-modular)"
-	@echo "  test-legacy      - Run legacy consolidated test runner"
+	@echo "  test             - Run all tests (196 tests across 17 suites)"
+	@echo "  test-unit        - Run unit tests only (129 tests)"
+	@echo "  test-integration - Run integration tests only (67 tests)"
+	@echo "  test-list        - List all available test suites"
+	@echo ""
+	@echo "🔍 Suite Filtering (use SUITE parameter):"
+	@echo "  make test SUITE=ptz-service                       - Run specific suite"
+	@echo "  make test SUITE=ptz-service,ptz-callbacks        - Run multiple suites"
+	@echo "  make test-unit SUITE=http-auth,http-metrics      - Run specific unit tests"
+	@echo "  make test-integration SUITE=ptz-integration      - Run specific integration tests"
+	@echo ""
+	@echo "📋 Direct Runner Usage:"
+	@echo "  $(OUT_DIR)/test_runner --suite=ptz-service    - Run specific suite"
+	@echo "  $(OUT_DIR)/test_runner --type=unit            - Run unit tests"
+	@echo "  $(OUT_DIR)/test_runner --list                 - List all suites"
 	@echo ""
 	@echo "📊 Coverage Targets:"
 	@echo "  coverage         - Build with coverage analysis"
@@ -581,19 +438,12 @@ help:
 	@echo "  clean-deps       - Clean dependency files only"
 	@echo "  help             - Show this help"
 	@echo ""
-	@echo "✨ Modular Test Suite Benefits:"
-	@echo "  • No forward declarations needed"
-	@echo "  • Faster incremental builds"
-	@echo "  • Better test isolation"
-	@echo "  • Can run individual test suites"
-	@echo "  • Parallel execution possible"
+	@echo "✨ Dynamic Test Runner Features:"
+	@echo "  • Unified test runner with advanced filtering"
+	@echo "  • 196 tests across 17 test suites"
+	@echo "  • Filter by suite name, type, or pattern"
+	@echo "  • Detailed test execution reports"
+	@echo "  • Better test isolation and organization"
 	@echo ""
-	@echo "📁 Test Executables:"
-	@echo "  $(OUT_DIR)/test_utils              - Utility tests"
-	@echo "  $(OUT_DIR)/test_networking         - Networking tests"
-	@echo "  $(OUT_DIR)/test_protocol           - Protocol tests"
-	@echo "  $(OUT_DIR)/test_service_dispatcher - Service dispatcher tests"
-	@echo "  $(OUT_DIR)/test_ptz                - PTZ service tests"
-	@echo "  $(OUT_DIR)/test_media              - Media service tests"
-	@echo "  $(OUT_DIR)/test_imaging            - Imaging service tests"
-	@echo "  $(OUT_DIR)/test_integration        - Integration tests"
+	@echo "📁 Test Executable:"
+	@echo "  $(OUT_DIR)/test_runner - Dynamic test runner (all 196 tests)"

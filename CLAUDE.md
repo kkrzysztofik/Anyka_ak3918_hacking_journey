@@ -39,10 +39,14 @@ This is a comprehensive reverse-engineering project for Anyka AK3918-based IP ca
 
 **Unit Testing (MANDATORY)**:
 
+- **Test Suite**: 196 tests across 17 suites (129 unit tests, 67 integration tests)
 - **ALL utility functions** must have corresponding unit tests
 - **Tests must cover** success cases, error cases, and edge conditions
 - **Use CMocka framework** for isolated unit testing
 - **Run tests** before committing any changes: `make test`
+- **Suite filtering**: `make test SUITE=ptz-service,http-auth`
+- **Type filtering**: `make test-unit` or `make test-integration`
+- **List suites**: `make test-list`
 - **Generate coverage reports** to ensure high test coverage: `make test-coverage-html`
 - **Tests run on development machine** using native compilation (not cross-compilation)
 
@@ -74,9 +78,12 @@ make
 # Debug build with symbols
 make debug
 
-# Run unit tests (MANDATORY)
+# Run unit tests (MANDATORY) - 196 tests across 17 suites
 make test
-make test-utils
+make test-unit              # Unit tests only (129 tests)
+make test-integration       # Integration tests only (67 tests)
+make test-list              # List all test suites
+make test SUITE=ptz-service # Run specific suite
 
 # Release build (optimized)
 make release
@@ -125,11 +132,29 @@ make clean
 # Install unit test dependencies
 ./cross-compile/onvif/tests/install_dependencies.sh
 
-# Run all unit tests
+# Run all tests (196 tests across 17 suites)
 make test
 
-# Run utility unit tests
-make test-utils
+# Run all unit tests only (129 tests)
+make test-unit
+
+# Run all integration tests only (67 tests)
+make test-integration
+
+# List all available test suites
+make test-list
+
+# Run specific test suite
+make test SUITE=ptz-service
+make test SUITE=http-auth
+
+# Run multiple test suites (comma-separated)
+make test SUITE=ptz-service,ptz-callbacks,ptz-integration
+make test-unit SUITE=http-auth,http-metrics
+
+# Filter by type and suite
+make test-unit SUITE=ptz-service,ptz-callbacks
+make test-integration SUITE=ptz-integration,media-integration
 
 # Run tests with coverage analysis
 make test-coverage
@@ -139,9 +164,6 @@ make test-coverage-html
 
 # Generate coverage summary
 make test-coverage-report
-
-# Run tests with valgrind (memory checking)
-make test-valgrind
 
 # Clean coverage files
 make test-coverage-clean
