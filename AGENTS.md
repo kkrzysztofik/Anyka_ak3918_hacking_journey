@@ -625,6 +625,193 @@ When reviewing ONVIF project code, **ALWAYS** follow this comprehensive review p
   - Achieve high code coverage on utility functions
   - Tests run on development machine (native compilation)
 
+- **CMocka-Based Mock Usage (MANDATORY)** - **STRICT REQUIREMENTS** for all unit tests:
+
+  - **Mock Framework**: **ONLY CMocka mocks** are allowed for unit testing - no other mocking frameworks
+  - **Mock Implementation Pattern**: All mocks must use CMocka's `--wrap` linker mechanism with `__wrap_` prefix
+  - **Mock Structure**: Each mock file must follow the pattern `*_mock_cmocka.c` and `*_mock_cmocka.h`
+  - **Mock Functions**: All mock functions must use standard CMocka patterns:
+    ```c
+    // Mock function implementation
+    platform_result_t __wrap_platform_init(void) {
+      function_called();                    // Track function calls
+      return (platform_result_t)mock();    // Return configured value
+    }
+
+    // Mock function with parameter validation
+    platform_result_t __wrap_platform_ptz_move(float pan, float tilt) {
+      check_expected(pan);                  // Validate pan parameter
+      check_expected(tilt);                 // Validate tilt parameter
+      function_called();                    // Track function calls
+      return (platform_result_t)mock();    // Return configured value
+    }
+    ```
+
+  - **Mock Configuration in Tests**: Use CMocka's `will_return()` and `expect_*()` functions:
+    ```c
+    // Configure mock return value
+    will_return(__wrap_platform_init, PLATFORM_SUCCESS);
+
+    // Configure mock parameter expectations
+    expect_value(__wrap_platform_ptz_move, pan, 90.0f);
+    expect_value(__wrap_platform_ptz_move, tilt, 45.0f);
+    will_return(__wrap_platform_ptz_move, PLATFORM_SUCCESS);
+
+    // Call function under test
+    platform_result_t result = ptz_adapter_absolute_move(90.0f, 45.0f, 50.0f);
+    assert_int_equal(result, PLATFORM_SUCCESS);
+    ```
+
+  - **Mock Call Verification**: Verify mock functions were called with correct parameters:
+    ```c
+    // Verify function was called exactly once
+    assert_int_equal(1, platform_mock_get_ptz_init_call_count());
+
+    // Verify function was called with specific parameters
+    int pan, tilt, speed;
+    assert_int_equal(1, platform_mock_get_last_ptz_absolute_move(&pan, &tilt, &speed));
+    assert_int_equal(90, pan);
+    assert_int_equal(45, tilt);
+    ```
+
+  - **Mock State Management**: All mocks must have proper initialization and cleanup:
+    ```c
+    // Test setup
+    static int test_setup(void** state) {
+      platform_mock_init();                    // Initialize mock state
+      platform_ptz_mock_init();               // Initialize specific mock
+      return 0;
+    }
+
+    // Test teardown
+    static int test_teardown(void** state) {
+      platform_ptz_mock_cleanup();            // Cleanup specific mock
+      platform_mock_cleanup();                // Cleanup mock state
+      return 0;
+    }
+    ```
+
+  - **Mock Error Simulation**: Use mocks to simulate error conditions:
+    ```c
+    // Simulate platform initialization failure
+    platform_mock_enable_ptz_error(PLATFORM_ERROR);
+    will_return(__wrap_platform_init, PLATFORM_ERROR);
+
+    platform_result_t result = ptz_adapter_init();
+    assert_int_equal(result, PLATFORM_ERROR);
+
+    // Disable error simulation for subsequent tests
+    platform_mock_disable_ptz_error();
+    ```
+
+  - **Mock Parameter Validation**: All mock functions must validate parameters using CMocka's `check_expected_*()` functions:
+    ```c
+    // For pointer parameters
+    check_expected_ptr(ptr);
+
+    // For value parameters
+    check_expected(value);
+
+    // For string parameters
+    check_expected_ptr(string);
+    ```
+
+  - **Mock Return Value Configuration**: Use `will_return()` to configure mock return values:
+    ```c
+    // Single return value
+    will_return(__wrap_platform_init, PLATFORM_SUCCESS);
+
+    // Multiple return values (for multiple calls)
+    will_return(__wrap_platform_init, PLATFORM_SUCCESS);
+    will_return(__wrap_platform_init, PLATFORM_ERROR);
+
+    // Return values for output parameters
+    will_return(__wrap_platform_vi_open, (uintptr_t)mock_handle);
+    will_return(__wrap_platform_vi_open, PLATFORM_SUCCESS);
+    ```
+
+  - **Mock Call Counting**: Track and verify function call counts:
+    ```c
+    // In mock implementation
+    static int g_platform_init_call_count = 0;
+
+    platform_result_t __wrap_platform_init(void) {
+      g_platform_init_call_count++;
+      function_called();
+      return (platform_result_t)mock();
+    }
+
+    // In test
+    assert_int_equal(1, platform_mock_get_init_call_count());
+    ```
+
+  - **Mock Data Structures**: For complex data structures, use mock data:
+    ```c
+    // Mock data structure population
+    platform_result_t __wrap_platform_get_system_info(platform_system_info_t* info) {
+      check_expected_ptr(info);
+      function_called();
+      if (info) {
+        info->cpu_usage = (float)mock();
+        info->cpu_temperature = (float)mock();
+        info->total_memory = (unsigned int)mock();
+        info->free_memory = (unsigned int)mock();
+        info->uptime_ms = (unsigned int)mock();
+      }
+      return (platform_result_t)mock();
+    }
+    ```
+
+  - **Mock File Organization**: Mocks must be organized in `tests/src/mocks/` directory:
+    ```
+    tests/src/mocks/
+    ├── platform_mock_cmocka.c          # Platform abstraction mocks
+    ├── platform_mock_cmocka.h
+    ├── network_mock_cmocka.c           # Network function mocks
+    ├── network_mock_cmocka.h
+    ├── config_mock_cmocka.c            # Configuration mocks
+    ├── config_mock_cmocka.h
+    └── memory_mock.c                   # Memory management mocks
+    ```
+
+  - **Mock Naming Conventions**: All mock functions must follow naming patterns:
+    - Mock implementation: `__wrap_<original_function_name>`
+    - Mock header: `<module>_mock_cmocka.h`
+    - Mock source: `<module>_mock_cmocka.c`
+    - Mock state functions: `<module>_mock_init()`, `<module>_mock_cleanup()`
+
+  - **Mock Testing Requirements**:
+    - **ALL external dependencies** must be mocked (platform, network, file I/O, etc.)
+    - **NO real hardware calls** in unit tests
+    - **NO real network operations** in unit tests
+    - **NO real file system operations** in unit tests
+    - **Mock all platform abstraction functions** used by code under test
+    - **Mock all utility functions** that are not the primary focus of the test
+
+  - **Mock Validation**: Every mock must be validated:
+    - Verify mock functions are called with correct parameters
+    - Verify mock functions are called the expected number of times
+    - Verify mock return values are handled correctly
+    - Verify mock error conditions are handled properly
+
+  - **Mock Documentation**: All mock functions must be documented:
+    ```c
+    /**
+     * @brief CMocka wrapped platform initialization
+     * @return Platform result code (configured via will_return)
+     * @note This mock tracks function calls and validates parameters
+     */
+    platform_result_t __wrap_platform_init(void);
+    ```
+
+  - **Mock Testing Best Practices**:
+    - **One mock per test**: Each test should focus on one specific function or behavior
+    - **Clear mock setup**: Use descriptive mock configuration that makes test intent clear
+    - **Mock isolation**: Each test should be independent and not rely on mock state from other tests
+    - **Mock cleanup**: Always clean up mock state between tests
+    - **Mock verification**: Always verify mock calls and parameters in assertions
+    - **Mock error testing**: Test both success and failure paths using mocks
+
 - **Compilation Testing** - ALL code changes must compile successfully:
 
   - Use native build: `make -C cross-compile/onvif`
@@ -727,6 +914,22 @@ When reviewing ONVIF project code, **ALWAYS** follow this comprehensive review p
 - [ ] **ONVIF compliance** is maintained
 - [ ] **File structure** follows directory organization
 - [ ] **Tests** pass (if applicable)
+- [ ] **Mock Testing** follows CMocka patterns (if unit tests)
+- [ ] **Mock Framework** uses only CMocka (no other mocking frameworks)
+- [ ] **Mock Implementation** uses `__wrap_` prefix and `--wrap` linker mechanism
+- [ ] **Mock File Structure** follows `*_mock_cmocka.c` and `*_mock_cmocka.h` pattern
+- [ ] **Mock Functions** use standard CMocka patterns (`function_called()`, `check_expected_*()`, `mock()`)
+- [ ] **Mock Configuration** uses `will_return()` and `expect_*()` functions correctly
+- [ ] **Mock State Management** has proper initialization and cleanup
+- [ ] **Mock Parameter Validation** uses CMocka validation functions
+- [ ] **Mock Call Verification** checks function calls and parameters
+- [ ] **Mock Error Simulation** tests error conditions properly
+- [ ] **Mock Documentation** has proper Doxygen documentation
+- [ ] **Mock Isolation** ensures tests are independent
+- [ ] **Mock Coverage** mocks all external dependencies
+- [ ] **Mock Naming** follows `__wrap_<function_name>` convention
+- [ ] **Mock File Organization** uses `tests/src/mocks/` directory
+- [ ] **Mock Testing Requirements** avoids real hardware/network/file operations
 
 ### Code Review Examples
 
@@ -1149,6 +1352,27 @@ wget -O response.xml "http://192.168.1.100/onvif/device_service"
    - **Fix all formatting issues** before proceeding
    - **Verify function ordering** compliance with project guidelines
    - **Check global variable placement** at top of files after includes
+
+3. **Mock Testing Validation (MANDATORY)** - **MANDATORY** for all unit test changes:
+
+   - **Mock Framework Compliance**: Verify only CMocka mocks are used (no other mocking frameworks)
+   - **Mock Implementation Pattern**: Check all mocks use `__wrap_` prefix and `--wrap` linker mechanism
+   - **Mock File Structure**: Verify mock files follow `*_mock_cmocka.c` and `*_mock_cmocka.h` pattern
+   - **Mock Function Implementation**: Validate all mock functions use standard CMocka patterns:
+     - `function_called()` for call tracking
+     - `check_expected_*()` for parameter validation
+     - `mock()` for return value configuration
+   - **Mock Configuration**: Verify tests use `will_return()` and `expect_*()` functions correctly
+   - **Mock State Management**: Check proper mock initialization and cleanup in test setup/teardown
+   - **Mock Parameter Validation**: Ensure all mock functions validate parameters using CMocka functions
+   - **Mock Call Verification**: Verify tests check mock function calls and parameters
+   - **Mock Error Simulation**: Confirm error conditions are properly tested using mocks
+   - **Mock Documentation**: Validate all mock functions have proper Doxygen documentation
+   - **Mock Isolation**: Ensure each test is independent and doesn't rely on mock state from other tests
+   - **Mock Coverage**: Verify all external dependencies are properly mocked
+   - **Mock Naming**: Check mock functions follow naming conventions (`__wrap_<function_name>`)
+   - **Mock File Organization**: Verify mocks are properly organized in `tests/src/mocks/` directory
+   - **Mock Testing Requirements**: Confirm no real hardware, network, or file system operations in unit tests
 
 3. **Testing and Validation**:
 

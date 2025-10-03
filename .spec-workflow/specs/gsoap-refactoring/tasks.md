@@ -561,7 +561,7 @@
 
 ### Phase 10: Final Validation & Compliance
 
-- [ ] 46. Run code formatting and linting
+- [x] 46. Run code formatting and linting
   - File: N/A - code quality validation task
   - Run `./cross-compile/onvif/scripts/format_code.sh --check` to verify formatting
   - Run `./cross-compile/onvif/scripts/lint_code.sh --check` to verify code quality
@@ -569,8 +569,9 @@
   - Purpose: Ensure code quality standards compliance
   - _Leverage: Project formatting and linting scripts_
   - _Requirements: Per CLAUDE.md code quality validation is MANDATORY_
+  - _Status: Integration test files formatted (4 files). Linting warnings present but acceptable for test code (magic numbers for buffer sizes, loop counter names). No errors found. SOAP helpers have zero lint issues._
 
-- [ ] 47. Validate complete SOAP integration test suite
+- [-] 47. Validate complete SOAP integration test suite
   - File: N/A - validation task
   - Run `make test-integration` and verify all SOAP tests pass
   - Verify complete coverage:
@@ -585,6 +586,16 @@
   - Purpose: Final validation of SOAP integration test migration
   - _Leverage: Make test targets, valgrind, coverage tools_
   - _Requirements: Per detailed SOAP migration plan - Testing & Validation_
+  - _Status: PARTIAL - Test suite execution shows critical issues requiring fixes before completion:_
+    - **Test Results**: 13/43 tests executed (6 passed, 6 failed, 1 crashed with double-free)
+    - **Passed Tests** (6): init_cleanup_lifecycle, get_device_information_fields_validation, handle_operation_null_params, handle_operation_invalid_operation, handle_operation_uninitialized, config_integration
+    - **Failed Tests** (6): get_capabilities_specific_category, get_capabilities_multiple_categories, get_system_date_time_timezone, get_system_date_time_dst, get_services_namespaces, get_device_info_soap
+    - **Critical Issues Identified**:
+      1. **SOAP Response Parsing Failure**: SOAP tests fail at response parsing (error -14: PARSE_FAILED) - `onvif_gsoap_init_request_parsing()` designed for requests, not responses. Need response-specific parsing initialization.
+      2. **gSOAP Double-Free**: `stdsoap2.c(3410): free(0x7c9220000b70) double free` - occurs in concurrent test, indicates improper gSOAP context lifecycle management
+      3. **Memory Leaks**: smart_response_builder.c:87 leaking 1303 bytes - buffer pool response not properly freed
+      4. **Response Generation Failures**: Some operations fail with "Callback failed to generate response content" (error code -11, -15)
+    - **Next Steps**: Fix SOAP response parsing (need soap_test_init_response_parsing to handle HTTP responses), fix gSOAP context cleanup to prevent double-free, fix memory leaks in smart_response_builder
 
 - [ ] 48. ONVIF client compatibility testing
   - File: N/A - compatibility testing task
@@ -605,3 +616,202 @@
   - Purpose: Final quality gate before completion
   - _Leverage: Requirements document, design document, AGENTS.md standards_
   - _Requirements: All requirements_
+
+## Phase 11: CMocka Mocking Refactoring
+
+### Current Issues Identified
+- **No CMocka Built-in Mocking**: Tests use custom mock implementations instead of CMocka's `will_return()`, `mock()`, `expect_value()`, `check_expected()`
+- **No Linker Wrapping**: Build system doesn't use `--wrap` linker option for function interception
+- **Custom Mock Framework**: Project has `generic_mock_framework` that duplicates CMocka functionality
+- **Manual State Management**: Mocks use pthread mutex-based state instead of CMocka's built-in state handling
+- **No Parameter Validation**: Current mocks don't validate function parameters using CMocka patterns
+- **Complex Setup/Teardown**: Could be simplified with CMocka's automatic state management
+
+### Phase 11A: Build System Updates for CMocka Best Practices
+
+- [x] 50. Update test Makefile for linker wrapping
+  - File: cross-compile/onvif/tests/Makefile
+  - Add comprehensive `--wrap` linker flags for all platform functions
+  - Create WRAP_FUNCTIONS variable with all functions to wrap
+  - Add WRAP_FLAGS to CFLAGS for test builds
+  - Update CMOCKA_LIBS to include proper linking flags
+  - Purpose: Enable CMocka's standard function interception mechanism
+  - _Leverage: CMocka best practices, linker `--wrap` option_
+  - _Requirements: Enable proper function wrapping for all platform functions_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Build Engineer with expertise in CMocka and linker configuration | Task: Update tests/Makefile to add comprehensive linker wrapping following CMocka best practices. Create WRAP_FUNCTIONS variable listing all platform functions: platform_init, platform_cleanup, platform_log_error, platform_log_warning, platform_log_info, platform_log_debug, platform_get_time_ms, platform_config_load, platform_config_save, platform_get_system_info, platform_vi_open, platform_vi_close, platform_venc_init, platform_venc_cleanup, platform_ai_open, platform_ai_close, platform_aenc_init, platform_aenc_cleanup, platform_ptz_*, platform_irled_*, platform_snapshot_*. Generate WRAP_FLAGS using addprefix -Wl,--wrap=,$(WRAP_FUNCTIONS). Add WRAP_FLAGS to CFLAGS for test builds. | Restrictions: Must wrap all platform functions used in tests, must not break existing builds, must follow CMocka best practices | Success: All platform functions wrapped, test builds succeed, CMocka can intercept function calls properly, no build errors | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [x] 51. Create CMocka-based platform mock header
+  - File: cross-compile/onvif/tests/src/mocks/platform_mock_cmocka.h (new file)
+  - Declare all platform functions with `__wrap_` prefix
+  - Add helper macros for common CMocka patterns
+  - Include CMocka headers and platform headers
+  - Add comprehensive Doxygen documentation
+  - Purpose: Provide CMocka-compliant mock interface
+  - _Leverage: CMocka framework, existing platform_mock.h patterns_
+  - _Requirements: Follow CMocka best practices for function wrapping_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in CMocka mocking | Task: Create platform_mock_cmocka.h following CMocka best practices. Declare all platform functions with __wrap_ prefix: __wrap_platform_init, __wrap_platform_cleanup, __wrap_platform_log_error, __wrap_platform_log_warning, __wrap_platform_log_info, __wrap_platform_log_debug, __wrap_platform_get_time_ms, __wrap_platform_config_load, __wrap_platform_config_save, __wrap_platform_get_system_info, __wrap_platform_vi_open, __wrap_platform_vi_close, __wrap_platform_venc_init, __wrap_platform_venc_cleanup, __wrap_platform_ai_open, __wrap_platform_ai_close, __wrap_platform_aenc_init, __wrap_platform_aenc_cleanup, all PTZ functions, IR LED functions, snapshot functions. Add helper macros: EXPECT_PLATFORM_INIT_SUCCESS(), EXPECT_PLATFORM_CLEANUP(), EXPECT_PLATFORM_LOG_INFO(msg), EXPECT_PLATFORM_LOG_ERROR(msg). Include cmocka.h and platform/platform.h. Add complete Doxygen documentation. | Restrictions: Must use __wrap_ prefix for all functions, must include all platform functions used in tests, must follow CMocka naming conventions, must provide helper macros for common patterns | Success: Header declares all wrapped functions correctly, helper macros work, includes proper headers, compiles without errors, follows CMocka best practices | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [x] 52. Implement CMocka-based platform mock functions
+  - File: cross-compile/onvif/tests/src/mocks/platform_mock_cmocka.c (new file)
+  - Implement all `__wrap_` functions using CMocka patterns
+  - Use `function_called()` for call tracking
+  - Use `check_expected()` for parameter validation
+  - Use `mock_type()` and `will_return()` for return values
+  - Remove custom state management (no pthread mutexes)
+  - Purpose: Replace custom mock framework with CMocka built-ins
+  - _Leverage: CMocka framework, existing platform_mock.c patterns_
+  - _Requirements: Follow CMocka best practices, eliminate custom state management_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in CMocka mocking and platform abstraction | Task: Implement platform_mock_cmocka.c following CMocka best practices. For each __wrap_ function: use function_called() to track calls, use check_expected() for parameter validation where appropriate, use mock_type() to return values set by will_return(). Remove all custom state management (no pthread mutexes, no global state structures). For logging functions: check_expected_ptr(format), function_called(), return mock_type(int). For init/cleanup: function_called(), return mock_type(platform_result_t). For config functions: check_expected_ptr(filename), function_called(), return mock_type(platform_result_t). For system info: check_expected_ptr(info), function_called(), populate info structure with mock data, return mock_type(platform_result_t). | Restrictions: Must use CMocka patterns exclusively, must not use custom state management, must handle all parameter types correctly, must return appropriate types | Success: All functions implemented with CMocka patterns, no custom state management, proper parameter validation, correct return types, compiles without errors | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+### Phase 11B: Test Case Migration to CMocka Patterns
+
+- [x] 53. Update PTZ service tests to use CMocka patterns
+  - File: cross-compile/onvif/tests/src/unit/services/ptz/test_ptz_service.c
+  - Replace custom mock setup with CMocka expectations
+  - Use `expect_function_call()` and `will_return()` patterns
+  - Use `expect_string()` and `check_expected()` for parameter validation
+  - Simplify setup/teardown functions (CMocka handles state automatically)
+  - Update all test cases to follow CMocka best practices
+  - Purpose: Migrate PTZ tests to CMocka standard patterns
+  - _Leverage: CMocka framework, platform_mock_cmocka.h_
+  - _Requirements: Follow CMocka best practices for test expectations_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Engineer with expertise in CMocka and ONVIF PTZ testing | Task: Update test_ptz_service.c to use CMocka patterns. Replace custom mock setup with CMocka expectations. For each test: use expect_function_call(__wrap_platform_init), will_return(__wrap_platform_init, PLATFORM_SUCCESS), expect_function_call(__wrap_platform_cleanup). For logging: expect_function_call(__wrap_platform_log_info), expect_string(__wrap_platform_log_info, format, "expected message"), will_return(__wrap_platform_log_info, 0). Simplify setup_ptz_tests() and teardown_ptz_tests() to just return 0 (CMocka handles state). Update all test cases: test_unit_ptz_get_nodes_success, test_unit_ptz_get_node_success, all NULL parameter tests. Remove custom mock configuration calls. | Restrictions: Must use CMocka patterns exclusively, must not use custom mock framework, must maintain test coverage, must follow CMocka naming conventions | Success: All PTZ tests use CMocka patterns, setup/teardown simplified, tests pass with CMocka expectations, no custom mock framework usage | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [x] 54. Update Media service tests to use CMocka patterns
+  - File: cross-compile/onvif/tests/src/unit/services/media/test_media_utils.c
+  - File: cross-compile/onvif/tests/src/unit/services/media/test_onvif_media_callbacks.c
+  - Apply same CMocka migration patterns as PTZ tests
+  - Update all Media service test cases
+  - Ensure proper parameter validation with `expect_string()` and `check_expected()`
+  - Purpose: Migrate Media tests to CMocka standard patterns
+  - _Leverage: CMocka framework, platform_mock_cmocka.h, PTZ test patterns_
+  - _Requirements: Follow CMocka best practices, maintain test coverage_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Engineer with expertise in CMocka and ONVIF Media testing | Task: Update Media service test files to use CMocka patterns following the same approach as PTZ tests. Update test_media_utils.c and test_onvif_media_callbacks.c. Replace custom mock setup with CMocka expectations: expect_function_call(__wrap_platform_init), will_return(__wrap_platform_init, PLATFORM_SUCCESS), expect_function_call(__wrap_platform_cleanup). For Media-specific operations: expect_function_call(__wrap_platform_venc_init), will_return(__wrap_platform_venc_init, PLATFORM_SUCCESS), expect_function_call(__wrap_platform_venc_cleanup). For logging: expect_function_call(__wrap_platform_log_info), expect_string(__wrap_platform_log_info, format, "Media operation message"), will_return(__wrap_platform_log_info, 0). Simplify setup/teardown functions. Update all test cases to use CMocka patterns. | Restrictions: Must use CMocka patterns exclusively, must maintain Media service test coverage, must follow established patterns from PTZ migration | Success: All Media tests use CMocka patterns, setup/teardown simplified, tests pass with CMocka expectations, Media-specific operations properly mocked | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [x] 55. Update Device service tests to use CMocka patterns
+  - File: cross-compile/onvif/tests/src/unit/services/device/test_device_service.c
+  - Apply CMocka migration patterns
+  - Update Device service test cases
+  - Ensure proper system info and configuration mocking
+  - Purpose: Migrate Device tests to CMocka standard patterns
+  - _Leverage: CMocka framework, platform_mock_cmocka.h, established patterns_
+  - _Requirements: Follow CMocka best practices, maintain Device service test coverage_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Engineer with expertise in CMocka and ONVIF Device testing | Task: Update Device service test file to use CMocka patterns. Update test_device_service.c following established patterns. For Device-specific operations: expect_function_call(__wrap_platform_get_system_info), check_expected_ptr(info), function_called(), populate info structure with mock data, return mock_type(platform_result_t). For configuration: expect_function_call(__wrap_platform_config_load), expect_string(__wrap_platform_config_load, filename, "expected_config.ini"), will_return(__wrap_platform_config_load, PLATFORM_SUCCESS). For system operations: expect_function_call(__wrap_platform_system_reboot), will_return(__wrap_platform_system_reboot, 0). Update all Device test cases to use CMocka patterns. | Restrictions: Must use CMocka patterns exclusively, must handle Device-specific operations properly, must maintain test coverage | Success: All Device tests use CMocka patterns, Device-specific operations properly mocked, tests pass with CMocka expectations | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [-] 56. Update Imaging service tests to use CMocka patterns
+  - File: cross-compile/onvif/tests/src/unit/services/imaging/test_onvif_imaging_callbacks.c
+  - Apply CMocka migration patterns
+  - Update Imaging service test cases
+  - Ensure proper VPSS and imaging parameter mocking
+  - Purpose: Migrate Imaging tests to CMocka standard patterns
+  - _Leverage: CMocka framework, platform_mock_cmocka.h, established patterns_
+  - _Requirements: Follow CMocka best practices, maintain Imaging service test coverage_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Engineer with expertise in CMocka and ONVIF Imaging testing | Task: Update Imaging service test file to use CMocka patterns. Update test_onvif_imaging_callbacks.c following established patterns. For Imaging-specific operations: expect_function_call(__wrap_platform_vpss_effect_set), check_expected(handle), check_expected(effect), check_expected(value), function_called(), return mock_type(platform_result_t). For VPSS operations: expect_function_call(__wrap_platform_vpss_effect_get), check_expected_ptr(value), function_called(), set *value to mock data, return mock_type(platform_result_t). For video operations: expect_function_call(__wrap_platform_vi_open), will_return(__wrap_platform_vi_open, PLATFORM_SUCCESS). Update all Imaging test cases to use CMocka patterns. | Restrictions: Must use CMocka patterns exclusively, must handle Imaging-specific operations properly, must maintain test coverage | Success: All Imaging tests use CMocka patterns, Imaging-specific operations properly mocked, tests pass with CMocka expectations | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+### Phase 11C: Remove Custom Mock Framework
+
+- [ ] 57. Remove custom generic mock framework
+  - File: cross-compile/onvif/tests/src/common/generic_mock_framework.h
+  - File: cross-compile/onvif/tests/src/common/generic_mock_framework.c
+  - Delete both files completely
+  - Update Makefile to remove generic_mock_framework.c from TEST_HELPER_SRCS
+  - Purpose: Eliminate custom framework that duplicates CMocka functionality
+  - _Leverage: None - pure deletion_
+  - _Requirements: Remove all custom mock framework code_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Build Engineer with code cleanup expertise | Task: Remove custom generic mock framework following CMocka best practices. Delete generic_mock_framework.h and generic_mock_framework.c completely. Update tests/Makefile to remove src/common/generic_mock_framework.c from TEST_HELPER_SRCS. Search codebase to verify no other files include or reference generic_mock_framework. After deletion, verify build succeeds with `make clean && make test`. Verify no dangling references remain. | Restrictions: Must verify no references before deletion, must ensure build succeeds after deletion, must not break existing functionality | Success: Custom mock framework completely removed, no references remain, build succeeds, tests pass with CMocka-only mocking | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 58. Remove old platform mock files
+  - File: cross-compile/onvif/tests/src/mocks/platform_mock.h
+  - File: cross-compile/onvif/tests/src/mocks/platform_mock.c
+  - Delete both files completely
+  - Update Makefile to remove platform_mock.c from MOCK_SRCS
+  - Purpose: Replace with CMocka-based platform mocks
+  - _Leverage: None - pure deletion_
+  - _Requirements: Remove old custom mock implementations_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Build Engineer with code cleanup expertise | Task: Remove old platform mock files following CMocka best practices. Delete platform_mock.h and platform_mock.c completely. Update tests/Makefile to remove src/mocks/platform_mock.c from MOCK_SRCS. Search codebase to verify no other files include or reference platform_mock.h. After deletion, verify build succeeds with `make clean && make test`. Verify no dangling references remain. | Restrictions: Must verify no references before deletion, must ensure build succeeds after deletion, must not break existing functionality | Success: Old platform mock files completely removed, no references remain, build succeeds, tests pass with CMocka-based mocks | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 59. Update test helper files to use CMocka patterns
+  - File: cross-compile/onvif/tests/src/common/test_helpers.h
+  - File: cross-compile/onvif/tests/src/common/test_helpers.c
+  - Remove custom mock configuration functions
+  - Remove mock setup/teardown helpers that use custom framework
+  - Simplify to use only CMocka patterns
+  - Purpose: Clean up test helpers to use CMocka exclusively
+  - _Leverage: CMocka framework, established patterns_
+  - _Requirements: Remove all custom mock framework dependencies_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Engineer with expertise in CMocka and test infrastructure | Task: Update test helper files to use CMocka patterns exclusively. Remove custom mock configuration functions: test_helper_create_standard_mock_config, test_helper_setup_mocks, test_helper_teardown_mocks, test_helper_reset_mock_counters. Remove mock_config_t structure and related functions. Simplify test helpers to use only CMocka patterns. Keep utility functions that don't depend on custom mocks: test_helper_assert_non_null, test_helper_assert_string_equal, etc. Update any remaining functions to work with CMocka. | Restrictions: Must remove all custom mock framework dependencies, must keep useful utility functions, must not break existing functionality | Success: Test helpers use CMocka exclusively, custom mock framework dependencies removed, utility functions preserved, tests pass | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+### Phase 11D: Integration Test Updates
+
+- [ ] 60. Update integration tests to use CMocka patterns
+  - File: cross-compile/onvif/tests/src/integration/ptz_service_tests.c
+  - File: cross-compile/onvif/tests/src/integration/media_service_tests.c
+  - File: cross-compile/onvif/tests/src/integration/device_service_tests.c
+  - File: cross-compile/onvif/tests/src/integration/imaging_service_optimization_test.c
+  - Update all integration tests to use CMocka expectations
+  - Replace custom mock setup with CMocka patterns
+  - Ensure proper parameter validation
+  - Purpose: Migrate integration tests to CMocka standard patterns
+  - _Leverage: CMocka framework, platform_mock_cmocka.h, unit test patterns_
+  - _Requirements: Follow CMocka best practices for integration tests_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Engineer with expertise in CMocka and integration testing | Task: Update all integration test files to use CMocka patterns. Update ptz_service_tests.c, media_service_tests.c, device_service_tests.c, imaging_service_optimization_test.c. Replace custom mock setup with CMocka expectations: expect_function_call(__wrap_platform_init), will_return(__wrap_platform_init, PLATFORM_SUCCESS), expect_function_call(__wrap_platform_cleanup). For service-specific operations: expect_function_call(__wrap_platform_ptz_*), expect_function_call(__wrap_platform_venc_*), expect_function_call(__wrap_platform_vi_*), etc. Use appropriate parameter validation with check_expected(). Update setup/teardown functions to use CMocka patterns. | Restrictions: Must use CMocka patterns exclusively, must maintain integration test coverage, must follow established patterns from unit tests | Success: All integration tests use CMocka patterns, setup/teardown simplified, tests pass with CMocka expectations, integration test coverage maintained | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+### Phase 11E: Validation and Documentation
+
+- [ ] 61. Run comprehensive test suite validation
+  - File: N/A - validation task
+  - Run `make test` to execute all unit tests
+  - Run `make test-integration` to execute all integration tests
+  - Verify all tests pass with CMocka patterns
+  - Run `make test-valgrind` to check for memory leaks
+  - Verify no custom mock framework usage remains
+  - Purpose: Validate complete CMocka migration
+  - _Leverage: CMocka test framework, valgrind, test suite_
+  - _Requirements: All tests must pass with CMocka patterns only_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with expertise in test validation and CMocka | Task: Execute comprehensive test suite validation following CMocka best practices. Run `make test` and verify all unit tests pass (0 failures). Run `make test-integration` and verify all integration tests pass. Run `make test-valgrind` and verify no memory leaks detected. Search codebase to verify no custom mock framework usage remains (grep for "generic_mock", "platform_mock_init", "test_helper_setup_mocks"). Verify all tests use CMocka patterns exclusively. If tests fail, analyze failures and fix issues. | Restrictions: Must achieve 100% test pass rate, must have zero memory leaks, must have zero custom mock framework usage | Success: All tests pass (100%), valgrind reports no memory leaks, no custom mock framework usage, all tests use CMocka patterns | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 62. Update test documentation for CMocka patterns
+  - File: cross-compile/onvif/tests/README.md
+  - Update documentation to reflect CMocka best practices
+  - Remove references to custom mock framework
+  - Add CMocka usage examples and patterns
+  - Update build instructions for linker wrapping
+  - Purpose: Document CMocka-based testing approach
+  - _Leverage: CMocka documentation, existing test patterns_
+  - _Requirements: Document CMocka best practices and usage_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Technical Writer with expertise in CMocka and test documentation | Task: Update tests/README.md to document CMocka best practices. Remove all references to custom mock framework. Add section on CMocka usage patterns: will_return() and mock() pairs, expect_value() and check_expected() for parameter validation, expect_function_call() and function_called() for call tracking, linker wrapping with --wrap option. Add examples of common CMocka patterns used in the project. Update build instructions to mention linker wrapping. Document helper macros from platform_mock_cmocka.h. | Restrictions: Must remove all custom mock framework references, must document CMocka patterns accurately, must provide useful examples | Success: Documentation updated for CMocka, custom mock framework references removed, CMocka patterns documented with examples, build instructions updated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 63. Create CMocka best practices guide
+  - File: cross-compile/onvif/tests/CMOCKA_BEST_PRACTICES.md (new file)
+  - Document CMocka best practices used in the project
+  - Provide examples of common patterns
+  - Document helper macros and utilities
+  - Include troubleshooting guide
+  - Purpose: Provide comprehensive CMocka usage guide
+  - _Leverage: CMocka documentation, project patterns, best practices research_
+  - _Requirements: Document all CMocka patterns used in the project_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Technical Writer with expertise in CMocka and testing best practices | Task: Create CMOCKA_BEST_PRACTICES.md following CMocka best practices. Document: 1) Function wrapping with --wrap option, 2) will_return() and mock() pairs for return values, 3) expect_value() and check_expected() for parameter validation, 4) expect_function_call() and function_called() for call tracking, 5) expect_string() and expect_string_count() for string parameters, 6) Helper macros from platform_mock_cmocka.h, 7) Common patterns used in the project, 8) Troubleshooting common issues, 9) Performance considerations. Include code examples for each pattern. | Restrictions: Must document all patterns used in the project, must provide practical examples, must be accurate and helpful | Success: Comprehensive CMocka guide created, all patterns documented with examples, troubleshooting guide included, guide is practical and useful | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+### Phase 11F: Performance and Quality Validation
+
+- [ ] 64. Validate CMocka migration performance impact
+  - File: N/A - performance validation task
+  - Measure test execution time before and after CMocka migration
+  - Verify no significant performance degradation
+  - Measure memory usage during test execution
+  - Document performance metrics
+  - Purpose: Ensure CMocka migration doesn't impact test performance
+  - _Leverage: Test execution timing, memory profiling tools_
+  - _Requirements: Maintain or improve test performance_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Performance Engineer with expertise in test performance and CMocka | Task: Validate CMocka migration performance impact. Measure test execution time: run `time make test` and `time make test-integration` before and after migration. Measure memory usage during test execution with valgrind --tool=massif. Verify no significant performance degradation (target: < 10% increase in execution time). Document performance metrics: execution time, memory usage, test count. Compare with baseline if available. | Restrictions: Must measure actual performance impact, must not significantly degrade test performance, must document results | Success: Performance impact measured and documented, no significant degradation, memory usage acceptable, performance metrics documented | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 65. Final code quality validation for CMocka migration
+  - File: N/A - code quality validation task
+  - Run `./cross-compile/onvif/scripts/format_code.sh --check` to verify formatting
+  - Run `./cross-compile/onvif/scripts/lint_code.sh --check` to verify code quality
+  - Fix any formatting or linting issues
+  - Verify all CMocka patterns follow best practices
+  - Purpose: Ensure code quality standards compliance after CMocka migration
+  - _Leverage: Project formatting and linting scripts_
+  - _Requirements: Per CLAUDE.md code quality validation is MANDATORY_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Code Quality Engineer with expertise in CMocka and code standards | Task: Execute final code quality validation following CMocka best practices. Run `./cross-compile/onvif/scripts/format_code.sh --check` and verify all test files are properly formatted. Run `./cross-compile/onvif/scripts/lint_code.sh --check` and verify no critical issues. Fix any formatting or linting issues found. Verify all CMocka patterns follow best practices: proper use of will_return()/mock() pairs, correct parameter validation with check_expected(), proper call tracking with function_called(). | Restrictions: Must fix all formatting and linting issues, must verify CMocka patterns are correct, must maintain code quality standards | Success: All code properly formatted, no critical linting issues, CMocka patterns follow best practices, code quality standards maintained | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
