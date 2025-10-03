@@ -23,7 +23,7 @@
 #include "utils/memory/memory_manager.h"
 
 // Platform mocks
-#include "mocks/platform_mock_cmocka.h"
+#include "mocks/platform_mock.h"
 #include "mocks/platform_ptz_mock.h"
 
 /* ============================================================================

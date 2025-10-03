@@ -1,11 +1,11 @@
 /**
- * @file ptz_adapter_mock_cmocka.c
+ * @file ptz_adapter_mock.c
  * @brief CMocka-based PTZ adapter mock implementation using standard function wrapping
  * @author kkrzysztofik
  * @date 2025
  */
 
-#include "ptz_adapter_mock_cmocka.h"
+#include "ptz_adapter_mock.h"
 
 #include <stddef.h>
 

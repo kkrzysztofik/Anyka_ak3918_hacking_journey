@@ -15,8 +15,8 @@
 #include "utils/error/error_handling.h"
 
 // CMocka mock includes
-#include "../../../mocks/mock_service_dispatcher_cmocka.h"
-#include "../../../mocks/platform_mock_cmocka.h"
+#include "../../../mocks/mock_service_dispatcher.h"
+#include "../../../mocks/platform_mock.h"
 
 /* ============================================================================
  * Test Constants

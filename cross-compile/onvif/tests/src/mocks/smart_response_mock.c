@@ -1,11 +1,11 @@
 /**
- * @file smart_response_mock_cmocka.c
+ * @file smart_response_mock.c
  * @brief Implementation of CMocka-based smart response builder mock
  * @author kkrzysztofik
  * @date 2025
  */
 
-#include "smart_response_mock_cmocka.h"
+#include "smart_response_mock.h"
 
 #include <setjmp.h>
 #include <stdarg.h>

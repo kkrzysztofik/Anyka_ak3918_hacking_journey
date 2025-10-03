@@ -1,12 +1,12 @@
 /**
- * @file ptz_adapter_mock_cmocka.h
+ * @file ptz_adapter_mock.h
  * @brief CMocka-based PTZ adapter mock using standard function wrapping
  * @author kkrzysztofik
  * @date 2025
  */
 
-#ifndef PTZ_ADAPTER_MOCK_CMOCKA_H
-#define PTZ_ADAPTER_MOCK_CMOCKA_H
+#ifndef PTZ_ADAPTER_MOCK_H
+#define PTZ_ADAPTER_MOCK_H
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -192,4 +192,4 @@ platform_result_t __wrap_ptz_adapter_goto_preset(int preset_id);
 }
 #endif
 
-#endif // PTZ_ADAPTER_MOCK_CMOCKA_H
+#endif // PTZ_ADAPTER_MOCK_H

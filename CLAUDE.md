@@ -54,7 +54,7 @@ This is a comprehensive reverse-engineering project for Anyka AK3918-based IP ca
 
 - **Mock Framework**: **ONLY CMocka mocks** are allowed for unit testing - no other mocking frameworks
 - **Mock Implementation Pattern**: All mocks must use CMocka's `--wrap` linker mechanism with `__wrap_` prefix
-- **Mock Structure**: Each mock file must follow the pattern `*_mock_cmocka.c` and `*_mock_cmocka.h`
+- **Mock Structure**: Each mock file must follow the pattern `*_mock.c` and `*_mock.h`
 - **Mock Functions**: All mock functions must use standard CMocka patterns:
   ```c
   // Mock function implementation
@@ -190,19 +190,19 @@ This is a comprehensive reverse-engineering project for Anyka AK3918-based IP ca
 - **Mock File Organization**: Mocks must be organized in `tests/src/mocks/` directory:
   ```
   tests/src/mocks/
-  ├── platform_mock_cmocka.c          # Platform abstraction mocks
-  ├── platform_mock_cmocka.h
-  ├── network_mock_cmocka.c           # Network function mocks
-  ├── network_mock_cmocka.h
-  ├── config_mock_cmocka.c            # Configuration mocks
-  ├── config_mock_cmocka.h
-  └── memory_mock.c                   # Memory management mocks
+  ├── platform_mock.c          # Platform abstraction mocks
+  ├── platform_mock.h
+  ├── network_mock.c           # Network function mocks
+  ├── network_mock.h
+  ├── config_mock.c            # Configuration mocks
+  ├── config_mock.h
+  └── memory_mock.c            # Memory management mocks
   ```
 
 - **Mock Naming Conventions**: All mock functions must follow naming patterns:
   - Mock implementation: `__wrap_<original_function_name>`
-  - Mock header: `<module>_mock_cmocka.h`
-  - Mock source: `<module>_mock_cmocka.c`
+  - Mock header: `<module>_mock.h`
+  - Mock source: `<module>_mock.c`
   - Mock state functions: `<module>_mock_init()`, `<module>_mock_cleanup()`
 
 - **Mock Testing Requirements**:
@@ -364,7 +364,7 @@ make test-coverage-clean
 grep -r "mock" cross-compile/onvif/tests/src/ --include="*.c" --include="*.h"
 
 # Check mock file structure
-find cross-compile/onvif/tests/src/mocks/ -name "*_mock_cmocka.*"
+find cross-compile/onvif/tests/src/mocks/ -name "*_mock.*"
 
 # Verify mock naming conventions
 grep -r "__wrap_" cross-compile/onvif/tests/src/mocks/
@@ -577,7 +577,7 @@ Integrated tools for code quality:
 6. **Mock Testing**: **MANDATORY** - Ensure all unit tests use CMocka mocks correctly
    - Verify mock framework compliance (only CMocka)
    - Check mock implementation patterns (`__wrap_` prefix, `--wrap` linker)
-   - Validate mock file structure (`*_mock_cmocka.c` and `*_mock_cmocka.h`)
+   - Validate mock file structure (`*_mock.c` and `*_mock.h`)
    - Ensure proper mock state management (init/cleanup)
    - Verify mock parameter validation and call verification
    - Check mock error simulation and documentation

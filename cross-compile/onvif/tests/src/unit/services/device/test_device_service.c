@@ -23,12 +23,12 @@
 #include "utils/error/error_handling.h"
 
 // CMocka-based mock includes for testing
-#include "mocks/buffer_pool_mock_cmocka.h"
-#include "mocks/config_mock_cmocka.h"
-#include "mocks/gsoap_mock_cmocka.h"
-#include "mocks/mock_service_dispatcher_cmocka.h"
-#include "mocks/platform_mock_cmocka.h"
-#include "mocks/smart_response_mock_cmocka.h"
+#include "mocks/buffer_pool_mock.h"
+#include "mocks/config_mock.h"
+#include "mocks/gsoap_mock.h"
+#include "mocks/mock_service_dispatcher.h"
+#include "mocks/platform_mock.h"
+#include "mocks/smart_response_mock.h"
 
 // Test data structures
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

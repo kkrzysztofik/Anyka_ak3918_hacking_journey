@@ -1,11 +1,11 @@
 /**
- * @file mock_service_dispatcher_cmocka.c
+ * @file mock_service_dispatcher.c
  * @brief Pure CMocka service dispatcher mock with helper functions
  * @author kkrzysztofik
  * @date 2025
  */
 
-#include "mock_service_dispatcher_cmocka.h"
+#include "mock_service_dispatcher.h"
 
 #include <setjmp.h>
 #include <stdarg.h>

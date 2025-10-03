@@ -1,5 +1,5 @@
 /**
- * @file platform_mock_cmocka.c
+ * @file platform_mock.c
  * @brief CMocka-based platform mock implementation using standard function wrapping
  * @author kkrzysztofik
  * @date 2025
@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "platform_mock_cmocka.h"
+#include "platform_mock.h"
 
 /* ============================================================================
  * Core Platform Functions

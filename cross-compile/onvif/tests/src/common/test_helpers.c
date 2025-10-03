@@ -13,10 +13,10 @@
 #include <string.h>
 
 // Mock includes
-#include "mocks/mock_service_dispatcher_cmocka.h"
-#include "mocks/platform_mock_cmocka.h"
+#include "mocks/mock_service_dispatcher.h"
+#include "mocks/platform_mock.h"
 #include "mocks/platform_ptz_mock.h"
-#include "mocks/ptz_adapter_mock_cmocka.h"
+#include "mocks/ptz_adapter_mock.h"
 
 // ONVIF includes
 #include "networking/http/http_auth.h"

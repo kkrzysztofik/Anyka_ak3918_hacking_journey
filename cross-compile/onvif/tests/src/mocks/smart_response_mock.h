@@ -1,12 +1,12 @@
 /**
- * @file smart_response_mock_cmocka.h
+ * @file smart_response_mock.h
  * @brief CMocka-based smart response builder mock using standard function wrapping
  * @author kkrzysztofik
  * @date 2025
  */
 
-#ifndef SMART_RESPONSE_MOCK_CMOCKA_H
-#define SMART_RESPONSE_MOCK_CMOCKA_H
+#ifndef SMART_RESPONSE_MOCK_H
+#define SMART_RESPONSE_MOCK_H
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -122,4 +122,4 @@ size_t __wrap_smart_response_estimate_size(struct soap* soap, int (*response_fun
 }
 #endif
 
-#endif // SMART_RESPONSE_MOCK_CMOCKA_H
+#endif // SMART_RESPONSE_MOCK_H

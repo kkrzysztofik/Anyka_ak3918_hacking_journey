@@ -1,11 +1,11 @@
 /**
- * @file buffer_pool_mock_cmocka.c
+ * @file buffer_pool_mock.c
  * @brief Implementation of CMocka-based buffer pool mock
  * @author kkrzysztofik
  * @date 2025
  */
 
-#include "buffer_pool_mock_cmocka.h"
+#include "buffer_pool_mock.h"
 
 #include <setjmp.h>
 #include <stdarg.h>

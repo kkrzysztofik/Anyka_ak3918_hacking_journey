@@ -1,12 +1,12 @@
 /**
- * @file buffer_pool_mock_cmocka.h
+ * @file buffer_pool_mock.h
  * @brief CMocka-based buffer pool mock using standard function wrapping
  * @author kkrzysztofik
  * @date 2025
  */
 
-#ifndef BUFFER_POOL_MOCK_CMOCKA_H
-#define BUFFER_POOL_MOCK_CMOCKA_H
+#ifndef BUFFER_POOL_MOCK_H
+#define BUFFER_POOL_MOCK_H
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -135,4 +135,4 @@ int __wrap_get_buffer_pool_stats(buffer_pool_stats_t* stats);
 }
 #endif
 
-#endif // BUFFER_POOL_MOCK_CMOCKA_H
+#endif // BUFFER_POOL_MOCK_H

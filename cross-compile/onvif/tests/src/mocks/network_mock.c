@@ -1,11 +1,11 @@
 /**
- * @file network_mock_cmocka.c
+ * @file network_mock.c
  * @brief Implementation of CMocka-based network mock
  * @author kkrzysztofik
  * @date 2025
  */
 
-#include "network_mock_cmocka.h"
+#include "network_mock.h"
 
 #include <setjmp.h>
 #include <stdarg.h>

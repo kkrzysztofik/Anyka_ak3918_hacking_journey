@@ -1,12 +1,12 @@
 /**
- * @file mock_service_dispatcher_cmocka.h
+ * @file mock_service_dispatcher.h
  * @brief Pure CMocka service dispatcher mock with helper functions
  * @author kkrzysztofik
  * @date 2025
  */
 
-#ifndef MOCK_SERVICE_DISPATCHER_CMOCKA_H
-#define MOCK_SERVICE_DISPATCHER_CMOCKA_H
+#ifndef MOCK_SERVICE_DISPATCHER_H
+#define MOCK_SERVICE_DISPATCHER_H
 
 #include <stddef.h>
 
@@ -187,4 +187,4 @@ void mock_service_dispatcher_set_last_unregister_service(const char* service_nam
 #define SET_SERVICE_DISPATCHER_INIT_RESULT(result)                                                 \
   will_return(__wrap_onvif_service_dispatcher_init, result)
 
-#endif /* MOCK_SERVICE_DISPATCHER_CMOCKA_H */
+#endif /* MOCK_SERVICE_DISPATCHER_H */

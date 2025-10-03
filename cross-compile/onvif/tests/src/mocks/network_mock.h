@@ -1,12 +1,12 @@
 /**
- * @file network_mock_cmocka.h
+ * @file network_mock.h
  * @brief CMocka-based network mock using standard function wrapping
  * @author kkrzysztofik
  * @date 2025
  */
 
-#ifndef NETWORK_MOCK_CMOCKA_H
-#define NETWORK_MOCK_CMOCKA_H
+#ifndef NETWORK_MOCK_H
+#define NETWORK_MOCK_H
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -265,4 +265,4 @@ int __wrap_getsockopt(int sockfd, int level, int optname, void* optval, socklen_
 }
 #endif
 
-#endif // NETWORK_MOCK_CMOCKA_H
+#endif // NETWORK_MOCK_H

@@ -1,5 +1,5 @@
 /**
- * @file gsoap_mock_cmocka.c
+ * @file gsoap_mock.c
  * @brief CMocka-based gSOAP mock implementation using standard function wrapping
  * @author kkrzysztofik
  * @date 2025
@@ -9,7 +9,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "gsoap_mock_cmocka.h"
+#include "gsoap_mock.h"
 
 /* ============================================================================
  * gSOAP Core Functions

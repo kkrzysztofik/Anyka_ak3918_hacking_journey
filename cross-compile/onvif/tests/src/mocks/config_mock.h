@@ -1,12 +1,12 @@
 /**
- * @file config_mock_cmocka.h
+ * @file config_mock.h
  * @brief CMocka-based configuration manager mock using standard function wrapping
  * @author kkrzysztofik
  * @date 2025
  */
 
-#ifndef CONFIG_MOCK_CMOCKA_H
-#define CONFIG_MOCK_CMOCKA_H
+#ifndef CONFIG_MOCK_H
+#define CONFIG_MOCK_H
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -184,4 +184,4 @@ int __wrap_config_get_summary(const config_manager_t* config, char* buffer, size
 }
 #endif
 
-#endif // CONFIG_MOCK_CMOCKA_H
+#endif // CONFIG_MOCK_H

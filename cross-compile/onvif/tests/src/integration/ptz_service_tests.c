@@ -35,7 +35,7 @@
 #include "protocol/gsoap/onvif_gsoap_core.h"
 
 // Mock includes
-#include "mocks/platform_mock_cmocka.h"
+#include "mocks/platform_mock.h"
 #include "mocks/platform_ptz_mock.h"
 
 // Test profile token constants

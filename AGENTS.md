@@ -629,7 +629,7 @@ When reviewing ONVIF project code, **ALWAYS** follow this comprehensive review p
 
   - **Mock Framework**: **ONLY CMocka mocks** are allowed for unit testing - no other mocking frameworks
   - **Mock Implementation Pattern**: All mocks must use CMocka's `--wrap` linker mechanism with `__wrap_` prefix
-  - **Mock Structure**: Each mock file must follow the pattern `*_mock_cmocka.c` and `*_mock_cmocka.h`
+  - **Mock Structure**: Each mock file must follow the pattern `*_mock.c` and `*_mock.h`
   - **Mock Functions**: All mock functions must use standard CMocka patterns:
     ```c
     // Mock function implementation
@@ -765,19 +765,19 @@ When reviewing ONVIF project code, **ALWAYS** follow this comprehensive review p
   - **Mock File Organization**: Mocks must be organized in `tests/src/mocks/` directory:
     ```
     tests/src/mocks/
-    ├── platform_mock_cmocka.c          # Platform abstraction mocks
-    ├── platform_mock_cmocka.h
-    ├── network_mock_cmocka.c           # Network function mocks
-    ├── network_mock_cmocka.h
-    ├── config_mock_cmocka.c            # Configuration mocks
-    ├── config_mock_cmocka.h
-    └── memory_mock.c                   # Memory management mocks
+    ├── platform_mock.c          # Platform abstraction mocks
+    ├── platform_mock.h
+    ├── network_mock.c           # Network function mocks
+    ├── network_mock.h
+    ├── config_mock.c            # Configuration mocks
+    ├── config_mock.h
+    └── memory_mock.c            # Memory management mocks
     ```
 
   - **Mock Naming Conventions**: All mock functions must follow naming patterns:
     - Mock implementation: `__wrap_<original_function_name>`
-    - Mock header: `<module>_mock_cmocka.h`
-    - Mock source: `<module>_mock_cmocka.c`
+    - Mock header: `<module>_mock.h`
+    - Mock source: `<module>_mock.c`
     - Mock state functions: `<module>_mock_init()`, `<module>_mock_cleanup()`
 
   - **Mock Testing Requirements**:
@@ -917,7 +917,7 @@ When reviewing ONVIF project code, **ALWAYS** follow this comprehensive review p
 - [ ] **Mock Testing** follows CMocka patterns (if unit tests)
 - [ ] **Mock Framework** uses only CMocka (no other mocking frameworks)
 - [ ] **Mock Implementation** uses `__wrap_` prefix and `--wrap` linker mechanism
-- [ ] **Mock File Structure** follows `*_mock_cmocka.c` and `*_mock_cmocka.h` pattern
+- [ ] **Mock File Structure** follows `*_mock.c` and `*_mock.h` pattern
 - [ ] **Mock Functions** use standard CMocka patterns (`function_called()`, `check_expected_*()`, `mock()`)
 - [ ] **Mock Configuration** uses `will_return()` and `expect_*()` functions correctly
 - [ ] **Mock State Management** has proper initialization and cleanup
@@ -1357,7 +1357,7 @@ wget -O response.xml "http://192.168.1.100/onvif/device_service"
 
    - **Mock Framework Compliance**: Verify only CMocka mocks are used (no other mocking frameworks)
    - **Mock Implementation Pattern**: Check all mocks use `__wrap_` prefix and `--wrap` linker mechanism
-   - **Mock File Structure**: Verify mock files follow `*_mock_cmocka.c` and `*_mock_cmocka.h` pattern
+   - **Mock File Structure**: Verify mock files follow `*_mock.c` and `*_mock.h` pattern
    - **Mock Function Implementation**: Validate all mock functions use standard CMocka patterns:
      - `function_called()` for call tracking
      - `check_expected_*()` for parameter validation

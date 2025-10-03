@@ -1,12 +1,12 @@
 /**
- * @file gsoap_mock_cmocka.h
+ * @file gsoap_mock.h
  * @brief CMocka-based gSOAP mock using standard function wrapping
  * @author kkrzysztofik
  * @date 2025
  */
 
-#ifndef GSOAP_MOCK_CMOCKA_H
-#define GSOAP_MOCK_CMOCKA_H
+#ifndef GSOAP_MOCK_H
+#define GSOAP_MOCK_H
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -158,4 +158,4 @@ int __wrap_onvif_gsoap_generate_fault_response(const char* fault_code,
 }
 #endif
 
-#endif // GSOAP_MOCK_CMOCKA_H
+#endif // GSOAP_MOCK_H

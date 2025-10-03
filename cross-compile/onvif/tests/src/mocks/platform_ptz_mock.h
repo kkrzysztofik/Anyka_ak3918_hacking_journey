@@ -12,7 +12,7 @@
 #define PLATFORM_PTZ_MOCK_H
 
 #include "platform/platform_common.h"
-#include "platform_mock_cmocka.h"
+#include "platform_mock.h"
 
 /* ============================================================================
  * Mock State Management

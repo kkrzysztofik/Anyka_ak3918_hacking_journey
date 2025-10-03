@@ -1,12 +1,12 @@
 /**
- * @file platform_mock_cmocka.h
+ * @file platform_mock.h
  * @brief CMocka-based platform mock header using standard function wrapping
  * @author kkrzysztofik
  * @date 2025
  */
 
-#ifndef PLATFORM_MOCK_CMOCKA_H
-#define PLATFORM_MOCK_CMOCKA_H
+#ifndef PLATFORM_MOCK_H
+#define PLATFORM_MOCK_H
 
 #include <setjmp.h>
 #include <stdarg.h>
@@ -579,4 +579,4 @@ void __wrap_platform_sleep_ms(unsigned int ms);
  */
 #define EXPECT_VENC_CLEANUP() will_return(__wrap_platform_venc_cleanup, PLATFORM_SUCCESS)
 
-#endif // PLATFORM_MOCK_CMOCKA_H
+#endif // PLATFORM_MOCK_H

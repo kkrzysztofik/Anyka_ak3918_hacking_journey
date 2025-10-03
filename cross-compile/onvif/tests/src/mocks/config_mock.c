@@ -1,11 +1,11 @@
 /**
- * @file config_mock_cmocka.c
+ * @file config_mock.c
  * @brief Implementation of CMocka-based configuration manager mock
  * @author kkrzysztofik
  * @date 2025
  */
 
-#include "config_mock_cmocka.h"
+#include "config_mock.h"
 
 #include <setjmp.h>
 #include <stdarg.h>
