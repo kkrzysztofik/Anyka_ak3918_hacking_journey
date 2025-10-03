@@ -27,7 +27,7 @@ BUILD_TYPE ?= debug
 VERBOSE ?= 0
 
 # Base compiler flags for native testing
-BASE_CFLAGS=-std=c99 -D_POSIX_C_SOURCE=199309L -DTEST_BUILD -fno-builtin -fstrict-aliasing -Wall -Wextra
+BASE_CFLAGS=-std=c99 -D_POSIX_C_SOURCE=199309L -DTEST_BUILD -fno-builtin -fstrict-aliasing -Wall -Wextra -fPIC
 
 # Test-specific flags
 TEST_CFLAGS=-DUNIT_TESTING -DPLATFORM_MOCK -DWITH_NO_C_LOCALE
@@ -63,6 +63,7 @@ INCLUDES=../include ../src src $(NATIVE_INCLUDES)
 
 # Output directory
 OUT_DIR=out
+LIB_DIR=$(OUT_DIR)/lib
 
 # Parallel builds with load average limiting to prevent memory issues
 # Use all available cores but limit based on load average
@@ -84,6 +85,102 @@ else
     NATIVE_INCLUDES =
     $(warning Native libraries not found. Run ./scripts/compile_local_libs.sh to build them for unit testing)
 endif
+
+# Comma variable for Makefile syntax (needed for addprefix with multiple arguments)
+comma := ,
+
+# Platform functions to wrap for CMocka mocking
+WRAP_FUNCTIONS := \
+	platform_init \
+	platform_cleanup \
+	platform_log_error \
+	platform_log_warning \
+	platform_log_notice \
+	platform_log_info \
+	platform_log_debug \
+	platform_vi_match_sensor \
+	platform_vi_open \
+	platform_vi_close \
+	platform_vi_get_sensor_resolution \
+	platform_vi_switch_day_night \
+	platform_vi_set_flip_mirror \
+	platform_vi_capture_on \
+	platform_vi_start_global_capture \
+	platform_vi_capture_off \
+	platform_vi_set_channel_attr \
+	platform_vi_get_fps \
+	platform_vpss_effect_set \
+	platform_vpss_effect_get \
+	platform_venc_init \
+	platform_validate_venc_config \
+	platform_venc_cleanup \
+	platform_venc_get_frame \
+	platform_venc_release_frame \
+	platform_venc_get_stream \
+	platform_venc_release_stream \
+	platform_venc_request_stream \
+	platform_venc_cancel_stream \
+	platform_venc_get_stream_by_handle \
+	platform_venc_release_stream_by_handle \
+	platform_venc_get_buffer_status \
+	platform_ai_open \
+	platform_ai_close \
+	platform_aenc_init \
+	platform_aenc_cleanup \
+	platform_aenc_get_frame \
+	platform_aenc_release_frame \
+	platform_aenc_get_stream \
+	platform_aenc_release_stream \
+	platform_ptz_init \
+	platform_ptz_cleanup \
+	platform_ptz_set_degree \
+	platform_ptz_check_self \
+	platform_ptz_move_to_position \
+	platform_ptz_get_step_position \
+	platform_ptz_get_status \
+	platform_ptz_set_speed \
+	platform_ptz_turn \
+	platform_ptz_turn_stop \
+	ptz_adapter_init \
+	ptz_adapter_cleanup \
+	ptz_adapter_get_status \
+	ptz_adapter_absolute_move \
+	ptz_adapter_relative_move \
+	ptz_adapter_continuous_move \
+	ptz_adapter_stop \
+	ptz_adapter_set_preset \
+	ptz_adapter_goto_preset \
+	platform_irled_init \
+	platform_irled_cleanup \
+	platform_irled_set_mode \
+	platform_irled_get_status \
+	platform_snapshot_init \
+	platform_snapshot_cleanup \
+	platform_snapshot_capture \
+	platform_snapshot_release \
+	platform_config_load \
+	platform_config_save \
+	platform_config_get_string \
+	platform_config_get_int \
+	platform_get_system_info \
+	onvif_service_dispatcher_register_service \
+	onvif_service_dispatcher_unregister_service \
+	onvif_service_dispatcher_init \
+	onvif_service_dispatcher_cleanup \
+	onvif_gsoap_init \
+	onvif_gsoap_cleanup \
+	onvif_gsoap_reset \
+	onvif_gsoap_has_error \
+	onvif_gsoap_get_error \
+	onvif_gsoap_get_response_data \
+	onvif_gsoap_get_response_length \
+	onvif_gsoap_generate_response_with_callback \
+	onvif_gsoap_generate_fault_response \
+	buffer_pool_init \
+	buffer_pool_cleanup
+
+# Generate linker wrap flags for CMocka function interception
+WRAP_FLAGS := $(addprefix -Wl$(comma)--wrap=,$(WRAP_FUNCTIONS))
 
 # CMocka library for native testing
 CMOCKA_LIBS=-lcmocka -lpthread -lm $(GSOAP_LIBS) $(BASE64_LIBS)
@@ -117,8 +214,8 @@ PROTOCOL_TEST_SRCS := \
 DISPATCHER_TEST_SRCS := \
 	src/unit/services/common/test_service_dispatcher.c
 
-# DEVICE_TEST_SRCS := \
-# 	src/unit/services/device/test_device_service.c
+DEVICE_TEST_SRCS := \
+	src/unit/services/device/test_device_service.c
 
 PTZ_TEST_SRCS := \
 	src/unit/services/ptz/test_ptz_service.c \
@@ -154,35 +251,42 @@ TEST_HELPER_SRCS := \
 # Mock source files (for unit tests)
 MOCK_SRCS := \
 	src/mocks/platform_mock.c \
-	src/mocks/network_mock.c \
+	src/mocks/platform_mock_cmocka.c \
+	src/mocks/network_mock_cmocka.c \
 	src/mocks/platform_ptz_mock.c \
 	src/mocks/ptz_adapter_mock.c \
-	src/mocks/service_handler_mock.c \
+	src/mocks/ptz_adapter_mock_cmocka.c \
 	src/mocks/mock_service_dispatcher.c \
-	src/mocks/config_mock.c \
-	src/mocks/gsoap_mock.c \
-	src/mocks/buffer_pool_mock.c \
-	src/mocks/smart_response_mock.c
+	src/mocks/mock_service_dispatcher_cmocka.c \
+	src/mocks/config_mock_cmocka.c \
+	src/mocks/buffer_pool_mock_cmocka.c \
+	src/mocks/smart_response_mock_cmocka.c \
+	src/mocks/gsoap_mock_cmocka.c \
+	src/mocks/memory_mock.c
 
 # Mock source files for integration tests (exclude buffer_pool_mock - use real implementation)
 MOCK_SRCS_INTEGRATION := \
 	src/mocks/platform_mock.c \
-	src/mocks/network_mock.c \
+	src/mocks/platform_mock_cmocka.c \
+	src/mocks/network_mock_cmocka.c \
 	src/mocks/platform_ptz_mock.c \
-	src/mocks/service_handler_mock.c \
+	src/mocks/ptz_adapter_mock.c \
+	src/mocks/ptz_adapter_mock_cmocka.c \
 	src/mocks/mock_service_dispatcher.c \
-	src/mocks/config_mock.c \
-	src/mocks/gsoap_mock.c \
-	src/mocks/smart_response_mock.c
+	src/mocks/mock_service_dispatcher_cmocka.c \
+	src/mocks/config_mock_cmocka.c \
+	src/mocks/smart_response_mock_cmocka.c \
+	src/mocks/gsoap_mock_cmocka.c \
+	src/mocks/memory_mock.c
 
-# Source files from main project (for testing - exclude platform_anyka.c)
+# Source files from main project (for testing - exclude platform_anyka.c - use platform mocks)
 MAIN_SRCS := \
-	../src/platform/adapters/ptz_adapter.c \
 	../src/utils/memory/memory_manager.c \
 	../src/utils/common/time_utils.c \
 	../src/utils/memory/smart_response_builder.c \
 	../src/protocol/gsoap/onvif_gsoap_core.c \
 	../src/protocol/gsoap/onvif_gsoap_response.c \
+	../src/protocol/response/onvif_service_handler.c \
 	../src/protocol/gsoap/onvif_gsoap_media.c \
 	../src/protocol/gsoap/onvif_gsoap_ptz.c \
 	../src/protocol/gsoap/onvif_gsoap_device.c \
@@ -204,6 +308,7 @@ MAIN_SRCS := \
 	../src/services/media/onvif_media.c \
 	../src/services/ptz/onvif_ptz.c \
 	../src/services/imaging/onvif_imaging.c \
+	../src/platform/adapters/ptz_adapter.c \
 	../src/utils/network/network_utils.c \
 	../src/utils/error/error_handling.c
 
@@ -244,6 +349,11 @@ MAIN_DEPS := $(MAIN_OBJS:$(OUT_DIR)/main/%.o=$(OUT_DIR)/main/%.d)
 TEST_HELPER_DEPS := $(TEST_HELPER_OBJS:$(OUT_DIR)/%.o=$(OUT_DIR)/%.d)
 RUNNER_DEPS := $(RUNNER_DYNAMIC_OBJ:%.o=%.d)
 ALL_DEPS := $(TEST_DEPS) $(MOCK_DEPS) $(MAIN_DEPS) $(TEST_HELPER_DEPS) $(RUNNER_DEPS)
+
+# Shared library targets for modular test linking
+MOCK_LIB = $(LIB_DIR)/libonvif_test_mocks.so
+MAIN_LIB = $(LIB_DIR)/libonvif_main.so
+HELPER_LIB = $(LIB_DIR)/libonvif_test_helpers.so
 
 # Dynamic test runner executable
 TEST_RUNNER = $(OUT_DIR)/test_runner
@@ -350,10 +460,31 @@ test-list: $(TEST_RUNNER)
 	@echo "Listing available test suites..."
 	@$(TEST_RUNNER) --list
 
-# Dynamic test runner build rule
-$(TEST_RUNNER): $(RUNNER_DYNAMIC_OBJ) $(TEST_SUITE_REGISTRY_OBJS) $(TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS_INTEGRATION) $(MAIN_OBJS)
+# Shared library build rules with modular linking
+$(MOCK_LIB): $(MOCK_OBJS) | $(LIB_DIR)
+	@echo "Building unit test mocks shared library..."
+	$(CC) -shared -o $@ $^
+	@echo "✅ Built $@"
+
+$(MAIN_LIB): $(MAIN_OBJS) | $(LIB_DIR)
+	@echo "Building main project shared library..."
+	$(CC) -shared -o $@ $^ $(GSOAP_LIBS) $(BASE64_LIBS)
+	@echo "✅ Built $@"
+
+$(HELPER_LIB): $(TEST_HELPER_OBJS) | $(LIB_DIR)
+	@echo "Building test helpers shared library..."
+	$(CC) -shared -o $@ $^
+	@echo "✅ Built $@"
+
+# Dynamic test runner build rule with shared library linking
+# Uses $ORIGIN/lib RPATH so executable finds shared libs in lib/ subdirectory
+# NOTE: WRAP_FLAGS are defined but not used yet - will be enabled when tests migrate to CMocka mocks
+$(TEST_RUNNER): $(RUNNER_DYNAMIC_OBJ) $(TEST_SUITE_REGISTRY_OBJS) $(TEST_OBJS) $(MOCK_LIB) $(MAIN_LIB) $(HELPER_LIB)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
+	$(CC) $(CFLAGS) $(WRAP_FLAGS) $(RUNNER_DYNAMIC_OBJ) $(TEST_SUITE_REGISTRY_OBJS) $(TEST_OBJS) \
+		-L$(LIB_DIR) -Wl,-rpath,'$$ORIGIN/lib' \
+		-lonvif_test_mocks -lonvif_main -lonvif_test_helpers \
+		$(CMOCKA_LIBS) -o $@
 	@echo "✅ Built dynamic test runner $@"
 
 # Object file compilation with dependency generation
@@ -374,9 +505,12 @@ $(OUT_DIR)/main/generated/soapC.o: ../src/generated/soapC.c | $(OUT_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(BASE_CFLAGS) -O0 -w $(TEST_CFLAGS) $(INCLUDES:%=-I%) -c $< -o $@ -pipe
 
-# Create output directory
+# Create output directories
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)
+
+$(LIB_DIR):
+	mkdir -p $(LIB_DIR)
 
 # Clean dependency files
 clean-deps:

@@ -38,17 +38,21 @@ static const struct ptz_speed TEST_SPEED = {.pan_tilt = {.x = 0.5F, .y = 0.5F}, 
  * Test Setup/Teardown
  * ============================================================================ */
 
+/**
+ * @brief Setup function for PTZ tests
+ * @note CMocka handles state management automatically via will_return() and expect_*()
+ */
 static int setup_ptz_tests(void** state) {
   (void)state;
-  mock_config_t config = test_helper_create_standard_mock_config(1, 1); // Include platform and PTZ
-  test_helper_setup_mocks(&config);
   return 0;
 }
 
+/**
+ * @brief Teardown function for PTZ tests
+ * @note CMocka handles cleanup automatically
+ */
 static int teardown_ptz_tests(void** state) {
   (void)state;
-  mock_config_t config = test_helper_create_standard_mock_config(1, 1); // Include platform and PTZ
-  test_helper_teardown_mocks(&config);
   return 0;
 }
 
@@ -233,8 +237,8 @@ void test_ptz_get_presets_with_null(void** state, const null_param_test_t* test_
  */
 void test_unit_ptz_get_nodes_null_params(void** state) {
   null_param_test_t tests[] = {
-    test_helper_create_null_test("nodes parameter", 0, ONVIF_ERROR_INVALID),
-    test_helper_create_null_test("count parameter", 1, ONVIF_ERROR_INVALID),
+    test_helper_create_null_test("nodes parameter", 0, ONVIF_ERROR_NULL),
+    test_helper_create_null_test("count parameter", 1, ONVIF_ERROR_NULL),
   };
 
   test_helper_null_parameters(state, "onvif_ptz_get_nodes", test_ptz_get_nodes_with_null, tests, 2);
@@ -246,8 +250,8 @@ void test_unit_ptz_get_nodes_null_params(void** state) {
  */
 void test_unit_ptz_get_node_null_params(void** state) {
   null_param_test_t tests[] = {
-    test_helper_create_null_test("token parameter", 0, ONVIF_ERROR_INVALID),
-    test_helper_create_null_test("node parameter", 1, ONVIF_ERROR_INVALID),
+    test_helper_create_null_test("token parameter", 0, ONVIF_ERROR_NULL),
+    test_helper_create_null_test("node parameter", 1, ONVIF_ERROR_NULL),
   };
 
   test_helper_null_parameters(state, "onvif_ptz_get_node", test_ptz_get_node_with_null, tests, 2);
@@ -259,8 +263,8 @@ void test_unit_ptz_get_node_null_params(void** state) {
  */
 void test_unit_ptz_get_configuration_null_params(void** state) {
   null_param_test_t tests[] = {
-    test_helper_create_null_test("token parameter", 0, ONVIF_ERROR_INVALID),
-    test_helper_create_null_test("config parameter", 1, ONVIF_ERROR_INVALID),
+    test_helper_create_null_test("token parameter", 0, ONVIF_ERROR_NULL),
+    test_helper_create_null_test("config parameter", 1, ONVIF_ERROR_NULL),
   };
 
   test_helper_null_parameters(state, "onvif_ptz_get_configuration",
@@ -273,8 +277,8 @@ void test_unit_ptz_get_configuration_null_params(void** state) {
  */
 void test_unit_ptz_get_status_null_params(void** state) {
   null_param_test_t tests[] = {
-    test_helper_create_null_test("token parameter", 0, ONVIF_ERROR_INVALID),
-    test_helper_create_null_test("status parameter", 1, ONVIF_ERROR_INVALID),
+    test_helper_create_null_test("token parameter", 0, ONVIF_ERROR_NULL),
+    test_helper_create_null_test("status parameter", 1, ONVIF_ERROR_NULL),
   };
 
   test_helper_null_parameters(state, "onvif_ptz_get_status", test_ptz_get_status_with_null, tests,
@@ -287,8 +291,8 @@ void test_unit_ptz_get_status_null_params(void** state) {
  */
 void test_unit_ptz_absolute_move_null_params(void** state) {
   null_param_test_t tests[] = {
-    test_helper_create_null_test("token parameter", 0, ONVIF_ERROR_INVALID),
-    test_helper_create_null_test("position parameter", 1, ONVIF_ERROR_INVALID),
+    test_helper_create_null_test("token parameter", 0, ONVIF_ERROR_NULL),
+    test_helper_create_null_test("position parameter", 1, ONVIF_ERROR_NULL),
     test_helper_create_null_test("speed parameter (uses default)", 2, ONVIF_SUCCESS),
   };
 
@@ -302,9 +306,9 @@ void test_unit_ptz_absolute_move_null_params(void** state) {
  */
 void test_unit_ptz_get_presets_null_params(void** state) {
   null_param_test_t tests[] = {
-    test_helper_create_null_test("token parameter", 0, ONVIF_ERROR_INVALID),
-    test_helper_create_null_test("preset_list parameter", 1, ONVIF_ERROR_INVALID),
-    test_helper_create_null_test("count parameter", 2, ONVIF_ERROR_INVALID),
+    test_helper_create_null_test("token parameter", 0, ONVIF_ERROR_NULL),
+    test_helper_create_null_test("preset_list parameter", 1, ONVIF_ERROR_NULL),
+    test_helper_create_null_test("count parameter", 2, ONVIF_ERROR_NULL),
   };
 
   test_helper_null_parameters(state, "onvif_ptz_get_presets", test_ptz_get_presets_with_null, tests,

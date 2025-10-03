@@ -12,10 +12,6 @@
 
 #include "services/common/service_dispatcher.h"
 
-// Error constants for testing
-#define ONVIF_ERROR_DUPLICATE      -10
-#define ONVIF_ERROR_RESOURCE_LIMIT -11
-
 /* ============================================================================
  * Mock Service Dispatcher State
  * ============================================================================ */

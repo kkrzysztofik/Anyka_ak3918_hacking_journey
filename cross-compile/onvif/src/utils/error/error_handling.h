@@ -35,6 +35,11 @@
 #define ONVIF_ERROR_AUTHENTICATION_FAILED -16
 #define ONVIF_ERROR_AUTHORIZATION_FAILED  -17
 
+/* Service dispatcher error codes */
+#define ONVIF_ERROR_NOT_INITIALIZED -40
+#define ONVIF_ERROR_RESOURCE_LIMIT  -41
+#define ONVIF_ERROR_DUPLICATE       -42
+
 /* Validation return codes */
 #define ONVIF_VALIDATION_SUCCESS 1
 #define ONVIF_VALIDATION_FAILED  0

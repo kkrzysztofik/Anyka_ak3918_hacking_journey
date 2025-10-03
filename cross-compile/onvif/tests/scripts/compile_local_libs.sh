@@ -86,7 +86,9 @@ export AR=ar
 export RANLIB=ranlib
 export STRIP=strip
 
-echo "Configuring and building gSOAP..."
+echo "Configuring and building gSOAP with -fPIC for shared library support..."
+export CFLAGS="-fPIC -O2"
+export CXXFLAGS="-fPIC -O2"
 ./configure --prefix="${BUILD_DIR}/gsoap_install" --enable-debug --disable-ssl || { echo "❌ Configure failed"; exit 1; }
 make -j$(nproc) || { echo "❌ Build failed"; exit 1; }
 make install || { echo "❌ Install failed"; exit 1; }
@@ -108,8 +110,9 @@ download_and_extract "${LIBB64_URL}" "${LIBB64_FILENAME}" "${LIBB64_DIR}"
 
 cd "${BUILD_DIR}/${LIBB64_DIR}"
 
-# Build and install libb64
-echo "Building libb64..."
+# Build and install libb64 with -fPIC
+echo "Building libb64 with -fPIC for shared library support..."
+export CFLAGS="-fPIC -O2"
 make -C src || { echo "❌ Build failed"; exit 1; }
 
 echo "Installing libb64..."

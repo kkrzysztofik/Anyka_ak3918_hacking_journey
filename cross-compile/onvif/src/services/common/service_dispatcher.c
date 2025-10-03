@@ -17,10 +17,6 @@
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
 
-/* Missing error constants */
-#define ONVIF_ERROR_NOT_INITIALIZED -40
-#define ONVIF_ERROR_RESOURCE_LIMIT  -41
-
 /* ============================================================================
  * Private Types and Constants
  * ============================================================================ */
