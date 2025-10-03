@@ -7,7 +7,7 @@
 
 #include "cmocka_wrapper.h"
 #include "common/test_helpers.h"
-#include "mocks/platform_mock.h"
+#include "mocks/platform_mock_cmocka.h"
 #include "mocks/platform_ptz_mock.h"
 #include "platform/platform_common.h"
 #include "services/ptz/onvif_ptz.h"

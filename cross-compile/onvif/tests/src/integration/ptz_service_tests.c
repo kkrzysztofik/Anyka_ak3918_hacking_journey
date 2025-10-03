@@ -35,7 +35,7 @@
 #include "protocol/gsoap/onvif_gsoap_core.h"
 
 // Mock includes
-#include "mocks/platform_mock.h"
+#include "mocks/platform_mock_cmocka.h"
 #include "mocks/platform_ptz_mock.h"
 
 // Test profile token constants
@@ -132,7 +132,6 @@ int ptz_service_setup(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Initialize platform mock for PTZ operations
-  platform_mock_init();
   platform_ptz_mock_init();
   platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
   platform_mock_set_ptz_move_result(PLATFORM_SUCCESS);
@@ -210,7 +209,6 @@ int ptz_service_teardown(void** state) {
   // The dispatcher mutex gets destroyed and can't be reinitialized
 
   platform_ptz_mock_cleanup();
-  platform_mock_cleanup();
   memory_manager_cleanup();
   return 0;
 }

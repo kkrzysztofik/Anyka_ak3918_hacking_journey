@@ -497,6 +497,12 @@ platform_result_t __wrap_platform_config_get_int(const char* key, int* value);
  */
 platform_result_t __wrap_platform_get_system_info(platform_system_info_t* info);
 
+/**
+ * @brief CMocka wrapped platform sleep milliseconds
+ * @param ms Milliseconds to sleep
+ */
+void __wrap_platform_sleep_ms(unsigned int ms);
+
 /* ============================================================================
  * CMocka Test Helper Macros
  * ============================================================================ */

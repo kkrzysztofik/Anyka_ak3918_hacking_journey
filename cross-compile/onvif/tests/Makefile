@@ -115,6 +115,7 @@ WRAP_FUNCTIONS := \
 	platform_validate_venc_config \
 	platform_venc_cleanup \
 	platform_venc_get_frame \
+	platform_sleep_ms \
 	platform_venc_release_frame \
 	platform_venc_get_stream \
 	platform_venc_release_stream \
@@ -245,12 +246,10 @@ TEST_SRCS := $(UTILS_TEST_SRCS) $(NETWORKING_TEST_SRCS) $(PROTOCOL_TEST_SRCS) \
 TEST_HELPER_SRCS := \
 	src/common/test_helpers.c \
 	src/common/time_utils.c \
-	src/common/generic_mock_framework.c \
 	src/common/soap_test_helpers.c
 
 # Mock source files (for unit tests)
 MOCK_SRCS := \
-	src/mocks/platform_mock.c \
 	src/mocks/platform_mock_cmocka.c \
 	src/mocks/network_mock_cmocka.c \
 	src/mocks/platform_ptz_mock.c \
@@ -266,7 +265,6 @@ MOCK_SRCS := \
 
 # Mock source files for integration tests (exclude buffer_pool_mock - use real implementation)
 MOCK_SRCS_INTEGRATION := \
-	src/mocks/platform_mock.c \
 	src/mocks/platform_mock_cmocka.c \
 	src/mocks/network_mock_cmocka.c \
 	src/mocks/platform_ptz_mock.c \
@@ -468,7 +466,7 @@ $(MOCK_LIB): $(MOCK_OBJS) | $(LIB_DIR)
 
 $(MAIN_LIB): $(MAIN_OBJS) | $(LIB_DIR)
 	@echo "Building main project shared library..."
-	$(CC) -shared -o $@ $^ $(GSOAP_LIBS) $(BASE64_LIBS)
+	$(CC) -shared $(WRAP_FLAGS) -o $@ $^ $(GSOAP_LIBS) $(BASE64_LIBS)
 	@echo "✅ Built $@"
 
 $(HELPER_LIB): $(TEST_HELPER_OBJS) | $(LIB_DIR)

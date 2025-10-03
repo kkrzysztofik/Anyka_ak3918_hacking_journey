@@ -30,7 +30,6 @@ struct ptz_speed;
 struct ptz_preset;
 
 #include "cmocka_wrapper.h"
-#include "generic_mock_framework.h"
 #include "networking/http/http_parser.h"
 #include "services/common/service_dispatcher.h"
 #include "services/ptz/onvif_ptz.h" // Added for struct ptz_vector
@@ -507,65 +506,7 @@ void test_helper_service_callback_logging_failure(void** state,
  * Generic Mock Framework Helpers
  * ============================================================================ */
 
-/**
- * @brief Initialize a generic mock with standard settings
- * @param mock Pointer to mock instance
- * @param name Mock name for debugging
- * @return 0 on success, -1 on error
- */
-int test_helper_init_generic_mock(generic_mock_t* mock, const char* name);
-
-/**
- * @brief Cleanup a generic mock
- * @param mock Pointer to mock instance
- */
-void test_helper_cleanup_generic_mock(generic_mock_t* mock);
-
-/**
- * @brief Reset a generic mock to initial state
- * @param mock Pointer to mock instance
- */
-void test_helper_reset_generic_mock(generic_mock_t* mock);
-
-/**
- * @brief Set result code for a mock operation
- * @param mock Pointer to mock instance
- * @param operation_index Operation index
- * @param result_code Result code to return
- * @return 0 on success, -1 on error
- */
-int test_helper_set_mock_operation_result(generic_mock_t* mock, int operation_index,
-                                          int result_code);
-
-/**
- * @brief Get call count for a mock operation
- * @param mock Pointer to mock instance
- * @param operation_index Operation index
- * @return Call count, or -1 on error
- */
-int test_helper_get_mock_operation_count(const generic_mock_t* mock, int operation_index);
-
-/**
- * @brief Assert that a mock operation was called expected number of times
- * @param mock Pointer to mock instance
- * @param operation_index Operation index
- * @param expected_count Expected call count
- * @param operation_name Operation name for error messages
- */
-void test_helper_assert_mock_operation_called(const generic_mock_t* mock, int operation_index,
-                                              int expected_count, const char* operation_name);
-
-/**
- * @brief Enable error simulation for a mock
- * @param mock Pointer to mock instance
- * @param error_code Error code to return
- */
-void test_helper_enable_mock_error(generic_mock_t* mock, int error_code);
-
-/**
- * @brief Disable error simulation for a mock
- * @param mock Pointer to mock instance
- */
-void test_helper_disable_mock_error(generic_mock_t* mock);
+// NOTE: Generic mock framework helpers have been removed as part of CMocka migration.
+// These functions are no longer needed with CMocka's built-in mocking patterns.
 
 #endif /* TEST_HELPERS_H */

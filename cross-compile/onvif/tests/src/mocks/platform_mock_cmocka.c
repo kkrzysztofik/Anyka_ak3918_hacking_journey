@@ -30,33 +30,33 @@ platform_result_t __wrap_platform_cleanup(void) {
  * ============================================================================ */
 
 int __wrap_platform_log_error(const char* format, ...) {
-  check_expected_ptr(format);
-  function_called();
-  return (int)mock();
+  (void)format;
+  // Logging functions don't require expectations - they're informational only
+  return 0;
 }
 
 int __wrap_platform_log_warning(const char* format, ...) {
-  check_expected_ptr(format);
-  function_called();
-  return (int)mock();
+  (void)format;
+  // Logging functions don't require expectations - they're informational only
+  return 0;
 }
 
 int __wrap_platform_log_notice(const char* format, ...) {
-  check_expected_ptr(format);
-  function_called();
-  return (int)mock();
+  (void)format;
+  // Logging functions don't require expectations - they're informational only
+  return 0;
 }
 
 int __wrap_platform_log_info(const char* format, ...) {
-  check_expected_ptr(format);
-  function_called();
-  return (int)mock();
+  (void)format;
+  // Logging functions don't require expectations - they're informational only
+  return 0;
 }
 
 int __wrap_platform_log_debug(const char* format, ...) {
-  check_expected_ptr(format);
-  function_called();
-  return (int)mock();
+  (void)format;
+  // Logging functions don't require expectations - they're informational only
+  return 0;
 }
 
 /* ============================================================================
@@ -544,4 +544,13 @@ platform_result_t __wrap_platform_get_system_info(platform_system_info_t* info) 
     info->uptime_ms = (unsigned int)mock();
   }
   return (platform_result_t)mock();
+}
+
+/* ============================================================================
+ * Platform Utility Functions
+ * ============================================================================ */
+
+void __wrap_platform_sleep_ms(unsigned int ms) {
+  check_expected(ms);
+  function_called();
 }

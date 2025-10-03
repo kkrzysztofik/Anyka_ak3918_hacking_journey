@@ -23,7 +23,7 @@
 #include "utils/memory/memory_manager.h"
 
 // Platform mocks
-#include "mocks/platform_mock.h"
+#include "mocks/platform_mock_cmocka.h"
 #include "mocks/platform_ptz_mock.h"
 
 /* ============================================================================
@@ -37,7 +37,6 @@ static int ptz_adapter_test_setup(void** state) {
   memory_manager_init();
 
   // Initialize platform mocks
-  platform_mock_init();
   platform_ptz_mock_init();
 
   // Set default success results
@@ -56,7 +55,6 @@ static int ptz_adapter_test_teardown(void** state) {
 
   // Cleanup mocks
   platform_ptz_mock_cleanup();
-  platform_mock_cleanup();
 
   // Cleanup memory manager
   memory_manager_cleanup();
