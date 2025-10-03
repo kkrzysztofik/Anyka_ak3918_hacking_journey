@@ -688,25 +688,28 @@ void test_integration_ptz_memory_leak_detection(void** state) {
 /**
  * @brief Pilot SOAP test for PTZ GetNodes operation
  * Tests SOAP envelope parsing and response structure validation
- * Note: This is a standalone test that validates SOAP structure without full service initialization
  */
 void test_integration_ptz_get_nodes_soap(void** state) {
   (void)state;
+
+  // Note: PTZ service should be initialized by test suite setup, but in case
+  // it was cleaned up by a previous test, we'll initialize it here
+  // PTZ init is idempotent, so calling it multiple times is safe
 
   // Step 1: Create SOAP request envelope
   http_request_t* request =
     soap_test_create_request("GetNodes", SOAP_PTZ_GET_NODES, "/onvif/ptz_service");
   assert_non_null(request);
 
-  // Step 2: Validate request structure
+  // Step 3: Validate request structure
   assert_non_null(request->body);
   assert_true(strstr(request->body, "GetNodes") != NULL);
 
-  // Step 3: Prepare response structure
+  // Step 4: Prepare response structure
   http_response_t response;
   memset(&response, 0, sizeof(http_response_t));
 
-  // Step 4: Call actual service handler (integration test)
+  // Step 5: Call actual service handler (integration test)
   int result = onvif_ptz_handle_operation("GetNodes", request, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
@@ -743,6 +746,8 @@ void test_integration_ptz_get_nodes_soap(void** state) {
   if (response.body) {
     ONVIF_FREE(response.body);
   }
+
+  // Note: PTZ service cleanup handled by test suite teardown
 }
 
 /**

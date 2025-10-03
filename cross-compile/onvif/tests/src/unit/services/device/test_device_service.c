@@ -1077,3 +1077,13 @@ const struct CMUnitTest device_test_suite[] = {
   cmocka_unit_test(test_unit_device_memory_management),
   cmocka_unit_test(test_unit_device_configuration_handling),
 };
+
+/**
+ * @brief Get unit tests
+ * @param count Output parameter for test count
+ * @return Array of CMUnit tests
+ */
+const struct CMUnitTest* get_device_service_unit_tests(size_t* count) {
+  *count = sizeof(device_test_suite) / sizeof(device_test_suite[0]);
+  return device_test_suite;
+}

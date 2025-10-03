@@ -444,9 +444,11 @@ void test_integration_media_request_response_validation(void** state) {
 }
 
 /**
- * @brief Test SetVideoSourceConfiguration operation
+ * @brief Test Media GetProfiles operation via SOAP
  */
 void test_integration_media_get_profiles_soap(void** state) {
+  // Note: Media service is already initialized by media_service_setup()
+  // Config is available in state if needed
   (void)state;
 
   // Step 1: Create SOAP request envelope
@@ -454,15 +456,15 @@ void test_integration_media_get_profiles_soap(void** state) {
     soap_test_create_request("GetProfiles", SOAP_MEDIA_GET_PROFILES, "/onvif/media_service");
   assert_non_null(request);
 
-  // Step 2: Validate request structure
+  // Step 3: Validate request structure
   assert_non_null(request->body);
   assert_true(strstr(request->body, "GetProfiles") != NULL);
 
-  // Step 3: Prepare response structure
+  // Step 4: Prepare response structure
   http_response_t response;
   memset(&response, 0, sizeof(http_response_t));
 
-  // Step 4: Call actual service handler (integration test)
+  // Step 5: Call actual service handler (integration test)
   int result = onvif_media_handle_request("GetProfiles", request, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
@@ -499,6 +501,8 @@ void test_integration_media_get_profiles_soap(void** state) {
   if (response.body) {
     ONVIF_FREE(response.body);
   }
+
+  // Note: Media service cleanup handled by media_service_teardown()
 }
 
 /**

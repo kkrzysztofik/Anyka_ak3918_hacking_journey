@@ -380,3 +380,13 @@ const struct CMUnitTest ptz_tests[] = {
   cmocka_unit_test_setup_teardown(test_unit_ptz_get_node_success, setup_ptz_tests,
                                   teardown_ptz_tests),
 };
+
+/**
+ * @brief Get unit tests
+ * @param count Output parameter for test count
+ * @return Array of CMUnit tests
+ */
+const struct CMUnitTest* get_ptz_service_unit_tests(size_t* count) {
+  *count = sizeof(ptz_tests) / sizeof(ptz_tests[0]);
+  return ptz_tests;
+}

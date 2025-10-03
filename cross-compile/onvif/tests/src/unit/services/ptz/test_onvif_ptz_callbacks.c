@@ -388,3 +388,13 @@ int run_ptz_callback_tests(void) {
  * - All original test cases preserved
  * - Hybrid approach: helpers for common patterns, manual for specific cases
  */
+
+/**
+ * @brief Get unit tests
+ * @param count Output parameter for test count
+ * @return Array of CMUnit tests
+ */
+const struct CMUnitTest* get_ptz_callbacks_unit_tests(size_t* count) {
+  *count = sizeof(ptz_callback_tests) / sizeof(ptz_callback_tests[0]);
+  return ptz_callback_tests;
+}

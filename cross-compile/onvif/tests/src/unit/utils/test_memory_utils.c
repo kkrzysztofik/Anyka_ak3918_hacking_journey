@@ -230,5 +230,21 @@ void test_unit_dynamic_buffer(void** state) {
   dynamic_buffer_cleanup(&buffer);
 }
 
-// Test functions are called from test_runner.c
-// Test comment
+/**
+ * @brief Get memory utils unit tests
+ * @param count Output parameter for test count
+ * @return Array of CMUnitTest structures
+ */
+const struct CMUnitTest* get_memory_utils_unit_tests(size_t* count) {
+  static const struct CMUnitTest tests[] = {
+    cmocka_unit_test(test_unit_memory_manager_init),
+    cmocka_unit_test(test_unit_memory_manager_alloc),
+    cmocka_unit_test(test_unit_memory_manager_free),
+    cmocka_unit_test(test_unit_smart_response_builder),
+    cmocka_unit_test(test_unit_memory_manager_stats),
+    cmocka_unit_test(test_unit_memory_manager_stress),
+    cmocka_unit_test(test_unit_dynamic_buffer),
+  };
+  *count = sizeof(tests) / sizeof(tests[0]);
+  return tests;
+}

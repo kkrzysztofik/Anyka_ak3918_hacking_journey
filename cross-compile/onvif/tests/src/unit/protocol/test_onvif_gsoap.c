@@ -361,11 +361,11 @@ void test_unit_onvif_gsoap_parse_absolute_move(void** state) {
   assert_non_null(request->ProfileToken);
   assert_string_equal(request->ProfileToken, "ptz_profile_1");
 
-  // AbsoluteMove uses Destination, not Position
-  assert_non_null(request->Destination);
-  assert_non_null(request->Destination->PanTilt);
-  assert_true(request->Destination->PanTilt->x >= 0.4 && request->Destination->PanTilt->x <= 0.6);
-  assert_true(request->Destination->PanTilt->y >= 0.2 && request->Destination->PanTilt->y <= 0.4);
+  // AbsoluteMove uses Position
+  assert_non_null(request->Position);
+  assert_non_null(request->Position->PanTilt);
+  assert_true(request->Position->PanTilt->x >= 0.4 && request->Position->PanTilt->x <= 0.6);
+  assert_true(request->Position->PanTilt->y >= 0.2 && request->Position->PanTilt->y <= 0.4);
 
   // Speed is optional but should be present in this test
   if (request->Speed) {
@@ -398,7 +398,7 @@ void test_unit_onvif_gsoap_parse_absolute_move_no_speed(void** state) {
 
   // Verify required fields
   assert_non_null(request->ProfileToken);
-  assert_non_null(request->Destination);
+  assert_non_null(request->Position);
 
   // Speed should be NULL (optional field not provided)
   // Note: gSOAP may still allocate it, so we just verify parsing succeeded

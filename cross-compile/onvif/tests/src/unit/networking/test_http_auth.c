@@ -603,3 +603,13 @@ const struct CMUnitTest http_auth_tests[] = {
   cmocka_unit_test_setup_teardown(test_unit_http_auth_mock_init_failure, setup_http_auth_tests,
                                   teardown_http_auth_tests),
 };
+
+/**
+ * @brief Get HTTP auth unit tests
+ * @param count Output parameter for test count
+ * @return Array of CMUnitTest structures
+ */
+const struct CMUnitTest* get_http_auth_unit_tests(size_t* count) {
+  *count = sizeof(http_auth_tests) / sizeof(http_auth_tests[0]);
+  return http_auth_tests;
+}

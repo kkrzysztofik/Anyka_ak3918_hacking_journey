@@ -692,3 +692,13 @@ const struct CMUnitTest service_dispatcher_tests[] = {
                                   setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
 };
+
+/**
+ * @brief Get service dispatcher unit tests
+ * @param count Output parameter for test count
+ * @return Array of CMUnit tests
+ */
+const struct CMUnitTest* get_service_dispatcher_unit_tests(size_t* count) {
+  *count = sizeof(service_dispatcher_tests) / sizeof(service_dispatcher_tests[0]);
+  return service_dispatcher_tests;
+}

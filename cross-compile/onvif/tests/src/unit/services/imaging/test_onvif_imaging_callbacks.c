@@ -223,3 +223,13 @@ int run_imaging_callback_tests(void) {
   return cmocka_run_group_tests_name("Imaging Callback Tests", imaging_callback_tests,
                                      setup_imaging_callback_tests, teardown_imaging_callback_tests);
 }
+
+/**
+ * @brief Get unit tests
+ * @param count Output parameter for test count
+ * @return Array of CMUnit tests
+ */
+const struct CMUnitTest* get_imaging_callbacks_unit_tests(size_t* count) {
+  *count = sizeof(imaging_callback_tests) / sizeof(imaging_callback_tests[0]);
+  return imaging_callback_tests;
+}

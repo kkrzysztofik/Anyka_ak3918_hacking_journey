@@ -264,3 +264,23 @@ void test_integration_soap_error_malformed_envelope(void** state) {
     ONVIF_FREE(response.body);
   }
 }
+
+/**
+ * @brief SOAP error test suite
+ */
+static const struct CMUnitTest soap_error_tests[] = {
+  cmocka_unit_test(test_integration_soap_error_invalid_xml),
+  cmocka_unit_test(test_integration_soap_error_missing_param),
+  cmocka_unit_test(test_integration_soap_error_wrong_operation),
+  cmocka_unit_test(test_integration_soap_error_malformed_envelope),
+};
+
+/**
+ * @brief Get SOAP error integration tests
+ * @param count Output parameter for test count
+ * @return Array of CMUnit tests
+ */
+const struct CMUnitTest* get_soap_error_integration_tests(size_t* count) {
+  *count = sizeof(soap_error_tests) / sizeof(soap_error_tests[0]);
+  return soap_error_tests;
+}

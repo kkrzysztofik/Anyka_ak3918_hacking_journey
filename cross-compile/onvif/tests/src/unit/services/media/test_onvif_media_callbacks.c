@@ -223,3 +223,13 @@ int run_media_callback_tests(void) {
   return cmocka_run_group_tests_name("Media Callback Tests", media_callback_tests,
                                      setup_media_callback_tests, teardown_media_callback_tests);
 }
+
+/**
+ * @brief Get unit tests
+ * @param count Output parameter for test count
+ * @return Array of CMUnit tests
+ */
+const struct CMUnitTest* get_media_callbacks_unit_tests(size_t* count) {
+  *count = sizeof(media_callback_tests) / sizeof(media_callback_tests[0]);
+  return media_callback_tests;
+}

@@ -448,25 +448,27 @@ void test_integration_imaging_performance_regression(void** state) {
 /**
  * @brief Pilot SOAP test for Imaging GetImagingSettings operation
  * Tests SOAP envelope parsing and response structure validation
- * Note: This is a standalone test that validates SOAP structure without full service initialization
  */
 void test_integration_imaging_get_settings_soap(void** state) {
   (void)state;
+
+  // Note: Imaging service is already initialized by setup_imaging_integration()
+  // Platform mock, service dispatcher, and imaging service are ready
 
   // Step 1: Create SOAP request envelope
   http_request_t* request = soap_test_create_request(
     "GetImagingSettings", SOAP_IMAGING_GET_IMAGING_SETTINGS, "/onvif/imaging_service");
   assert_non_null(request);
 
-  // Step 2: Validate request structure
+  // Step 3: Validate request structure
   assert_non_null(request->body);
   assert_true(strstr(request->body, "GetImagingSettings") != NULL);
 
-  // Step 3: Prepare response structure
+  // Step 4: Prepare response structure
   http_response_t response;
   memset(&response, 0, sizeof(http_response_t));
 
-  // Step 4: Call actual service handler (integration test)
+  // Step 5: Call actual service handler (integration test)
   int result = onvif_imaging_handle_operation("GetImagingSettings", request, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
@@ -498,6 +500,8 @@ void test_integration_imaging_get_settings_soap(void** state) {
   if (response.body) {
     ONVIF_FREE(response.body);
   }
+
+  // Note: Imaging service cleanup handled by teardown_imaging_integration()
 }
 
 /**

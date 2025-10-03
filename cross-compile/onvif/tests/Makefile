@@ -98,8 +98,22 @@ RUNNER_MEDIA_SRC = src/runner/test_media_runner.c
 RUNNER_IMAGING_SRC = src/runner/test_imaging_runner.c
 RUNNER_INTEGRATION_SRC = src/runner/test_integration_runner.c
 
-# Legacy consolidated test runner (kept for compatibility)
-RUNNER_LEGACY_SRC = src/runner/test_runner.c
+# New dynamic test runner with filtering
+RUNNER_DYNAMIC_SRC = src/runner/test_runner.c
+
+# Test suite registry sources
+# Test suite registry sources for dynamic test runner
+TEST_SUITE_REGISTRY_SRCS := \
+	src/common/test_suites.c \
+	src/unit/test_basic.c \
+	src/unit/networking/test_http_metrics_suite.c \
+	src/unit/protocol/test_gsoap_protocol_suite.c \
+	src/integration/ptz_integration_suite.c \
+	src/integration/media_integration_suite.c \
+	src/integration/device_integration_suite.c \
+	src/integration/imaging_integration_suite.c
+# Legacy consolidated test runner (kept for compatibility - DEPRECATED)
+RUNNER_LEGACY_SRC = src/runner/test_runner.c.old
 
 # Test source files for each module
 UTILS_TEST_SRCS := \
@@ -115,6 +129,9 @@ PROTOCOL_TEST_SRCS := \
 
 DISPATCHER_TEST_SRCS := \
 	src/unit/services/common/test_service_dispatcher.c
+
+# DEVICE_TEST_SRCS := \
+# 	src/unit/services/device/test_device_service.c
 
 PTZ_TEST_SRCS := \
 	src/unit/services/ptz/test_ptz_service.c \
@@ -136,7 +153,7 @@ INTEGRATION_TEST_SRCS := \
 
 # All test sources (for legacy runner)
 TEST_SRCS := $(UTILS_TEST_SRCS) $(NETWORKING_TEST_SRCS) $(PROTOCOL_TEST_SRCS) \
-             $(DISPATCHER_TEST_SRCS) $(PTZ_TEST_SRCS) $(MEDIA_TEST_SRCS) \
+             $(DISPATCHER_TEST_SRCS) $(DEVICE_TEST_SRCS) $(PTZ_TEST_SRCS) $(MEDIA_TEST_SRCS) \
              $(IMAGING_TEST_SRCS) $(INTEGRATION_TEST_SRCS)
 
 # Test helper library source files
@@ -205,6 +222,7 @@ UTILS_TEST_OBJS := $(UTILS_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
 NETWORKING_TEST_OBJS := $(NETWORKING_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
 PROTOCOL_TEST_OBJS := $(PROTOCOL_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
 DISPATCHER_TEST_OBJS := $(DISPATCHER_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
+DEVICE_TEST_OBJS := $(DEVICE_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
 PTZ_TEST_OBJS := $(PTZ_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
 MEDIA_TEST_OBJS := $(MEDIA_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
 IMAGING_TEST_OBJS := $(IMAGING_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
@@ -219,7 +237,11 @@ RUNNER_PTZ_OBJ := $(RUNNER_PTZ_SRC:src/%.c=$(OUT_DIR)/%.o)
 RUNNER_MEDIA_OBJ := $(RUNNER_MEDIA_SRC:src/%.c=$(OUT_DIR)/%.o)
 RUNNER_IMAGING_OBJ := $(RUNNER_IMAGING_SRC:src/%.c=$(OUT_DIR)/%.o)
 RUNNER_INTEGRATION_OBJ := $(RUNNER_INTEGRATION_SRC:src/%.c=$(OUT_DIR)/%.o)
+RUNNER_DYNAMIC_OBJ := $(RUNNER_DYNAMIC_SRC:src/%.c=$(OUT_DIR)/%.o)
 RUNNER_LEGACY_OBJ := $(RUNNER_LEGACY_SRC:src/%.c=$(OUT_DIR)/%.o)
+
+# Test suite registry object files
+TEST_SUITE_REGISTRY_OBJS := $(TEST_SUITE_REGISTRY_SRCS:src/%.c=$(OUT_DIR)/%.o)
 
 # Test helper library objects
 TEST_HELPER_OBJS := $(TEST_HELPER_SRCS:src/%.c=$(OUT_DIR)/%.o)
@@ -231,7 +253,7 @@ MAIN_OBJS := $(MAIN_SRCS:../src/%.c=$(OUT_DIR)/main/%.o)
 
 # All test objects (for dependency tracking)
 TEST_OBJS := $(UTILS_TEST_OBJS) $(NETWORKING_TEST_OBJS) $(PROTOCOL_TEST_OBJS) \
-             $(DISPATCHER_TEST_OBJS) $(PTZ_TEST_OBJS) $(MEDIA_TEST_OBJS) \
+             $(DISPATCHER_TEST_OBJS) $(DEVICE_TEST_OBJS) $(PTZ_TEST_OBJS) $(MEDIA_TEST_OBJS) \
              $(IMAGING_TEST_OBJS) $(INTEGRATION_TEST_OBJS)
 
 # Dependency files for incremental builds
@@ -255,8 +277,11 @@ TEST_MEDIA = $(OUT_DIR)/test_media
 TEST_IMAGING = $(OUT_DIR)/test_imaging
 TEST_INTEGRATION = $(OUT_DIR)/test_integration
 
-# Legacy consolidated test runner (kept for compatibility)
-TEST_RUNNER_LEGACY = $(OUT_DIR)/test_runner
+# New dynamic test runner with filtering
+TEST_RUNNER_DYNAMIC = $(OUT_DIR)/test_runner
+
+# Legacy consolidated test runner (kept for compatibility - DEPRECATED)
+TEST_RUNNER_LEGACY = $(OUT_DIR)/test_runner_legacy
 
 # All modular test targets
 MODULAR_TESTS := $(TEST_UTILS) $(TEST_NETWORKING) $(TEST_PROTOCOL) $(TEST_DISPATCHER) \
@@ -264,12 +289,14 @@ MODULAR_TESTS := $(TEST_UTILS) $(TEST_NETWORKING) $(TEST_PROTOCOL) $(TEST_DISPAT
 
 .PHONY: all clean clean-deps test test-utils test-networking test-protocol test-dispatcher \
         test-ptz test-media test-imaging test-integration test-all test-modular test-legacy \
+        test-dynamic test-dynamic-unit test-dynamic-integration test-dynamic-list \
+        test-dynamic-ptz test-dynamic-media \
         coverage coverage-html coverage-report coverage-clean debug release \
         compile-native-libs compile-commands incremental-build help
 
-# Default target - build all modular test suites
-all: $(MODULAR_TESTS)
-	@echo "✅ All modular test suites built successfully"
+# Default target - build new dynamic test runner and all modular test suites
+all: $(TEST_RUNNER_DYNAMIC) $(MODULAR_TESTS)
+	@echo "✅ Dynamic test runner and all modular test suites built successfully"
 
 # Incremental build - only recompile changed files
 incremental-build: $(MODULAR_TESTS)
@@ -393,6 +420,31 @@ test-integration: $(TEST_INTEGRATION)
 
 test-all: test-modular
 
+# Dynamic test runner targets with filtering
+test-dynamic: $(TEST_RUNNER_DYNAMIC)
+	@echo "Running all tests with dynamic runner..."
+	@$(TEST_RUNNER_DYNAMIC)
+
+test-dynamic-unit: $(TEST_RUNNER_DYNAMIC)
+	@echo "Running unit tests only..."
+	@$(TEST_RUNNER_DYNAMIC) --type=unit
+
+test-dynamic-integration: $(TEST_RUNNER_DYNAMIC)
+	@echo "Running integration tests only..."
+	@$(TEST_RUNNER_DYNAMIC) --type=integration
+
+test-dynamic-list: $(TEST_RUNNER_DYNAMIC)
+	@echo "Listing available test suites..."
+	@$(TEST_RUNNER_DYNAMIC) --list
+
+test-dynamic-ptz: $(TEST_RUNNER_DYNAMIC)
+	@echo "Running PTZ tests (unit + integration)..."
+	@$(TEST_RUNNER_DYNAMIC) --suite=ptz-service,ptz-adapter,ptz-callbacks,ptz-integration
+
+test-dynamic-media: $(TEST_RUNNER_DYNAMIC)
+	@echo "Running Media tests (unit + integration)..."
+	@$(TEST_RUNNER_DYNAMIC) --suite=media-utils,media-callbacks,media-integration
+
 # Build rules for each modular test executable (with test helpers)
 $(TEST_UTILS): $(RUNNER_UTILS_OBJ) $(UTILS_TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
 	@mkdir -p $(dir $@)
@@ -434,7 +486,13 @@ $(TEST_INTEGRATION): $(RUNNER_INTEGRATION_OBJ) $(INTEGRATION_TEST_OBJS) $(TEST_H
 	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
 	@echo "✅ Built $@"
 
-# Legacy consolidated test runner build (for compatibility, with test helpers)
+# New dynamic test runner with filtering support
+$(TEST_RUNNER_DYNAMIC): $(RUNNER_DYNAMIC_OBJ) $(TEST_SUITE_REGISTRY_OBJS) $(TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS_INTEGRATION) $(MAIN_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@
+	@echo "✅ Built dynamic test runner $@"
+
+# Legacy consolidated test runner build (for compatibility, with test helpers - DEPRECATED)
 $(TEST_RUNNER_LEGACY): $(RUNNER_LEGACY_OBJ) $(TEST_OBJS) $(TEST_HELPER_OBJS) $(MOCK_OBJS) $(MAIN_OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $^ $(CMOCKA_LIBS) -o $@

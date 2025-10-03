@@ -228,3 +228,30 @@ void test_unit_media_audio_configurations(void** state) {
 void test_unit_media_metadata_configurations(void** state) {
   test_unit_media_metadata_functions(state);
 }
+
+/**
+ * @brief Media utils test suite
+ */
+static const struct CMUnitTest media_utils_tests[] = {
+  cmocka_unit_test(test_unit_media_profile_functions),
+  cmocka_unit_test(test_unit_media_video_source_functions),
+  cmocka_unit_test(test_unit_media_audio_source_functions),
+  cmocka_unit_test(test_unit_media_video_configuration_functions),
+  cmocka_unit_test(test_unit_media_audio_configuration_functions),
+  cmocka_unit_test(test_unit_media_stream_uri_functions),
+  cmocka_unit_test(test_unit_media_snapshot_uri_functions),
+  cmocka_unit_test(test_unit_media_multicast_functions),
+  cmocka_unit_test(test_unit_media_metadata_functions),
+  cmocka_unit_test(test_unit_media_error_handling),
+  cmocka_unit_test(test_unit_media_initialization),
+};
+
+/**
+ * @brief Get media utils unit tests
+ * @param count Output parameter for test count
+ * @return Array of CMUnit tests
+ */
+const struct CMUnitTest* get_media_utils_unit_tests(size_t* count) {
+  *count = sizeof(media_utils_tests) / sizeof(media_utils_tests[0]);
+  return media_utils_tests;
+}

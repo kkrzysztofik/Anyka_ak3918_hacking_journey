@@ -132,3 +132,21 @@ void test_unit_platform_logging(void** state) {
   log_platform_operation_failure("Operation", NULL);
   log_platform_operation_failure(NULL, NULL);
 }
+
+/**
+ * @brief Get logging utils unit tests
+ * @param count Output parameter for test count
+ * @return Array of CMUnitTest structures
+ */
+const struct CMUnitTest* get_logging_utils_unit_tests(size_t* count) {
+  static const struct CMUnitTest tests[] = {
+    cmocka_unit_test(test_unit_logging_init),
+    cmocka_unit_test(test_unit_logging_cleanup),
+    cmocka_unit_test(test_unit_log_level),
+    cmocka_unit_test(test_unit_basic_logging),
+    cmocka_unit_test(test_unit_service_logging),
+    cmocka_unit_test(test_unit_platform_logging),
+  };
+  *count = sizeof(tests) / sizeof(tests[0]);
+  return tests;
+}
