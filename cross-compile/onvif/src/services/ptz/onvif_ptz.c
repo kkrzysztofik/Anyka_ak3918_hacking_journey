@@ -92,17 +92,8 @@ static const struct ptz_node g_ptz_node = {
 static struct ptz_preset g_ptz_presets[PTZ_MAX_PRESETS]; // NOLINT
 static int g_ptz_preset_count = 0;                       // NOLINT
 
-/* Global PTZ state variables */
-static pthread_mutex_t g_ptz_lock = PTHREAD_MUTEX_INITIALIZER;     // NOLINT
-static pthread_cond_t g_ptz_timer_cond = PTHREAD_COND_INITIALIZER; // NOLINT
-static int g_ptz_initialized = 0;                                  // NOLINT
-static int g_ptz_current_pan_pos = 0;                              // NOLINT
-static int g_ptz_current_tilt_pos = 0;                             // NOLINT
-static pthread_t g_ptz_continuous_move_timer_thread = 0;           // NOLINT
-static int g_ptz_continuous_move_timeout_s = 0;                    // NOLINT
-static volatile int g_ptz_continuous_move_active = 0;              // NOLINT
-static volatile int g_ptz_timer_shutdown_requested = 0;            // NOLINT
-static int g_ptz_cleanup_in_progress = 0;                          // NOLINT
+/* Service cleanup guard */
+static int g_ptz_cleanup_in_progress = 0; // NOLINT
 
 /* Global buffer pool for PTZ service responses */
 static buffer_pool_t g_ptz_response_buffer_pool; // NOLINT
@@ -111,6 +102,7 @@ static buffer_pool_t g_ptz_response_buffer_pool; // NOLINT
 static int find_preset_by_token(const char* token, int* index);
 static int remove_preset_at_index(int index);
 static int cleanup_preset_memory(void);
+static int reset_preset_state(void);
 
 /* Convert ONVIF normalized coordinates to device degrees */
 static int normalize_to_degrees_pan(float normalized_value) {
@@ -939,6 +931,18 @@ int onvif_ptz_handle_operation(const char* operation_name, const http_request_t*
     return ONVIF_ERROR_MEMORY;
   }
 
+  // CRITICAL: Initialize request parsing from HTTP body
+  // This is required for gSOAP's soap_read_* functions to work
+  if (request->body && request->body_length > 0) {
+    int parse_init =
+      onvif_gsoap_init_request_parsing(&gsoap_ctx, request->body, request->body_length);
+    if (parse_init != ONVIF_SUCCESS) {
+      platform_log_error("Failed to initialize SOAP request parsing (error: %d)\n", parse_init);
+      onvif_gsoap_cleanup(&gsoap_ctx);
+      return ONVIF_ERROR_PARSE_FAILED;
+    }
+  }
+
   // Dispatch using lookup table for O(n) performance with small constant factor
   int result = ONVIF_ERROR_NOT_FOUND;
   for (size_t i = 0; i < PTZ_OPERATIONS_COUNT; i++) {
@@ -1031,24 +1035,11 @@ void onvif_ptz_cleanup(void) {
   memory_manager_check_leaks();
 
   platform_log_info("PTZ service cleaned up and unregistered from dispatcher\n");
-
-  g_ptz_cleanup_in_progress = 0;
 }
 
 /* ============================================================================
- * Low-level PTZ hardware abstraction functions (formerly ptz_adapter)
- * ============================================================================
- */
-
-/* Continuous move timeout handling */
-
-static int simple_abs(int value) {
-  return (value < 0) ? -value : value;
-}
-
-/* Movement completion is handled by the Anyka driver internally */
-
-/* Preset management helper functions */
+ * Preset Management Helper Functions
+ * ============================================================================ */
 static int find_preset_by_token(const char* token, int* index) {
   if (!token || !index) {
     return ONVIF_ERROR_INVALID;
@@ -1142,341 +1133,28 @@ static int cleanup_preset_memory(void) {
   return ONVIF_SUCCESS;
 }
 
-/* Continuous move timeout thread function */
-static void* continuous_move_timeout_thread(void* unused_arg) {
-  (void)unused_arg; /* Suppress unused parameter warning */
+/**
+ * @brief Reset preset state (internal implementation)
+ * @return ONVIF_SUCCESS on success
+ * @note This resets the preset count and clears preset data without logging
+ */
+static int reset_preset_state(void) {
+  printf("[RESET] Before: g_ptz_preset_count = %d\n", g_ptz_preset_count);
 
-  /* Use condition variable with timed wait instead of sleep */
-  struct timespec timeout;
-  clock_gettime(CLOCK_REALTIME, &timeout);
-  timeout.tv_sec += g_ptz_continuous_move_timeout_s;
+  // Clear all preset data
+  memset(g_ptz_presets, 0, sizeof(g_ptz_presets));
+  g_ptz_preset_count = 0;
 
-  pthread_mutex_lock(&g_ptz_lock);
+  printf("[RESET] After: g_ptz_preset_count = %d\n", g_ptz_preset_count);
 
-  /* Wait for timeout or shutdown signal */
-  int wait_result = pthread_cond_timedwait(&g_ptz_timer_cond, &g_ptz_lock, &timeout);
-
-  /* Check if shutdown was requested */
-  if (g_ptz_timer_shutdown_requested) {
-    pthread_mutex_unlock(&g_ptz_lock);
-    return NULL;
-  }
-
-  /* If timeout occurred and continuous move is still active, stop it */
-  if (wait_result == ETIMEDOUT && g_ptz_continuous_move_active) {
-    platform_log_info("PTZ continuous move timeout after %ds, stopping movement\n",
-                      g_ptz_continuous_move_timeout_s);
-
-    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_LEFT);
-    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_RIGHT);
-    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_UP);
-    platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
-    g_ptz_continuous_move_active = 0;
-  }
-
-  pthread_mutex_unlock(&g_ptz_lock);
-  return NULL;
-}
-
-int ptz_adapter_init(void) {
-  int ret = 0;
-  pthread_mutex_lock(&g_ptz_lock);
-  if (!g_ptz_initialized) {
-    ret = platform_ptz_init();
-    if (ret == PLATFORM_SUCCESS) {
-      /* PTZ is already initialized with proper parameters in
-       * platform_ptz_init() */
-      /* Reset to center position */
-      g_ptz_current_pan_pos = 0;
-      g_ptz_current_tilt_pos = 0;
-      platform_ptz_move_to_position(g_ptz_current_pan_pos, g_ptz_current_tilt_pos);
-
-      g_ptz_initialized = 1;
-      platform_log_notice("PTZ adapter initialized successfully\n");
-    } else {
-      platform_log_error("PTZ initialization failed: %d\n", ret);
-    }
-  }
-  pthread_mutex_unlock(&g_ptz_lock);
-  return g_ptz_initialized ? 0 : -1;
-}
-
-int ptz_adapter_shutdown(void) {
-  pthread_mutex_lock(&g_ptz_lock);
-  if (g_ptz_initialized) {
-    /* Stop any ongoing continuous movement */
-    if (g_ptz_continuous_move_active) {
-      platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_LEFT);
-      platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_RIGHT);
-      platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_UP);
-      platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
-      g_ptz_continuous_move_active = 0;
-    }
-
-    /* Signal and wait for timeout thread to finish if it exists */
-    if (g_ptz_continuous_move_timer_thread != 0) {
-      pthread_t timer_thread = g_ptz_continuous_move_timer_thread;
-      g_ptz_continuous_move_timer_thread = 0;
-
-      /* Signal shutdown to timer thread */
-      g_ptz_timer_shutdown_requested = 1;
-      pthread_cond_signal(&g_ptz_timer_cond);
-
-      pthread_mutex_unlock(&g_ptz_lock);
-      pthread_join(timer_thread, NULL);
-      pthread_mutex_lock(&g_ptz_lock);
-
-      /* Reset shutdown flag for next use */
-      g_ptz_timer_shutdown_requested = 0;
-    }
-
-    platform_ptz_cleanup();
-    g_ptz_initialized = 0;
-  }
-  pthread_mutex_unlock(&g_ptz_lock);
   return ONVIF_SUCCESS;
 }
 
-platform_result_t ptz_adapter_get_status(struct ptz_device_status* status) {
-  ONVIF_CHECK_NULL(status);
-
-  pthread_mutex_lock(&g_ptz_lock);
-  if (!g_ptz_initialized) {
-    pthread_mutex_unlock(&g_ptz_lock);
-    return ONVIF_ERROR;
-  }
-
-  // Use current position tracking instead of platform function
-  status->h_pos_deg = g_ptz_current_pan_pos;
-  status->v_pos_deg = g_ptz_current_tilt_pos;
-  status->h_speed = 0;
-  status->v_speed = 0;
-
-  pthread_mutex_unlock(&g_ptz_lock);
-  return ONVIF_SUCCESS;
-}
-
-int ptz_adapter_absolute_move(int pan_degrees, int tilt_degrees, // NOLINT
-                              int move_speed) {                  // NOLINT
-  int ret = ONVIF_ERROR;
-
-  pthread_mutex_lock(&g_ptz_lock);
-  if (!g_ptz_initialized) {
-    pthread_mutex_unlock(&g_ptz_lock);
-    return ONVIF_ERROR;
-  }
-
-  /* Clamp values to safe ranges - based on akipc implementation */
-  if (pan_degrees > PTZ_MAX_PAN_DEGREES) {
-    pan_degrees = PTZ_MAX_PAN_DEGREES;
-  }
-  if (pan_degrees < PTZ_MIN_PAN_DEGREES) {
-    pan_degrees = PTZ_MIN_PAN_DEGREES;
-  }
-  if (tilt_degrees > PTZ_MAX_TILT_DEGREES) {
-    tilt_degrees = PTZ_MAX_TILT_DEGREES;
-  }
-  if (tilt_degrees < PTZ_MIN_TILT_DEGREES) {
-    tilt_degrees = PTZ_MIN_TILT_DEGREES;
-  }
-
-  platform_log_info("PTZ absolute move to pan=%d, tilt=%d\n", pan_degrees, tilt_degrees);
-
-  ret = platform_ptz_move_to_position(pan_degrees, tilt_degrees);
-  if (ret == PLATFORM_SUCCESS) {
-    g_ptz_current_pan_pos = pan_degrees;
-    g_ptz_current_tilt_pos = tilt_degrees;
-    ret = ONVIF_SUCCESS; // Convert platform success to ONVIF success
-  }
-
-  pthread_mutex_unlock(&g_ptz_lock);
-  return ret;
-}
-
-int ptz_adapter_relative_move(int pan_delta_degrees,  // NOLINT
-                              int tilt_delta_degrees, // NOLINT
-                              int move_speed) {       // NOLINT
-  pthread_mutex_lock(&g_ptz_lock);
-  if (!g_ptz_initialized) {
-    pthread_mutex_unlock(&g_ptz_lock);
-    return ONVIF_ERROR;
-  }
-
-  platform_log_info("PTZ relative move pan_delta=%d, tilt_delta=%d\n", pan_delta_degrees,
-                    tilt_delta_degrees);
-
-  int ret = ONVIF_SUCCESS;
-
-  /* Horizontal movement - based on akipc implementation with step size 16 */
-  if (pan_delta_degrees != 0) {
-    platform_ptz_direction_t dir =
-      (pan_delta_degrees > 0) ? PLATFORM_PTZ_DIRECTION_LEFT : PLATFORM_PTZ_DIRECTION_RIGHT;
-    int steps = simple_abs(pan_delta_degrees);
-    if (steps > PTZ_MAX_STEP_SIZE_PAN) {
-      steps = PTZ_MAX_STEP_SIZE_PAN; /* Limit step size like in akipc */
-    }
-
-    ret = platform_ptz_turn(dir, steps);
-    if (ret == PLATFORM_SUCCESS) {
-      g_ptz_current_pan_pos += (dir == PLATFORM_PTZ_DIRECTION_LEFT) ? steps : -steps;
-    }
-  }
-
-  /* Vertical movement - based on akipc implementation with step size 8 */
-  if (tilt_delta_degrees != 0) {
-    platform_ptz_direction_t dir =
-      (tilt_delta_degrees > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
-    int steps = simple_abs(tilt_delta_degrees);
-    if (steps > PTZ_MAX_STEP_SIZE_TILT) {
-      steps = PTZ_MAX_STEP_SIZE_TILT; /* Limit step size like in akipc */
-    }
-
-    ret = platform_ptz_turn(dir, steps);
-    if (ret == PLATFORM_SUCCESS) {
-      g_ptz_current_tilt_pos += (dir == PLATFORM_PTZ_DIRECTION_DOWN) ? steps : -steps;
-    }
-  }
-
-  pthread_mutex_unlock(&g_ptz_lock);
-  return ret;
-}
-
-int ptz_adapter_continuous_move(int pan_velocity, int tilt_velocity, // NOLINT
-                                int timeout_seconds) {
-  pthread_mutex_lock(&g_ptz_lock);
-  if (!g_ptz_initialized) {
-    pthread_mutex_unlock(&g_ptz_lock);
-    return ONVIF_ERROR;
-  }
-
-  /* Stop any existing continuous movement */
-  if (g_ptz_continuous_move_active) {
-    g_ptz_continuous_move_active = 0;
-
-    /* Wait for existing timer thread to finish */
-    if (g_ptz_continuous_move_timer_thread != 0) {
-      pthread_mutex_unlock(&g_ptz_lock);
-      pthread_join(g_ptz_continuous_move_timer_thread, NULL);
-      pthread_mutex_lock(&g_ptz_lock);
-      g_ptz_continuous_move_timer_thread = 0;
-    }
-  }
-
-  /* Start movement in appropriate directions */
-  if (pan_velocity != 0) {
-    platform_ptz_direction_t dir =
-      (pan_velocity > 0) ? PLATFORM_PTZ_DIRECTION_RIGHT : PLATFORM_PTZ_DIRECTION_LEFT;
-    platform_ptz_turn(dir, PTZ_MAX_PAN_DEGREES); /* Large number for continuous movement */
-  }
-
-  if (tilt_velocity != 0) {
-    platform_ptz_direction_t dir =
-      (tilt_velocity > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
-    platform_ptz_turn(dir, PTZ_MAX_TILT_DEGREES); /* Large number for continuous movement */
-  }
-
-  /* Start timeout timer if timeout is specified and > 0 */
-  if (timeout_seconds > 0) {
-    g_ptz_continuous_move_timeout_s = timeout_seconds;
-    g_ptz_continuous_move_active = 1;
-    g_ptz_timer_shutdown_requested = 0; /* Reset shutdown flag for new timer */
-
-    if (pthread_create(&g_ptz_continuous_move_timer_thread, NULL, continuous_move_timeout_thread,
-                       NULL) != 0) {
-      platform_log_error("Failed to create continuous move timeout thread\n");
-      g_ptz_continuous_move_active = 0;
-      pthread_mutex_unlock(&g_ptz_lock);
-      return ONVIF_ERROR;
-    }
-
-    platform_log_info("PTZ continuous move started with %ds timeout\n", timeout_seconds);
-  } else {
-    platform_log_info("PTZ continuous move started (no timeout)\n");
-  }
-
-  pthread_mutex_unlock(&g_ptz_lock);
-  return ONVIF_SUCCESS;
-}
-
-int ptz_adapter_stop(void) {
-  pthread_mutex_lock(&g_ptz_lock);
-  if (!g_ptz_initialized) {
-    pthread_mutex_unlock(&g_ptz_lock);
-    return ONVIF_ERROR;
-  }
-
-  platform_log_info("PTZ stop all movement\n");
-
-  /* Stop all PTZ movement */
-  platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_LEFT);
-  platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_RIGHT);
-  platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_UP);
-  platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
-
-  /* Clear continuous move state */
-  g_ptz_continuous_move_active = 0;
-
-  /* Signal and wait for timeout thread to finish if it exists */
-  if (g_ptz_continuous_move_timer_thread != 0) {
-    pthread_t timer_thread = g_ptz_continuous_move_timer_thread;
-    g_ptz_continuous_move_timer_thread = 0;
-
-    /* Signal shutdown to timer thread */
-    g_ptz_timer_shutdown_requested = 1;
-    pthread_cond_signal(&g_ptz_timer_cond);
-
-    pthread_mutex_unlock(&g_ptz_lock);
-    pthread_join(timer_thread, NULL);
-    pthread_mutex_lock(&g_ptz_lock);
-
-    /* Reset shutdown flag for next use */
-    g_ptz_timer_shutdown_requested = 0;
-  }
-
-  pthread_mutex_unlock(&g_ptz_lock);
-  return ONVIF_SUCCESS;
-}
-
-int ptz_adapter_set_preset(const char* name, int preset_id) {
-  pthread_mutex_lock(&g_ptz_lock);
-  if (!g_ptz_initialized) {
-    pthread_mutex_unlock(&g_ptz_lock);
-    return ONVIF_ERROR;
-  }
-
-  platform_log_info("PTZ set preset %s (id=%d) at pan=%d, tilt=%d\n", name ? name : "unnamed",
-                    preset_id, g_ptz_current_pan_pos, g_ptz_current_tilt_pos);
-
-  /* For now, just store current position - could be enhanced to save to file */
-  pthread_mutex_unlock(&g_ptz_lock);
-  return ONVIF_SUCCESS; /* Basic implementation */
-}
-
-int ptz_adapter_goto_preset(int preset_id) {
-  pthread_mutex_lock(&g_ptz_lock);
-  if (!g_ptz_initialized) {
-    pthread_mutex_unlock(&g_ptz_lock);
-    return ONVIF_ERROR;
-  }
-
-  platform_log_info("PTZ goto preset id=%d\n", preset_id);
-
-  /* Basic implementation - could be enhanced to load from saved presets */
-  int ret = ONVIF_ERROR;
-  switch (preset_id) {
-  case 1: /* Home position */
-    ret = platform_ptz_move_to_position(0, 0);
-    if (ret == PLATFORM_SUCCESS) {
-      g_ptz_current_pan_pos = 0;
-      g_ptz_current_tilt_pos = 0;
-      ret = ONVIF_SUCCESS;
-    }
-    break;
-  default:
-    platform_log_info("Preset %d not implemented\n", preset_id);
-    break;
-  }
-
-  pthread_mutex_unlock(&g_ptz_lock);
-  return ret;
+/**
+ * @brief Reset PTZ preset state (public API for testing)
+ * @return ONVIF_SUCCESS on success
+ */
+int onvif_ptz_reset_presets(void) {
+  printf("[RESET] onvif_ptz_reset_presets() called\n");
+  return reset_preset_state();
 }

@@ -164,12 +164,8 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
   ctx->soap.frecv = frecv_buffer;       /* Set custom receive callback */
   ctx->soap.recvfd = -1;                /* No file descriptor */
 
-  /* Initialize receive mode */
-  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to initialize SOAP receive mode");
-    return ONVIF_ERROR_PARSE_FAILED;
-  }
+  /* NOTE: We do NOT call soap_begin_recv() here because the soap_read_* macros
+   * call it themselves. Calling it twice would reset the parsing state. */
 
   /* Update request state */
   ctx->request_state.is_initialized = true;

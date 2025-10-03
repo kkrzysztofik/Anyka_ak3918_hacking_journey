@@ -122,7 +122,8 @@ DISPATCHER_TEST_SRCS := \
 
 PTZ_TEST_SRCS := \
 	src/unit/services/ptz/test_ptz_service.c \
-	src/unit/services/ptz/test_onvif_ptz_callbacks.c
+	src/unit/services/ptz/test_onvif_ptz_callbacks.c \
+	src/unit/ptz_adapter_tests.c
 
 MEDIA_TEST_SRCS := \
 	src/unit/services/media/test_media_utils.c \
@@ -155,6 +156,7 @@ MOCK_SRCS := \
 	src/mocks/platform_mock.c \
 	src/mocks/network_mock.c \
 	src/mocks/platform_ptz_mock.c \
+	src/mocks/ptz_adapter_mock.c \
 	src/mocks/service_handler_mock.c \
 	src/mocks/mock_service_dispatcher.c \
 	src/mocks/config_mock.c \
@@ -175,6 +177,7 @@ MOCK_SRCS_INTEGRATION := \
 
 # Source files from main project (for testing - exclude platform_anyka.c)
 MAIN_SRCS := \
+	../src/platform/adapters/ptz_adapter.c \
 	../src/utils/memory/memory_manager.c \
 	../src/utils/common/time_utils.c \
 	../src/utils/memory/smart_response_builder.c \

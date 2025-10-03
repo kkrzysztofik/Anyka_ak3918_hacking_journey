@@ -84,7 +84,7 @@ int teardown_ptz_callback_tests(void** state) {
   (void)state;
 
   onvif_ptz_cleanup();
-  ptz_adapter_shutdown();
+  ptz_adapter_cleanup();
 
   mock_config_t mock_config = test_helper_create_standard_mock_config(1, 1);
   test_helper_teardown_mocks(&mock_config);

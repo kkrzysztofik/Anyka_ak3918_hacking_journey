@@ -86,6 +86,13 @@ const test_suite_t g_test_suites[] = {
    .setup = NULL,
    .teardown = NULL},
 
+  {.name = "ptz-adapter",
+   .full_name = "PTZ Adapter",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_ptz_adapter_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
   // Media service tests
   {.name = "media-utils",
    .full_name = "Media Utilities",
@@ -158,3 +165,16 @@ const test_suite_t g_test_suites[] = {
  * @brief Number of registered test suites
  */
 const size_t g_test_suite_count = sizeof(g_test_suites) / sizeof(g_test_suites[0]);
+
+/* ============================================================================
+ * PTZ Adapter Test Suite Getter
+ * ============================================================================ */
+
+// External test array from ptz_adapter_tests.c
+extern const struct CMUnitTest ptz_adapter_unit_tests[];
+
+const struct CMUnitTest* get_ptz_adapter_unit_tests(size_t* count) {
+  // Count tests in the array (21 tests)
+  *count = 21;
+  return ptz_adapter_unit_tests;
+}

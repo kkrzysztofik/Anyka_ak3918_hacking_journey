@@ -167,8 +167,16 @@ int ptz_service_setup(void** state) {
 int ptz_service_reset(void** state) {
   (void)state; // Unused
 
+  printf("[DEBUG] ptz_service_reset() called\n");
+
   // Reset mock state (lightweight operation)
   platform_ptz_mock_reset();
+
+  // CRITICAL: Reset preset state between tests to prevent overflow
+  // This ensures each test starts with a clean preset slate
+  printf("[DEBUG] Calling onvif_ptz_reset_presets()\n");
+  int reset_result = onvif_ptz_reset_presets();
+  printf("[DEBUG] onvif_ptz_reset_presets() returned: %d\n", reset_result);
 
   // No need to reinitialize - service remains initialized
   return 0;
@@ -196,7 +204,7 @@ int ptz_service_teardown(void** state) {
 
   // Cleanup PTZ service (this unregisters from dispatcher)
   onvif_ptz_cleanup();
-  ptz_adapter_shutdown();
+  ptz_adapter_cleanup();
 
   // Note: Don't cleanup dispatcher - keep it alive for next test
   // The dispatcher mutex gets destroyed and can't be reinitialized

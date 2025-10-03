@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "core/config/config.h"
+#include "platform/adapters/ptz_adapter.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
 #include "services/common/service_dispatcher.h"
@@ -99,7 +100,7 @@ void onvif_services_cleanup(void) {
 
   // Cleanup services in reverse order
   onvif_imaging_cleanup();
-  ptz_adapter_shutdown();
+  ptz_adapter_cleanup();
   onvif_media_cleanup();
   onvif_device_cleanup();
 

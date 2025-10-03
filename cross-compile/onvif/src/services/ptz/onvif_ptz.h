@@ -147,22 +147,6 @@ struct ptz_device_status {
   int v_speed;   /**< Current vertical speed. */
 };
 
-/* Low-level PTZ hardware abstraction functions (formerly ptz_adapter) */
-int ptz_adapter_init(void);     /**< Initialize underlying PTZ hardware or control channel. */
-int ptz_adapter_shutdown(void); /**< Shutdown / release PTZ hardware resources. */
-/* ptz_adapter_get_status is declared in platform/adapters/ptz_adapter.h */
-int ptz_adapter_absolute_move(int pan_deg, int tilt_deg,
-                              int speed); /**< Move to absolute pan/tilt with speed. */
-int ptz_adapter_relative_move(int pan_delta_deg, int tilt_delta_deg,
-                              int speed); /**< Move relative delta in pan/tilt. */
-int ptz_adapter_continuous_move(int pan_vel, int tilt_vel,
-                                int timeout_s); /**< Start continuous velocity move (timeout_s
-                                                   seconds, 0 = indefinite). */
-int ptz_adapter_stop(void);                     /**< Stop any motion (pan & tilt). */
-int ptz_adapter_set_preset(const char* name, int preset_id); /**< Store current position as preset
-                                                                id with optional name. */
-int ptz_adapter_goto_preset(int preset_id); /**< Move to a previously stored preset id. */
-
 /* PTZ service functions */
 
 /**
@@ -176,6 +160,13 @@ int onvif_ptz_init(config_manager_t* config);
  * @brief Clean up PTZ service
  */
 void onvif_ptz_cleanup(void);
+
+/**
+ * @brief Reset PTZ preset state (for testing)
+ * @return ONVIF_SUCCESS on success, error code on failure
+ * @note This function is primarily used for test isolation between test cases
+ */
+int onvif_ptz_reset_presets(void);
 
 /**
  * @brief Handle ONVIF PTZ service requests (HTTP server interface)

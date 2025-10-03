@@ -70,6 +70,7 @@ OUT_DIR=out
 SRCS := \
 	src/core/main/onvifd.c \
 	src/platform/platform_anyka.c \
+	src/platform/adapters/ptz_adapter.c \
 	src/core/config/config.c \
 	src/core/lifecycle/service_manager.c \
 	src/core/lifecycle/video_lifecycle.c \
