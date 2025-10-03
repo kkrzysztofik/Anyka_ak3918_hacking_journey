@@ -209,23 +209,23 @@ int soap_test_parse_get_profiles_response(onvif_gsoap_context_t* ctx,
 }
 
 int soap_test_parse_get_nodes_response(onvif_gsoap_context_t* ctx,
-                                       struct _onvif3__GetNodesResponse** response) {
+                                       struct _tptz__GetNodesResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure (PTZ uses onvif3 namespace)
-  *response = (struct _onvif3__GetNodesResponse*)soap_malloc(
-    &ctx->soap, sizeof(struct _onvif3__GetNodesResponse));
+  // Allocate response structure (PTZ uses tptz namespace)
+  *response = (struct _tptz__GetNodesResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _tptz__GetNodesResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
   // Initialize response structure
-  soap_default__onvif3__GetNodesResponse(&ctx->soap, *response);
+  soap_default__tptz__GetNodesResponse(&ctx->soap, *response);
 
   // Parse SOAP response
-  if (soap_read__onvif3__GetNodesResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_read__tptz__GetNodesResponse(&ctx->soap, *response) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -501,23 +501,23 @@ int soap_test_parse_stop_multicast_response(
  * ============================================================================ */
 
 int soap_test_parse_absolute_move_response(onvif_gsoap_context_t* ctx,
-                                           struct _onvif3__AbsoluteMoveResponse** response) {
+                                           struct _tptz__AbsoluteMoveResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
-  *response = (struct _onvif3__AbsoluteMoveResponse*)soap_malloc(
-    &ctx->soap, sizeof(struct _onvif3__AbsoluteMoveResponse));
+  *response = (struct _tptz__AbsoluteMoveResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _tptz__AbsoluteMoveResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
   // Initialize response structure
-  soap_default__onvif3__AbsoluteMoveResponse(&ctx->soap, *response);
+  soap_default__tptz__AbsoluteMoveResponse(&ctx->soap, *response);
 
   // Parse SOAP response
-  if (soap_read__onvif3__AbsoluteMoveResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_read__tptz__AbsoluteMoveResponse(&ctx->soap, *response) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -525,23 +525,23 @@ int soap_test_parse_absolute_move_response(onvif_gsoap_context_t* ctx,
 }
 
 int soap_test_parse_get_presets_response(onvif_gsoap_context_t* ctx,
-                                         struct _onvif3__GetPresetsResponse** response) {
+                                         struct _tptz__GetPresetsResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
-  *response = (struct _onvif3__GetPresetsResponse*)soap_malloc(
-    &ctx->soap, sizeof(struct _onvif3__GetPresetsResponse));
+  *response = (struct _tptz__GetPresetsResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _tptz__GetPresetsResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
   // Initialize response structure
-  soap_default__onvif3__GetPresetsResponse(&ctx->soap, *response);
+  soap_default__tptz__GetPresetsResponse(&ctx->soap, *response);
 
   // Parse SOAP response
-  if (soap_read__onvif3__GetPresetsResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_read__tptz__GetPresetsResponse(&ctx->soap, *response) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -549,23 +549,23 @@ int soap_test_parse_get_presets_response(onvif_gsoap_context_t* ctx,
 }
 
 int soap_test_parse_set_preset_response(onvif_gsoap_context_t* ctx,
-                                        struct _onvif3__SetPresetResponse** response) {
+                                        struct _tptz__SetPresetResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
-  *response = (struct _onvif3__SetPresetResponse*)soap_malloc(
-    &ctx->soap, sizeof(struct _onvif3__SetPresetResponse));
+  *response = (struct _tptz__SetPresetResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _tptz__SetPresetResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
   // Initialize response structure
-  soap_default__onvif3__SetPresetResponse(&ctx->soap, *response);
+  soap_default__tptz__SetPresetResponse(&ctx->soap, *response);
 
   // Parse SOAP response
-  if (soap_read__onvif3__SetPresetResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_read__tptz__SetPresetResponse(&ctx->soap, *response) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -573,23 +573,23 @@ int soap_test_parse_set_preset_response(onvif_gsoap_context_t* ctx,
 }
 
 int soap_test_parse_goto_preset_response(onvif_gsoap_context_t* ctx,
-                                         struct _onvif3__GotoPresetResponse** response) {
+                                         struct _tptz__GotoPresetResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
-  *response = (struct _onvif3__GotoPresetResponse*)soap_malloc(
-    &ctx->soap, sizeof(struct _onvif3__GotoPresetResponse));
+  *response = (struct _tptz__GotoPresetResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _tptz__GotoPresetResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
   // Initialize response structure
-  soap_default__onvif3__GotoPresetResponse(&ctx->soap, *response);
+  soap_default__tptz__GotoPresetResponse(&ctx->soap, *response);
 
   // Parse SOAP response
-  if (soap_read__onvif3__GotoPresetResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_read__tptz__GotoPresetResponse(&ctx->soap, *response) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -597,23 +597,23 @@ int soap_test_parse_goto_preset_response(onvif_gsoap_context_t* ctx,
 }
 
 int soap_test_parse_remove_preset_response(onvif_gsoap_context_t* ctx,
-                                           struct _onvif3__RemovePresetResponse** response) {
+                                           struct _tptz__RemovePresetResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
-  *response = (struct _onvif3__RemovePresetResponse*)soap_malloc(
-    &ctx->soap, sizeof(struct _onvif3__RemovePresetResponse));
+  *response = (struct _tptz__RemovePresetResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _tptz__RemovePresetResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
   // Initialize response structure
-  soap_default__onvif3__RemovePresetResponse(&ctx->soap, *response);
+  soap_default__tptz__RemovePresetResponse(&ctx->soap, *response);
 
   // Parse SOAP response
-  if (soap_read__onvif3__RemovePresetResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_read__tptz__RemovePresetResponse(&ctx->soap, *response) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -725,23 +725,23 @@ int soap_test_parse_system_reboot_response(onvif_gsoap_context_t* ctx,
  * ============================================================================ */
 
 int soap_test_parse_set_imaging_settings_response(
-  onvif_gsoap_context_t* ctx, struct _onvif4__SetImagingSettingsResponse** response) {
+  onvif_gsoap_context_t* ctx, struct _timg__SetImagingSettingsResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Allocate response structure
-  *response = (struct _onvif4__SetImagingSettingsResponse*)soap_malloc(
-    &ctx->soap, sizeof(struct _onvif4__SetImagingSettingsResponse));
+  *response = (struct _timg__SetImagingSettingsResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _timg__SetImagingSettingsResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
   // Initialize response structure
-  soap_default__onvif4__SetImagingSettingsResponse(&ctx->soap, *response);
+  soap_default__timg__SetImagingSettingsResponse(&ctx->soap, *response);
 
   // Parse SOAP response
-  if (soap_read__onvif4__SetImagingSettingsResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_read__timg__SetImagingSettingsResponse(&ctx->soap, *response) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 

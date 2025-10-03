@@ -322,7 +322,7 @@ void test_unit_onvif_gsoap_parse_get_nodes(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
-  struct _onvif3__GetNodes* request = NULL;
+  struct _tptz__GetNodes* request = NULL;
 
   // Setup parsing test
   int result = setup_parsing_test(&ctx, SOAP_PTZ_GET_NODES);
@@ -346,7 +346,7 @@ void test_unit_onvif_gsoap_parse_absolute_move(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
-  struct _onvif3__AbsoluteMove* request = NULL;
+  struct _tptz__AbsoluteMove* request = NULL;
 
   // Setup parsing test
   int result = setup_parsing_test(&ctx, SOAP_PTZ_ABSOLUTE_MOVE);
@@ -385,7 +385,7 @@ void test_unit_onvif_gsoap_parse_absolute_move_no_speed(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
-  struct _onvif3__AbsoluteMove* request = NULL;
+  struct _tptz__AbsoluteMove* request = NULL;
 
   // Setup parsing test
   int result = setup_parsing_test(&ctx, SOAP_PTZ_ABSOLUTE_MOVE_NO_SPEED);
@@ -416,7 +416,7 @@ void test_unit_onvif_gsoap_parse_get_presets(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
-  struct _onvif3__GetPresets* request = NULL;
+  struct _tptz__GetPresets* request = NULL;
 
   // Setup parsing test
   int result = setup_parsing_test(&ctx, SOAP_PTZ_GET_PRESETS);
@@ -444,7 +444,7 @@ void test_unit_onvif_gsoap_parse_set_preset(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
-  struct _onvif3__SetPreset* request = NULL;
+  struct _tptz__SetPreset* request = NULL;
 
   // Setup parsing test
   int result = setup_parsing_test(&ctx, SOAP_PTZ_SET_PRESET);
@@ -480,7 +480,7 @@ void test_unit_onvif_gsoap_parse_goto_preset(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
-  struct _onvif3__GotoPreset* request = NULL;
+  struct _tptz__GotoPreset* request = NULL;
 
   // Setup parsing test
   int result = setup_parsing_test(&ctx, SOAP_PTZ_GOTO_PRESET);
@@ -511,7 +511,7 @@ void test_unit_onvif_gsoap_parse_remove_preset(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
-  struct _onvif3__RemovePreset* request = NULL;
+  struct _tptz__RemovePreset* request = NULL;
 
   // Setup parsing test
   int result = setup_parsing_test(&ctx, SOAP_PTZ_REMOVE_PRESET);
@@ -652,7 +652,7 @@ void test_unit_onvif_gsoap_parse_get_imaging_settings(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
-  struct _onvif4__GetImagingSettings* request = NULL;
+  struct _timg__GetImagingSettings* request = NULL;
 
   // Setup parsing test
   int result = setup_parsing_test(&ctx, SOAP_IMAGING_GET_IMAGING_SETTINGS);
@@ -680,7 +680,7 @@ void test_unit_onvif_gsoap_parse_set_imaging_settings(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
-  struct _onvif4__SetImagingSettings* request = NULL;
+  struct _timg__SetImagingSettings* request = NULL;
 
   // Setup parsing test
   int result = setup_parsing_test(&ctx, SOAP_IMAGING_SET_IMAGING_SETTINGS);

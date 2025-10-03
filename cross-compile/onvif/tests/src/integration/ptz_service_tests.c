@@ -727,7 +727,7 @@ void test_integration_ptz_get_nodes_soap(void** state) {
   result = soap_test_init_response_parsing(&ctx, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  struct _onvif3__GetNodesResponse* nodes_response = NULL;
+  struct _tptz__GetNodesResponse* nodes_response = NULL;
   result = soap_test_parse_get_nodes_response(&ctx, &nodes_response);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(nodes_response);
@@ -778,7 +778,7 @@ void test_integration_ptz_absolute_move_soap(void** state) {
   result = soap_test_init_response_parsing(&ctx, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  struct _onvif3__AbsoluteMoveResponse* move_response = NULL;
+  struct _tptz__AbsoluteMoveResponse* move_response = NULL;
   result = soap_test_parse_absolute_move_response(&ctx, &move_response);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(move_response);
@@ -824,13 +824,13 @@ void test_integration_ptz_get_presets_soap(void** state) {
   result = soap_test_init_response_parsing(&ctx, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  struct _onvif3__GetPresetsResponse* presets_response = NULL;
+  struct _tptz__GetPresetsResponse* presets_response = NULL;
   result = soap_test_parse_get_presets_response(&ctx, &presets_response);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(presets_response);
 
   // Step 7: Validate response data - presets array should exist
-  assert_true(presets_response->__sizePTZPreset >= 0);
+  assert_true(presets_response->__sizePreset >= 0);
 
   // Step 8: Cleanup
   onvif_gsoap_cleanup(&ctx);
@@ -873,7 +873,7 @@ void test_integration_ptz_set_preset_soap(void** state) {
   result = soap_test_init_response_parsing(&ctx, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  struct _onvif3__SetPresetResponse* preset_response = NULL;
+  struct _tptz__SetPresetResponse* preset_response = NULL;
   result = soap_test_parse_set_preset_response(&ctx, &preset_response);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(preset_response);
@@ -922,7 +922,7 @@ void test_integration_ptz_goto_preset_soap(void** state) {
   result = soap_test_init_response_parsing(&ctx, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  struct _onvif3__GotoPresetResponse* goto_response = NULL;
+  struct _tptz__GotoPresetResponse* goto_response = NULL;
   result = soap_test_parse_goto_preset_response(&ctx, &goto_response);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(goto_response);
@@ -968,7 +968,7 @@ void test_integration_ptz_remove_preset_soap(void** state) {
   result = soap_test_init_response_parsing(&ctx, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  struct _onvif3__RemovePresetResponse* remove_response = NULL;
+  struct _tptz__RemovePresetResponse* remove_response = NULL;
   result = soap_test_parse_remove_preset_response(&ctx, &remove_response);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(remove_response);

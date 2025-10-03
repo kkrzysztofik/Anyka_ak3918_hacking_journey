@@ -14,7 +14,7 @@
 
 /* Forward declarations for gSOAP structures */
 struct _trt__GetProfilesResponse;
-struct _onvif3__GetNodesResponse;
+struct _tptz__GetNodesResponse;
 struct _tds__GetDeviceInformationResponse;
 
 /* Media Service Response Structures */
@@ -29,11 +29,11 @@ struct _trt__StartMulticastStreamingResponse;
 struct _trt__StopMulticastStreamingResponse;
 
 /* PTZ Service Response Structures */
-struct _onvif3__AbsoluteMoveResponse;
-struct _onvif3__GetPresetsResponse;
-struct _onvif3__SetPresetResponse;
-struct _onvif3__GotoPresetResponse;
-struct _onvif3__RemovePresetResponse;
+struct _tptz__AbsoluteMoveResponse;
+struct _tptz__GetPresetsResponse;
+struct _tptz__SetPresetResponse;
+struct _tptz__GotoPresetResponse;
+struct _tptz__RemovePresetResponse;
 
 /* Device Service Response Structures */
 struct _tds__GetCapabilitiesResponse;
@@ -42,7 +42,7 @@ struct _tds__GetServicesResponse;
 struct _tds__SystemRebootResponse;
 
 /* Imaging Service Response Structures */
-struct _onvif4__SetImagingSettingsResponse;
+struct _timg__SetImagingSettingsResponse;
 
 /* ============================================================================
  * HTTP Request Builder
@@ -104,7 +104,7 @@ int soap_test_parse_get_profiles_response(onvif_gsoap_context_t* ctx,
  * @note Response structure is allocated from gSOAP managed memory
  */
 int soap_test_parse_get_nodes_response(onvif_gsoap_context_t* ctx,
-                                       struct _onvif3__GetNodesResponse** response);
+                                       struct _tptz__GetNodesResponse** response);
 
 /**
  * @brief Parse SOAP response for Device GetDeviceInformation
@@ -218,7 +218,7 @@ int soap_test_parse_stop_multicast_response(onvif_gsoap_context_t* ctx,
  * @note Response structure is allocated from gSOAP managed memory
  */
 int soap_test_parse_absolute_move_response(onvif_gsoap_context_t* ctx,
-                                           struct _onvif3__AbsoluteMoveResponse** response);
+                                           struct _tptz__AbsoluteMoveResponse** response);
 
 /**
  * @brief Parse SOAP response for PTZ GetPresets
@@ -228,7 +228,7 @@ int soap_test_parse_absolute_move_response(onvif_gsoap_context_t* ctx,
  * @note Response structure is allocated from gSOAP managed memory
  */
 int soap_test_parse_get_presets_response(onvif_gsoap_context_t* ctx,
-                                         struct _onvif3__GetPresetsResponse** response);
+                                         struct _tptz__GetPresetsResponse** response);
 
 /**
  * @brief Parse SOAP response for PTZ SetPreset
@@ -238,7 +238,7 @@ int soap_test_parse_get_presets_response(onvif_gsoap_context_t* ctx,
  * @note Response structure is allocated from gSOAP managed memory
  */
 int soap_test_parse_set_preset_response(onvif_gsoap_context_t* ctx,
-                                        struct _onvif3__SetPresetResponse** response);
+                                        struct _tptz__SetPresetResponse** response);
 
 /**
  * @brief Parse SOAP response for PTZ GotoPreset
@@ -248,7 +248,7 @@ int soap_test_parse_set_preset_response(onvif_gsoap_context_t* ctx,
  * @note Response structure is allocated from gSOAP managed memory
  */
 int soap_test_parse_goto_preset_response(onvif_gsoap_context_t* ctx,
-                                         struct _onvif3__GotoPresetResponse** response);
+                                         struct _tptz__GotoPresetResponse** response);
 
 /**
  * @brief Parse SOAP response for PTZ RemovePreset
@@ -258,7 +258,7 @@ int soap_test_parse_goto_preset_response(onvif_gsoap_context_t* ctx,
  * @note Response structure is allocated from gSOAP managed memory
  */
 int soap_test_parse_remove_preset_response(onvif_gsoap_context_t* ctx,
-                                           struct _onvif3__RemovePresetResponse** response);
+                                           struct _tptz__RemovePresetResponse** response);
 
 /* Device Service - Additional Response Parsers */
 
@@ -312,7 +312,7 @@ int soap_test_parse_system_reboot_response(onvif_gsoap_context_t* ctx,
  * @note Response structure is allocated from gSOAP managed memory
  */
 int soap_test_parse_set_imaging_settings_response(onvif_gsoap_context_t* ctx,
-                                                  struct _onvif4__SetImagingSettingsResponse** response);
+                                                  struct _timg__SetImagingSettingsResponse** response);
 
 /* ============================================================================
  * Response Validation

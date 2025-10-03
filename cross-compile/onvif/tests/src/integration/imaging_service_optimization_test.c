@@ -533,7 +533,7 @@ void test_integration_imaging_set_settings_soap(void** state) {
   result = soap_test_init_response_parsing(&ctx, &response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  struct _onvif4__SetImagingSettingsResponse* settings_response = NULL;
+  struct _timg__SetImagingSettingsResponse* settings_response = NULL;
   result = soap_test_parse_set_imaging_settings_response(&ctx, &settings_response);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(settings_response);
