@@ -12,7 +12,7 @@
  * 2. Verify request parsing is initialized
  * 3. Set operation name and start timing
  * 4. Allocate gSOAP structure using soap_new__timg__[Operation]()
- * 5. Deserialize SOAP request using soap_read__timg__[Operation]()
+ * 5. Deserialize SOAP request using soap_get__timg__[Operation]()
  * 6. Record completion time
  *
  * The parsed structures are managed by the gSOAP context and should not
@@ -24,8 +24,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "generated/soapH.h"
+#include "platform/platform.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
 #include "utils/common/time_utils.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 
 /**
  * @brief Parse GetImagingSettings ONVIF Imaging service request
@@ -38,26 +42,13 @@
  */
 int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
                                            struct _timg__GetImagingSettings** out) {
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+  /* 1. Validate context and begin parse operation */
+  int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "GetImagingSettings", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "GetImagingSettings";
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
-  /* 4. Allocate structure using gSOAP managed memory */
+  /* 2. Allocate GetImagingSettings structure using gSOAP managed memory */
   *out = soap_new__timg__GetImagingSettings(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -65,16 +56,24 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__timg__GetImagingSettings(&ctx->soap, *out) != SOAP_OK) {
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
+    *out = NULL;
+    return result;
+  }
+
+  /* 4. Parse the actual GetImagingSettings structure */
+  struct _timg__GetImagingSettings* result_ptr = soap_get__timg__GetImagingSettings(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse GetImagingSettings SOAP request");
+                          "Failed to parse GetImagingSettings structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   return ONVIF_SUCCESS;
 }
@@ -92,26 +91,13 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
  */
 int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
                                            struct _timg__SetImagingSettings** out) {
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+  /* 1. Validate context and begin parse operation */
+  int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "SetImagingSettings", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "SetImagingSettings";
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
-  /* 4. Allocate structure using gSOAP managed memory */
+  /* 2. Allocate SetImagingSettings structure using gSOAP managed memory */
   *out = soap_new__timg__SetImagingSettings(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -119,16 +105,24 @@ int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__timg__SetImagingSettings(&ctx->soap, *out) != SOAP_OK) {
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
+    *out = NULL;
+    return result;
+  }
+
+  /* 4. Parse the actual SetImagingSettings structure */
+  struct _timg__SetImagingSettings* result_ptr = soap_get__timg__SetImagingSettings(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse SetImagingSettings SOAP request");
+                          "Failed to parse SetImagingSettings structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   return ONVIF_SUCCESS;
 }
