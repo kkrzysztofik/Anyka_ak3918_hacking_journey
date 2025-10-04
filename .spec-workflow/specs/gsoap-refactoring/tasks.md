@@ -103,7 +103,7 @@
   - Purpose: Complete Media service request parsing
   - _Leverage: gSOAP soap_read__trt__* functions, parsing pattern from task 9_
   - _Requirements: 3.2, 3.3, 3.4, 3.5, 3.6_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in gSOAP and ONVIF Media service | Task: Implement 5 remaining Media service parsing functions following requirements 3.2-3.6. Use identical pattern from onvif_gsoap_parse_get_profiles(). For each: validate parameters, check initialization, set operation name, allocate with soap_new__trt__[Operation](), deserialize with soap_read__trt__[Operation](), track timing, handle errors with onvif_gsoap_set_error(). | Restrictions: Must use identical pattern for consistency, each function must be self-contained, proper gSOAP structure types for each operation | Success: All 5 functions implemented correctly, consistent error handling, proper timing tracking, follows established pattern, no code duplication beyond pattern structure | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in gSOAP and ONVIF Media service | Task: Implement 5 remaining Media service parsing functions following requirements 3.2-3.6. Use identical pattern from ```onvif_gsoap_parse_get_profiles()```. For each: validate parameters, check initialization, set operation name, allocate with ```soap_new__trt__[Operation]()```, deserialize with ```soap_read__trt__[Operation]()```, track timing, handle errors with onvif_gsoap_set_error(). | Restrictions: Must use identical pattern for consistency, each function must be self-contained, proper gSOAP structure types for each operation | Success: All 5 functions implemented correctly, consistent error handling, proper timing tracking, follows established pattern, no code duplication beyond pattern structure | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
 - [x] 11. Add Doxygen file header and function documentation to onvif_gsoap_media.c
   - File: src/protocol/gsoap/onvif_gsoap_media.c
@@ -124,7 +124,7 @@
   - Purpose: Define PTZ service parsing API
   - _Leverage: gSOAP generated _tptz__* structures, onvif_gsoap_core.h_
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 10.6_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in ONVIF PTZ protocol and gSOAP | Task: Create onvif_gsoap_ptz.h header following requirements 4.1-4.6 and 10.6. Declare 6 PTZ service parsing functions with signature: int onvif_gsoap_parse_[operation](onvif_gsoap_context_t* ctx, struct _tptz__[Operation]** out). Add complete Doxygen documentation including PTZ-specific notes about Position, Speed, and PresetToken fields. | Restrictions: Follow project standards, consistent naming, proper gSOAP structure types (_tptz__ prefix), include file header | Success: Header declares all 6 PTZ functions correctly, PTZ-specific documentation, compiles cleanly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in ONVIF PTZ protocol and gSOAP | Task: Create onvif_gsoap_ptz.h header following requirements 4.1-4.6 and 10.6. Declare 6 PTZ service parsing functions with signature: int onvif_gsoap_parse_[operation](onvif_gsoap_context_t* ctx, struct _tptz__[Operation]** out). Add complete Doxygen documentation including PTZ-specific notes about Position, Speed, and PresetToken fields. | Restrictions: Follow project standards, consistent naming, proper gSOAP structure types (_tptz__prefix), include file header | Success: Header declares all 6 PTZ functions correctly, PTZ-specific documentation, compiles cleanly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
 - [x] 13. Implement all 6 PTZ service parsing functions in onvif_gsoap_ptz.c
   - File: src/protocol/gsoap/onvif_gsoap_ptz.c (new file)
@@ -134,7 +134,7 @@
   - Purpose: Complete PTZ service request parsing
   - _Leverage: gSOAP soap_read__tptz__* functions, Media service parsing pattern_
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in gSOAP and ONVIF PTZ protocol | Task: Implement all 6 PTZ parsing functions following requirements 4.1-4.6. Use same pattern as Media service: validate, check initialization, set operation name, allocate with soap_new__tptz__[Operation](), deserialize with soap_read__tptz__[Operation](), track timing, handle errors. Include file header and function documentation. | Restrictions: Must use consistent pattern, must handle PTZ-specific structures (PTZVector, PTZSpeed), proper error handling for all cases | Success: All 6 functions implemented correctly, PTZ structures parsed properly, consistent with Media service pattern, complete documentation | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Developer with expertise in gSOAP and ONVIF PTZ protocol | Task: Implement all 6 PTZ parsing functions following requirements 4.1-4.6. Use same pattern as Media service: validate, check initialization, set operation name, allocate with ```soap_new__tptz__[Operation]()```, deserialize with ```soap_read__tptz__[Operation]()```, track timing, handle errors. Include file header and function documentation. | Restrictions: Must use consistent pattern, must handle PTZ-specific structures (PTZVector, PTZSpeed), proper error handling for all cases | Success: All 6 functions implemented correctly, PTZ structures parsed properly, consistent with Media service pattern, complete documentation | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
 ## Phase 4: Device & Imaging Services Implementation
 
@@ -145,7 +145,7 @@
   - Purpose: Define Device service parsing API
   - _Leverage: gSOAP generated _tds__* structures, onvif_gsoap_core.h_
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 10.6_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in ONVIF Device service protocol | Task: Create onvif_gsoap_device.h header following requirements 5.1-5.4 and 10.6. Declare 4 Device service parsing functions with signature: int onvif_gsoap_parse_[operation](onvif_gsoap_context_t* ctx, struct _tds__[Operation]** out). Add complete Doxygen documentation. | Restrictions: Follow project standards, _tds__ prefix for Device service structures, include file header | Success: Header declares all 4 Device functions, complete documentation, compiles cleanly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in ONVIF Device service protocol | Task: Create onvif_gsoap_device.h header following requirements 5.1-5.4 and 10.6. Declare 4 Device service parsing functions with signature: int onvif_gsoap_parse_[operation](onvif_gsoap_context_t* ctx, struct _tds__[Operation]** out). Add complete Doxygen documentation. | Restrictions: Follow project standards, _tds__prefix for Device service structures, include file header | Success: Header declares all 4 Device functions, complete documentation, compiles cleanly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
 - [x] 15. Implement all 4 Device service parsing functions in onvif_gsoap_device.c
   - File: src/protocol/gsoap/onvif_gsoap_device.c (new file)
@@ -163,7 +163,7 @@
   - Purpose: Define Imaging service parsing API
   - _Leverage: gSOAP generated _timg__* structures, onvif_gsoap_core.h_
   - _Requirements: 5.5, 5.6, 10.6_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in ONVIF Imaging service protocol | Task: Create onvif_gsoap_imaging.h header following requirements 5.5-5.6 and 10.6. Declare 2 Imaging service parsing functions with signature: int onvif_gsoap_parse_[operation](onvif_gsoap_context_t* ctx, struct _timg__[Operation]** out). Document VideoSourceToken and ImagingSettings fields. | Restrictions: Follow project standards, _timg__ prefix for Imaging service structures | Success: Header declares both functions, complete documentation, compiles cleanly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in ONVIF Imaging service protocol | Task: Create onvif_gsoap_imaging.h header following requirements 5.5-5.6 and 10.6. Declare 2 Imaging service parsing functions with signature: int onvif_gsoap_parse_[operation](onvif_gsoap_context_t* ctx, struct _timg__[Operation]** out). Document VideoSourceToken and ImagingSettings fields. | Restrictions: Follow project standards, _timg__prefix for Imaging service structures | Success: Header declares both functions, complete documentation, compiles cleanly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
 - [x] 17. Implement both Imaging service parsing functions in onvif_gsoap_imaging.c
   - File: src/protocol/gsoap/onvif_gsoap_imaging.c (new file)
@@ -587,15 +587,15 @@
   - _Leverage: Make test targets, valgrind, coverage tools_
   - _Requirements: Per detailed SOAP migration plan - Testing & Validation_
   - _Status: PARTIAL - Test suite execution shows critical issues requiring fixes before completion:_
-    - **Test Results**: 13/43 tests executed (6 passed, 6 failed, 1 crashed with double-free)
-    - **Passed Tests** (6): init_cleanup_lifecycle, get_device_information_fields_validation, handle_operation_null_params, handle_operation_invalid_operation, handle_operation_uninitialized, config_integration
-    - **Failed Tests** (6): get_capabilities_specific_category, get_capabilities_multiple_categories, get_system_date_time_timezone, get_system_date_time_dst, get_services_namespaces, get_device_info_soap
-    - **Critical Issues Identified**:
-      1. **SOAP Response Parsing Failure**: SOAP tests fail at response parsing (error -14: PARSE_FAILED) - `onvif_gsoap_init_request_parsing()` designed for requests, not responses. Need response-specific parsing initialization.
-      2. **gSOAP Double-Free**: `stdsoap2.c(3410): free(0x7c9220000b70) double free` - occurs in concurrent test, indicates improper gSOAP context lifecycle management
-      3. **Memory Leaks**: smart_response_builder.c:87 leaking 1303 bytes - buffer pool response not properly freed
-      4. **Response Generation Failures**: Some operations fail with "Callback failed to generate response content" (error code -11, -15)
-    - **Next Steps**: Fix SOAP response parsing (need soap_test_init_response_parsing to handle HTTP responses), fix gSOAP context cleanup to prevent double-free, fix memory leaks in smart_response_builder
+    - __Test Results__: 13/43 tests executed (6 passed, 6 failed, 1 crashed with double-free)
+    - __Passed Tests__ (6): init_cleanup_lifecycle, get_device_information_fields_validation, handle_operation_null_params, handle_operation_invalid_operation, handle_operation_uninitialized, config_integration
+    - __Failed Tests__ (6): get_capabilities_specific_category, get_capabilities_multiple_categories, get_system_date_time_timezone, get_system_date_time_dst, get_services_namespaces, get_device_info_soap
+    - __Critical Issues Identified__:
+      1. __SOAP Response Parsing Failure__: SOAP tests fail at response parsing (error -14: PARSE_FAILED) - `onvif_gsoap_init_request_parsing()` designed for requests, not responses. Need response-specific parsing initialization.
+      2. __gSOAP Double-Free__: `stdsoap2.c(3410): free(0x7c9220000b70) double free` - occurs in concurrent test, indicates improper gSOAP context lifecycle management
+      3. __Memory Leaks__: smart_response_builder.c:87 leaking 1303 bytes - buffer pool response not properly freed
+      4. __Response Generation Failures__: Some operations fail with "Callback failed to generate response content" (error code -11, -15)
+    - __Next Steps__: Fix SOAP response parsing (need soap_test_init_response_parsing to handle HTTP responses), fix gSOAP context cleanup to prevent double-free, fix memory leaks in smart_response_builder
 
 - [ ] 48. ONVIF client compatibility testing
   - File: N/A - compatibility testing task
@@ -620,12 +620,13 @@
 ## Phase 11: CMocka Mocking Refactoring
 
 ### Current Issues Identified
-- **No CMocka Built-in Mocking**: Tests use custom mock implementations instead of CMocka's `will_return()`, `mock()`, `expect_value()`, `check_expected()`
-- **No Linker Wrapping**: Build system doesn't use `--wrap` linker option for function interception
-- **Custom Mock Framework**: Project has `generic_mock_framework` that duplicates CMocka functionality
-- **Manual State Management**: Mocks use pthread mutex-based state instead of CMocka's built-in state handling
-- **No Parameter Validation**: Current mocks don't validate function parameters using CMocka patterns
-- **Complex Setup/Teardown**: Could be simplified with CMocka's automatic state management
+
+- __No CMocka Built-in Mocking__: Tests use custom mock implementations instead of CMocka's `will_return()`, `mock()`, `expect_value()`, `check_expected()`
+- __No Linker Wrapping__: Build system doesn't use `--wrap` linker option for function interception
+- __Custom Mock Framework__: Project has `generic_mock_framework` that duplicates CMocka functionality
+- __Manual State Management__: Mocks use pthread mutex-based state instead of CMocka's built-in state handling
+- __No Parameter Validation__: Current mocks don't validate function parameters using CMocka patterns
+- __Complex Setup/Teardown__: Could be simplified with CMocka's automatic state management
 
 ### Phase 11A: Build System Updates for CMocka Best Practices
 
@@ -649,7 +650,7 @@
   - Purpose: Provide CMocka-compliant mock interface
   - _Leverage: CMocka framework, existing platform_mock.h patterns_
   - _Requirements: Follow CMocka best practices for function wrapping_
-  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in CMocka mocking | Task: Create platform_mock.h following CMocka best practices. Declare all platform functions with __wrap_ prefix: __wrap_platform_init, __wrap_platform_cleanup, __wrap_platform_log_error, __wrap_platform_log_warning, __wrap_platform_log_info, __wrap_platform_log_debug, __wrap_platform_get_time_ms, __wrap_platform_config_load, __wrap_platform_config_save, __wrap_platform_get_system_info, __wrap_platform_vi_open, __wrap_platform_vi_close, __wrap_platform_venc_init, __wrap_platform_venc_cleanup, __wrap_platform_ai_open, __wrap_platform_ai_close, __wrap_platform_aenc_init, __wrap_platform_aenc_cleanup, all PTZ functions, IR LED functions, snapshot functions. Add helper macros: EXPECT_PLATFORM_INIT_SUCCESS(), EXPECT_PLATFORM_CLEANUP(), EXPECT_PLATFORM_LOG_INFO(msg), EXPECT_PLATFORM_LOG_ERROR(msg). Include cmocka.h and platform/platform.h. Add complete Doxygen documentation. | Restrictions: Must use __wrap_ prefix for all functions, must include all platform functions used in tests, must follow CMocka naming conventions, must provide helper macros for common patterns | Success: Header declares all wrapped functions correctly, helper macros work, includes proper headers, compiles without errors, follows CMocka best practices | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C API Designer with expertise in CMocka mocking | Task: Create platform_mock.h following CMocka best practices. Declare all platform functions with __wrap_ prefix: __wrap_platform_init,__wrap_platform_cleanup, __wrap_platform_log_error,__wrap_platform_log_warning, __wrap_platform_log_info,__wrap_platform_log_debug, __wrap_platform_get_time_ms,__wrap_platform_config_load, __wrap_platform_config_save,__wrap_platform_get_system_info, __wrap_platform_vi_open,__wrap_platform_vi_close, __wrap_platform_venc_init,__wrap_platform_venc_cleanup, __wrap_platform_ai_open,__wrap_platform_ai_close, __wrap_platform_aenc_init,__wrap_platform_aenc_cleanup, all PTZ functions, IR LED functions, snapshot functions. Add helper macros: EXPECT_PLATFORM_INIT_SUCCESS(), EXPECT_PLATFORM_CLEANUP(), EXPECT_PLATFORM_LOG_INFO(msg), EXPECT_PLATFORM_LOG_ERROR(msg). Include cmocka.h and platform/platform.h. Add complete Doxygen documentation. | Restrictions: Must use __wrap_ prefix for all functions, must include all platform functions used in tests, must follow CMocka naming conventions, must provide helper macros for common patterns | Success: Header declares all wrapped functions correctly, helper macros work, includes proper headers, compiles without errors, follows CMocka best practices | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
 - [x] 52. Implement CMocka-based platform mock functions
   - File: cross-compile/onvif/tests/src/mocks/platform_mock.c (new file)
@@ -804,7 +805,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer concentrating on HTTP telemetry | Task: Execute `make test-unit SUITE=http-metrics` and refactor cross-compile/onvif/tests/src/unit/networking/test_http_metrics.c plus the suite harness to rely exclusively on CMocka expectations. Repair any failures by ensuring counters, timers, and error paths assert correctly using helper macros. | Restrictions: Keep metric thresholds unchanged unless required by migration, do not stub out functionality, enforce parameter validation with check_expected() | Success: HTTP metrics suite passes, metrics assertions rely on CMocka, no legacy mock code remains | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 66. Validate gSOAP protocol unit test suite
+- [x] 66. Validate gSOAP protocol unit test suite
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap.c
   - File: cross-compile/onvif/tests/src/unit/protocol/test_gsoap_protocol_suite.c
   - Run `make test-unit SUITE=gsoap-protocol`
@@ -815,7 +816,141 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with gSOAP protocol expertise | Task: Run `make test-unit SUITE=gsoap-protocol` and update cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap.c plus its suite harness to align with embedded context changes and CMocka expectations. Repair serialization/deserialization checks and confirm wrapped functions use expect_function_call() and will_return() correctly. | Restrictions: Preserve coverage for error paths, do not bypass SOAP memory management validation, avoid reintroducing pointer-based context assumptions | Success: gSOAP protocol suite passes with zero failures, all mocks rely on CMocka primitives, coverage tracks embedded context behavior | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 67. Validate service dispatcher unit test suite
+### Phase 11E Supplemental: gSOAP Response & Handler Unit Tests
+
+- [x] 67. Implement gSOAP response generation unit test suite
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c (new file)
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_gsoap_response_suite.c (new file)
+  - File: cross-compile/onvif/tests/src/data/response_test_data.h (new file)
+  - Run `make test-unit SUITE=gsoap-response`
+  - Add success, NULL parameter, empty payload, and allocation failure tests for all response generator functions listed in GSOAP_TESTING.md
+  - Purpose: Deliver 100% CMocka coverage for gSOAP response generation paths
+  - _Leverage: GSOAP_TESTING.md response plan, tests/src/utils/test_gsoap_utils.c, gSOAP protocol helpers_
+  - _Requirements: Register new suite in tests/Makefile, cover Device/Media/PTZ generators, ensure diagnostics for failures_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: CMocka-focused QA Engineer for gSOAP responses | Task: Create the gSOAP response generation unit test suite, including new test files, shared response test data, and Makefile registrations. Cover all Device, Media, and PTZ response generators with success, NULL input, empty payload, and memory failure scenarios as defined in GSOAP_TESTING.md. Execute `make test-unit SUITE=gsoap-response` until it passes. | Restrictions: Do not modify production response functions beyond injectable hooks, follow project include path conventions, avoid introducing dynamic allocations outside gSOAP context | Success: Suite compiles and passes, coverage reports include every response generator, failure messages are actionable, CMocka patterns validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 68. Enhance XML validation helpers
+  - File: cross-compile/onvif/tests/src/utils/xml_validation_helpers.c
+  - Replace strstr-based SOAP fault checks with gSOAP deserialization of SOAP_ENV__Fault
+  - Validate fault code, string, and detail fields using ctx->soap.fault
+  - Purpose: Harden XML validation helpers for response verification
+  - _Leverage: Implementation Plan: gSOAP Response Generation Test Improvements, gSOAP fault structures_
+  - _Requirements: Do not introduce custom parsers, rely on gSOAP APIs, maintain existing helper interfaces_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: gSOAP QA Infrastructure Engineer | Task: Update xml_validation_helpers.c so validate_soap_fault_xml() deserializes SOAP_ENV__Fault via gSOAP APIs, checks faultcode, faultstring, and detail members, and removes ad-hoc strstr comparisons while preserving helper signatures. | Restrictions: No changes to production sources outside helper, keep include paths project-compliant, avoid introducing global state | Success: Helper compiles without warnings, fault validation uses gSOAP data structures, existing callers continue to pass, new diagnostics improve clarity | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 69. Add response serialization helper to response_test_data
+  - File: cross-compile/onvif/tests/src/data/response_test_data.h
+  - File: cross-compile/onvif/tests/src/data/response_test_data.c
+  - Implement get_serialized_response() to extract ctx->soap buffer contents
+  - Purpose: Provide reusable response extraction utility for tests
+  - _Leverage: Implementation Plan: gSOAP Response Generation Test Improvements, existing response_test_data init routines_
+  - _Requirements: Follow project include conventions, return ONVIF error codes on failure, ensure buffers null-terminated_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Data Utilities Engineer | Task: Declare and define get_serialized_response(onvif_gsoap_context_t*, char*, size_t) within response_test_data.h/c, copying from ctx->soap buffer with bounds checks and returning byte count or ONVIF_ERROR codes. | Restrictions: Do not alter existing mock structs, avoid dynamic allocation, ensure helper works with embedded soap context | Success: Helper available to unit tests, returns correct sizes, handles invalid input gracefully, passes static analysis | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 70. Validate device response XML content
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
+  - Update device info success/empty parameter tests to assert serialized XML content
+  - Use get_serialized_response(), is_well_formed_xml(), and validate_soap_envelope()
+  - Purpose: Ensure device responses include expected payload fields
+  - _Leverage: Implementation Plan: gSOAP Response Generation Test Improvements, response_test_data helpers_
+  - _Requirements: Maintain existing CMocka patterns, avoid brittle string assumptions beyond required fields_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: ONVIF Device QA Engineer | Task: Extend device response tests to pull serialized XML via new helper, verify well-formedness/envelope validity, and confirm manufacturer/model tokens appear for success while empty-param test validates graceful handling. | Restrictions: Do not modify production response generator, keep test names unchanged, ensure assertions remain deterministic | Success: Updated tests pass, XML validation covers expected elements, failure messages informative | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 71. Validate media response XML content
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
+  - Enhance DeleteProfile response test with serialized XML checks
+  - Confirm SOAP action name and profile tokens appear in output
+  - Purpose: Strengthen media response verification
+  - _Leverage: Implementation Plan: gSOAP Response Generation Test Improvements, response_test_data helpers_
+  - _Requirements: Keep test runtime low, reuse shared buffers, adhere to project naming conventions_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Media Service QA Engineer | Task: Update DeleteProfile response test to extract serialized XML, validate SOAP envelope, and assert DeleteProfileResponse plus profile identifiers are present without introducing brittle string order dependencies. | Restrictions: Avoid duplicating helper logic, do not alter unrelated tests, keep assertions CMocka-compliant | Success: Media response test captures XML content expectations and passes reliably | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 72. Validate PTZ response XML content
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
+  - Add XML validation to AbsoluteMove and GotoPreset success tests
+  - Ensure PTZ response names and tokens appear
+  - Purpose: Confirm PTZ responses serialize expected data
+  - _Leverage: Implementation Plan: gSOAP Response Generation Test Improvements, response_test_data helpers_
+  - _Requirements: Retain existing PTZ mock usage, share buffers to minimize stack usage, keep assertions specific_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: PTZ Service QA Engineer | Task: Extend PTZ response tests to fetch serialized XML, validate envelope, and assert AbsoluteMoveResponse/GotoPresetResponse along with preset tokens are encoded, handling whitespace variability safely. | Restrictions: No changes to PTZ production code, avoid adding large static buffers per test, ensure tests remain deterministic | Success: PTZ response tests validate XML content and continue to pass | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 73. Remove ineffective response memory failure test
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
+  - Delete test_unit_onvif_gsoap_generate_device_info_response_memory_failure
+  - Remove registration from response_generation_tests array
+  - Purpose: Eliminate misleading test coverage
+  - _Leverage: Implementation Plan: gSOAP Response Generation Test Improvements, existing test suite structure_
+  - _Requirements: Ensure suite still compiles, adjust documentation comments referencing test count_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Suite Maintainer | Task: Remove the ineffective memory failure test and its registration from response_generation_tests, updating any adjacent comments so the suite reflects actual coverage. | Restrictions: Do not remove surrounding useful tests, keep formatting consistent, ensure build remains green | Success: Memory failure test eliminated, suite still passes, comments accurate | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 74. Auto-calculate gSOAP response test count
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_gsoap_response_suite.c
+  - Replace hardcoded test count with sizeof(response_generation_tests)
+  - Purpose: Keep suite synchronized with test list automatically
+  - _Leverage: Implementation Plan: gSOAP Response Generation Test Improvements, existing suite patterns_
+  - _Requirements: Maintain function signature and return semantics, ensure count pointer validated_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: CMocka Suite Engineer | Task: Update get_gsoap_response_unit_tests() to compute *count using sizeof array division, removing stale comments about fixed totals. | Restrictions: No additional globals, avoid modifying registration order, keep style consistent | Success: Test count auto-updates with array changes, suite returns accurate value, no compiler warnings | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 75. Add response buffer overflow protection test
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
+  - Introduce test covering small output buffer handling for fault generation
+  - Ensure function returns error without crashing or overwriting memory
+  - Purpose: Guard against buffer size regressions
+  - _Leverage: Implementation Plan: gSOAP Response Generation Test Improvements, new get_serialized_response helper_
+  - _Requirements: Use CMocka assertions, avoid writing beyond local buffer, document expected error code_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Reliability QA Engineer | Task: Add a unit test that calls onvif_gsoap_generate_fault_response() with an undersized buffer, verifying it returns an error and leaves context consistent, then register the test in response_generation_tests. | Restrictions: Do not modify production fault generator, keep buffer on stack, ensure test teardown resets context | Success: New test passes, failure properly detected, suite count updated automatically | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 76. Add large string response handling test
+  - File: cross-compile/onvif/tests/src/data/response_test_data.c
+  - File: cross-compile/onvif/tests/src/data/response_test_data.h
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
+  - Add mock_device_info_large_strings data and corresponding test ensuring large manufacturer names serialize correctly
+  - Purpose: Verify gSOAP handles oversized but valid fields
+  - _Leverage: Implementation Plan: gSOAP Response Generation Test Improvements, response_test_data init routines_
+  - _Requirements: Initialize large string during response_test_data_init(), avoid heap allocation, ensure buffer sizes cover serialized output_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Stress Testing QA Engineer | Task: Create large string mock data (512 chars) in response_test_data, expose it via header, and add a unit test verifying onvif_gsoap_generate_device_info_response() succeeds and serialized output is retrievable without truncation. | Restrictions: Keep large buffers static, ensure tests reset context between runs, avoid impacting other mocks | Success: Large-string test passes, helper data initialized safely, no compiler warnings | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 77. Add special character response handling test
+  - File: cross-compile/onvif/tests/src/data/response_test_data.c
+  - File: cross-compile/onvif/tests/src/data/response_test_data.h
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
+  - Create mock_device_info_special_chars and verify gSOAP escapes XML metacharacters
+  - Purpose: Ensure responses encode reserved characters safely
+  - _Leverage: Implementation Plan: gSOAP Response Generation Test Improvements, new get_serialized_response helper_
+  - _Requirements: Confirm serialized output includes escaped sequences, reuse shared buffers, follow naming conventions_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: XML Compliance QA Engineer | Task: Define special-character mock data in response_test_data, expose via header, and add a unit test validating onvif_gsoap_generate_device_info_response() escapes <, >, &, quotes, and apostrophes using XML entities. | Restrictions: Do not alter production escaping logic, keep test deterministic, avoid scanning entire buffer needlessly | Success: Special character test passes, asserts presence of escaped entities, suite remains green | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 78. Implement gSOAP service handler unit test suite
+  - File: cross-compile/onvif/tests/src/unit/services/common/test_onvif_service_handler.c (new file)
+  - File: cross-compile/onvif/tests/src/unit/services/common/test_service_handler_suite.c (new file)
+  - Run `make test-unit SUITE=service-handler`
+  - Add tests for init, request dispatch, cleanup, validation, success/error responses, config getters/setters, stats, and action registration
+  - Purpose: Provide full unit coverage for service handler control flow using CMocka mocks
+  - _Leverage: GSOAP_TESTING.md service handler plan, dispatcher mocks, platform mock wrappers_
+  - _Requirements: Register suite in tests/Makefile, cover success and failure paths, use expect_function_call()/will_return() for dispatcher interactions_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in ONVIF service orchestration | Task: Build the service handler unit test suite with comprehensive coverage of initialization, request handling, error propagation, configuration access, and action registration routines. Register the suite, rely on CMocka expectations for dispatcher/platform mocks, and run `make test-unit SUITE=service-handler` until it passes. | Restrictions: Keep service handler public APIs unchanged, do not bypass error paths, maintain approved include paths | Success: Suite passes consistently, coverage reaches all handler functions, failure diagnostics identify exact subroutine, mocks use only CMocka primitives | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 79. Expand gSOAP core utility unit test coverage
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_core.c
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_gsoap_protocol_suite.c
+  - Run `make test-unit SUITE=gsoap-protocol`
+  - Add tests for onvif_gsoap_reset, onvif_gsoap_init_request_parsing, onvif_gsoap_set_error, onvif_gsoap_get_detailed_error, onvif_gsoap_has_error, onvif_gsoap_get_error, onvif_gsoap_validate_and_begin_parse, and onvif_gsoap_finalize_parse
+  - Purpose: Close remaining coverage gaps across gSOAP core utilities
+  - _Leverage: GSOAP_TESTING.md core utility checklist, response test data, CMocka failure injection patterns_
+  - _Requirements: Exercise success and failure paths, use__wrap functions for allocation failures, maintain deterministic teardown_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: C Systems QA Engineer for gSOAP core utilities | Task: Extend the existing gSOAP core unit tests to cover all utility functions listed in GSOAP_TESTING.md, including detailed error handling and parse lifecycle helpers. Update the suite registration and ensure `make test-unit SUITE=gsoap-protocol` remains green. | Restrictions: Avoid modifying production utility signatures, do not add global state, ensure mocks remain CMocka-compliant | Success: Core utility coverage reaches 100%, new tests pass reliably, error contexts validated, no regressions introduced | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 80. Add gSOAP edge case unit tests for memory, XML, and state handling
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_edge_cases.c (new file)
+  - File: cross-compile/onvif/tests/src/unit/protocol/test_gsoap_edge_suite.c (new file)
+  - Run `make test-unit SUITE=gsoap-edge-cases`
+  - Cover memory allocation failures, invalid XML envelopes, parameter validation, and state transition edge cases described in GSOAP_TESTING.md
+  - Purpose: Ensure edge scenarios are enforced at the unit level with precise diagnostics
+  - _Leverage: GSOAP_TESTING.md Phase 2 plan, tests/src/utils/test_memory_utils.c, dispatcher/platform mocks_
+  - _Requirements: Register suite in tests/Makefile, use ENABLE_MEMORY_LEAK_DETECTION hooks, assert cleanup paths leave context consistent_
+  - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Memory and Reliability QA Engineer for gSOAP | Task: Create the gSOAP edge case unit test suite to simulate memory allocation failures, malformed XML, missing parameters, and invalid state transitions per GSOAP_TESTING.md. Register the suite, integrate leak detection helpers, and run `make test-unit SUITE=gsoap-edge-cases` until it passes. | Restrictions: Do not disable leak detection, avoid stubbing core SOAP parsing beyond approved wrappers, keep diagnostics clear and actionable | Success: Suite passes with leak detection enabled, edge cases produce expected error codes, context/reset logic verified, CMocka expectations satisfied | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
+
+- [ ] 81. Validate service dispatcher unit test suite
   - File: cross-compile/onvif/tests/src/unit/services/common/test_service_dispatcher.c
   - File: cross-compile/onvif/tests/src/unit/services/common/test_service_dispatcher_suite.c
   - Run `make test-unit SUITE=service-dispatcher`
@@ -826,7 +961,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer focusing on service orchestration | Task: Execute `make test-unit SUITE=service-dispatcher` and refactor dispatcher tests to rely on CMocka expectations for register/unregister flows. Repair any failures caused by embedded context changes and ensure dispatcher state transitions are fully asserted. | Restrictions: Keep dispatcher public API unchanged, avoid weakening negative test cases, ensure call tracking uses expect_function_call() | Success: Service dispatcher suite passes cleanly, registration tests leverage CMocka, no references to deprecated mocks remain | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 68. Validate PTZ service unit test suite
+- [ ] 82. Validate PTZ service unit test suite
   - File: cross-compile/onvif/tests/src/unit/services/ptz/test_ptz_service.c
   - File: cross-compile/onvif/tests/src/unit/services/ptz/test_ptz_unit_suite.c
   - Run `make test-unit SUITE=ptz-service`
@@ -837,7 +972,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in PTZ services | Task: Run `make test-unit SUITE=ptz-service` and update PTZ service unit tests to use expect_value() and will_return() for PTZ adapter interactions. Resolve failures ensuring presets, limits, and error handling align with refactored code. | Restrictions: Do not change PTZ public APIs, keep speed and bounds checks intact, rely on platform mock wrappers | Success: PTZ service suite passes, mocks are pure CMocka, PTZ behavior is fully asserted | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 69. Validate PTZ callbacks unit test suite
+- [ ] 83. Validate PTZ callbacks unit test suite
   - File: cross-compile/onvif/tests/src/unit/services/ptz/test_onvif_ptz_callbacks.c
   - File: cross-compile/onvif/tests/src/unit/services/ptz/test_ptz_callbacks_suite.c
   - Run `make test-unit SUITE=ptz-callbacks`
@@ -848,7 +983,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with PTZ callback focus | Task: Execute `make test-unit SUITE=ptz-callbacks` and refactor callback tests to use expect_function_call(), expect_value(), and will_return() for dispatcher and adapter interactions. Resolve failures introduced by embedded context changes and ensure unregister paths stay covered. | Restrictions: Preserve callback coverage breadth, avoid ignoring failure paths, do not reintroduce generic mock helpers | Success: PTZ callback suite passes, all expectations use CMocka, dispatcher/adapter interactions validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 70. Validate PTZ adapter unit test suite
+- [ ] 84. Validate PTZ adapter unit test suite
   - File: cross-compile/onvif/tests/src/unit/ptz_adapter_tests.c
   - Run `make test-unit SUITE=ptz-adapter`
   - Align adapter wrapper expectations with CMocka patterns
@@ -858,7 +993,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer responsible for PTZ adapter validation | Task: Run `make test-unit SUITE=ptz-adapter` and update PTZ adapter tests to exclusively use CMocka expectations for platform wrappers. Resolve failures around absolute/relative moves and speed checks while keeping coverage for error paths. | Restrictions: Do not loosen adapter validation logic, avoid removing edge-case tests, follow naming conventions for mocks | Success: PTZ adapter suite passes, all mocks use CMocka, coverage spans success and error flows | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 71. Validate media utility unit test suite
+- [ ] 85. Validate media utility unit test suite
   - File: cross-compile/onvif/tests/src/unit/services/media/test_media_utils.c
   - Run `make test-unit SUITE=media-utils`
   - Update media utility expectations to CMocka conventions
@@ -868,7 +1003,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer focused on media utilities | Task: Execute `make test-unit SUITE=media-utils` and refactor media utility tests to replace legacy mocks with CMocka expectations. Address failures related to stream profiles, encoders, and error handling introduced by the migration. | Restrictions: Maintain validation of resolution and bitrate constraints, avoid skipping problematic tests, keep helper usage consistent | Success: Media utility suite passes fully, mocks use CMocka, all edge cases remain covered | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 72. Validate media callbacks unit test suite
+- [ ] 86. Validate media callbacks unit test suite
   - File: cross-compile/onvif/tests/src/unit/services/media/test_onvif_media_callbacks.c
   - File: cross-compile/onvif/tests/src/unit/services/media/test_media_callbacks_suite.c
   - Run `make test-unit SUITE=media-callbacks`
@@ -879,7 +1014,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with media callback specialization | Task: Run `make test-unit SUITE=media-callbacks` and rewrite media callback expectations to use CMocka primitives for dispatcher and encoder mocks. Fix failures tied to preset/stream registration and ensure deregistration flows remain validated. | Restrictions: Keep callback assertions comprehensive, avoid removal of negative tests, depend solely on platform mock wrappers | Success: Media callback suite passes, mocks are pure CMocka, dispatcher interactions validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 73. Validate imaging callbacks unit test suite
+- [ ] 87. Validate imaging callbacks unit test suite
   - File: cross-compile/onvif/tests/src/unit/services/imaging/test_onvif_imaging_callbacks.c
   - File: cross-compile/onvif/tests/src/unit/services/imaging/test_imaging_callbacks_suite.c
   - Run `make test-unit SUITE=imaging-callbacks`
@@ -890,7 +1025,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with imaging service expertise | Task: Execute `make test-unit SUITE=imaging-callbacks` and refactor imaging callback tests to use expect_value(), expect_string(), and will_return() for dispatcher and platform interactions. Resolve failures covering brightness/contrast updates and ensure cleanup paths are asserted. | Restrictions: Preserve imaging validation depth, avoid disabling flaky tests, rely solely on approved mock helpers | Success: Imaging callback suite passes, all expectations use CMocka, imaging error handling verified | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 74. Validate PTZ integration test suite
+- [ ] 88. Validate PTZ integration test suite
   - File: cross-compile/onvif/tests/src/integration/ptz_service_tests.c
   - File: cross-compile/onvif/tests/src/integration/ptz_integration_suite.c
   - Run `make test-integration SUITE=ptz-integration`
@@ -901,7 +1036,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Integration QA Engineer for PTZ functionality | Task: Run `make test-integration SUITE=ptz-integration` and refactor PTZ integration tests to use CMocka expectations for adapter and dispatcher interactions. Debug and resolve move/preset workflow failures resulting from the gSOAP migration. | Restrictions: Keep integration coverage intact, do not mock out network flows beyond approved wrappers, ensure expect_function_call() usage captures critical path | Success: PTZ integration suite passes, mocks use CMocka, PTZ workflows validated end-to-end | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 75. Validate media integration test suite
+- [ ] 89. Validate media integration test suite
   - File: cross-compile/onvif/tests/src/integration/media_service_tests.c
   - File: cross-compile/onvif/tests/src/integration/media_integration_suite.c
   - Run `make test-integration SUITE=media-integration`
@@ -912,7 +1047,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Integration QA Engineer for media streaming | Task: Execute `make test-integration SUITE=media-integration` and refactor media integration tests to depend exclusively on CMocka expectations. Resolve failures around stream URI handling, encoder setup, and teardown sequences introduced by the migration. | Restrictions: Preserve full integration coverage, avoid bypassing RTSP/HTTP flows, use expect_value() and will_return() for platform hooks | Success: Media integration suite passes, mocks use CMocka, streaming scenarios validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 76. Validate device integration test suite
+- [ ] 90. Validate device integration test suite
   - File: cross-compile/onvif/tests/src/integration/device_service_tests.c
   - File: cross-compile/onvif/tests/src/integration/device_integration_suite.c
   - Run `make test-integration SUITE=device-integration`
@@ -923,7 +1058,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Integration QA Engineer for device services | Task: Run `make test-integration SUITE=device-integration` and refactor device integration tests to use CMocka expectations for system info, capabilities, and discovery flows. Resolve failures triggered by the embedded gSOAP context and ensure capability assertions remain intact. | Restrictions: Keep device endpoints fully validated, do not stub out capability checks, rely on approved platform mocks | Success: Device integration suite passes, mocks use CMocka, device workflows validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 77. Validate imaging integration test suite
+- [ ] 91. Validate imaging integration test suite
   - File: cross-compile/onvif/tests/src/integration/imaging_service_optimization_test.c
   - File: cross-compile/onvif/tests/src/integration/imaging_integration_suite.c
   - Run `make test-integration SUITE=imaging-integration`
@@ -934,7 +1069,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Integration QA Engineer for imaging services | Task: Execute `make test-integration SUITE=imaging-integration` and refactor imaging integration tests to use CMocka expectations for platform imaging operations. Fix failures related to brightness/contrast adjustments, presets, and error handling. | Restrictions: Keep imaging operations fully validated, avoid reducing parameter coverage, use expect_string() for token checks | Success: Imaging integration suite passes, mocks use CMocka, imaging workflows validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 78. Validate SOAP error handling integration test suite
+- [ ] 92. Validate SOAP error handling integration test suite
   - File: cross-compile/onvif/tests/src/integration/soap_error_tests.c
   - Run `make test-integration SUITE=soap-errors`
   - Ensure error path expectations rely on CMocka helpers
@@ -944,7 +1079,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Integration QA Engineer focusing on error handling | Task: Run `make test-integration SUITE=soap-errors` and refactor SOAP error tests to use CMocka expectations for fault injection and propagation. Resolve failures to ensure detailed error information surfaces correctly through the new context. | Restrictions: Maintain coverage for negative SOAP paths, avoid suppressing assertions, depend solely on CMocka helpers | Success: SOAP error suite passes, mocks use CMocka, fault propagation verified | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 79. Update test documentation for CMocka patterns
+- [ ] 93. Update test documentation for CMocka patterns
   - File: cross-compile/onvif/tests/README.md
   - Update documentation to reflect CMocka best practices
   - Remove references to custom mock framework
@@ -955,7 +1090,7 @@
   - _Requirements: Document CMocka best practices and usage_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Technical Writer with expertise in CMocka and test documentation | Task: Update tests/README.md to document CMocka best practices. Remove all references to custom mock framework. Add section on CMocka usage patterns: will_return() and mock() pairs, expect_value() and check_expected() for parameter validation, expect_function_call() and function_called() for call tracking, linker wrapping with --wrap option. Add examples of common CMocka patterns used in the project. Update build instructions to mention linker wrapping. Document helper macros from platform_mock.h. | Restrictions: Must remove all custom mock framework references, must document CMocka patterns accurately, must provide useful examples | Success: Documentation updated for CMocka, custom mock framework references removed, CMocka patterns documented with examples, build instructions updated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 80. Create CMocka best practices guide
+- [ ] 94. Create CMocka best practices guide
   - File: cross-compile/onvif/tests/CMOCKA_BEST_PRACTICES.md (new file)
   - Document CMocka best practices used in the project
   - Provide examples of common patterns
@@ -968,7 +1103,7 @@
 
 ### Phase 11F: Performance and Quality Validation
 
-- [ ] 81. Validate CMocka migration performance impact
+- [ ] 95. Validate CMocka migration performance impact
   - File: N/A - performance validation task
   - Measure test execution time before and after CMocka migration
   - Verify no significant performance degradation
@@ -979,7 +1114,7 @@
   - _Requirements: Maintain or improve test performance_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Performance Engineer with expertise in test performance and CMocka | Task: Validate CMocka migration performance impact. Measure test execution time: run `time make test` and `time make test-integration` before and after migration. Measure memory usage during test execution with valgrind --tool=massif. Verify no significant performance degradation (target: < 10% increase in execution time). Document performance metrics: execution time, memory usage, test count. Compare with baseline if available. | Restrictions: Must measure actual performance impact, must not significantly degrade test performance, must document results | Success: Performance impact measured and documented, no significant degradation, memory usage acceptable, performance metrics documented | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 82. Final code quality validation for CMocka migration
+- [ ] 96. Final code quality validation for CMocka migration
   - File: N/A - code quality validation task
   - Run `./cross-compile/onvif/scripts/format_code.sh --check` to verify formatting
   - Run `./cross-compile/onvif/scripts/lint_code.sh --check` to verify code quality
