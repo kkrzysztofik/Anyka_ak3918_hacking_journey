@@ -10,6 +10,7 @@
 
 #include "cmocka_wrapper.h"
 #include "common/test_helpers.h"
+#include "mocks/mock_service_dispatcher.h"
 #include "networking/http/http_parser.h"
 #include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
@@ -23,15 +24,15 @@ TEST_HELPER_CREATE_MOCK_HANDLERS(test_service)
 
 static int setup_service_dispatcher_tests(void** state) {
   (void)state;
+  service_dispatcher_mock_use_real_function(true);
   test_service_reset_mock_state();
-  onvif_service_dispatcher_cleanup();
   return 0;
 }
 
 static int teardown_service_dispatcher_tests(void** state) {
   (void)state;
-  onvif_service_dispatcher_cleanup();
   test_service_reset_mock_state();
+  service_dispatcher_mock_use_real_function(false);
   return 0;
 }
 
@@ -392,13 +393,16 @@ void test_unit_service_dispatcher_register_service_registry_full(void** state) {
 
   onvif_service_dispatcher_init();
 
+  // Use static array so strings persist beyond loop iterations
+  // (ONVIF_SERVICE_REGISTRATION stores pointers, not copies)
+  static char service_names[16][32];
+
   // Register maximum number of services to fill the registry
   for (int i = 0; i < 16; i++) { // MAX_REGISTERED_SERVICES
-    char service_name[32];
-    snprintf(service_name, sizeof(service_name), "service_%d", i);
+    snprintf(service_names[i], sizeof(service_names[i]), "service_%d", i);
 
     onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-      service_name, "http://test.namespace.uri", test_service_mock_operation, NULL, NULL);
+      service_names[i], "http://test.namespace.uri", test_service_mock_operation, NULL, NULL);
 
     int result = onvif_service_dispatcher_register_service(&registration);
     assert_int_equal(result, ONVIF_SUCCESS);
@@ -426,22 +430,29 @@ void test_unit_service_dispatcher_get_services(void** state) {
   // Initially no services should be registered
   const char* services[16] = {0}; // MAX_REGISTERED_SERVICES - initialize to NULL
   int result = onvif_service_dispatcher_get_services(services, 16);
-  assert_int_equal(result, ONVIF_SUCCESS);
-  assert_null(services[0]); // First service should be NULL
+  assert_int_equal(result, 0); // get_services returns count, not success/error code
+  assert_null(services[0]);    // First service should be NULL
 
   // Register a few services
-  onvif_service_registration_t device_registration = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
+  // Use static strings so pointers remain valid (ONVIF_SERVICE_REGISTRATION stores pointers, not
+  // copies)
+  static const char device_name[] = "device";
+  static const char device_ns[] = "http://www.onvif.org/ver10/device/wsdl";
+  static const char media_name[] = "media";
+  static const char media_ns[] = "http://www.onvif.org/ver10/media/wsdl";
+
+  onvif_service_registration_t device_registration =
+    ONVIF_SERVICE_REGISTRATION(device_name, device_ns, test_service_mock_operation, NULL, NULL);
   onvif_service_dispatcher_register_service(&device_registration);
 
-  onvif_service_registration_t media_registration = ONVIF_SERVICE_REGISTRATION(
-    "media", "http://www.onvif.org/ver10/media/wsdl", test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t media_registration =
+    ONVIF_SERVICE_REGISTRATION(media_name, media_ns, test_service_mock_operation, NULL, NULL);
   onvif_service_dispatcher_register_service(&media_registration);
 
   // Get services list
   memset(services, 0, sizeof(services)); // Clear the array first
   result = onvif_service_dispatcher_get_services(services, 16);
-  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_int_equal(result, 2); // get_services returns count (2 services registered)
 
   // Check that our services are in the list
   int device_found = 0;

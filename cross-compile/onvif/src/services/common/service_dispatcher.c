@@ -163,9 +163,6 @@ void onvif_service_dispatcher_cleanup(void) {
 
   pthread_mutex_unlock(&g_dispatcher_mutex);
 
-  // Destroy mutex after cleanup is complete
-  pthread_mutex_destroy(&g_dispatcher_mutex);
-
   platform_log_info("Service dispatcher cleanup completed");
 }
 
