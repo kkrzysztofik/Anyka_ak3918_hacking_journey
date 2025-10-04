@@ -57,6 +57,13 @@ const test_suite_t g_test_suites[] = {
    .setup = gsoap_core_suite_setup,
    .teardown = gsoap_core_suite_teardown},
 
+  {.name = "gsoap-response",
+   .full_name = "gSOAP Response Generation",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_gsoap_response_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
   // Service tests
   {.name = "service-dispatcher",
    .full_name = "Service Dispatcher",

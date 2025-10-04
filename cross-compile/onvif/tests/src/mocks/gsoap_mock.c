@@ -11,6 +11,7 @@
 #include <stddef.h>
 
 #include "cmocka_wrapper.h"
+#include "protocol/gsoap/onvif_gsoap_response.h"
 
 /* ============================================================================
  * External Real Function Declarations
@@ -28,13 +29,15 @@ extern const char* __real_onvif_gsoap_get_error(const onvif_gsoap_context_t* ctx
 extern const char* __real_onvif_gsoap_get_response_data(const onvif_gsoap_context_t* ctx);
 extern size_t __real_onvif_gsoap_get_response_length(const onvif_gsoap_context_t* ctx);
 extern int __real_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
-                                                               const char* service_name,
-                                                               const char* operation_name,
-                                                               void* callback, void* user_data);
+                                                              onvif_response_callback_t callback,
+                                                              void* user_data);
 extern int __real_onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx,
-                                                       const char* fault_code,
-                                                       const char* fault_string,
-                                                       const char* fault_detail);
+                                                      const char* fault_code,
+                                                      const char* fault_string,
+                                                      const char* fault_actor,
+                                                      const char* fault_detail,
+                                                      char* output_buffer,
+                                                      size_t buffer_size);
 
 /* ============================================================================
  * Conditional Mock/Real Function Control
@@ -124,16 +127,12 @@ size_t __wrap_onvif_gsoap_get_response_length(const onvif_gsoap_context_t* ctx) 
  * ============================================================================ */
 
 int __wrap_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
-                                                       const char* service_name,
-                                                       const char* operation_name, void* callback,
+                                                       onvif_response_callback_t callback,
                                                        void* user_data) {
   if (g_use_real_functions) {
-    return __real_onvif_gsoap_generate_response_with_callback(ctx, service_name, operation_name,
-                                                              callback, user_data);
+    return __real_onvif_gsoap_generate_response_with_callback(ctx, callback, user_data);
   }
 
-  check_expected_ptr(service_name);
-  check_expected_ptr(operation_name);
   check_expected_ptr(callback);
   check_expected_ptr(user_data);
   function_called();
@@ -141,15 +140,20 @@ int __wrap_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ct
 }
 
 int __wrap_onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code,
-                                               const char* fault_string,
-                                               const char* fault_detail) {
+                                               const char* fault_string, const char* fault_actor,
+                                               const char* fault_detail, char* output_buffer,
+                                               size_t buffer_size) {
   if (g_use_real_functions) {
-    return __real_onvif_gsoap_generate_fault_response(ctx, fault_code, fault_string, fault_detail);
+    return __real_onvif_gsoap_generate_fault_response(ctx, fault_code, fault_string, fault_actor,
+                                                      fault_detail, output_buffer, buffer_size);
   }
 
   check_expected_ptr(fault_code);
   check_expected_ptr(fault_string);
+  check_expected_ptr(fault_actor);
   check_expected_ptr(fault_detail);
+  check_expected_ptr(output_buffer);
+  check_expected(buffer_size);
   function_called();
   return (int)mock();
 }

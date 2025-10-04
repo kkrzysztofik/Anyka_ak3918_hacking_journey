@@ -11,7 +11,7 @@
 #include <stdbool.h>
 
 #include "cmocka_wrapper.h"
-
+#include "protocol/gsoap/onvif_gsoap_response.h"
 
 // Forward declare gSOAP functions without pulling in full headers
 // to avoid conflicts with CMocka macros
@@ -81,15 +81,12 @@ size_t __wrap_onvif_gsoap_get_response_length(const onvif_gsoap_context_t* ctx);
 /**
  * @brief Wrapped onvif_gsoap_generate_response_with_callback function
  * @param ctx gSOAP context
- * @param service_name Service name (expected via expect_string)
- * @param operation_name Operation name (expected via expect_string)
  * @param callback Response generation callback (expected via expect_any)
  * @param user_data User data passed to callback (expected via expect_any)
  * @return Mock return value configured via will_return()
  */
 int __wrap_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
-                                                       const char* service_name,
-                                                       const char* operation_name, void* callback,
+                                                       onvif_response_callback_t callback,
                                                        void* user_data);
 
 /**
@@ -97,12 +94,16 @@ int __wrap_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ct
  * @param ctx gSOAP context
  * @param fault_code Fault code string (expected via expect_string)
  * @param fault_string Fault string (expected via expect_string)
+ * @param fault_actor Fault actor string (expected via expect_string)
  * @param fault_detail Fault detail (expected via expect_any)
+ * @param output_buffer Output buffer for fault response
+ * @param buffer_size Size of output buffer
  * @return Mock return value configured via will_return()
  */
 int __wrap_onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code,
-                                               const char* fault_string,
-                                               const char* fault_detail);
+                                               const char* fault_string, const char* fault_actor,
+                                               const char* fault_detail, char* output_buffer,
+                                               size_t buffer_size);
 
 /* ============================================================================
  * Conditional Mock/Real Function Control

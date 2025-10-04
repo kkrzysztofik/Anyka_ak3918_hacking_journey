@@ -58,6 +58,7 @@ const struct CMUnitTest* get_logging_utils_unit_tests(size_t* count);
 const struct CMUnitTest* get_http_auth_unit_tests(size_t* count);
 const struct CMUnitTest* get_http_metrics_unit_tests(size_t* count);
 const struct CMUnitTest* get_gsoap_protocol_unit_tests(size_t* count);
+const struct CMUnitTest* get_gsoap_response_unit_tests(size_t* count);
 const struct CMUnitTest* get_service_dispatcher_unit_tests(size_t* count);
 const struct CMUnitTest* get_device_service_unit_tests(size_t* count);
 const struct CMUnitTest* get_ptz_service_unit_tests(size_t* count);
