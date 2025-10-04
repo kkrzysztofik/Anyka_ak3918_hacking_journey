@@ -73,18 +73,6 @@
 #define SOAP_FAULT_RECEIVER "soap:Receiver"
 #define SOAP_FAULT_SENDER   "soap:Sender"
 
-/* ONVIF Service Namespaces */
-#define ONVIF_DEVICE_NS  "http://www.onvif.org/ver10/device/wsdl"
-#define ONVIF_MEDIA_NS   "http://www.onvif.org/ver10/media/wsdl"
-#define ONVIF_PTZ_NS     "http://www.onvif.org/ver20/ptz/wsdl"
-#define ONVIF_IMAGING_NS "http://www.onvif.org/ver20/imaging/wsdl"
-
-/* SOAP Response Templates */
-#define ONVIF_SOAP_IMAGING_SET_SETTINGS_OK       "<SetImagingSettings>OK</SetImagingSettings>"
-#define ONVIF_SOAP_IMAGING_SET_SETTINGS_FAIL     "<SetImagingSettings>FAIL</SetImagingSettings>"
-#define ONVIF_SOAP_IMAGING_GET_OPTIONS_RESPONSE  "<GetOptions>Options</GetOptions>"
-#define ONVIF_SOAP_IMAGING_GET_SETTINGS_RESPONSE "<GetImagingSettings>Settings</GetImagingSettings>"
-
 /* WS-Discovery Constants */
 #define WSD_HELLO_INTERVAL_SECONDS 300
 #define WSD_HELLO_TEMPLATE         "<Hello>%s-%s-%s-%d</Hello>"

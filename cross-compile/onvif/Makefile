@@ -80,6 +80,7 @@ SRCS := \
 	src/core/lifecycle/signal_lifecycle.c \
 	src/services/common/onvif_service_common.c \
 	src/services/common/service_dispatcher.c \
+	src/services/common/transport_types.c \
 	src/services/device/onvif_device.c \
 	src/services/media/onvif_media.c \
 	src/services/ptz/onvif_ptz.c \

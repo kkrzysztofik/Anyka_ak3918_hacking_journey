@@ -15,6 +15,7 @@
 #include "mocks/gsoap_mock.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
 #include "protocol/gsoap/onvif_gsoap_media.h"
+#include "services/common/transport_types.h"
 #include "utils/error/error_handling.h"
 #include "utils/error/error_translation.h"
 #include "utils/test_gsoap_utils.h"
@@ -142,7 +143,7 @@ void test_unit_onvif_gsoap_parse_get_stream_uri(void** state) {
   assert_non_null(request->StreamSetup);
   assert_non_null(request->StreamSetup->Transport);
   // Protocol is an enum, not a pointer
-  assert_int_equal(request->StreamSetup->Transport->Protocol, 0); // RTSP = 0
+  assert_int_equal(request->StreamSetup->Transport->Protocol, ONVIF_TRANSPORT_RTSP); // RTSP
 
   // Cleanup
   onvif_gsoap_cleanup(&ctx);
