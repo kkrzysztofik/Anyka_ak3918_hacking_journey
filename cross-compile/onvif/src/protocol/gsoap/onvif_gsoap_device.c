@@ -12,7 +12,7 @@
  * 2. Verify request parsing is initialized
  * 3. Set operation name and start timing
  * 4. Allocate gSOAP structure using soap_new__tds__[Operation]()
- * 5. Deserialize SOAP request using soap_read__tds__[Operation]()
+ * 5. Deserialize SOAP request using soap_get__tds__[Operation]()
  * 6. Record completion time
  *
  * Note: Some Device operations (GetDeviceInformation, GetSystemDateAndTime,
@@ -27,8 +27,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "generated/soapH.h"
+#include "platform/platform.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
 #include "utils/common/time_utils.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 
 /* ============================================================================
  * Helper Functions - Response Callbacks
@@ -282,26 +286,13 @@ int system_reboot_response_callback(struct soap* soap, void* user_data) {
  */
 int onvif_gsoap_parse_get_device_information(onvif_gsoap_context_t* ctx,
                                              struct _tds__GetDeviceInformation** out) {
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+  /* 1. Validate context and begin parse operation */
+  int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "GetDeviceInformation", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "GetDeviceInformation";
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
-  /* 4. Allocate structure using gSOAP managed memory */
+  /* 2. Allocate GetDeviceInformation structure using gSOAP managed memory */
   *out = soap_new__tds__GetDeviceInformation(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -309,16 +300,24 @@ int onvif_gsoap_parse_get_device_information(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__tds__GetDeviceInformation(&ctx->soap, *out) != SOAP_OK) {
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
+    *out = NULL;
+    return result;
+  }
+
+  /* 4. Parse the actual GetDeviceInformation structure */
+  struct _tds__GetDeviceInformation* result_ptr = soap_get__tds__GetDeviceInformation(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse GetDeviceInformation SOAP request");
+                          "Failed to parse GetDeviceInformation structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   return ONVIF_SUCCESS;
 }
@@ -334,26 +333,13 @@ int onvif_gsoap_parse_get_device_information(onvif_gsoap_context_t* ctx,
  */
 int onvif_gsoap_parse_get_capabilities(onvif_gsoap_context_t* ctx,
                                        struct _tds__GetCapabilities** out) {
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+  /* 1. Validate context and begin parse operation */
+  int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "GetCapabilities", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "GetCapabilities";
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
-  /* 4. Allocate structure using gSOAP managed memory */
+  /* 2. Allocate GetCapabilities structure using gSOAP managed memory */
   *out = soap_new__tds__GetCapabilities(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -361,16 +347,24 @@ int onvif_gsoap_parse_get_capabilities(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__tds__GetCapabilities(&ctx->soap, *out) != SOAP_OK) {
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
+    *out = NULL;
+    return result;
+  }
+
+  /* 4. Parse the actual GetCapabilities structure */
+  struct _tds__GetCapabilities* result_ptr = soap_get__tds__GetCapabilities(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse GetCapabilities SOAP request");
+                          "Failed to parse GetCapabilities structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   return ONVIF_SUCCESS;
 }
@@ -386,26 +380,13 @@ int onvif_gsoap_parse_get_capabilities(onvif_gsoap_context_t* ctx,
  */
 int onvif_gsoap_parse_get_system_date_and_time(onvif_gsoap_context_t* ctx,
                                                struct _tds__GetSystemDateAndTime** out) {
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+  /* 1. Validate context and begin parse operation */
+  int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "GetSystemDateAndTime", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "GetSystemDateAndTime";
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
-  /* 4. Allocate structure using gSOAP managed memory */
+  /* 2. Allocate GetSystemDateAndTime structure using gSOAP managed memory */
   *out = soap_new__tds__GetSystemDateAndTime(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -413,16 +394,24 @@ int onvif_gsoap_parse_get_system_date_and_time(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__tds__GetSystemDateAndTime(&ctx->soap, *out) != SOAP_OK) {
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
+    *out = NULL;
+    return result;
+  }
+
+  /* 4. Parse the actual GetSystemDateAndTime structure */
+  struct _tds__GetSystemDateAndTime* result_ptr = soap_get__tds__GetSystemDateAndTime(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse GetSystemDateAndTime SOAP request");
+                          "Failed to parse GetSystemDateAndTime structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   return ONVIF_SUCCESS;
 }
@@ -437,26 +426,13 @@ int onvif_gsoap_parse_get_system_date_and_time(onvif_gsoap_context_t* ctx,
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_system_reboot(onvif_gsoap_context_t* ctx, struct _tds__SystemReboot** out) {
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+  /* 1. Validate context and begin parse operation */
+  int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "SystemReboot", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "SystemReboot";
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
-  /* 4. Allocate structure using gSOAP managed memory */
+  /* 2. Allocate SystemReboot structure using gSOAP managed memory */
   *out = soap_new__tds__SystemReboot(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -464,16 +440,24 @@ int onvif_gsoap_parse_system_reboot(onvif_gsoap_context_t* ctx, struct _tds__Sys
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__tds__SystemReboot(&ctx->soap, *out) != SOAP_OK) {
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
+    *out = NULL;
+    return result;
+  }
+
+  /* 4. Parse the actual SystemReboot structure */
+  struct _tds__SystemReboot* result_ptr = soap_get__tds__SystemReboot(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse SystemReboot SOAP request");
+                          "Failed to parse SystemReboot structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   return ONVIF_SUCCESS;
 }
