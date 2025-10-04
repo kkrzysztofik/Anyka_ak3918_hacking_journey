@@ -357,20 +357,41 @@ int onvif_gsoap_parse_soap_envelope(onvif_gsoap_context_t* ctx, const char* func
  * @brief Finalize SOAP envelope parsing and complete operation timing
  * @param ctx Context to finalize
  */
-void onvif_gsoap_finalize_parse(onvif_gsoap_context_t* ctx) {
+int onvif_gsoap_finalize_parse(onvif_gsoap_context_t* ctx) {
   if (!ctx) {
-    return;
+    return ONVIF_ERROR_INVALID;
   }
 
   platform_log_debug("onvif_gsoap_finalize_parse: Completing SOAP parsing sequence");
 
-  /* Complete the parsing sequence */
-  soap_body_end_in(&ctx->soap);
-  soap_envelope_end_in(&ctx->soap);
-  soap_end_recv(&ctx->soap);
+  /* Complete the parsing sequence - check return values for errors */
+  int soap_result = soap_body_end_in(&ctx->soap);
+  if (soap_result != SOAP_OK) {
+    platform_log_debug("onvif_gsoap_finalize_parse: soap_body_end_in failed: %d", soap_result);
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
+                          "Failed to finalize SOAP body parsing");
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  soap_result = soap_envelope_end_in(&ctx->soap);
+  if (soap_result != SOAP_OK) {
+    platform_log_debug("onvif_gsoap_finalize_parse: soap_envelope_end_in failed: %d", soap_result);
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
+                          "Failed to finalize SOAP envelope parsing");
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  soap_result = soap_end_recv(&ctx->soap);
+  if (soap_result != SOAP_OK) {
+    platform_log_debug("onvif_gsoap_finalize_parse: soap_end_recv failed: %d", soap_result);
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
+                          "Failed to finalize SOAP receive");
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
 
   /* Record parse completion time */
   ctx->request_state.parse_end_time = get_timestamp_us();
 
   platform_log_debug("onvif_gsoap_finalize_parse: Parsing finalized successfully");
+  return ONVIF_SUCCESS;
 }

@@ -65,7 +65,7 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
 
   /* 4. Parse the actual GetImagingSettings structure */
   struct _timg__GetImagingSettings* result_ptr = soap_get__timg__GetImagingSettings(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GetImagingSettings structure");
@@ -73,7 +73,10 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -114,7 +117,7 @@ int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
 
   /* 4. Parse the actual SetImagingSettings structure */
   struct _timg__SetImagingSettings* result_ptr = soap_get__timg__SetImagingSettings(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse SetImagingSettings structure");
@@ -122,7 +125,10 @@ int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }

@@ -141,10 +141,12 @@ int onvif_gsoap_parse_soap_envelope(onvif_gsoap_context_t* ctx, const char* func
 /**
  * @brief Finalize SOAP envelope parsing and complete operation timing
  * @param ctx Context to finalize
+ * @return ONVIF_SUCCESS on success, error code on failure
  * @note Executes: soap_body_end_in → soap_envelope_end_in → soap_end_recv
  * @note Records parse_end_time for performance tracking
+ * @note Validates XML completeness and structure during finalization
  */
-void onvif_gsoap_finalize_parse(onvif_gsoap_context_t* ctx);
+int onvif_gsoap_finalize_parse(onvif_gsoap_context_t* ctx);
 
 /**
  * @brief Set error context with detailed information

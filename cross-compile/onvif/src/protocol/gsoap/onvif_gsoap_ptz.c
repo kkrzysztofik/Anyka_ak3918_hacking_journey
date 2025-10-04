@@ -64,7 +64,7 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _tptz__GetNod
 
   /* 4. Parse the actual GetNodes structure */
   struct _tptz__GetNodes* result_ptr = soap_get__tptz__GetNodes(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GetNodes structure");
@@ -72,7 +72,10 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _tptz__GetNod
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -111,7 +114,7 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
 
   /* 4. Parse the actual AbsoluteMove structure */
   struct _tptz__AbsoluteMove* result_ptr = soap_get__tptz__AbsoluteMove(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse AbsoluteMove structure");
@@ -119,7 +122,10 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -157,7 +163,7 @@ int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _tptz__GetP
 
   /* 4. Parse the actual GetPresets structure */
   struct _tptz__GetPresets* result_ptr = soap_get__tptz__GetPresets(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GetPresets structure");
@@ -165,7 +171,10 @@ int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _tptz__GetP
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -204,7 +213,7 @@ int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _tptz__SetPr
 
   /* 4. Parse the actual SetPreset structure */
   struct _tptz__SetPreset* result_ptr = soap_get__tptz__SetPreset(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse SetPreset structure");
@@ -212,7 +221,10 @@ int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _tptz__SetPr
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -251,7 +263,7 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _tptz__Goto
 
   /* 4. Parse the actual GotoPreset structure */
   struct _tptz__GotoPreset* result_ptr = soap_get__tptz__GotoPreset(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GotoPreset structure");
@@ -259,7 +271,10 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _tptz__Goto
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -299,7 +314,7 @@ int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
 
   /* 4. Parse the actual RemovePreset structure */
   struct _tptz__RemovePreset* result_ptr = soap_get__tptz__RemovePreset(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse RemovePreset structure");
@@ -307,7 +322,10 @@ int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }

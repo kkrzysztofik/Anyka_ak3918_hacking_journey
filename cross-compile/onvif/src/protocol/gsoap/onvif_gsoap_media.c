@@ -67,7 +67,7 @@ int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct _trt__GetP
   /* 4. Parse the actual GetProfiles structure */
   platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_get__trt__GetProfiles");
   struct _trt__GetProfiles* result_ptr = soap_get__trt__GetProfiles(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     int soap_result = ctx->soap.error;
     platform_log_debug("onvif_gsoap_parse_get_profiles: soap_get___trt__GetProfiles failed: %d",
                        soap_result);
@@ -80,7 +80,10 @@ int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct _trt__GetP
   platform_log_debug("onvif_gsoap_parse_get_profiles: gSOAP deserialization succeeded");
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   platform_log_debug("onvif_gsoap_parse_get_profiles: GetProfiles parsing completed successfully");
   return ONVIF_SUCCESS;
@@ -119,7 +122,7 @@ int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx, struct _trt__Ge
 
   /* 4. Parse the actual GetStreamUri structure */
   struct _trt__GetStreamUri* result_ptr = soap_get__trt__GetStreamUri(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GetStreamUri structure");
@@ -127,7 +130,10 @@ int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx, struct _trt__Ge
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -165,7 +171,7 @@ int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx, struct _trt__Cr
 
   /* 4. Parse the actual CreateProfile structure */
   struct _trt__CreateProfile* result_ptr = soap_get__trt__CreateProfile(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse CreateProfile structure");
@@ -173,7 +179,10 @@ int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx, struct _trt__Cr
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -211,7 +220,7 @@ int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx, struct _trt__De
 
   /* 4. Parse the actual DeleteProfile structure */
   struct _trt__DeleteProfile* result_ptr = soap_get__trt__DeleteProfile(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse DeleteProfile structure");
@@ -219,7 +228,10 @@ int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx, struct _trt__De
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -260,7 +272,7 @@ int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
   /* 4. Parse the actual SetVideoSourceConfiguration structure */
   struct _trt__SetVideoSourceConfiguration* result_ptr =
     soap_get__trt__SetVideoSourceConfiguration(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse SetVideoSourceConfiguration structure");
@@ -268,7 +280,10 @@ int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -310,7 +325,7 @@ int onvif_gsoap_parse_set_video_encoder_config(onvif_gsoap_context_t* ctx,
   /* 4. Parse the actual SetVideoEncoderConfiguration structure */
   struct _trt__SetVideoEncoderConfiguration* result_ptr =
     soap_get__trt__SetVideoEncoderConfiguration(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse SetVideoEncoderConfiguration structure");
@@ -318,7 +333,10 @@ int onvif_gsoap_parse_set_video_encoder_config(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }

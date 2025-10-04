@@ -309,7 +309,7 @@ int onvif_gsoap_parse_get_device_information(onvif_gsoap_context_t* ctx,
 
   /* 4. Parse the actual GetDeviceInformation structure */
   struct _tds__GetDeviceInformation* result_ptr = soap_get__tds__GetDeviceInformation(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GetDeviceInformation structure");
@@ -356,7 +356,7 @@ int onvif_gsoap_parse_get_capabilities(onvif_gsoap_context_t* ctx,
 
   /* 4. Parse the actual GetCapabilities structure */
   struct _tds__GetCapabilities* result_ptr = soap_get__tds__GetCapabilities(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GetCapabilities structure");
@@ -403,7 +403,7 @@ int onvif_gsoap_parse_get_system_date_and_time(onvif_gsoap_context_t* ctx,
 
   /* 4. Parse the actual GetSystemDateAndTime structure */
   struct _tds__GetSystemDateAndTime* result_ptr = soap_get__tds__GetSystemDateAndTime(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse GetSystemDateAndTime structure");
@@ -449,7 +449,7 @@ int onvif_gsoap_parse_system_reboot(onvif_gsoap_context_t* ctx, struct _tds__Sys
 
   /* 4. Parse the actual SystemReboot structure */
   struct _tds__SystemReboot* result_ptr = soap_get__tds__SystemReboot(&ctx->soap, *out, NULL, NULL);
-  if (!result_ptr) {
+  if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
                           "Failed to parse SystemReboot structure");
