@@ -44,11 +44,9 @@ int onvif_gsoap_init(onvif_gsoap_context_t* ctx) {
   // Set SOAP version to 1.2 for ONVIF compliance
   soap_set_version(&ctx->soap, 2);
 
-  // Enable strict XML and namespace validation for ONVIF compliance
-  // SOAP_XML_STRICT: Enforce strict namespace and structure validation
-  // SOAP_C_UTFSTRING: Use UTF-8 strings
-  // SOAP_XML_INDENT: Pretty-print output XML
-  soap_set_mode(&ctx->soap, SOAP_C_UTFSTRING | SOAP_XML_INDENT | SOAP_XML_STRICT);
+  // Parsing is permissive - validates XML syntax only
+  // Business logic and namespace validation happens in service handlers
+  soap_set_mode(&ctx->soap, SOAP_C_UTFSTRING | SOAP_XML_INDENT);
 
   ctx->soap.namespaces = namespaces;
 

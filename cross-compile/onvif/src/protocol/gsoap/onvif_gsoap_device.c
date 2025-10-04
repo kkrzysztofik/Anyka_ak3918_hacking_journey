@@ -317,7 +317,10 @@ int onvif_gsoap_parse_get_device_information(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -364,7 +367,10 @@ int onvif_gsoap_parse_get_capabilities(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -411,7 +417,10 @@ int onvif_gsoap_parse_get_system_date_and_time(onvif_gsoap_context_t* ctx,
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -457,7 +466,10 @@ int onvif_gsoap_parse_system_reboot(onvif_gsoap_context_t* ctx, struct _tds__Sys
   }
 
   /* 5. Finalize SOAP parsing and complete timing */
-  onvif_gsoap_finalize_parse(ctx);
+  result = onvif_gsoap_finalize_parse(ctx);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
 
   return ONVIF_SUCCESS;
 }
