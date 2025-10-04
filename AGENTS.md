@@ -48,6 +48,16 @@ will_return(__wrap_platform_init, PLATFORM_SUCCESS);
 expect_value(__wrap_platform_ptz_move, pan, 90.0f);
 ```
 
+## Mandatory Document Loading Instructions
+
+**CRITICAL**: When working on tasks covered by any of the linked documentation files below, the AGENT MUST:
+
+1. **Load the relevant document** using the appropriate tool (e.g., `read_file`, `mcp_serena_read_memory`, or other file reading tools)
+2. **Inform the user** that the document has been loaded and is being used to guide the work
+3. **Follow the guidelines** contained in the loaded document throughout the task execution
+
+This ensures consistent application of project standards and reduces context usage by referencing focused, purpose-built documentation modules.
+
 ## Documentation Structure
 
 This documentation is organized into focused modules to reduce context usage:
