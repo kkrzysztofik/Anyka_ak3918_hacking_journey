@@ -40,12 +40,16 @@ int onvif_gsoap_init(onvif_gsoap_context_t* ctx) {
 
   platform_log_debug("onvif_gsoap_init: Initializing embedded soap context");
   soap_init(&ctx->soap);
-  soap_set_mode(&ctx->soap, SOAP_C_UTFSTRING | SOAP_XML_INDENT);
 
   // Set SOAP version to 1.2 for ONVIF compliance
   soap_set_version(&ctx->soap, 2);
 
-  soap_set_mode(&ctx->soap, SOAP_C_UTFSTRING | SOAP_XML_INDENT);
+  // Enable strict XML and namespace validation for ONVIF compliance
+  // SOAP_XML_STRICT: Enforce strict namespace and structure validation
+  // SOAP_C_UTFSTRING: Use UTF-8 strings
+  // SOAP_XML_INDENT: Pretty-print output XML
+  soap_set_mode(&ctx->soap, SOAP_C_UTFSTRING | SOAP_XML_INDENT | SOAP_XML_STRICT);
+
   ctx->soap.namespaces = namespaces;
 
   platform_log_debug("onvif_gsoap_init: Initialization completed successfully");
