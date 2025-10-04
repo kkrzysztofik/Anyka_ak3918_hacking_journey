@@ -8,12 +8,9 @@
 #ifndef CONFIG_MOCK_H
 #define CONFIG_MOCK_H
 
-#include <setjmp.h>
-#include <stdarg.h>
-#include <stddef.h>
+#include <stdbool.h>
 
-#include <cmocka.h>
-
+#include "cmocka_wrapper.h"
 #include "core/config/config.h"
 
 #ifdef __cplusplus
@@ -59,7 +56,7 @@ config_validation_result_t __wrap_config_validate(const config_manager_t* config
  * @return Result code (configured via will_return)
  */
 int __wrap_config_get_value(const config_manager_t* config, config_section_t section,
-                             const char* key, void* value, size_t value_size);
+                            const char* key, void* value, size_t value_size);
 
 /**
  * @brief CMocka wrapped configuration set value
@@ -71,7 +68,7 @@ int __wrap_config_get_value(const config_manager_t* config, config_section_t sec
  * @return Result code (configured via will_return)
  */
 int __wrap_config_set_value(config_manager_t* config, config_section_t section, const char* key,
-                             const void* value, size_t value_size);
+                            const void* value, size_t value_size);
 
 /**
  * @brief CMocka wrapped configuration reset to defaults
@@ -88,7 +85,7 @@ int __wrap_config_reset_to_defaults(config_manager_t* config);
  * @return Parameter pointer (configured via will_return)
  */
 const config_parameter_t* __wrap_config_get_parameter(const config_manager_t* config,
-                                                       config_section_t section, const char* key);
+                                                      config_section_t section, const char* key);
 
 /**
  * @brief CMocka wrapped configuration cleanup
@@ -104,6 +101,16 @@ void __wrap_config_cleanup(config_manager_t* config);
  * @return Result code (configured via will_return)
  */
 int __wrap_config_get_summary(const config_manager_t* config, char* buffer, size_t buffer_size);
+
+/* ============================================================================
+ * Conditional Mock/Real Function Control
+ * ============================================================================ */
+
+/**
+ * @brief Control whether to use real functions or mocks
+ * @param use_real true to use real functions, false for mocks
+ */
+void config_mock_use_real_function(bool use_real);
 
 /* ============================================================================
  * CMocka Test Helper Macros
@@ -177,8 +184,7 @@ int __wrap_config_get_summary(const config_manager_t* config, char* buffer, size
 /**
  * @brief Set up expectations for successful configuration cleanup
  */
-#define EXPECT_CONFIG_CLEANUP()                                                                    \
-  expect_any(__wrap_config_cleanup, config)
+#define EXPECT_CONFIG_CLEANUP() expect_any(__wrap_config_cleanup, config)
 
 #ifdef __cplusplus
 }

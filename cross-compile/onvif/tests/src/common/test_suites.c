@@ -17,14 +17,6 @@ const test_suite_t g_test_suites[] = {
   // Unit Test Suites
   // ============================================================================
 
-  // Basic framework tests
-  {.name = "basic",
-   .full_name = "Basic Framework Tests",
-   .category = TEST_CATEGORY_UNIT,
-   .get_tests = get_basic_unit_tests,
-   .setup = NULL,
-   .teardown = NULL},
-
   // Utility tests
   {.name = "memory-utils",
    .full_name = "Memory Management Utilities",

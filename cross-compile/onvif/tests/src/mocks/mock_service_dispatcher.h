@@ -8,6 +8,7 @@
 #ifndef MOCK_SERVICE_DISPATCHER_H
 #define MOCK_SERVICE_DISPATCHER_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "services/common/service_dispatcher.h"
@@ -41,7 +42,17 @@ void __wrap_onvif_service_dispatcher_cleanup(void);
  * @brief CMocka wrapped version of onvif_service_dispatcher_dispatch
  */
 int __wrap_onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name,
-                                              void* request, void* response);
+                                             void* request, void* response);
+
+/* ============================================================================
+ * Conditional Mock/Real Function Control
+ * ============================================================================ */
+
+/**
+ * @brief Control whether to use real functions or mocks
+ * @param use_real true to use real functions, false for mocks
+ */
+void service_dispatcher_mock_use_real_function(bool use_real);
 
 /* ============================================================================
  * Mock State Management

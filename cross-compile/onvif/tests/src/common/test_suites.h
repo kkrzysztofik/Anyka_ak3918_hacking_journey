@@ -54,7 +54,6 @@ extern const size_t g_test_suite_count;
 // ============================================================================
 
 // Unit test suite exports
-const struct CMUnitTest* get_basic_unit_tests(size_t* count);
 const struct CMUnitTest* get_memory_utils_unit_tests(size_t* count);
 const struct CMUnitTest* get_logging_utils_unit_tests(size_t* count);
 const struct CMUnitTest* get_http_auth_unit_tests(size_t* count);

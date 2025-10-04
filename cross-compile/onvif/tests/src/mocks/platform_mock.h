@@ -8,13 +8,7 @@
 #ifndef PLATFORM_MOCK_H
 #define PLATFORM_MOCK_H
 
-#include <setjmp.h>
-#include <stdarg.h>
-#include <stddef.h>
-#include <time.h>
-
-#include <cmocka.h>
-
+#include "cmocka_wrapper.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
 

@@ -8,14 +8,11 @@
 #ifndef NETWORK_MOCK_H
 #define NETWORK_MOCK_H
 
-#include <setjmp.h>
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdint.h>
+#include <stdbool.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 
-#include <cmocka.h>
+#include "cmocka_wrapper.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -148,6 +145,16 @@ int __wrap_setsockopt(int sockfd, int level, int optname, const void* optval, so
 int __wrap_getsockopt(int sockfd, int level, int optname, void* optval, socklen_t* optlen);
 
 /* ============================================================================
+ * Conditional Mock/Real Function Control
+ * ============================================================================ */
+
+/**
+ * @brief Control whether to use real functions or mocks
+ * @param use_real true to use real functions, false for mocks
+ */
+void network_mock_use_real_function(bool use_real);
+
+/* ============================================================================
  * CMocka Test Helper Macros - Socket Functions
  * ============================================================================ */
 
@@ -158,7 +165,7 @@ int __wrap_getsockopt(int sockfd, int level, int optname, void* optval, socklen_
  * @param protocol Expected protocol
  * @param fd File descriptor to return
  */
-#define EXPECT_SOCKET_SUCCESS(domain, type, protocol, fd)                                         \
+#define EXPECT_SOCKET_SUCCESS(domain, type, protocol, fd)                                          \
   expect_value(__wrap_socket, domain, domain);                                                     \
   expect_value(__wrap_socket, type, type);                                                         \
   expect_value(__wrap_socket, protocol, protocol);                                                 \

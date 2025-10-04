@@ -5,11 +5,11 @@
  * @date 2025
  */
 
+#include "platform_mock.h"
+
 #include <stdarg.h>
 #include <stddef.h>
 #include <string.h>
-
-#include "platform_mock.h"
 
 /* ============================================================================
  * Core Platform Functions

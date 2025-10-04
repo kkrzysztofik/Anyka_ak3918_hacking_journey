@@ -7,20 +7,44 @@
 
 #include "ptz_adapter_mock.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "services/ptz/onvif_ptz.h"
+
+/* ============================================================================
+ * Conditional Mock/Real Function Control
+ * ============================================================================ */
+
+static bool g_use_real_functions = false;
+
+/**
+ * @brief Control whether to use real functions or mocks
+ * @param use_real true to use real functions, false for mocks
+ */
+void ptz_adapter_mock_use_real_function(bool use_real) {
+  g_use_real_functions = use_real;
+}
 
 /* ============================================================================
  * PTZ Adapter Initialization and Cleanup
  * ============================================================================ */
 
 platform_result_t __wrap_ptz_adapter_init(void) {
+  if (g_use_real_functions) {
+    return __real_ptz_adapter_init();
+  }
+
   function_called();
   return (platform_result_t)mock();
 }
 
 void __wrap_ptz_adapter_cleanup(void) {
+  if (g_use_real_functions) {
+    __real_ptz_adapter_cleanup();
+    return;
+  }
+
   function_called();
 }
 
@@ -29,6 +53,10 @@ void __wrap_ptz_adapter_cleanup(void) {
  * ============================================================================ */
 
 platform_result_t __wrap_ptz_adapter_get_status(struct ptz_device_status* status) {
+  if (g_use_real_functions) {
+    return __real_ptz_adapter_get_status(status);
+  }
+
   check_expected_ptr(status);
   function_called();
 
@@ -47,7 +75,11 @@ platform_result_t __wrap_ptz_adapter_get_status(struct ptz_device_status* status
  * ============================================================================ */
 
 platform_result_t __wrap_ptz_adapter_absolute_move(int pan_degrees, int tilt_degrees,
-                                                    int move_speed) {
+                                                   int move_speed) {
+  if (g_use_real_functions) {
+    return __real_ptz_adapter_absolute_move(pan_degrees, tilt_degrees, move_speed);
+  }
+
   check_expected(pan_degrees);
   check_expected(tilt_degrees);
   check_expected(move_speed);
@@ -56,7 +88,11 @@ platform_result_t __wrap_ptz_adapter_absolute_move(int pan_degrees, int tilt_deg
 }
 
 platform_result_t __wrap_ptz_adapter_relative_move(int pan_delta_degrees, int tilt_delta_degrees,
-                                                    int move_speed) {
+                                                   int move_speed) {
+  if (g_use_real_functions) {
+    return __real_ptz_adapter_relative_move(pan_delta_degrees, tilt_delta_degrees, move_speed);
+  }
+
   check_expected(pan_delta_degrees);
   check_expected(tilt_delta_degrees);
   check_expected(move_speed);
@@ -65,7 +101,11 @@ platform_result_t __wrap_ptz_adapter_relative_move(int pan_delta_degrees, int ti
 }
 
 platform_result_t __wrap_ptz_adapter_continuous_move(int pan_velocity, int tilt_velocity,
-                                                      int timeout_seconds) {
+                                                     int timeout_seconds) {
+  if (g_use_real_functions) {
+    return __real_ptz_adapter_continuous_move(pan_velocity, tilt_velocity, timeout_seconds);
+  }
+
   check_expected(pan_velocity);
   check_expected(tilt_velocity);
   check_expected(timeout_seconds);
@@ -74,6 +114,10 @@ platform_result_t __wrap_ptz_adapter_continuous_move(int pan_velocity, int tilt_
 }
 
 platform_result_t __wrap_ptz_adapter_stop(void) {
+  if (g_use_real_functions) {
+    return __real_ptz_adapter_stop();
+  }
+
   function_called();
   return (platform_result_t)mock();
 }
@@ -83,6 +127,10 @@ platform_result_t __wrap_ptz_adapter_stop(void) {
  * ============================================================================ */
 
 platform_result_t __wrap_ptz_adapter_set_preset(const char* name, int preset_id) {
+  if (g_use_real_functions) {
+    return __real_ptz_adapter_set_preset(name, preset_id);
+  }
+
   check_expected_ptr(name);
   check_expected(preset_id);
   function_called();
@@ -90,6 +138,10 @@ platform_result_t __wrap_ptz_adapter_set_preset(const char* name, int preset_id)
 }
 
 platform_result_t __wrap_ptz_adapter_goto_preset(int preset_id) {
+  if (g_use_real_functions) {
+    return __real_ptz_adapter_goto_preset(preset_id);
+  }
+
   check_expected(preset_id);
   function_called();
   return (platform_result_t)mock();

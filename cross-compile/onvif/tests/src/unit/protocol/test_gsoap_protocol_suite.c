@@ -5,7 +5,12 @@
  * @date 2025
  */
 
+#include <stdbool.h>
+#include <stddef.h>
+
 #include "cmocka_wrapper.h"
+#include "generated/soapH.h"
+#include "protocol/gsoap/onvif_gsoap_core.h"
 
 // Forward declarations from test_onvif_gsoap.c
 void test_unit_onvif_gsoap_init(void** state);

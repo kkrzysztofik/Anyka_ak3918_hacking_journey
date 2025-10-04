@@ -8,13 +8,11 @@
 #ifndef BUFFER_POOL_MOCK_H
 #define BUFFER_POOL_MOCK_H
 
-#include <setjmp.h>
-#include <stdarg.h>
-#include <stddef.h>
+#include <stdbool.h>
 
-#include <cmocka.h>
-
+#include "cmocka_wrapper.h"
 #include "networking/common/buffer_pool.h"
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -70,6 +68,16 @@ int __wrap_buffer_pool_get_stats(buffer_pool_t* pool, buffer_pool_stats_t* stats
 int __wrap_get_buffer_pool_stats(buffer_pool_stats_t* stats);
 
 /* ============================================================================
+ * Conditional Mock/Real Function Control
+ * ============================================================================ */
+
+/**
+ * @brief Control whether to use real functions or mocks
+ * @param use_real true to use real functions, false for mocks
+ */
+void buffer_pool_mock_use_real_function(bool use_real);
+
+/* ============================================================================
  * CMocka Test Helper Macros
  * ============================================================================ */
 
@@ -91,8 +99,7 @@ int __wrap_get_buffer_pool_stats(buffer_pool_stats_t* stats);
 /**
  * @brief Set up expectations for buffer pool cleanup
  */
-#define EXPECT_BUFFER_POOL_CLEANUP()                                                               \
-  expect_any(__wrap_buffer_pool_cleanup, pool)
+#define EXPECT_BUFFER_POOL_CLEANUP() expect_any(__wrap_buffer_pool_cleanup, pool)
 
 /**
  * @brief Set up expectations for successful buffer pool get

@@ -7,16 +7,26 @@
 
 #include "mock_service_dispatcher.h"
 
-#include <setjmp.h>
-#include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
 
-#include <cmocka.h>
-
-#include "networking/http/http_parser.h"
+#include "cmocka_wrapper.h"
 #include "services/common/service_dispatcher.h"
-#include "utils/error/error_handling.h"
+
+/* ============================================================================
+ * Conditional Mock/Real Function Control
+ * ============================================================================ */
+
+static bool g_use_real_functions = false;
+
+/**
+ * @brief Control whether to use real functions or mocks
+ * @param use_real true to use real functions, false for mocks
+ */
+void service_dispatcher_mock_use_real_function(bool use_real) {
+  g_use_real_functions = use_real;
+}
 
 /* ============================================================================
  * Static State Variables for Call Tracking
@@ -40,6 +50,10 @@ static char g_last_dispatch_operation[256] = {0};
  */
 int __wrap_onvif_service_dispatcher_register_service(
   const onvif_service_registration_t* registration) {
+  if (g_use_real_functions) {
+    return __real_onvif_service_dispatcher_register_service(registration);
+  }
+
   check_expected_ptr(registration);
 
   // Track call and store registration data
@@ -55,6 +69,10 @@ int __wrap_onvif_service_dispatcher_register_service(
  * @brief CMocka wrapped version of onvif_service_dispatcher_unregister_service
  */
 int __wrap_onvif_service_dispatcher_unregister_service(const char* service_name) {
+  if (g_use_real_functions) {
+    return __real_onvif_service_dispatcher_unregister_service(service_name);
+  }
+
   check_expected_ptr(service_name);
 
   // Track call and store service name
@@ -71,6 +89,10 @@ int __wrap_onvif_service_dispatcher_unregister_service(const char* service_name)
  * @brief CMocka wrapped version of onvif_service_dispatcher_init
  */
 int __wrap_onvif_service_dispatcher_init(void) {
+  if (g_use_real_functions) {
+    return __real_onvif_service_dispatcher_init();
+  }
+
   return (int)mock();
 }
 
@@ -78,6 +100,11 @@ int __wrap_onvif_service_dispatcher_init(void) {
  * @brief CMocka wrapped version of onvif_service_dispatcher_cleanup
  */
 void __wrap_onvif_service_dispatcher_cleanup(void) {
+  if (g_use_real_functions) {
+    __real_onvif_service_dispatcher_cleanup();
+    return;
+  }
+
   // No mock return needed for void function
 }
 
@@ -85,7 +112,12 @@ void __wrap_onvif_service_dispatcher_cleanup(void) {
  * @brief CMocka wrapped version of onvif_service_dispatcher_dispatch
  */
 int __wrap_onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name,
-                                              void* request, void* response) {
+                                             void* request, void* response) {
+  if (g_use_real_functions) {
+    return __real_onvif_service_dispatcher_dispatch(service_name, operation_name, request,
+                                                    response);
+  }
+
   check_expected_ptr(service_name);
   check_expected_ptr(operation_name);
   check_expected_ptr(request);

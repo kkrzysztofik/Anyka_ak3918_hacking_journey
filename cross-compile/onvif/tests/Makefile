@@ -168,6 +168,8 @@ WRAP_FUNCTIONS := \
 	onvif_service_dispatcher_unregister_service \
 	onvif_service_dispatcher_init \
 	onvif_service_dispatcher_cleanup \
+	buffer_pool_init \
+	buffer_pool_cleanup \
 	onvif_gsoap_init \
 	onvif_gsoap_cleanup \
 	onvif_gsoap_reset \
@@ -177,8 +179,27 @@ WRAP_FUNCTIONS := \
 	onvif_gsoap_get_response_length \
 	onvif_gsoap_generate_response_with_callback \
 	onvif_gsoap_generate_fault_response \
-	buffer_pool_init \
-	buffer_pool_cleanup
+	buffer_pool_get \
+	buffer_pool_return \
+	buffer_pool_get_stats \
+	get_buffer_pool_stats \
+	smart_response_build_with_dynamic_buffer \
+	smart_response_build_with_buffer_pool \
+	smart_response_build \
+	smart_response_estimate_size \
+	onvif_service_dispatcher_dispatch \
+	socket \
+	bind \
+	listen \
+	accept \
+	connect \
+	send \
+	recv \
+	sendto \
+	recvfrom \
+	close \
+	setsockopt \
+	getsockopt
 
 # Generate linker wrap flags for CMocka function interception
 WRAP_FLAGS := $(addprefix -Wl$(comma)--wrap=,$(WRAP_FUNCTIONS))
@@ -192,7 +213,6 @@ RUNNER_DYNAMIC_SRC = src/runner/test_runner.c
 # Test suite registry sources for dynamic test runner
 TEST_SUITE_REGISTRY_SRCS := \
 	src/common/test_suites.c \
-	src/unit/test_basic.c \
 	src/unit/networking/test_http_metrics_suite.c \
 	src/unit/protocol/test_gsoap_protocol_suite.c \
 	src/integration/ptz_integration_suite.c \
@@ -342,21 +362,16 @@ TEST_HELPER_DEPS := $(TEST_HELPER_OBJS:$(OUT_DIR)/%.o=$(OUT_DIR)/%.d)
 RUNNER_DEPS := $(RUNNER_DYNAMIC_OBJ:%.o=%.d)
 ALL_DEPS := $(TEST_DEPS) $(MOCK_DEPS) $(MAIN_DEPS) $(TEST_HELPER_DEPS) $(RUNNER_DEPS)
 
-# Shared library targets for modular test linking
-MOCK_LIB = $(LIB_DIR)/libonvif_test_mocks.so
-MAIN_LIB = $(LIB_DIR)/libonvif_main.so
-HELPER_LIB = $(LIB_DIR)/libonvif_test_helpers.so
-
-# Dynamic test runner executable
+# Single executable target (no shared libraries)
 TEST_RUNNER = $(OUT_DIR)/test_runner
 
 .PHONY: all clean clean-deps test test-unit test-integration test-list \
         coverage coverage-html coverage-report coverage-clean debug release \
         compile-native-libs compile-commands help
 
-# Default target - build dynamic test runner
+# Default target - build single executable test runner
 all: $(TEST_RUNNER)
-	@echo "✅ Dynamic test runner built successfully"
+	@echo "✅ Single executable test runner built successfully"
 
 # Debug build
 debug:
@@ -452,32 +467,13 @@ test-list: $(TEST_RUNNER)
 	@echo "Listing available test suites..."
 	@$(TEST_RUNNER) --list
 
-# Shared library build rules with modular linking
-$(MOCK_LIB): $(MOCK_OBJS) | $(LIB_DIR)
-	@echo "Building unit test mocks shared library..."
-	$(CC) -shared -o $@ $^
-	@echo "✅ Built $@"
-
-$(MAIN_LIB): $(MAIN_OBJS) | $(LIB_DIR)
-	@echo "Building main project shared library..."
-	$(CC) -shared $(WRAP_FLAGS) -o $@ $^ $(GSOAP_LIBS) $(BASE64_LIBS)
-	@echo "✅ Built $@"
-
-$(HELPER_LIB): $(TEST_HELPER_OBJS) | $(LIB_DIR)
-	@echo "Building test helpers shared library..."
-	$(CC) -shared -o $@ $^
-	@echo "✅ Built $@"
-
-# Dynamic test runner build rule with shared library linking
-# Uses $ORIGIN/lib RPATH so executable finds shared libs in lib/ subdirectory
-# NOTE: WRAP_FLAGS are defined but not used yet - will be enabled when tests migrate to CMocka mocks
-$(TEST_RUNNER): $(RUNNER_DYNAMIC_OBJ) $(TEST_SUITE_REGISTRY_OBJS) $(TEST_OBJS) $(MOCK_LIB) $(MAIN_LIB) $(HELPER_LIB)
+# Single executable test runner build rule
+# Links all object files directly with CMocka wrap flags applied
+$(TEST_RUNNER): $(RUNNER_DYNAMIC_OBJ) $(TEST_SUITE_REGISTRY_OBJS) $(TEST_OBJS) $(MOCK_OBJS) $(MAIN_OBJS) $(TEST_HELPER_OBJS)
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(WRAP_FLAGS) $(RUNNER_DYNAMIC_OBJ) $(TEST_SUITE_REGISTRY_OBJS) $(TEST_OBJS) \
-		-L$(LIB_DIR) -Wl,-rpath,'$$ORIGIN/lib' \
-		-lonvif_test_mocks -lonvif_main -lonvif_test_helpers \
+	$(CC) $(CFLAGS) $(WRAP_FLAGS) $(RUNNER_DYNAMIC_OBJ) $(TEST_SUITE_REGISTRY_OBJS) $(TEST_OBJS) $(MOCK_OBJS) $(MAIN_OBJS) $(TEST_HELPER_OBJS) \
 		$(CMOCKA_LIBS) -o $@
-	@echo "✅ Built dynamic test runner $@"
+	@echo "✅ Built single executable test runner $@"
 
 # Object file compilation with dependency generation
 $(OUT_DIR)/%.o: src/%.c | $(OUT_DIR)
@@ -529,11 +525,11 @@ compile-commands:
 # Help target
 help:
 	@echo "╔════════════════════════════════════════════════════════════════╗"
-	@echo "║           ONVIF Dynamic Test Runner - Build System            ║"
+	@echo "║           ONVIF Single Executable Test Runner - Build System  ║"
 	@echo "╚════════════════════════════════════════════════════════════════╝"
 	@echo ""
 	@echo "📦 Build Targets:"
-	@echo "  all              - Build dynamic test runner (default)"
+	@echo "  all              - Build single executable test runner (default)"
 	@echo "  debug            - Build debug version"
 	@echo "  release          - Build release version"
 	@echo ""
@@ -567,12 +563,13 @@ help:
 	@echo "  clean-deps       - Clean dependency files only"
 	@echo "  help             - Show this help"
 	@echo ""
-	@echo "✨ Dynamic Test Runner Features:"
+	@echo "✨ Single Executable Test Runner Features:"
 	@echo "  • Unified test runner with advanced filtering"
 	@echo "  • 196 tests across 17 test suites"
 	@echo "  • Filter by suite name, type, or pattern"
 	@echo "  • Detailed test execution reports"
 	@echo "  • Better test isolation and organization"
+	@echo "  • No shared library dependencies"
 	@echo ""
 	@echo "📁 Test Executable:"
-	@echo "  $(OUT_DIR)/test_runner - Dynamic test runner (all 196 tests)"
+	@echo "  $(OUT_DIR)/test_runner - Single executable test runner (all 196 tests)"

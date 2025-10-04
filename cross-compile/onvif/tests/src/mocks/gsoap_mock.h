@@ -8,11 +8,10 @@
 #ifndef GSOAP_MOCK_H
 #define GSOAP_MOCK_H
 
-#include <setjmp.h>
-#include <stdarg.h>
-#include <stddef.h>
+#include <stdbool.h>
 
-#include <cmocka.h>
+#include "cmocka_wrapper.h"
+
 
 // Forward declare gSOAP functions without pulling in full headers
 // to avoid conflicts with CMocka macros
@@ -103,7 +102,8 @@ const char* __wrap_onvif_gsoap_get_response_data(void);
 
 /**
  * @brief Wrapped onvif_gsoap_get_response_length function
- * @return Mock return value configured via will_return(__wrap_onvif_gsoap_get_response_length, value)
+ * @return Mock return value configured via will_return(__wrap_onvif_gsoap_get_response_length,
+ * value)
  *
  * Example usage in tests:
  * @code
@@ -124,16 +124,15 @@ size_t __wrap_onvif_gsoap_get_response_length(void);
  * Example usage in tests:
  * @code
  * expect_string(__wrap_onvif_gsoap_generate_response_with_callback, service_name, "Device");
- * expect_string(__wrap_onvif_gsoap_generate_response_with_callback, operation_name, "GetDeviceInformation");
- * expect_any(__wrap_onvif_gsoap_generate_response_with_callback, callback);
- * expect_any(__wrap_onvif_gsoap_generate_response_with_callback, user_data);
+ * expect_string(__wrap_onvif_gsoap_generate_response_with_callback, operation_name,
+ * "GetDeviceInformation"); expect_any(__wrap_onvif_gsoap_generate_response_with_callback,
+ * callback); expect_any(__wrap_onvif_gsoap_generate_response_with_callback, user_data);
  * will_return(__wrap_onvif_gsoap_generate_response_with_callback, ONVIF_SUCCESS);
  * @endcode
  */
 int __wrap_onvif_gsoap_generate_response_with_callback(const char* service_name,
-                                                        const char* operation_name,
-                                                        void* callback,
-                                                        void* user_data);
+                                                       const char* operation_name, void* callback,
+                                                       void* user_data);
 
 /**
  * @brief Wrapped onvif_gsoap_generate_fault_response function
@@ -150,9 +149,18 @@ int __wrap_onvif_gsoap_generate_response_with_callback(const char* service_name,
  * will_return(__wrap_onvif_gsoap_generate_fault_response, ONVIF_SUCCESS);
  * @endcode
  */
-int __wrap_onvif_gsoap_generate_fault_response(const char* fault_code,
-                                                const char* fault_string,
-                                                const char* fault_detail);
+int __wrap_onvif_gsoap_generate_fault_response(const char* fault_code, const char* fault_string,
+                                               const char* fault_detail);
+
+/* ============================================================================
+ * Conditional Mock/Real Function Control
+ * ============================================================================ */
+
+/**
+ * @brief Control whether to use real functions or mocks
+ * @param use_real true to use real functions, false for mocks
+ */
+void gsoap_mock_use_real_function(bool use_real);
 
 #ifdef __cplusplus
 }
