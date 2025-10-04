@@ -26,13 +26,12 @@ typedef enum {
  * Describes a test suite with its name, category, tests, and optional setup/teardown functions.
  */
 typedef struct {
-  const char* name;     /**< Suite name (e.g., "ptz", "media", "networking") */
-  const char* full_name; /**< Full descriptive name for display */
+  const char* name;         /**< Suite name (e.g., "ptz", "media", "networking") */
+  const char* full_name;    /**< Full descriptive name for display */
   test_category_t category; /**< Test category (unit or integration) */
-  const struct CMUnitTest* (*get_tests)(
-    size_t* count); /**< Function to retrieve test array */
-  int (*setup)(void** state);   /**< Optional suite setup function */
-  int (*teardown)(void** state); /**< Optional suite teardown function */
+  const struct CMUnitTest* (*get_tests)(size_t* count); /**< Function to retrieve test array */
+  int (*setup)(void** state);                           /**< Optional suite setup function */
+  int (*teardown)(void** state);                        /**< Optional suite teardown function */
 } test_suite_t;
 
 /**
@@ -85,9 +84,5 @@ int device_service_setup(void** state);
 int device_service_teardown(void** state);
 int setup_imaging_integration(void** state);
 int teardown_imaging_integration(void** state);
-
-// Setup/teardown function declarations for unit tests requiring real functions
-int gsoap_protocol_suite_setup(void** state);
-int gsoap_protocol_suite_teardown(void** state);
 
 #endif // TEST_SUITES_H

@@ -26,7 +26,7 @@
  * @note Caller must check request_state.is_initialized before calling
  * @note Output structure is allocated with soap_new__trt__GetProfiles()
  */
-int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct __trt__GetProfiles** out);
+int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct _trt__GetProfiles** out);
 
 /**
  * @brief Parse GetStreamUri ONVIF Media service request

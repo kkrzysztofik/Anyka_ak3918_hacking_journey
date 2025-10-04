@@ -229,7 +229,12 @@ NETWORKING_TEST_SRCS := \
 	src/unit/networking/test_http_metrics_simple.c
 
 PROTOCOL_TEST_SRCS := \
-	src/unit/protocol/test_onvif_gsoap.c
+	src/unit/protocol/test_onvif_gsoap_core.c \
+	src/unit/protocol/test_onvif_gsoap_media.c \
+	src/unit/protocol/test_onvif_gsoap_ptz.c \
+	src/unit/protocol/test_onvif_gsoap_device.c \
+	src/unit/protocol/test_onvif_gsoap_imaging.c \
+	src/utils/test_gsoap_utils.c
 
 DISPATCHER_TEST_SRCS := \
 	src/unit/services/common/test_service_dispatcher.c

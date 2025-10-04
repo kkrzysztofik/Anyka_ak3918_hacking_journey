@@ -110,6 +110,42 @@ void onvif_gsoap_reset(onvif_gsoap_context_t* ctx);
 int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* request_xml,
                                      size_t xml_size);
 
+/* ============================================================================
+ * Request Parsing Helper Functions
+ * ============================================================================
+ */
+
+/**
+ * @brief Validate context and begin parse operation
+ * @param ctx Context to validate
+ * @param out_ptr Output pointer to validate
+ * @param operation_name Operation name for logging and tracking
+ * @param func_name Function name for error reporting (__func__)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Combines parameter validation, request state check, and timing start
+ */
+int onvif_gsoap_validate_and_begin_parse(onvif_gsoap_context_t* ctx, void* out_ptr,
+                                         const char* operation_name, const char* func_name);
+
+/**
+ * @brief Parse SOAP envelope structure
+ * @param ctx Context with initialized request parsing
+ * @param func_name Function name for error reporting (__func__)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Executes: soap_begin_recv → soap_envelope_begin_in → soap_recv_header →
+ * soap_body_begin_in
+ * @note Handles errors at each step with detailed logging
+ */
+int onvif_gsoap_parse_soap_envelope(onvif_gsoap_context_t* ctx, const char* func_name);
+
+/**
+ * @brief Finalize SOAP envelope parsing and complete operation timing
+ * @param ctx Context to finalize
+ * @note Executes: soap_body_end_in → soap_envelope_end_in → soap_end_recv
+ * @note Records parse_end_time for performance tracking
+ */
+void onvif_gsoap_finalize_parse(onvif_gsoap_context_t* ctx);
+
 /**
  * @brief Set error context with detailed information
  * @param ctx Context to update

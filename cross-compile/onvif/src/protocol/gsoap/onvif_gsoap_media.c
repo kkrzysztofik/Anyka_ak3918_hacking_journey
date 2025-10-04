@@ -39,37 +39,17 @@
  * @note GetProfiles has no request parameters (empty structure)
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct __trt__GetProfiles** out) {
-  platform_log_debug("onvif_gsoap_parse_get_profiles: Starting GetProfiles parsing");
-
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    platform_log_debug("onvif_gsoap_parse_get_profiles: Invalid parameters - ctx=%p, out=%p", ctx,
-                       out);
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct _trt__GetProfiles** out) {
+  /* 1. Validate context and begin parse operation */
+  int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "GetProfiles", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    platform_log_debug("onvif_gsoap_parse_get_profiles: Request parsing not initialized");
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  platform_log_debug(
-    "onvif_gsoap_parse_get_profiles: Request parsing is initialized, proceeding with parsing");
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
+  /* 2. Allocate GetProfiles structure using gSOAP managed memory */
   platform_log_debug(
     "onvif_gsoap_parse_get_profiles: Allocating GetProfiles structure using gSOAP managed memory");
-  /* 4. Allocate structure using gSOAP managed memory */
-  *out = soap_new___trt__GetProfiles(&ctx->soap, -1);
+  *out = soap_new__trt__GetProfiles(&ctx->soap, -1);
   if (!*out) {
     platform_log_debug("onvif_gsoap_parse_get_profiles: Failed to allocate GetProfiles structure");
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -77,64 +57,18 @@ int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct __trt__Get
     return ONVIF_ERROR_MEMORY;
   }
 
-  platform_log_debug("onvif_gsoap_parse_get_profiles: Starting SOAP envelope parsing sequence");
-  platform_log_debug("onvif_gsoap_parse_get_profiles: gSOAP context state - soap.is=%p, "
-                     "soap.bufidx=%lu, soap.buflen=%lu",
-                     ctx->soap.is, (unsigned long)ctx->soap.bufidx,
-                     (unsigned long)ctx->soap.buflen);
-
-  /* 5. CORRECTED: Parse SOAP envelope using proper sequence */
-  int soap_result = SOAP_OK;
-
-  // Begin receiving
-  platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_begin_recv");
-  soap_result = soap_begin_recv(&ctx->soap);
-  if (soap_result != SOAP_OK) {
-    platform_log_debug("onvif_gsoap_parse_get_profiles: soap_begin_recv failed: %d", soap_result);
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
     *out = NULL;
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to begin SOAP receive");
-    return ONVIF_ERROR_PARSE_FAILED;
+    return result;
   }
 
-  // Parse SOAP envelope
-  platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_envelope_begin_in");
-  soap_result = soap_envelope_begin_in(&ctx->soap);
-  if (soap_result != SOAP_OK) {
-    platform_log_debug("onvif_gsoap_parse_get_profiles: soap_envelope_begin_in failed: %d",
-                       soap_result);
-    *out = NULL;
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to begin SOAP envelope parsing");
-    return ONVIF_ERROR_PARSE_FAILED;
-  }
-
-  // Skip SOAP header if present
-  platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_recv_header");
-  soap_result = soap_recv_header(&ctx->soap);
-  if (soap_result != SOAP_OK) {
-    platform_log_debug("onvif_gsoap_parse_get_profiles: soap_recv_header failed: %d", soap_result);
-    *out = NULL;
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to receive SOAP header");
-    return ONVIF_ERROR_PARSE_FAILED;
-  }
-
-  // Parse SOAP body
-  platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_body_begin_in");
-  soap_result = soap_body_begin_in(&ctx->soap);
-  if (soap_result != SOAP_OK) {
-    platform_log_debug("onvif_gsoap_parse_get_profiles: soap_body_begin_in failed: %d",
-                       soap_result);
-    *out = NULL;
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to begin SOAP body parsing");
-    return ONVIF_ERROR_PARSE_FAILED;
-  }
-
-  // Now parse the actual GetProfiles structure
-  platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_get___trt__GetProfiles");
+  /* 4. Parse the actual GetProfiles structure */
+  platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_get__trt__GetProfiles");
   struct _trt__GetProfiles* result_ptr = soap_get__trt__GetProfiles(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr) {
-    soap_result = ctx->soap.error;
+    int soap_result = ctx->soap.error;
     platform_log_debug("onvif_gsoap_parse_get_profiles: soap_get___trt__GetProfiles failed: %d",
                        soap_result);
     *out = NULL;
@@ -142,18 +76,11 @@ int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct __trt__Get
                           "Failed to parse GetProfiles structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
-  ctx->request_state.operation_name = "GetProfiles";
-
-  // Complete the parsing sequence
-  platform_log_debug("onvif_gsoap_parse_get_profiles: Completing SOAP parsing sequence");
-  soap_body_end_in(&ctx->soap);
-  soap_envelope_end_in(&ctx->soap);
-  soap_end_recv(&ctx->soap);
 
   platform_log_debug("onvif_gsoap_parse_get_profiles: gSOAP deserialization succeeded");
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   platform_log_debug("onvif_gsoap_parse_get_profiles: GetProfiles parsing completed successfully");
   return ONVIF_SUCCESS;
@@ -169,26 +96,13 @@ int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct __trt__Get
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx, struct _trt__GetStreamUri** out) {
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+  /* 1. Validate context and begin parse operation */
+  int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "GetStreamUri", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "GetStreamUri";
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
-  /* 4. Allocate structure using gSOAP managed memory */
+  /* 2. Allocate GetStreamUri structure using gSOAP managed memory */
   *out = soap_new__trt__GetStreamUri(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -196,16 +110,24 @@ int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx, struct _trt__Ge
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__trt__GetStreamUri(&ctx->soap, *out) != SOAP_OK) {
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
+    *out = NULL;
+    return result;
+  }
+
+  /* 4. Parse the actual GetStreamUri structure */
+  struct _trt__GetStreamUri* result_ptr = soap_get__trt__GetStreamUri(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse GetStreamUri SOAP request");
+                          "Failed to parse GetStreamUri structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   return ONVIF_SUCCESS;
 }
@@ -220,26 +142,13 @@ int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx, struct _trt__Ge
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx, struct _trt__CreateProfile** out) {
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+  /* 1. Validate context and begin parse operation */
+  int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "CreateProfile", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "CreateProfile";
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
-  /* 4. Allocate structure using gSOAP managed memory */
+  /* 2. Allocate CreateProfile structure using gSOAP managed memory */
   *out = soap_new__trt__CreateProfile(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -247,16 +156,24 @@ int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx, struct _trt__Cr
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__trt__CreateProfile(&ctx->soap, *out) != SOAP_OK) {
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
+    *out = NULL;
+    return result;
+  }
+
+  /* 4. Parse the actual CreateProfile structure */
+  struct _trt__CreateProfile* result_ptr = soap_get__trt__CreateProfile(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse CreateProfile SOAP request");
+                          "Failed to parse CreateProfile structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   return ONVIF_SUCCESS;
 }
@@ -271,26 +188,13 @@ int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx, struct _trt__Cr
  * @note Output structure is allocated and managed by gSOAP context
  */
 int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx, struct _trt__DeleteProfile** out) {
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+  /* 1. Validate context and begin parse operation */
+  int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "DeleteProfile", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "DeleteProfile";
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
-  /* 4. Allocate structure using gSOAP managed memory */
+  /* 2. Allocate DeleteProfile structure using gSOAP managed memory */
   *out = soap_new__trt__DeleteProfile(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -298,16 +202,24 @@ int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx, struct _trt__De
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__trt__DeleteProfile(&ctx->soap, *out) != SOAP_OK) {
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
+    *out = NULL;
+    return result;
+  }
+
+  /* 4. Parse the actual DeleteProfile structure */
+  struct _trt__DeleteProfile* result_ptr = soap_get__trt__DeleteProfile(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse DeleteProfile SOAP request");
+                          "Failed to parse DeleteProfile structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   return ONVIF_SUCCESS;
 }
@@ -323,26 +235,14 @@ int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx, struct _trt__De
  */
 int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
                                               struct _trt__SetVideoSourceConfiguration** out) {
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+  /* 1. Validate context and begin parse operation */
+  int result =
+    onvif_gsoap_validate_and_begin_parse(ctx, out, "SetVideoSourceConfiguration", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "SetVideoSourceConfiguration";
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
-  /* 4. Allocate structure using gSOAP managed memory */
+  /* 2. Allocate SetVideoSourceConfiguration structure using gSOAP managed memory */
   *out = soap_new__trt__SetVideoSourceConfiguration(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -350,16 +250,25 @@ int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__trt__SetVideoSourceConfiguration(&ctx->soap, *out) != SOAP_OK) {
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
+    *out = NULL;
+    return result;
+  }
+
+  /* 4. Parse the actual SetVideoSourceConfiguration structure */
+  struct _trt__SetVideoSourceConfiguration* result_ptr =
+    soap_get__trt__SetVideoSourceConfiguration(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse SetVideoSourceConfiguration SOAP request");
+                          "Failed to parse SetVideoSourceConfiguration structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   return ONVIF_SUCCESS;
 }
@@ -376,26 +285,14 @@ int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
  */
 int onvif_gsoap_parse_set_video_encoder_config(onvif_gsoap_context_t* ctx,
                                                struct _trt__SetVideoEncoderConfiguration** out) {
-  /* 1. Validate parameters */
-  if (!ctx || !out) {
-    if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or output pointer");
-    }
-    return ONVIF_ERROR_INVALID;
+  /* 1. Validate context and begin parse operation */
+  int result =
+    onvif_gsoap_validate_and_begin_parse(ctx, out, "SetVideoEncoderConfiguration", __func__);
+  if (result != ONVIF_SUCCESS) {
+    return result;
   }
 
-  /* 2. Check request parsing is initialized */
-  if (!ctx->request_state.is_initialized) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "SetVideoEncoderConfiguration";
-  ctx->request_state.parse_start_time = get_timestamp_us();
-
-  /* 4. Allocate structure using gSOAP managed memory */
+  /* 2. Allocate SetVideoEncoderConfiguration structure using gSOAP managed memory */
   *out = soap_new__trt__SetVideoEncoderConfiguration(&ctx->soap, -1);
   if (!*out) {
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
@@ -403,16 +300,25 @@ int onvif_gsoap_parse_set_video_encoder_config(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__trt__SetVideoEncoderConfiguration(&ctx->soap, *out) != SOAP_OK) {
+  /* 3. Parse SOAP envelope */
+  result = onvif_gsoap_parse_soap_envelope(ctx, __func__);
+  if (result != ONVIF_SUCCESS) {
+    *out = NULL;
+    return result;
+  }
+
+  /* 4. Parse the actual SetVideoEncoderConfiguration structure */
+  struct _trt__SetVideoEncoderConfiguration* result_ptr =
+    soap_get__trt__SetVideoEncoderConfiguration(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse SetVideoEncoderConfiguration SOAP request");
+                          "Failed to parse SetVideoEncoderConfiguration structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  /* 6. Record parse completion time */
-  ctx->request_state.parse_end_time = get_timestamp_us();
+  /* 5. Finalize SOAP parsing and complete timing */
+  onvif_gsoap_finalize_parse(ctx);
 
   return ONVIF_SUCCESS;
 }
