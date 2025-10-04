@@ -829,7 +829,7 @@
   - _Requirements: Register new suite in tests/Makefile, cover Device/Media/PTZ generators, ensure diagnostics for failures_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: CMocka-focused QA Engineer for gSOAP responses | Task: Create the gSOAP response generation unit test suite, including new test files, shared response test data, and Makefile registrations. Cover all Device, Media, and PTZ response generators with success, NULL input, empty payload, and memory failure scenarios as defined in GSOAP_TESTING.md. Execute `make test-unit SUITE=gsoap-response` until it passes. | Restrictions: Do not modify production response functions beyond injectable hooks, follow project include path conventions, avoid introducing dynamic allocations outside gSOAP context | Success: Suite compiles and passes, coverage reports include every response generator, failure messages are actionable, CMocka patterns validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 68. Enhance XML validation helpers
+- [-] 68. Enhance XML validation helpers
   - File: cross-compile/onvif/tests/src/utils/xml_validation_helpers.c
   - Replace strstr-based SOAP fault checks with gSOAP deserialization of SOAP_ENV__Fault
   - Validate fault code, string, and detail fields using ctx->soap.fault
@@ -838,7 +838,7 @@
   - _Requirements: Do not introduce custom parsers, rely on gSOAP APIs, maintain existing helper interfaces_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: gSOAP QA Infrastructure Engineer | Task: Update xml_validation_helpers.c so validate_soap_fault_xml() deserializes SOAP_ENV__Fault via gSOAP APIs, checks faultcode, faultstring, and detail members, and removes ad-hoc strstr comparisons while preserving helper signatures. | Restrictions: No changes to production sources outside helper, keep include paths project-compliant, avoid introducing global state | Success: Helper compiles without warnings, fault validation uses gSOAP data structures, existing callers continue to pass, new diagnostics improve clarity | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 69. Add response serialization helper to response_test_data
+- [x] 69. Add response serialization helper to response_test_data
   - File: cross-compile/onvif/tests/src/data/response_test_data.h
   - File: cross-compile/onvif/tests/src/data/response_test_data.c
   - Implement get_serialized_response() to extract ctx->soap buffer contents
@@ -847,7 +847,7 @@
   - _Requirements: Follow project include conventions, return ONVIF error codes on failure, ensure buffers null-terminated_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Data Utilities Engineer | Task: Declare and define get_serialized_response(onvif_gsoap_context_t*, char*, size_t) within response_test_data.h/c, copying from ctx->soap buffer with bounds checks and returning byte count or ONVIF_ERROR codes. | Restrictions: Do not alter existing mock structs, avoid dynamic allocation, ensure helper works with embedded soap context | Success: Helper available to unit tests, returns correct sizes, handles invalid input gracefully, passes static analysis | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 70. Validate device response XML content
+- [x] 70. Validate device response XML content
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
   - Update device info success/empty parameter tests to assert serialized XML content
   - Use get_serialized_response(), is_well_formed_xml(), and validate_soap_envelope()
@@ -856,7 +856,7 @@
   - _Requirements: Maintain existing CMocka patterns, avoid brittle string assumptions beyond required fields_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: ONVIF Device QA Engineer | Task: Extend device response tests to pull serialized XML via new helper, verify well-formedness/envelope validity, and confirm manufacturer/model tokens appear for success while empty-param test validates graceful handling. | Restrictions: Do not modify production response generator, keep test names unchanged, ensure assertions remain deterministic | Success: Updated tests pass, XML validation covers expected elements, failure messages informative | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 71. Validate media response XML content
+- [x] 71. Validate media response XML content
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
   - Enhance DeleteProfile response test with serialized XML checks
   - Confirm SOAP action name and profile tokens appear in output
@@ -874,7 +874,7 @@
   - _Requirements: Retain existing PTZ mock usage, share buffers to minimize stack usage, keep assertions specific_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: PTZ Service QA Engineer | Task: Extend PTZ response tests to fetch serialized XML, validate envelope, and assert AbsoluteMoveResponse/GotoPresetResponse along with preset tokens are encoded, handling whitespace variability safely. | Restrictions: No changes to PTZ production code, avoid adding large static buffers per test, ensure tests remain deterministic | Success: PTZ response tests validate XML content and continue to pass | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 73. Remove ineffective response memory failure test
+- [x] 73. Remove ineffective response memory failure test
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
   - Delete test_unit_onvif_gsoap_generate_device_info_response_memory_failure
   - Remove registration from response_generation_tests array
@@ -883,7 +883,7 @@
   - _Requirements: Ensure suite still compiles, adjust documentation comments referencing test count_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Test Suite Maintainer | Task: Remove the ineffective memory failure test and its registration from response_generation_tests, updating any adjacent comments so the suite reflects actual coverage. | Restrictions: Do not remove surrounding useful tests, keep formatting consistent, ensure build remains green | Success: Memory failure test eliminated, suite still passes, comments accurate | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 74. Auto-calculate gSOAP response test count
+- [x] 74. Auto-calculate gSOAP response test count
   - File: cross-compile/onvif/tests/src/unit/protocol/test_gsoap_response_suite.c
   - Replace hardcoded test count with sizeof(response_generation_tests)
   - Purpose: Keep suite synchronized with test list automatically

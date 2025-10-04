@@ -10,9 +10,6 @@
 #include "cmocka_wrapper.h"
 #include "unit/protocol/test_onvif_gsoap_response_generation.h"
 
-// External test array from test_onvif_gsoap_response_generation.c
-extern const struct CMUnitTest response_generation_tests[];
-
 // ============================================================================
 // Test Suite Getter Function
 // ============================================================================
@@ -23,7 +20,8 @@ extern const struct CMUnitTest response_generation_tests[];
  * @return Array of CMUnitTest structures
  */
 const struct CMUnitTest* get_gsoap_response_unit_tests(size_t* count) {
-  // Count tests in the array (14 tests total)
-  *count = 14;
+  // Use pre-defined test count constant
+  // Note: sizeof() doesn't work with extern arrays, so we use a constant
+  *count = RESPONSE_GENERATION_TEST_COUNT;
   return response_generation_tests;
 }

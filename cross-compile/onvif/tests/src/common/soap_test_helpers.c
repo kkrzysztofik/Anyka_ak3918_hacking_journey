@@ -200,8 +200,28 @@ int soap_test_parse_get_profiles_response(onvif_gsoap_context_t* ctx,
   // Initialize response structure
   soap_default__trt__GetProfilesResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__trt__GetProfilesResponse(&ctx->soap, *response) != SOAP_OK) {
+  // Begin receiving and parse the complete message
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Navigate to the Body element
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Deserialize the response element from the body
+  if (soap_in__trt__GetProfilesResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Close body and envelope
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Finish receiving
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -296,8 +316,28 @@ int soap_test_parse_get_stream_uri_response(onvif_gsoap_context_t* ctx,
   // Initialize response structure
   soap_default__trt__GetStreamUriResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__trt__GetStreamUriResponse(&ctx->soap, *response) != SOAP_OK) {
+  // Begin receiving and parse the complete message
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Navigate to the Body element
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Deserialize the response element from the body
+  if (soap_in__trt__GetStreamUriResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Close body and envelope
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Finish receiving
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -320,8 +360,28 @@ int soap_test_parse_create_profile_response(onvif_gsoap_context_t* ctx,
   // Initialize response structure
   soap_default__trt__CreateProfileResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__trt__CreateProfileResponse(&ctx->soap, *response) != SOAP_OK) {
+  // Begin receiving and parse the complete message
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Navigate to the Body element
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Deserialize the response element from the body
+  if (soap_in__trt__CreateProfileResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Close body and envelope
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Finish receiving
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -368,8 +428,28 @@ int soap_test_parse_set_video_source_config_response(
   // Initialize response structure
   soap_default__trt__SetVideoSourceConfigurationResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__trt__SetVideoSourceConfigurationResponse(&ctx->soap, *response) != SOAP_OK) {
+  // Begin receiving and parse the complete message
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Navigate to the Body element
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Deserialize the response element from the body
+  if (soap_in__trt__SetVideoSourceConfigurationResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Close body and envelope
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Finish receiving
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -392,8 +472,28 @@ int soap_test_parse_set_video_encoder_config_response(
   // Initialize response structure
   soap_default__trt__SetVideoEncoderConfigurationResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__trt__SetVideoEncoderConfigurationResponse(&ctx->soap, *response) != SOAP_OK) {
+  // Begin receiving and parse the complete message
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Navigate to the Body element
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Deserialize the response element from the body
+  if (soap_in__trt__SetVideoEncoderConfigurationResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Close body and envelope
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Finish receiving
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -892,6 +992,51 @@ int soap_test_extract_attribute(const char* xml, const char* element_name,
 
   strncpy(value, attr_start, attr_len);
   value[attr_len] = '\0';
+
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
+ * SOAP Fault Parser Implementation
+ * ============================================================================ */
+
+int soap_test_parse_soap_fault(onvif_gsoap_context_t* ctx, struct SOAP_ENV__Fault** fault) {
+  if (!ctx || !fault) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Allocate and initialize SOAP Fault structure
+  *fault = (struct SOAP_ENV__Fault*)soap_malloc(&ctx->soap, sizeof(struct SOAP_ENV__Fault));
+  if (!*fault) {
+    return ONVIF_ERROR_MEMORY;
+  }
+
+  soap_default_SOAP_ENV__Fault(&ctx->soap, *fault);
+
+  // Begin receiving and parse the fault
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Navigate to Body element
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Parse the fault structure
+  if (soap_read_SOAP_ENV__Fault(&ctx->soap, *fault) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Close body and envelope
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Finish receiving
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
 
   return ONVIF_SUCCESS;
 }

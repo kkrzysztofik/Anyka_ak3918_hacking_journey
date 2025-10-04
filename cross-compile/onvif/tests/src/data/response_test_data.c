@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "protocol/gsoap/onvif_gsoap_core.h"
 #include "utils/error/error_handling.h"
 
 // ============================================================================
@@ -182,25 +183,25 @@ const mock_ptz_position_t mock_ptz_position_valid = {
 // ============================================================================
 
 const mock_fault_response_t mock_fault_invalid_parameter = {
-  .fault_code = "soap:Client",
+  .fault_code = "SOAP-ENV:Sender",
   .fault_string = "Invalid parameter",
   .fault_detail = "The parameter 'token' is invalid or missing",
   .fault_subcode = "onvif:InvalidParameter"};
 
 const mock_fault_response_t mock_fault_action_not_supported = {
-  .fault_code = "soap:Client",
+  .fault_code = "SOAP-ENV:Sender",
   .fault_string = "Action not supported",
   .fault_detail = "The requested action is not supported by this device",
   .fault_subcode = "onvif:ActionNotSupported"};
 
 const mock_fault_response_t mock_fault_internal_error = {
-  .fault_code = "soap:Server",
+  .fault_code = "SOAP-ENV:Receiver",
   .fault_string = "Internal error",
   .fault_detail = "An internal error occurred while processing the request",
   .fault_subcode = "onvif:InternalError"};
 
 const mock_fault_response_t mock_fault_authentication_failed = {
-  .fault_code = "soap:Client",
+  .fault_code = "SOAP-ENV:Sender",
   .fault_string = "Authentication failed",
   .fault_detail = "Invalid credentials provided",
   .fault_subcode = "onvif:AuthenticationFailed"};
@@ -221,325 +222,29 @@ void response_test_data_cleanup(void) {
 }
 
 // ============================================================================
-// Test Data Validation
+// Response Serialization Helpers
 // ============================================================================
 
-int validate_device_info_data(const mock_device_info_t* device_info) {
-  if (!device_info) {
+int get_serialized_response(const void* ctx, char* buffer, size_t buffer_size) {
+  if (!ctx || !buffer || buffer_size == 0) {
     return ONVIF_ERROR_INVALID;
   }
 
-  // Check for valid manufacturer (not NULL and not empty)
-  if (!device_info->manufacturer || strlen(device_info->manufacturer) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid model (not NULL and not empty)
-  if (!device_info->model || strlen(device_info->model) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Validate against expected values from mock_device_info_valid
-  if (strcmp(device_info->manufacturer, mock_device_info_valid.manufacturer) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(device_info->model, mock_device_info_valid.model) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(device_info->firmware_version, mock_device_info_valid.firmware_version) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(device_info->serial_number, mock_device_info_valid.serial_number) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(device_info->hardware_id, mock_device_info_valid.hardware_id) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  return ONVIF_SUCCESS;
-}
-
-int validate_media_profile_data(const mock_media_profile_t* profile) {
-  if (!profile) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid token (not empty)
-  if (strlen(profile->token) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid name (not empty)
-  if (strlen(profile->name) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid video source token
-  if (strlen(profile->video_source.source_token) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid video encoder token
-  if (strlen(profile->video_encoder.token) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Validate against expected values from mock_profiles[0] (Main Profile)
-  if (strcmp(profile->token, mock_profiles[0].token) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(profile->name, mock_profiles[0].name) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (profile->fixed != mock_profiles[0].fixed) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(profile->video_source.source_token, mock_profiles[0].video_source.source_token) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (profile->video_source.bounds.width != mock_profiles[0].video_source.bounds.width) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (profile->video_source.bounds.height != mock_profiles[0].video_source.bounds.height) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(profile->video_encoder.token, mock_profiles[0].video_encoder.token) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(profile->video_encoder.encoding, mock_profiles[0].video_encoder.encoding) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (profile->video_encoder.width != mock_profiles[0].video_encoder.width) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (profile->video_encoder.height != mock_profiles[0].video_encoder.height) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (profile->video_encoder.frame_rate != mock_profiles[0].video_encoder.frame_rate) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (profile->video_encoder.bitrate != mock_profiles[0].video_encoder.bitrate) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  return ONVIF_SUCCESS;
-}
-
-int validate_ptz_node_data(const mock_ptz_node_t* node) {
-  if (!node) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid token (not empty)
-  if (strlen(node->token) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid name (not empty)
-  if (strlen(node->name) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for positive values
-  if (node->maximum_number_of_presets < 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Validate against expected values from mock_ptz_nodes[0] (Main PTZ Node)
-  if (strcmp(node->token, mock_ptz_nodes[0].token) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(node->name, mock_ptz_nodes[0].name) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (node->maximum_number_of_presets != mock_ptz_nodes[0].maximum_number_of_presets) {
-    return ONVIF_ERROR_INVALID;
-  }
+  const onvif_gsoap_context_t* gsoap_ctx = (const onvif_gsoap_context_t*)ctx;
 
-  if (node->home_supported != mock_ptz_nodes[0].home_supported) {
+  // Check if context has valid response data
+  if (gsoap_ctx->soap.length == 0) {
     return ONVIF_ERROR_INVALID;
   }
 
-  if (strcmp(node->auxiliary_commands, mock_ptz_nodes[0].auxiliary_commands) != 0) {
+  // Check if response fits in the provided buffer (leave room for null terminator)
+  if (gsoap_ctx->soap.length >= buffer_size) {
     return ONVIF_ERROR_INVALID;
   }
 
-  // Validate PTZ spaces with floating point comparison (using epsilon)
-  const float epsilon = 0.001F;
-
-  if (fabsf(node->supported_ptz_spaces.absolute_pan_tilt_position_space.x_min -
-            mock_ptz_nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.x_min) >
-      epsilon) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (fabsf(node->supported_ptz_spaces.absolute_pan_tilt_position_space.x_max -
-            mock_ptz_nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.x_max) >
-      epsilon) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (fabsf(node->supported_ptz_spaces.absolute_pan_tilt_position_space.y_min -
-            mock_ptz_nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.y_min) >
-      epsilon) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (fabsf(node->supported_ptz_spaces.absolute_pan_tilt_position_space.y_max -
-            mock_ptz_nodes[0].supported_ptz_spaces.absolute_pan_tilt_position_space.y_max) >
-      epsilon) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (fabsf(node->supported_ptz_spaces.absolute_zoom_position_space.min -
-            mock_ptz_nodes[0].supported_ptz_spaces.absolute_zoom_position_space.min) > epsilon) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (fabsf(node->supported_ptz_spaces.absolute_zoom_position_space.max -
-            mock_ptz_nodes[0].supported_ptz_spaces.absolute_zoom_position_space.max) > epsilon) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  return ONVIF_SUCCESS;
-}
-
-int validate_fault_response_data(const mock_fault_response_t* fault) {
-  if (!fault) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid fault code (not NULL and not empty)
-  if (!fault->fault_code || strlen(fault->fault_code) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid fault string (not NULL and not empty)
-  if (!fault->fault_string || strlen(fault->fault_string) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Validate against expected values from mock_fault_invalid_parameter
-  if (strcmp(fault->fault_code, mock_fault_invalid_parameter.fault_code) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(fault->fault_string, mock_fault_invalid_parameter.fault_string) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(fault->fault_detail, mock_fault_invalid_parameter.fault_detail) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(fault->fault_subcode, mock_fault_invalid_parameter.fault_subcode) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  return ONVIF_SUCCESS;
-}
-
-int validate_stream_uri_data(const mock_stream_uri_t* stream_uri) {
-  if (!stream_uri) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid URI (not empty)
-  if (strlen(stream_uri->uri) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Validate against expected values from mock_stream_uri_valid
-  if (strcmp(stream_uri->uri, mock_stream_uri_valid.uri) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (stream_uri->invalid_after_connect != mock_stream_uri_valid.invalid_after_connect) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (stream_uri->invalid_after_reboot != mock_stream_uri_valid.invalid_after_reboot) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (stream_uri->timeout != mock_stream_uri_valid.timeout) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  return ONVIF_SUCCESS;
-}
-
-int validate_ptz_preset_data(const mock_ptz_preset_t* preset) {
-  if (!preset) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid token (not empty)
-  if (strlen(preset->token) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Check for valid name (not empty)
-  if (strlen(preset->name) == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Validate against expected values from mock_ptz_presets[0] (Home Position)
-  if (strcmp(preset->token, mock_ptz_presets[0].token) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(preset->name, mock_ptz_presets[0].name) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(preset->ptz_position, mock_ptz_presets[0].ptz_position) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  return ONVIF_SUCCESS;
-}
-
-int validate_ptz_position_data(const mock_ptz_position_t* position) {
-  if (!position) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Validate against expected values from mock_ptz_position_valid
-  const float epsilon = 0.001F;
-
-  if (fabsf(position->pan - mock_ptz_position_valid.pan) > epsilon) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (fabsf(position->tilt - mock_ptz_position_valid.tilt) > epsilon) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (fabsf(position->zoom - mock_ptz_position_valid.zoom) > epsilon) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  if (strcmp(position->space, mock_ptz_position_valid.space) != 0) {
-    return ONVIF_ERROR_INVALID;
-  }
+  // Copy the response data with bounds checking
+  memcpy(buffer, gsoap_ctx->soap.buf, gsoap_ctx->soap.length);
+  buffer[gsoap_ctx->soap.length] = '\0';
 
-  return ONVIF_SUCCESS;
+  return (int)gsoap_ctx->soap.length;
 }

@@ -369,4 +369,19 @@ int soap_test_extract_element_text(const char* xml, const char* element_name, ch
 int soap_test_extract_attribute(const char* xml, const char* element_name,
                                 const char* attribute_name, char* value, size_t value_size);
 
+/* ============================================================================
+ * SOAP Fault Parser
+ * ============================================================================ */
+
+/**
+ * @brief Parse SOAP Fault from XML buffer
+ * @param ctx gSOAP context for parsing
+ * @param xml_buffer XML buffer containing SOAP Fault
+ * @param buffer_len Length of XML buffer
+ * @param fault Parsed fault structure (output)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Fault structure is allocated from gSOAP managed memory
+ */
+int soap_test_parse_soap_fault(onvif_gsoap_context_t* ctx, struct SOAP_ENV__Fault** fault);
+
 #endif /* SOAP_TEST_HELPERS_H */

@@ -100,16 +100,28 @@ static int fault_response_callback(struct soap* soap, void* user_data) {
   // Initialize fault structure with defaults
   soap_default_SOAP_ENV__Fault(soap, fault);
 
-  // Set fault code and string using proper gSOAP string duplication
-  fault->faultcode = soap_strdup(soap, data->fault_code);
-  fault->faultstring = soap_strdup(soap, data->fault_string);
+  // SOAP 1.2: Create Code structure with Value
+  fault->SOAP_ENV__Code = soap_new_SOAP_ENV__Code(soap, 1);
+  if (!fault->SOAP_ENV__Code) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+  soap_default_SOAP_ENV__Code(soap, fault->SOAP_ENV__Code);
+  fault->SOAP_ENV__Code->SOAP_ENV__Value = soap_strdup(soap, data->fault_code);
 
-  // Set optional fault actor if provided
+  // SOAP 1.2: Create Reason structure with Text
+  fault->SOAP_ENV__Reason = soap_new_SOAP_ENV__Reason(soap, 1);
+  if (!fault->SOAP_ENV__Reason) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+  soap_default_SOAP_ENV__Reason(soap, fault->SOAP_ENV__Reason);
+  fault->SOAP_ENV__Reason->SOAP_ENV__Text = soap_strdup(soap, data->fault_string);
+
+  // SOAP 1.2: Set optional Role (actor) if provided
   if (data->fault_actor[0] != '\0') {
-    fault->faultactor = soap_strdup(soap, data->fault_actor);
+    fault->SOAP_ENV__Role = soap_strdup(soap, data->fault_actor);
   }
 
-  // Set optional detail if provided
+  // SOAP 1.2: Set optional Detail if provided
   if (data->fault_detail[0] != '\0') {
     fault->SOAP_ENV__Detail = soap_new_SOAP_ENV__Detail(soap, 1);
     if (fault->SOAP_ENV__Detail) {
@@ -388,8 +400,8 @@ int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* 
     return ONVIF_ERROR_INVALID;
   }
 
-  // Use default fault code if not provided
-  const char* default_fault_code = "soap:Server";
+  // Use default SOAP 1.2 fault code if not provided
+  const char* default_fault_code = "SOAP-ENV:Receiver";
   const char* actual_fault_code = fault_code ? fault_code : default_fault_code;
 
   // Determine if we need to create a temporary context

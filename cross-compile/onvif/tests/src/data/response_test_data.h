@@ -226,56 +226,18 @@ int response_test_data_init(void);
 void response_test_data_cleanup(void);
 
 // ============================================================================
-// Test Data Validation
+// Response Serialization Helpers
 // ============================================================================
 
 /**
- * @brief Validate device info test data
- * @param device_info Device info to validate
- * @return 1 if valid, 0 if invalid
+ * @brief Extract serialized response from gSOAP context
+ * @param ctx gSOAP context containing the response
+ * @param buffer Output buffer to store the serialized response
+ * @param buffer_size Size of the output buffer
+ * @return Number of bytes written on success, ONVIF error code on failure
+ * @note Copies response from ctx->soap.buf with bounds checking
+ * @note Ensures buffer is null-terminated
  */
-int validate_device_info_data(const mock_device_info_t* device_info);
-
-/**
- * @brief Validate media profile test data
- * @param profile Profile to validate
- * @return 1 if valid, 0 if invalid
- */
-int validate_media_profile_data(const mock_media_profile_t* profile);
-
-/**
- * @brief Validate PTZ node test data
- * @param node PTZ node to validate
- * @return 1 if valid, 0 if invalid
- */
-int validate_ptz_node_data(const mock_ptz_node_t* node);
-
-/**
- * @brief Validate fault response test data
- * @param fault Fault response to validate
- * @return 1 if valid, 0 if invalid
- */
-int validate_fault_response_data(const mock_fault_response_t* fault);
-
-/**
- * @brief Validate stream URI test data
- * @param stream_uri Stream URI to validate
- * @return 1 if valid, 0 if invalid
- */
-int validate_stream_uri_data(const mock_stream_uri_t* stream_uri);
-
-/**
- * @brief Validate PTZ preset test data
- * @param preset PTZ preset to validate
- * @return 1 if valid, 0 if invalid
- */
-int validate_ptz_preset_data(const mock_ptz_preset_t* preset);
-
-/**
- * @brief Validate PTZ position test data
- * @param position PTZ position to validate
- * @return 1 if valid, 0 if invalid
- */
-int validate_ptz_position_data(const mock_ptz_position_t* position);
+int get_serialized_response(const void* ctx, char* buffer, size_t buffer_size);
 
 #endif // RESPONSE_TEST_DATA_H
