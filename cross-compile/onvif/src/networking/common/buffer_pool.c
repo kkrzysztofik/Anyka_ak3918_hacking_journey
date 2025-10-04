@@ -19,15 +19,13 @@
  */
 int buffer_pool_init(buffer_pool_t* pool) {
   if (!pool) {
-    printf("ERROR: buffer_pool_init: NULL pool pointer\n");
     platform_log_error("buffer_pool_init: NULL pool pointer\n");
     return -1;
   }
 
-  printf("DEBUG: buffer_pool_init: Starting initialization (initialized=%d, mutex_initialized=%d)\n",
-         pool->initialized, pool->mutex_initialized);
-  platform_log_debug("buffer_pool_init: Starting initialization (initialized=%d, mutex_initialized=%d)\n",
-                     pool->initialized, pool->mutex_initialized);
+  platform_log_debug(
+    "buffer_pool_init: Starting initialization (initialized=%d, mutex_initialized=%d)\n",
+    pool->initialized, pool->mutex_initialized);
 
   // Check if already initialized - allow idempotent initialization
   if (pool->initialized) {
@@ -39,19 +37,15 @@ int buffer_pool_init(buffer_pool_t* pool) {
   // Initialize mutex only if not already initialized
   if (!pool->mutex_initialized) {
     // First initialization - init the mutex
-    printf("DEBUG: Initializing buffer pool mutex...\n");
     platform_log_debug("Initializing buffer pool mutex...\n");
     int mutex_result = pthread_mutex_init(&pool->mutex, NULL);
     if (mutex_result != 0) {
-      printf("ERROR: Failed to initialize buffer pool mutex (errno=%d)\n", mutex_result);
       platform_log_error("Failed to initialize buffer pool mutex (errno=%d)\n", mutex_result);
       return -1;
     }
     pool->mutex_initialized = 1;
-    printf("DEBUG: Buffer pool mutex initialized successfully\n");
     platform_log_debug("Buffer pool mutex initialized successfully\n");
   } else {
-    printf("DEBUG: Buffer pool mutex already initialized, reusing\n");
     platform_log_debug("Buffer pool mutex already initialized, reusing\n");
   }
 

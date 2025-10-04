@@ -30,33 +30,53 @@ platform_result_t __wrap_platform_cleanup(void) {
  * ============================================================================ */
 
 int __wrap_platform_log_error(const char* format, ...) {
-  (void)format;
-  // Logging functions don't require expectations - they're informational only
-  return 0;
+  va_list args;
+  va_start(args, format);
+  printf("[ERROR] ");
+  int result = vprintf(format, args);
+  printf("\n");
+  va_end(args);
+  return result;
 }
 
 int __wrap_platform_log_warning(const char* format, ...) {
-  (void)format;
-  // Logging functions don't require expectations - they're informational only
-  return 0;
+  va_list args;
+  va_start(args, format);
+  printf("[WARNING] ");
+  int result = vprintf(format, args);
+  printf("\n");
+  va_end(args);
+  return result;
 }
 
 int __wrap_platform_log_notice(const char* format, ...) {
-  (void)format;
-  // Logging functions don't require expectations - they're informational only
-  return 0;
+  va_list args;
+  va_start(args, format);
+  printf("[NOTICE] ");
+  int result = vprintf(format, args);
+  printf("\n");
+  va_end(args);
+  return result;
 }
 
 int __wrap_platform_log_info(const char* format, ...) {
-  (void)format;
-  // Logging functions don't require expectations - they're informational only
-  return 0;
+  va_list args;
+  va_start(args, format);
+  printf("[INFO] ");
+  int result = vprintf(format, args);
+  printf("\n");
+  va_end(args);
+  return result;
 }
 
 int __wrap_platform_log_debug(const char* format, ...) {
-  (void)format;
-  // Logging functions don't require expectations - they're informational only
-  return 0;
+  va_list args;
+  va_start(args, format);
+  printf("[DEBUG] ");
+  int result = vprintf(format, args);
+  printf("\n");
+  va_end(args);
+  return result;
 }
 
 /* ============================================================================

@@ -535,8 +535,9 @@ static const onvif_service_registration_t g_ptz_service_registration = {
 static int get_ptz_nodes_business_logic(const service_handler_config_t* config, // NOLINT
                                         const http_request_t* request,          // NOLINT
                                         http_response_t* response,              // NOLINT
-                                        onvif_gsoap_context_t* gsoap_ctx, // NOLINT
-                                        service_log_context_t* log_ctx, error_context_t* error_ctx, // NOLINT
+                                        onvif_gsoap_context_t* gsoap_ctx,       // NOLINT
+                                        service_log_context_t* log_ctx,
+                                        error_context_t* error_ctx, // NOLINT
                                         void* callback_data) {
   // Initialize gSOAP context for request parsing
   int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
@@ -561,8 +562,7 @@ static int get_ptz_nodes_business_logic(const service_handler_config_t* config, 
   result = onvif_ptz_get_nodes(&nodes, &count);
 
   if (result != ONVIF_SUCCESS) {
-    service_log_operation_failure(log_ctx, "get_nodes", result,
-                                  "Failed to get PTZ nodes");
+    service_log_operation_failure(log_ctx, "get_nodes", result, "Failed to get PTZ nodes");
     return result;
   }
 
@@ -1139,13 +1139,9 @@ static int cleanup_preset_memory(void) {
  * @note This resets the preset count and clears preset data without logging
  */
 static int reset_preset_state(void) {
-  printf("[RESET] Before: g_ptz_preset_count = %d\n", g_ptz_preset_count);
-
   // Clear all preset data
   memset(g_ptz_presets, 0, sizeof(g_ptz_presets));
   g_ptz_preset_count = 0;
-
-  printf("[RESET] After: g_ptz_preset_count = %d\n", g_ptz_preset_count);
 
   return ONVIF_SUCCESS;
 }
@@ -1155,6 +1151,5 @@ static int reset_preset_state(void) {
  * @return ONVIF_SUCCESS on success
  */
 int onvif_ptz_reset_presets(void) {
-  printf("[RESET] onvif_ptz_reset_presets() called\n");
   return reset_preset_state();
 }

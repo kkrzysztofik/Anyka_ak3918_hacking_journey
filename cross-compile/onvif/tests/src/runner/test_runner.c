@@ -5,29 +5,129 @@
  * @date 2025
  */
 
-#define _DEFAULT_SOURCE  // For strdup()
+#define _DEFAULT_SOURCE // For strdup()
+#include <fcntl.h>
 #include <getopt.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "cmocka_wrapper.h"
 #include "common/test_suites.h"
 
 #define MAX_SUITE_FILTERS 32
+#define OUTPUT_LOG_FILE   "OUT.log"
+#define BUFFER_SIZE       4096
 
 /**
  * @brief Test runner options
  */
 typedef struct {
-  test_category_t category;                 /**< Filter by category (unit/integration) */
+  test_category_t category;               /**< Filter by category (unit/integration) */
   char* suite_filters[MAX_SUITE_FILTERS]; /**< Array of suite name filters */
-  int suite_filter_count;                   /**< Number of suite filters */
-  int list_only;                            /**< Just list suites, don't run */
-  int verbose;                              /**< Verbose output */
-  int help;                                 /**< Show help */
+  int suite_filter_count;                 /**< Number of suite filters */
+  int list_only;                          /**< Just list suites, don't run */
+  int help;                               /**< Show help */
+  FILE* output_file;                      /**< Output file handle */
+  int original_stdout;                    /**< Original stdout file descriptor */
 } test_runner_options_t;
+
+/**
+ * @brief Initialize output redirection
+ * @param options Test runner options
+ * @return 0 on success, -1 on failure
+ */
+static int init_output_redirection(test_runner_options_t* options) {
+  // Save original stdout
+  options->original_stdout = dup(STDOUT_FILENO);
+  if (options->original_stdout == -1) {
+    perror("Failed to duplicate stdout");
+    return -1;
+  }
+
+  // Open output file
+  options->output_file = fopen(OUTPUT_LOG_FILE, "w");
+  if (options->output_file == NULL) {
+    perror("Failed to open output file");
+    close(options->original_stdout);
+    return -1;
+  }
+
+  // Redirect stdout to file (always dual output: console + file)
+  if (dup2(fileno(options->output_file), STDOUT_FILENO) == -1) {
+    perror("Failed to redirect stdout");
+    fclose(options->output_file);
+    close(options->original_stdout);
+    return -1;
+  }
+
+  return 0;
+}
+
+/**
+ * @brief Cleanup output redirection
+ * @param options Test runner options
+ */
+static void cleanup_output_redirection(test_runner_options_t* options) {
+  if (options->output_file) {
+    fclose(options->output_file);
+    options->output_file = NULL;
+  }
+
+  if (options->original_stdout != -1) {
+    // Restore original stdout
+    if (dup2(options->original_stdout, STDOUT_FILENO) == -1) {
+      perror("Failed to restore stdout");
+    }
+    close(options->original_stdout);
+    options->original_stdout = -1;
+  }
+}
+
+/**
+ * @brief Custom printf that handles both file and console output
+ * @param options Test runner options
+ * @param format Format string
+ * @param ... Variable arguments
+ * @return Number of characters written
+ */
+static int test_printf(test_runner_options_t* options, const char* format, ...) {
+  va_list args;
+  int result = 0;
+
+  va_start(args, format);
+
+  // Always write to both file and console
+  char buffer[BUFFER_SIZE];
+  int len = vsnprintf(buffer, sizeof(buffer), format, args);
+
+  if (len > 0) {
+    // Write to file
+    if (options->output_file) {
+      if (fwrite(buffer, 1, len, options->output_file) != (size_t)len) {
+        perror("Failed to write to output file");
+      }
+      if (fflush(options->output_file) != 0) {
+        perror("Failed to flush output file");
+      }
+    }
+
+    // Write to console
+    if (options->original_stdout != -1) {
+      if (write(options->original_stdout, buffer, len) != len) {
+        perror("Failed to write to console");
+      }
+    }
+  }
+  result = len;
+
+  va_end(args);
+  return result;
+}
 
 /**
  * @brief Print usage information
@@ -43,14 +143,12 @@ static void print_help(const char* program_name) {
   printf("                       Examples: --suite=ptz-service\n");
   printf("                                 --suite=ptz-service,media-utils\n");
   printf("  --list               List available test suites without running them\n");
-  printf("  --verbose            Enable verbose output\n");
   printf("  --help, -h           Show this help message\n");
   printf("\nExamples:\n");
   printf("  %s                                # Run all tests\n", program_name);
   printf("  %s --type=unit                    # Run only unit tests\n", program_name);
   printf("  %s --type=integration             # Run only integration tests\n", program_name);
-  printf("  %s --suite=ptz-service            # Run only PTZ service tests\n",
-         program_name);
+  printf("  %s --suite=ptz-service            # Run only PTZ service tests\n", program_name);
   printf("  %s --type=unit --suite=ptz-service,media-utils  # PTZ + Media unit tests\n",
          program_name);
   printf("  %s --list                         # List all available suites\n", program_name);
@@ -71,17 +169,19 @@ static void parse_arguments(int argc, char* argv[], test_runner_options_t* optio
   // Initialize with defaults
   memset(options, 0, sizeof(test_runner_options_t));
   options->category = (test_category_t)-1; // -1 means "all"
+  options->original_stdout = -1;
 
-  static struct option long_options[] = {
-    {"type", required_argument, 0, 't'},   {"suite", required_argument, 0, 's'},
-    {"list", no_argument, 0, 'l'},         {"verbose", no_argument, 0, 'v'},
-    {"help", no_argument, 0, 'h'},         {0, 0, 0, 0}};
+  static struct option long_options[] = {{"type", required_argument, 0, 't'},
+                                         {"suite", required_argument, 0, 's'},
+                                         {"list", no_argument, 0, 'l'},
+                                         {"help", no_argument, 0, 'h'},
+                                         {0, 0, 0, 0}};
 
   int option_index = 0;
-  int c;
+  int option_char = 0;
 
-  while ((c = getopt_long(argc, argv, "hvl", long_options, &option_index)) != -1) {
-    switch (c) {
+  while ((option_char = getopt_long(argc, argv, "hl", long_options, &option_index)) != -1) {
+    switch (option_char) {
     case 't':
       if (strcmp(optarg, "unit") == 0) {
         options->category = TEST_CATEGORY_UNIT;
@@ -96,14 +196,14 @@ static void parse_arguments(int argc, char* argv[], test_runner_options_t* optio
       break;
 
     case 's': {
-      // Parse comma-separated suite names
-      // Use system malloc/free, not CMocka's test versions
-      #ifdef strdup
-      #undef strdup
-      #endif
-      #ifdef free
-      #undef free
-      #endif
+// Parse comma-separated suite names
+// Use system malloc/free, not CMocka's test versions
+#ifdef strdup
+#undef strdup
+#endif
+#ifdef free
+#undef free
+#endif
       char* suite_list = strdup(optarg);
       if (suite_list == NULL) {
         fprintf(stderr, "Memory allocation failed\n");
@@ -126,10 +226,6 @@ static void parse_arguments(int argc, char* argv[], test_runner_options_t* optio
 
     case 'l':
       options->list_only = 1;
-      break;
-
-    case 'v':
-      options->verbose = 1;
       break;
 
     case 'h':
@@ -179,8 +275,8 @@ static int suite_matches_filter(const test_suite_t* suite, const test_runner_opt
  * @param options Options (for filtering)
  */
 static void list_test_suites(const test_runner_options_t* options) {
-  printf("Available Test Suites:\n");
-  printf("=====================\n\n");
+  test_printf((test_runner_options_t*)options, "Available Test Suites:\n");
+  test_printf((test_runner_options_t*)options, "=====================\n\n");
 
   int unit_count = 0;
   int integration_count = 0;
@@ -195,10 +291,9 @@ static void list_test_suites(const test_runner_options_t* options) {
     size_t test_count = 0;
     suite->get_tests(&test_count);
 
-    const char* category_str =
-      suite->category == TEST_CATEGORY_UNIT ? "unit" : "integration";
-    printf("  %-20s (%2zu tests) - %s [%s]\n", suite->name, test_count, suite->full_name,
-           category_str);
+    const char* category_str = suite->category == TEST_CATEGORY_UNIT ? "unit" : "integration";
+    test_printf((test_runner_options_t*)options, "  %-20s (%2zu tests) - %s [%s]\n", suite->name,
+                test_count, suite->full_name, category_str);
 
     if (suite->category == TEST_CATEGORY_UNIT) {
       unit_count += (int)test_count;
@@ -207,10 +302,11 @@ static void list_test_suites(const test_runner_options_t* options) {
     }
   }
 
-  printf("\nSummary:\n");
-  printf("  Unit tests:        %d\n", unit_count);
-  printf("  Integration tests: %d\n", integration_count);
-  printf("  Total tests:       %d\n", unit_count + integration_count);
+  test_printf((test_runner_options_t*)options, "\nSummary:\n");
+  test_printf((test_runner_options_t*)options, "  Unit tests:        %d\n", unit_count);
+  test_printf((test_runner_options_t*)options, "  Integration tests: %d\n", integration_count);
+  test_printf((test_runner_options_t*)options, "  Total tests:       %d\n",
+              unit_count + integration_count);
 }
 
 /**
@@ -235,28 +331,32 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  // Display header
-  printf("ONVIF Dynamic Test Runner\n");
-  printf("=========================\n\n");
-
-  if (options.verbose) {
-    if (options.category == TEST_CATEGORY_UNIT) {
-      printf("Running unit tests only\n");
-    } else if (options.category == TEST_CATEGORY_INTEGRATION) {
-      printf("Running integration tests only\n");
-    } else {
-      printf("Running all tests\n");
-    }
-
-    if (options.suite_filter_count > 0) {
-      printf("Filtering suites: ");
-      for (int i = 0; i < options.suite_filter_count; i++) {
-        printf("%s%s", options.suite_filters[i],
-               i < options.suite_filter_count - 1 ? ", " : "\n");
-      }
-    }
-    printf("\n");
+  // Initialize output redirection
+  if (init_output_redirection(&options) != 0) {
+    fprintf(stderr, "Failed to initialize output redirection\n");
+    return 1;
   }
+
+  // Display header
+  test_printf(&options, "ONVIF Dynamic Test Runner\n");
+  test_printf(&options, "=========================\n\n");
+
+  if (options.category == TEST_CATEGORY_UNIT) {
+    test_printf(&options, "Running unit tests only\n");
+  } else if (options.category == TEST_CATEGORY_INTEGRATION) {
+    test_printf(&options, "Running integration tests only\n");
+  } else {
+    test_printf(&options, "Running all tests\n");
+  }
+
+  if (options.suite_filter_count > 0) {
+    test_printf(&options, "Filtering suites: ");
+    for (int i = 0; i < options.suite_filter_count; i++) {
+      test_printf(&options, "%s%s", options.suite_filters[i],
+                  i < options.suite_filter_count - 1 ? ", " : "\n");
+    }
+  }
+  test_printf(&options, "\n");
 
   clock_t start_time = clock();
   int total_failures = 0;
@@ -274,44 +374,42 @@ int main(int argc, char* argv[]) {
     size_t test_count = 0;
     const struct CMUnitTest* tests = suite->get_tests(&test_count);
 
-    if (options.verbose) {
-      printf("Running suite: %s (%zu tests)\n", suite->full_name, test_count);
-    } else {
-      printf("Running %s...\n", suite->full_name);
-    }
+    test_printf(&options, "Running suite: %s (%zu tests)\n", suite->full_name, test_count);
 
     // Use _cmocka_run_group_tests directly with explicit count to avoid sizeof() macro issue
-    int failures = _cmocka_run_group_tests(suite->name, tests, test_count, suite->setup, suite->teardown);
+    int failures =
+      _cmocka_run_group_tests(suite->name, tests, test_count, suite->setup, suite->teardown);
     total_failures += failures;
     total_tests_run += (int)test_count;
     suites_run++;
 
-    if (options.verbose) {
-      printf("Suite %s: %zu passed, %d failed\n\n", suite->name, test_count - (size_t)failures,
-             failures);
-    }
+    test_printf(&options, "Suite %s: %zu passed, %d failed\n\n", suite->name,
+                test_count - (size_t)failures, failures);
   }
 
   clock_t end_time = clock();
   double test_duration = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
 
   // Display summary
-  printf("\nTest Summary\n");
-  printf("============\n");
-  printf("Suites run:    %d\n", suites_run);
-  printf("Tests run:     %d\n", total_tests_run);
-  printf("Test duration: %.2f seconds\n", test_duration);
+  test_printf(&options, "\nTest Summary\n");
+  test_printf(&options, "============\n");
+  test_printf(&options, "Suites run:    %d\n", suites_run);
+  test_printf(&options, "Tests run:     %d\n", total_tests_run);
+  test_printf(&options, "Test duration: %.2f seconds\n", test_duration);
 
   if (total_failures == 0) {
-    printf("✅ All %d test(s) passed!\n", total_tests_run);
+    test_printf(&options, "✅ All %d test(s) passed!\n", total_tests_run);
   } else {
-    printf("❌ %d test(s) failed!\n", total_failures);
+    test_printf(&options, "❌ %d test(s) failed!\n", total_failures);
   }
 
   // Cleanup
   for (int i = 0; i < options.suite_filter_count; i++) {
     free(options.suite_filters[i]);
   }
+
+  // Cleanup output redirection
+  cleanup_output_redirection(&options);
 
   return total_failures;
 }

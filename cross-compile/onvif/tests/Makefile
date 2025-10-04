@@ -5,7 +5,7 @@
 #
 # Build Commands:
 #   make                    - Build all tests
-#   make test              - Build and run all tests
+#   make test              - Build and run all tests (output to console + OUT.log)
 #   make test-utils        - Build and run utility tests
 #   make test-services     - Build and run service tests
 #   make test-networking   - Build and run networking tests
@@ -15,7 +15,6 @@
 #
 # Environment Variables:
 #   BUILD_TYPE - Build type: 'debug' or 'release' (default: debug for tests)
-#   VERBOSE    - Verbose output: '1' for verbose, '0' for quiet (default: 0)
 
 # Native compilation for unit tests (development machine)
 # Use native GCC with ccache for faster incremental builds
@@ -433,9 +432,9 @@ coverage-clean:
 
 # Test execution targets with optional SUITE parameter
 # Usage:
-#   make test                    - Run all tests
-#   make test SUITE=ptz-service  - Run specific suite
-#   make test-unit SUITE=ptz-*   - Run all PTZ unit tests
+#   make test                    - Run all tests (output to console + OUT.log)
+#   make test SUITE=ptz-service  - Run specific suite (output to console + OUT.log)
+#   make test-unit SUITE=ptz-*   - Run all PTZ unit tests (output to console + OUT.log)
 test: $(TEST_RUNNER)
 ifdef SUITE
 	@echo "Running tests for suite: $(SUITE)..."

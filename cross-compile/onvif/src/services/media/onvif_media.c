@@ -1114,10 +1114,12 @@ static int handle_set_metadata_configuration(const service_handler_config_t* con
 /**
  * @brief Business logic callback for GetProfiles operation
  */
-static int get_profiles_business_logic(const service_handler_config_t* config,            // NOLINT
-                                       const http_request_t* request, http_response_t* response, // NOLINT
+static int get_profiles_business_logic(const service_handler_config_t* config, // NOLINT
+                                       const http_request_t* request,
+                                       http_response_t* response, // NOLINT
                                        onvif_gsoap_context_t* gsoap_ctx,
-                                       service_log_context_t* log_ctx, error_context_t* error_ctx, // NOLINT
+                                       service_log_context_t* log_ctx,
+                                       error_context_t* error_ctx, // NOLINT
                                        void* callback_data) {
   (void)config;
   (void)error_ctx;
@@ -1136,7 +1138,7 @@ static int get_profiles_business_logic(const service_handler_config_t* config,  
   }
 
   // Parse GetProfiles request (empty request structure)
-  struct _trt__GetProfiles* profiles_req = NULL;
+  struct __trt__GetProfiles* profiles_req = NULL;
   result = onvif_gsoap_parse_get_profiles(gsoap_ctx, &profiles_req);
   if (result != ONVIF_SUCCESS) {
     service_log_operation_failure(log_ctx, "parse_get_profiles", result,

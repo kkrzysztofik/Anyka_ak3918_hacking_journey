@@ -27,129 +27,81 @@ extern "C" {
  * Tests use will_return() and expect_*() to configure mock behavior.
  */
 
+/* Forward declaration for context type */
+typedef struct onvif_gsoap_context_s onvif_gsoap_context_t;
+
 /**
  * @brief Wrapped onvif_gsoap_init function
+ * @param ctx gSOAP context
  * @return Mock return value configured via will_return(__wrap_onvif_gsoap_init, value)
- *
- * Example usage in tests:
- * @code
- * will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
- * int result = onvif_gsoap_init();
- * @endcode
  */
-int __wrap_onvif_gsoap_init(void);
+int __wrap_onvif_gsoap_init(onvif_gsoap_context_t* ctx);
 
 /**
  * @brief Wrapped onvif_gsoap_cleanup function
- * @return Mock return value configured via will_return(__wrap_onvif_gsoap_cleanup, value)
- *
- * Example usage in tests:
- * @code
- * will_return(__wrap_onvif_gsoap_cleanup, ONVIF_SUCCESS);
- * onvif_gsoap_cleanup();
- * @endcode
+ * @param ctx gSOAP context
  */
-void __wrap_onvif_gsoap_cleanup(void);
+void __wrap_onvif_gsoap_cleanup(onvif_gsoap_context_t* ctx);
 
 /**
  * @brief Wrapped onvif_gsoap_reset function
- * @return Mock return value configured via will_return(__wrap_onvif_gsoap_reset, value)
- *
- * Example usage in tests:
- * @code
- * will_return(__wrap_onvif_gsoap_reset, ONVIF_SUCCESS);
- * onvif_gsoap_reset();
- * @endcode
+ * @param ctx gSOAP context
  */
-void __wrap_onvif_gsoap_reset(void);
+void __wrap_onvif_gsoap_reset(onvif_gsoap_context_t* ctx);
 
 /**
  * @brief Wrapped onvif_gsoap_has_error function
+ * @param ctx gSOAP context
  * @return Mock return value configured via will_return(__wrap_onvif_gsoap_has_error, value)
- *
- * Example usage in tests:
- * @code
- * will_return(__wrap_onvif_gsoap_has_error, 0);  // No error
- * int has_error = onvif_gsoap_has_error();
- * @endcode
  */
-int __wrap_onvif_gsoap_has_error(void);
+int __wrap_onvif_gsoap_has_error(const onvif_gsoap_context_t* ctx);
 
 /**
  * @brief Wrapped onvif_gsoap_get_error function
+ * @param ctx gSOAP context
  * @return Mock return value configured via will_return(__wrap_onvif_gsoap_get_error, value)
- *
- * Example usage in tests:
- * @code
- * will_return(__wrap_onvif_gsoap_get_error, ONVIF_SUCCESS);
- * int error = onvif_gsoap_get_error();
- * @endcode
  */
-int __wrap_onvif_gsoap_get_error(void);
+const char* __wrap_onvif_gsoap_get_error(const onvif_gsoap_context_t* ctx);
 
 /**
  * @brief Wrapped onvif_gsoap_get_response_data function
+ * @param ctx gSOAP context
  * @return Mock return value configured via will_return(__wrap_onvif_gsoap_get_response_data, ptr)
- *
- * Example usage in tests:
- * @code
- * const char* mock_response = "<xml>response</xml>";
- * will_return(__wrap_onvif_gsoap_get_response_data, mock_response);
- * const char* data = onvif_gsoap_get_response_data();
- * @endcode
  */
-const char* __wrap_onvif_gsoap_get_response_data(void);
+const char* __wrap_onvif_gsoap_get_response_data(const onvif_gsoap_context_t* ctx);
 
 /**
  * @brief Wrapped onvif_gsoap_get_response_length function
+ * @param ctx gSOAP context
  * @return Mock return value configured via will_return(__wrap_onvif_gsoap_get_response_length,
  * value)
- *
- * Example usage in tests:
- * @code
- * will_return(__wrap_onvif_gsoap_get_response_length, 100);
- * size_t len = onvif_gsoap_get_response_length();
- * @endcode
  */
-size_t __wrap_onvif_gsoap_get_response_length(void);
+size_t __wrap_onvif_gsoap_get_response_length(const onvif_gsoap_context_t* ctx);
 
 /**
  * @brief Wrapped onvif_gsoap_generate_response_with_callback function
+ * @param ctx gSOAP context
  * @param service_name Service name (expected via expect_string)
  * @param operation_name Operation name (expected via expect_string)
  * @param callback Response generation callback (expected via expect_any)
  * @param user_data User data passed to callback (expected via expect_any)
  * @return Mock return value configured via will_return()
- *
- * Example usage in tests:
- * @code
- * expect_string(__wrap_onvif_gsoap_generate_response_with_callback, service_name, "Device");
- * expect_string(__wrap_onvif_gsoap_generate_response_with_callback, operation_name,
- * "GetDeviceInformation"); expect_any(__wrap_onvif_gsoap_generate_response_with_callback,
- * callback); expect_any(__wrap_onvif_gsoap_generate_response_with_callback, user_data);
- * will_return(__wrap_onvif_gsoap_generate_response_with_callback, ONVIF_SUCCESS);
- * @endcode
  */
-int __wrap_onvif_gsoap_generate_response_with_callback(const char* service_name,
+int __wrap_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
+                                                       const char* service_name,
                                                        const char* operation_name, void* callback,
                                                        void* user_data);
 
 /**
  * @brief Wrapped onvif_gsoap_generate_fault_response function
+ * @param ctx gSOAP context
  * @param fault_code Fault code string (expected via expect_string)
  * @param fault_string Fault string (expected via expect_string)
  * @param fault_detail Fault detail (expected via expect_any)
  * @return Mock return value configured via will_return()
- *
- * Example usage in tests:
- * @code
- * expect_string(__wrap_onvif_gsoap_generate_fault_response, fault_code, "Sender");
- * expect_string(__wrap_onvif_gsoap_generate_fault_response, fault_string, "Invalid request");
- * expect_any(__wrap_onvif_gsoap_generate_fault_response, fault_detail);
- * will_return(__wrap_onvif_gsoap_generate_fault_response, ONVIF_SUCCESS);
- * @endcode
  */
-int __wrap_onvif_gsoap_generate_fault_response(const char* fault_code, const char* fault_string,
+int __wrap_onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code,
+                                               const char* fault_string,
                                                const char* fault_detail);
 
 /* ============================================================================

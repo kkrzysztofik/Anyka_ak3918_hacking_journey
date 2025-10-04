@@ -12,12 +12,43 @@
 #include "cmocka_wrapper.h"
 #include "data/soap_test_envelopes.h"
 #include "generated/soapH.h"
+#include "mocks/gsoap_mock.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
 #include "protocol/gsoap/onvif_gsoap_device.h"
 #include "protocol/gsoap/onvif_gsoap_imaging.h"
 #include "protocol/gsoap/onvif_gsoap_media.h"
 #include "protocol/gsoap/onvif_gsoap_ptz.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
+#include "utils/logging/platform_logging.h"
+
+/* ============================================================================
+ * Test Suite Setup/Teardown
+ * ============================================================================ */
+
+/**
+ * @brief Suite setup - enable real gSOAP functions for protocol parsing tests
+ * @param state Test state (unused)
+ * @return 0 on success
+ * @note These tests validate SOAP parsing, so they need real gSOAP functionality.
+ *       The __wrap_ functions stay compiled but route to __real_ implementations.
+ */
+int gsoap_protocol_suite_setup(void** state) {
+  (void)state;
+  gsoap_mock_use_real_function(true);
+  return 0;
+}
+
+/**
+ * @brief Suite teardown - restore mock behavior for other test suites
+ * @param state Test state (unused)
+ * @return 0 on success
+ */
+int gsoap_protocol_suite_teardown(void** state) {
+  (void)state;
+  gsoap_mock_use_real_function(false);
+  return 0;
+}
 
 /* ============================================================================
  * Helper Functions
@@ -31,22 +62,35 @@
  */
 static int setup_parsing_test(onvif_gsoap_context_t* ctx, const char* soap_request) {
   if (!ctx || !soap_request) {
+    printf("DEBUG: setup_parsing_test: Invalid parameters - ctx=%p, soap_request=%p\n", ctx,
+           soap_request);
     return ONVIF_ERROR_INVALID;
   }
 
+  printf("DEBUG: setup_parsing_test: Starting setup with SOAP request length: %zu\n",
+         strlen(soap_request));
+
   // Initialize context
+  printf("DEBUG: setup_parsing_test: Calling onvif_gsoap_init\n");
   int result = onvif_gsoap_init(ctx);
   if (result != ONVIF_SUCCESS) {
+    printf("DEBUG: setup_parsing_test: onvif_gsoap_init failed with result: %d\n", result);
     return result;
   }
+  printf("DEBUG: setup_parsing_test: onvif_gsoap_init succeeded\n");
 
   // Initialize request parsing
+  printf("DEBUG: setup_parsing_test: Calling onvif_gsoap_init_request_parsing\n");
   result = onvif_gsoap_init_request_parsing(ctx, soap_request, strlen(soap_request));
   if (result != ONVIF_SUCCESS) {
+    printf("DEBUG: setup_parsing_test: onvif_gsoap_init_request_parsing failed with result: %d\n",
+           result);
     onvif_gsoap_cleanup(ctx);
     return result;
   }
+  printf("DEBUG: setup_parsing_test: onvif_gsoap_init_request_parsing succeeded\n");
 
+  printf("DEBUG: setup_parsing_test: Setup completed successfully\n");
   return ONVIF_SUCCESS;
 }
 
@@ -126,30 +170,74 @@ void test_unit_onvif_gsoap_cleanup(void** state) {
 void test_unit_onvif_gsoap_parse_get_profiles(void** state) {
   (void)state;
 
+  printf("DEBUG: Starting test_unit_onvif_gsoap_parse_get_profiles\n");
+
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
   struct _trt__GetProfiles* request = NULL;
 
+  printf("DEBUG: Testing with NULL context\n");
   // Test with NULL context
   int result = onvif_gsoap_parse_get_profiles(NULL, &request);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
+  printf("DEBUG: Testing with NULL output pointer\n");
   // Test with NULL output pointer
   result = onvif_gsoap_parse_get_profiles(&ctx, NULL);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
+  printf("DEBUG: Setting up parsing test with SOAP_MEDIA_GET_PROFILES\n");
   // Setup parsing test
   result = setup_parsing_test(&ctx, SOAP_MEDIA_GET_PROFILES);
+  if (result != ONVIF_SUCCESS) {
+    // Debug: Print error details
+    int error_code;
+    const char* location;
+    int soap_error;
+    const char* error_msg =
+      onvif_gsoap_get_detailed_error(&ctx, &error_code, &location, &soap_error);
+    printf("\nDEBUG: setup_parsing_test failed\n");
+    printf("  Error code: %d\n", error_code);
+    printf("  Location: %s\n", location ? location : "NULL");
+    printf("  SOAP error: %d (%s)\n", soap_error, soap_error_to_string(soap_error));
+    printf("  Message: %s\n", error_msg ? error_msg : "NULL");
+    printf("  SOAP envelope length: %zu\n", strlen(SOAP_MEDIA_GET_PROFILES));
+    printf(
+      "DEBUG: setup_parsing_test failed - Error code: %d (%s), Location: %s, SOAP error: %d (%s), "
+      "Message: %s\n",
+      error_code, onvif_error_to_string(error_code), location ? location : "NULL", soap_error,
+      soap_error_to_string(soap_error), error_msg ? error_msg : "NULL");
+  }
   assert_int_equal(result, ONVIF_SUCCESS);
 
+  printf("DEBUG: setup_parsing_test succeeded, now parsing GetProfiles request\n");
   // Parse valid request
   result = onvif_gsoap_parse_get_profiles(&ctx, &request);
+  if (result != ONVIF_SUCCESS) {
+    // Debug: Print parsing error details
+    int error_code;
+    const char* location;
+    int soap_error;
+    const char* error_msg =
+      onvif_gsoap_get_detailed_error(&ctx, &error_code, &location, &soap_error);
+    printf("\nDEBUG: onvif_gsoap_parse_get_profiles failed\n");
+    printf("  Error code: %d (%s)\n", error_code, onvif_error_to_string(error_code));
+    printf("  Location: %s\n", location ? location : "NULL");
+    printf("  SOAP error: %d (%s)\n", soap_error, soap_error_to_string(soap_error));
+    printf("  Message: %s\n", error_msg ? error_msg : "NULL");
+    printf("DEBUG: onvif_gsoap_parse_get_profiles failed - Error code: %d (%s), Location: %s, SOAP "
+           "error: %d (%s), Message: %s\n",
+           error_code, onvif_error_to_string(error_code), location ? location : "NULL", soap_error,
+           soap_error_to_string(soap_error), error_msg ? error_msg : "NULL");
+  }
   assert_int_equal(result, ONVIF_SUCCESS);
   assert_non_null(request);
 
+  printf("DEBUG: GetProfiles parsing succeeded, verifying operation name\n");
   // Verify operation name was set
   assert_string_equal(ctx.request_state.operation_name, "GetProfiles");
 
+  printf("DEBUG: Test completed successfully, cleaning up\n");
   // Cleanup
   onvif_gsoap_cleanup(&ctx);
 }

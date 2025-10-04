@@ -52,8 +52,8 @@ const test_suite_t g_test_suites[] = {
    .full_name = "gSOAP Protocol",
    .category = TEST_CATEGORY_UNIT,
    .get_tests = get_gsoap_protocol_unit_tests,
-   .setup = NULL,
-   .teardown = NULL},
+   .setup = gsoap_protocol_suite_setup,
+   .teardown = gsoap_protocol_suite_teardown},
 
   // Service tests
   {.name = "service-dispatcher",

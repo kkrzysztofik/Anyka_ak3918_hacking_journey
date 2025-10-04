@@ -86,4 +86,8 @@ int device_service_teardown(void** state);
 int setup_imaging_integration(void** state);
 int teardown_imaging_integration(void** state);
 
+// Setup/teardown function declarations for unit tests requiring real functions
+int gsoap_protocol_suite_setup(void** state);
+int gsoap_protocol_suite_teardown(void** state);
+
 #endif // TEST_SUITES_H

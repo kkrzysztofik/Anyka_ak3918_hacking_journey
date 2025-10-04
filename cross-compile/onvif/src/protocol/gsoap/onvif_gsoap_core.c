@@ -13,8 +13,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "platform/platform.h"
 #include "utils/common/time_utils.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 
 /* Include gSOAP namespace table */
 #include "generated/DeviceBinding.nsmap"
@@ -25,18 +27,28 @@
  * @return ONVIF_SUCCESS on success, error code otherwise
  */
 int onvif_gsoap_init(onvif_gsoap_context_t* ctx) {
+  platform_log_debug("onvif_gsoap_init: Starting initialization");
+
   if (!ctx) {
+    platform_log_debug("onvif_gsoap_init: NULL context provided");
     return ONVIF_ERROR_INVALID;
   }
 
+  platform_log_debug("onvif_gsoap_init: Clearing context structure");
   /* Clear entire context structure */
   memset(ctx, 0, sizeof(*ctx));
 
-  /* Initialize embedded soap context (no allocation!) */
+  platform_log_debug("onvif_gsoap_init: Initializing embedded soap context");
   soap_init(&ctx->soap);
-  soap_set_mode(&ctx->soap, SOAP_C_UTFSTRING);
+  soap_set_mode(&ctx->soap, SOAP_C_UTFSTRING | SOAP_XML_INDENT);
+
+  // Set SOAP version to 1.2 for ONVIF compliance
+  soap_set_version(&ctx->soap, 2);
+
+  soap_set_mode(&ctx->soap, SOAP_C_UTFSTRING | SOAP_XML_INDENT);
   ctx->soap.namespaces = namespaces;
 
+  platform_log_debug("onvif_gsoap_init: Initialization completed successfully");
   return ONVIF_SUCCESS;
 }
 
@@ -70,47 +82,17 @@ void onvif_gsoap_reset(onvif_gsoap_context_t* ctx) {
   /* Clean up existing state */
   soap_destroy(&ctx->soap);
   soap_end(&ctx->soap);
+  ctx->soap.is = NULL;
+  ctx->soap.user = NULL;
+  ctx->soap.bufidx = 0;
+  ctx->soap.buflen = 0;
+  ctx->soap.ahead = 0;
+  ctx->soap.recvfd = SOAP_INVALID_SOCKET;
 
   /* Reset state tracking structures */
   memset(&ctx->request_state, 0, sizeof(ctx->request_state));
   memset(&ctx->response_state, 0, sizeof(ctx->response_state));
   memset(&ctx->error_context, 0, sizeof(ctx->error_context));
-}
-
-/**
- * @brief Structure to track buffer reading state
- */
-typedef struct {
-  const char* buffer;     /* Source buffer */
-  size_t size;            /* Total buffer size */
-  size_t position;        /* Current read position */
-} buffer_read_state_t;
-
-/**
- * @brief Receive callback for reading from memory buffer
- * @param soap gSOAP runtime context
- * @param buf Buffer to read into
- * @param len Maximum bytes to read
- * @return Number of bytes read, or 0 for EOF, or -1 for error
- */
-static size_t frecv_buffer(struct soap* soap, char* buf, size_t len) {
-  buffer_read_state_t* state = (buffer_read_state_t*)soap->user;
-  if (!state || !buf) {
-    return 0;
-  }
-
-  /* Calculate how many bytes are remaining in the buffer */
-  size_t remaining = state->size - state->position;
-  if (remaining == 0) {
-    return 0; /* EOF */
-  }
-
-  /* Read up to len bytes from the buffer */
-  size_t to_read = (len < remaining) ? len : remaining;
-  memcpy(buf, state->buffer + state->position, to_read);
-  state->position += to_read;
-
-  return to_read;
 }
 
 /**
@@ -122,7 +104,12 @@ static size_t frecv_buffer(struct soap* soap, char* buf, size_t len) {
  */
 int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* request_xml,
                                      size_t xml_size) {
+  platform_log_debug("onvif_gsoap_init_request_parsing: Starting with xml_size=%zu", xml_size);
+
   if (!ctx || !request_xml || xml_size == 0) {
+    platform_log_debug(
+      "onvif_gsoap_init_request_parsing: Invalid parameters - ctx=%p, request_xml=%p, xml_size=%zu",
+      ctx, request_xml, xml_size);
     if (ctx) {
       onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
                             "Invalid parameters: NULL context or request");
@@ -130,48 +117,48 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
     return ONVIF_ERROR_INVALID;
   }
 
+  platform_log_debug("onvif_gsoap_init_request_parsing: Configuring soap context for parsing");
   /* Configure soap context for parsing from buffer */
   soap_begin(&ctx->soap);
 
+  platform_log_debug("onvif_gsoap_init_request_parsing: Allocating buffer for request XML");
   /* Allocate and copy the request XML to soap-managed memory
    * This ensures the buffer remains valid during parsing */
   char* buffer = (char*)soap_malloc(&ctx->soap, xml_size + 1);
   if (!buffer) {
+    platform_log_debug("onvif_gsoap_init_request_parsing: Failed to allocate buffer");
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
                           "Failed to allocate buffer for request");
     return ONVIF_ERROR_MEMORY;
   }
 
+  platform_log_debug("onvif_gsoap_init_request_parsing: Copying request XML to buffer");
   memcpy(buffer, request_xml, xml_size);
   buffer[xml_size] = '\0';
 
-  /* Allocate buffer read state structure */
-  buffer_read_state_t* read_state = (buffer_read_state_t*)soap_malloc(
-    &ctx->soap, sizeof(buffer_read_state_t));
-  if (!read_state) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
-                          "Failed to allocate read state");
-    return ONVIF_ERROR_MEMORY;
-  }
+  /* Log the incoming XML for debugging */
+  platform_log_debug("onvif_gsoap_init_request_parsing: Incoming SOAP request XML:");
+  platform_log_debug("%s", buffer);
 
-  read_state->buffer = buffer;
-  read_state->size = xml_size;
-  read_state->position = 0;
+  platform_log_debug(
+    "onvif_gsoap_init_request_parsing: Configuring gSOAP to read from in-memory buffer");
+  /* Configure gSOAP to read directly from the in-memory buffer using
+   * the Method 1 pattern (soap->is advanced by the runtime). */
+  ctx->soap.is = buffer;
+  ctx->soap.bufidx = 0;
+  ctx->soap.buflen = xml_size;
+  ctx->soap.ahead = 0;
+  ctx->soap.recvfd = SOAP_INVALID_SOCKET;
+  ctx->soap.user = NULL;
 
-  /* Configure gSOAP to read from the buffer using frecv callback
-   * This is the standard way to parse from memory in gSOAP */
-  ctx->soap.user = read_state;          /* Store read state in user field */
-  ctx->soap.frecv = frecv_buffer;       /* Set custom receive callback */
-  ctx->soap.recvfd = -1;                /* No file descriptor */
-
-  /* NOTE: We do NOT call soap_begin_recv() here because the soap_read_* macros
-   * call it themselves. Calling it twice would reset the parsing state. */
-
+  platform_log_debug("onvif_gsoap_init_request_parsing: Updating request state");
   /* Update request state */
   ctx->request_state.is_initialized = true;
   ctx->request_state.request_size = xml_size;
   ctx->request_state.parse_start_time = get_timestamp_us();
 
+  platform_log_debug(
+    "onvif_gsoap_init_request_parsing: Request parsing initialization completed successfully");
   return ONVIF_SUCCESS;
 }
 

@@ -24,8 +24,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "generated/soapH.h"
+#include "platform/platform.h"
 #include "utils/common/time_utils.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 
 /**
  * @brief Parse GetProfiles ONVIF Media service request
@@ -36,9 +39,13 @@
  * @note GetProfiles has no request parameters (empty structure)
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct _trt__GetProfiles** out) {
+int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct __trt__GetProfiles** out) {
+  platform_log_debug("onvif_gsoap_parse_get_profiles: Starting GetProfiles parsing");
+
   /* 1. Validate parameters */
   if (!ctx || !out) {
+    platform_log_debug("onvif_gsoap_parse_get_profiles: Invalid parameters - ctx=%p, out=%p", ctx,
+                       out);
     if (ctx) {
       onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
                             "Invalid parameters: NULL context or output pointer");
@@ -48,33 +55,107 @@ int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct _trt__GetP
 
   /* 2. Check request parsing is initialized */
   if (!ctx->request_state.is_initialized) {
+    platform_log_debug("onvif_gsoap_parse_get_profiles: Request parsing not initialized");
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request parsing not initialized");
     return ONVIF_ERROR_INVALID;
   }
 
+  platform_log_debug(
+    "onvif_gsoap_parse_get_profiles: Request parsing is initialized, proceeding with parsing");
+
   /* 3. Record operation name and start timing */
-  ctx->request_state.operation_name = "GetProfiles";
   ctx->request_state.parse_start_time = get_timestamp_us();
 
+  platform_log_debug(
+    "onvif_gsoap_parse_get_profiles: Allocating GetProfiles structure using gSOAP managed memory");
   /* 4. Allocate structure using gSOAP managed memory */
-  *out = soap_new__trt__GetProfiles(&ctx->soap, -1);
+  *out = soap_new___trt__GetProfiles(&ctx->soap, -1);
   if (!*out) {
+    platform_log_debug("onvif_gsoap_parse_get_profiles: Failed to allocate GetProfiles structure");
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
                           "Failed to allocate GetProfiles request structure");
     return ONVIF_ERROR_MEMORY;
   }
 
-  /* 5. Use gSOAP generated deserialization function */
-  if (soap_read__trt__GetProfiles(&ctx->soap, *out) != SOAP_OK) {
+  platform_log_debug("onvif_gsoap_parse_get_profiles: Starting SOAP envelope parsing sequence");
+  platform_log_debug("onvif_gsoap_parse_get_profiles: gSOAP context state - soap.is=%p, "
+                     "soap.bufidx=%lu, soap.buflen=%lu",
+                     ctx->soap.is, (unsigned long)ctx->soap.bufidx,
+                     (unsigned long)ctx->soap.buflen);
+
+  /* 5. CORRECTED: Parse SOAP envelope using proper sequence */
+  int soap_result = SOAP_OK;
+
+  // Begin receiving
+  platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_begin_recv");
+  soap_result = soap_begin_recv(&ctx->soap);
+  if (soap_result != SOAP_OK) {
+    platform_log_debug("onvif_gsoap_parse_get_profiles: soap_begin_recv failed: %d", soap_result);
     *out = NULL;
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse GetProfiles SOAP request");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to begin SOAP receive");
     return ONVIF_ERROR_PARSE_FAILED;
   }
+
+  // Parse SOAP envelope
+  platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_envelope_begin_in");
+  soap_result = soap_envelope_begin_in(&ctx->soap);
+  if (soap_result != SOAP_OK) {
+    platform_log_debug("onvif_gsoap_parse_get_profiles: soap_envelope_begin_in failed: %d",
+                       soap_result);
+    *out = NULL;
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
+                          "Failed to begin SOAP envelope parsing");
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Skip SOAP header if present
+  platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_recv_header");
+  soap_result = soap_recv_header(&ctx->soap);
+  if (soap_result != SOAP_OK) {
+    platform_log_debug("onvif_gsoap_parse_get_profiles: soap_recv_header failed: %d", soap_result);
+    *out = NULL;
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to receive SOAP header");
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Parse SOAP body
+  platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_body_begin_in");
+  soap_result = soap_body_begin_in(&ctx->soap);
+  if (soap_result != SOAP_OK) {
+    platform_log_debug("onvif_gsoap_parse_get_profiles: soap_body_begin_in failed: %d",
+                       soap_result);
+    *out = NULL;
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
+                          "Failed to begin SOAP body parsing");
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Now parse the actual GetProfiles structure
+  platform_log_debug("onvif_gsoap_parse_get_profiles: Calling soap_get___trt__GetProfiles");
+  struct _trt__GetProfiles* result_ptr = soap_get__trt__GetProfiles(&ctx->soap, *out, NULL, NULL);
+  if (!result_ptr) {
+    soap_result = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_get_profiles: soap_get___trt__GetProfiles failed: %d",
+                       soap_result);
+    *out = NULL;
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
+                          "Failed to parse GetProfiles structure");
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+  ctx->request_state.operation_name = "GetProfiles";
+
+  // Complete the parsing sequence
+  platform_log_debug("onvif_gsoap_parse_get_profiles: Completing SOAP parsing sequence");
+  soap_body_end_in(&ctx->soap);
+  soap_envelope_end_in(&ctx->soap);
+  soap_end_recv(&ctx->soap);
+
+  platform_log_debug("onvif_gsoap_parse_get_profiles: gSOAP deserialization succeeded");
 
   /* 6. Record parse completion time */
   ctx->request_state.parse_end_time = get_timestamp_us();
 
+  platform_log_debug("onvif_gsoap_parse_get_profiles: GetProfiles parsing completed successfully");
   return ONVIF_SUCCESS;
 }
 
