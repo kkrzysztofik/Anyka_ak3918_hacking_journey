@@ -267,7 +267,7 @@
   - _Requirements: Follow existing test patterns, use CMocka assertions, test success and failure scenarios_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in gSOAP response testing | Task: Add comprehensive tests for system reboot response generation in test_onvif_gsoap_response_generation.c. Create test_unit_onvif_gsoap_generate_system_reboot_response_success, test_unit_onvif_gsoap_generate_system_reboot_response_null_context, and test_unit_onvif_gsoap_generate_system_reboot_response_null_params. Verify SystemRebootResponse structure is properly serialized and contains expected elements. Follow existing test patterns and use CMocka assertions. | Restrictions: Must follow existing test patterns, must use CMocka assertions, must test both success and failure scenarios, must not modify production code | Success: System reboot response tests implemented, all tests pass, proper test coverage, follows existing test patterns, CMocka assertions used correctly | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 20.5.3. Implement GetCapabilities response generation
+- [x] 20.5.3. Implement GetCapabilities response generation
   - File: src/protocol/gsoap/onvif_gsoap_device.c
   - Implement `onvif_gsoap_generate_capabilities_response()` function
   - Add response structure creation and serialization using gSOAP patterns
@@ -297,7 +297,7 @@
   - _Requirements: Follow gSOAP response generation pattern, proper SOAP envelope structure, handle memory allocation properly_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: gSOAP Response Generation Developer with expertise in Device service callbacks | Task: Implement onvif_gsoap_generate_services_response() function in onvif_gsoap_device.c. Create GetServicesResponse structure using soap_new__tds__GetServicesResponse(), initialize it properly with services data, and serialize using soap_put__tds__GetServicesResponse(). Handle memory allocation and error cases appropriately. | Restrictions: Must follow existing gSOAP response patterns, must use gSOAP serialization functions, must handle memory allocation properly, must not modify existing callback signatures | Success: GetServices response function implemented, follows gSOAP patterns, proper response generation, no memory leaks, function returns appropriate error codes | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 20.5.6. Add GetCapabilities response generation tests
+- [x] 20.5.6. Add GetCapabilities response generation tests
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
   - Add test for GetCapabilities response generation success scenario
   - Add test for GetCapabilities response generation with NULL context

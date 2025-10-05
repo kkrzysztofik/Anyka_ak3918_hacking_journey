@@ -234,18 +234,31 @@ int soap_test_parse_get_nodes_response(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure (PTZ uses tptz namespace)
   *response = (struct _tptz__GetNodesResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _tptz__GetNodesResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__tptz__GetNodesResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__tptz__GetNodesResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tptz__GetNodesResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -394,18 +407,31 @@ int soap_test_parse_delete_profile_response(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
   *response = (struct _trt__DeleteProfileResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _trt__DeleteProfileResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__trt__DeleteProfileResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__trt__DeleteProfileResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__trt__DeleteProfileResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -506,18 +532,31 @@ int soap_test_parse_get_metadata_configs_response(
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
   *response = (struct _trt__GetMetadataConfigurationsResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _trt__GetMetadataConfigurationsResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__trt__GetMetadataConfigurationsResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__trt__GetMetadataConfigurationsResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__trt__GetMetadataConfigurationsResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -530,18 +569,31 @@ int soap_test_parse_set_metadata_config_response(
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
   *response = (struct _trt__SetMetadataConfigurationResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _trt__SetMetadataConfigurationResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__trt__SetMetadataConfigurationResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__trt__SetMetadataConfigurationResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__trt__SetMetadataConfigurationResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -564,8 +616,24 @@ int soap_test_parse_start_multicast_response(
   // Initialize response structure
   soap_default__trt__StartMulticastStreamingResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__trt__StartMulticastStreamingResponse(&ctx->soap, *response) != SOAP_OK) {
+  // Proper SOAP envelope navigation
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__trt__StartMulticastStreamingResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -578,18 +646,31 @@ int soap_test_parse_stop_multicast_response(
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
   *response = (struct _trt__StopMulticastStreamingResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _trt__StopMulticastStreamingResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__trt__StopMulticastStreamingResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__trt__StopMulticastStreamingResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__trt__StopMulticastStreamingResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -601,23 +682,36 @@ int soap_test_parse_stop_multicast_response(
  * ============================================================================ */
 
 int soap_test_parse_absolute_move_response(onvif_gsoap_context_t* ctx,
-                                           struct _tptz__AbsoluteMoveResponse** response) {
+                                            struct _tptz__AbsoluteMoveResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
   *response = (struct _tptz__AbsoluteMoveResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _tptz__AbsoluteMoveResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__tptz__AbsoluteMoveResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__tptz__AbsoluteMoveResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tptz__AbsoluteMoveResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -630,18 +724,31 @@ int soap_test_parse_get_presets_response(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
   *response = (struct _tptz__GetPresetsResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _tptz__GetPresetsResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__tptz__GetPresetsResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__tptz__GetPresetsResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tptz__GetPresetsResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -654,18 +761,31 @@ int soap_test_parse_set_preset_response(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
   *response = (struct _tptz__SetPresetResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _tptz__SetPresetResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__tptz__SetPresetResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__tptz__SetPresetResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tptz__SetPresetResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -673,23 +793,36 @@ int soap_test_parse_set_preset_response(onvif_gsoap_context_t* ctx,
 }
 
 int soap_test_parse_goto_preset_response(onvif_gsoap_context_t* ctx,
-                                         struct _tptz__GotoPresetResponse** response) {
+                                          struct _tptz__GotoPresetResponse** response) {
   if (!ctx || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
-  *response = (struct _tptz__GotoPresetResponse*)soap_malloc(
-    &ctx->soap, sizeof(struct _tptz__GotoPresetResponse));
+  *response = (struct _tptz__GotoPresetResponse*)soap_malloc(&ctx->soap,
+                                                              sizeof(struct _tptz__GotoPresetResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__tptz__GotoPresetResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__tptz__GotoPresetResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tptz__GotoPresetResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -702,18 +835,31 @@ int soap_test_parse_remove_preset_response(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
   *response = (struct _tptz__RemovePresetResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _tptz__RemovePresetResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__tptz__RemovePresetResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__tptz__RemovePresetResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tptz__RemovePresetResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -740,8 +886,28 @@ int soap_test_parse_get_capabilities_response(onvif_gsoap_context_t* ctx,
   // Initialize response structure
   soap_default__tds__GetCapabilitiesResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__tds__GetCapabilitiesResponse(&ctx->soap, *response) != SOAP_OK) {
+  // Begin receiving and parse the complete message
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Navigate to the Body element
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Deserialize the response element from the body
+  if (soap_in__tds__GetCapabilitiesResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Close body and envelope
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Finish receiving
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -754,18 +920,31 @@ int soap_test_parse_get_system_date_time_response(
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
   *response = (struct _tds__GetSystemDateAndTimeResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _tds__GetSystemDateAndTimeResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__tds__GetSystemDateAndTimeResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__tds__GetSystemDateAndTimeResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tds__GetSystemDateAndTimeResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -778,18 +957,31 @@ int soap_test_parse_get_services_response(onvif_gsoap_context_t* ctx,
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
   *response = (struct _tds__GetServicesResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _tds__GetServicesResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__tds__GetServicesResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__tds__GetServicesResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tds__GetServicesResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -850,18 +1042,31 @@ int soap_test_parse_set_imaging_settings_response(
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate response structure
   *response = (struct _timg__SetImagingSettingsResponse*)soap_malloc(
     &ctx->soap, sizeof(struct _timg__SetImagingSettingsResponse));
   if (!*response) {
     return ONVIF_ERROR_MEMORY;
   }
 
-  // Initialize response structure
   soap_default__timg__SetImagingSettingsResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__timg__SetImagingSettingsResponse(&ctx->soap, *response) != SOAP_OK) {
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__timg__SetImagingSettingsResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -1025,7 +1230,6 @@ int soap_test_parse_soap_fault(onvif_gsoap_context_t* ctx, struct SOAP_ENV__Faul
     return ONVIF_ERROR_INVALID;
   }
 
-  // Allocate and initialize SOAP Fault structure
   *fault = (struct SOAP_ENV__Fault*)soap_malloc(&ctx->soap, sizeof(struct SOAP_ENV__Fault));
   if (!*fault) {
     return ONVIF_ERROR_MEMORY;
@@ -1033,27 +1237,23 @@ int soap_test_parse_soap_fault(onvif_gsoap_context_t* ctx, struct SOAP_ENV__Faul
 
   soap_default_SOAP_ENV__Fault(&ctx->soap, *fault);
 
-  // Begin receiving and parse the fault
   if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  // Navigate to Body element
   if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  // Parse the fault structure
-  if (soap_read_SOAP_ENV__Fault(&ctx->soap, *fault) != SOAP_OK) {
+  // Use proper SOAP envelope navigation instead of soap_read_SOAP_ENV__Fault
+  if (soap_in_SOAP_ENV__Fault(&ctx->soap, NULL, *fault, NULL) == NULL) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  // Close body and envelope
   if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  // Finish receiving
   if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }

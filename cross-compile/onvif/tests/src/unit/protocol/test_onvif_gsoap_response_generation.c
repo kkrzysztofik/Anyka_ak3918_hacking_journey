@@ -280,6 +280,157 @@ static void test_unit_onvif_gsoap_generate_system_reboot_response_null_params(vo
   assert_int_equal(result, ONVIF_SUCCESS);
 }
 
+/**
+ * @brief Test successful GetCapabilities response generation
+ */
+static void test_unit_onvif_gsoap_generate_capabilities_response_success(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  char response_buffer[4096];
+  const char* test_device_ip = "192.168.1.100";
+  const int test_http_port = 80;
+
+  // Test basic context validation
+  assert_non_null(ctx);
+  assert_int_equal(ctx->error_context.last_error_code, ONVIF_SUCCESS);
+
+  // Test successful response generation using real functions with NULL capabilities (default)
+  int result = onvif_gsoap_generate_capabilities_response(ctx, NULL, test_device_ip, test_http_port);
+
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Extract serialized response using helper
+  int response_size = get_serialized_response(ctx, response_buffer, sizeof(response_buffer));
+  assert_true(response_size > 0);
+  assert_true(response_size < (int)sizeof(response_buffer));
+
+  // Create http_response_t wrapper for helper function
+  http_response_t http_resp = {
+    .body = response_buffer,
+    .body_length = strlen(response_buffer),
+    .status_code = 200
+  };
+
+  // Deserialize response back to gSOAP structure for proper validation
+  onvif_gsoap_context_t parse_ctx;
+  result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  struct _tds__GetCapabilitiesResponse* response;
+  result = soap_test_parse_get_capabilities_response(&parse_ctx, &response);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Verify capabilities structure exists
+  assert_non_null(response->Capabilities);
+
+  // Verify Device capabilities
+  assert_non_null(response->Capabilities->Device);
+  assert_non_null(response->Capabilities->Device->XAddr);
+  assert_string_equal(response->Capabilities->Device->XAddr,
+                     "http://192.168.1.100:80/onvif/device_service");
+
+  // Verify Media capabilities
+  assert_non_null(response->Capabilities->Media);
+  assert_non_null(response->Capabilities->Media->XAddr);
+  assert_string_equal(response->Capabilities->Media->XAddr,
+                     "http://192.168.1.100:80/onvif/media_service");
+
+  // Verify PTZ capabilities
+  assert_non_null(response->Capabilities->PTZ);
+  assert_non_null(response->Capabilities->PTZ->XAddr);
+  assert_string_equal(response->Capabilities->PTZ->XAddr,
+                     "http://192.168.1.100:80/onvif/ptz_service");
+
+  // Cleanup
+  onvif_gsoap_cleanup(&parse_ctx);
+}
+
+/**
+ * @brief Test GetCapabilities response generation with NULL context
+ */
+static void test_unit_onvif_gsoap_generate_capabilities_response_null_context(void** state) {
+  (void)state; // Unused parameter
+  const char* test_device_ip = "192.168.1.100";
+  const int test_http_port = 80;
+
+  // Test with NULL context
+  int result = onvif_gsoap_generate_capabilities_response(NULL, NULL, test_device_ip, test_http_port);
+
+  assert_int_equal(result, ONVIF_ERROR_INVALID);
+}
+
+/**
+ * @brief Test GetCapabilities response generation with NULL parameters
+ */
+static void test_unit_onvif_gsoap_generate_capabilities_response_null_params(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  const int test_http_port = 80;
+
+  // Test with NULL device_ip - the function should handle NULL gracefully
+  int result = onvif_gsoap_generate_capabilities_response(ctx, NULL, NULL, test_http_port);
+
+  // The function should succeed even with NULL device_ip (it converts it to empty string)
+  assert_int_equal(result, ONVIF_SUCCESS);
+}
+
+/**
+ * @brief Test GetCapabilities response generation with real capabilities data
+ */
+static void test_unit_onvif_gsoap_generate_capabilities_response_with_real_data(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  char response_buffer[4096];
+  const char* test_device_ip = "192.168.1.100";
+  const int test_http_port = 80;
+
+  // Create real capabilities structure with custom XAddr URLs
+  struct tt__Capabilities* real_caps = soap_new_tt__Capabilities(&ctx->soap, 1);
+  assert_non_null(real_caps);
+
+  // Create Device capabilities with custom XAddr
+  real_caps->Device = soap_new_tt__DeviceCapabilities(&ctx->soap, 1);
+  assert_non_null(real_caps->Device);
+  real_caps->Device->XAddr = soap_strdup(&ctx->soap, "http://custom-device.local:8080/device");
+
+  // Create Media capabilities with custom XAddr
+  real_caps->Media = soap_new_tt__MediaCapabilities(&ctx->soap, 1);
+  assert_non_null(real_caps->Media);
+  real_caps->Media->XAddr = soap_strdup(&ctx->soap, "http://custom-media.local:8080/media");
+
+  // PTZ is intentionally NULL to test that only implemented services are included
+
+  // Generate response using real capabilities
+  int result = onvif_gsoap_generate_capabilities_response(ctx, real_caps, test_device_ip, test_http_port);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Extract and parse response
+  int response_size = get_serialized_response(ctx, response_buffer, sizeof(response_buffer));
+  http_response_t http_resp = {
+    .body = response_buffer,
+    .body_length = strlen(response_buffer),
+    .status_code = 200
+  };
+
+  onvif_gsoap_context_t parse_ctx;
+  result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  struct _tds__GetCapabilitiesResponse* response;
+  result = soap_test_parse_get_capabilities_response(&parse_ctx, &response);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Verify the response uses our real capabilities with custom XAddr URLs
+  assert_non_null(response->Capabilities);
+  assert_non_null(response->Capabilities->Device);
+  assert_string_equal(response->Capabilities->Device->XAddr, "http://custom-device.local:8080/device");
+
+  assert_non_null(response->Capabilities->Media);
+  assert_string_equal(response->Capabilities->Media->XAddr, "http://custom-media.local:8080/media");
+
+  // PTZ should be NULL since we didn't provide it
+  assert_null(response->Capabilities->PTZ);
+
+  onvif_gsoap_cleanup(&parse_ctx);
+}
+
 // ============================================================================
 // Media Service Response Generation Tests
 // ============================================================================
@@ -787,7 +938,9 @@ static void test_unit_onvif_gsoap_generate_get_metadata_configurations_response_
   assert_string_equal(response->Configurations[0].token, test_config.token);
   assert_string_equal(response->Configurations[0].Name, test_config.name);
   assert_int_equal(response->Configurations[0].UseCount, test_config.use_count);
-  assert_int_equal(response->Configurations[0].SessionTimeout, test_config.session_timeout);
+  // SessionTimeout is xsd:duration string format (default is "PT60S" for 60 seconds)
+  assert_non_null(response->Configurations[0].SessionTimeout);
+  assert_string_equal(response->Configurations[0].SessionTimeout, "PT60S");
 
   // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
@@ -1057,14 +1210,16 @@ static void test_unit_onvif_gsoap_generate_fault_response_success(void** state) 
   int parse_result = soap_test_parse_soap_fault(&parse_ctx, &fault);
   assert_int_equal(parse_result, ONVIF_SUCCESS);
 
-  // Validate fault fields
-  assert_non_null(fault->faultcode);
-  assert_string_equal(fault->faultcode, mock_fault_invalid_parameter.fault_code);
-  assert_non_null(fault->faultstring);
-  assert_string_equal(fault->faultstring, mock_fault_invalid_parameter.fault_string);
+  // Validate SOAP 1.2 fault fields (Code, Reason, Detail)
+  assert_non_null(fault->SOAP_ENV__Code);
+  assert_non_null(fault->SOAP_ENV__Code->SOAP_ENV__Value);
+  assert_string_equal(fault->SOAP_ENV__Code->SOAP_ENV__Value, mock_fault_invalid_parameter.fault_code);
+  assert_non_null(fault->SOAP_ENV__Reason);
+  assert_non_null(fault->SOAP_ENV__Reason->SOAP_ENV__Text);
+  assert_string_equal(fault->SOAP_ENV__Reason->SOAP_ENV__Text, mock_fault_invalid_parameter.fault_string);
   if (mock_fault_invalid_parameter.fault_detail) {
-    assert_non_null(fault->detail);
-    assert_non_null(strstr(fault->detail->__any, mock_fault_invalid_parameter.fault_detail));
+    assert_non_null(fault->SOAP_ENV__Detail);
+    assert_non_null(strstr(fault->SOAP_ENV__Detail->__any, mock_fault_invalid_parameter.fault_detail));
   }
 
   // Cleanup
@@ -1103,11 +1258,13 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_context(void** st
   int parse_result = soap_test_parse_soap_fault(&parse_ctx, &fault);
   assert_int_equal(parse_result, ONVIF_SUCCESS);
 
-  // Validate fault fields
-  assert_non_null(fault->faultcode);
-  assert_string_equal(fault->faultcode, mock_fault_invalid_parameter.fault_code);
-  assert_non_null(fault->faultstring);
-  assert_string_equal(fault->faultstring, mock_fault_invalid_parameter.fault_string);
+  // Validate SOAP 1.2 fault fields
+  assert_non_null(fault->SOAP_ENV__Code);
+  assert_non_null(fault->SOAP_ENV__Code->SOAP_ENV__Value);
+  assert_string_equal(fault->SOAP_ENV__Code->SOAP_ENV__Value, mock_fault_invalid_parameter.fault_code);
+  assert_non_null(fault->SOAP_ENV__Reason);
+  assert_non_null(fault->SOAP_ENV__Reason->SOAP_ENV__Text);
+  assert_string_equal(fault->SOAP_ENV__Reason->SOAP_ENV__Text, mock_fault_invalid_parameter.fault_string);
 
   // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
@@ -1130,12 +1287,25 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_fault_code(void**
   assert_true(strlen(output_buffer) > 0);
 
   // Parse SOAP Fault to validate it's well-formed
+  http_response_t fault_http_resp = {
+    .body = output_buffer,
+    .body_length = strlen(output_buffer),
+    .status_code = 500
+  };
+
   onvif_gsoap_context_t parse_ctx;
+  int init_result = soap_test_init_response_parsing(&parse_ctx, &fault_http_resp);
+  assert_int_equal(init_result, ONVIF_SUCCESS);
+
   struct SOAP_ENV__Fault* fault;
   int parse_result = soap_test_parse_soap_fault(&parse_ctx, &fault);
   assert_int_equal(parse_result, ONVIF_SUCCESS);
-  assert_non_null(fault->faultcode);
-  assert_non_null(fault->faultstring);
+
+  // Validate SOAP 1.2 fault fields
+  assert_non_null(fault->SOAP_ENV__Code);
+  assert_non_null(fault->SOAP_ENV__Code->SOAP_ENV__Value);
+  assert_non_null(fault->SOAP_ENV__Reason);
+  assert_non_null(fault->SOAP_ENV__Reason->SOAP_ENV__Text);
 
   // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
@@ -1177,6 +1347,17 @@ const struct CMUnitTest response_generation_tests[] = {
     response_generation_teardown),
   cmocka_unit_test_setup_teardown(
     test_unit_onvif_gsoap_generate_system_reboot_response_null_params, response_generation_setup,
+    response_generation_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_capabilities_response_success,
+                                  response_generation_setup, response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_capabilities_response_null_context, response_generation_setup,
+    response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_capabilities_response_null_params, response_generation_setup,
+    response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_capabilities_response_with_real_data, response_generation_setup,
     response_generation_teardown),
 
   // Media Service Tests

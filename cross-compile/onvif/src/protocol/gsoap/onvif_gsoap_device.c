@@ -92,47 +92,52 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  /* Create capabilities structure */
-  response->Capabilities = soap_new_tt__Capabilities(soap, 1);
-  if (!response->Capabilities) {
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  /* Use provided capabilities if available, otherwise create default */
+  if (data->capabilities) {
+    response->Capabilities = (struct tt__Capabilities*)data->capabilities;
+  } else {
+    /* Create default capabilities structure */
+    response->Capabilities = soap_new_tt__Capabilities(soap, 1);
+    if (!response->Capabilities) {
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
+    }
+
+    /* Build service URLs using configured device IP and port */
+    char device_xaddr[256];
+    char media_xaddr[256];
+    char ptz_xaddr[256];
+    snprintf(device_xaddr, sizeof(device_xaddr), "http://%s:%d/onvif/device_service",
+             data->device_ip, data->http_port);
+    snprintf(media_xaddr, sizeof(media_xaddr), "http://%s:%d/onvif/media_service",
+             data->device_ip, data->http_port);
+    snprintf(ptz_xaddr, sizeof(ptz_xaddr), "http://%s:%d/onvif/ptz_service",
+             data->device_ip, data->http_port);
+
+    /* Create device capabilities */
+    response->Capabilities->Device = soap_new_tt__DeviceCapabilities(soap, 1);
+    if (!response->Capabilities->Device) {
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
+    }
+
+    /* Set device capabilities XAddr */
+    response->Capabilities->Device->XAddr = soap_strdup(soap, device_xaddr);
+
+    /* Create media capabilities */
+    response->Capabilities->Media = soap_new_tt__MediaCapabilities(soap, 1);
+    if (!response->Capabilities->Media) {
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
+    }
+
+    response->Capabilities->Media->XAddr = soap_strdup(soap, media_xaddr);
+
+    /* Create PTZ capabilities */
+    response->Capabilities->PTZ = soap_new_tt__PTZCapabilities(soap, 1);
+    if (!response->Capabilities->PTZ) {
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
+    }
+
+    response->Capabilities->PTZ->XAddr = soap_strdup(soap, ptz_xaddr);
   }
-
-  /* Build service URLs using configured device IP and port */
-  char device_xaddr[256];
-  char media_xaddr[256];
-  char ptz_xaddr[256];
-  snprintf(device_xaddr, sizeof(device_xaddr), "http://%s:%d/onvif/device_service",
-           data->device_ip, data->http_port);
-  snprintf(media_xaddr, sizeof(media_xaddr), "http://%s:%d/onvif/media_service",
-           data->device_ip, data->http_port);
-  snprintf(ptz_xaddr, sizeof(ptz_xaddr), "http://%s:%d/onvif/ptz_service",
-           data->device_ip, data->http_port);
-
-  /* Create device capabilities */
-  response->Capabilities->Device = soap_new_tt__DeviceCapabilities(soap, 1);
-  if (!response->Capabilities->Device) {
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-
-  /* Set device capabilities XAddr */
-  response->Capabilities->Device->XAddr = soap_strdup(soap, device_xaddr);
-
-  /* Create media capabilities */
-  response->Capabilities->Media = soap_new_tt__MediaCapabilities(soap, 1);
-  if (!response->Capabilities->Media) {
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-
-  response->Capabilities->Media->XAddr = soap_strdup(soap, media_xaddr);
-
-  /* Create PTZ capabilities */
-  response->Capabilities->PTZ = soap_new_tt__PTZCapabilities(soap, 1);
-  if (!response->Capabilities->PTZ) {
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-
-  response->Capabilities->PTZ->XAddr = soap_strdup(soap, ptz_xaddr);
 
   /* Serialize response within SOAP body */
   if (soap_put__tds__GetCapabilitiesResponse(soap, response, "tds:GetCapabilitiesResponse", "") !=
@@ -540,5 +545,33 @@ int onvif_gsoap_generate_device_info_response(onvif_gsoap_context_t* ctx, const 
 
   /* Use the generic response generation with callback */
   return onvif_gsoap_generate_response_with_callback(ctx, device_info_response_callback,
+                                                     &callback_data);
+}
+
+/**
+ * @brief Generate GetCapabilities response
+ * @param ctx gSOAP context for response generation
+ * @param device_ip Device IP address for XAddr URLs
+ * @param http_port HTTP port for XAddr URLs
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Generates Device service GetCapabilities response containing service capabilities
+ */
+int onvif_gsoap_generate_capabilities_response(onvif_gsoap_context_t* ctx, 
+                                                const struct tt__Capabilities* capabilities,
+                                                const char* device_ip,
+                                                int http_port) {
+  /* Prepare callback data */
+  capabilities_callback_data_t callback_data = {
+    .capabilities = capabilities,
+    .http_port = http_port,
+    .device_ip = {0}
+  };
+
+  /* Copy device IP into the callback data structure */
+  strncpy(callback_data.device_ip, device_ip ? device_ip : "", sizeof(callback_data.device_ip) - 1);
+  callback_data.device_ip[sizeof(callback_data.device_ip) - 1] = '\0';
+
+  /* Use the generic response generation with callback */
+  return onvif_gsoap_generate_response_with_callback(ctx, capabilities_response_callback,
                                                      &callback_data);
 }

@@ -170,4 +170,19 @@ int onvif_gsoap_generate_device_info_response(onvif_gsoap_context_t* ctx, const 
                                               const char* model, const char* firmware_version,
                                               const char* serial_number, const char* hardware_id);
 
+/**
+ * @brief Generate GetCapabilities response
+ * @param ctx gSOAP context for response generation
+ * @param capabilities Capabilities structure to include in response (NULL for default)
+ * @param device_ip Device IP address for XAddr URLs (used if capabilities is NULL)
+ * @param http_port HTTP port for XAddr URLs (used if capabilities is NULL)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Generates Device service GetCapabilities response containing service capabilities
+ * @note If capabilities is NULL, creates default capabilities with Device, Media, and PTZ services
+ */
+int onvif_gsoap_generate_capabilities_response(onvif_gsoap_context_t* ctx,
+                                                const struct tt__Capabilities* capabilities,
+                                                const char* device_ip,
+                                                int http_port);
+
 #endif /* ONVIF_GSOAP_DEVICE_H */
