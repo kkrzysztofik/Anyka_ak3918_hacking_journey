@@ -10,17 +10,107 @@
 - Unit test: `test_unit_memory_manager_init`, `test_unit_http_auth_verify_credentials_success`
 - Integration test: `test_integration_ptz_absolute_move_functionality`, `test_integration_media_profile_operations`
 
+## Unified Test Runner System
+
+The project uses a sophisticated unified test runner that consolidates **196 tests across 17 test suites** into a single executable. This system provides flexible filtering, comprehensive output logging, and efficient test execution.
+
+### Test Suite Structure
+
+The unified runner organizes tests into the following **17 test suites**:
+
+#### Unit Test Suites (12 suites)
+
+- **memory-utils** - Memory Management Utilities
+- **logging-utils** - Logging Utilities
+- **http-auth** - HTTP Authentication
+- **http-metrics** - HTTP Metrics
+- **gsoap-protocol** - gSOAP Protocol
+- **gsoap-response** - gSOAP Response Generation
+- **service-dispatcher** - Service Dispatcher
+- **ptz-service** - PTZ Service
+- **ptz-callbacks** - PTZ Callbacks
+- **ptz-adapter** - PTZ Adapter
+- **media-utils** - Media Utilities
+- **media-callbacks** - Media Callbacks
+- **imaging-callbacks** - Imaging Callbacks
+
+#### Integration Test Suites (5 suites)
+
+- **ptz-integration** - PTZ Service Integration
+- **media-integration** - Media Service Integration
+- **device-integration** - Device Service Integration
+- **imaging-integration** - Imaging Service Integration
+- **soap-errors** - SOAP Error Handling
+
+### OUT.log Output Mechanism
+
+The unified test runner automatically creates an `OUT.log` file in the tests directory that captures:
+
+- **Dual Output**: All test output is written to both console and `OUT.log` simultaneously
+- **Complete Test Logs**: Full test execution details, debug output, and results
+- **Persistent Records**: Test results are preserved for analysis and debugging
+- **Real-time Monitoring**: Output appears in both console and log file in real-time
+
+**Output Location**: `cross-compile/onvif/tests/OUT.log`
+
+## Test Execution Commands
+
+### Basic Test Execution
+
+```bash
+# Run all 196 tests across 17 suites (output to console + OUT.log)
+make test
+
+# Run only unit tests (12 suites)
+make test-unit
+
+# Run only integration tests (5 suites)
+make test-integration
+
+# List all available test suites with test counts
+make test-list
+```
+
+### Suite-Specific Execution
+
+```bash
+# Run specific suite
+make test SUITE=ptz-service
+
+# Run multiple suites (comma-separated)
+make test SUITE=ptz-service,ptz-callbacks,ptz-integration
+
+# Run unit tests for specific suites
+make test-unit SUITE=http-auth,http-metrics
+
+# Run integration tests for specific suites
+make test-integration SUITE=ptz-integration,media-integration
+```
+
+### Advanced Filtering
+
+```bash
+# Run all PTZ-related tests (unit + integration)
+make test SUITE=ptz-service,ptz-callbacks,ptz-adapter,ptz-integration
+
+# Run all gSOAP-related tests
+make test SUITE=gsoap-protocol,gsoap-response
+
+# Run all media-related tests
+make test SUITE=media-utils,media-callbacks,media-integration
+```
+
+### Direct Runner Usage
+
+```bash
+# Direct runner with advanced options
+./out/test_runner --type=unit --suite=ptz-service
+./out/test_runner --type=integration --suite=ptz-integration,media-integration
+./out/test_runner --list
+./out/test_runner --help
+```
+
 ## Unit Testing (MANDATORY)
-
-**Test Suite**: Dynamic test count across 17 suites (unit and integration tests)
-
-- **Run all tests**: `make test` (from project root or tests directory)
-- **Run unit tests only**: `make test-unit`
-- **Run integration tests only**: `make test-integration`
-- **List available test suites**: `make test-list`
-- **Run specific suite**: `make test SUITE=ptz-service`
-- **Run multiple suites**: `make test SUITE=ptz-service,ptz-callbacks,ptz-integration`
-- **Filter by type and suite**: `make test-unit SUITE=http-auth,http-metrics`
 
 **Requirements**:
 
@@ -148,7 +238,7 @@ will_return(__wrap_platform_vi_open, PLATFORM_SUCCESS);
 
 ### Mock File Organization
 
-```
+```text
 tests/src/mocks/
 ├── platform_mock.c          # Platform abstraction mocks
 ├── platform_mock.h
@@ -225,15 +315,37 @@ tests/src/mocks/
 
 ## Testing Commands
 
+### Unified Test Runner Commands
+
 ```bash
-# Unit Testing (MANDATORY)
-make test                    # Run all unit tests
-make test-utils             # Run utility unit tests
+# Basic test execution (MANDATORY)
+make test                    # Run all 196 tests across 17 suites
+make test-unit              # Run only unit tests (12 suites)
+make test-integration       # Run only integration tests (5 suites)
+make test-list              # List all available test suites with counts
+
+# Suite-specific execution
+make test SUITE=ptz-service                    # Run specific suite
+make test SUITE=ptz-service,ptz-callbacks      # Run multiple suites
+make test-unit SUITE=http-auth,http-metrics    # Unit tests for specific suites
+make test-integration SUITE=ptz-integration    # Integration tests for specific suites
+
+# Coverage and analysis
 make test-coverage          # Run tests with coverage
 make test-coverage-html     # Generate HTML coverage report
 make test-coverage-report   # Generate coverage summary
 make test-valgrind          # Run tests with valgrind
 
+# Direct runner usage
+./out/test_runner --type=unit --suite=ptz-service
+./out/test_runner --type=integration --suite=ptz-integration,media-integration
+./out/test_runner --list
+./out/test_runner --help
+```
+
+### Test Infrastructure Commands
+
+```bash
 # Install unit test dependencies
 ./cross-compile/onvif/tests/install_dependencies.sh
 
@@ -242,4 +354,28 @@ cppcheck cross-compile/onvif/src
 
 # Check for memory leaks with valgrind (if available)
 valgrind --leak-check=full cross-compile/onvif/out/onvifd
+```
+
+### Test Runner Help Options
+
+The unified test runner provides comprehensive help and filtering options:
+
+```bash
+# Show help with all available options
+./out/test_runner --help
+
+# List all test suites with descriptions and test counts
+./out/test_runner --list
+
+# Filter by test type
+./out/test_runner --type=unit          # Unit tests only
+./out/test_runner --type=integration   # Integration tests only
+./out/test_runner --type=all           # All tests (default)
+
+# Filter by suite name (supports multiple suites)
+./out/test_runner --suite=ptz-service
+./out/test_runner --suite=ptz-service,media-utils,http-auth
+
+# Combined filtering
+./out/test_runner --type=unit --suite=ptz-service,ptz-callbacks
 ```
