@@ -28,6 +28,8 @@ typedef struct {
 extern const mock_device_info_t mock_device_info_valid;
 extern const mock_device_info_t mock_device_info_empty;
 extern const mock_device_info_t mock_device_info_null_strings;
+extern const mock_device_info_t mock_device_info_large_strings;
+extern const mock_device_info_t mock_device_info_special_chars;
 
 // ============================================================================
 // Media Service Test Data

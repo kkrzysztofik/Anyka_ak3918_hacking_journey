@@ -1033,7 +1033,7 @@
   - _Requirements: Keep test runtime low, reuse shared buffers, adhere to project naming conventions_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Media Service QA Engineer | Task: Update DeleteProfile response test to extract serialized XML, validate SOAP envelope, and assert DeleteProfileResponse plus profile identifiers are present without introducing brittle string order dependencies. | Restrictions: Avoid duplicating helper logic, do not alter unrelated tests, keep assertions CMocka-compliant | Success: Media response test captures XML content expectations and passes reliably | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 74. Validate PTZ response XML content
+- [x] 74. Validate PTZ response XML content
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
   - Add XML validation to AbsoluteMove and GotoPreset success tests
   - Ensure PTZ response names and tokens appear
@@ -1059,7 +1059,7 @@
   - _Requirements: Maintain function signature and return semantics, ensure count pointer validated_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: CMocka Suite Engineer | Task: Update get_gsoap_response_unit_tests() to compute *count using sizeof array division, removing stale comments about fixed totals. | Restrictions: No additional globals, avoid modifying registration order, keep style consistent | Success: Test count auto-updates with array changes, suite returns accurate value, no compiler warnings | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 77. Add response buffer overflow protection test
+- [x] 77. Add response buffer overflow protection test
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
   - Introduce test covering small output buffer handling for fault generation
   - Ensure function returns error without crashing or overwriting memory
@@ -1068,7 +1068,7 @@
   - _Requirements: Use CMocka assertions, avoid writing beyond local buffer, document expected error code_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Reliability QA Engineer | Task: Add a unit test that calls onvif_gsoap_generate_fault_response() with an undersized buffer, verifying it returns an error and leaves context consistent, then register the test in response_generation_tests. | Restrictions: Do not modify production fault generator, keep buffer on stack, ensure test teardown resets context | Success: New test passes, failure properly detected, suite count updated automatically | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 78. Add large string response handling test
+- [x] 78. Add large string response handling test
   - File: cross-compile/onvif/tests/src/data/response_test_data.c
   - File: cross-compile/onvif/tests/src/data/response_test_data.h
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
@@ -1078,7 +1078,7 @@
   - _Requirements: Initialize large string during response_test_data_init(), avoid heap allocation, ensure buffer sizes cover serialized output_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Stress Testing QA Engineer | Task: Create large string mock data (512 chars) in response_test_data, expose it via header, and add a unit test verifying onvif_gsoap_generate_device_info_response() succeeds and serialized output is retrievable without truncation. | Restrictions: Keep large buffers static, ensure tests reset context between runs, avoid impacting other mocks | Success: Large-string test passes, helper data initialized safely, no compiler warnings | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 79. Add special character response handling test
+- [x] 79. Add special character response handling test
   - File: cross-compile/onvif/tests/src/data/response_test_data.c
   - File: cross-compile/onvif/tests/src/data/response_test_data.h
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c

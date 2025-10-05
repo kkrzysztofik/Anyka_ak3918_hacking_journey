@@ -34,6 +34,23 @@ const mock_device_info_t mock_device_info_null_strings = {.manufacturer = NULL,
                                                           .serial_number = NULL,
                                                           .hardware_id = NULL};
 
+// Large string test data (512 characters)
+static char g_large_manufacturer[512];
+
+const mock_device_info_t mock_device_info_large_strings = {.manufacturer = g_large_manufacturer,
+                                                            .model = "LargeModel",
+                                                            .firmware_version = "1.0.0",
+                                                            .serial_number = "LARGE-12345",
+                                                            .hardware_id = "LARGE-HW-001"};
+
+// Special character test data (XML metacharacters: < > & " ')
+const mock_device_info_t mock_device_info_special_chars = {
+  .manufacturer = "Test<>&\"'Manufacturer",
+  .model = "Model&Test",
+  .firmware_version = "<FW>1.0.0</FW>",
+  .serial_number = "SN\"12345\"",
+  .hardware_id = "HW'ID'001"};
+
 // ============================================================================
 // Media Service Test Data
 // ============================================================================
@@ -211,8 +228,10 @@ const mock_fault_response_t mock_fault_authentication_failed = {
 // ============================================================================
 
 int response_test_data_init(void) {
-  // Initialize any dynamic test data if needed
-  // For now, all data is static, so just return success
+  // Initialize large string with 511 'X' characters (512 - 1 for null terminator)
+  memset(g_large_manufacturer, 'X', sizeof(g_large_manufacturer) - 1);
+  g_large_manufacturer[sizeof(g_large_manufacturer) - 1] = '\0';
+
   return ONVIF_SUCCESS;
 }
 

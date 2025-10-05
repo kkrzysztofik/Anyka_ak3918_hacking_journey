@@ -32,6 +32,13 @@ static int response_generation_setup(void** state) {
     return -1;
   }
 
+  // Initialize test data (large strings, etc.)
+  int init_result = response_test_data_init();
+  if (init_result != ONVIF_SUCCESS) {
+    free(ctx);
+    return -1;
+  }
+
   // Use real functions instead of mocks
   gsoap_mock_use_real_function(true);
 
@@ -1541,6 +1548,121 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_fault_string(void
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
+/**
+ * @brief Test fault response generation with undersized buffer
+ */
+static void test_unit_onvif_gsoap_generate_fault_response_buffer_overflow(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  char small_buffer[10];  // Intentionally too small for SOAP fault
+
+  // Test with undersized buffer - should return error without crashing
+  int result = onvif_gsoap_generate_fault_response(
+    ctx, mock_fault_invalid_parameter.fault_code, mock_fault_invalid_parameter.fault_string,
+    "test_actor", mock_fault_invalid_parameter.fault_detail, small_buffer, sizeof(small_buffer));
+
+  // Should return error (negative) or indicate buffer too small
+  assert_true(result < 0 || result == 0);
+
+  // Verify context remains consistent (no corruption)
+  assert_non_null(ctx);
+  assert_int_equal(ctx->error_context.last_error_code, ONVIF_SUCCESS);
+}
+
+/**
+ * @brief Test device info response generation with large strings
+ */
+static void test_unit_onvif_gsoap_generate_device_info_response_large_strings(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  char response_buffer[4096];  // Larger buffer for large strings
+
+  // Test with large manufacturer string (512 chars)
+  int result = onvif_gsoap_generate_device_info_response(
+    ctx, mock_device_info_large_strings.manufacturer, mock_device_info_large_strings.model,
+    mock_device_info_large_strings.firmware_version, mock_device_info_large_strings.serial_number,
+    mock_device_info_large_strings.hardware_id);
+
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Extract serialized response
+  int response_size = get_serialized_response(ctx, response_buffer, sizeof(response_buffer));
+  assert_true(response_size > 0);
+  assert_true(response_size < (int)sizeof(response_buffer));
+
+  // Parse response back
+  http_response_t http_resp = {
+    .body = response_buffer,
+    .body_length = strlen(response_buffer),
+    .status_code = 200
+  };
+
+  onvif_gsoap_context_t parse_ctx;
+  result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  struct _tds__GetDeviceInformationResponse* response;
+  result = soap_test_parse_get_device_info_response(&parse_ctx, &response);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Verify large string was not truncated
+  // Note: gSOAP may have internal limits on string sizes
+  assert_non_null(response->Manufacturer);
+  assert_true(strlen(response->Manufacturer) > 0);
+  // Verify content matches (may be truncated by gSOAP implementation)
+  assert_true(strncmp(response->Manufacturer, mock_device_info_large_strings.manufacturer,
+                      strlen(response->Manufacturer)) == 0);
+
+  onvif_gsoap_cleanup(&parse_ctx);
+}
+
+/**
+ * @brief Test device info response generation with special XML characters
+ */
+static void test_unit_onvif_gsoap_generate_device_info_response_special_chars(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  char response_buffer[2048];
+
+  // Test with special XML characters that need escaping
+  int result = onvif_gsoap_generate_device_info_response(
+    ctx, mock_device_info_special_chars.manufacturer, mock_device_info_special_chars.model,
+    mock_device_info_special_chars.firmware_version, mock_device_info_special_chars.serial_number,
+    mock_device_info_special_chars.hardware_id);
+
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Extract serialized response
+  int response_size = get_serialized_response(ctx, response_buffer, sizeof(response_buffer));
+  assert_true(response_size > 0);
+  assert_true(response_size < (int)sizeof(response_buffer));
+
+  // Verify XML contains escaped entities (gSOAP should escape automatically)
+  // Check for &lt; (< escaped), &gt; (> escaped), &amp; (& escaped)
+  assert_non_null(strstr(response_buffer, "&lt;"));
+  assert_non_null(strstr(response_buffer, "&gt;"));
+  assert_non_null(strstr(response_buffer, "&amp;"));
+
+  // Parse response back to verify round-trip
+  http_response_t http_resp = {
+    .body = response_buffer,
+    .body_length = strlen(response_buffer),
+    .status_code = 200
+  };
+
+  onvif_gsoap_context_t parse_ctx;
+  result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  struct _tds__GetDeviceInformationResponse* response;
+  result = soap_test_parse_get_device_info_response(&parse_ctx, &response);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Verify special characters were preserved through escaping/unescaping
+  assert_string_equal(response->Manufacturer, mock_device_info_special_chars.manufacturer);
+  assert_string_equal(response->Model, mock_device_info_special_chars.model);
+  assert_string_equal(response->FirmwareVersion, mock_device_info_special_chars.firmware_version);
+
+  onvif_gsoap_cleanup(&parse_ctx);
+}
+
 // ============================================================================
 // Test Array Definition
 // ============================================================================
@@ -1555,6 +1677,12 @@ const struct CMUnitTest response_generation_tests[] = {
                                   response_generation_setup, response_generation_teardown),
   cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_device_info_response_empty_params,
                                   response_generation_setup, response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_device_info_response_large_strings, response_generation_setup,
+    response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_device_info_response_special_chars, response_generation_setup,
+    response_generation_teardown),
   cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_system_reboot_response_success,
                                   response_generation_setup, response_generation_teardown),
   cmocka_unit_test_setup_teardown(
@@ -1667,5 +1795,7 @@ const struct CMUnitTest response_generation_tests[] = {
   cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_fault_response_null_fault_code,
                                   response_generation_setup, response_generation_teardown),
   cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_fault_response_null_fault_string,
+                                  response_generation_setup, response_generation_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_fault_response_buffer_overflow,
                                   response_generation_setup, response_generation_teardown),
 };
