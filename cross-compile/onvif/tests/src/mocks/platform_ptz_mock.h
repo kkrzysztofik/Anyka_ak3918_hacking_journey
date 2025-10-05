@@ -11,6 +11,8 @@
 #ifndef PLATFORM_PTZ_MOCK_H
 #define PLATFORM_PTZ_MOCK_H
 
+#include <stdbool.h>
+
 #include "platform/platform_common.h"
 #include "platform_mock.h"
 
@@ -111,5 +113,34 @@ int platform_mock_get_last_ptz_turn(platform_ptz_direction_t* dir, int* steps);
  * @return 1 if data available, 0 if not
  */
 int platform_mock_get_last_ptz_turn_stop(platform_ptz_direction_t* dir);
+
+/**
+ * @brief Get bitmask of PTZ turn stop directions seen since last reset
+ * @return Bitmask using (1u << PLATFORM_PTZ_DIRECTION_*) encoding
+ */
+unsigned int platform_mock_get_ptz_turn_stop_mask(void);
+
+/**
+ * @brief Enable or disable async-safe mode for PTZ platform mocks
+ * @param enable true to bypass CMocka expectations on non-owner threads
+ */
+void platform_ptz_mock_set_async_mode(bool enable);
+
+/**
+ * @brief Determine whether the current thread should bypass CMocka expectations
+ * @return true if expectations must be skipped for the calling thread
+ */
+bool platform_ptz_mock_should_bypass_expectations(void);
+
+/**
+ * @brief Record that platform cleanup was called (resets init flag)
+ */
+void platform_ptz_mock_record_cleanup(void);
+
+/**
+ * @brief Check whether PTZ mock currently considers the adapter initialized
+ * @return Non-zero if initialization has been recorded without cleanup
+ */
+int platform_mock_is_ptz_initialized(void);
 
 #endif /* PLATFORM_PTZ_MOCK_H */

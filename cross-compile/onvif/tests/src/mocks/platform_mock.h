@@ -340,11 +340,11 @@ platform_result_t __wrap_platform_ptz_cleanup(void);
 
 /**
  * @brief CMocka wrapped PTZ set degree
- * @param pan_degree Pan degree
- * @param tilt_degree Tilt degree
+ * @param pan_range_deg Pan range degree
+ * @param tilt_range_deg Tilt range degree
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_ptz_set_degree(float pan_degree, float tilt_degree);
+platform_result_t __wrap_platform_ptz_set_degree(int pan_range_deg, int tilt_range_deg);
 
 /**
  * @brief CMocka wrapped PTZ self check
@@ -354,48 +354,50 @@ platform_result_t __wrap_platform_ptz_check_self(void);
 
 /**
  * @brief CMocka wrapped PTZ move to position
- * @param pan Pan value
- * @param tilt Tilt value
- * @param zoom Zoom value
+ * @param pan_deg Pan degree value
+ * @param tilt_deg Tilt degree value
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_ptz_move_to_position(float pan, float tilt, float zoom);
+platform_result_t __wrap_platform_ptz_move_to_position(int pan_deg, int tilt_deg);
 
 /**
  * @brief CMocka wrapped PTZ get step position
- * @param pan Output pan pointer
- * @param tilt Output tilt pointer
- * @return Platform result code (configured via will_return)
+ * @param axis PTZ axis type
+ * @return Step position value
  */
-platform_result_t __wrap_platform_ptz_get_step_position(int* pan, int* tilt);
+int __wrap_platform_ptz_get_step_position(platform_ptz_axis_t axis);
 
 /**
  * @brief CMocka wrapped PTZ get status
+ * @param axis PTZ axis type
  * @param status Output status pointer
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_ptz_get_status(void* status);
+platform_result_t __wrap_platform_ptz_get_status(platform_ptz_axis_t axis,
+                                                 platform_ptz_status_t* status);
 
 /**
  * @brief CMocka wrapped PTZ set speed
- * @param pan_speed Pan speed
- * @param tilt_speed Tilt speed
+ * @param axis_type PTZ axis type
+ * @param speed_value Speed value
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_ptz_set_speed(float pan_speed, float tilt_speed);
+platform_result_t __wrap_platform_ptz_set_speed(platform_ptz_axis_t axis_type, int speed_value);
 
 /**
  * @brief CMocka wrapped PTZ turn
- * @param direction Turn direction
+ * @param direction Turn direction (platform_ptz_direction_t)
+ * @param steps Number of steps to turn
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_ptz_turn(int direction);
+platform_result_t __wrap_platform_ptz_turn(platform_ptz_direction_t direction, int steps);
 
 /**
  * @brief CMocka wrapped PTZ turn stop
+ * @param direction Direction to stop (platform_ptz_direction_t)
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_ptz_turn_stop(void);
+platform_result_t __wrap_platform_ptz_turn_stop(platform_ptz_direction_t direction);
 
 /**
  * @brief CMocka wrapped IR LED initialization

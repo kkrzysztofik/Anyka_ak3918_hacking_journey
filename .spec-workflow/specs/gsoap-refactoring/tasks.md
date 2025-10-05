@@ -1172,7 +1172,7 @@
   - _Requirements: All tests must pass with CMocka patterns only, test error scenarios, validate state transitions_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer focusing on service orchestration and state management | Task: Execute `make test-unit SUITE=service-dispatcher` and refactor dispatcher tests to rely on CMocka expectations for register/unregister flows. Test error scenarios: duplicate registration, unregister of non-existent service, invalid service parameters. Repair any failures caused by embedded context changes and ensure dispatcher state transitions are fully asserted using expect_function_call() and will_return() patterns. | Restrictions: Keep dispatcher public API unchanged, avoid weakening negative test cases, ensure call tracking uses expect_function_call(), test all error scenarios | Success: Service dispatcher suite passes cleanly, registration tests leverage CMocka, error scenarios tested, no references to deprecated mocks remain, state transitions validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 88. Validate PTZ service unit test suite
+- [x] 88. Validate PTZ service unit test suite
   - File: cross-compile/onvif/tests/src/unit/services/ptz/test_ptz_service.c
   - File: cross-compile/onvif/tests/src/unit/services/ptz/test_ptz_unit_suite.c
   - Run `make test-unit SUITE=ptz-service`
@@ -1183,7 +1183,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in PTZ services | Task: Run `make test-unit SUITE=ptz-service` and update PTZ service unit tests to use expect_value() and will_return() for PTZ adapter interactions. Resolve failures ensuring presets, limits, and error handling align with refactored code. | Restrictions: Do not change PTZ public APIs, keep speed and bounds checks intact, rely on platform mock wrappers | Success: PTZ service suite passes, mocks are pure CMocka, PTZ behavior is fully asserted | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 89. Validate PTZ callbacks unit test suite
+- [-] 89. Validate PTZ callbacks unit test suite
   - File: cross-compile/onvif/tests/src/unit/services/ptz/test_onvif_ptz_callbacks.c
   - File: cross-compile/onvif/tests/src/unit/services/ptz/test_ptz_callbacks_suite.c
   - Run `make test-unit SUITE=ptz-callbacks`
@@ -1194,7 +1194,7 @@
   - _Requirements: All tests must pass with CMocka patterns only_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer with PTZ callback focus | Task: Execute `make test-unit SUITE=ptz-callbacks` and refactor callback tests to use expect_function_call(), expect_value(), and will_return() for dispatcher and adapter interactions. Resolve failures introduced by embedded context changes and ensure unregister paths stay covered. | Restrictions: Preserve callback coverage breadth, avoid ignoring failure paths, do not reintroduce generic mock helpers | Success: PTZ callback suite passes, all expectations use CMocka, dispatcher/adapter interactions validated | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 90. Validate PTZ adapter unit test suite
+- [-] 90. Validate PTZ adapter unit test suite
   - File: cross-compile/onvif/tests/src/unit/ptz_adapter_tests.c
   - Run `make test-unit SUITE=ptz-adapter`
   - Align adapter wrapper expectations with CMocka patterns

@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "mocks/platform_ptz_mock.h"
 #include "services/ptz/onvif_ptz.h"
 
 /* ============================================================================
@@ -24,6 +25,7 @@ static bool g_use_real_functions = false;
  */
 void ptz_adapter_mock_use_real_function(bool use_real) {
   g_use_real_functions = use_real;
+  platform_ptz_mock_set_async_mode(use_real);
 }
 
 /* ============================================================================

@@ -51,10 +51,17 @@ int setup_ptz_callback_tests(void** state) {
   // Initialize service dispatcher mock (pure CMocka pattern)
   mock_service_dispatcher_init();
 
+  // Configure mocks to use REAL functions (integration testing)
+  service_dispatcher_mock_use_real_function(true);
+  buffer_pool_mock_use_real_function(true);
+  gsoap_mock_use_real_function(true);
+
   // Initialize service dispatcher (REAL implementation for integration testing)
   onvif_service_dispatcher_init();
 
-  // Initialize PTZ adapter
+  // Initialize PTZ adapter with mock expectation
+  expect_function_call(__wrap_ptz_adapter_init);
+  will_return(__wrap_ptz_adapter_init, PLATFORM_SUCCESS);
   ptz_adapter_init();
 
   // Initialize test data
@@ -75,6 +82,9 @@ int teardown_ptz_callback_tests(void** state) {
 
   // Cleanup PTZ service
   onvif_ptz_cleanup();
+
+  // Cleanup PTZ adapter with mock expectation
+  expect_function_call(__wrap_ptz_adapter_cleanup);
   ptz_adapter_cleanup();
 
   // Cleanup service dispatcher (real implementation)
@@ -97,8 +107,7 @@ int teardown_ptz_callback_tests(void** state) {
 void test_unit_ptz_service_registration_success(void** state) {
   (void)state;
 
-  // Mock platform layer to return success
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+
 
   // Act: Initialize PTZ service (registers with real dispatcher)
   int result = onvif_ptz_init(NULL);
@@ -118,8 +127,7 @@ void test_unit_ptz_service_registration_success(void** state) {
 void test_unit_ptz_service_registration_duplicate(void** state) {
   (void)state;
 
-  // Mock platform layer to return success
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+
 
   // Act: Initialize PTZ service twice
   int result1 = onvif_ptz_init(NULL);
@@ -139,8 +147,7 @@ void test_unit_ptz_service_registration_duplicate(void** state) {
 void test_unit_ptz_service_registration_invalid_params(void** state) {
   (void)state;
 
-  // Mock platform layer to return success
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+
 
   // Act: Initialize with NULL config (should succeed - config is optional)
   int result = onvif_ptz_init(NULL);
@@ -156,16 +163,13 @@ void test_unit_ptz_service_registration_invalid_params(void** state) {
 void test_unit_ptz_service_registration_dispatcher_failure(void** state) {
   (void)state;
 
-  // Mock platform layer to return success
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+
 
   // Note: This test is difficult to implement with real dispatcher
   // because we'd need to register 16 dummy services to fill it up.
   // Since the real dispatcher is working correctly, we'll test that
   // PTZ service can register successfully (proves dispatcher has space)
 
-  // Mock platform layer to return success
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
 
   // Act: Initialize PTZ service
   int result = onvif_ptz_init(NULL);
@@ -185,8 +189,7 @@ void test_unit_ptz_service_registration_dispatcher_failure(void** state) {
 void test_unit_ptz_service_unregistration_success(void** state) {
   (void)state;
 
-  // Mock platform layer to return success
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+
 
   // Arrange: First register the service
   int init_result = onvif_ptz_init(NULL);
@@ -236,9 +239,6 @@ void test_unit_ptz_service_unregistration_not_found(void** state) {
  */
 void test_unit_ptz_operation_handler_success(void** state) {
   (void)state;
-
-  // Mock successful platform PTZ initialization
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
 
   // Initialize PTZ service (registers with dispatcher)
   int result = onvif_ptz_init(NULL);
@@ -314,8 +314,7 @@ void test_unit_ptz_operation_handler_unknown_operation(void** state) {
 void test_unit_ptz_service_registration_failure_handling(void** state) {
   (void)state;
 
-  // Mock platform layer to return success
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+
 
   // Initialize PTZ service first time
   int result1 = onvif_ptz_init(NULL);
@@ -335,8 +334,7 @@ void test_unit_ptz_service_registration_failure_handling(void** state) {
 void test_unit_ptz_service_unregistration_failure_handling(void** state) {
   (void)state;
 
-  // Mock platform layer to return success
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+
 
   // Initialize PTZ service
   int result = onvif_ptz_init(NULL);
@@ -366,8 +364,7 @@ void test_unit_ptz_service_unregistration_failure_handling(void** state) {
 void test_unit_ptz_service_callback_logging_failure(void** state) {
   (void)state;
 
-  // Mock platform success
-  platform_mock_set_ptz_init_result(PLATFORM_SUCCESS);
+
 
   // Initialize PTZ service (should succeed and log info)
   int result = onvif_ptz_init(NULL);

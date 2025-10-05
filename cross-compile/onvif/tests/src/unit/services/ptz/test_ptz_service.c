@@ -185,7 +185,13 @@ void test_ptz_absolute_move_with_null(void** state, const null_param_test_t* tes
     result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, NULL, &TEST_SPEED);
     break;
   case 2: // NULL speed parameter (should succeed with default speed)
-    will_return(__wrap_platform_ptz_set_degree, PLATFORM_SUCCESS);
+    // When speed is NULL, the function uses default speed and calls the adapter
+    // Note: PTZ implementation converts: pan = x * 180, tilt = y * 90
+    expect_function_call(__wrap_ptz_adapter_absolute_move);
+    expect_value(__wrap_ptz_adapter_absolute_move, pan_degrees, 90);  // 0.5 * 180 = 90
+    expect_value(__wrap_ptz_adapter_absolute_move, tilt_degrees, 27); // 0.3 * 90 = 27
+    expect_value(__wrap_ptz_adapter_absolute_move, move_speed, 50);   // Default speed
+    will_return(__wrap_ptz_adapter_absolute_move, PLATFORM_SUCCESS);
     result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &TEST_POSITION, NULL);
     break;
   default:

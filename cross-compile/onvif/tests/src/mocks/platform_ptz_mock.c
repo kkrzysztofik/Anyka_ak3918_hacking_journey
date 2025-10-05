@@ -11,6 +11,9 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <cmocka.h>
+#include <pthread.h>
+#include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 /* ============================================================================
@@ -20,6 +23,7 @@
 static int g_ptz_init_call_count = 0;
 static int g_ptz_error_enabled = 0;
 static platform_result_t g_ptz_error_code = PLATFORM_ERROR;
+static int g_ptz_initialized_flag = 0;
 
 // Last call parameters
 static struct {
@@ -40,6 +44,29 @@ static struct {
   int valid;
 } g_last_turn_stop = {0, 0};
 
+static unsigned int g_ptz_turn_stop_mask = 0;
+static int g_ptz_async_mode_enabled = 0;
+static pthread_t g_ptz_async_main_thread;
+static pthread_mutex_t g_ptz_async_lock = PTHREAD_MUTEX_INITIALIZER;
+
+bool platform_ptz_mock_should_bypass_expectations(void) {
+  pthread_mutex_lock(&g_ptz_async_lock);
+  int enabled = g_ptz_async_mode_enabled;
+  pthread_t owner_thread = g_ptz_async_main_thread;
+  pthread_mutex_unlock(&g_ptz_async_lock);
+
+  if (!enabled) {
+    return false;
+  }
+
+  const int bypass = !pthread_equal(pthread_self(), owner_thread);
+  if (bypass) {
+    printf("[MOCK][PTZ] bypassing expectations on thread %lu (owner=%lu)\n",
+           (unsigned long)pthread_self(), (unsigned long)owner_thread);
+  }
+  return bypass;
+}
+
 /* ============================================================================
  * Mock State Management
  * ============================================================================ */
@@ -53,6 +80,7 @@ void platform_ptz_mock_cleanup(void) {
 }
 
 void platform_ptz_mock_reset(void) {
+  pthread_mutex_lock(&g_ptz_async_lock);
   g_ptz_init_call_count = 0;
   g_ptz_error_enabled = 0;
   g_ptz_error_code = PLATFORM_ERROR;
@@ -60,6 +88,11 @@ void platform_ptz_mock_reset(void) {
   g_last_absolute_move.valid = 0;
   g_last_turn.valid = 0;
   g_last_turn_stop.valid = 0;
+  g_ptz_turn_stop_mask = 0;
+  g_ptz_async_mode_enabled = 0;
+  g_ptz_initialized_flag = 0;
+  pthread_mutex_unlock(&g_ptz_async_lock);
+  printf("[MOCK][PTZ] state reset\n");
 }
 
 /* ============================================================================
@@ -137,6 +170,35 @@ int platform_mock_get_last_ptz_turn_stop(platform_ptz_direction_t* dir) {
   return 1;
 }
 
+unsigned int platform_mock_get_ptz_turn_stop_mask(void) {
+  pthread_mutex_lock(&g_ptz_async_lock);
+  unsigned int mask = g_ptz_turn_stop_mask;
+  pthread_mutex_unlock(&g_ptz_async_lock);
+  return mask;
+}
+
+void platform_ptz_mock_set_async_mode(bool enable) {
+  pthread_mutex_lock(&g_ptz_async_lock);
+  g_ptz_async_mode_enabled = enable ? 1 : 0;
+  if (enable) {
+    g_ptz_async_main_thread = pthread_self();
+    printf("[MOCK][PTZ] async mode enabled (owner thread=%lu)\n",
+           (unsigned long)g_ptz_async_main_thread);
+  } else {
+    printf("[MOCK][PTZ] async mode disabled\n");
+  }
+  pthread_mutex_unlock(&g_ptz_async_lock);
+}
+
+void platform_ptz_mock_record_cleanup(void) {
+  g_ptz_initialized_flag = 0;
+  printf("[MOCK][PTZ] cleanup recorded (initialized flag cleared)\n");
+}
+
+int platform_mock_is_ptz_initialized(void) {
+  return g_ptz_initialized_flag;
+}
+
 /* ============================================================================
  * Internal Helpers (called by CMocka wrapped functions or tracking)
  * ============================================================================ */
@@ -146,6 +208,8 @@ int platform_mock_get_last_ptz_turn_stop(platform_ptz_direction_t* dir) {
  */
 void platform_ptz_mock_record_init(void) {
   g_ptz_init_call_count++;
+  g_ptz_initialized_flag = 1;
+  printf("[MOCK][PTZ] init call count=%d\n", g_ptz_init_call_count);
 }
 
 /**
@@ -159,6 +223,7 @@ void platform_ptz_mock_record_absolute_move(int pan, int tilt, int speed) {
   g_last_absolute_move.tilt = tilt;
   g_last_absolute_move.speed = speed;
   g_last_absolute_move.valid = 1;
+  printf("[MOCK][PTZ] recorded absolute move pan=%d tilt=%d speed=%d\n", pan, tilt, speed);
 }
 
 /**
@@ -170,6 +235,7 @@ void platform_ptz_mock_record_turn(platform_ptz_direction_t dir, int steps) {
   g_last_turn.dir = dir;
   g_last_turn.steps = steps;
   g_last_turn.valid = 1;
+  printf("[MOCK][PTZ] recorded turn dir=%d steps=%d\n", dir, steps);
 }
 
 /**
@@ -179,4 +245,9 @@ void platform_ptz_mock_record_turn(platform_ptz_direction_t dir, int steps) {
 void platform_ptz_mock_record_turn_stop(platform_ptz_direction_t dir) {
   g_last_turn_stop.dir = dir;
   g_last_turn_stop.valid = 1;
+  pthread_mutex_lock(&g_ptz_async_lock);
+  g_ptz_turn_stop_mask |= (1U << (int)dir);
+  pthread_mutex_unlock(&g_ptz_async_lock);
+  printf("[MOCK][PTZ] recorded stop direction=%d mask=0x%02x\n", dir,
+         g_ptz_turn_stop_mask);
 }

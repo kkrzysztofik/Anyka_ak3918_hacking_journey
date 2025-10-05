@@ -6,6 +6,7 @@
  */
 
 #include "platform_mock.h"
+#include "platform_ptz_mock.h"
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -388,12 +389,13 @@ platform_result_t __wrap_platform_ptz_init(void) {
 
 platform_result_t __wrap_platform_ptz_cleanup(void) {
   function_called();
+  platform_ptz_mock_record_cleanup();
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_ptz_set_degree(float pan_degree, float tilt_degree) {
-  check_expected(pan_degree);
-  check_expected(tilt_degree);
+platform_result_t __wrap_platform_ptz_set_degree(int pan_range_deg, int tilt_range_deg) {
+  check_expected(pan_range_deg);
+  check_expected(tilt_range_deg);
   function_called();
   return (platform_result_t)mock();
 }
@@ -403,47 +405,56 @@ platform_result_t __wrap_platform_ptz_check_self(void) {
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_ptz_move_to_position(float pan, float tilt, float zoom) {
-  check_expected(pan);
-  check_expected(tilt);
-  check_expected(zoom);
+platform_result_t __wrap_platform_ptz_move_to_position(int pan_deg, int tilt_deg) {
+  check_expected(pan_deg);
+  check_expected(tilt_deg);
   function_called();
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_ptz_get_step_position(int* pan, int* tilt) {
-  check_expected_ptr(pan);
-  check_expected_ptr(tilt);
+int __wrap_platform_ptz_get_step_position(platform_ptz_axis_t axis) {
+  check_expected(axis);
   function_called();
-  if (pan) {
-    *pan = (int)mock();
-  }
-  if (tilt) {
-    *tilt = (int)mock();
-  }
-  return (platform_result_t)mock();
+  return (int)mock();
 }
 
-platform_result_t __wrap_platform_ptz_get_status(void* status) {
+platform_result_t __wrap_platform_ptz_get_status(platform_ptz_axis_t axis,
+                                                 platform_ptz_status_t* status) {
+  check_expected(axis);
   check_expected_ptr(status);
   function_called();
+  if (status) {
+    *status = (platform_ptz_status_t)mock();
+  }
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_ptz_set_speed(float pan_speed, float tilt_speed) {
-  check_expected(pan_speed);
-  check_expected(tilt_speed);
+platform_result_t __wrap_platform_ptz_set_speed(platform_ptz_axis_t axis_type, int speed_value) {
+  check_expected(axis_type);
+  check_expected(speed_value);
   function_called();
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_ptz_turn(int direction) {
+platform_result_t __wrap_platform_ptz_turn(platform_ptz_direction_t direction, int steps) {
   check_expected(direction);
+  check_expected(steps);
+  platform_ptz_mock_record_turn(direction, steps);
+  printf("[MOCK][PTZ] turn dir=%d steps=%d\n", direction, steps);
   function_called();
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_ptz_turn_stop(void) {
+platform_result_t __wrap_platform_ptz_turn_stop(platform_ptz_direction_t direction) {
+  if (platform_ptz_mock_should_bypass_expectations()) {
+    platform_ptz_mock_record_turn_stop(direction);
+    printf("[MOCK][PTZ] turn_stop bypass dir=%d\n", direction);
+    return PLATFORM_SUCCESS;
+  }
+
+  check_expected(direction);
+  platform_ptz_mock_record_turn_stop(direction);
+  printf("[MOCK][PTZ] turn_stop dir=%d (expectation path)\n", direction);
   function_called();
   return (platform_result_t)mock();
 }
