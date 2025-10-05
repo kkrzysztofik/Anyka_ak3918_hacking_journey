@@ -261,13 +261,31 @@ int services_response_callback(struct soap* soap, void* user_data) {
 }
 
 /**
- * @brief System reboot response callback function (stub)
+ * @brief System reboot response callback function
  */
 int system_reboot_response_callback(struct soap* soap, void* user_data) {
-  (void)soap;
-  (void)user_data;
-  /* TODO: Implement system reboot response generation */
-  return ONVIF_ERROR_NOT_IMPLEMENTED;
+  if (!soap || !user_data) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  system_reboot_callback_data_t* data = (system_reboot_callback_data_t*)user_data;
+
+  /* Create response structure */
+  struct _tds__SystemRebootResponse* response = soap_new__tds__SystemRebootResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  /* Set reboot message */
+  response->Message = soap_strdup(soap, data->message ? data->message : "");
+
+  /* Serialize response within SOAP body */
+  if (soap_put__tds__SystemRebootResponse(soap, response, "tds:SystemRebootResponse", "") !=
+      SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return 0;
 }
 
 /* ============================================================================

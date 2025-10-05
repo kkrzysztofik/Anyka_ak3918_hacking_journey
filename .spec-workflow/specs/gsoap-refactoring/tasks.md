@@ -245,7 +245,7 @@
   - Include onvif_gsoap_response.h
   - Purpose: Complete Device service (4 parsing + 1 response = 5 functions)
 
-- [ ] 20.5.1. Implement system reboot response generation
+- [x] 20.5.1. Implement system reboot response generation
   - File: src/protocol/gsoap/onvif_gsoap_device.c
   - Complete the `system_reboot_response_callback()` function
   - Implement proper gSOAP response generation for SystemReboot operation
@@ -256,7 +256,7 @@
   - _Requirements: Follow gSOAP response generation pattern, proper SOAP envelope structure, handle memory allocation properly_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: gSOAP Response Generation Developer with expertise in Device service callbacks | Task: Complete the system_reboot_response_callback() function in onvif_gsoap_device.c. Implement proper gSOAP response generation for SystemReboot operation following the established pattern used by other Device service callbacks. Create SystemRebootResponse structure using soap_new__tds__SystemRebootResponse(), initialize it properly, and serialize using soap_put__tds__SystemRebootResponse(). Handle memory allocation and error cases appropriately. | Restrictions: Must follow existing gSOAP response patterns, must use gSOAP serialization functions, must handle memory allocation properly, must not modify existing callback signatures | Success: SystemReboot response callback implemented, follows gSOAP patterns, proper response generation, no memory leaks, callback returns appropriate error codes | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 20.5.2. Add system reboot response generation tests
+- [x] 20.5.2. Add system reboot response generation tests
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_response_generation.c
   - Add test for system reboot response generation success scenario
   - Add test for system reboot response generation with NULL context

@@ -812,8 +812,28 @@ int soap_test_parse_system_reboot_response(onvif_gsoap_context_t* ctx,
   // Initialize response structure
   soap_default__tds__SystemRebootResponse(&ctx->soap, *response);
 
-  // Parse SOAP response
-  if (soap_read__tds__SystemRebootResponse(&ctx->soap, *response) != SOAP_OK) {
+  // Begin receiving and parse the complete message
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Navigate to the Body element
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Deserialize the response element from the body
+  if (soap_in__tds__SystemRebootResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Close body and envelope
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Finish receiving
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
     return ONVIF_ERROR_PARSE_FAILED;
   }
 

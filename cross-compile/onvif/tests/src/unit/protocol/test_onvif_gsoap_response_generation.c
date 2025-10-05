@@ -197,6 +197,89 @@ static void test_unit_onvif_gsoap_generate_device_info_response_empty_params(voi
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
+/**
+ * @brief Test successful system reboot response generation
+ */
+static void test_unit_onvif_gsoap_generate_system_reboot_response_success(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  char response_buffer[2048];
+  const char* test_message = "System will reboot in 5 seconds";
+
+  // Test basic context validation
+  assert_non_null(ctx);
+  assert_int_equal(ctx->error_context.last_error_code, ONVIF_SUCCESS);
+
+  // Prepare callback data
+  system_reboot_callback_data_t callback_data = {.message = test_message};
+
+  // Generate response using callback
+  int result = onvif_gsoap_generate_response_with_callback(ctx, system_reboot_response_callback,
+                                                           &callback_data);
+
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Extract serialized response using helper
+  int response_size = get_serialized_response(ctx, response_buffer, sizeof(response_buffer));
+  assert_true(response_size > 0);
+  assert_true(response_size < (int)sizeof(response_buffer));
+
+  // Create http_response_t wrapper for helper function
+  http_response_t http_resp = {
+    .body = response_buffer,
+    .body_length = strlen(response_buffer),
+    .status_code = 200
+  };
+
+  // Deserialize response back to gSOAP structure for proper validation
+  onvif_gsoap_context_t parse_ctx;
+  result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  struct _tds__SystemRebootResponse* response;
+  result = soap_test_parse_system_reboot_response(&parse_ctx, &response);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Field-by-field comparison with test data
+  assert_non_null(response->Message);
+  assert_string_equal(response->Message, test_message);
+
+  // Cleanup
+  onvif_gsoap_cleanup(&parse_ctx);
+}
+
+/**
+ * @brief Test system reboot response generation with NULL context
+ */
+static void test_unit_onvif_gsoap_generate_system_reboot_response_null_context(void** state) {
+  (void)state; // Unused parameter
+  const char* test_message = "System will reboot";
+
+  // Prepare callback data
+  system_reboot_callback_data_t callback_data = {.message = test_message};
+
+  // Test with NULL context
+  int result = onvif_gsoap_generate_response_with_callback(NULL, system_reboot_response_callback,
+                                                           &callback_data);
+
+  assert_int_equal(result, ONVIF_ERROR_INVALID);
+}
+
+/**
+ * @brief Test system reboot response generation with NULL user_data
+ */
+static void test_unit_onvif_gsoap_generate_system_reboot_response_null_params(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+
+  // Test with NULL message (NULL user_data) - callback should handle gracefully
+  system_reboot_callback_data_t callback_data = {.message = NULL};
+
+  int result = onvif_gsoap_generate_response_with_callback(ctx, system_reboot_response_callback,
+                                                           &callback_data);
+
+  // The callback should handle NULL message by converting to empty string and succeed
+  assert_int_equal(result, ONVIF_SUCCESS);
+}
+
 // ============================================================================
 // Media Service Response Generation Tests
 // ============================================================================
@@ -1087,6 +1170,14 @@ const struct CMUnitTest response_generation_tests[] = {
                                   response_generation_setup, response_generation_teardown),
   cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_device_info_response_empty_params,
                                   response_generation_setup, response_generation_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_system_reboot_response_success,
+                                  response_generation_setup, response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_system_reboot_response_null_context, response_generation_setup,
+    response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_system_reboot_response_null_params, response_generation_setup,
+    response_generation_teardown),
 
   // Media Service Tests
   cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_profiles_response_success,
