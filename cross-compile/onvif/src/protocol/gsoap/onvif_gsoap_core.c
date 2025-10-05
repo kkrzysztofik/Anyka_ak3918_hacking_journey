@@ -119,6 +119,16 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
     return ONVIF_ERROR_INVALID;
   }
 
+  /* Validate request size to prevent malloc corruption */
+  if (xml_size > MAX_ONVIF_REQUEST_SIZE) {
+    platform_log_debug(
+      "onvif_gsoap_init_request_parsing: Request too large - xml_size=%zu, max=%d",
+      xml_size, MAX_ONVIF_REQUEST_SIZE);
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
+                          "Request size exceeds maximum allowed size (1MB)");
+    return ONVIF_ERROR_INVALID;
+  }
+
   platform_log_debug("onvif_gsoap_init_request_parsing: Configuring soap context for parsing");
   /* Configure soap context for parsing from buffer */
   soap_begin(&ctx->soap);

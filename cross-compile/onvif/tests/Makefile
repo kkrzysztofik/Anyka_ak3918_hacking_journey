@@ -237,6 +237,8 @@ PROTOCOL_TEST_SRCS := \
 	src/utils/test_gsoap_utils.c \
 	src/unit/protocol/test_onvif_gsoap_response_generation.c \
 	src/unit/protocol/test_gsoap_response_suite.c \
+	src/unit/protocol/test_onvif_gsoap_edge_cases.c \
+	src/unit/protocol/test_gsoap_edge_suite.c \
 	src/data/response_test_data.c
 
 DISPATCHER_TEST_SRCS := \

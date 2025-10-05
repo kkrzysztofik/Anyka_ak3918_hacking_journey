@@ -1150,7 +1150,7 @@
   - _Requirements: Test parsing workflow validation, error scenarios, recovery mechanisms_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in parsing workflows | Task: Implement tests for gSOAP parsing workflow functions (validate_and_begin_parse, finalize_parse) using CMocka patterns. Test parsing workflow validation, initialization, finalization, error scenarios, and recovery mechanisms. Verify parsing state management and error handling. | Restrictions: Use only CMocka primitives, test parsing error scenarios, verify recovery mechanisms | Success: Parsing workflow tests pass, parsing state properly managed, error scenarios and recovery tested, suite continues to pass | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 86. Add gSOAP edge case unit tests for memory, XML, and state handling
+- [x] 86. Add gSOAP edge case unit tests for memory, XML, and state handling
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_edge_cases.c (new file)
   - File: cross-compile/onvif/tests/src/unit/protocol/test_gsoap_edge_suite.c (new file)
   - Run `make test-unit SUITE=gsoap-edge-cases`

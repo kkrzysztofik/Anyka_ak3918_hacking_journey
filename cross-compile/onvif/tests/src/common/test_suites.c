@@ -64,6 +64,13 @@ const test_suite_t g_test_suites[] = {
    .setup = NULL,
    .teardown = NULL},
 
+  {.name = "gsoap-edge-cases",
+   .full_name = "gSOAP Edge Cases",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_gsoap_edge_unit_tests,
+   .setup = gsoap_core_suite_setup,
+   .teardown = gsoap_core_suite_teardown},
+
   // Service tests
   {.name = "service-dispatcher",
    .full_name = "Service Dispatcher",
