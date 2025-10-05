@@ -1099,7 +1099,7 @@
   - _Requirements: Use expect_function_call() for platform_init, will_return() for success/failure, register suite in tests/Makefile_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in service lifecycle management | Task: Implement service handler init/cleanup tests using CMocka patterns. Test successful initialization, cleanup, and error paths including resource allocation failures. Use expect_function_call() for platform_init and will_return() for return values. Register suite and run `make test-unit SUITE=service-handler` until init/cleanup tests pass. | Restrictions: Use only CMocka primitives, test both success and failure paths, maintain approved include paths | Success: Init/cleanup tests pass, proper CMocka expectations used, error paths covered, suite registered and runs successfully | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 81. Implement service handler request dispatch tests
+- [x] 81. Implement service handler request dispatch tests
   - File: cross-compile/onvif/tests/src/unit/services/common/test_onvif_service_handler.c
   - Add tests for request validation, dispatch, and response generation
   - Test error propagation, timeout handling, and invalid request scenarios
@@ -1109,7 +1109,7 @@
   - _Requirements: Use expect_value() for request validation, will_return() for dispatcher responses, test timeout scenarios_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in request processing workflows | Task: Implement request dispatch tests using CMocka patterns. Test request validation, successful dispatch, error propagation, timeout scenarios, and invalid request handling. Use expect_value() for parameter validation and will_return() for dispatcher responses. Ensure timeout and error scenarios are properly tested. | Restrictions: Use only CMocka primitives, test error propagation, maintain approved include paths | Success: Dispatch tests pass, proper parameter validation, error scenarios covered, timeout handling verified, suite continues to pass | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 82. Implement service handler configuration and stats tests
+- [x] 82. Implement service handler configuration and stats tests
   - File: cross-compile/onvif/tests/src/unit/services/common/test_onvif_service_handler.c
   - Add tests for config getters/setters, statistics collection, and action registration
   - Test configuration validation and error handling
