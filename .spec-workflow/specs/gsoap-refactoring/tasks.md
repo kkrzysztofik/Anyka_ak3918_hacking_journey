@@ -1119,7 +1119,7 @@
   - _Requirements: Use expect_function_call() for config operations, will_return() for stats, test action registration flows_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in service configuration and monitoring | Task: Implement configuration and stats tests using CMocka patterns. Test config getters/setters, statistics collection accuracy, and action registration/deregistration flows. Use expect_function_call() for config operations and will_return() for statistics. Test configuration validation and error handling scenarios. | Restrictions: Use only CMocka primitives, test configuration validation, maintain approved include paths | Success: Config and stats tests pass, proper CMocka expectations used, action registration flows verified, suite continues to pass | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 83. Implement gSOAP context management tests
+- [x] 83. Implement gSOAP context management tests
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_core.c
   - File: cross-compile/onvif/tests/src/unit/protocol/test_gsoap_protocol_suite.c
   - Add tests for onvif_gsoap_reset() and onvif_gsoap_init_request_parsing()
@@ -1130,7 +1130,7 @@
   - _Requirements: Exercise success and failure paths, use \_\_wrap functions for allocation failures, maintain deterministic teardown_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in gSOAP context management | Task: Implement tests for onvif_gsoap_reset() and onvif_gsoap_init_request_parsing() using CMocka patterns. Test context reset scenarios, request parsing initialization, error handling, and resource cleanup. Use \_\_wrap functions for allocation failure injection. Run `make test-unit SUITE=gsoap-protocol` until context management tests pass. | Restrictions: Use only CMocka primitives, test both success and failure paths, maintain deterministic teardown | Success: Context management tests pass, proper error handling verified, allocation failures tested, suite continues to pass | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 84. Implement gSOAP error handling tests
+- [x] 84. Implement gSOAP error handling tests
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_core.c
   - Add tests for onvif_gsoap_set_error(), onvif_gsoap_get_detailed_error(), onvif_gsoap_has_error(), and onvif_gsoap_get_error()
   - Test error context storage, retrieval, and detailed error reporting
@@ -1140,7 +1140,7 @@
   - _Requirements: Test error context storage, detailed error retrieval, error state management_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: QA Engineer specializing in error handling and debugging | Task: Implement tests for gSOAP error handling functions (set_error, get_detailed_error, has_error, get_error) using CMocka patterns. Test error context storage, detailed error retrieval, error state management, and cleanup scenarios. Verify error information is properly stored and retrieved. | Restrictions: Use only CMocka primitives, test error state management, verify error context integrity | Success: Error handling tests pass, error context properly managed, detailed error information verified, suite continues to pass | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 85. Implement gSOAP parsing workflow tests
+- [x] 85. Implement gSOAP parsing workflow tests
   - File: cross-compile/onvif/tests/src/unit/protocol/test_onvif_gsoap_core.c
   - Add tests for onvif_gsoap_validate_and_begin_parse() and onvif_gsoap_finalize_parse()
   - Test parsing workflow validation, initialization, and finalization
