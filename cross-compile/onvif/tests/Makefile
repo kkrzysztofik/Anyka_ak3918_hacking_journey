@@ -240,7 +240,8 @@ PROTOCOL_TEST_SRCS := \
 	src/data/response_test_data.c
 
 DISPATCHER_TEST_SRCS := \
-	src/unit/services/common/test_service_dispatcher.c
+	src/unit/services/common/test_service_dispatcher.c \
+	src/unit/services/common/test_onvif_service_handler.c
 
 DEVICE_TEST_SRCS := \
 	src/unit/services/device/test_device_service.c

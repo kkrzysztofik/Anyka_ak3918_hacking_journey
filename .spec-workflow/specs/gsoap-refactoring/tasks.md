@@ -1088,7 +1088,7 @@
   - _Requirements: Confirm serialized output includes escaped sequences, reuse shared buffers, follow naming conventions_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: XML Compliance QA Engineer | Task: Define special-character mock data in response_test_data, expose via header, and add a unit test validating onvif_gsoap_generate_device_info_response() escapes <, >, &, quotes, and apostrophes using XML entities. | Restrictions: Do not alter production escaping logic, keep test deterministic, avoid scanning entire buffer needlessly | Success: Special character test passes, asserts presence of escaped entities, suite remains green | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 80. Implement service handler initialization and cleanup tests
+- [x] 80. Implement service handler initialization and cleanup tests
   - File: cross-compile/onvif/tests/src/unit/services/common/test_onvif_service_handler.c (new file)
   - File: cross-compile/onvif/tests/src/unit/services/common/test_service_handler_suite.c (new file)
   - Add tests for onvif_service_handler_init() and onvif_service_handler_cleanup()

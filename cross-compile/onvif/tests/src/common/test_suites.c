@@ -72,6 +72,13 @@ const test_suite_t g_test_suites[] = {
    .setup = NULL,
    .teardown = NULL},
 
+  {.name = "service-handler",
+   .full_name = "Service Handler",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_service_handler_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
   // PTZ service tests
   {.name = "ptz-service",
    .full_name = "PTZ Service",
