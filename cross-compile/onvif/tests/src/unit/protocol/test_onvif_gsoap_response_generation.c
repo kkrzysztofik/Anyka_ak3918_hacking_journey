@@ -563,6 +563,89 @@ static void test_unit_onvif_gsoap_generate_system_date_time_response_null_time(v
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
+/**
+ * @brief Test GetServices response generation success scenario
+ */
+static void test_unit_onvif_gsoap_generate_services_response_success(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  char response_buffer[4096];
+  const char* test_device_ip = "192.168.1.100";
+  const int test_http_port = 80;
+  const int include_capability = 0;
+
+  // Test successful response generation
+  int result = onvif_gsoap_generate_services_response(ctx, include_capability, test_device_ip,
+                                                       test_http_port);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Extract serialized response
+  int response_size = get_serialized_response(ctx, response_buffer, sizeof(response_buffer));
+  assert_true(response_size > 0);
+  assert_true(response_size < (int)sizeof(response_buffer));
+
+  // Create http_response_t wrapper for parsing
+  http_response_t http_resp = {
+    .body = response_buffer,
+    .body_length = strlen(response_buffer),
+    .status_code = 200
+  };
+
+  // Parse response back
+  onvif_gsoap_context_t parse_ctx;
+  result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  struct _tds__GetServicesResponse* response;
+  result = soap_test_parse_get_services_response(&parse_ctx, &response);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Verify response structure
+  assert_non_null(response);
+  assert_int_equal(response->__sizeService, 1);
+  assert_non_null(response->Service);
+
+  // Verify Device service information
+  assert_non_null(response->Service[0].Namespace);
+  assert_string_equal(response->Service[0].Namespace, "http://www.onvif.org/ver10/device/wsdl");
+
+  assert_non_null(response->Service[0].XAddr);
+  assert_string_equal(response->Service[0].XAddr, "http://192.168.1.100:80/onvif/device_service");
+
+  assert_non_null(response->Service[0].Version);
+  assert_int_equal(response->Service[0].Version->Major, 2);
+  assert_int_equal(response->Service[0].Version->Minor, 5);
+
+  onvif_gsoap_cleanup(&parse_ctx);
+}
+
+/**
+ * @brief Test GetServices response generation with NULL context
+ */
+static void test_unit_onvif_gsoap_generate_services_response_null_context(void** state) {
+  (void)state; // Unused parameter
+
+  const char* test_device_ip = "192.168.1.100";
+  const int test_http_port = 80;
+
+  // Test with NULL context
+  int result = onvif_gsoap_generate_services_response(NULL, 0, test_device_ip, test_http_port);
+  assert_int_equal(result, ONVIF_ERROR_INVALID);
+}
+
+/**
+ * @brief Test GetServices response generation with NULL device_ip
+ */
+static void test_unit_onvif_gsoap_generate_services_response_null_params(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  const int test_http_port = 80;
+
+  // Test with NULL device_ip - should handle gracefully with empty string
+  int result = onvif_gsoap_generate_services_response(ctx, 0, NULL, test_http_port);
+
+  // Should succeed with empty device_ip
+  assert_int_equal(result, ONVIF_SUCCESS);
+}
+
 // ============================================================================
 // Media Service Response Generation Tests
 // ============================================================================
@@ -1499,6 +1582,14 @@ const struct CMUnitTest response_generation_tests[] = {
     response_generation_setup, response_generation_teardown),
   cmocka_unit_test_setup_teardown(
     test_unit_onvif_gsoap_generate_system_date_time_response_null_time, response_generation_setup,
+    response_generation_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_services_response_success,
+                                  response_generation_setup, response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_services_response_null_context, response_generation_setup,
+    response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_services_response_null_params, response_generation_setup,
     response_generation_teardown),
 
   // Media Service Tests

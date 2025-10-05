@@ -24,7 +24,7 @@ extern const struct CMUnitTest response_generation_tests[];
 /**
  * @brief Number of tests in response_generation_tests array
  */
-#define RESPONSE_GENERATION_TEST_COUNT 42
+#define RESPONSE_GENERATION_TEST_COUNT 45
 
 // ============================================================================
 // Test Suite Getter Function

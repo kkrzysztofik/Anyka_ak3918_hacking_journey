@@ -607,3 +607,30 @@ int onvif_gsoap_generate_system_date_time_response(onvif_gsoap_context_t* ctx,
   return onvif_gsoap_generate_response_with_callback(ctx, system_datetime_response_callback,
                                                      &callback_data);
 }
+
+/**
+ * @brief Generate GetServices response
+ * @param ctx gSOAP context for response generation
+ * @param include_capability Include capability information (0 or 1)
+ * @param device_ip Device IP address for XAddr URLs
+ * @param http_port HTTP port for XAddr URLs
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Generates Device service GetServices response containing available services
+ */
+int onvif_gsoap_generate_services_response(onvif_gsoap_context_t* ctx, int include_capability,
+                                            const char* device_ip, int http_port) {
+  /* Prepare callback data */
+  services_callback_data_t callback_data = {
+    .include_capability = include_capability,
+    .http_port = http_port,
+    .device_ip = {0}
+  };
+
+  /* Copy device IP into the callback data structure */
+  strncpy(callback_data.device_ip, device_ip ? device_ip : "", sizeof(callback_data.device_ip) - 1);
+  callback_data.device_ip[sizeof(callback_data.device_ip) - 1] = '\0';
+
+  /* Use the generic response generation with callback */
+  return onvif_gsoap_generate_response_with_callback(ctx, services_response_callback,
+                                                     &callback_data);
+}
