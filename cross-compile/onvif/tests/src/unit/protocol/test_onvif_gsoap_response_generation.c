@@ -431,6 +431,138 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_with_real_data(
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
+/**
+ * @brief Test GetSystemDateAndTime response generation success scenario
+ */
+static void test_unit_onvif_gsoap_generate_system_date_time_response_success(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  char response_buffer[4096];
+
+  // Create a specific test time: 2025-01-15 14:30:45 UTC
+  struct tm test_time = {0};
+  test_time.tm_year = 2025 - 1900;  // tm_year is years since 1900
+  test_time.tm_mon = 0;             // January (0-11)
+  test_time.tm_mday = 15;           // 15th day
+  test_time.tm_hour = 14;           // 14:30:45
+  test_time.tm_min = 30;
+  test_time.tm_sec = 45;
+
+  // Test successful response generation
+  int result = onvif_gsoap_generate_system_date_time_response(ctx, &test_time);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Extract serialized response
+  int response_size = get_serialized_response(ctx, response_buffer, sizeof(response_buffer));
+  assert_true(response_size > 0);
+  assert_true(response_size < (int)sizeof(response_buffer));
+
+  // Create http_response_t wrapper for parsing
+  http_response_t http_resp = {
+    .body = response_buffer,
+    .body_length = strlen(response_buffer),
+    .status_code = 200
+  };
+
+  // Parse response back
+  onvif_gsoap_context_t parse_ctx;
+  result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  struct _tds__GetSystemDateAndTimeResponse* response;
+  result = soap_test_parse_get_system_date_time_response(&parse_ctx, &response);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Verify SystemDateTime structure exists
+  assert_non_null(response->SystemDateAndTime);
+  assert_int_equal(response->SystemDateAndTime->DateTimeType, tt__SetDateTimeType__Manual);
+  assert_int_equal(response->SystemDateAndTime->DaylightSavings, xsd__boolean__false_);
+
+  // Verify UTCDateTime exists and has correct values
+  assert_non_null(response->SystemDateAndTime->UTCDateTime);
+  assert_non_null(response->SystemDateAndTime->UTCDateTime->Time);
+  assert_int_equal(response->SystemDateAndTime->UTCDateTime->Time->Hour, 14);
+  assert_int_equal(response->SystemDateAndTime->UTCDateTime->Time->Minute, 30);
+  assert_int_equal(response->SystemDateAndTime->UTCDateTime->Time->Second, 45);
+
+  assert_non_null(response->SystemDateAndTime->UTCDateTime->Date);
+  assert_int_equal(response->SystemDateAndTime->UTCDateTime->Date->Year, 2025);
+  assert_int_equal(response->SystemDateAndTime->UTCDateTime->Date->Month, 1);
+  assert_int_equal(response->SystemDateAndTime->UTCDateTime->Date->Day, 15);
+
+  // Verify TimeZone is set to UTC
+  assert_non_null(response->SystemDateAndTime->TimeZone);
+  assert_non_null(response->SystemDateAndTime->TimeZone->TZ);
+  assert_string_equal(response->SystemDateAndTime->TimeZone->TZ, "UTC");
+
+  // LocalDateTime is optional and should be NULL
+  assert_null(response->SystemDateAndTime->LocalDateTime);
+
+  onvif_gsoap_cleanup(&parse_ctx);
+}
+
+/**
+ * @brief Test GetSystemDateAndTime response generation with NULL context
+ */
+static void test_unit_onvif_gsoap_generate_system_date_time_response_null_context(void** state) {
+  (void)state; // Unused parameter
+
+  struct tm test_time = {0};
+  test_time.tm_year = 2025 - 1900;
+  test_time.tm_mon = 0;
+  test_time.tm_mday = 15;
+
+  // Test with NULL context
+  int result = onvif_gsoap_generate_system_date_time_response(NULL, &test_time);
+  assert_int_equal(result, ONVIF_ERROR_INVALID);
+}
+
+/**
+ * @brief Test GetSystemDateAndTime response generation with NULL time (uses current time)
+ */
+static void test_unit_onvif_gsoap_generate_system_date_time_response_null_time(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  char response_buffer[4096];
+
+  // Test with NULL time - should use current system time
+  int result = onvif_gsoap_generate_system_date_time_response(ctx, NULL);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Extract and verify response was generated
+  int response_size = get_serialized_response(ctx, response_buffer, sizeof(response_buffer));
+  assert_true(response_size > 0);
+
+  // Parse response back
+  http_response_t http_resp = {
+    .body = response_buffer,
+    .body_length = strlen(response_buffer),
+    .status_code = 200
+  };
+
+  onvif_gsoap_context_t parse_ctx;
+  result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  struct _tds__GetSystemDateAndTimeResponse* response;
+  result = soap_test_parse_get_system_date_time_response(&parse_ctx, &response);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Verify basic structure (don't check exact time values since it's current time)
+  assert_non_null(response->SystemDateAndTime);
+  assert_non_null(response->SystemDateAndTime->UTCDateTime);
+  assert_non_null(response->SystemDateAndTime->UTCDateTime->Time);
+  assert_non_null(response->SystemDateAndTime->UTCDateTime->Date);
+
+  // Verify time values are within reasonable ranges
+  assert_in_range(response->SystemDateAndTime->UTCDateTime->Time->Hour, 0, 23);
+  assert_in_range(response->SystemDateAndTime->UTCDateTime->Time->Minute, 0, 59);
+  assert_in_range(response->SystemDateAndTime->UTCDateTime->Time->Second, 0, 59);
+  assert_in_range(response->SystemDateAndTime->UTCDateTime->Date->Year, 2025, 2030);
+  assert_in_range(response->SystemDateAndTime->UTCDateTime->Date->Month, 1, 12);
+  assert_in_range(response->SystemDateAndTime->UTCDateTime->Date->Day, 1, 31);
+
+  onvif_gsoap_cleanup(&parse_ctx);
+}
+
 // ============================================================================
 // Media Service Response Generation Tests
 // ============================================================================
@@ -1358,6 +1490,15 @@ const struct CMUnitTest response_generation_tests[] = {
     response_generation_teardown),
   cmocka_unit_test_setup_teardown(
     test_unit_onvif_gsoap_generate_capabilities_response_with_real_data, response_generation_setup,
+    response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_system_date_time_response_success, response_generation_setup,
+    response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_system_date_time_response_null_context,
+    response_generation_setup, response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_system_date_time_response_null_time, response_generation_setup,
     response_generation_teardown),
 
   // Media Service Tests

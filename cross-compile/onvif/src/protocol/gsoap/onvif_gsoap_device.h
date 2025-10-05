@@ -131,6 +131,11 @@ typedef struct {
 int device_info_response_callback(struct soap* soap, void* user_data);
 
 /**
+ * @brief System datetime response callback function
+ */
+int system_datetime_response_callback(struct soap* soap, void* user_data);
+
+/**
  * @brief Capabilities response callback function
  */
 int capabilities_response_callback(struct soap* soap, void* user_data);
@@ -184,5 +189,16 @@ int onvif_gsoap_generate_capabilities_response(onvif_gsoap_context_t* ctx,
                                                 const struct tt__Capabilities* capabilities,
                                                 const char* device_ip,
                                                 int http_port);
+
+/**
+ * @brief Generate GetSystemDateAndTime response
+ * @param ctx gSOAP context for response generation
+ * @param utc_time Pointer to struct tm containing UTC time (NULL for current time)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Generates Device service GetSystemDateAndTime response containing system date/time
+ * @note If utc_time is NULL, uses current system time
+ */
+int onvif_gsoap_generate_system_date_time_response(onvif_gsoap_context_t* ctx,
+                                                     const struct tm* utc_time);
 
 #endif /* ONVIF_GSOAP_DEVICE_H */

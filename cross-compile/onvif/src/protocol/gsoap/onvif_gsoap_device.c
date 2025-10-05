@@ -575,3 +575,35 @@ int onvif_gsoap_generate_capabilities_response(onvif_gsoap_context_t* ctx,
   return onvif_gsoap_generate_response_with_callback(ctx, capabilities_response_callback,
                                                      &callback_data);
 }
+
+/**
+ * @brief Generate GetSystemDateAndTime response
+ * @param ctx gSOAP context for response generation
+ * @param utc_time Pointer to struct tm containing UTC time
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Generates Device service GetSystemDateAndTime response containing system date/time
+ * @note If utc_time is NULL, uses current system time
+ */
+int onvif_gsoap_generate_system_date_time_response(onvif_gsoap_context_t* ctx,
+                                                     const struct tm* utc_time) {
+  /* Prepare callback data */
+  system_datetime_callback_data_t callback_data = {.tm_info = {0}};
+
+  /* Use provided time or get current time */
+  if (utc_time) {
+    callback_data.tm_info = *utc_time;
+  } else {
+    time_t now = time(NULL);
+    struct tm* tm_utc = gmtime(&now);
+    if (tm_utc) {
+      callback_data.tm_info = *tm_utc;
+    } else {
+      /* If gmtime fails, return error */
+      return ONVIF_ERROR_INVALID;
+    }
+  }
+
+  /* Use the generic response generation with callback */
+  return onvif_gsoap_generate_response_with_callback(ctx, system_datetime_response_callback,
+                                                     &callback_data);
+}
