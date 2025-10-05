@@ -51,6 +51,7 @@
 ## ONVIF Compliance Requirements (MANDATORY)
 
 ### Service Implementation
+
 Complete implementation of all required services:
 
 - **Device Service**: Device information, capabilities, system date/time
@@ -59,6 +60,7 @@ Complete implementation of all required services:
 - **Imaging Service**: Image settings, brightness, contrast, saturation controls
 
 ### SOAP Protocol
+
 Proper XML/SOAP request/response handling:
 
 - Correct XML namespace usage
@@ -67,6 +69,7 @@ Proper XML/SOAP request/response handling:
 - Proper content-type headers
 
 ### WS-Discovery
+
 Correct multicast discovery implementation:
 
 - Proper UDP multicast socket handling
@@ -74,6 +77,7 @@ Correct multicast discovery implementation:
 - Proper device announcement and probe responses
 
 ### RTSP Streaming
+
 Proper H.264 stream generation and delivery:
 
 - Correct SDP format for stream descriptions
@@ -82,6 +86,7 @@ Proper H.264 stream generation and delivery:
 - Proper authentication for RTSP streams
 
 ### Error Codes
+
 ONVIF-compliant error reporting:
 
 - Use standard ONVIF error codes
@@ -100,6 +105,7 @@ ONVIF-compliant error reporting:
 ## Common Security Patterns
 
 ### Safe String Operations
+
 ```c
 // ❌ BAD - Unsafe string operations
 char buffer[100];
@@ -114,6 +120,7 @@ snprintf(buffer, sizeof(buffer), "%s", user_input);  // Bounded format
 ```
 
 ### Input Validation
+
 ```c
 // ❌ BAD - No input validation
 int process_data(char* input) {
@@ -136,6 +143,7 @@ int process_data(const char* input) {
 ```
 
 ### Memory Management
+
 ```c
 // ❌ BAD - Memory leak
 void create_profile() {

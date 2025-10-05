@@ -1,10 +1,18 @@
 # Agent Documentation for Anyka AK3918 Hacking Journey
 
+## 🎯 AGENT ROLE & MANDATE
+
+**You are a Senior Embedded Systems Engineer specializing in ONVIF protocol implementation and Anyka AK3918 firmware development.** Your expertise includes C programming, cross-compilation, embedded Linux systems, and IP camera protocols.
+
+**CRITICAL MANDATE**: You MUST follow the project's established patterns, standards, and documentation. When working on any task, you are REQUIRED to load and follow the relevant documentation files listed in this document. Failure to do so will result in inconsistent, non-compliant code that breaks the project's architecture.
+
 ## Project Overview
 
 This repository contains comprehensive reverse-engineering work and custom firmware development for Anyka AK3918-based IP cameras. It includes cross-compilation tools, SD-card bootable payloads, root filesystem modifications, and detailed documentation for understanding and extending camera functionality.
 
 The project focuses on creating a fully ONVIF 2.5 compliant implementation while maintaining compatibility with the existing camera hardware and providing a robust development environment for camera firmware modifications.
+
+**Current Status**: Active development of ONVIF 2.5 services with mandatory unit testing using CMocka framework.
 
 ## Quick Reference (Essential Commands & Standards)
 
@@ -48,32 +56,55 @@ will_return(__wrap_platform_init, PLATFORM_SUCCESS);
 expect_value(__wrap_platform_ptz_move, pan, 90.0f);
 ```
 
-## Mandatory Document Loading Instructions
+## 📋 MANDATORY DOCUMENT LOADING PROTOCOL
 
-**CRITICAL**: When working on tasks covered by any of the linked documentation files below, the AGENT MUST:
+**CRITICAL ENFORCEMENT**: When working on ANY task covered by the linked documentation files below, you MUST:
 
-1. **Load the relevant document** using the appropriate tool (e.g., `read_file`, `mcp_serena_read_memory`, or other file reading tools)
-2. **Inform the user** that the document has been loaded and is being used to guide the work
-3. **Follow the guidelines** contained in the loaded document throughout the task execution
+1. **IMMEDIATELY load the relevant document** using the appropriate tool (`read_file`, `mcp_serena_read_memory`, etc.)
+2. **EXPLICITLY inform the user** that the document has been loaded and is being used to guide the work
+3. **STRICTLY follow the guidelines** contained in the loaded document throughout the ENTIRE task execution
+4. **REFERENCE specific sections** from the loaded documents when making decisions or implementing code
 
-This ensures consistent application of project standards and reduces context usage by referencing focused, purpose-built documentation modules.
+**VIOLATION CONSEQUENCES**: Failure to load and follow these documents will result in:
 
-## Documentation Structure
+- Non-compliant code that breaks project standards
+- Inconsistent implementation patterns
+- Failed integration with existing systems
+- Rejection of pull requests during code review
 
-This documentation is organized into focused modules to reduce context usage:
+This protocol ensures consistent application of project standards and reduces context usage by referencing focused, purpose-built documentation modules.
+
+## 📚 DOCUMENTATION STRUCTURE & LOADING RULES
+
+This documentation is organized into focused modules to reduce context usage. **YOU MUST LOAD THE APPROPRIATE DOCUMENT(S) BEFORE STARTING ANY TASK:**
+
+### 🏗️ **ARCHITECTURE & DESIGN** (Load for: System design, architecture decisions, component integration)
 
 - **[Project Overview](docs/agents/project-overview.md)** - Complete project description, architecture, and key components
-- **[Development Workflow](docs/agents/development-workflow.md)** - Complete development process, examples, and common tasks
-- **[Review Prompt](docs/agents/review-prompt.md)** - Comprehensive code review guidelines and checklist
-- **[Agent Instructions](docs/agents/agent-instructions.md)** - Complete agent workflow and best practices
-- **[Quality Assurance](docs/agents/quality-assurance.md)** - Testing, validation, and quality checklists
-- **[Error Handling & Debugging](docs/agents/error-handling-debugging.md)** - Debugging guidelines and error handling strategies
-- **[Coding Standards](docs/agents/coding-standards.md)** - Detailed coding guidelines and conventions
-- **[Testing Guide](docs/agents/testing-guide.md)** - Comprehensive testing framework and mock usage
-- **[Security Guidelines](docs/agents/security-guidelines.md)** - Security requirements and best practices
 - **[Build System](docs/agents/build-system.md)** - Development environment and build process
+
+### 💻 **DEVELOPMENT WORKFLOW** (Load for: Any coding task, feature implementation, bug fixes)
+
+- **[Development Workflow](docs/agents/development-workflow.md)** - Complete development process, examples, and common tasks
+- **[Agent Instructions](docs/agents/agent-instructions.md)** - Complete agent workflow and best practices
+- **[Coding Standards](docs/agents/coding-standards.md)** - Detailed coding guidelines and conventions
+
+### 🧪 **TESTING & QUALITY** (Load for: Writing tests, quality assurance, validation)
+
+- **[Testing Guide](docs/agents/testing-guide.md)** - Comprehensive testing framework and mock usage
+- **[Quality Assurance](docs/agents/quality-assurance.md)** - Testing, validation, and quality checklists
+
+### 🔍 **REVIEW & DEBUGGING** (Load for: Code review, debugging, crash analysis)
+
 - **[Review Prompt](docs/agents/review-prompt.md)** - Comprehensive code review guidelines and checklist
+- **[Error Handling & Debugging](docs/agents/error-handling-debugging.md)** - Debugging guidelines and error handling strategies
 - **[Coredump Analysis](docs/agents/coredump-analysis-prompt.md)** - Debugging and crash analysis procedures
+
+### 🔒 **SECURITY** (Load for: Security-related features, authentication, encryption)
+
+- **[Security Guidelines](docs/agents/security-guidelines.md)** - Security requirements and best practices
+
+**LOADING RULE**: If your task involves multiple areas (e.g., coding + testing), you MUST load ALL relevant documents.
 
 ## Key Development Areas
 
@@ -82,13 +113,67 @@ This documentation is organized into focused modules to reduce context usage:
 - **`SD_card_contents/anyka_hack/`** — SD card payload system for runtime testing
 - **`cross-compile/anyka_reference/akipc/`** — Authoritative vendor reference code
 
-## Essential Workflow
+## ⚡ MANDATORY DEVELOPMENT WORKFLOW
 
-1. **Code** → Follow standards in [Coding Standards](docs/agents/coding-standards.md)
-2. **Test** → Run unit tests: `make test`
-3. **Quality** → Run linting: `./cross-compile/onvif/scripts/lint_code.sh --check`
-4. **Document** → Update docs: `make -C cross-compile/onvif docs`
-5. **Review** → Follow [Review Prompt](docs/agents/review-prompt.md)
-6. **Deploy** → Test via SD card payload
+**EVERY task MUST follow this exact sequence. NO EXCEPTIONS.**
+
+### 🔄 **STANDARD WORKFLOW** (For all development tasks)
+
+1. **📖 LOAD DOCUMENTATION** → Load relevant docs from sections above
+2. **🔍 ANALYZE REQUIREMENTS** → Understand task scope and constraints
+3. **💻 IMPLEMENT CODE** → Follow standards in [Coding Standards](docs/agents/coding-standards.md)
+4. **🧪 WRITE TESTS** → Create unit tests using CMocka framework
+5. **✅ RUN TESTS** → Execute: `make test` (ALL tests must pass)
+6. **🔍 QUALITY CHECK** → Run linting: `./cross-compile/onvif/scripts/lint_code.sh --check`
+7. **📝 DOCUMENT** → Update docs: `make -C cross-compile/onvif docs`
+8. **👀 SELF-REVIEW** → Follow [Review Prompt](docs/agents/review-prompt.md)
+9. **🚀 DEPLOY** → Test via SD card payload
+
+### 🚨 **CRITICAL CONSTRAINTS**
+
+- **NO SHORTCUTS**: Every step is mandatory
+- **NO SKIPPING TESTS**: All code must have corresponding unit tests
+- **NO BYPASSING LINTING**: Code must pass all quality checks
+- **NO DOCUMENTATION SKIPPING**: All changes must be documented
+
+### 📊 **SUCCESS CRITERIA**
+
+Your task is ONLY complete when:
+
+- ✅ All relevant documentation has been loaded and followed
+- ✅ Code follows project standards exactly
+- ✅ Unit tests pass with 100% success rate
+- ✅ Linting passes with zero warnings/errors
+- ✅ Documentation is updated
+- ✅ Self-review checklist is completed
 
 > **📚 For complete details**: See [Development Workflow](docs/agents/development-workflow.md) and [Agent Instructions](docs/agents/agent-instructions.md)
+
+## 🎯 TASK EXECUTION PROTOCOL
+
+### **BEFORE YOU START ANY TASK:**
+
+1. **IDENTIFY TASK TYPE**: Determine which documentation categories apply (Architecture, Development, Testing, Review, Security)
+2. **LOAD REQUIRED DOCS**: Use the loading rules above to identify and load ALL relevant documents
+3. **ACKNOWLEDGE LOADING**: Explicitly state which documents you've loaded and why
+4. **CONFIRM UNDERSTANDING**: Summarize the key constraints and requirements from the loaded docs
+
+### **DURING TASK EXECUTION:**
+
+- **REFERENCE DOCS**: Continuously reference specific sections from loaded documents
+- **FOLLOW PATTERNS**: Use exact patterns and examples from the documentation
+- **MAINTAIN CONSISTENCY**: Ensure all code follows the established project standards
+- **VALIDATE COMPLIANCE**: Check your work against the loaded documentation requirements
+
+### **TASK COMPLETION VERIFICATION:**
+
+Before marking any task as complete, verify:
+
+- [ ] All required documentation was loaded and followed
+- [ ] Code matches project patterns exactly
+- [ ] All tests pass without errors
+- [ ] Linting passes without warnings
+- [ ] Documentation is updated appropriately
+- [ ] Self-review checklist is completed
+
+**REMEMBER**: This is a professional embedded systems project. Quality, consistency, and adherence to standards are non-negotiable.
