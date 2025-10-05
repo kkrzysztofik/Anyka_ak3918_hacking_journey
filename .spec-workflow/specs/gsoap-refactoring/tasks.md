@@ -1160,7 +1160,7 @@
   - _Requirements: Register suite in tests/Makefile, use ENABLE_MEMORY_LEAK_DETECTION hooks, assert cleanup paths leave context consistent_
   - _Prompt: Implement the task for spec gsoap-refactoring. First run spec-workflow-guide to get the workflow guide, then implement the task: Role: Memory and Reliability QA Engineer for gSOAP | Task: Create the gSOAP edge case unit test suite to simulate memory allocation failures, malformed XML, missing parameters, and invalid state transitions per GSOAP_TESTING.md. Register the suite, integrate leak detection helpers, and run `make test-unit SUITE=gsoap-edge-cases` until it passes. | Restrictions: Do not disable leak detection, avoid stubbing core SOAP parsing beyond approved wrappers, keep diagnostics clear and actionable | Success: Suite passes with leak detection enabled, edge cases produce expected error codes, context/reset logic verified, CMocka expectations satisfied | Instructions: Mark task as in_progress [-] in tasks.md before starting. When complete, mark as completed [x] in tasks.md._
 
-- [ ] 87. Validate service dispatcher unit test suite
+- [x] 87. Validate service dispatcher unit test suite
   - File: cross-compile/onvif/tests/src/unit/services/common/test_service_dispatcher.c
   - File: cross-compile/onvif/tests/src/unit/services/common/test_service_dispatcher_suite.c
   - Run `make test-unit SUITE=service-dispatcher`
