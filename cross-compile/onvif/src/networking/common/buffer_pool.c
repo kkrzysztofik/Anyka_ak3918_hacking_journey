@@ -29,7 +29,6 @@ int buffer_pool_init(buffer_pool_t* pool) {
 
   // Check if already initialized - allow idempotent initialization
   if (pool->initialized) {
-    printf("DEBUG: Buffer pool already initialized, skipping reinitialization\n");
     platform_log_debug("Buffer pool already initialized, skipping reinitialization\n");
     return 0;
   }

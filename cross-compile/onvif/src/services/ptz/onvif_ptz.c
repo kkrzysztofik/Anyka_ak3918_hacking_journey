@@ -33,6 +33,10 @@
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
 
+#ifdef UNIT_TESTING
+#include "services/common/onvif_service_test_helpers.h"
+#endif
+
 /* PTZ Movement Constants */
 #define PTZ_MOVEMENT_TIMEOUT_MS        5000
 #define PTZ_MOVEMENT_CHECK_INTERVAL_MS 5
@@ -92,11 +96,12 @@ static const struct ptz_node g_ptz_node = {
 static struct ptz_preset g_ptz_presets[PTZ_MAX_PRESETS]; // NOLINT
 static int g_ptz_preset_count = 0;                       // NOLINT
 
-/* Service cleanup guard */
-static int g_ptz_cleanup_in_progress = 0; // NOLINT
+/* Service initialization guard */
+static int g_ptz_initialized = 0; // NOLINT
+static int g_ptz_cleanup_in_progress = 0;
 
 /* Global buffer pool for PTZ service responses */
-static buffer_pool_t g_ptz_response_buffer_pool; // NOLINT
+static buffer_pool_t g_ptz_response_buffer_pool = {0}; // NOLINT
 
 /* Preset management helper functions */
 static int find_preset_by_token(const char* token, int* index);
@@ -982,8 +987,12 @@ int onvif_ptz_handle_request(const char* action_name, const http_request_t* requ
  * ============================================================================ */
 
 int onvif_ptz_init(config_manager_t* config) {
+  // Idempotency guard - prevent double initialization
+  if (g_ptz_initialized) {
+    return ONVIF_SUCCESS;
+  }
 
-  // Initialize PTZ handler state
+  // Initialize PTZ handler state (NULL config allowed for unit testing)
   g_ptz_handler_state.config.service_type = ONVIF_SERVICE_PTZ;
   g_ptz_handler_state.config.service_name = "PTZ";
   g_ptz_handler_state.config.config = config;
@@ -996,7 +1005,17 @@ int onvif_ptz_init(config_manager_t* config) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  // Register with standardized service dispatcher
+  // Set flag BEFORE registration (enables cleanup on failure)
+  g_ptz_initialized = 1;
+
+#ifdef UNIT_TESTING
+  int result = onvif_service_unit_register(&g_ptz_service_registration, &g_ptz_initialized,
+                                           onvif_ptz_cleanup, "PTZ");
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+  return ONVIF_SUCCESS;
+#else
   int result = onvif_service_dispatcher_register_service(&g_ptz_service_registration);
   if (result != ONVIF_SUCCESS) {
     platform_log_error("Failed to register PTZ service with dispatcher: %d\n", result);
@@ -1007,18 +1026,15 @@ int onvif_ptz_init(config_manager_t* config) {
   platform_log_info("PTZ service initialized and registered with standardized dispatcher\n");
 
   return ONVIF_SUCCESS;
+#endif
 }
 
 void onvif_ptz_cleanup(void) {
-  if (g_ptz_cleanup_in_progress) {
+  // Guard against double cleanup
+  if (!g_ptz_initialized || g_ptz_cleanup_in_progress) {
     return;
   }
-
   g_ptz_cleanup_in_progress = 1;
-
-  error_context_t error_ctx;
-  error_context_init(&error_ctx, "PTZ", "Cleanup", "service_cleanup");
-
   // Unregister from standardized service dispatcher
   onvif_service_dispatcher_unregister_service("ptz");
 
@@ -1031,6 +1047,9 @@ void onvif_ptz_cleanup(void) {
   // Reset handler state
   memset(&g_ptz_handler_state, 0, sizeof(g_ptz_handler_state));
 
+  // Reset initialization flag (enables re-initialization)
+  g_ptz_initialized = 0;
+  g_ptz_cleanup_in_progress = 0;
   // Check for memory leaks
   memory_manager_check_leaks();
 

@@ -103,9 +103,9 @@ int onvif_device_handle_operation(const char* operation_name, const http_request
 
 /**
  * @brief Clean up device service
- * @return ONVIF_SUCCESS on success, error code on failure
+ * @note Best effort cleanup - always succeeds
  */
-int onvif_device_cleanup(void);
+void onvif_device_cleanup(void);
 
 /* Utility functions */
 const char* onvif_service_type_to_string(onvif_service_type_t service);

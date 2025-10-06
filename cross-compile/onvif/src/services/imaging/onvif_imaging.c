@@ -26,6 +26,7 @@
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_imaging_types.h"
 #include "services/common/onvif_service_common.h"
+#include "services/common/onvif_service_test_helpers.h"
 #include "services/common/onvif_types.h"
 #include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
@@ -875,6 +876,13 @@ int onvif_imaging_service_init(config_manager_t* config) {
   g_handler_initialized = 1;
 
   // Register with standardized service dispatcher
+#ifdef UNIT_TESTING
+  int result = onvif_service_unit_register(&g_imaging_service_registration, &g_handler_initialized,
+                                           onvif_imaging_service_cleanup, "Imaging");
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+#else
   int result = onvif_service_dispatcher_register_service(&g_imaging_service_registration);
   if (result != ONVIF_SUCCESS) {
     platform_log_error("Failed to register imaging service with dispatcher: %d\n", result);
@@ -883,6 +891,7 @@ int onvif_imaging_service_init(config_manager_t* config) {
   }
 
   platform_log_info("Imaging service initialized and registered with dispatcher\n");
+#endif
 
   return ONVIF_SUCCESS;
 }

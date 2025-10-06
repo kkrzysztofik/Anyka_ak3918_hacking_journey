@@ -29,6 +29,10 @@
 #include "utils/memory/smart_response_builder.h"
 #include "utils/network/network_utils.h"
 
+#ifdef UNIT_TESTING
+#include "services/common/onvif_service_test_helpers.h"
+#endif
+
 #define MEDIA_PROFILE_COUNT_DEFAULT 2
 #define MEDIA_MAIN_PROFILE_TOKEN    "MainProfile"
 #define MEDIA_SUB_PROFILE_TOKEN     "SubProfile"
@@ -1646,8 +1650,7 @@ static const service_action_def_t media_actions[] = {
   {"SetMetadataConfiguration", handle_set_metadata_configuration, 1}};
 
 int onvif_media_init(config_manager_t* config) {
-  ONVIF_CHECK_NULL(config);
-
+  // Allow NULL config for unit testing flexibility (matches PTZ/Device pattern)
   if (g_handler_initialized) {
     return ONVIF_SUCCESS;
   }
@@ -1667,7 +1670,11 @@ int onvif_media_init(config_manager_t* config) {
       onvif_service_handler_cleanup(&g_media_handler);
       return ONVIF_ERROR;
     }
-    // Register with service dispatcher using new standardized interface
+
+    // Set flag BEFORE registration (enables cleanup on failure)
+    g_handler_initialized = 1;
+
+    // Register with service dispatcher using standardized interface
     onvif_service_registration_t registration = {
       .service_name = "Media",
       .namespace_uri = "http://www.onvif.org/ver10/media/wsdl",
@@ -1676,13 +1683,23 @@ int onvif_media_init(config_manager_t* config) {
       .cleanup_handler = NULL,
       .capabilities_handler = NULL,
       .reserved = {NULL, NULL, NULL, NULL}};
-
+#ifdef UNIT_TESTING
+    int dispatch_result =
+      onvif_service_unit_register(&registration, &g_handler_initialized, onvif_media_cleanup,
+                                  "Media");
+    if (dispatch_result != ONVIF_SUCCESS) {
+      return dispatch_result;
+    }
+#else
     int dispatch_result = onvif_service_dispatcher_register_service(&registration);
     if (dispatch_result != ONVIF_SUCCESS) {
-      platform_log_warning("Failed to register media service with dispatcher\n");
+      platform_log_error("Failed to register media service with dispatcher: %d\n", dispatch_result);
+      onvif_media_cleanup();
+      return dispatch_result;
     }
 
-    g_handler_initialized = 1;
+    platform_log_info("Media service initialized and registered with dispatcher\n");
+#endif
   }
 
   return result;
@@ -1708,7 +1725,52 @@ void onvif_media_cleanup(void) {
 int onvif_media_handle_request(const char* action_name, const http_request_t* request,
                                http_response_t* response) {
   if (!g_handler_initialized) {
+#ifdef UNIT_TESTING
+    platform_log_warning(
+      "Media service handle_request invoked before initialization; returning NOT_INITIALIZED\n");
+    return ONVIF_ERROR_NOT_INITIALIZED;
+#else
     return ONVIF_ERROR;
+#endif
   }
   return onvif_service_handler_handle_request(&g_media_handler, action_name, request, response);
 }
+
+#ifdef UNIT_TESTING
+int onvif_media_unit_init_cached_uris(void) {
+  return init_cached_uris();
+}
+
+void onvif_media_unit_reset_cached_uris(void) {
+  memset(g_cached_main_rtsp_uri, 0, sizeof(g_cached_main_rtsp_uri));
+  memset(g_cached_sub_rtsp_uri, 0, sizeof(g_cached_sub_rtsp_uri));
+  g_cached_uris_initialized = 0;
+}
+
+int onvif_media_unit_get_cached_rtsp_uri(const char* profile_token, char* uri_buffer,
+                                         size_t buffer_size) {
+  return get_cached_rtsp_uri(profile_token, uri_buffer, buffer_size);
+}
+
+const char* onvif_media_unit_get_main_profile_token(void) {
+  return MEDIA_MAIN_PROFILE_TOKEN;
+}
+
+const char* onvif_media_unit_get_sub_profile_token(void) {
+  return MEDIA_SUB_PROFILE_TOKEN;
+}
+
+int onvif_media_unit_validate_profile_token(const char* token) {
+  return validate_profile_token(token);
+}
+
+int onvif_media_unit_validate_protocol(const char* protocol) {
+  return validate_protocol(protocol);
+}
+
+int onvif_media_unit_parse_value_from_request(const char* request_body,
+                                              onvif_gsoap_context_t* gsoap_ctx, const char* xpath,
+                                              char* value, size_t value_size) {
+  return parse_value_from_request(request_body, gsoap_ctx, xpath, value, value_size);
+}
+#endif

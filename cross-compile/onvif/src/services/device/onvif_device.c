@@ -30,6 +30,10 @@
 #include "utils/memory/smart_response_builder.h"
 #include "utils/network/network_utils.h"
 
+#ifdef UNIT_TESTING
+#include "services/common/onvif_service_test_helpers.h"
+#endif
+
 /* ============================================================================
  * Device Service Specific Utility Functions
  * ============================================================================
@@ -699,7 +703,14 @@ int onvif_device_init(config_manager_t* config) {
 
   g_handler_initialized = 1;
 
-  // Register with standardized service dispatcher
+#ifdef UNIT_TESTING
+  int result = onvif_service_unit_register(&g_device_service_registration, &g_handler_initialized,
+                                           onvif_device_cleanup, "Device");
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+  return ONVIF_SUCCESS;
+#else
   int result = onvif_service_dispatcher_register_service(&g_device_service_registration);
   if (result != ONVIF_SUCCESS) {
     platform_log_error("Failed to register device service with dispatcher: %d\n", result);
@@ -715,6 +726,7 @@ int onvif_device_init(config_manager_t* config) {
     stats.current_used, BUFFER_POOL_SIZE, stats.utilization_percent, stats.hits, stats.misses);
 
   return ONVIF_SUCCESS;
+#endif
 }
 
 /**
@@ -722,26 +734,20 @@ int onvif_device_init(config_manager_t* config) {
  * @return ONVIF_SUCCESS on success, error code on failure
  * @note This function cleans up all device service resources and unregisters from dispatcher
  */
-int onvif_device_cleanup(void) {
+void onvif_device_cleanup(void) {
+  // Guard against double cleanup
   if (!g_handler_initialized) {
-    return ONVIF_SUCCESS;
+    return;
   }
 
-  int result = ONVIF_SUCCESS;
+  // Unregister from standardized service dispatcher (continue even if fails)
+  onvif_service_dispatcher_unregister_service("device");
 
-  // Unregister from standardized service dispatcher
-  int unregister_result = onvif_service_dispatcher_unregister_service("device");
-  if (unregister_result != ONVIF_SUCCESS) {
-    platform_log_error("Failed to unregister device service from dispatcher: %d\n",
-                       unregister_result);
-    // Don't fail cleanup for this, but log the error
-  }
-
-  // Cleanup buffer pool (returns void, so we can't check for errors)
+  // Cleanup buffer pool
   buffer_pool_cleanup(&g_device_response_buffer_pool);
 
+  // Reset initialization flag (enables re-initialization)
   g_handler_initialized = 0;
-  return result;
 }
 
 /* ============================================================================
