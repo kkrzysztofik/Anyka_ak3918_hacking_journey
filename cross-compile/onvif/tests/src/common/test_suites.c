@@ -86,25 +86,11 @@ const test_suite_t g_test_suites[] = {
    .setup = NULL,
    .teardown = NULL},
 
-  // PTZ service tests
-  {.name = "ptz-service",
-   .full_name = "PTZ Service",
+  // PTZ unit tests (unified: service + callbacks + adapter)
+  {.name = "ptz-unit",
+   .full_name = "PTZ Unit Tests",
    .category = TEST_CATEGORY_UNIT,
-   .get_tests = get_ptz_service_unit_tests,
-   .setup = NULL,
-   .teardown = NULL},
-
-  {.name = "ptz-callbacks",
-   .full_name = "PTZ Callbacks",
-   .category = TEST_CATEGORY_UNIT,
-   .get_tests = get_ptz_callbacks_unit_tests,
-   .setup = NULL,
-   .teardown = NULL},
-
-  {.name = "ptz-adapter",
-   .full_name = "PTZ Adapter",
-   .category = TEST_CATEGORY_UNIT,
-   .get_tests = get_ptz_adapter_unit_tests,
+   .get_tests = get_ptz_unit_tests,
    .setup = NULL,
    .teardown = NULL},
 
@@ -182,14 +168,8 @@ const test_suite_t g_test_suites[] = {
 const size_t g_test_suite_count = sizeof(g_test_suites) / sizeof(g_test_suites[0]);
 
 /* ============================================================================
- * PTZ Adapter Test Suite Getter
+ * Unified PTZ Test Suite
  * ============================================================================ */
 
-// External test array from ptz_adapter_tests.c
-extern const struct CMUnitTest ptz_adapter_unit_tests[];
-
-const struct CMUnitTest* get_ptz_adapter_unit_tests(size_t* count) {
-  // Count tests in the array (21 tests)
-  *count = 21;
-  return ptz_adapter_unit_tests;
-}
+// Unified PTZ test suite getter is defined in:
+// tests/src/unit/services/ptz/test_ptz_unit_suite.c

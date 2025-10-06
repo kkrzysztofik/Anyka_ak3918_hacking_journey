@@ -251,6 +251,7 @@ DEVICE_TEST_SRCS := \
 PTZ_TEST_SRCS := \
 	src/unit/services/ptz/test_ptz_service.c \
 	src/unit/services/ptz/test_onvif_ptz_callbacks.c \
+	src/unit/services/ptz/test_ptz_unit_suite.c \
 	src/unit/ptz_adapter_tests.c
 
 MEDIA_TEST_SRCS := \
