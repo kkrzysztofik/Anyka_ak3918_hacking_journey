@@ -378,13 +378,21 @@ platform_result_t __wrap_platform_aenc_release_stream(void* aenc_handle,
  * PTZ Functions
  * ============================================================================ */
 
-// Forward declaration
+// Forward declarations for PTZ mock recording functions
 void platform_ptz_mock_record_init(void);
+void platform_ptz_mock_record_cleanup(void);
+void platform_ptz_mock_record_absolute_move(int pan, int tilt, int speed);
+void platform_ptz_mock_record_turn(platform_ptz_direction_t dir, int steps);
+void platform_ptz_mock_record_turn_stop(platform_ptz_direction_t dir);
 
 platform_result_t __wrap_platform_ptz_init(void) {
   function_called();
-  platform_ptz_mock_record_init();
-  return (platform_result_t)mock();
+  platform_result_t result = (platform_result_t)mock();
+  // Only record init as successful if the result is PLATFORM_SUCCESS
+  if (result == PLATFORM_SUCCESS) {
+    platform_ptz_mock_record_init();
+  }
+  return result;
 }
 
 platform_result_t __wrap_platform_ptz_cleanup(void) {
@@ -408,6 +416,8 @@ platform_result_t __wrap_platform_ptz_check_self(void) {
 platform_result_t __wrap_platform_ptz_move_to_position(int pan_deg, int tilt_deg) {
   check_expected(pan_deg);
   check_expected(tilt_deg);
+  // Record the move (speed is 0 since it's not part of this function's signature)
+  platform_ptz_mock_record_absolute_move(pan_deg, tilt_deg, 0);
   function_called();
   return (platform_result_t)mock();
 }
