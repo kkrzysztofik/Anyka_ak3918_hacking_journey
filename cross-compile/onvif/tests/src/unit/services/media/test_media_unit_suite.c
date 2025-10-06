@@ -17,6 +17,11 @@ void test_unit_media_stream_uri_functions(void** state);
 void test_unit_media_snapshot_uri_functions(void** state);
 void test_unit_media_multicast_functions(void** state);
 void test_unit_media_metadata_functions(void** state);
+void test_unit_media_cached_uri_initialization(void** state);
+void test_unit_media_cached_uri_error_paths(void** state);
+void test_unit_media_validate_profile_token(void** state);
+void test_unit_media_validate_protocol(void** state);
+void test_unit_media_parse_value_from_request(void** state);
 
 /**
  * @brief Get media utils unit tests
@@ -34,6 +39,11 @@ const struct CMUnitTest* get_media_utils_unit_tests(size_t* count) {
     cmocka_unit_test(test_unit_media_snapshot_uri_functions),
     cmocka_unit_test(test_unit_media_multicast_functions),
     cmocka_unit_test(test_unit_media_metadata_functions),
+    cmocka_unit_test(test_unit_media_cached_uri_initialization),
+    cmocka_unit_test(test_unit_media_cached_uri_error_paths),
+    cmocka_unit_test(test_unit_media_validate_profile_token),
+    cmocka_unit_test(test_unit_media_validate_protocol),
+    cmocka_unit_test(test_unit_media_parse_value_from_request),
   };
   *count = sizeof(tests) / sizeof(tests[0]);
   return tests;

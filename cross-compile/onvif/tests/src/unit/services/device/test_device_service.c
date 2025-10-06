@@ -213,9 +213,8 @@ void test_unit_device_cleanup_success(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
-  // Now test cleanup
-  result = onvif_device_cleanup();
-  assert_int_equal(ONVIF_SUCCESS, result);
+  // Now test cleanup (void return - best effort)
+  onvif_device_cleanup();
   g_device_service_initialized = 0;}
 
 /**
@@ -225,8 +224,9 @@ void test_unit_device_cleanup_success(void** state) {
 void test_unit_device_cleanup_not_initialized(void** state) {
   (void)state;
 
-  int result = onvif_device_cleanup();
-  assert_int_equal(ONVIF_SUCCESS, result);}
+  // Cleanup when not initialized should be no-op (void return)
+  onvif_device_cleanup();
+}
 
 /**
  * @brief Test device cleanup with unregistration failure
@@ -253,9 +253,8 @@ void test_unit_device_cleanup_unregister_failure(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
-  // Test cleanup with unregistration failure
-  result = onvif_device_cleanup();
-  assert_int_equal(ONVIF_SUCCESS, result); // Should still succeed
+  // Test cleanup with unregister failure (void return - best effort, always succeeds)
+  onvif_device_cleanup();
   g_device_service_initialized = 0;}
 
 /* ============================================================================
@@ -756,9 +755,8 @@ void test_unit_device_service_unregistration_success(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
-  // Test unregistration
-  result = onvif_device_cleanup();
-  assert_int_equal(ONVIF_SUCCESS, result);
+  // Test unregistration (void return)
+  onvif_device_cleanup();
   g_device_service_initialized = 0;}
 
 /**
@@ -786,9 +784,8 @@ void test_unit_device_service_unregistration_not_found(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
-  // Test unregistration with not found error
-  result = onvif_device_cleanup();
-  assert_int_equal(ONVIF_SUCCESS, result); // Should still succeed
+  // Test unregistration with not found error (void return - best effort)
+  onvif_device_cleanup();
   g_device_service_initialized = 0;}
 
 /* ============================================================================
@@ -952,9 +949,8 @@ void test_unit_device_memory_management(void** state) {
   int result = onvif_device_init(g_test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
-  // Cleanup
-  result = onvif_device_cleanup();
-  assert_int_equal(ONVIF_SUCCESS, result);
+  // Cleanup (void return)
+  onvif_device_cleanup();
   g_device_service_initialized = 0;}
 
 /**

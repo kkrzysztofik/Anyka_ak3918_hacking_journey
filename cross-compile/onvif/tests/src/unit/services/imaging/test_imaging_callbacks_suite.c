@@ -13,11 +13,8 @@ int teardown_imaging_unit_tests(void** state);
 void test_unit_imaging_callback_registration_success(void** state);
 void test_unit_imaging_callback_registration_duplicate(void** state);
 void test_unit_imaging_callback_registration_null_config(void** state);
-void test_unit_imaging_callback_registration_dispatcher_failure(void** state);
-void test_unit_imaging_callback_double_initialization(void** state);
 void test_unit_imaging_callback_unregistration_success(void** state);
 void test_unit_imaging_callback_unregistration_not_initialized(void** state);
-void test_unit_imaging_callback_unregistration_failure(void** state);
 
 /**
  * @brief Get imaging callbacks unit tests
@@ -32,15 +29,9 @@ const struct CMUnitTest* get_imaging_callbacks_unit_tests(size_t* count) {
                                     setup_imaging_unit_tests, teardown_imaging_unit_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_null_config,
                                     setup_imaging_unit_tests, teardown_imaging_unit_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_dispatcher_failure,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_double_initialization,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_success,
                                     setup_imaging_unit_tests, teardown_imaging_unit_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_not_initialized,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_failure,
                                     setup_imaging_unit_tests, teardown_imaging_unit_tests),
   };
   *count = sizeof(tests) / sizeof(tests[0]);

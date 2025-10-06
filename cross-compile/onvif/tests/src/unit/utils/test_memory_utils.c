@@ -14,6 +14,9 @@
 #include "utils/memory/memory_manager.h"
 #include "utils/memory/smart_response_builder.h"
 
+// Include mock control for conditional real/mock function usage
+#include "mocks/smart_response_mock.h"
+
 // Test constants for memory allocation sizes
 #define TEST_ALLOC_SIZE           1024
 #define TEST_ALLOC_LAST_INDEX     (TEST_ALLOC_SIZE - 1)
@@ -109,6 +112,10 @@ void test_unit_memory_manager_free(void** state) {
 void test_unit_smart_response_builder(void** state) {
   (void)state;
 
+  // Enable real functions for this utility behavior test
+  // We're testing the actual implementation logic (NULL handling, strlen behavior)
+  smart_response_mock_use_real_function(true);
+
   // Initialize for testing
   memory_manager_init();
 
@@ -128,6 +135,9 @@ void test_unit_smart_response_builder(void** state) {
 
   // Cleanup
   memory_manager_cleanup();
+
+  // Restore mock behavior for other tests
+  smart_response_mock_use_real_function(false);
 }
 
 /**

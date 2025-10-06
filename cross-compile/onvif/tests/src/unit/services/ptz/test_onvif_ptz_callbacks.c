@@ -107,8 +107,6 @@ int teardown_ptz_callback_tests(void** state) {
 void test_unit_ptz_service_registration_success(void** state) {
   (void)state;
 
-
-
   // Act: Initialize PTZ service (registers with real dispatcher)
   int result = onvif_ptz_init(NULL);
 
@@ -121,21 +119,19 @@ void test_unit_ptz_service_registration_success(void** state) {
 }
 
 /**
- * @brief Test PTZ service registration with duplicate
+ * @brief Test PTZ service registration with duplicate (idempotent behavior)
  * @param state Test state (unused)
  */
 void test_unit_ptz_service_registration_duplicate(void** state) {
   (void)state;
 
-
-
   // Act: Initialize PTZ service twice
   int result1 = onvif_ptz_init(NULL);
   assert_int_equal(result1, ONVIF_SUCCESS);
 
-  // Second registration should fail with ALREADY_EXISTS
+  // Second registration should succeed (idempotent behavior)
   int result2 = onvif_ptz_init(NULL);
-  assert_int_equal(result2, ONVIF_ERROR_ALREADY_EXISTS);
+  assert_int_equal(result2, ONVIF_SUCCESS);
 }
 
 /**
@@ -146,8 +142,6 @@ void test_unit_ptz_service_registration_duplicate(void** state) {
  */
 void test_unit_ptz_service_registration_invalid_params(void** state) {
   (void)state;
-
-
 
   // Act: Initialize with NULL config (should succeed - config is optional)
   int result = onvif_ptz_init(NULL);
@@ -163,13 +157,10 @@ void test_unit_ptz_service_registration_invalid_params(void** state) {
 void test_unit_ptz_service_registration_dispatcher_failure(void** state) {
   (void)state;
 
-
-
   // Note: This test is difficult to implement with real dispatcher
   // because we'd need to register 16 dummy services to fill it up.
   // Since the real dispatcher is working correctly, we'll test that
   // PTZ service can register successfully (proves dispatcher has space)
-
 
   // Act: Initialize PTZ service
   int result = onvif_ptz_init(NULL);
@@ -189,8 +180,6 @@ void test_unit_ptz_service_registration_dispatcher_failure(void** state) {
 void test_unit_ptz_service_unregistration_success(void** state) {
   (void)state;
 
-
-
   // Arrange: First register the service
   int init_result = onvif_ptz_init(NULL);
   assert_int_equal(init_result, ONVIF_SUCCESS);
@@ -199,9 +188,8 @@ void test_unit_ptz_service_unregistration_success(void** state) {
   int registered = onvif_service_dispatcher_is_registered(TEST_PTZ_SERVICE_NAME);
   assert_int_equal(registered, 1);
 
-  // Act: Unregister the service directly
-  int unregister_result = onvif_service_dispatcher_unregister_service(TEST_PTZ_SERVICE_NAME);
-  assert_int_equal(unregister_result, ONVIF_SUCCESS);
+  // Act: Cleanup the PTZ service (which unregisters internally)
+  onvif_ptz_cleanup();
 
   // Assert: Service should no longer be registered
   int still_registered = onvif_service_dispatcher_is_registered(TEST_PTZ_SERVICE_NAME);
@@ -308,23 +296,21 @@ void test_unit_ptz_operation_handler_unknown_operation(void** state) {
  * ============================================================================ */
 
 /**
- * @brief Test PTZ service handles duplicate registration gracefully
+ * @brief Test PTZ service handles duplicate registration gracefully (idempotent behavior)
  * @param state Test state (unused)
  */
 void test_unit_ptz_service_registration_failure_handling(void** state) {
   (void)state;
 
-
-
   // Initialize PTZ service first time
   int result1 = onvif_ptz_init(NULL);
   assert_int_equal(result1, ONVIF_SUCCESS);
 
-  // Try to initialize again - should fail gracefully
+  // Try to initialize again - should succeed (idempotent behavior)
   int result2 = onvif_ptz_init(NULL);
 
-  // Assert: Second init should fail with already exists error
-  assert_int_equal(result2, ONVIF_ERROR_ALREADY_EXISTS);
+  // Assert: Second init should succeed (idempotent behavior)
+  assert_int_equal(result2, ONVIF_SUCCESS);
 }
 
 /**
@@ -333,8 +319,6 @@ void test_unit_ptz_service_registration_failure_handling(void** state) {
  */
 void test_unit_ptz_service_unregistration_failure_handling(void** state) {
   (void)state;
-
-
 
   // Initialize PTZ service
   int result = onvif_ptz_init(NULL);
@@ -363,8 +347,6 @@ void test_unit_ptz_service_unregistration_failure_handling(void** state) {
  */
 void test_unit_ptz_service_callback_logging_failure(void** state) {
   (void)state;
-
-
 
   // Initialize PTZ service (should succeed and log info)
   int result = onvif_ptz_init(NULL);

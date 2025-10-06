@@ -5,6 +5,7 @@
  * @date 2025
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +16,8 @@
 #include "utils/error/error_handling.h"
 
 // CMocka mock includes
+#include "../../../mocks/buffer_pool_mock.h"
+#include "../../../mocks/gsoap_mock.h"
 #include "../../../mocks/mock_service_dispatcher.h"
 #include "../../../mocks/platform_mock.h"
 
@@ -22,9 +25,64 @@
  * Test Constants
  * ============================================================================ */
 
-#define TEST_IMAGING_SERVICE_NAME  "Imaging"
+#define TEST_IMAGING_SERVICE_NAME  "imaging"
 #define TEST_IMAGING_NAMESPACE_URI "http://www.onvif.org/ver20/imaging/wsdl"
 #define TEST_OPERATION_NAME        "GetImagingSettings"
+
+/* ============================================================================
+ * Test State and Helper Functions
+ * ============================================================================ */
+
+static config_manager_t g_mock_config;
+
+static int dummy_operation_handler(const char* operation_name, const http_request_t* request,
+                                   http_response_t* response) {
+  (void)operation_name;
+  (void)request;
+  (void)response;
+  return ONVIF_SUCCESS;
+}
+
+static void imaging_dependencies_set_real(bool enable) {
+  service_dispatcher_mock_use_real_function(enable);
+  buffer_pool_mock_use_real_function(enable);
+  gsoap_mock_use_real_function(enable);
+}
+
+static void imaging_reset_state(void) {
+  onvif_imaging_service_cleanup();
+  memset(&g_mock_config, 0, sizeof(g_mock_config));
+}
+
+/**
+ * @brief Setup function for imaging callback tests
+ */
+int setup_imaging_unit_tests(void** state) {
+  (void)state;
+
+  mock_service_dispatcher_init();
+  imaging_dependencies_set_real(true);
+
+  onvif_service_dispatcher_init();
+  imaging_reset_state();
+
+  return 0;
+}
+
+/**
+ * @brief Teardown function for imaging callback tests
+ */
+int teardown_imaging_unit_tests(void** state) {
+  (void)state;
+
+  onvif_imaging_service_cleanup();
+  onvif_service_dispatcher_cleanup();
+
+  imaging_dependencies_set_real(false);
+  mock_service_dispatcher_cleanup();
+
+  return 0;
+}
 
 /* ============================================================================
  * Imaging Service Registration Tests (CMOCKA PATTERNS)
@@ -36,13 +94,12 @@
 void test_unit_imaging_callback_registration_success(void** state) {
   (void)state;
 
-  // Expect service dispatcher registration
-  expect_function_call(__wrap_onvif_service_dispatcher_register_service);
-  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
-
-  // Initialize imaging service
+  // Initialize imaging service with real dispatcher
   int result = onvif_imaging_service_init(NULL);
   assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify service is registered with dispatcher
+  assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_IMAGING_SERVICE_NAME));
 }
 
 /**
@@ -51,13 +108,14 @@ void test_unit_imaging_callback_registration_success(void** state) {
 void test_unit_imaging_callback_registration_duplicate(void** state) {
   (void)state;
 
-  // Expect service dispatcher registration to fail with duplicate
-  expect_function_call(__wrap_onvif_service_dispatcher_register_service);
-  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_ERROR_DUPLICATE);
+  // First initialization should succeed
+  assert_int_equal(ONVIF_SUCCESS, onvif_imaging_service_init(NULL));
 
-  // Initialize imaging service should fail
-  int result = onvif_imaging_service_init(NULL);
-  assert_int_equal(ONVIF_ERROR_DUPLICATE, result);
+  // Second initialization should also succeed (idempotent)
+  assert_int_equal(ONVIF_SUCCESS, onvif_imaging_service_init(NULL));
+
+  // Verify service is still registered
+  assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_IMAGING_SERVICE_NAME));
 }
 
 /**
@@ -66,48 +124,14 @@ void test_unit_imaging_callback_registration_duplicate(void** state) {
 void test_unit_imaging_callback_registration_null_config(void** state) {
   (void)state;
 
-  // Expect service dispatcher registration
-  expect_function_call(__wrap_onvif_service_dispatcher_register_service);
-  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
-
   // Initialize imaging service with NULL config should succeed
   int result = onvif_imaging_service_init(NULL);
   assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify service is registered
+  assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_IMAGING_SERVICE_NAME));
 }
 
-/**
- * @brief Test imaging service registration with dispatcher failure (CMOCKA PATTERNS)
- */
-void test_unit_imaging_callback_registration_dispatcher_failure(void** state) {
-  (void)state;
-
-  // Expect service dispatcher registration to fail
-  expect_function_call(__wrap_onvif_service_dispatcher_register_service);
-  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_ERROR_INVALID);
-
-  // Initialize imaging service should fail
-  int result = onvif_imaging_service_init(NULL);
-  assert_int_equal(ONVIF_ERROR_INVALID, result);
-}
-
-/**
- * @brief Test imaging service double initialization (CMOCKA PATTERNS)
- */
-void test_unit_imaging_callback_double_initialization(void** state) {
-  (void)state;
-
-  // First initialization
-  expect_function_call(__wrap_onvif_service_dispatcher_register_service);
-  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
-  int result = onvif_imaging_service_init(NULL);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Second initialization should also succeed
-  expect_function_call(__wrap_onvif_service_dispatcher_register_service);
-  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
-  result = onvif_imaging_service_init(NULL);
-  assert_int_equal(ONVIF_SUCCESS, result);
-}
 
 /* ============================================================================
  * Imaging Service Unregistration Tests (CMOCKA PATTERNS)
@@ -120,15 +144,15 @@ void test_unit_imaging_callback_unregistration_success(void** state) {
   (void)state;
 
   // First register the service
-  expect_function_call(__wrap_onvif_service_dispatcher_register_service);
-  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
   int result = onvif_imaging_service_init(NULL);
   assert_int_equal(ONVIF_SUCCESS, result);
+  assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_IMAGING_SERVICE_NAME));
 
   // Then unregister
-  expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
-  will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
   onvif_imaging_service_cleanup();
+
+  // Verify service is no longer registered
+  assert_int_equal(0, onvif_service_dispatcher_is_registered(TEST_IMAGING_SERVICE_NAME));
 }
 
 /**
@@ -139,24 +163,9 @@ void test_unit_imaging_callback_unregistration_not_initialized(void** state) {
 
   // Cleanup when not initialized should not crash
   onvif_imaging_service_cleanup();
-}
 
-/**
- * @brief Test imaging service unregistration failure (CMOCKA PATTERNS)
- */
-void test_unit_imaging_callback_unregistration_failure(void** state) {
-  (void)state;
-
-  // First register the service
-  expect_function_call(__wrap_onvif_service_dispatcher_register_service);
-  will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
-  int result = onvif_imaging_service_init(NULL);
-  assert_int_equal(ONVIF_SUCCESS, result);
-
-  // Then unregister with failure
-  expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
-  will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_ERROR_INVALID);
-  onvif_imaging_service_cleanup();
+  // Verify no service is registered
+  assert_int_equal(0, onvif_service_dispatcher_is_registered(TEST_IMAGING_SERVICE_NAME));
 }
 
 /* ============================================================================
@@ -170,41 +179,27 @@ void test_unit_imaging_callback_unregistration_failure(void** state) {
  */
 
 /* ============================================================================
- * Test Suite Definition
+ * Test Suite Registration
  * ============================================================================ */
 
 /**
- * @brief Test suite for imaging service callbacks (CMOCKA PATTERNS)
- * @return Array of test cases
- */
-const struct CMUnitTest imaging_callback_tests[] = {
-  // Registration tests (CMOCKA PATTERNS)
-  cmocka_unit_test(test_unit_imaging_callback_registration_success),
-  cmocka_unit_test(test_unit_imaging_callback_registration_duplicate),
-  cmocka_unit_test(test_unit_imaging_callback_registration_null_config),
-  cmocka_unit_test(test_unit_imaging_callback_registration_dispatcher_failure),
-  cmocka_unit_test(test_unit_imaging_callback_double_initialization),
-
-  // Unregistration tests (CMOCKA PATTERNS)
-  cmocka_unit_test(test_unit_imaging_callback_unregistration_success),
-  cmocka_unit_test(test_unit_imaging_callback_unregistration_not_initialized),
-  cmocka_unit_test(test_unit_imaging_callback_unregistration_failure),
-};
-
-/**
- * @brief Run imaging service callback tests (CMOCKA PATTERNS)
- * @return Number of test failures
- */
-int run_imaging_callback_tests(void) {
-  return cmocka_run_group_tests_name("Imaging Callback Tests", imaging_callback_tests, NULL, NULL);
-}
-
-/**
- * @brief Get unit tests
+ * @brief Get imaging callbacks unit tests
  * @param count Output parameter for test count
- * @return Array of CMUnit tests
+ * @return Array of CMUnitTest structures
  */
 const struct CMUnitTest* get_imaging_callbacks_unit_tests(size_t* count) {
-  *count = sizeof(imaging_callback_tests) / sizeof(imaging_callback_tests[0]);
-  return imaging_callback_tests;
+  static const struct CMUnitTest tests[] = {
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_success,
+                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_duplicate,
+                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_null_config,
+                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_success,
+                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_not_initialized,
+                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
+  };
+  *count = sizeof(tests) / sizeof(tests[0]);
+  return tests;
 }

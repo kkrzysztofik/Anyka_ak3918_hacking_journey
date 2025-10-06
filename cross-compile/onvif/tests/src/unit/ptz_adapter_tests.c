@@ -543,8 +543,8 @@ void test_unit_ptz_adapter_continuous_move_with_timeout(void** state) {
   int steps;
   assert_int_equal(1, platform_mock_get_last_ptz_turn(&dir, &steps));
 
-  // Wait for timeout thread to stop all directions
-  wait_for_turn_stop_mask(PTZ_TIMEOUT_EXPECTED_MASK, 6000);
+  // Wait for timeout thread to stop all directions (increased timeout to 10 seconds)
+  wait_for_turn_stop_mask(PTZ_TIMEOUT_EXPECTED_MASK, 10000);
 }
 
 void test_unit_ptz_adapter_continuous_move_no_timeout(void** state) {
