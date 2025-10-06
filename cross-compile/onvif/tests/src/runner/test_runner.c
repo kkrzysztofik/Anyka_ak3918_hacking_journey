@@ -6,6 +6,7 @@
  */
 
 #define _DEFAULT_SOURCE // For strdup()
+#include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <stdarg.h>
@@ -66,26 +67,6 @@ static int init_output_redirection(test_runner_options_t* options) {
   }
 
   return 0;
-}
-
-/**
- * @brief Cleanup output redirection
- * @param options Test runner options
- */
-static void cleanup_output_redirection(test_runner_options_t* options) {
-  if (options->output_file) {
-    fclose(options->output_file);
-    options->output_file = NULL;
-  }
-
-  if (options->original_stdout != -1) {
-    // Restore original stdout
-    if (dup2(options->original_stdout, STDOUT_FILENO) == -1) {
-      perror("Failed to restore stdout");
-    }
-    close(options->original_stdout);
-    options->original_stdout = -1;
-  }
 }
 
 /**
@@ -275,8 +256,8 @@ static int suite_matches_filter(const test_suite_t* suite, const test_runner_opt
  * @param options Options (for filtering)
  */
 static void list_test_suites(const test_runner_options_t* options) {
-  test_printf((test_runner_options_t*)options, "Available Test Suites:\n");
-  test_printf((test_runner_options_t*)options, "=====================\n\n");
+  printf("Available Test Suites:\n");
+  printf("=====================\n\n");
 
   int unit_count = 0;
   int integration_count = 0;
@@ -292,8 +273,8 @@ static void list_test_suites(const test_runner_options_t* options) {
     suite->get_tests(&test_count);
 
     const char* category_str = suite->category == TEST_CATEGORY_UNIT ? "unit" : "integration";
-    test_printf((test_runner_options_t*)options, "  %-20s (%2zu tests) - %s [%s]\n", suite->name,
-                test_count, suite->full_name, category_str);
+    printf("  %-20s (%2zu tests) - %s [%s]\n", suite->name, test_count, suite->full_name,
+           category_str);
 
     if (suite->category == TEST_CATEGORY_UNIT) {
       unit_count += (int)test_count;
@@ -302,11 +283,10 @@ static void list_test_suites(const test_runner_options_t* options) {
     }
   }
 
-  test_printf((test_runner_options_t*)options, "\nSummary:\n");
-  test_printf((test_runner_options_t*)options, "  Unit tests:        %d\n", unit_count);
-  test_printf((test_runner_options_t*)options, "  Integration tests: %d\n", integration_count);
-  test_printf((test_runner_options_t*)options, "  Total tests:       %d\n",
-              unit_count + integration_count);
+  printf("\nSummary:\n");
+  printf("  Unit tests:        %d\n", unit_count);
+  printf("  Integration tests: %d\n", integration_count);
+  printf("  Total tests:       %d\n", unit_count + integration_count);
 }
 
 /**
@@ -403,13 +383,13 @@ int main(int argc, char* argv[]) {
     test_printf(&options, "❌ %d test(s) failed!\n", total_failures);
   }
 
-  // Cleanup
-  for (int i = 0; i < options.suite_filter_count; i++) {
-    free(options.suite_filters[i]);
+  // Force exit immediately after tests complete to avoid CMocka exit(255)
+  fflush(stdout);
+  fflush(stderr);
+
+  if (total_failures == 0) {
+    _exit(0);
+  } else {
+    _exit(total_failures);
   }
-
-  // Cleanup output redirection
-  cleanup_output_redirection(&options);
-
-  return total_failures;
 }

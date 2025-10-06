@@ -256,7 +256,8 @@ PTZ_TEST_SRCS := \
 
 MEDIA_TEST_SRCS := \
 	src/unit/services/media/test_media_utils.c \
-	src/unit/services/media/test_onvif_media_callbacks.c
+	src/unit/services/media/test_onvif_media_callbacks.c \
+	src/unit/services/media/test_media_callbacks_suite.c
 
 IMAGING_TEST_SRCS := \
 	src/unit/services/imaging/test_onvif_imaging_callbacks.c
@@ -290,6 +291,7 @@ MOCK_SRCS := \
 	src/mocks/buffer_pool_mock.c \
 	src/mocks/smart_response_mock.c \
 	src/mocks/gsoap_mock.c \
+	src/mocks/media_mock.c \
 
 # Mock source files for integration tests (exclude buffer_pool_mock - use real implementation)
 MOCK_SRCS_INTEGRATION := \
@@ -301,6 +303,7 @@ MOCK_SRCS_INTEGRATION := \
 	src/mocks/config_mock.c \
 	src/mocks/smart_response_mock.c \
 	src/mocks/gsoap_mock.c \
+	src/mocks/media_mock.c \
 
 # Source files from main project (for testing - exclude platform_anyka.c - use platform mocks)
 MAIN_SRCS := \
