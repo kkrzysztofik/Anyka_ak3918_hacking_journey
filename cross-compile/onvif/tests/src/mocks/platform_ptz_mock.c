@@ -7,12 +7,12 @@
 
 #include "platform_ptz_mock.h"
 
-#include <setjmp.h>
-#include <stdarg.h>
-#include <stddef.h>
 #include <cmocka.h>
 #include <pthread.h>
+#include <setjmp.h>
+#include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -51,11 +51,11 @@ static pthread_mutex_t g_ptz_async_lock = PTHREAD_MUTEX_INITIALIZER;
 
 bool platform_ptz_mock_should_bypass_expectations(void) {
   pthread_mutex_lock(&g_ptz_async_lock);
-  int enabled = g_ptz_async_mode_enabled;
+  int async_enabled = g_ptz_async_mode_enabled;
   pthread_t owner_thread = g_ptz_async_main_thread;
   pthread_mutex_unlock(&g_ptz_async_lock);
 
-  if (!enabled) {
+  if (!async_enabled) {
     return false;
   }
 
@@ -142,9 +142,12 @@ int platform_mock_get_last_ptz_absolute_move(int* pan, int* tilt, int* speed) {
     return 0;
   }
 
-  if (pan) *pan = g_last_absolute_move.pan;
-  if (tilt) *tilt = g_last_absolute_move.tilt;
-  if (speed) *speed = g_last_absolute_move.speed;
+  if (pan)
+    *pan = g_last_absolute_move.pan;
+  if (tilt)
+    *tilt = g_last_absolute_move.tilt;
+  if (speed)
+    *speed = g_last_absolute_move.speed;
 
   return 1;
 }
@@ -154,8 +157,10 @@ int platform_mock_get_last_ptz_turn(platform_ptz_direction_t* dir, int* steps) {
     return 0;
   }
 
-  if (dir) *dir = g_last_turn.dir;
-  if (steps) *steps = g_last_turn.steps;
+  if (dir)
+    *dir = g_last_turn.dir;
+  if (steps)
+    *steps = g_last_turn.steps;
 
   return 1;
 }
@@ -165,7 +170,8 @@ int platform_mock_get_last_ptz_turn_stop(platform_ptz_direction_t* dir) {
     return 0;
   }
 
-  if (dir) *dir = g_last_turn_stop.dir;
+  if (dir)
+    *dir = g_last_turn_stop.dir;
 
   return 1;
 }
@@ -248,6 +254,5 @@ void platform_ptz_mock_record_turn_stop(platform_ptz_direction_t dir) {
   pthread_mutex_lock(&g_ptz_async_lock);
   g_ptz_turn_stop_mask |= (1U << (int)dir);
   pthread_mutex_unlock(&g_ptz_async_lock);
-  printf("[MOCK][PTZ] recorded stop direction=%d mask=0x%02x\n", dir,
-         g_ptz_turn_stop_mask);
+  printf("[MOCK][PTZ] recorded stop direction=%d mask=0x%02x\n", dir, g_ptz_turn_stop_mask);
 }

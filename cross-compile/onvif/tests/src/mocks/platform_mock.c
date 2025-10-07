@@ -6,11 +6,12 @@
  */
 
 #include "platform_mock.h"
-#include "platform_ptz_mock.h"
 
 #include <stdarg.h>
 #include <stddef.h>
 #include <string.h>
+
+#include "platform_ptz_mock.h"
 
 /* ============================================================================
  * Core Platform Functions
@@ -164,15 +165,19 @@ platform_result_t __wrap_platform_vi_get_fps(int* fps) {
  * Video Processing (VPSS) Functions
  * ============================================================================ */
 
-platform_result_t __wrap_platform_vpss_effect_set(int effect_type, int value) {
-  check_expected(effect_type);
+platform_result_t __wrap_platform_vpss_effect_set(platform_vi_handle_t handle,
+                                                  platform_vpss_effect_t effect, int value) {
+  check_expected_ptr(handle);
+  check_expected(effect);
   check_expected(value);
   function_called();
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_vpss_effect_get(int effect_type, int* value) {
-  check_expected(effect_type);
+platform_result_t __wrap_platform_vpss_effect_get(platform_vi_handle_t handle,
+                                                  platform_vpss_effect_t effect, int* value) {
+  check_expected_ptr(handle);
+  check_expected(effect);
   check_expected_ptr(value);
   function_called();
   if (value) {
@@ -473,7 +478,8 @@ platform_result_t __wrap_platform_ptz_turn_stop(platform_ptz_direction_t directi
  * IR LED Functions
  * ============================================================================ */
 
-platform_result_t __wrap_platform_irled_init(void) {
+platform_result_t __wrap_platform_irled_init(int level) {
+  check_expected(level);
   function_called();
   return (platform_result_t)mock();
 }
@@ -564,14 +570,11 @@ platform_result_t __wrap_platform_config_get_string(const char* key, char* value
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_config_get_int(const char* key, int* value) {
+int __wrap_platform_config_get_int(const char* section, const char* key, int default_value) {
+  check_expected_ptr(section);
   check_expected_ptr(key);
-  check_expected_ptr(value);
   function_called();
-  if (value) {
-    *value = (int)mock();
-  }
-  return (platform_result_t)mock();
+  return (int)mock_type(int);
 }
 
 /* ============================================================================

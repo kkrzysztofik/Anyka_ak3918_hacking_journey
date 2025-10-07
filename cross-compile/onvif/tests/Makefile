@@ -198,7 +198,11 @@ WRAP_FUNCTIONS := \
 	recvfrom \
 	close \
 	setsockopt \
-	getsockopt
+	getsockopt \
+	http_server_start \
+	http_server_stop \
+	process_connection \
+	http_validate_authentication
 
 # Generate linker wrap flags for CMocka function interception
 WRAP_FLAGS := $(addprefix -Wl$(comma)--wrap=,$(WRAP_FUNCTIONS))
@@ -222,11 +226,13 @@ TEST_SUITE_REGISTRY_SRCS := \
 # Test source files for each module
 UTILS_TEST_SRCS := \
 	src/unit/utils/test_memory_utils.c \
-	src/unit/utils/test_logging_utils.c
+	src/unit/utils/test_logging_utils.c \
+	src/unit/core/test_config_auth.c
 
 NETWORKING_TEST_SRCS := \
 	src/unit/networking/test_http_auth.c \
-	src/unit/networking/test_http_metrics_simple.c
+	src/unit/networking/test_http_metrics_simple.c \
+	src/unit/networking/test_http_server_auth.c
 
 PROTOCOL_TEST_SRCS := \
 	src/unit/protocol/test_onvif_gsoap_core.c \
@@ -292,6 +298,7 @@ MOCK_SRCS := \
 	src/mocks/smart_response_mock.c \
 	src/mocks/gsoap_mock.c \
 	src/mocks/media_mock.c \
+	src/mocks/http_server_mock.c \
 
 # Mock source files for integration tests (exclude buffer_pool_mock - use real implementation)
 MOCK_SRCS_INTEGRATION := \
@@ -304,6 +311,7 @@ MOCK_SRCS_INTEGRATION := \
 	src/mocks/smart_response_mock.c \
 	src/mocks/gsoap_mock.c \
 	src/mocks/media_mock.c \
+	src/mocks/http_server_mock.c \
 
 # Source files from main project (for testing - exclude platform_anyka.c - use platform mocks)
 MAIN_SRCS := \
@@ -322,6 +330,7 @@ MAIN_SRCS := \
 	../src/utils/logging/service_logging.c \
 	../src/networking/http/http_auth.c \
 	../src/networking/http/http_parser.c \
+	../src/networking/http/http_server.c \
 	../src/networking/common/buffer_pool.c \
 	../src/utils/validation/common_validation.c \
 	../src/utils/validation/input_validation.c \
@@ -334,9 +343,11 @@ MAIN_SRCS := \
 	../src/services/media/onvif_media.c \
 	../src/services/ptz/onvif_ptz.c \
 	../src/services/imaging/onvif_imaging.c \
+	../src/services/snapshot/onvif_snapshot.c \
 	../src/platform/adapters/ptz_adapter.c \
 	../src/utils/network/network_utils.c \
-	../src/utils/error/error_handling.c
+	../src/utils/error/error_handling.c \
+	../src/core/config/config.c
 
 # Object files for each module
 UTILS_TEST_OBJS := $(UTILS_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)

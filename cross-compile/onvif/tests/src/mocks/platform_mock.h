@@ -149,19 +149,23 @@ platform_result_t __wrap_platform_vi_get_fps(int* fps);
 
 /**
  * @brief CMocka wrapped VPSS effect set
- * @param effect_type Effect type
+ * @param handle Video input handle
+ * @param effect Effect type
  * @param value Effect value
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_vpss_effect_set(int effect_type, int value);
+platform_result_t __wrap_platform_vpss_effect_set(platform_vi_handle_t handle,
+                                                   platform_vpss_effect_t effect, int value);
 
 /**
  * @brief CMocka wrapped VPSS effect get
- * @param effect_type Effect type
+ * @param handle Video input handle
+ * @param effect Effect type
  * @param value Output value pointer
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_vpss_effect_get(int effect_type, int* value);
+platform_result_t __wrap_platform_vpss_effect_get(platform_vi_handle_t handle,
+                                                   platform_vpss_effect_t effect, int* value);
 
 /**
  * @brief CMocka wrapped video encoder initialization
@@ -401,9 +405,10 @@ platform_result_t __wrap_platform_ptz_turn_stop(platform_ptz_direction_t directi
 
 /**
  * @brief CMocka wrapped IR LED initialization
+ * @param level IR LED level to initialize with
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_irled_init(void);
+platform_result_t __wrap_platform_irled_init(int level);
 
 /**
  * @brief CMocka wrapped IR LED cleanup
@@ -480,11 +485,12 @@ platform_result_t __wrap_platform_config_get_string(const char* key, char* value
 
 /**
  * @brief CMocka wrapped config get int
+ * @param section Configuration section
  * @param key Configuration key
- * @param value Output value pointer
- * @return Platform result code (configured via will_return)
+ * @param default_value Default value if key not found
+ * @return Configuration value (configured via will_return)
  */
-platform_result_t __wrap_platform_config_get_int(const char* key, int* value);
+int __wrap_platform_config_get_int(const char* section, const char* key, int default_value);
 
 /**
  * @brief CMocka wrapped get system info
