@@ -20,6 +20,7 @@
 #include "../../../mocks/platform_mock.h"
 #include "../../../mocks/platform_ptz_mock.h"
 #include "platform/adapters/ptz_adapter.h"
+#include "../../../utils/test_gsoap_utils.h"
 
 /* ============================================================================
  * Test Configuration
@@ -285,6 +286,7 @@ void test_unit_ptz_operation_handler_null_response(void** state) {
 void test_unit_ptz_operation_handler_unknown_operation(void** state) {
   (void)state;
 
+  setup_http_verbose_mock();
   int result =
     onvif_ptz_handle_operation(TEST_PTZ_UNKNOWN_OPERATION, &g_test_request, &g_test_response);
 

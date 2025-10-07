@@ -11,6 +11,11 @@
 
 // Include the actual source files we're testing
 #include "utils/logging/logging_utils.h"
+#include "utils/logging/service_logging.h"
+
+// Test constants
+#define TEST_HEADER_VALUE_SIZE 64
+#define TEST_XML_SIZE          256
 
 /**
  * @brief Test service initialization logging
@@ -134,11 +139,98 @@ void test_unit_platform_logging(void** state) {
 }
 
 /**
+ * @brief Test Authorization header redaction
+ * @param state Test state (unused)
+ */
+void test_unit_redact_header_authorization(void** state) {
+  (void)state;
+  char value[TEST_HEADER_VALUE_SIZE];
+  value[0] = '\0';
+  (void)snprintf(value, sizeof(value), "%s", "Basic dXNlcjpwYXNz");
+  service_log_redact_header_value("Authorization", value);
+  assert_string_equal(value, "<REDACTED>");
+}
+
+/**
+ * @brief Test WS-Security password redaction
+ * @param state Test state (unused)
+ */
+void test_unit_redact_wsse_password(void** state) {
+  (void)state;
+  char xml[TEST_XML_SIZE];
+  (void)snprintf(xml, sizeof(xml), "%s",
+                 "<s:Envelope><s:Header><wsse:Security>"
+                 "<wsse:UsernameToken><wsse:Password>secret123</wsse:Password>"
+                 "</wsse:UsernameToken></wsse:Security></s:Header><s:Body/></s:Envelope>");
+  service_log_redact_wsse_password(xml);
+  assert_non_null(strstr(xml, ">***REDACTED***</wsse:Password>"));
+  assert_null(strstr(xml, "secret123"));
+}
+
+/**
+ * @brief Test non-Authorization header (should not be redacted)
+ * @param state Test state (unused)
+ */
+void test_unit_redact_header_non_authorization(void** state) {
+  (void)state;
+  char value[TEST_HEADER_VALUE_SIZE];
+  (void)snprintf(value, sizeof(value), "%s", "application/soap+xml");
+  service_log_redact_header_value("Content-Type", value);
+  // Non-Authorization headers should not be redacted
+  assert_string_equal(value, "application/soap+xml");
+}
+
+/**
+ * @brief Test redaction with NULL parameters
+ * @param state Test state (unused)
+ */
+void test_unit_redact_header_null_params(void** state) {
+  (void)state;
+  char value[TEST_HEADER_VALUE_SIZE];
+  (void)snprintf(value, sizeof(value), "%s", "Basic dXNlcjpwYXNz");
+
+  // Test NULL header name
+  service_log_redact_header_value(NULL, value);
+  assert_string_equal(value, "Basic dXNlcjpwYXNz"); // Should not change
+
+  // Test NULL value
+  service_log_redact_header_value("Authorization", NULL);
+  // Should not crash
+}
+
+/**
+ * @brief Test WS-Security redaction with no password element
+ * @param state Test state (unused)
+ */
+void test_unit_redact_wsse_password_no_password(void** state) {
+  (void)state;
+  char xml[TEST_XML_SIZE];
+  (void)snprintf(
+    xml, sizeof(xml), "%s",
+    "<s:Envelope><s:Header><wsse:Security>"
+    "<wsse:UsernameToken></wsse:UsernameToken></wsse:Security></s:Header><s:Body/></s:Envelope>");
+  service_log_redact_wsse_password(xml);
+  // Should not crash and XML should remain unchanged
+  assert_non_null(strstr(xml, "<wsse:UsernameToken></wsse:UsernameToken>"));
+}
+
+/**
+ * @brief Test WS-Security redaction with NULL XML
+ * @param state Test state (unused)
+ */
+void test_unit_redact_wsse_password_null_xml(void** state) {
+  (void)state;
+  // Test NULL XML - should not crash
+  service_log_redact_wsse_password(NULL);
+}
+
+/**
  * @brief Get logging utils unit tests
  * @param count Output parameter for test count
  * @return Array of CMUnitTest structures
  */
 const struct CMUnitTest* get_logging_utils_unit_tests(size_t* count) {
+
   static const struct CMUnitTest tests[] = {
     cmocka_unit_test(test_unit_logging_init),
     cmocka_unit_test(test_unit_logging_cleanup),
@@ -146,6 +238,12 @@ const struct CMUnitTest* get_logging_utils_unit_tests(size_t* count) {
     cmocka_unit_test(test_unit_basic_logging),
     cmocka_unit_test(test_unit_service_logging),
     cmocka_unit_test(test_unit_platform_logging),
+    cmocka_unit_test(test_unit_redact_header_authorization),
+    cmocka_unit_test(test_unit_redact_wsse_password),
+    cmocka_unit_test(test_unit_redact_header_non_authorization),
+    cmocka_unit_test(test_unit_redact_header_null_params),
+    cmocka_unit_test(test_unit_redact_wsse_password_no_password),
+    cmocka_unit_test(test_unit_redact_wsse_password_null_xml),
   };
   *count = sizeof(tests) / sizeof(tests[0]);
   return tests;

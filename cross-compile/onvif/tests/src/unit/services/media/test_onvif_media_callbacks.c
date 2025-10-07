@@ -17,6 +17,7 @@
 #include "../../../mocks/buffer_pool_mock.h"
 #include "../../../mocks/gsoap_mock.h"
 #include "../../../mocks/mock_service_dispatcher.h"
+#include "../../../utils/test_gsoap_utils.h"
 
 #define TEST_MEDIA_SERVICE_NAME "Media"
 #define TEST_MEDIA_NAMESPACE    "http://www.onvif.org/ver10/media/wsdl"
@@ -84,6 +85,7 @@ int teardown_media_callback_tests(void** state) {
 void test_unit_media_callback_registration_success(void** state) {
   (void)state;
 
+  setup_http_verbose_mock();
   int result = onvif_media_init(NULL);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
@@ -92,6 +94,7 @@ void test_unit_media_callback_registration_success(void** state) {
 void test_unit_media_callback_registration_duplicate(void** state) {
   (void)state;
 
+  setup_http_verbose_mock();
   assert_int_equal(ONVIF_SUCCESS, onvif_media_init(NULL));
   assert_int_equal(ONVIF_SUCCESS, onvif_media_init(NULL));
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
@@ -100,6 +103,7 @@ void test_unit_media_callback_registration_duplicate(void** state) {
 void test_unit_media_callback_registration_null_config(void** state) {
   (void)state;
 
+  setup_http_verbose_mock();
   int result = onvif_media_init(&g_mock_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
@@ -110,6 +114,7 @@ void test_unit_media_callback_registration_dispatcher_failure(void** state) {
 
   media_pre_register_service();
 
+  setup_http_verbose_mock();
   int result = onvif_media_init(&g_mock_config);
   assert_int_equal(ONVIF_ERROR_ALREADY_EXISTS, result);
   // Service should remain registered with original handler after ALREADY_EXISTS error
@@ -119,6 +124,7 @@ void test_unit_media_callback_registration_dispatcher_failure(void** state) {
 void test_unit_media_callback_double_initialization(void** state) {
   (void)state;
 
+  setup_http_verbose_mock();
   assert_int_equal(ONVIF_SUCCESS, onvif_media_init(NULL));
   assert_int_equal(ONVIF_SUCCESS, onvif_media_init(&g_mock_config));
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
@@ -127,6 +133,7 @@ void test_unit_media_callback_double_initialization(void** state) {
 void test_unit_media_callback_unregistration_success(void** state) {
   (void)state;
 
+  setup_http_verbose_mock();
   assert_int_equal(ONVIF_SUCCESS, onvif_media_init(NULL));
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
 
@@ -144,6 +151,7 @@ void test_unit_media_callback_unregistration_not_initialized(void** state) {
 void test_unit_media_callback_unregistration_failure(void** state) {
   (void)state;
 
+  setup_http_verbose_mock();
   assert_int_equal(ONVIF_SUCCESS, onvif_media_init(NULL));
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
 

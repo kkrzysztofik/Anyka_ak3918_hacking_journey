@@ -44,6 +44,9 @@ void test_unit_onvif_gsoap_init(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Test successful initialization
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -80,6 +83,9 @@ void test_unit_onvif_gsoap_cleanup(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize and then cleanup
   int result = onvif_gsoap_init(&ctx);
@@ -190,6 +196,9 @@ void test_unit_onvif_gsoap_parse_without_initialization(void** state) {
   memset(&ctx, 0, sizeof(ctx));
   struct _trt__GetProfiles* request = NULL;
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context but NOT request parsing
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -217,6 +226,9 @@ void test_unit_onvif_gsoap_reset_success(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context first
   int result = onvif_gsoap_init(&ctx);
@@ -270,6 +282,9 @@ void test_unit_onvif_gsoap_reset_after_parsing(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -303,6 +318,9 @@ void test_unit_onvif_gsoap_init_request_parsing_success(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -353,6 +371,9 @@ void test_unit_onvif_gsoap_init_request_parsing_null_xml(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -377,6 +398,9 @@ void test_unit_onvif_gsoap_init_request_parsing_zero_size(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -409,6 +433,9 @@ void test_unit_onvif_gsoap_set_error_success(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -437,6 +464,9 @@ void test_unit_onvif_gsoap_set_error_null_message(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -463,6 +493,9 @@ void test_unit_onvif_gsoap_get_detailed_error_success(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -502,6 +535,9 @@ void test_unit_onvif_gsoap_get_detailed_error_null_outputs(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -530,6 +566,9 @@ void test_unit_onvif_gsoap_has_error_true(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -557,6 +596,9 @@ void test_unit_onvif_gsoap_has_error_false(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -577,6 +619,9 @@ void test_unit_onvif_gsoap_get_error_with_message(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -607,6 +652,9 @@ void test_unit_onvif_gsoap_get_error_no_message(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -633,6 +681,9 @@ void test_unit_onvif_gsoap_validate_and_begin_parse_success(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
   void* output_ptr = &ctx; // Non-NULL output pointer
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -681,6 +732,9 @@ void test_unit_onvif_gsoap_validate_and_begin_parse_null_output(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -706,6 +760,9 @@ void test_unit_onvif_gsoap_validate_and_begin_parse_not_initialized(void** state
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
   void* output_ptr = &ctx;
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context but NOT request parsing
   int result = onvif_gsoap_init(&ctx);

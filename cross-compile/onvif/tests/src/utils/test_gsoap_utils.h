@@ -13,6 +13,12 @@
 #include "protocol/gsoap/onvif_gsoap_core.h"
 
 /**
+ * @brief Setup mock expectation for platform_config_get_int http_verbose call
+ * @note Call this before any onvif_gsoap_init() invocation in tests
+ */
+void setup_http_verbose_mock(void);
+
+/**
  * @brief Helper function to set up context for parsing tests
  * @param ctx gSOAP context to initialize
  * @param soap_request SOAP request envelope string

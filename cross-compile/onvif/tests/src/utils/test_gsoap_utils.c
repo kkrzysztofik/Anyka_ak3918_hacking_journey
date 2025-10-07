@@ -10,8 +10,24 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "cmocka_wrapper.h"
 #include "mocks/gsoap_mock.h"
+#include "mocks/platform_mock.h"
 #include "utils/error/error_handling.h"
+
+/**
+ * @brief Setup mock expectation for platform_config_get_int http_verbose call
+ * @note This helper encapsulates the mock setup pattern used before every
+ *       onvif_gsoap_init() call. Each init() invocation requires a fresh
+ *       mock expectation. The mock checks parameters, calls function_called(),
+ *       then returns the mocked value.
+ */
+void setup_http_verbose_mock(void) {
+  expect_function_call(__wrap_platform_config_get_int);
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  will_return(__wrap_platform_config_get_int, 1);
+}
 
 /**
  * @brief Helper function to set up context for parsing tests
@@ -28,6 +44,9 @@ int setup_parsing_test(onvif_gsoap_context_t* ctx, const char* soap_request) {
 
   printf("DEBUG: setup_parsing_test: Starting setup with SOAP request length: %zu\n",
          strlen(soap_request));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   printf("DEBUG: setup_parsing_test: Calling onvif_gsoap_init\n");

@@ -32,85 +32,15 @@ typedef struct http_performance_metrics {
 static http_performance_metrics_t g_test_metrics = {0};
 
 // Mock functions for testing
-int http_metrics_init(void) {
-  // Initialize metrics
-  g_test_metrics.total_requests = 0;
-  g_test_metrics.successful_requests = 0;
-  g_test_metrics.client_errors = 0;
-  g_test_metrics.server_errors = 0;
-  g_test_metrics.total_response_bytes = 0;
-  g_test_metrics.total_latency_ms = 0;
-  g_test_metrics.min_latency_ms = UINT64_MAX;
-  g_test_metrics.max_latency_ms = 0;
-  g_test_metrics.current_connections = 0;
-  g_test_metrics.metrics_start_time = 1000; // Mock start time
+// NOTE: http_metrics_init() is now provided by the real http_server.c implementation
 
-  // Initialize mutex
-  if (pthread_mutex_init(&g_test_metrics.metrics_mutex, NULL) != 0) {
-    return ONVIF_ERROR;
-  }
+// NOTE: http_metrics_cleanup() is now provided by the real http_server.c implementation
 
-  return ONVIF_SUCCESS;
-}
+// NOTE: http_metrics_get_current() is now provided by the real http_server.c implementation
 
-int http_metrics_cleanup(void) {
-  pthread_mutex_destroy(&g_test_metrics.metrics_mutex);
-  return ONVIF_SUCCESS;
-}
+// NOTE: http_metrics_record_request() is now provided by the real http_server.c implementation
 
-int http_metrics_get_current(http_performance_metrics_t* metrics) {
-  if (!metrics) {
-    return ONVIF_ERROR_NULL;
-  }
-
-  pthread_mutex_lock(&g_test_metrics.metrics_mutex);
-  *metrics = g_test_metrics;
-  pthread_mutex_unlock(&g_test_metrics.metrics_mutex);
-
-  return ONVIF_SUCCESS;
-}
-
-int http_metrics_record_request(uint64_t latency_ms, size_t response_size, int status_code) {
-  pthread_mutex_lock(&g_test_metrics.metrics_mutex);
-
-  // Increment total requests
-  g_test_metrics.total_requests++;
-
-  // Add response bytes
-  g_test_metrics.total_response_bytes += response_size;
-
-  // Add latency
-  g_test_metrics.total_latency_ms += latency_ms;
-
-  // Update min/max latency
-  if (latency_ms < g_test_metrics.min_latency_ms) {
-    g_test_metrics.min_latency_ms = latency_ms;
-  }
-
-  if (latency_ms > g_test_metrics.max_latency_ms) {
-    g_test_metrics.max_latency_ms = latency_ms;
-  }
-
-  // Categorize by status code
-  if (status_code >= 200 && status_code < 300) {
-    g_test_metrics.successful_requests++;
-  } else if (status_code >= 400 && status_code < 500) {
-    g_test_metrics.client_errors++;
-  } else if (status_code >= 500) {
-    g_test_metrics.server_errors++;
-  }
-
-  pthread_mutex_unlock(&g_test_metrics.metrics_mutex);
-
-  return ONVIF_SUCCESS;
-}
-
-int http_metrics_update_connections(int delta) {
-  pthread_mutex_lock(&g_test_metrics.metrics_mutex);
-  g_test_metrics.current_connections += delta;
-  pthread_mutex_unlock(&g_test_metrics.metrics_mutex);
-  return ONVIF_SUCCESS;
-}
+// NOTE: http_metrics_update_connections() is now provided by the real http_server.c implementation
 
 /* ==================== Test Setup/Teardown ==================== */
 

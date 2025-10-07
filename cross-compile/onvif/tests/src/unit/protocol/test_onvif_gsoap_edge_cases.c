@@ -5,10 +5,10 @@
  * @date 2025
  */
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
-#include <limits.h>
 
 #include "cmocka_wrapper.h"
 #include "data/soap_test_envelopes.h"
@@ -17,6 +17,7 @@
 #include "protocol/gsoap/onvif_gsoap_media.h"
 #include "utils/error/error_handling.h"
 #include "utils/test_gsoap_utils.h"
+
 
 /* ============================================================================
  * Memory Allocation Edge Cases
@@ -31,6 +32,9 @@ void test_unit_gsoap_edge_init_zero_context(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Test initialization on zeroed context
   int result = onvif_gsoap_init(&ctx);
@@ -54,6 +58,9 @@ void test_unit_gsoap_edge_large_xml_allocation(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -64,10 +71,11 @@ void test_unit_gsoap_edge_large_xml_allocation(void** state) {
   assert_non_null(large_xml);
 
   // Fill with valid XML structure
-  snprintf(large_xml, large_size,
-           "<?xml version=\"1.0\"?><soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">"
-           "<soap:Body>%*s</soap:Body></soap:Envelope>",
-           (int)(large_size - 200), " ");
+  snprintf(
+    large_xml, large_size,
+    "<?xml version=\"1.0\"?><soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">"
+    "<soap:Body>%*s</soap:Body></soap:Envelope>",
+    (int)(large_size - 200), " ");
 
   // Test parsing initialization with large XML
   result = onvif_gsoap_init_request_parsing(&ctx, large_xml, strlen(large_xml));
@@ -94,6 +102,9 @@ void test_unit_gsoap_edge_repeated_alloc_dealloc(void** state) {
   for (int i = 0; i < 10; i++) {
     memset(&ctx, 0, sizeof(ctx));
 
+    // Mock platform_config_get_int call for http_verbose check
+    setup_http_verbose_mock();
+
     int result = onvif_gsoap_init(&ctx);
     assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -116,6 +127,9 @@ void test_unit_gsoap_edge_zero_size_allocation(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -141,6 +155,9 @@ void test_unit_gsoap_edge_multiple_reset_cycles(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -180,6 +197,9 @@ void test_unit_gsoap_edge_empty_xml(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -204,6 +224,9 @@ void test_unit_gsoap_edge_malformed_xml_syntax(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -234,6 +257,9 @@ void test_unit_gsoap_edge_incomplete_soap_envelope(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -245,7 +271,7 @@ void test_unit_gsoap_edge_incomplete_soap_envelope(void** state) {
 
   // Should fail validation or parsing - either is acceptable
   // We're testing that the system doesn't crash, not specific error codes
-  (void)result;  // Result may be success or failure depending on validation
+  (void)result; // Result may be success or failure depending on validation
 
   // Cleanup should work regardless
   onvif_gsoap_cleanup(&ctx);
@@ -263,6 +289,9 @@ void test_unit_gsoap_edge_missing_soap_body(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -292,6 +321,9 @@ void test_unit_gsoap_edge_extremely_long_strings(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -336,6 +368,9 @@ void test_unit_gsoap_edge_whitespace_only_xml(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -371,7 +406,7 @@ void test_unit_gsoap_edge_whitespace_only_xml(void** state) {
 void test_unit_gsoap_edge_null_context_all_functions(void** state) {
   (void)state;
 
-  // Test init with NULL
+  // Test init with NULL (no mock needed for NULL context)
   int result = onvif_gsoap_init(NULL);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
@@ -414,6 +449,9 @@ void test_unit_gsoap_edge_null_output_pointers(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -440,6 +478,9 @@ void test_unit_gsoap_edge_empty_operation_name(void** state) {
   memset(&ctx, 0, sizeof(ctx));
   void* output = &ctx;
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context and parsing
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -454,7 +495,10 @@ void test_unit_gsoap_edge_empty_operation_name(void** state) {
 
   // Reset for next test
   onvif_gsoap_reset(&ctx);
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
   result = onvif_gsoap_init(&ctx);
+  assert_int_equal(result, ONVIF_SUCCESS);
   result = onvif_gsoap_init_request_parsing(&ctx, test_xml, strlen(test_xml));
 
   // Test with empty operation name
@@ -477,6 +521,9 @@ void test_unit_gsoap_edge_invalid_request_size(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -509,9 +556,15 @@ void test_unit_gsoap_edge_double_init(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize again without cleanup
   result = onvif_gsoap_init(&ctx);
@@ -574,12 +627,17 @@ void test_unit_gsoap_edge_interleaved_operations(void** state) {
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
+
   // Init -> Reset -> Init sequence
   int result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
 
   onvif_gsoap_reset(&ctx);
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
   result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -590,6 +648,8 @@ void test_unit_gsoap_edge_interleaved_operations(void** state) {
 
   onvif_gsoap_reset(&ctx);
 
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
   result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -609,6 +669,9 @@ void test_unit_gsoap_edge_error_recovery(void** state) {
 
   onvif_gsoap_context_t ctx;
   memset(&ctx, 0, sizeof(ctx));
+
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
 
   // Initialize context
   int result = onvif_gsoap_init(&ctx);
@@ -630,6 +693,8 @@ void test_unit_gsoap_edge_error_recovery(void** state) {
   assert_int_equal(ctx.error_context.last_error_code, 0);
 
   // Re-initialize and verify recovery
+  // Mock platform_config_get_int call for http_verbose check
+  setup_http_verbose_mock();
   result = onvif_gsoap_init(&ctx);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -654,6 +719,9 @@ void test_unit_gsoap_edge_rapid_state_transitions(void** state) {
   // Perform rapid state transitions
   for (int i = 0; i < 20; i++) {
     memset(&ctx, 0, sizeof(ctx));
+
+    // Mock platform_config_get_int call for http_verbose check
+    setup_http_verbose_mock();
 
     int result = onvif_gsoap_init(&ctx);
     assert_int_equal(result, ONVIF_SUCCESS);
