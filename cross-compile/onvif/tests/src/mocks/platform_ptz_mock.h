@@ -80,12 +80,6 @@ void platform_mock_enable_ptz_error(platform_result_t error);
  */
 void platform_mock_disable_ptz_error(void);
 
-/**
- * @brief Enable or disable strict expectation enforcement
- * @param enable true to enforce CMocka expectations, false to bypass
- */
-void platform_ptz_mock_set_expectations_enabled(bool enable);
-
 /* ============================================================================
  * Mock Call Tracking
  * ============================================================================ */

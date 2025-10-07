@@ -31,6 +31,9 @@
 #include "protocol/gsoap/onvif_gsoap_core.h"
 
 // Test mocks
+#include "mocks/buffer_pool_mock.h"
+#include "mocks/gsoap_mock.h"
+#include "mocks/mock_service_dispatcher.h"
 
 // Test constants
 #define TEST_OPERATION_GET_DEVICE_INFORMATION "GetDeviceInformation"
@@ -60,7 +63,10 @@ int device_service_setup(void** state) {
   // Initialize memory manager for tracking
   memory_manager_init();
 
-  // Initialize buffer pool mock
+  // Enable real functions for integration testing (test real service interactions)
+  service_dispatcher_mock_use_real_function(true);
+  buffer_pool_mock_use_real_function(true);
+  gsoap_mock_use_real_function(true);
 
   // Initialize service dispatcher
   int result = onvif_service_dispatcher_init();
@@ -101,6 +107,12 @@ int device_service_teardown(void** state) {
   // The dispatcher mutex gets destroyed and can't be reinitialized
 
   memory_manager_cleanup();
+
+  // Restore mock behavior for subsequent tests
+  service_dispatcher_mock_use_real_function(false);
+  buffer_pool_mock_use_real_function(false);
+  gsoap_mock_use_real_function(false);
+
   return 0;
 }
 

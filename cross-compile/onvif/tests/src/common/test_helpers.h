@@ -246,7 +246,12 @@ int test_helper_ptz_create_test_preset(struct ptz_preset* preset, const char* to
 // Macro to simplify state management
 #define TEST_HELPER_DECLARE_COUNTERS(name, ...)                                                    \
   static int g_##name##_counter_values[] = {__VA_ARGS__};                                          \
-  static int* g_##name##_counters[] = {g_##name##_counter_values};                                 \
+  static int* g_##name##_counters[] = {                                                            \
+    &g_##name##_counter_values[0],                                                                 \
+    &g_##name##_counter_values[1],                                                                 \
+    &g_##name##_counter_values[2],                                                                 \
+    &g_##name##_counter_values[3]                                                                  \
+  };                                                                                               \
   static void reset_##name##_state(void) {                                                         \
     test_state_config_t config = {                                                                 \
       .counters = g_##name##_counters,                                                             \

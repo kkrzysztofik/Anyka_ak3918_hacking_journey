@@ -21,6 +21,8 @@
 #include "cmocka_wrapper.h"
 #include "common/time_utils.h"
 #include "imaging_service_optimization_tests.h"
+#include "mocks/buffer_pool_mock.h"
+#include "mocks/gsoap_mock.h"
 #include "mocks/mock_service_dispatcher.h"
 #include "mocks/platform_mock.h"
 
@@ -107,14 +109,26 @@ int setup_imaging_integration(void** state) {
   // Initialize memory manager for tracking
   memory_manager_init();
 
-  // Configure CMocka mocks for service dispatcher
-  expect_function_call(__wrap_onvif_service_dispatcher_init);
-  will_return(__wrap_onvif_service_dispatcher_init, ONVIF_SUCCESS);
+  // Enable real functions for integration testing (test real service interactions)
+  service_dispatcher_mock_use_real_function(true);
+  buffer_pool_mock_use_real_function(true);
+  gsoap_mock_use_real_function(true);
 
-  // Initialize service dispatcher (mocked)
-  printf("DEBUG: About to call onvif_service_dispatcher_init()\n");
+  // Configure platform mock expectations for imaging service initialization
+  // The imaging service init calls platform_irled_init(level) and applies VPSS settings
+
+  // 1. IR LED initialization
+  expect_function_call(__wrap_platform_irled_init);
+  expect_any(__wrap_platform_irled_init, level);
+  will_return(__wrap_platform_irled_init, PLATFORM_SUCCESS);
+
+  // 2. VPSS effect settings (brightness, contrast, saturation, sharpness, hue)
+  //    Called during apply_imaging_settings_to_vpss() if vi_handle is non-NULL
+  //    Since we pass NULL to onvif_imaging_init(), vi_handle will be NULL, so these won't be called
+  //    No need to mock VPSS calls
+
+  // Initialize service dispatcher
   int result = onvif_service_dispatcher_init();
-  printf("DEBUG: onvif_service_dispatcher_init() returned %d\n", result);
   if (result != ONVIF_SUCCESS) {
     printf("Failed to initialize service dispatcher: %d\n", result);
     return -1;
@@ -124,6 +138,13 @@ int setup_imaging_integration(void** state) {
   result = onvif_imaging_init(NULL);
   if (result != ONVIF_SUCCESS) {
     printf("Failed to initialize imaging service: %d\n", result);
+    return -1;
+  }
+
+  // Initialize imaging service handler for SOAP operations
+  result = onvif_imaging_service_init(NULL);
+  if (result != ONVIF_SUCCESS) {
+    printf("Failed to initialize imaging service handler: %d\n", result);
     return -1;
   }
 
@@ -141,6 +162,11 @@ int teardown_imaging_integration(void** state) {
 
   // Cleanup memory manager
   memory_manager_cleanup();
+
+  // Restore mock behavior for subsequent tests
+  service_dispatcher_mock_use_real_function(false);
+  buffer_pool_mock_use_real_function(false);
+  gsoap_mock_use_real_function(false);
 
   return 0;
 }
@@ -430,6 +456,16 @@ void test_integration_imaging_get_settings_soap(void** state) {
   // Note: Imaging service is already initialized by setup_imaging_integration()
   // Platform mock, service dispatcher, and imaging service are ready
 
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
+
   // Step 1: Create SOAP request envelope
   http_request_t* request = soap_test_create_request(
     "GetImagingSettings", SOAP_IMAGING_GET_IMAGING_SETTINGS, "/onvif/imaging_service");
@@ -484,6 +520,16 @@ void test_integration_imaging_get_settings_soap(void** state) {
  */
 void test_integration_imaging_set_settings_soap(void** state) {
   (void)state;
+
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
 
   // Step 1: Create SOAP request envelope
   http_request_t* request = soap_test_create_request(

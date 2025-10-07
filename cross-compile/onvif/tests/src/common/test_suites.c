@@ -7,6 +7,8 @@
 
 #include "test_suites.h"
 
+#include "unit/core/test_config_auth.h"
+#include "unit/networking/test_http_server_auth.h"
 #include "utils/test_gsoap_utils.h"
 
 /**
@@ -34,6 +36,13 @@ const test_suite_t g_test_suites[] = {
    .setup = NULL,
    .teardown = NULL},
 
+  {.name = "config-auth",
+   .full_name = "Configuration Authentication",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_config_auth_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
   // Networking tests
   {.name = "http-auth",
    .full_name = "HTTP Authentication",
@@ -46,6 +55,13 @@ const test_suite_t g_test_suites[] = {
    .full_name = "HTTP Metrics",
    .category = TEST_CATEGORY_UNIT,
    .get_tests = get_http_metrics_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  {.name = "http-server-auth",
+   .full_name = "HTTP Server Authentication",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_http_server_auth_unit_tests,
    .setup = NULL,
    .teardown = NULL},
 

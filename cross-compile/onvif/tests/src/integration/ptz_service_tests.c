@@ -35,8 +35,12 @@
 #include "protocol/gsoap/onvif_gsoap_core.h"
 
 // Mock includes
+#include "mocks/buffer_pool_mock.h"
+#include "mocks/gsoap_mock.h"
+#include "mocks/mock_service_dispatcher.h"
 #include "mocks/platform_mock.h"
 #include "mocks/platform_ptz_mock.h"
+#include "mocks/ptz_adapter_mock.h"
 
 // Test profile token constants
 #define TEST_PROFILE_TOKEN      "ProfileToken1"
@@ -86,9 +90,9 @@
 #define TEST_TIMEOUT_500MS  500
 
 // Test delay constants (for sleep/timing) - OPTIMIZED FOR FASTER TESTS
-#define TEST_DELAY_1200MS 200  // Reduced from 1200ms - just verify timeout fired
-#define TEST_DELAY_200MS  50   // Reduced from 200ms
-#define TEST_DELAY_10MS   10   // Kept minimal
+#define TEST_DELAY_1200MS 200 // Reduced from 1200ms - just verify timeout fired
+#define TEST_DELAY_200MS  50  // Reduced from 200ms
+#define TEST_DELAY_10MS   10  // Kept minimal
 #define TEST_DELAY_50MS   50
 #define TEST_DELAY_100MS  100
 #define TEST_DELAY_250MS  250
@@ -96,13 +100,13 @@
 #define TEST_DELAY_900MS  900
 
 // Test iteration constants - OPTIMIZED FOR FASTER TESTS
-#define TEST_STRESS_ITERATIONS 10  // Reduced from 50
+#define TEST_STRESS_ITERATIONS 10 // Reduced from 50
 #define TEST_MEMORY_CYCLES     3
-#define TEST_MEMORY_PRESETS    3   // Reduced from 5
+#define TEST_MEMORY_PRESETS    3 // Reduced from 5
 #define TEST_CONCURRENT_OPS    10
 #define TEST_BUFFER_POOL_OPS   3
-#define TEST_LOOP_COUNT_3      2   // Reduced from 3
-#define TEST_LOOP_COUNT_10     3   // Reduced from 10
+#define TEST_LOOP_COUNT_3      2 // Reduced from 3
+#define TEST_LOOP_COUNT_10     3 // Reduced from 10
 
 // Test string constants
 #define TEST_STRING_LONG_SIZE        512
@@ -125,7 +129,11 @@ int ptz_service_setup(void** state) {
   // Initialize memory manager for tracking
   memory_manager_init();
 
-  // Initialize buffer pool mock
+  // Enable real functions for integration testing (test real service interactions)
+  service_dispatcher_mock_use_real_function(true);
+  buffer_pool_mock_use_real_function(true);
+  gsoap_mock_use_real_function(true);
+  ptz_adapter_mock_use_real_function(true);
 
   // Initialize service dispatcher
   int result = onvif_service_dispatcher_init();
@@ -135,9 +143,12 @@ int ptz_service_setup(void** state) {
   platform_ptz_mock_init();
 
   // Configure CMocka expectations for PTZ operations (pure CMocka pattern)
+  // ptz_adapter_init() calls platform_ptz_init() and then move_to_position(0, 0) to reset
+  expect_function_call(__wrap_platform_ptz_init);
   will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
-  will_return(__wrap_platform_ptz_set_degree, PLATFORM_SUCCESS);
-  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+  expect_value(__wrap_platform_ptz_move_to_position, pan_deg, 0);
+  expect_value(__wrap_platform_ptz_move_to_position, tilt_deg, 0);
+  expect_function_call(__wrap_platform_ptz_move_to_position);
   will_return(__wrap_platform_ptz_move_to_position, PLATFORM_SUCCESS);
 
   // Initialize PTZ service with mock config
@@ -212,6 +223,13 @@ int ptz_service_teardown(void** state) {
 
   platform_ptz_mock_cleanup();
   memory_manager_cleanup();
+
+  // Restore mock behavior for subsequent tests
+  service_dispatcher_mock_use_real_function(false);
+  buffer_pool_mock_use_real_function(false);
+  gsoap_mock_use_real_function(false);
+  ptz_adapter_mock_use_real_function(false);
+
   return 0;
 }
 
@@ -223,6 +241,20 @@ void test_integration_ptz_relative_move_functionality(void** state) {
 
   // Test valid relative move
   printf("  [TEST CASE] Valid relative move with translation and speed\n");
+
+  // Set up expectations for the platform calls that will be made
+  // TEST_TRANSLATION_PAN = 0.1f -> pan_delta = 18 -> direction = LEFT (2), steps = 16
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_LEFT);
+  expect_value(__wrap_platform_ptz_turn, steps, 16);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
+  // TEST_TRANSLATION_TILT = -0.1f -> tilt_delta = -9 -> direction = UP (0), steps = 8
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_UP);
+  expect_value(__wrap_platform_ptz_turn, steps, 8);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
   struct ptz_vector translation;
   struct ptz_speed speed;
   test_helper_ptz_create_test_position(&translation, TEST_TRANSLATION_PAN, TEST_TRANSLATION_TILT,
@@ -234,6 +266,18 @@ void test_integration_ptz_relative_move_functionality(void** state) {
 
   // Test with NULL speed
   printf("  [TEST CASE] Valid relative move with NULL speed (default speed)\n");
+
+  // Set up expectations for the second call (same parameters)
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_LEFT);
+  expect_value(__wrap_platform_ptz_turn, steps, 16);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_UP);
+  expect_value(__wrap_platform_ptz_turn, steps, 8);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
   result = onvif_ptz_relative_move(TEST_PROFILE_TOKEN, &translation, NULL);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -257,6 +301,20 @@ void test_integration_ptz_continuous_move_functionality(void** state) {
 
   // Test valid continuous move
   printf("  [TEST CASE] Valid continuous move with velocity and timeout\n");
+
+  // Set up expectations for first continuous move call
+  // TEST_VELOCITY_PAN = 0.7f (positive) -> direction = RIGHT (3), steps = 350
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+  expect_value(__wrap_platform_ptz_turn, steps, 350);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
+  // TEST_VELOCITY_TILT = 0.5f (positive) -> direction = DOWN (1), steps = 130
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+  expect_value(__wrap_platform_ptz_turn, steps, 130);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
   struct ptz_speed velocity;
   test_helper_ptz_create_test_speed(&velocity, TEST_VELOCITY_PAN, TEST_SPEED_ZOOM);
   velocity.pan_tilt.y = TEST_VELOCITY_TILT; // Set different tilt velocity
@@ -266,6 +324,18 @@ void test_integration_ptz_continuous_move_functionality(void** state) {
 
   // Test with zero timeout (no timeout)
   printf("  [TEST CASE] Valid continuous move with zero timeout (no timeout)\n");
+
+  // Set up expectations for second continuous move call (same parameters)
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+  expect_value(__wrap_platform_ptz_turn, steps, 350);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+  expect_value(__wrap_platform_ptz_turn, steps, 130);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
   result = onvif_ptz_continuous_move(TEST_PROFILE_TOKEN, &velocity, TEST_TIMEOUT_NONE);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -289,6 +359,20 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
 
   // Test continuous move with short timeout to verify cleanup doesn't deadlock
   printf("  [TEST CASE] Timeout cleanup - continuous move with 1 second timeout\n");
+
+  // Set up expectations for continuous move platform calls
+  // TEST_VELOCITY_PAN = 0.7f (positive) -> direction = RIGHT (3), steps = 350
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+  expect_value(__wrap_platform_ptz_turn, steps, 350);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
+  // TEST_VELOCITY_TILT = 0.5f (positive) -> direction = DOWN (1), steps = 130
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+  expect_value(__wrap_platform_ptz_turn, steps, 130);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
   struct ptz_speed velocity;
   test_helper_ptz_create_test_speed(&velocity, TEST_VELOCITY_PAN, TEST_SPEED_ZOOM);
   velocity.pan_tilt.y = TEST_VELOCITY_TILT;
@@ -298,21 +382,70 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Wait for timeout to trigger (1.2 seconds to ensure thread has time to execute)
+  expect_value(__wrap_platform_sleep_ms, ms, TEST_DELAY_1200MS);
+  expect_function_call(__wrap_platform_sleep_ms);
   platform_sleep_ms(TEST_DELAY_1200MS);
 
   // Verify that we can still perform operations after timeout
   // This would hang indefinitely if the deadlock bug exists
   printf("  [TEST CASE] Verify stop works after timeout (deadlock check)\n");
+
+  // Set up expectations for stop calls (all 4 directions)
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_LEFT);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_UP);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
   result = onvif_ptz_stop(TEST_PROFILE_TOKEN, 1, 1);
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Test rapid continuous move followed by immediate stop
   // This tests the race condition where stop is called while timer thread is active
   printf("  [TEST CASE] Rapid continuous move with immediate stop (race condition test)\n");
+
+  // Set up expectations for second continuous move
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+  expect_value(__wrap_platform_ptz_turn, steps, 350);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+  expect_value(__wrap_platform_ptz_turn, steps, 130);
+  expect_function_call(__wrap_platform_ptz_turn);
+  will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
   result = onvif_ptz_continuous_move(TEST_PROFILE_TOKEN, &velocity, TEST_TIMEOUT_2000MS);
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Immediately call stop (timer thread should still be sleeping)
+  // Set up expectations for second stop calls
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_LEFT);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_UP);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
   result = onvif_ptz_stop(TEST_PROFILE_TOKEN, 1, 1);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -321,9 +454,42 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
   printf(
     "  [TEST CASE] Multiple rapid continuous moves with partial timeout (thread join stress)\n");
   for (int i = 0; i < TEST_LOOP_COUNT_3; i++) {
+    // Set up expectations for continuous move (pan + tilt)
+    expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+    expect_value(__wrap_platform_ptz_turn, steps, 350);
+    expect_function_call(__wrap_platform_ptz_turn);
+    will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+    expect_value(__wrap_platform_ptz_turn, steps, 130);
+    expect_function_call(__wrap_platform_ptz_turn);
+    will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
     result = onvif_ptz_continuous_move(TEST_PROFILE_TOKEN, &velocity, TEST_TIMEOUT_500MS);
     assert_int_equal(result, ONVIF_SUCCESS);
+
+    // Set up expectations for sleep
+    expect_value(__wrap_platform_sleep_ms, ms, TEST_DELAY_200MS);
+    expect_function_call(__wrap_platform_sleep_ms);
     platform_sleep_ms(TEST_DELAY_200MS); // Wait partial timeout
+
+    // Set up expectations for stop (all 4 directions)
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_LEFT);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_UP);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
     result = onvif_ptz_stop(TEST_PROFILE_TOKEN, 1, 1);
     assert_int_equal(result, ONVIF_SUCCESS);
   }
@@ -332,10 +498,43 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
   // This aggressively tests the condition variable wake-up mechanism
   printf("  [TEST CASE] Rapid start/stop cycles stress test (condition variable wake-up)\n");
   for (int i = 0; i < TEST_LOOP_COUNT_10; i++) {
+    // Set up expectations for continuous move (pan + tilt)
+    expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+    expect_value(__wrap_platform_ptz_turn, steps, 350);
+    expect_function_call(__wrap_platform_ptz_turn);
+    will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+    expect_value(__wrap_platform_ptz_turn, steps, 130);
+    expect_function_call(__wrap_platform_ptz_turn);
+    will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
     result = onvif_ptz_continuous_move(TEST_PROFILE_TOKEN, &velocity, TEST_TIMEOUT_1000MS);
     assert_int_equal(result, ONVIF_SUCCESS);
+
     // Stop almost immediately (before timer thread even starts waiting)
+    // Set up expectations for sleep
+    expect_value(__wrap_platform_sleep_ms, ms, TEST_DELAY_10MS);
+    expect_function_call(__wrap_platform_sleep_ms);
     platform_sleep_ms(TEST_DELAY_10MS); // Minimal delay
+
+    // Set up expectations for stop (all 4 directions)
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_LEFT);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_UP);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
     result = onvif_ptz_stop(TEST_PROFILE_TOKEN, 1, 1);
     assert_int_equal(result, ONVIF_SUCCESS);
   }
@@ -344,9 +543,42 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
   printf("  [TEST CASE] Stop at various timing points during timeout\n");
   int test_delays[] = {TEST_DELAY_50MS, TEST_DELAY_250MS, TEST_TIMEOUT_500MS};
   for (size_t i = 0; i < sizeof(test_delays) / sizeof(test_delays[0]); i++) {
+    // Set up expectations for continuous move (pan + tilt)
+    expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+    expect_value(__wrap_platform_ptz_turn, steps, 350);
+    expect_function_call(__wrap_platform_ptz_turn);
+    will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+    expect_value(__wrap_platform_ptz_turn, steps, 130);
+    expect_function_call(__wrap_platform_ptz_turn);
+    will_return(__wrap_platform_ptz_turn, PLATFORM_SUCCESS);
+
     result = onvif_ptz_continuous_move(TEST_PROFILE_TOKEN, &velocity, TEST_TIMEOUT_1000MS);
     assert_int_equal(result, ONVIF_SUCCESS);
+
+    // Set up expectations for sleep with variable delay
+    expect_value(__wrap_platform_sleep_ms, ms, test_delays[i]);
+    expect_function_call(__wrap_platform_sleep_ms);
     platform_sleep_ms(test_delays[i]);
+
+    // Set up expectations for stop (all 4 directions)
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_LEFT);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_UP);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+    expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+    expect_function_call(__wrap_platform_ptz_turn_stop);
+    will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
     result = onvif_ptz_stop(TEST_PROFILE_TOKEN, 1, 1);
     assert_int_equal(result, ONVIF_SUCCESS);
   }
@@ -362,16 +594,53 @@ void test_integration_ptz_stop_functionality(void** state) {
 
   // Test valid stop
   printf("  [TEST CASE] Valid stop pan/tilt and zoom\n");
+
+  // Set up expectations for first stop call (all 4 directions)
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_LEFT);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_UP);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
   int result = onvif_ptz_stop(TEST_PROFILE_TOKEN, 1, 1);
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Test stop pan/tilt only
   printf("  [TEST CASE] Valid stop pan/tilt only\n");
+
+  // Set up expectations for second stop call
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_LEFT);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_UP);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
+  expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_DOWN);
+  expect_function_call(__wrap_platform_ptz_turn_stop);
+  will_return(__wrap_platform_ptz_turn_stop, PLATFORM_SUCCESS);
+
   result = onvif_ptz_stop(TEST_PROFILE_TOKEN, 1, 0);
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Test stop zoom only (should succeed even without zoom support)
   printf("  [TEST CASE] Valid stop zoom only (graceful without zoom support)\n");
+  // Note: zoom-only stop doesn't call platform functions, so no expectations needed
   result = onvif_ptz_stop(TEST_PROFILE_TOKEN, 0, 1);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -445,6 +714,16 @@ void test_integration_ptz_memory_usage_improvements(void** state) {
     test_helper_ptz_create_test_position(&position, (float)(i % 2),
                                          (float)(i % 3) * TEST_MULTIPLIER_0_5F, TEST_POSITION_ZOOM);
 
+    // Set up expectations for absolute move (pan and tilt positions)
+    int expected_pan = (int)((float)(i % 2) * 180.0f); // Convert normalized to degrees
+    int expected_tilt =
+      (int)((float)(i % 3) * TEST_MULTIPLIER_0_5F * 90.0f); // Convert normalized to degrees
+
+    expect_value(__wrap_platform_ptz_move_to_position, pan_deg, expected_pan);
+    expect_value(__wrap_platform_ptz_move_to_position, tilt_deg, expected_tilt);
+    expect_function_call(__wrap_platform_ptz_move_to_position);
+    will_return(__wrap_platform_ptz_move_to_position, PLATFORM_SUCCESS);
+
     int result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &position, NULL);
     assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -479,6 +758,15 @@ void test_integration_ptz_buffer_pool_usage(void** state) {
     test_helper_ptz_create_test_position(&position, test_positions[i][0], test_positions[i][1],
                                          TEST_POSITION_ZOOM);
 
+    // Set up expectations for absolute move (pan and tilt positions)
+    int expected_pan = (int)(test_positions[i][0] * 180.0f); // Convert normalized to degrees
+    int expected_tilt = (int)(test_positions[i][1] * 90.0f); // Convert normalized to degrees
+
+    expect_value(__wrap_platform_ptz_move_to_position, pan_deg, expected_pan);
+    expect_value(__wrap_platform_ptz_move_to_position, tilt_deg, expected_tilt);
+    expect_function_call(__wrap_platform_ptz_move_to_position);
+    will_return(__wrap_platform_ptz_move_to_position, PLATFORM_SUCCESS);
+
     int result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &position, NULL);
     assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -506,6 +794,10 @@ void test_integration_ptz_string_operations_optimization(void** state) {
   memset(long_preset_name, 'A', sizeof(long_preset_name) - 1);
   long_preset_name[sizeof(long_preset_name) - 1] = '\0';
 
+  // Set up expectations for buffer_pool_get calls
+  expect_function_call(__wrap_buffer_pool_get);
+  will_return(__wrap_buffer_pool_get, (void*)0x12345678); // Mock buffer pointer
+
   char output_token[TEST_PRESET_TOKEN_SIZE] = {0};
   int result =
     onvif_ptz_set_preset(TEST_PROFILE_TOKEN, long_preset_name, output_token, sizeof(output_token));
@@ -513,12 +805,22 @@ void test_integration_ptz_string_operations_optimization(void** state) {
 
   // Test with empty string
   printf("  [TEST CASE] Empty string preset name\n");
+
+  // Set up expectations for second buffer_pool_get call
+  expect_function_call(__wrap_buffer_pool_get);
+  will_return(__wrap_buffer_pool_get, (void*)0x12345678); // Mock buffer pointer
+
   result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME_EMPTY, output_token,
                                 sizeof(output_token));
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Test with special characters
   printf("  [TEST CASE] Special characters in preset name\n");
+
+  // Set up expectations for third buffer_pool_get call
+  expect_function_call(__wrap_buffer_pool_get);
+  will_return(__wrap_buffer_pool_get, (void*)0x12345678); // Mock buffer pointer
+
   result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME_SPECIAL, output_token,
                                 sizeof(output_token));
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -538,6 +840,13 @@ void test_integration_ptz_error_handling_robustness(void** state) {
   test_helper_ptz_create_test_position(&extreme_position, TEST_POSITION_PAN_EXTREME,
                                        TEST_POSITION_TILT_EXTREME, TEST_POSITION_ZOOM);
 
+  // Set up expectations for absolute move with clamped values
+  // From the log: pan=179820 -> clamped to 350, tilt=-89910 -> clamped to -130
+  expect_value(__wrap_platform_ptz_move_to_position, pan_deg, 350);
+  expect_value(__wrap_platform_ptz_move_to_position, tilt_deg, -130);
+  expect_function_call(__wrap_platform_ptz_move_to_position);
+  will_return(__wrap_platform_ptz_move_to_position, PLATFORM_SUCCESS);
+
   int result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &extreme_position, NULL);
   // Should handle extreme values gracefully (clamp to valid range)
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -547,6 +856,12 @@ void test_integration_ptz_error_handling_robustness(void** state) {
   char long_profile_token[TEST_STRING_LONG_SIZE];
   memset(long_profile_token, 'X', sizeof(long_profile_token) - 1);
   long_profile_token[sizeof(long_profile_token) - 1] = '\0';
+
+  // Set up expectations for the second absolute move call with same clamped values
+  expect_value(__wrap_platform_ptz_move_to_position, pan_deg, 350);
+  expect_value(__wrap_platform_ptz_move_to_position, tilt_deg, -130);
+  expect_function_call(__wrap_platform_ptz_move_to_position);
+  will_return(__wrap_platform_ptz_move_to_position, PLATFORM_SUCCESS);
 
   result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN_LONG, &extreme_position, NULL);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -589,6 +904,17 @@ void test_integration_ptz_concurrent_operations(void** state) {
     test_helper_ptz_create_test_position(&position, (float)i * TEST_MULTIPLIER_0_2F,
                                          (float)i * TEST_MULTIPLIER_0_1F, TEST_POSITION_ZOOM);
 
+    // Set up expectations for absolute move (pan and tilt positions)
+    int expected_pan =
+      (int)((float)i * TEST_MULTIPLIER_0_2F * 180.0f); // Convert normalized to degrees
+    int expected_tilt =
+      (int)((float)i * TEST_MULTIPLIER_0_1F * 90.0f); // Convert normalized to degrees
+
+    expect_value(__wrap_platform_ptz_move_to_position, pan_deg, expected_pan);
+    expect_value(__wrap_platform_ptz_move_to_position, tilt_deg, expected_tilt);
+    expect_function_call(__wrap_platform_ptz_move_to_position);
+    will_return(__wrap_platform_ptz_move_to_position, PLATFORM_SUCCESS);
+
     int result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &position, NULL);
     assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -596,9 +922,19 @@ void test_integration_ptz_concurrent_operations(void** state) {
     char preset_name[TEST_PRESET_NAME_BUFFER_SIZE];
     (void)snprintf(preset_name, sizeof(preset_name), "ConcurrentPreset%d", i);
 
+    // Set up expectations for buffer_pool_get (called by onvif_ptz_set_preset)
+    expect_function_call(__wrap_buffer_pool_get);
+    will_return(__wrap_buffer_pool_get, (void*)0x12345678);
+
     result =
       onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, output_token, sizeof(output_token));
     assert_int_equal(result, ONVIF_SUCCESS);
+
+    // Set up expectations for goto_preset (calls platform_ptz_move_to_position with same values)
+    expect_value(__wrap_platform_ptz_move_to_position, pan_deg, expected_pan);
+    expect_value(__wrap_platform_ptz_move_to_position, tilt_deg, expected_tilt);
+    expect_function_call(__wrap_platform_ptz_move_to_position);
+    will_return(__wrap_platform_ptz_move_to_position, PLATFORM_SUCCESS);
 
     result = onvif_ptz_goto_preset(TEST_PROFILE_TOKEN, output_token, NULL);
     assert_int_equal(result, ONVIF_SUCCESS);
@@ -1000,49 +1336,49 @@ void test_integration_ptz_remove_preset_soap(void** state) {
 const struct CMUnitTest ptz_service_optimization_tests[] = {
   // PTZ Movement Operations Tests
   cmocka_unit_test_setup_teardown(test_integration_ptz_relative_move_functionality,
-                                  ptz_service_setup, ptz_service_reset),  // SETUP first test
+                                  ptz_service_setup, ptz_service_reset), // SETUP first test
   cmocka_unit_test_setup_teardown(test_integration_ptz_continuous_move_functionality,
-                                  ptz_service_reset, ptz_service_reset),  // RESET between tests
+                                  ptz_service_reset, ptz_service_reset), // RESET between tests
   cmocka_unit_test_setup_teardown(test_integration_ptz_continuous_move_timeout_cleanup,
                                   ptz_service_reset, ptz_service_reset),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_stop_functionality,
-                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_stop_functionality, ptz_service_reset,
+                                  ptz_service_reset),
 
   // PTZ Preset Management Tests
   cmocka_unit_test_setup_teardown(test_integration_ptz_preset_memory_optimization,
                                   ptz_service_reset, ptz_service_reset),
 
   // PTZ Service Optimization Validation Tests
-  cmocka_unit_test_setup_teardown(test_integration_ptz_memory_usage_improvements,
-                                  ptz_service_reset, ptz_service_reset),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_buffer_pool_usage,
-                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_memory_usage_improvements, ptz_service_reset,
+                                  ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_buffer_pool_usage, ptz_service_reset,
+                                  ptz_service_reset),
   cmocka_unit_test_setup_teardown(test_integration_ptz_string_operations_optimization,
                                   ptz_service_reset, ptz_service_reset),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_error_handling_robustness,
-                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_error_handling_robustness, ptz_service_reset,
+                                  ptz_service_reset),
 
   // PTZ Service Performance Tests
-  cmocka_unit_test_setup_teardown(test_integration_ptz_stress_testing,
-                                  ptz_service_reset, ptz_service_reset),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_memory_leak_detection,
-                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_stress_testing, ptz_service_reset,
+                                  ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_memory_leak_detection, ptz_service_reset,
+                                  ptz_service_reset),
 
   // SOAP integration tests (full HTTP/SOAP layer validation)
-  cmocka_unit_test_setup_teardown(test_integration_ptz_get_nodes_soap,
-                                  ptz_service_reset, ptz_service_reset),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_absolute_move_soap,
-                                  ptz_service_reset, ptz_service_reset),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_get_presets_soap,
-                                  ptz_service_reset, ptz_service_reset),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_set_preset_soap,
-                                  ptz_service_reset, ptz_service_reset),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_goto_preset_soap,
-                                  ptz_service_reset, ptz_service_reset),
-  cmocka_unit_test_setup_teardown(test_integration_ptz_remove_preset_soap,
-                                  ptz_service_reset, ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_get_nodes_soap, ptz_service_reset,
+                                  ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_absolute_move_soap, ptz_service_reset,
+                                  ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_get_presets_soap, ptz_service_reset,
+                                  ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_set_preset_soap, ptz_service_reset,
+                                  ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_goto_preset_soap, ptz_service_reset,
+                                  ptz_service_reset),
+  cmocka_unit_test_setup_teardown(test_integration_ptz_remove_preset_soap, ptz_service_reset,
+                                  ptz_service_reset),
 
   // Concurrent tests - last test uses full TEARDOWN
-  cmocka_unit_test_setup_teardown(test_integration_ptz_concurrent_operations,
-                                  ptz_service_reset, ptz_service_teardown),  // TEARDOWN last test
+  cmocka_unit_test_setup_teardown(test_integration_ptz_concurrent_operations, ptz_service_reset,
+                                  ptz_service_teardown), // TEARDOWN last test
 };
