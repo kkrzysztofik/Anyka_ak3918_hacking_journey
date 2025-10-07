@@ -125,4 +125,17 @@ void service_log_info(const service_log_context_t* context, const char* format, 
  */
 void service_log_debug(const service_log_context_t* context, const char* format, ...);
 
+/**
+ * @brief Redact sensitive HTTP header values in-place (e.g., Authorization)
+ * @param header_name Header name
+ * @param header_value Header value buffer (modified in place)
+ */
+void service_log_redact_header_value(const char* header_name, char* header_value);
+
+/**
+ * @brief Redact WS-Security Password content in a SOAP XML body in-place
+ * @param body Mutable XML buffer to redact
+ */
+void service_log_redact_wsse_password(char* body);
+
 #endif /* ONVIF_SERVICE_LOGGING_H */

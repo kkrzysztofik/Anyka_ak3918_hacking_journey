@@ -31,8 +31,7 @@
 #include "networking/http/http_auth.h"
 #include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
-#include "platform/platform.h"
-#include "protocol/gsoap/onvif_gsoap_core.h"
+#include "protocol/gsoap/onvif_gsoap_response.h"
 #include "services/common/onvif_types.h"
 #include "services/device/onvif_device.h"
 #include "services/imaging/onvif_imaging.h"
@@ -56,7 +55,7 @@
 server_state_t g_http_server; // NOLINT
 
 /** @brief Global application configuration for HTTP server */
-static const struct application_config* g_http_app_config = NULL; // NOLINT
+const struct application_config* g_http_app_config = NULL; // NOLINT
 
 /** @brief Global HTTP authentication configuration */
 static struct http_auth_config g_http_auth_config = {0}; // NOLINT
@@ -131,6 +130,105 @@ static void http_log_init_context(service_log_context_t* context, const char* cl
 static void http_server_log_init_context(service_log_context_t* context, const char* operation,
                                          service_log_level_t level) {
   service_log_init_context(context, "HTTP_SERVER", operation, level);
+}
+
+/* =========================================================================
+ * Verbose HTTP Logging Controls
+ * ========================================================================= */
+
+/**
+ * @brief Check if verbose HTTP logging is enabled in configuration
+ */
+static int http_verbose_enabled(void) {
+  if (!g_http_app_config || !g_http_app_config->logging) {
+    return 0;
+  }
+  return g_http_app_config->logging->http_verbose ? 1 : 0;
+}
+
+/**
+ * @brief Redact sensitive header values in-place (e.g., Authorization)
+ */
+static void redact_header_value(const char* header_name, char* header_value) {
+  service_log_redact_header_value(header_name, header_value);
+}
+
+/**
+ * @brief Attempt to redact WS-Security Password text in XML body in-place
+ *        This is a simple best-effort redaction to avoid logging cleartext secrets
+ */
+static void redact_ws_security_password(char* body) {
+  service_log_redact_wsse_password(body);
+}
+
+/**
+ * @brief Log full HTTP request with headers and body when enabled
+ */
+static void http_log_full_request(const http_request_t* request) {
+  if (!http_verbose_enabled() || !request) {
+    return;
+  }
+  service_log_context_t log_ctx;
+  http_log_init_context(&log_ctx, request->client_ip, "request", SERVICE_LOG_INFO);
+  service_log_info(&log_ctx, "HTTP Request: %s %s %s", request->method, request->path,
+                   request->version);
+
+  for (size_t i = 0; i < request->header_count; i++) {
+    if (!request->headers[i].name || !request->headers[i].value) {
+      continue;
+    }
+    char value_buf[HTTP_MAX_HEADER_LINE_LENGTH];
+    value_buf[0] = '\0';
+    (void)snprintf(value_buf, sizeof(value_buf), "%s", request->headers[i].value);
+    redact_header_value(request->headers[i].name, value_buf);
+    service_log_info(&log_ctx, "Header: %s: %s", request->headers[i].name, value_buf);
+  }
+
+  if (request->body && request->body_length > 0) {
+    /* Copy to temp buffer to redact in-place safely */
+    size_t temp_len = request->body_length;
+    char* temp = (char*)malloc(temp_len + 1);
+    if (temp) {
+      memcpy(temp, request->body, temp_len);
+      temp[temp_len] = '\0';
+      redact_ws_security_password(temp);
+      service_log_info(&log_ctx, "Body (%zu bytes):", request->body_length);
+      service_log_info(&log_ctx, "%s", temp);
+      free(temp);
+    }
+  }
+}
+
+/**
+ * @brief Log full HTTP response with headers and body when enabled
+ */
+static void http_log_full_response(const http_response_t* response, const char* client_ip) {
+  if (!http_verbose_enabled() || !response) {
+    return;
+  }
+  service_log_context_t log_ctx;
+  http_log_init_context(&log_ctx, client_ip, "response", SERVICE_LOG_INFO);
+  service_log_info(&log_ctx, "HTTP Response: status=%d, content-type=%s, body_len=%zu",
+                   response->status_code, response->content_type ? response->content_type : "",
+                   response->body_length);
+  for (size_t i = 0; i < response->header_count; i++) {
+    if (response->headers[i].name && response->headers[i].value) {
+      service_log_info(&log_ctx, "Header: %s: %s", response->headers[i].name,
+                       response->headers[i].value);
+    }
+  }
+  if (response->body && response->body_length > 0) {
+    size_t temp_len = response->body_length;
+    char* temp = (char*)malloc(temp_len + 1);
+    if (temp) {
+      memcpy(temp, response->body, temp_len);
+      temp[temp_len] = '\0';
+      redact_ws_security_password(temp);
+      service_log_info(&log_ctx, "Body (%zu bytes):", response->body_length);
+      service_log_info(&log_ctx, "%s", temp);
+      free(temp);
+    }
+  }
 }
 
 /* ============================================================================
@@ -268,11 +366,19 @@ static const char* extract_operation_name(const char* body) {
  * @param security_ctx Security context for logging
  * @return ONVIF_SUCCESS if authentication succeeds, ONVIF_ERROR if it fails
  */
-static int http_validate_authentication(const http_request_t* request,
-                                        security_context_t* security_ctx) {
+int http_validate_authentication(const http_request_t* request, security_context_t* security_ctx) {
   if (!request || !security_ctx) {
     return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_NULL,
                                      "HTTP authentication validation failed: null parameters");
+  }
+
+  // Check if authentication is enabled in configuration
+  if (!g_http_app_config || !g_http_app_config->onvif.auth_enabled) {
+    // Authentication is disabled, allow request to proceed
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, security_ctx->client_ip, "auth_validation", SERVICE_LOG_DEBUG);
+    service_log_debug(&log_ctx, "Authentication disabled, allowing request");
+    return ONVIF_SUCCESS;
   }
 
   // Ensure auth config is initialized
@@ -1240,11 +1346,16 @@ int http_server_process_request(int client_fd) {
     return ONVIF_ERROR;
   }
 
+  /* Verbose log full inbound request if enabled */
+  http_log_full_request(&request);
+
   // Handle ONVIF request
   int result = handle_onvif_request(&request, &response);
 
   // Send response
   if (result == ONVIF_SUCCESS) {
+    /* Verbose log full response just before sending */
+    http_log_full_response(&response, client_ip_str);
     result = send_http_response_with_fallback(client_fd, &response, client_ip_str);
   } else {
     handle_request_error(client_fd, client_ip_str, result);
@@ -1495,4 +1606,16 @@ int http_metrics_update_connections(int delta) {
  */
 int http_server_cleanup(void) {
   return http_server_stop();
+}
+
+/**
+ * @brief Reset HTTP authentication configuration (for testing)
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
+ */
+int http_server_reset_auth_config(void) {
+  if (g_http_auth_config.enabled) {
+    http_auth_cleanup(&g_http_auth_config);
+    memset(&g_http_auth_config, 0, sizeof(g_http_auth_config));
+  }
+  return ONVIF_SUCCESS;
 }

@@ -14,9 +14,10 @@
 #include <string.h>
 
 #include "platform/platform.h"
+#include "stdsoap2.h"
 #include "utils/common/time_utils.h"
 #include "utils/error/error_handling.h"
-#include "utils/error/error_translation.h"
+/* error_translation.h not used directly */
 
 /* Include gSOAP namespace table */
 #include "generated/DeviceBinding.nsmap"
@@ -49,6 +50,16 @@ int onvif_gsoap_init(onvif_gsoap_context_t* ctx) {
   soap_set_mode(&ctx->soap, SOAP_C_UTFSTRING | SOAP_XML_INDENT);
 
   ctx->soap.namespaces = namespaces;
+
+  /* Enable gSOAP message logging based on configuration flag */
+  {
+    int http_verbose = platform_config_get_int("logging", "http_verbose", 1);
+    if (http_verbose) {
+      soap_set_recv_logfile(&ctx->soap, "/tmp/onvif_recv.log");
+      soap_set_sent_logfile(&ctx->soap, "/tmp/onvif_sent.log");
+      soap_set_test_logfile(&ctx->soap, "/tmp/onvif_test.log");
+    }
+  }
 
   platform_log_debug("onvif_gsoap_init: Initialization completed successfully");
   return ONVIF_SUCCESS;
@@ -121,9 +132,8 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
 
   /* Validate request size to prevent malloc corruption */
   if (xml_size > MAX_ONVIF_REQUEST_SIZE) {
-    platform_log_debug(
-      "onvif_gsoap_init_request_parsing: Request too large - xml_size=%zu, max=%d",
-      xml_size, MAX_ONVIF_REQUEST_SIZE);
+    platform_log_debug("onvif_gsoap_init_request_parsing: Request too large - xml_size=%zu, max=%d",
+                       xml_size, MAX_ONVIF_REQUEST_SIZE);
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
                           "Request size exceeds maximum allowed size (1MB)");
     return ONVIF_ERROR_INVALID;
@@ -347,7 +357,8 @@ int onvif_gsoap_parse_soap_envelope(onvif_gsoap_context_t* ctx, const char* func
   soap_result = soap_recv_header(&ctx->soap);
   if (soap_result != SOAP_OK) {
     platform_log_debug("%s: soap_recv_header failed: %d", func_name, soap_result);
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, func_name, "Failed to receive SOAP header");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, func_name,
+                          "Failed to receive SOAP header");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 

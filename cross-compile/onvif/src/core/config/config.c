@@ -52,11 +52,12 @@
 static const config_parameter_t onvif_parameters_init[] = {
   {"enabled", CONFIG_TYPE_BOOL, NULL, sizeof(int), 0, 1, "1", 1},
   {"http_port", CONFIG_TYPE_INT, NULL, sizeof(int), 1, 65535, "8080", 1},
+  {"auth_enabled", CONFIG_TYPE_BOOL, NULL, sizeof(int), 0, 1, "1", 0},
   {"username", CONFIG_TYPE_STRING, NULL, 64, 0, 0, DEFAULT_USERNAME, 1},
   {"password", CONFIG_TYPE_STRING, NULL, 64, 0, 0, DEFAULT_PASSWORD, 1}};
 
 // Runtime copies that can be modified
-static config_parameter_t onvif_parameters[4]; // NOLINT
+static config_parameter_t onvif_parameters[5]; // NOLINT
 
 static const config_parameter_t imaging_parameters_init[] = {
   {"brightness", CONFIG_TYPE_INT, NULL, sizeof(int), 0, 100, "50", 0},
@@ -97,9 +98,10 @@ static const config_parameter_t logging_parameters_init[] = {
   {"use_colors", CONFIG_TYPE_BOOL, NULL, sizeof(int), 0, 1, "1", 0},
   {"use_timestamps", CONFIG_TYPE_BOOL, NULL, sizeof(int), 0, 1, "1", 0},
   {"min_level", CONFIG_TYPE_INT, NULL, sizeof(int), 0, 4, "1", 0},
-  {"tag", CONFIG_TYPE_STRING, NULL, 32, 0, 0, "ONVIF", 0}};
+  {"tag", CONFIG_TYPE_STRING, NULL, 32, 0, 0, "ONVIF", 0},
+  {"http_verbose", CONFIG_TYPE_BOOL, NULL, sizeof(int), 0, 1, "1", 0}};
 
-static config_parameter_t logging_parameters[5]; // NOLINT
+static config_parameter_t logging_parameters[6]; // NOLINT
 
 static const config_parameter_t server_parameters_init[] = {
   {"worker_threads", CONFIG_TYPE_INT, NULL, sizeof(int), 1, 32, "8", 0},
@@ -507,8 +509,9 @@ static void link_parameters_to_config(config_manager_t* config) {
   // Link ONVIF parameters
   onvif_parameters[0].value_ptr = &config->app_config->onvif.enabled;
   onvif_parameters[1].value_ptr = &config->app_config->onvif.http_port;
-  onvif_parameters[2].value_ptr = config->app_config->onvif.username;
-  onvif_parameters[3].value_ptr = config->app_config->onvif.password;
+  onvif_parameters[2].value_ptr = &config->app_config->onvif.auth_enabled;
+  onvif_parameters[3].value_ptr = config->app_config->onvif.username;
+  onvif_parameters[4].value_ptr = config->app_config->onvif.password;
 
   // Link imaging parameters
   if (config->app_config->imaging) {
@@ -554,6 +557,7 @@ static void link_parameters_to_config(config_manager_t* config) {
     logging_parameters[2].value_ptr = &config->app_config->logging->use_timestamps;
     logging_parameters[3].value_ptr = &config->app_config->logging->min_level;
     logging_parameters[4].value_ptr = config->app_config->logging->tag;
+    logging_parameters[5].value_ptr = &config->app_config->logging->http_verbose;
   }
 
   // Link server parameters
@@ -1055,6 +1059,16 @@ config_validation_result_t config_validate(config_manager_t* config) {
           return CONFIG_VALIDATION_OUT_OF_RANGE;
         }
       }
+
+      if (param->type == CONFIG_TYPE_BOOL && param->value_ptr) {
+        int value = *(int*)param->value_ptr;
+        if (value != 0 && value != 1) {
+          platform_log_error(
+            "parameter '%s' value %d is invalid for boolean type (must be 0 or 1) in section %d",
+            param->key, value, config->sections[i].section);
+          return CONFIG_VALIDATION_INVALID_VALUE;
+        }
+      }
     }
   }
 
@@ -1128,6 +1142,15 @@ int config_set_value(config_manager_t* config, config_section_t section, const c
 
   if (param->value_ptr) {
     memcpy(param->value_ptr, value_ptr, param->value_size);
+
+    // Validate the value after setting it
+    if (config->validation_enabled) {
+      config_validation_result_t validation_result = config_validate(config);
+      if (validation_result != CONFIG_VALIDATION_OK) {
+        return ONVIF_ERROR_INVALID;
+      }
+    }
+
     return ONVIF_SUCCESS;
   }
 
@@ -1207,12 +1230,12 @@ int config_get_summary(config_manager_t* config, char* summary, size_t summary_s
 
   int result = snprintf(
     summary, summary_size,
-    "ONVIF: enabled=%d, port=%d, user=%s\n"
+    "ONVIF: enabled=%d, port=%d, auth_enabled=%d, user=%s\n"
     "Imaging: brightness=%d, contrast=%d, saturation=%d, sharpness=%d, "
     "hue=%d\n"
     "Auto Day/Night: enabled=%d, mode=%d, thresholds=%d/%d, lock_time=%ds",
     config->app_config->onvif.enabled, config->app_config->onvif.http_port,
-    config->app_config->onvif.username,
+    config->app_config->onvif.auth_enabled, config->app_config->onvif.username,
     config->app_config->imaging ? config->app_config->imaging->brightness : 0,
     config->app_config->imaging ? config->app_config->imaging->contrast : 0,
     config->app_config->imaging ? config->app_config->imaging->saturation : 0,

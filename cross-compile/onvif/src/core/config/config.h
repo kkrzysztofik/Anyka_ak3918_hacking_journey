@@ -23,6 +23,7 @@ struct device_info;
 struct onvif_settings {
   int enabled;       /* daemon enable flag */
   int http_port;     /* HTTP/SOAP port */
+  int auth_enabled;  /* authentication enable flag */
   char username[64]; /* auth user (optional) */
   char password[64]; /* auth password (optional) */
 };
@@ -51,6 +52,7 @@ struct logging_settings {
   int min_level;      /* Minimum log level (0=ERROR, 1=WARNING, 2=NOTICE, 3=INFO,
                          4=DEBUG) */
   char tag[32];       /* Log tag identifier */
+  int http_verbose;   /* Enable full HTTP/SOAP request/response body logging */
 };
 
 /* HTTP server configuration */

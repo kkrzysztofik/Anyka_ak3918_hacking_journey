@@ -9,9 +9,15 @@
 
 #include "networking/common/buffer_pool.h"
 #include "networking/common/thread_pool.h"
+#include "networking/http/http_parser.h"
+#include "utils/error/error_handling.h"
+#include "utils/security/security_hardening.h"
 
 /* Forward declaration */
 struct application_config;
+
+/* Global variable for testing */
+extern const struct application_config* g_http_app_config;
 
 /**
  * @brief Start the ONVIF HTTP/SOAP server.
@@ -32,6 +38,14 @@ int http_server_stop(void);
  * @param conn Connection to process
  */
 void process_connection(void* conn);
+
+/**
+ * @brief Validate HTTP Basic Authentication
+ * @param request HTTP request structure
+ * @param security_ctx Security context for logging
+ * @return ONVIF_SUCCESS if authentication succeeds, ONVIF_ERROR if it fails
+ */
+int http_validate_authentication(const http_request_t* request, security_context_t* security_ctx);
 
 /**
  * @brief HTTP performance metrics structure
@@ -105,5 +119,17 @@ int http_metrics_record_request(uint64_t latency_ms, size_t response_size, int s
  * @return ONVIF_SUCCESS on success, error code on failure
  */
 int http_metrics_update_connections(int delta);
+
+/**
+ * @brief Cleanup HTTP server resources
+ * @return ONVIF_SUCCESS if cleanup succeeds, error code if it fails
+ */
+int http_server_cleanup(void);
+
+/**
+ * @brief Reset HTTP authentication configuration (for testing)
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
+ */
+int http_server_reset_auth_config(void);
 
 #endif

@@ -359,6 +359,11 @@ static int optimized_batch_param_update(const struct imaging_settings* settings)
     return ONVIF_ERROR;
   }
 
+  if (!g_imaging_vi_handle) {
+    // No active VPSS handle; skip platform updates but treat as success
+    return ONVIF_SUCCESS;
+  }
+
   // Check if any parameters actually changed to avoid unnecessary VPSS calls
   int brightness_changed = (g_imaging_settings.brightness != settings->brightness);
   int contrast_changed = (g_imaging_settings.contrast != settings->contrast);
