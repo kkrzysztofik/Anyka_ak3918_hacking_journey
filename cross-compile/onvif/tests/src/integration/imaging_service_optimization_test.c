@@ -25,6 +25,7 @@
 #include "mocks/gsoap_mock.h"
 #include "mocks/mock_service_dispatcher.h"
 #include "mocks/platform_mock.h"
+#include "mocks/smart_response_mock.h"
 
 // ONVIF project includes
 #include "services/common/onvif_imaging_types.h"
@@ -113,6 +114,7 @@ int setup_imaging_integration(void** state) {
   service_dispatcher_mock_use_real_function(true);
   buffer_pool_mock_use_real_function(true);
   gsoap_mock_use_real_function(true);
+  smart_response_mock_use_real_function(true);
 
   // Configure platform mock expectations for imaging service initialization
   // The imaging service init calls platform_irled_init(level) and applies VPSS settings
@@ -461,10 +463,6 @@ void test_integration_imaging_get_settings_soap(void** state) {
   expect_string(__wrap_platform_config_get_int, key, "http_verbose");
   expect_function_call(__wrap_platform_config_get_int);
   will_return(__wrap_platform_config_get_int, 0);
-  expect_string(__wrap_platform_config_get_int, section, "logging");
-  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
-  expect_function_call(__wrap_platform_config_get_int);
-  will_return(__wrap_platform_config_get_int, 0);
 
   // Step 1: Create SOAP request envelope
   http_request_t* request = soap_test_create_request(
@@ -526,6 +524,8 @@ void test_integration_imaging_set_settings_soap(void** state) {
   expect_string(__wrap_platform_config_get_int, key, "http_verbose");
   expect_function_call(__wrap_platform_config_get_int);
   will_return(__wrap_platform_config_get_int, 0);
+
+  // Second gSOAP call (for response parsing)
   expect_string(__wrap_platform_config_get_int, section, "logging");
   expect_string(__wrap_platform_config_get_int, key, "http_verbose");
   expect_function_call(__wrap_platform_config_get_int);

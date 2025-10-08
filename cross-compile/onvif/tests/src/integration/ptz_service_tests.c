@@ -115,6 +115,27 @@
 #define TEST_PRESET_NAME_BUFFER_SIZE 32
 
 /**
+ * @brief Setup mock expectations for platform configuration calls during gSOAP initialization
+ *
+ * This function configures the required mock expectations for platform_config_get_int
+ * calls that occur during real gSOAP initialization. The gSOAP implementation itself
+ * is real (not mocked), but it calls platform functions that need to be mocked.
+ */
+static void setup_platform_config_mock_expectations(void) {
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  // Real gSOAP initialization calls platform_config_get_int("logging", "http_verbose", 0) twice
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
+
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
+}
+
+/**
  * @brief Setup function for PTZ integration tests
  * @param state Test state pointer
  * @return 0 on success, -1 on failure
@@ -384,7 +405,7 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
   // Wait for timeout to trigger (1.2 seconds to ensure thread has time to execute)
   expect_value(__wrap_platform_sleep_ms, ms, TEST_DELAY_1200MS);
   expect_function_call(__wrap_platform_sleep_ms);
-  platform_sleep_ms(TEST_DELAY_1200MS);
+  __wrap_platform_sleep_ms(TEST_DELAY_1200MS);
 
   // Verify that we can still perform operations after timeout
   // This would hang indefinitely if the deadlock bug exists
@@ -471,7 +492,7 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
     // Set up expectations for sleep
     expect_value(__wrap_platform_sleep_ms, ms, TEST_DELAY_200MS);
     expect_function_call(__wrap_platform_sleep_ms);
-    platform_sleep_ms(TEST_DELAY_200MS); // Wait partial timeout
+    __wrap_platform_sleep_ms(TEST_DELAY_200MS); // Wait partial timeout
 
     // Set up expectations for stop (all 4 directions)
     expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_LEFT);
@@ -516,7 +537,7 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
     // Set up expectations for sleep
     expect_value(__wrap_platform_sleep_ms, ms, TEST_DELAY_10MS);
     expect_function_call(__wrap_platform_sleep_ms);
-    platform_sleep_ms(TEST_DELAY_10MS); // Minimal delay
+    __wrap_platform_sleep_ms(TEST_DELAY_10MS); // Minimal delay
 
     // Set up expectations for stop (all 4 directions)
     expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_LEFT);
@@ -560,7 +581,7 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
     // Set up expectations for sleep with variable delay
     expect_value(__wrap_platform_sleep_ms, ms, test_delays[i]);
     expect_function_call(__wrap_platform_sleep_ms);
-    platform_sleep_ms(test_delays[i]);
+    __wrap_platform_sleep_ms(test_delays[i]);
 
     // Set up expectations for stop (all 4 directions)
     expect_value(__wrap_platform_ptz_turn_stop, direction, PLATFORM_PTZ_DIRECTION_LEFT);
@@ -703,6 +724,7 @@ void test_integration_ptz_memory_usage_improvements(void** state) {
 
   printf("Testing PTZ memory usage improvements...\n");
 
+
   // Test buffer pool usage for string operations
   // This would require access to internal buffer pool statistics
   // For now, we test that operations complete without memory errors
@@ -744,6 +766,7 @@ void test_integration_ptz_buffer_pool_usage(void** state) {
   (void)state; // Unused parameter
 
   printf("Testing PTZ buffer pool usage...\n");
+
 
   // Test that buffer pool is properly used for temporary operations
   // This is validated by ensuring operations complete successfully
@@ -787,6 +810,7 @@ void test_integration_ptz_string_operations_optimization(void** state) {
   (void)state; // Unused parameter
 
   printf("Testing PTZ string operations optimization...\n");
+
 
   // Test with various string lengths to verify bounds checking
   printf("  [TEST CASE] Long preset name (bounds checking)\n");
@@ -833,6 +857,7 @@ void test_integration_ptz_error_handling_robustness(void** state) {
   (void)state; // Unused parameter
 
   printf("Testing PTZ error handling robustness...\n");
+
 
   // Test with extreme values
   printf("  [TEST CASE] Extreme position values (clamping test)\n");
@@ -894,6 +919,7 @@ void test_integration_ptz_concurrent_operations(void** state) {
 
   printf("Testing PTZ concurrent operations...\n");
 
+
   // This test would require threading support
   // For now, we test sequential operations that simulate concurrent access
 
@@ -949,6 +975,7 @@ void test_integration_ptz_stress_testing(void** state) {
 
   printf("Testing PTZ stress testing...\n");
 
+
   // Perform many operations in sequence to stress test the system
   printf("  [TEST CASE] Stress test with %d iterations\n", TEST_STRESS_ITERATIONS);
   for (int i = 0; i < TEST_STRESS_ITERATIONS; i++) {
@@ -986,6 +1013,7 @@ void test_integration_ptz_memory_leak_detection(void** state) {
   (void)state; // Unused parameter
 
   printf("Testing PTZ memory leak detection...\n");
+
 
   // Perform operations that should not leak memory
   // This test relies on the memory manager's leak detection
@@ -1039,6 +1067,9 @@ void test_integration_ptz_get_nodes_soap(void** state) {
   // Note: PTZ service should be initialized by test suite setup, but in case
   // it was cleaned up by a previous test, we'll initialize it here
   // PTZ init is idempotent, so calling it multiple times is safe
+
+  // Setup mock expectations for platform config calls during real gSOAP initialization
+  setup_platform_config_mock_expectations();
 
   // Step 1: Create SOAP request envelope
   http_request_t* request =
@@ -1100,6 +1131,9 @@ void test_integration_ptz_get_nodes_soap(void** state) {
 void test_integration_ptz_absolute_move_soap(void** state) {
   (void)state;
 
+  // Setup mock expectations for platform config calls during real gSOAP initialization
+  setup_platform_config_mock_expectations();
+
   // Step 1: Create SOAP request envelope
   http_request_t* request =
     soap_test_create_request("AbsoluteMove", SOAP_PTZ_ABSOLUTE_MOVE, "/onvif/ptz_service");
@@ -1145,6 +1179,9 @@ void test_integration_ptz_absolute_move_soap(void** state) {
  */
 void test_integration_ptz_get_presets_soap(void** state) {
   (void)state;
+
+  // Setup mock expectations for platform config calls during real gSOAP initialization
+  setup_platform_config_mock_expectations();
 
   // Step 1: Create SOAP request envelope
   http_request_t* request =
@@ -1195,6 +1232,9 @@ void test_integration_ptz_get_presets_soap(void** state) {
 void test_integration_ptz_set_preset_soap(void** state) {
   (void)state;
 
+  // Setup mock expectations for platform config calls during real gSOAP initialization
+  setup_platform_config_mock_expectations();
+
   // Step 1: Create SOAP request envelope
   http_request_t* request =
     soap_test_create_request("SetPreset", SOAP_PTZ_SET_PRESET, "/onvif/ptz_service");
@@ -1244,6 +1284,9 @@ void test_integration_ptz_set_preset_soap(void** state) {
 void test_integration_ptz_goto_preset_soap(void** state) {
   (void)state;
 
+  // Setup mock expectations for platform config calls during real gSOAP initialization
+  setup_platform_config_mock_expectations();
+
   // Step 1: Create SOAP request envelope
   http_request_t* request =
     soap_test_create_request("GotoPreset", SOAP_PTZ_GOTO_PRESET, "/onvif/ptz_service");
@@ -1289,6 +1332,9 @@ void test_integration_ptz_goto_preset_soap(void** state) {
  */
 void test_integration_ptz_remove_preset_soap(void** state) {
   (void)state;
+
+  // Setup mock expectations for platform config calls during real gSOAP initialization
+  setup_platform_config_mock_expectations();
 
   // Step 1: Create SOAP request envelope
   http_request_t* request =

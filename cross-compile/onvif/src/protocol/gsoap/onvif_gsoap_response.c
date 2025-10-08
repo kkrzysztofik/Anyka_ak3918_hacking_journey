@@ -289,15 +289,19 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
   // Copy the generated string to our buffer
   if (output_string) {
     size_t response_len = strlen(output_string);
+    platform_log_debug("ONVIF gSOAP: output_string length=%zu, content=%s", response_len,
+                       output_string);
     if (response_len < sizeof(ctx->soap.buf)) {
       strncpy(ctx->soap.buf, output_string, sizeof(ctx->soap.buf) - 1);
       ctx->soap.buf[sizeof(ctx->soap.buf) - 1] = '\0';
       ctx->soap.length = response_len;
+      platform_log_debug("ONVIF gSOAP: Copied to buffer, length set to %zu", ctx->soap.length);
     } else {
       set_soap_error(&ctx->soap, "Response too large for buffer");
       return ONVIF_ERROR_SERIALIZATION_FAILED;
     }
   } else {
+    platform_log_error("ONVIF gSOAP: output_string is NULL after callback");
     set_soap_error(&ctx->soap, "No output string generated");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }

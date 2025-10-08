@@ -15,6 +15,7 @@
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "protocol/gsoap/onvif_gsoap_response.h"
+#include "utils/memory/smart_response_builder.h"
 
 /* ============================================================================
  * Common Utility Function Implementations
@@ -98,7 +99,8 @@ int onvif_util_handle_service_request(const service_handler_config_t* config,
 
   // Generate SOAP response using callback (only if business logic didn't already set response body)
   if (soap_callback && !response->body) {
-    int result = onvif_gsoap_generate_response_with_callback(gsoap_ctx, soap_callback, callback_data);
+    int result =
+      onvif_gsoap_generate_response_with_callback(gsoap_ctx, soap_callback, callback_data);
     if (result != ONVIF_SUCCESS) {
       service_log_operation_failure(&log_ctx, "soap_response_generation", result,
                                     "Failed to generate SOAP response");
@@ -106,11 +108,15 @@ int onvif_util_handle_service_request(const service_handler_config_t* config,
     }
 
     // Copy the generated SOAP response to the HTTP response
-    if (gsoap_ctx->soap.os) {
-      char** output_string = (char**)gsoap_ctx->soap.os;
-      if (*output_string) {
-        response->body = *output_string;
-        response->body_length = strlen(*output_string);
+    const char* soap_response = onvif_gsoap_get_response_data(gsoap_ctx);
+    if (soap_response) {
+      // Use smart_response_build_with_dynamic_buffer to properly copy the response
+      if (smart_response_build_with_dynamic_buffer(response, soap_response) == ONVIF_SUCCESS) {
+        response->status_code = 200;
+      } else {
+        // Fallback: assign pointer directly (may be temporary)
+        response->body = soap_response;
+        response->body_length = strlen(soap_response);
         response->status_code = 200;
       }
     }

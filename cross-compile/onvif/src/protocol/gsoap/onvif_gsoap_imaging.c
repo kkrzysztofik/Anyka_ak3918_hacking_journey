@@ -64,7 +64,8 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
   }
 
   /* 4. Parse the actual GetImagingSettings structure */
-  struct _timg__GetImagingSettings* result_ptr = soap_get__timg__GetImagingSettings(&ctx->soap, *out, NULL, NULL);
+  struct _timg__GetImagingSettings* result_ptr =
+    soap_get__timg__GetImagingSettings(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
@@ -116,7 +117,8 @@ int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
   }
 
   /* 4. Parse the actual SetImagingSettings structure */
-  struct _timg__SetImagingSettings* result_ptr = soap_get__timg__SetImagingSettings(&ctx->soap, *out, NULL, NULL);
+  struct _timg__SetImagingSettings* result_ptr =
+    soap_get__timg__SetImagingSettings(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
@@ -196,23 +198,62 @@ int imaging_settings_response_callback(struct soap* soap, void* user_data) {
   imaging_settings_callback_data_t* data = (imaging_settings_callback_data_t*)user_data;
 
   if (!data || !data->settings) {
+    platform_log_error("Imaging callback: Invalid data or settings\n");
     return ONVIF_ERROR_INVALID;
   }
 
   struct _timg__GetImagingSettingsResponse* response =
     soap_new__timg__GetImagingSettingsResponse(soap, 1);
   if (!response) {
+    platform_log_error("Imaging callback: Failed to create response structure\n");
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  // Note: Imaging settings response generation would go here
-  // For now, create minimal response structure
+  // Create ImagingSettings structure
+  response->ImagingSettings = soap_new_tt__ImagingSettings20(soap, 1);
+  if (!response->ImagingSettings) {
+    platform_log_error("Imaging callback: Failed to create ImagingSettings structure\n");
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
 
-  if (soap_put__timg__GetImagingSettingsResponse(
-        soap, response, "timg:GetImagingSettingsResponse", NULL) != SOAP_OK) {
+  // Populate all imaging settings fields from data->settings
+  const struct imaging_settings* settings = data->settings;
+
+  // Brightness
+  response->ImagingSettings->Brightness = soap_new_float(soap, 1);
+  if (response->ImagingSettings->Brightness) {
+    *(response->ImagingSettings->Brightness) = (float)settings->brightness;
+  }
+
+  // Contrast
+  response->ImagingSettings->Contrast = soap_new_float(soap, 1);
+  if (response->ImagingSettings->Contrast) {
+    *(response->ImagingSettings->Contrast) = (float)settings->contrast;
+  }
+
+  // ColorSaturation
+  response->ImagingSettings->ColorSaturation = soap_new_float(soap, 1);
+  if (response->ImagingSettings->ColorSaturation) {
+    *(response->ImagingSettings->ColorSaturation) = (float)settings->saturation;
+  }
+
+  // Sharpness
+  response->ImagingSettings->Sharpness = soap_new_float(soap, 1);
+  if (response->ImagingSettings->Sharpness) {
+    *(response->ImagingSettings->Sharpness) = (float)settings->sharpness;
+  }
+
+  platform_log_debug("Imaging callback: About to serialize response with brightness=%d\n",
+                     settings->brightness);
+
+  // Serialize complete response
+  if (soap_put__timg__GetImagingSettingsResponse(soap, response, "timg:GetImagingSettingsResponse",
+                                                 NULL) != SOAP_OK) {
+    platform_log_error("Imaging callback: Failed to serialize response\n");
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
+  platform_log_debug("Imaging callback: Successfully serialized response\n");
   return ONVIF_SUCCESS;
 }
 
@@ -239,8 +280,8 @@ int set_imaging_settings_response_callback(struct soap* soap, void* user_data) {
   // Note: SetImagingSettings response is typically empty
   (void)data; // Suppress unused parameter warning
 
-  if (soap_put__timg__SetImagingSettingsResponse(
-        soap, response, "timg:SetImagingSettingsResponse", NULL) != SOAP_OK) {
+  if (soap_put__timg__SetImagingSettingsResponse(soap, response, "timg:SetImagingSettingsResponse",
+                                                 NULL) != SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 

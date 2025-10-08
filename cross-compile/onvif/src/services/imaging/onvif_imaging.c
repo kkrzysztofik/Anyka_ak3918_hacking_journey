@@ -930,12 +930,12 @@ void onvif_imaging_service_cleanup(void) {
  * @brief GetImagingSettings business logic
  */
 static int get_imaging_settings_business_logic(const service_handler_config_t* config, // NOLINT
-                                                const http_request_t* request,
-                                                http_response_t* response,              // NOLINT
-                                                onvif_gsoap_context_t* gsoap_ctx,
-                                                service_log_context_t* log_ctx,
-                                                error_context_t* error_ctx,             // NOLINT
-                                                void* callback_data) {
+                                               const http_request_t* request,
+                                               http_response_t* response, // NOLINT
+                                               onvif_gsoap_context_t* gsoap_ctx,
+                                               service_log_context_t* log_ctx,
+                                               error_context_t* error_ctx, // NOLINT
+                                               void* callback_data) {
   (void)config;
 
   // Initialize gSOAP context for request parsing
@@ -1048,6 +1048,8 @@ static int handle_set_imaging_settings(const service_handler_config_t* config,
   settings.sharpness = set_settings_req->ImagingSettings->Sharpness
                          ? (int)*set_settings_req->ImagingSettings->Sharpness
                          : 50;
+  // Hue is not part of ONVIF ImagingSettings20, so set to default valid value
+  settings.hue = 0;
 
   // Validate imaging settings
   result = validate_imaging_settings_local(&settings);
@@ -1074,10 +1076,10 @@ static int handle_set_imaging_settings(const service_handler_config_t* config,
     return error_handle_system(&error_ctx, ONVIF_ERROR, "get_response_data", response);
   }
 
-  size_t estimated_size = smart_response_estimate_size(soap_response);
-  if (smart_response_build(response, soap_response, estimated_size,
-                           &g_imaging_response_buffer_pool) != ONVIF_SUCCESS) {
-    return error_handle_system(&error_ctx, ONVIF_ERROR, "smart_response_build", response);
+  // Use smart_response_build_with_dynamic_buffer to avoid buffer pool issues in tests
+  if (smart_response_build_with_dynamic_buffer(response, soap_response) != ONVIF_SUCCESS) {
+    return error_handle_system(&error_ctx, ONVIF_ERROR, "smart_response_build_with_dynamic_buffer",
+                               response);
   }
 
   // Set response headers
