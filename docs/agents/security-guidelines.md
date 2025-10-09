@@ -37,7 +37,6 @@
 - Validate all network input before processing
 - Use proper error message handling (no information leakage)
 - Implement proper authentication and authorization
-- Use secure communication protocols (HTTPS, WSS)
 - Validate SOAP/XML input to prevent injection
 
 ## Authentication & Authorization

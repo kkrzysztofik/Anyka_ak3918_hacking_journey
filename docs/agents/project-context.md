@@ -1,4 +1,4 @@
-# Project Overview - Anyka AK3918 Hacking Journey
+# Project Context - Anyka AK3918 Hacking Journey
 
 ## Project Description
 
@@ -64,13 +64,6 @@ The ONVIF implementation follows a modular architecture:
 - WS-Discovery for automatic device discovery
 - Connection management with thread pooling
 
-## Key Development Areas
-
-- **`cross-compile/onvif/`** — **CURRENT FOCUS** - Complete ONVIF 2.5 implementation
-- **`cross-compile/onvif/tests/`** — **MANDATORY** - Unit testing framework using CMocka
-- **`SD_card_contents/anyka_hack/`** — SD card payload system for runtime testing
-- **`cross-compile/anyka_reference/akipc/`** — Authoritative vendor reference code
-
 ## Project Goals
 
 1. **ONVIF 2.5 Compliance** - Complete implementation of all required ONVIF services
@@ -90,3 +83,28 @@ The ONVIF implementation follows a modular architecture:
 - **Documentation**: Doxygen for code documentation
 - **Version Control**: Git with comprehensive commit history
 - **Build System**: Make-based with native cross-compilation support
+
+## Development Environment
+
+### Quick Environment Summary
+
+- **Primary OS**: WSL2 with Ubuntu
+- **Shell**: **MANDATORY** - All commands use bash syntax
+- **Cross-compilation**: Native tools for consistent builds
+- **SD-card testing**: Primary development workflow for device testing
+
+### Build Process
+
+- **Use native cross-compilation tools**: `make -C cross-compile/<project>` - This ensures consistent builds in the WSL Ubuntu environment.
+- **Test compilation** before committing changes - Always verify that code compiles successfully before making changes.
+- **SD-card testing** is the primary development workflow for device testing - Copy compiled binaries to the SD card payload and boot the device with the SD card to test functionality.
+
+### Build System Features
+
+The Makefile supports:
+
+- **Debug/Release builds**: `make debug` vs `make release` with automatic BUILD_TYPE handling
+- **Documentation generation**: `make docs` (MANDATORY after changes)
+- **Static analysis**: Multiple tools including Clang, Cppcheck, Snyk via `make static-analysis`
+- **Compile commands**: `make compile-commands` for clangd support
+- **Cross-compilation**: Uses arm-anykav200-linux-uclibcgnueabi toolchain

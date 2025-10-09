@@ -1,4 +1,4 @@
-# Agent Documentation for Anyka AK3918 Hacking Journey
+# Agent Core - Anyka AK3918 Project
 
 ## 🎯 AGENT ROLE & MANDATE
 
@@ -6,7 +6,7 @@
 
 **CRITICAL MANDATE**: You MUST follow the project's established patterns, standards, and documentation. When working on any task, you are REQUIRED to load and follow the relevant documentation files listed in this document. Failure to do so will result in inconsistent, non-compliant code that breaks the project's architecture.
 
-## Project Overview
+## Project Context
 
 This repository contains comprehensive reverse-engineering work and custom firmware development for Anyka AK3918-based IP cameras. It includes cross-compilation tools, SD-card bootable payloads, root filesystem modifications, and detailed documentation for understanding and extending camera functionality.
 
@@ -22,7 +22,7 @@ The project focuses on creating a fully ONVIF 2.5 compliant implementation while
 | -------------------- | ------------------------------------------ | ------------------------------- |
 | **Include paths**    | `#include "services/common/onvif_types.h"` | `#include "../../services/..."` |
 | **Global variables** | `static int g_onvif_device_count = 0;`     | `static int device_count = 0;`  |
-| **Return codes**     | `return ONVIF_SUCCESS;`                    | `return 0;`                     |
+| **Return codes**     | `return ONVIF_SUCCESS;`                    | `return 0`                      |
 | **Test names**       | `test_unit_memory_manager_init`            | `test_memory_init`              |
 | **Mock functions**   | `__wrap_platform_init()`                   | `mock_platform_init()`          |
 
@@ -46,10 +46,10 @@ make -C cross-compile/onvif docs    # Generate docs
 
 ```c
 // Mock function
-    platform_result_t __wrap_platform_init(void) {
-      function_called();
-      return (platform_result_t)mock();
-    }
+platform_result_t __wrap_platform_init(void) {
+  function_called();
+  return (platform_result_t)mock();
+}
 
 // Test usage
 will_return(__wrap_platform_init, PLATFORM_SUCCESS);
@@ -74,31 +74,27 @@ expect_value(__wrap_platform_ptz_move, pan, 90.0f);
 
 This protocol ensures consistent application of project standards and reduces context usage by referencing focused, purpose-built documentation modules.
 
-## 📚 OPTIMIZED DOCUMENTATION STRUCTURE & LOADING RULES
+## 📚 DOCUMENTATION STRUCTURE & LOADING RULES
 
-This documentation is organized into focused modules to reduce context usage and eliminate redundancy. **YOU MUST LOAD THE APPROPRIATE DOCUMENT(S) BEFORE STARTING ANY TASK:**
-
-### 🎯 **CORE AGENT BEHAVIOR** (Always Load)
-
-- **[Agent Core](docs/agents/agent-core.md)** - Essential agent behavior, role, and constraints
+This documentation is organized into focused modules to reduce context usage. **YOU MUST LOAD THE APPROPRIATE DOCUMENT(S) BEFORE STARTING ANY TASK:**
 
 ### 🏗️ **ARCHITECTURE & DESIGN** (Load for: System design, architecture decisions, component integration)
 
-- **[Project Context](docs/agents/project-context.md)** - Complete project description, architecture, and key components
+- **[Project Context](project-context.md)** - Complete project description, architecture, and key components
 
 ### 💻 **DEVELOPMENT WORKFLOW** (Load for: Any coding task, feature implementation, bug fixes)
 
-- **[Development Standards](docs/agents/development-standards.md)** - Complete development process, coding standards, and conventions
+- **[Development Standards](development-standards.md)** - Complete development process, coding standards, and conventions
 
 ### 🧪 **TESTING & QUALITY** (Load for: Writing tests, quality assurance, validation)
 
-- **[Testing Framework](docs/agents/testing-framework.md)** - Comprehensive testing framework and mock usage
-- **[Quality Gates](docs/agents/quality-gates.md)** - Quality assurance and review process
+- **[Testing Framework](testing-framework.md)** - Comprehensive testing framework and mock usage
+- **[Quality Gates](quality-gates.md)** - Quality assurance and review process
 
 ### 🔍 **REVIEW & DEBUGGING** (Load for: Code review, debugging, crash analysis)
 
-- **[Review Prompt](docs/agents/review-prompt.md)** - Comprehensive code review guidelines and checklist
-- **[Coredump Analysis](docs/agents/coredump-analysis-prompt.md)** - Debugging and crash analysis procedures
+- **[Review Prompt](review-prompt.md)** - Comprehensive code review guidelines and checklist
+- **[Coredump Analysis](coredump-analysis-prompt.md)** - Debugging and crash analysis procedures
 
 **LOADING RULE**: If your task involves multiple areas (e.g., coding + testing), you MUST load ALL relevant documents.
 
@@ -117,12 +113,12 @@ This documentation is organized into focused modules to reduce context usage and
 
 1. **📖 LOAD DOCUMENTATION** → Load relevant docs from sections above
 2. **🔍 ANALYZE REQUIREMENTS** → Understand task scope and constraints
-3. **💻 IMPLEMENT CODE** → Follow standards in [Development Standards](docs/agents/development-standards.md)
+3. **💻 IMPLEMENT CODE** → Follow standards in [Development Standards](development-standards.md)
 4. **🧪 WRITE TESTS** → Create unit tests using CMocka framework
 5. **✅ RUN TESTS** → Execute: `make test` (ALL tests must pass)
 6. **🔍 QUALITY CHECK** → Run linting: `./cross-compile/onvif/scripts/lint_code.sh --check`
 7. **📝 DOCUMENT** → Update docs: `make -C cross-compile/onvif docs`
-8. **👀 SELF-REVIEW** → Follow [Quality Gates](docs/agents/quality-gates.md)
+8. **👀 SELF-REVIEW** → Follow [Quality Gates](quality-gates.md)
 9. **🚀 DEPLOY** → Test via SD card payload
 
 ### 🚨 **CRITICAL CONSTRAINTS**
@@ -142,8 +138,6 @@ Your task is ONLY complete when:
 - ✅ Linting passes with zero warnings/errors
 - ✅ Documentation is updated
 - ✅ Self-review checklist is completed
-
-> **📚 For complete details**: See [Development Standards](docs/agents/development-standards.md) and [Agent Core](docs/agents/agent-core.md)
 
 ## 🎯 TASK EXECUTION PROTOCOL
 

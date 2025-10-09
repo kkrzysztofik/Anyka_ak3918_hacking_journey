@@ -18,17 +18,17 @@ The project focuses on creating a fully ONVIF 2.5 compliant implementation while
 
 ### Critical Standards
 
-| Rule | ✅ Correct | ❌ Wrong |
-|------|------------|----------|
-| **Include paths** | `#include "services/common/onvif_types.h"` | `#include "../../services/..."` |
-| **Global variables** | `static int g_onvif_device_count = 0;` | `static int device_count = 0;` |
-| **Return codes** | `return ONVIF_SUCCESS;` | `return 0;`|
-| **Test names** | `test_unit_memory_manager_init` | `test_memory_init`|
-| **Mock functions** | `__wrap_platform_init()` | `mock_platform_init()`|
+| Rule                 | ✅ Correct                                 | ❌ Wrong                        |
+| -------------------- | ------------------------------------------ | ------------------------------- |
+| **Include paths**    | `#include "services/common/onvif_types.h"` | `#include "../../services/..."` |
+| **Global variables** | `static int g_onvif_device_count = 0;`     | `static int device_count = 0;`  |
+| **Return codes**     | `return ONVIF_SUCCESS;`                    | `return 0;`                     |
+| **Test names**       | `test_unit_memory_manager_init`            | `test_memory_init`              |
+| **Mock functions**   | `__wrap_platform_init()`                   | `mock_platform_init()`          |
 
 ### Essential Commands
 
-  ```bash
+```bash
 # Build & Test
 make -C cross-compile/onvif          # Build
 make test                           # All tests
@@ -74,35 +74,31 @@ expect_value(__wrap_platform_ptz_move, pan, 90.0f);
 
 This protocol ensures consistent application of project standards and reduces context usage by referencing focused, purpose-built documentation modules.
 
-## 📚 DOCUMENTATION STRUCTURE & LOADING RULES
+## 📚 OPTIMIZED DOCUMENTATION STRUCTURE & LOADING RULES
 
-This documentation is organized into focused modules to reduce context usage. **YOU MUST LOAD THE APPROPRIATE DOCUMENT(S) BEFORE STARTING ANY TASK:**
+This documentation is organized into focused modules to reduce context usage and eliminate redundancy. **YOU MUST LOAD THE APPROPRIATE DOCUMENT(S) BEFORE STARTING ANY TASK:**
+
+### 🎯 **CORE AGENT BEHAVIOR** (Always Load)
+
+- **[Agent Core](docs/agents/agent-core.md)** - Essential agent behavior, role, and constraints
 
 ### 🏗️ **ARCHITECTURE & DESIGN** (Load for: System design, architecture decisions, component integration)
 
-- **[Project Overview](docs/agents/project-overview.md)** - Complete project description, architecture, and key components
-- **[Build System](docs/agents/build-system.md)** - Development environment and build process
+- **[Project Context](docs/agents/project-context.md)** - Complete project description, architecture, and key components
 
 ### 💻 **DEVELOPMENT WORKFLOW** (Load for: Any coding task, feature implementation, bug fixes)
 
-- **[Development Workflow](docs/agents/development-workflow.md)** - Complete development process, examples, and common tasks
-- **[Agent Instructions](docs/agents/agent-instructions.md)** - Complete agent workflow and best practices
-- **[Coding Standards](docs/agents/coding-standards.md)** - Detailed coding guidelines and conventions
+- **[Development Standards](docs/agents/development-standards.md)** - Complete development process, coding standards, and conventions
 
 ### 🧪 **TESTING & QUALITY** (Load for: Writing tests, quality assurance, validation)
 
-- **[Testing Guide](docs/agents/testing-guide.md)** - Comprehensive testing framework and mock usage
-- **[Quality Assurance](docs/agents/quality-assurance.md)** - Testing, validation, and quality checklists
+- **[Testing Framework](docs/agents/testing-framework.md)** - Comprehensive testing framework and mock usage
+- **[Quality Gates](docs/agents/quality-gates.md)** - Quality assurance and review process
 
 ### 🔍 **REVIEW & DEBUGGING** (Load for: Code review, debugging, crash analysis)
 
 - **[Review Prompt](docs/agents/review-prompt.md)** - Comprehensive code review guidelines and checklist
-- **[Error Handling & Debugging](docs/agents/error-handling-debugging.md)** - Debugging guidelines and error handling strategies
 - **[Coredump Analysis](docs/agents/coredump-analysis-prompt.md)** - Debugging and crash analysis procedures
-
-### 🔒 **SECURITY** (Load for: Security-related features, authentication, encryption)
-
-- **[Security Guidelines](docs/agents/security-guidelines.md)** - Security requirements and best practices
 
 **LOADING RULE**: If your task involves multiple areas (e.g., coding + testing), you MUST load ALL relevant documents.
 
@@ -121,12 +117,12 @@ This documentation is organized into focused modules to reduce context usage. **
 
 1. **📖 LOAD DOCUMENTATION** → Load relevant docs from sections above
 2. **🔍 ANALYZE REQUIREMENTS** → Understand task scope and constraints
-3. **💻 IMPLEMENT CODE** → Follow standards in [Coding Standards](docs/agents/coding-standards.md)
+3. **💻 IMPLEMENT CODE** → Follow standards in [Development Standards](docs/agents/development-standards.md)
 4. **🧪 WRITE TESTS** → Create unit tests using CMocka framework
 5. **✅ RUN TESTS** → Execute: `make test` (ALL tests must pass)
 6. **🔍 QUALITY CHECK** → Run linting: `./cross-compile/onvif/scripts/lint_code.sh --check`
 7. **📝 DOCUMENT** → Update docs: `make -C cross-compile/onvif docs`
-8. **👀 SELF-REVIEW** → Follow [Review Prompt](docs/agents/review-prompt.md)
+8. **👀 SELF-REVIEW** → Follow [Quality Gates](docs/agents/quality-gates.md)
 9. **🚀 DEPLOY** → Test via SD card payload
 
 ### 🚨 **CRITICAL CONSTRAINTS**
@@ -147,13 +143,13 @@ Your task is ONLY complete when:
 - ✅ Documentation is updated
 - ✅ Self-review checklist is completed
 
-> **📚 For complete details**: See [Development Workflow](docs/agents/development-workflow.md) and [Agent Instructions](docs/agents/agent-instructions.md)
+> **📚 For complete details**: See [Development Standards](docs/agents/development-standards.md) and [Agent Core](docs/agents/agent-core.md)
 
 ## 🎯 TASK EXECUTION PROTOCOL
 
 ### **BEFORE YOU START ANY TASK:**
 
-1. **IDENTIFY TASK TYPE**: Determine which documentation categories apply (Architecture, Development, Testing, Review, Security)
+1. **IDENTIFY TASK TYPE**: Determine which documentation categories apply (Architecture, Development, Testing, Quality, Review, Debugging)
 2. **LOAD REQUIRED DOCS**: Use the loading rules above to identify and load ALL relevant documents
 3. **ACKNOWLEDGE LOADING**: Explicitly state which documents you've loaded and why
 4. **CONFIRM UNDERSTANDING**: Summarize the key constraints and requirements from the loaded docs

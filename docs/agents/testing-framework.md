@@ -1,4 +1,4 @@
-# Testing Guide
+# Testing Framework - Anyka AK3918 Project
 
 ## Test Naming Convention (MANDATORY)
 
@@ -280,38 +280,6 @@ tests/src/mocks/
 - Fix all compiler warnings and errors
 - Verify no undefined behavior
 - Check for unused variables and functions
-
-## Code Quality Commands (MANDATORY)
-
-### Code Linting
-
-```bash
-# Code Linting (MANDATORY)
-./cross-compile/onvif/scripts/lint_code.sh                    # Lint all C files
-./cross-compile/onvif/scripts/lint_code.sh --check            # Check for issues (exit 1 if found)
-./cross-compile/onvif/scripts/lint_code.sh --file src/path/to/file.c  # Lint specific file
-./cross-compile/onvif/scripts/lint_code.sh --changed          # Lint only changed files
-./cross-compile/onvif/scripts/lint_code.sh --format           # Also check formatting
-./cross-compile/onvif/scripts/lint_code.sh --severity error   # Fail only on errors
-```
-
-### Code Formatting
-
-```bash
-# Code Formatting (MANDATORY)
-./cross-compile/onvif/scripts/format_code.sh                  # Format all C files
-./cross-compile/onvif/scripts/format_code.sh --check          # Check formatting (exit 1 if issues)
-./cross-compile/onvif/scripts/format_code.sh --files src/path/to/file.c  # Format specific files
-./cross-compile/onvif/scripts/format_code.sh --dry-run        # Show what would be changed
-```
-
-### Function Order Compliance (MANDATORY)
-
-- **Verify function ordering** follows project guidelines: definitions at top, execution logic at bottom
-- **Check global variables** are placed at the top of files after includes
-- **Validate include ordering**: system headers → third-party → project headers
-- **Ensure proper spacing** and formatting between function groups
-- **Use linting script** with `--format` flag to check function ordering compliance
 
 ## Testing Commands
 
