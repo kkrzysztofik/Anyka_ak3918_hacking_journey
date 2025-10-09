@@ -2,7 +2,7 @@
 
 ## Project Type
 
-Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cross-compilation toolchain, SD-card development environment, and web-based management interface.
+Embedded firmware system for IP cameras with ONVIF 24.12 compliance, including cross-compilation toolchain, SD-card development environment, and web-based management interface.
 
 ## Core Technologies
 
@@ -14,9 +14,7 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 
 ### Key Dependencies/Libraries
 
-- **gSOAP 2.8**: SOAP/XML processing for ONVIF services and web service communication
-- **libcurl**: HTTP client functionality for network communication
-- **libxml2**: XML parsing and generation for ONVIF protocol handling
+- **gSOAP 2.8**: SOAP/XML processing for ONVIF 24.12 services and web service communication
 - **CMocka**: Unit testing framework for C with mocking support (development only)
 - **Anyka SDK**: Hardware abstraction layer and device drivers for AK3918 SoC
 - **uClibc**: Embedded C library optimized for resource-constrained systems
@@ -31,18 +29,17 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 - **Core Services Layer**: ONVIF service implementations (Device, Media, PTZ, Imaging)
 - **Network Layer**: HTTP/SOAP, RTSP, WS-Discovery protocol implementations
 - **Utility Layer**: Shared utilities for memory management, validation, logging
-- **Application Layer**: Main daemon and web interface
+- **Application Layer**: Camera daemon exposes SOAP/HTTP APIs and static bundles consumed by a client-rendered React application
 
 ### Data Storage
 
-- **Primary storage**: SquashFS compressed filesystem images for root filesystem
-- **Configuration**: JSON/XML configuration files stored in flash memory
+- **Configuration**: INI configuration files stored in flash memory
 - **Caching**: In-memory caching for frequently accessed data (profiles, settings)
-- **Data formats**: XML for ONVIF SOAP messages, JSON for configuration, H.264 for video streams
+- **Data formats**: XML for ONVIF SOAP messages, INI for configuration, H.264 for video streams
 
 ### External Integrations
 
-- **ONVIF Protocol**: Full ONVIF 2.5 specification compliance for IP camera standards
+- **ONVIF Protocol**: Full ONVIF 24.12 specification compliance for IP camera standards
 - **RTSP Streaming**: Real-time video streaming protocol for H.264 video delivery
 - **WS-Discovery**: Web Services Discovery for automatic camera detection
 - **HTTP/SOAP**: Web service communication for camera control and configuration
@@ -50,10 +47,8 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 
 ### Monitoring & Dashboard Technologies
 
-- **Dashboard Framework**: Vanilla JavaScript with HTML5/CSS3 for web interface
-- **Real-time Communication**: WebSocket for live updates and control
-- **Visualization Libraries**: Canvas API for video display, Chart.js for metrics
-- **State Management**: File system as source of truth with JSON configuration
+- **Dashboard Framework**: React, Redux, Tailwind CSS, and TypeScript bundled as a client-rendered single-page application
+- **State Management**: Redux store synchronized with ONVIF/SOAP endpoints while persisted configuration remains in camera INI files
 
 ## Development Environment
 
@@ -61,7 +56,7 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 
 - **Build System**: GNU Make with cross-compilation support
 - **Package Management**: Custom toolchain with pre-compiled libraries
-- **Development workflow**: SD-card based testing, UART debugging, hot reload for web interface
+- **Development workflow**: SD-card based testing, hot reload for web interface
 
 ### Code Quality Tools
 
@@ -83,30 +78,28 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 
 - **Live Reload**: File watchers for web interface development
 - **Port Management**: Configurable HTTP port (default 80) for web interface
-- **Multi-Instance Support**: Single camera per instance, multiple cameras via network
 
 ## Deployment & Distribution
 
 - **Target Platform(s)**: Anyka AK3918-based IP cameras (embedded Linux)
 - **Distribution Method**: SD-card payload system for development, flash memory for production
-- **Installation Requirements**: UART access for debugging, SD card slot for development
-- **Update Mechanism**: SD-card based updates for development, OTA updates for production
+- **Installation Requirements**: SD card slot
 
 ## Technical Requirements & Constraints
 
 ### Performance Requirements
 
 - **Response Time**: Sub-second response for all ONVIF operations
-- **Video Streaming**: Real-time H.264 streaming at 1080p@30fps
-- **Memory Usage**: Optimized for embedded systems with limited RAM (typically 64-128MB)
+- **Video Streaming**: Real-time H.264 streaming at 720p with configurable bitrate validated through ONVIF Profile S workflows
+- **Memory Usage**: Optimized for embedded systems with limited RAM
 - **Startup Time**: Camera ready for operation within 30 seconds of power-on
 - **Concurrent Connections**: Support for multiple simultaneous ONVIF clients
 
 ### Compatibility Requirements
 
 - **Platform Support**: Anyka AK3918 SoC with ARM architecture
-- **Dependency Versions**: gSOAP 2.8+, libcurl 7.0+, OpenSSL 1.1+
-- **Standards Compliance**: ONVIF 2.5 specification, RTSP RFC 2326, WS-Discovery
+- **Dependency Versions**: gSOAP 2.8+
+- **Standards Compliance**: ONVIF 24.12 specification, RTSP RFC 2326, WS-Discovery
 
 ### Security & Compliance
 
@@ -114,10 +107,9 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
   - Input validation and sanitization for all network inputs
   - Secure authentication with digest authentication
   - Buffer overflow prevention and memory safety
-  - Secure communication protocols (HTTPS, WSS)
-- **Compliance Standards**: ONVIF 2.5 specification compliance
+- **Compliance Standards**: ONVIF 24.12 specification compliance
 - **Threat Model**:
-  - Network-based attacks (injection, DoS)
+  - Network-based attacks (injection)
   - Authentication bypass attempts
   - Memory corruption vulnerabilities
   - Unauthorized access to video streams
@@ -126,20 +118,17 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 
 - **Expected Load**: 1-10 concurrent ONVIF clients per camera
 - **Availability Requirements**: 99.9% uptime for camera services
-- **Growth Projections**: Support for additional camera models and features
 
 ## Technical Decisions & Rationale
 
 ### Decision Log
 
 1. **C Language Choice**: Chosen for embedded systems performance, direct hardware access, and compatibility with existing Anyka SDK
-2. **ONVIF 2.5 Compliance**: Industry standard for IP camera interoperability, enables integration with existing security systems
+2. **ONVIF 24.12 Compliance**: Industry standard for IP camera interoperability, enables integration with existing security systems
 3. **SD-card Development Environment**: Safe testing without modifying flash memory, enables rapid iteration and debugging
 4. **Platform Abstraction Layer**: Enables code reuse across different camera models and hardware configurations
 5. **gSOAP for SOAP Processing**: Mature, well-tested library for ONVIF SOAP message handling
-6. **SquashFS for Root Filesystem**: Compressed filesystem saves flash memory space while maintaining functionality
-7. **UART Debugging Interface**: Essential for embedded development and troubleshooting
-8. **Web-based Management Interface**: User-friendly configuration without requiring specialized tools
+6. **Web-based Management Interface**: User-friendly configuration without requiring specialized tools
 
 ## Known Limitations
 
@@ -147,8 +136,6 @@ Embedded firmware system for IP cameras with ONVIF 2.5 compliance, including cro
 - **Memory Constraints**: Limited RAM requires careful memory management and optimization
 - **Flash Storage**: Limited flash memory requires efficient filesystem design
 - **Network Bandwidth**: Video streaming performance depends on network conditions
-- **Power Management**: Continuous operation may require external power supply
-- **Temperature Sensitivity**: Performance may be affected by operating temperature
 - **Single Camera Focus**: Current implementation focuses on single camera management
 
 ## Development Workflow
@@ -243,7 +230,6 @@ make -C cross-compile/onvif docs
 
 ### Network Security
 
-- **HTTPS/WSS support** for secure communication
 - **Input sanitization** for all network data
 - **Error message handling** without information leakage
 - **Secure configuration** with encrypted credentials
