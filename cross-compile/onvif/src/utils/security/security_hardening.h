@@ -96,6 +96,9 @@ time_t security_get_current_time(void);
 int security_is_valid_ip(const char* ip_address);
 int security_is_private_ip(const char* ip_address);
 
+/* Hash and password utilities */
+#include "hash_utils.h"
+
 /* Comprehensive request validation functions */
 int security_validate_request(const http_request_t* request, security_context_t* context);
 int security_validate_request_body(const http_request_t* request, security_context_t* context);

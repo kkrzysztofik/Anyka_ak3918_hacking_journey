@@ -40,6 +40,10 @@
 #define ONVIF_ERROR_RESOURCE_LIMIT  -41
 #define ONVIF_ERROR_DUPLICATE       -42
 
+/* Hash utility error codes */
+#define ONVIF_ERROR_BUFFER_TOO_SMALL -50
+#define ONVIF_ERROR_AUTH_FAILED      -51
+
 /* Validation return codes */
 #define ONVIF_VALIDATION_SUCCESS 1
 #define ONVIF_VALIDATION_FAILED  0

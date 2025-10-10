@@ -227,6 +227,7 @@ TEST_SUITE_REGISTRY_SRCS := \
 UTILS_TEST_SRCS := \
 	src/unit/utils/test_memory_utils.c \
 	src/unit/utils/test_logging_utils.c \
+	src/unit/utils/test_hash_utils.c \
 	src/unit/core/test_config_auth.c
 
 NETWORKING_TEST_SRCS := \
@@ -336,6 +337,8 @@ MAIN_SRCS := \
 	../src/utils/validation/input_validation.c \
 	../src/utils/security/base64_utils.c \
 	../src/utils/security/security_hardening.c \
+	../src/utils/security/sha256.c \
+	../src/utils/security/hash_utils.c \
 	../src/utils/string/string_shims.c \
 	../src/services/common/service_dispatcher.c \
 	../src/services/common/onvif_service_common.c \

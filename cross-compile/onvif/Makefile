@@ -122,6 +122,8 @@ SRCS := \
 	src/utils/validation/audio_validation.c \
 	src/utils/security/security_hardening.c \
 	src/utils/security/base64_utils.c \
+	src/utils/security/sha256.c \
+	src/utils/security/hash_utils.c \
 	src/utils/stream/stream_config_utils.c
 
 OBJS := $(SRCS:src/%.c=$(OUT_DIR)/%.o)
