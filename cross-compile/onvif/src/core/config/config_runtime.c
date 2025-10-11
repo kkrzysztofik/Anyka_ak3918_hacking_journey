@@ -92,7 +92,24 @@ int config_runtime_apply_defaults(void)
         return ONVIF_ERROR_NOT_INITIALIZED;
     }
 
-    /* TODO: Implement default value application from schema */
+    /* Apply default values using existing config system */
+    /* For now, we set reasonable defaults directly */
+    /* TODO: In Phase 4 (Schema-Driven Validation), this will load from schema */
+
+    if (g_config_runtime_app_config->network) {
+        g_config_runtime_app_config->network->rtsp_port = 554;
+        g_config_runtime_app_config->network->snapshot_port = 8080;
+        g_config_runtime_app_config->network->ws_discovery_port = 3702;
+    }
+
+    if (g_config_runtime_app_config->logging) {
+        g_config_runtime_app_config->logging->enabled = 1;
+        g_config_runtime_app_config->logging->min_level = 2;  /* NOTICE */
+    }
+
+    g_config_runtime_app_config->onvif.enabled = 1;
+    g_config_runtime_app_config->onvif.http_port = 8080;
+    g_config_runtime_app_config->onvif.auth_enabled = 0;
 
     g_config_runtime_generation++;
 
@@ -220,6 +237,8 @@ int config_runtime_get_bool(config_section_t section, const char* key, int* out_
  */
 int config_runtime_get_float(config_section_t section, const char* key, float* out_value)
 {
+    config_value_type_t field_type = CONFIG_TYPE_FLOAT;
+
     if (key == NULL || out_value == NULL) {
         return ONVIF_ERROR_INVALID_PARAMETER;
     }
@@ -239,8 +258,22 @@ int config_runtime_get_float(config_section_t section, const char* key, float* o
         return ONVIF_ERROR_NOT_INITIALIZED;
     }
 
-    /* TODO: Implement actual getter logic */
-    *out_value = 0.0f;
+    /* Get pointer to the field */
+    void* field_ptr = config_runtime_get_field_ptr(section, key, &field_type);
+    if (field_ptr == NULL) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_FOUND;
+    }
+
+    /* Type must be int or float */
+    if (field_type == CONFIG_TYPE_INT) {
+        *out_value = (float)(*(int*)field_ptr);
+    } else if (field_type == CONFIG_TYPE_FLOAT) {
+        *out_value = *(float*)field_ptr;
+    } else {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_INVALID;
+    }
 
     pthread_mutex_unlock(&g_config_runtime_mutex);
 
@@ -380,7 +413,8 @@ int config_runtime_set_bool(config_section_t section, const char* key, int value
  */
 int config_runtime_set_float(config_section_t section, const char* key, float value)
 {
-    (void)value;  /* TODO: Use value when implementing setter logic */
+    config_value_type_t field_type = CONFIG_TYPE_FLOAT;
+    void* field_ptr = NULL;
 
     if (key == NULL) {
         return ONVIF_ERROR_INVALID_PARAMETER;
@@ -401,7 +435,23 @@ int config_runtime_set_float(config_section_t section, const char* key, float va
         return ONVIF_ERROR_NOT_INITIALIZED;
     }
 
-    /* TODO: Implement actual setter logic with validation */
+    /* Get pointer to the field */
+    field_ptr = config_runtime_get_field_ptr(section, key, &field_type);
+    if (field_ptr == NULL) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_FOUND;
+    }
+
+    /* Type must be float or int (for conversion) */
+    if (field_type == CONFIG_TYPE_FLOAT) {
+        *(float*)field_ptr = value;
+    } else if (field_type == CONFIG_TYPE_INT) {
+        *(int*)field_ptr = (int)value;
+    } else {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_INVALID;
+    }
+
     g_config_runtime_generation++;
 
     pthread_mutex_unlock(&g_config_runtime_mutex);

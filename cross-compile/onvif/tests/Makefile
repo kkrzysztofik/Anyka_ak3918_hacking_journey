@@ -228,7 +228,9 @@ UTILS_TEST_SRCS := \
 	src/unit/utils/test_memory_utils.c \
 	src/unit/utils/test_logging_utils.c \
 	src/unit/utils/test_hash_utils.c \
-	src/unit/core/test_config_auth.c
+	src/unit/core/test_config_auth.c \
+	src/unit/core/config/test_config_runtime.c \
+	src/unit/core/config/test_config_storage.c
 
 NETWORKING_TEST_SRCS := \
 	src/unit/networking/test_http_auth.c \
@@ -274,7 +276,8 @@ INTEGRATION_TEST_SRCS := \
 	src/integration/media_service_tests.c \
 	src/integration/imaging_service_optimization_test.c \
 	src/integration/device_service_tests.c \
-	src/integration/soap_error_tests.c
+	src/integration/soap_error_tests.c \
+	src/integration/core/config/test_config_integration.c
 
 # All test sources (for legacy runner)
 TEST_SRCS := $(UTILS_TEST_SRCS) $(NETWORKING_TEST_SRCS) $(PROTOCOL_TEST_SRCS) \
@@ -350,7 +353,9 @@ MAIN_SRCS := \
 	../src/platform/adapters/ptz_adapter.c \
 	../src/utils/network/network_utils.c \
 	../src/utils/error/error_handling.c \
-	../src/core/config/config.c
+	../src/core/config/config.c \
+	../src/core/config/config_runtime.c \
+	../src/core/config/config_storage.c
 
 # Object files for each module
 UTILS_TEST_OBJS := $(UTILS_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)

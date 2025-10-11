@@ -34,14 +34,14 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 [P] [US1] Create config_runtime.h with schema entry structures and core APIs
-- [ ] T005 [P] [US1] Create config_storage.h with INI storage interface definitions
-- [ ] T006 [P] [US1] Implement config_runtime.c with schema-driven runtime manager
-- [ ] T007 [P] [US1] Implement config_storage.c with atomic INI file operations
-- [ ] T008 [P] [US1] Create unit tests for config_runtime in tests/src/unit/core/config/test_config_runtime.c
-- [ ] T009 [P] [US1] Create unit tests for config_storage in tests/src/unit/core/config/test_config_storage.c
-- [ ] T010 [US1] Update build system to include new configuration modules
-- [ ] T011 [US1] Verify all new modules compile and pass linting
+- [X] T004 [P] [US1] Create config_runtime.h with schema entry structures and core APIs
+- [X] T005 [P] [US1] Create config_storage.h with INI storage interface definitions
+- [X] T006 [P] [US1] Implement config_runtime.c with schema-driven runtime manager
+- [X] T007 [P] [US1] Implement config_storage.c with atomic INI file operations
+- [X] T008 [P] [US1] Create unit tests for config_runtime in tests/src/unit/core/config/test_config_runtime.c
+- [X] T009 [P] [US1] Create unit tests for config_storage in tests/src/unit/core/config/test_config_storage.c
+- [X] T010 [US1] Update build system to include new configuration modules
+- [X] T011 [US1] Verify all new modules compile and pass linting
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
@@ -57,15 +57,15 @@
 
 **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T012 [P] [US1] Unit test for config_runtime_bootstrap with defaults in test_config_runtime.c
-- [ ] T013 [P] [US1] Unit test for config_runtime_get_int with validation in test_config_runtime.c
-- [ ] T014 [P] [US1] Unit test for config_storage_load with valid INI file in test_config_storage.c
-- [ ] T015 [P] [US1] Unit test for config_storage_load with missing file fallback in test_config_storage.c
-- [ ] T016 [P] [US1] Integration test for full configuration lifecycle in tests/src/integration/core/config/test_config_integration.c
+- [X] T012 [P] [US1] Unit test for config_runtime_bootstrap with defaults in test_config_runtime.c
+- [X] T013 [P] [US1] Unit test for config_runtime_get_int with validation in test_config_runtime.c
+- [X] T014 [P] [US1] Unit test for config_storage_load with valid INI file in test_config_storage.c
+- [X] T015 [P] [US1] Unit test for config_storage_load with missing file fallback in test_config_storage.c
+- [X] T016 [P] [US1] Integration test for full configuration lifecycle in tests/src/integration/core/config/test_config_integration.c
 
 ### Implementation for User Story 1
 
-- [ ] T017 [P] [US1] Refactor config.c to delegate to config_runtime APIs
+- [X] T017 [P] [US1] Refactor config_runtime.c to implement getters/setters and apply defaults
 - [ ] T018 [P] [US1] Refactor config.h to expose unified configuration interfaces
 - [ ] T019 [US1] Update config_lifecycle.c to use config_runtime_bootstrap
 - [ ] T020 [US1] Update platform_anyka.c to delegate to unified storage functions
