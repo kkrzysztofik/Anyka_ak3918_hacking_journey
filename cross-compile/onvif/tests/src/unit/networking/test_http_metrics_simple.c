@@ -32,17 +32,7 @@ typedef struct http_performance_metrics {
 static http_performance_metrics_t g_test_metrics = {0};
 
 // Mock functions for testing
-// NOTE: http_metrics_init() is now provided by the real http_server.c implementation
 
-// NOTE: http_metrics_cleanup() is now provided by the real http_server.c implementation
-
-// NOTE: http_metrics_get_current() is now provided by the real http_server.c implementation
-
-// NOTE: http_metrics_record_request() is now provided by the real http_server.c implementation
-
-// NOTE: http_metrics_update_connections() is now provided by the real http_server.c implementation
-
-/* ==================== Test Setup/Teardown ==================== */
 
 /**
  * @brief Setup function for metrics tests
@@ -64,7 +54,6 @@ int teardown_http_metrics_tests(void** state) {
   return http_metrics_cleanup();
 }
 
-/* ==================== Unit Tests ==================== */
 
 /**
  * @brief Test metrics initialization and cleanup
@@ -184,18 +173,15 @@ void test_unit_http_metrics_realistic_patterns(void** state) {
 // Add stub functions for the missing tests referenced in test_runner.c
 void test_unit_http_metrics_concurrency(void** state) {
   (void)state;
-  // Placeholder - concurrency test implementation pending
   assert_true(1); // Always pass for now
 }
 
 void test_unit_http_metrics_cpu_overhead(void** state) {
   (void)state;
-  // Placeholder - CPU overhead test implementation pending
   assert_true(1); // Always pass for now
 }
 
 void test_unit_http_metrics_retrieval_performance(void** state) {
   (void)state;
-  // Placeholder - retrieval performance test implementation pending
   assert_true(1); // Always pass for now
 }

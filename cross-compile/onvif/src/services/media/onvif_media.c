@@ -744,10 +744,6 @@ int onvif_media_stop_multicast_streaming(const char* profile_token) {
 
 /* Helper Functions */
 
-// TODO: These wrapper functions call deleted XML parsing functions
-// They're used by handlers outside the scope of tasks 21-23
-// Should be migrated to new gSOAP parsing when those handlers are updated
-
 static int parse_profile_token(onvif_gsoap_context_t* gsoap_ctx, char* token, size_t token_size) {
   if (!gsoap_ctx || !token || token_size == 0) {
     return ONVIF_ERROR_INVALID;
@@ -1684,9 +1680,8 @@ int onvif_media_init(config_manager_t* config) {
       .capabilities_handler = NULL,
       .reserved = {NULL, NULL, NULL, NULL}};
 #ifdef UNIT_TESTING
-    int dispatch_result =
-      onvif_service_unit_register(&registration, &g_handler_initialized, onvif_media_cleanup,
-                                  "Media");
+    int dispatch_result = onvif_service_unit_register(&registration, &g_handler_initialized,
+                                                      onvif_media_cleanup, "Media");
     if (dispatch_result != ONVIF_SUCCESS) {
       return dispatch_result;
     }

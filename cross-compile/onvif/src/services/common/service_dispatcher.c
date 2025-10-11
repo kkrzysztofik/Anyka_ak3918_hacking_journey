@@ -340,4 +340,3 @@ int onvif_service_dispatcher_get_services(const char** services, size_t max_serv
   pthread_mutex_unlock(&g_dispatcher_mutex);
   return (int)count;
 }
-// Test comment

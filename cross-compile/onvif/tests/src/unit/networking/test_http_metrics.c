@@ -81,8 +81,6 @@ static int g_test_metrics_initialized = 0;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static pthread_mutex_t g_test_metrics_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* ==================== Test Setup/Teardown ==================== */
-
 /**
  * @brief Setup function for metrics tests
  * @param state Test state (unused)
@@ -125,8 +123,6 @@ static int teardown_http_metrics_tests(void** state) {
   return 0;
 }
 
-/* ==================== Helper Functions ==================== */
-
 /**
  * @brief Get current time in milliseconds
  * @return Current time in milliseconds
@@ -154,8 +150,6 @@ static void simulate_http_request(uint64_t latency_ms, size_t response_size, int
   // Record metrics
   http_metrics_record_request(latency_ms, response_size, status_code);
 }
-
-/* ==================== Unit Tests ==================== */
 
 /**
  * @brief Test metrics initialization and cleanup
@@ -234,8 +228,6 @@ static void test_http_metrics_connection_updates(void** state) {
   assert_int_equal(metrics.current_connections, 1);
 }
 
-/* ==================== Concurrency Tests ==================== */
-
 /**
  * @brief Thread function for concurrent metrics testing
  * @param arg Thread argument (unused)
@@ -294,7 +286,6 @@ static void test_http_metrics_concurrency(void** state) {
   assert_true(metrics_after.total_latency_ms >= metrics_before.total_latency_ms);
 }
 
-/* ==================== Performance Tests ==================== */
 
 /**
  * @brief Test CPU overhead threshold compliance
@@ -350,7 +341,6 @@ static void test_http_metrics_retrieval_performance(void** state) {
   assert_true(total_time_ms < TEST_RETRIEVAL_TIME_MS);
 }
 
-/* ==================== Integration Tests ==================== */
 
 /**
  * @brief Test metrics with realistic HTTP request patterns

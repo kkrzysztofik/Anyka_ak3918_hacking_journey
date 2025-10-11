@@ -199,4 +199,3 @@ const char* onvif_service_type_to_string(onvif_service_type_t service) {
 /**
  * @brief Convert action type to string
  */
-/* onvif_action_type_to_string function removed - using string names directly */

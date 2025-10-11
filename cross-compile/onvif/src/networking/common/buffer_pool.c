@@ -57,7 +57,7 @@ int buffer_pool_init(buffer_pool_t* pool) {
         free(pool->buffers[j]);
         pool->buffers[j] = NULL;
       }
-      // Note: Don't destroy mutex on error - it will be reused or cleaned up later
+      // Don't destroy mutex on error - it will be reused or cleaned up later
       return -1;
     }
     pool->available[i] = 1;
@@ -99,7 +99,7 @@ void buffer_pool_cleanup(buffer_pool_t* pool) {
     }
   }
 
-  // NOTE: Do NOT destroy the mutex to allow reinitialization
+  // Do NOT destroy the mutex to allow reinitialization
   // The mutex will be reused on next init call
   // pthread_mutex_destroy(&pool->mutex);  // Commented out for idempotent init/cleanup
 

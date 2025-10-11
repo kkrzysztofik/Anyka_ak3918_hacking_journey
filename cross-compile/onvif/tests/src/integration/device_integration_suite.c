@@ -34,26 +34,65 @@ void test_integration_device_system_reboot_soap(void** state);
  * @return Array of CMUnitTest structures
  */
 const struct CMUnitTest* get_device_integration_tests(size_t* count) {
+  // Forward declare setup/teardown functions
+  int device_service_setup(void** state);
+  int device_service_teardown(void** state);
+
   static const struct CMUnitTest tests[] = {
+    // Lifecycle tests
     cmocka_unit_test(test_integration_device_init_cleanup_lifecycle),
-    cmocka_unit_test(test_integration_device_get_device_information_fields_validation),
-    cmocka_unit_test(test_integration_device_get_capabilities_specific_category),
-    cmocka_unit_test(test_integration_device_get_capabilities_multiple_categories),
-    cmocka_unit_test(test_integration_device_get_system_date_time_timezone),
-    cmocka_unit_test(test_integration_device_get_system_date_time_dst),
-    cmocka_unit_test(test_integration_device_get_services_namespaces),
-    cmocka_unit_test(test_integration_device_handle_operation_null_params),
-    cmocka_unit_test(test_integration_device_handle_operation_invalid_operation),
+
+    // GetDeviceInformation tests
+    cmocka_unit_test_setup_teardown(
+      test_integration_device_get_device_information_fields_validation, device_service_setup,
+      device_service_teardown),
+
+    // GetCapabilities tests
+    cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_specific_category,
+                                    device_service_setup, device_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_multiple_categories,
+                                    device_service_setup, device_service_teardown),
+
+    // GetSystemDateAndTime tests
+    cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_timezone,
+                                    device_service_setup, device_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_dst,
+                                    device_service_setup, device_service_teardown),
+
+    // GetServices tests
+    cmocka_unit_test_setup_teardown(test_integration_device_get_services_namespaces,
+                                    device_service_setup, device_service_teardown),
+
+    // Error handling tests
+    cmocka_unit_test_setup_teardown(test_integration_device_handle_operation_null_params,
+                                    device_service_setup, device_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_device_handle_operation_invalid_operation,
+                                    device_service_setup, device_service_teardown),
     cmocka_unit_test(test_integration_device_handle_operation_uninitialized),
-    cmocka_unit_test(test_integration_device_concurrent_get_device_information),
-    cmocka_unit_test(test_integration_device_concurrent_get_capabilities),
-    cmocka_unit_test(test_integration_device_concurrent_mixed_operations),
-    cmocka_unit_test(test_integration_device_config_integration),
-    cmocka_unit_test(test_integration_device_get_device_info_soap),
-    cmocka_unit_test(test_integration_device_get_capabilities_soap),
-    cmocka_unit_test(test_integration_device_get_system_date_time_soap),
-    cmocka_unit_test(test_integration_device_get_services_soap),
-    cmocka_unit_test(test_integration_device_system_reboot_soap),
+
+    // Configuration integration test
+    cmocka_unit_test_setup_teardown(test_integration_device_config_integration,
+                                    device_service_setup, device_service_teardown),
+
+    // SOAP integration tests (full HTTP/SOAP layer validation)
+    cmocka_unit_test_setup_teardown(test_integration_device_get_device_info_soap,
+                                    device_service_setup, device_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_soap,
+                                    device_service_setup, device_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_soap,
+                                    device_service_setup, device_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_device_get_services_soap, device_service_setup,
+                                    device_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_device_system_reboot_soap,
+                                    device_service_setup, device_service_teardown),
+
+    // Concurrent operations tests (may hang - placed at end)
+    cmocka_unit_test_setup_teardown(test_integration_device_concurrent_get_device_information,
+                                    device_service_setup, device_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_device_concurrent_get_capabilities,
+                                    device_service_setup, device_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_device_concurrent_mixed_operations,
+                                    device_service_setup, device_service_teardown),
   };
   *count = sizeof(tests) / sizeof(tests[0]);
   return tests;

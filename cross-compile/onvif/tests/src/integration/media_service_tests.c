@@ -101,9 +101,6 @@ int media_service_teardown(void** state) {
   onvif_media_cleanup();
   free(config);
 
-  // Note: Don't cleanup dispatcher - keep it alive for next test
-  // The dispatcher mutex gets destroyed and can't be reinitialized
-
   memory_manager_cleanup();
 
   // Restore mock behavior for subsequent tests
@@ -116,7 +113,7 @@ int media_service_teardown(void** state) {
 
 // Test functions for functionality preservation
 void test_integration_optimized_profile_lookup_performance(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   // Measure performance of optimized profile lookup
   long start_time = test_get_time_microseconds();
@@ -145,7 +142,7 @@ void test_integration_optimized_profile_lookup_performance(void** state) {
 }
 
 void test_integration_uri_caching_optimization(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   struct stream_uri uri1;
   struct stream_uri uri2;
@@ -177,7 +174,7 @@ void test_integration_uri_caching_optimization(void** state) {
 }
 
 void test_integration_media_memory_efficiency(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   size_t initial_memory = memory_manager_get_allocated_size();
 
@@ -210,7 +207,7 @@ void test_integration_media_memory_efficiency(void** state) {
 }
 
 void test_integration_concurrent_stream_uri_access(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   // Test concurrent access patterns (simulate multiple threads)
   struct stream_uri uris[TEST_ITERATIONS_CONCURRENT];
@@ -239,7 +236,7 @@ void test_integration_concurrent_stream_uri_access(void** state) {
 }
 
 void test_integration_stress_test_optimization(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("\nRunning stress test for media service optimization...\n");
 
@@ -292,7 +289,7 @@ void test_integration_stress_test_optimization(void** state) {
 }
 
 void test_integration_media_platform_integration(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   // This test verifies that the media service properly integrates with
   // the platform abstraction layer for real device operations
@@ -459,8 +456,6 @@ void test_integration_media_request_response_validation(void** state) {
  * @brief Test Media GetProfiles operation via SOAP
  */
 void test_integration_media_get_profiles_soap(void** state) {
-  // Note: Media service is already initialized by media_service_setup()
-  // Config is available in state if needed
   (void)state;
 
   // Step 1: Create SOAP request envelope
@@ -513,8 +508,6 @@ void test_integration_media_get_profiles_soap(void** state) {
   if (response.body) {
     ONVIF_FREE(response.body);
   }
-
-  // Note: Media service cleanup handled by media_service_teardown()
 }
 
 /**

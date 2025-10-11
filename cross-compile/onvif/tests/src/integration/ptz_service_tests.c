@@ -198,18 +198,14 @@ int ptz_service_setup(void** state) {
  * Much faster than full teardown/setup cycle.
  */
 int ptz_service_reset(void** state) {
-  (void)state; // Unused
-
-  printf("[DEBUG] ptz_service_reset() called\n");
+  (void)state;
 
   // Reset mock state (lightweight operation)
   platform_ptz_mock_reset();
 
   // CRITICAL: Reset preset state between tests to prevent overflow
   // This ensures each test starts with a clean preset slate
-  printf("[DEBUG] Calling onvif_ptz_reset_presets()\n");
   int reset_result = onvif_ptz_reset_presets();
-  printf("[DEBUG] onvif_ptz_reset_presets() returned: %d\n", reset_result);
 
   // No need to reinitialize - service remains initialized
   return 0;
@@ -239,9 +235,6 @@ int ptz_service_teardown(void** state) {
   onvif_ptz_cleanup();
   ptz_adapter_cleanup();
 
-  // Note: Don't cleanup dispatcher - keep it alive for next test
-  // The dispatcher mutex gets destroyed and can't be reinitialized
-
   platform_ptz_mock_cleanup();
   memory_manager_cleanup();
 
@@ -256,7 +249,7 @@ int ptz_service_teardown(void** state) {
 
 // Test PTZ Absolute Move Functionality
 void test_integration_ptz_relative_move_functionality(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ relative move functionality...\n");
 
@@ -316,7 +309,7 @@ void test_integration_ptz_relative_move_functionality(void** state) {
 
 // Test PTZ Continuous Move Functionality
 void test_integration_ptz_continuous_move_functionality(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ continuous move functionality...\n");
 
@@ -374,7 +367,7 @@ void test_integration_ptz_continuous_move_functionality(void** state) {
 
 // Test PTZ Continuous Move Timeout Cleanup
 void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ continuous move timeout cleanup (deadlock prevention)...\n");
 
@@ -609,7 +602,7 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
 
 // Test PTZ Stop Functionality
 void test_integration_ptz_stop_functionality(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ stop functionality...\n");
 
@@ -661,7 +654,6 @@ void test_integration_ptz_stop_functionality(void** state) {
 
   // Test stop zoom only (should succeed even without zoom support)
   printf("  [TEST CASE] Valid stop zoom only (graceful without zoom support)\n");
-  // Note: zoom-only stop doesn't call platform functions, so no expectations needed
   result = onvif_ptz_stop(TEST_PROFILE_TOKEN, 0, 1);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -675,7 +667,7 @@ void test_integration_ptz_stop_functionality(void** state) {
 
 // Test PTZ Preset Creation
 void test_integration_ptz_preset_memory_optimization(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ preset memory optimization...\n");
 
@@ -720,10 +712,9 @@ void test_integration_ptz_preset_memory_optimization(void** state) {
 
 // Test PTZ Memory Usage Improvements
 void test_integration_ptz_memory_usage_improvements(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ memory usage improvements...\n");
-
 
   // Test buffer pool usage for string operations
   // This would require access to internal buffer pool statistics
@@ -763,10 +754,9 @@ void test_integration_ptz_memory_usage_improvements(void** state) {
 
 // Test PTZ Buffer Pool Usage
 void test_integration_ptz_buffer_pool_usage(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ buffer pool usage...\n");
-
 
   // Test that buffer pool is properly used for temporary operations
   // This is validated by ensuring operations complete successfully
@@ -807,10 +797,9 @@ void test_integration_ptz_buffer_pool_usage(void** state) {
 
 // Test PTZ String Operations Optimization
 void test_integration_ptz_string_operations_optimization(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ string operations optimization...\n");
-
 
   // Test with various string lengths to verify bounds checking
   printf("  [TEST CASE] Long preset name (bounds checking)\n");
@@ -854,10 +843,9 @@ void test_integration_ptz_string_operations_optimization(void** state) {
 
 // Test PTZ Error Handling Robustness
 void test_integration_ptz_error_handling_robustness(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ error handling robustness...\n");
-
 
   // Test with extreme values
   printf("  [TEST CASE] Extreme position values (clamping test)\n");
@@ -915,10 +903,9 @@ void test_integration_ptz_error_handling_robustness(void** state) {
 
 // Test PTZ Concurrent Operations
 void test_integration_ptz_concurrent_operations(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ concurrent operations...\n");
-
 
   // This test would require threading support
   // For now, we test sequential operations that simulate concurrent access
@@ -971,10 +958,9 @@ void test_integration_ptz_concurrent_operations(void** state) {
 
 // Test PTZ Stress Testing
 void test_integration_ptz_stress_testing(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ stress testing...\n");
-
 
   // Perform many operations in sequence to stress test the system
   printf("  [TEST CASE] Stress test with %d iterations\n", TEST_STRESS_ITERATIONS);
@@ -1010,10 +996,9 @@ void test_integration_ptz_stress_testing(void** state) {
 
 // Test PTZ Memory Leak Detection
 void test_integration_ptz_memory_leak_detection(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   printf("Testing PTZ memory leak detection...\n");
-
 
   // Perform operations that should not leak memory
   // This test relies on the memory manager's leak detection
@@ -1064,8 +1049,6 @@ void test_integration_ptz_memory_leak_detection(void** state) {
 void test_integration_ptz_get_nodes_soap(void** state) {
   (void)state;
 
-  // Note: PTZ service should be initialized by test suite setup, but in case
-  // it was cleaned up by a previous test, we'll initialize it here
   // PTZ init is idempotent, so calling it multiple times is safe
 
   // Setup mock expectations for platform config calls during real gSOAP initialization
@@ -1121,8 +1104,6 @@ void test_integration_ptz_get_nodes_soap(void** state) {
   if (response.body) {
     ONVIF_FREE(response.body);
   }
-
-  // Note: PTZ service cleanup handled by test suite teardown
 }
 
 /**
@@ -1268,7 +1249,6 @@ void test_integration_ptz_set_preset_soap(void** state) {
   assert_non_null(preset_response);
 
   // Step 7: Validate response data - token field exists
-  // Note: SetPresetResponse contains token field, no validation needed here
 
   // Step 8: Cleanup
   onvif_gsoap_cleanup(&ctx);

@@ -18,7 +18,6 @@
 #include "utils/error/error_handling.h"
 #include "utils/test_gsoap_utils.h"
 
-
 /* ============================================================================
  * Memory Allocation Edge Cases
  * ============================================================================ */
@@ -740,7 +739,3 @@ void test_unit_gsoap_edge_rapid_state_transitions(void** state) {
     onvif_gsoap_cleanup(&ctx);
   }
 }
-
-/* ============================================================================
- * Test functions are registered in test_gsoap_edge_suite.c
- * ============================================================================ */

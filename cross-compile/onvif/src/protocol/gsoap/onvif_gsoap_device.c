@@ -86,8 +86,7 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
   capabilities_callback_data_t* data = (capabilities_callback_data_t*)user_data;
 
   /* Create response structure */
-  struct _tds__GetCapabilitiesResponse* response =
-    soap_new__tds__GetCapabilitiesResponse(soap, 1);
+  struct _tds__GetCapabilitiesResponse* response = soap_new__tds__GetCapabilitiesResponse(soap, 1);
   if (!response) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
@@ -101,6 +100,21 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     if (!response->Capabilities) {
       return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
+    /* Properly initialize the structure with default values */
+    soap_default_tt__Capabilities(soap, response->Capabilities);
+
+    /* Create minimal valid AnalyticsCapabilities to prevent segfaults */
+    response->Capabilities->Analytics = soap_new_tt__AnalyticsCapabilities(soap, 1);
+    if (response->Capabilities->Analytics) {
+      response->Capabilities->Analytics->XAddr =
+        soap_strdup(soap, "http://localhost:8080/onvif/analytics_service");
+      response->Capabilities->Analytics->RuleSupport = xsd__boolean__false_;
+      response->Capabilities->Analytics->AnalyticsModuleSupport = xsd__boolean__false_;
+    }
+  }
+
+  /* Only create default capabilities if we created a new structure */
+  if (!data->capabilities) {
 
     /* Build service URLs using configured device IP and port */
     char device_xaddr[256];
@@ -108,10 +122,10 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     char ptz_xaddr[256];
     snprintf(device_xaddr, sizeof(device_xaddr), "http://%s:%d/onvif/device_service",
              data->device_ip, data->http_port);
-    snprintf(media_xaddr, sizeof(media_xaddr), "http://%s:%d/onvif/media_service",
-             data->device_ip, data->http_port);
-    snprintf(ptz_xaddr, sizeof(ptz_xaddr), "http://%s:%d/onvif/ptz_service",
-             data->device_ip, data->http_port);
+    snprintf(media_xaddr, sizeof(media_xaddr), "http://%s:%d/onvif/media_service", data->device_ip,
+             data->http_port);
+    snprintf(ptz_xaddr, sizeof(ptz_xaddr), "http://%s:%d/onvif/ptz_service", data->device_ip,
+             data->http_port);
 
     /* Create device capabilities */
     response->Capabilities->Device = soap_new_tt__DeviceCapabilities(soap, 1);
@@ -242,8 +256,8 @@ int services_response_callback(struct soap* soap, void* user_data) {
 
   /* Build device service URL using configured device IP and port */
   char device_service_xaddr[256];
-  snprintf(device_service_xaddr, sizeof(device_service_xaddr),
-           "http://%s:%d/onvif/device_service", data->device_ip, data->http_port);
+  snprintf(device_service_xaddr, sizeof(device_service_xaddr), "http://%s:%d/onvif/device_service",
+           data->device_ip, data->http_port);
 
   /* Set device service information */
   response->Service[0].Namespace = soap_strdup(soap, "http://www.onvif.org/ver10/device/wsdl");
@@ -331,7 +345,8 @@ int onvif_gsoap_parse_get_device_information(onvif_gsoap_context_t* ctx,
   }
 
   /* 4. Parse the actual GetDeviceInformation structure */
-  struct _tds__GetDeviceInformation* result_ptr = soap_get__tds__GetDeviceInformation(&ctx->soap, *out, NULL, NULL);
+  struct _tds__GetDeviceInformation* result_ptr =
+    soap_get__tds__GetDeviceInformation(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
@@ -381,7 +396,8 @@ int onvif_gsoap_parse_get_capabilities(onvif_gsoap_context_t* ctx,
   }
 
   /* 4. Parse the actual GetCapabilities structure */
-  struct _tds__GetCapabilities* result_ptr = soap_get__tds__GetCapabilities(&ctx->soap, *out, NULL, NULL);
+  struct _tds__GetCapabilities* result_ptr =
+    soap_get__tds__GetCapabilities(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
@@ -431,7 +447,8 @@ int onvif_gsoap_parse_get_system_date_and_time(onvif_gsoap_context_t* ctx,
   }
 
   /* 4. Parse the actual GetSystemDateAndTime structure */
-  struct _tds__GetSystemDateAndTime* result_ptr = soap_get__tds__GetSystemDateAndTime(&ctx->soap, *out, NULL, NULL);
+  struct _tds__GetSystemDateAndTime* result_ptr =
+    soap_get__tds__GetSystemDateAndTime(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
@@ -556,16 +573,12 @@ int onvif_gsoap_generate_device_info_response(onvif_gsoap_context_t* ctx, const 
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Generates Device service GetCapabilities response containing service capabilities
  */
-int onvif_gsoap_generate_capabilities_response(onvif_gsoap_context_t* ctx, 
-                                                const struct tt__Capabilities* capabilities,
-                                                const char* device_ip,
-                                                int http_port) {
+int onvif_gsoap_generate_capabilities_response(onvif_gsoap_context_t* ctx,
+                                               const struct tt__Capabilities* capabilities,
+                                               const char* device_ip, int http_port) {
   /* Prepare callback data */
   capabilities_callback_data_t callback_data = {
-    .capabilities = capabilities,
-    .http_port = http_port,
-    .device_ip = {0}
-  };
+    .capabilities = capabilities, .http_port = http_port, .device_ip = {0}};
 
   /* Copy device IP into the callback data structure */
   strncpy(callback_data.device_ip, device_ip ? device_ip : "", sizeof(callback_data.device_ip) - 1);
@@ -585,7 +598,7 @@ int onvif_gsoap_generate_capabilities_response(onvif_gsoap_context_t* ctx,
  * @note If utc_time is NULL, uses current system time
  */
 int onvif_gsoap_generate_system_date_time_response(onvif_gsoap_context_t* ctx,
-                                                     const struct tm* utc_time) {
+                                                   const struct tm* utc_time) {
   /* Prepare callback data */
   system_datetime_callback_data_t callback_data = {.tm_info = {0}};
 
@@ -618,13 +631,10 @@ int onvif_gsoap_generate_system_date_time_response(onvif_gsoap_context_t* ctx,
  * @note Generates Device service GetServices response containing available services
  */
 int onvif_gsoap_generate_services_response(onvif_gsoap_context_t* ctx, int include_capability,
-                                            const char* device_ip, int http_port) {
+                                           const char* device_ip, int http_port) {
   /* Prepare callback data */
   services_callback_data_t callback_data = {
-    .include_capability = include_capability,
-    .http_port = http_port,
-    .device_ip = {0}
-  };
+    .include_capability = include_capability, .http_port = http_port, .device_ip = {0}};
 
   /* Copy device IP into the callback data structure */
   strncpy(callback_data.device_ip, device_ip ? device_ip : "", sizeof(callback_data.device_ip) - 1);

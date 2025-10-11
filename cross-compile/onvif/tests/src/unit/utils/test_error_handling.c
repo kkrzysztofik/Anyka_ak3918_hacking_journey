@@ -337,7 +337,6 @@ static void test_error_macros(void** state) {
     assert_fail(); /* Should not reach here */                                                     \
   } while (0)
 
-  // Note: Actual macro testing would require more complex setup
   // For now, just verify the error codes are properly defined
   assert_true(ONVIF_SUCCESS == 0);
   assert_true(ONVIF_ERROR_INVALID < 0);

@@ -28,6 +28,10 @@
 // SOAP test helpers
 #include "common/soap_test_helpers.h"
 #include "data/soap_test_envelopes.h"
+
+// Test mocks
+#include "mocks/platform_mock.h"
+#include "mocks/smart_response_mock.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
 
 // Test mocks
@@ -67,6 +71,7 @@ int device_service_setup(void** state) {
   service_dispatcher_mock_use_real_function(true);
   buffer_pool_mock_use_real_function(true);
   gsoap_mock_use_real_function(true);
+  smart_response_mock_use_real_function(true);
 
   // Initialize service dispatcher
   int result = onvif_service_dispatcher_init();
@@ -102,9 +107,6 @@ int device_service_teardown(void** state) {
 
   // Cleanup Device service (this unregisters from dispatcher)
   onvif_device_cleanup();
-
-  // Note: Don't cleanup dispatcher - keep it alive for next test
-  // The dispatcher mutex gets destroyed and can't be reinitialized
 
   memory_manager_cleanup();
 
@@ -151,8 +153,6 @@ void test_integration_device_init_cleanup_lifecycle(void** state) {
 
   free(config);
 
-  // Note: Don't cleanup dispatcher - keep it alive for next tests
-
   memory_manager_cleanup();
 }
 
@@ -161,6 +161,12 @@ void test_integration_device_init_cleanup_lifecycle(void** state) {
  */
 void test_integration_device_get_device_information_fields_validation(void** state) {
   (void)state;
+
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
 
   http_request_t request;
   memset(&request, 0, sizeof(http_request_t));
@@ -194,6 +200,12 @@ void test_integration_device_get_device_information_fields_validation(void** sta
 void test_integration_device_get_capabilities_specific_category(void** state) {
   (void)state;
 
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
+
   http_request_t request;
   memset(&request, 0, sizeof(http_request_t));
 
@@ -220,6 +232,12 @@ void test_integration_device_get_capabilities_specific_category(void** state) {
  */
 void test_integration_device_get_capabilities_multiple_categories(void** state) {
   (void)state;
+
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
 
   http_request_t request;
   memset(&request, 0, sizeof(http_request_t));
@@ -250,6 +268,12 @@ void test_integration_device_get_capabilities_multiple_categories(void** state) 
 void test_integration_device_get_system_date_time_timezone(void** state) {
   (void)state;
 
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
+
   http_request_t request;
   memset(&request, 0, sizeof(http_request_t));
 
@@ -278,6 +302,12 @@ void test_integration_device_get_system_date_time_timezone(void** state) {
 void test_integration_device_get_system_date_time_dst(void** state) {
   (void)state;
 
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
+
   http_request_t request;
   memset(&request, 0, sizeof(http_request_t));
 
@@ -305,6 +335,12 @@ void test_integration_device_get_system_date_time_dst(void** state) {
  */
 void test_integration_device_get_services_namespaces(void** state) {
   (void)state;
+
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
 
   http_request_t request;
   memset(&request, 0, sizeof(http_request_t));
@@ -435,6 +471,15 @@ void test_integration_device_concurrent_get_device_information(void** state) {
   pthread_t threads[TEST_CONCURRENT_OPS];
   int i;
 
+  // Configure platform configuration mock expectations for ALL thread gSOAP initializations
+  // Each thread will call onvif_device_handle_operation which initializes gSOAP
+  for (i = 0; i < TEST_CONCURRENT_OPS; i++) {
+    expect_string(__wrap_platform_config_get_int, section, "logging");
+    expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+    expect_function_call(__wrap_platform_config_get_int);
+    will_return(__wrap_platform_config_get_int, 0);
+  }
+
   // Launch concurrent operations
   for (i = 0; i < TEST_CONCURRENT_OPS; i++) {
     int result = pthread_create(&threads[i], NULL, concurrent_get_device_information_thread, NULL);
@@ -488,6 +533,15 @@ void test_integration_device_concurrent_get_capabilities(void** state) {
   pthread_t threads[TEST_CONCURRENT_OPS];
   int i;
 
+  // Configure platform configuration mock expectations for ALL thread gSOAP initializations
+  // Each thread will call onvif_device_handle_operation which initializes gSOAP
+  for (i = 0; i < TEST_CONCURRENT_OPS; i++) {
+    expect_string(__wrap_platform_config_get_int, section, "logging");
+    expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+    expect_function_call(__wrap_platform_config_get_int);
+    will_return(__wrap_platform_config_get_int, 0);
+  }
+
   // Launch concurrent operations
   for (i = 0; i < TEST_CONCURRENT_OPS; i++) {
     int result = pthread_create(&threads[i], NULL, concurrent_get_capabilities_thread, NULL);
@@ -511,8 +565,6 @@ void test_integration_device_concurrent_get_capabilities(void** state) {
 static void* concurrent_mixed_operations_thread(void* arg) {
   int operation_index = *(int*)arg;
 
-  printf("[DEBUG] Thread %d: Starting\n", operation_index);
-
   http_request_t request;
   memset(&request, 0, sizeof(http_request_t));
 
@@ -526,20 +578,13 @@ static void* concurrent_mixed_operations_thread(void* arg) {
 
   const char* operation = operations[operation_index % 4];
 
-  printf("[DEBUG] Thread %d: Executing operation '%s'\n", operation_index, operation);
-
   // Execute operation
   int result = onvif_device_handle_operation(operation, &request, &response);
 
-  printf("[DEBUG] Thread %d: Operation completed with result %d\n", operation_index, result);
-
   // Free the response body allocated by the service
   if (response.body) {
-    printf("[DEBUG] Thread %d: Freeing response body\n", operation_index);
     ONVIF_FREE(response.body);
   }
-
-  printf("[DEBUG] Thread %d: Completed successfully\n", operation_index);
 
   int* thread_result = malloc(sizeof(int));
   *thread_result = result;
@@ -553,38 +598,36 @@ static void* concurrent_mixed_operations_thread(void* arg) {
 void test_integration_device_concurrent_mixed_operations(void** state) {
   (void)state;
 
-  printf("[DEBUG] Test: Starting concurrent mixed operations test with %d threads\n", TEST_CONCURRENT_OPS);
-
   pthread_t threads[TEST_CONCURRENT_OPS];
   int thread_args[TEST_CONCURRENT_OPS];
   int i;
 
+  // Configure platform configuration mock expectations for ALL thread gSOAP initializations
+  // Each thread will call onvif_device_handle_operation which initializes gSOAP
+  for (i = 0; i < TEST_CONCURRENT_OPS; i++) {
+    expect_string(__wrap_platform_config_get_int, section, "logging");
+    expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+    expect_function_call(__wrap_platform_config_get_int);
+    will_return(__wrap_platform_config_get_int, 0);
+  }
+
   // Launch concurrent mixed operations
-  printf("[DEBUG] Test: Launching %d threads...\n", TEST_CONCURRENT_OPS);
   for (i = 0; i < TEST_CONCURRENT_OPS; i++) {
     thread_args[i] = i;
     int result =
       pthread_create(&threads[i], NULL, concurrent_mixed_operations_thread, &thread_args[i]);
     assert_int_equal(0, result);
-    printf("[DEBUG] Test: Thread %d created successfully\n", i);
   }
-
-  printf("[DEBUG] Test: All threads launched, waiting for completion...\n");
 
   // Wait for all threads and verify results
   for (i = 0; i < TEST_CONCURRENT_OPS; i++) {
-    printf("[DEBUG] Test: Waiting for thread %d to complete...\n", i);
     void* thread_return;
     pthread_join(threads[i], &thread_return);
 
-    printf("[DEBUG] Test: Thread %d joined, checking result...\n", i);
     int* result = (int*)thread_return;
     assert_int_equal(ONVIF_SUCCESS, *result);
     free(result);
-    printf("[DEBUG] Test: Thread %d result verified successfully\n", i);
   }
-
-  printf("[DEBUG] Test: All threads completed successfully\n");
 }
 
 /**
@@ -607,6 +650,12 @@ void test_integration_device_config_integration(void** state) {
  */
 void test_integration_device_get_device_info_soap(void** state) {
   (void)state;
+
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
 
   // Step 1: Create SOAP request envelope
   http_request_t* request = soap_test_create_request(
@@ -649,10 +698,21 @@ void test_integration_device_get_device_info_soap(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(device_info_response);
 
-  // Step 8: Validate response data
+  // Step 8: Validate response data - check for correct field values
   assert_non_null(device_info_response->Manufacturer);
+  assert_string_equal(device_info_response->Manufacturer, "Anyka");
+
   assert_non_null(device_info_response->Model);
+  assert_string_equal(device_info_response->Model, "AK3918 Camera");
+
   assert_non_null(device_info_response->FirmwareVersion);
+  assert_string_equal(device_info_response->FirmwareVersion, "1.0.0");
+
+  assert_non_null(device_info_response->SerialNumber);
+  assert_string_equal(device_info_response->SerialNumber, "AK3918-001");
+
+  assert_non_null(device_info_response->HardwareId);
+  assert_string_equal(device_info_response->HardwareId, "1.0");
 
   // Step 9: Cleanup resources
   soap_test_cleanup_response_parsing(&ctx);
@@ -660,7 +720,7 @@ void test_integration_device_get_device_info_soap(void** state) {
   soap_test_free_request(request);
 
   // Always free response body - it was allocated by the service handler
-  assert_non_null(response.body);  // Ensure we have something to free
+  assert_non_null(response.body); // Ensure we have something to free
   ONVIF_FREE(response.body);
   response.body = NULL;
 }
@@ -670,6 +730,12 @@ void test_integration_device_get_device_info_soap(void** state) {
  */
 void test_integration_device_get_capabilities_soap(void** state) {
   (void)state;
+
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
 
   // Step 1: Create SOAP request envelope
   http_request_t* request = soap_test_create_request(
@@ -706,6 +772,22 @@ void test_integration_device_get_capabilities_soap(void** state) {
   // Step 7: Validate response data - capabilities should be present
   assert_non_null(caps_response->Capabilities);
 
+  // Validate Device capabilities
+  assert_non_null(caps_response->Capabilities->Device);
+  assert_non_null(caps_response->Capabilities->Device->XAddr);
+
+  // Validate Media capabilities (should be present based on dev_caps)
+  assert_non_null(caps_response->Capabilities->Media);
+  assert_non_null(caps_response->Capabilities->Media->XAddr);
+
+  // Validate PTZ capabilities (should be present based on dev_caps)
+  assert_non_null(caps_response->Capabilities->PTZ);
+  assert_non_null(caps_response->Capabilities->PTZ->XAddr);
+
+  // Validate Imaging capabilities (should be present based on dev_caps)
+  assert_non_null(caps_response->Capabilities->Imaging);
+  assert_non_null(caps_response->Capabilities->Imaging->XAddr);
+
   // Step 8: Cleanup
   onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
@@ -719,6 +801,12 @@ void test_integration_device_get_capabilities_soap(void** state) {
  */
 void test_integration_device_get_system_date_time_soap(void** state) {
   (void)state;
+
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
 
   // Step 1: Create SOAP request envelope
   http_request_t* request = soap_test_create_request(
@@ -752,8 +840,23 @@ void test_integration_device_get_system_date_time_soap(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(datetime_response);
 
-  // Step 7: Validate response data - SystemDateAndTime should be present
+  // Step 7: Validate response data - SystemDateAndTime should be present with valid fields
   assert_non_null(datetime_response->SystemDateAndTime);
+  assert_non_null(datetime_response->SystemDateAndTime->DateTimeType);
+
+  // Validate UTCDateTime is present
+  assert_non_null(datetime_response->SystemDateAndTime->UTCDateTime);
+  assert_non_null(datetime_response->SystemDateAndTime->UTCDateTime->Time);
+  assert_non_null(datetime_response->SystemDateAndTime->UTCDateTime->Date);
+
+  // Validate LocalDateTime is present
+  assert_non_null(datetime_response->SystemDateAndTime->LocalDateTime);
+  assert_non_null(datetime_response->SystemDateAndTime->LocalDateTime->Time);
+  assert_non_null(datetime_response->SystemDateAndTime->LocalDateTime->Date);
+
+  // Validate TimeZone is present
+  assert_non_null(datetime_response->SystemDateAndTime->TimeZone);
+  assert_non_null(datetime_response->SystemDateAndTime->TimeZone->TZ);
 
   // Step 8: Cleanup
   onvif_gsoap_cleanup(&ctx);
@@ -768,6 +871,12 @@ void test_integration_device_get_system_date_time_soap(void** state) {
  */
 void test_integration_device_get_services_soap(void** state) {
   (void)state;
+
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
 
   // Step 1: Create SOAP request envelope (using DEVICE_GET_CAPABILITIES as placeholder)
   http_request_t* request =
@@ -801,8 +910,22 @@ void test_integration_device_get_services_soap(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(services_response);
 
-  // Step 7: Validate response data - services array should exist
-  assert_true(services_response->__sizeService >= 0);
+  // Step 7: Validate response data - services array should exist with services
+  assert_true(services_response->__sizeService > 0);
+  assert_non_null(services_response->Service);
+
+  // Validate that at least the Device service is present
+  int found_device = 0;
+  for (int i = 0; i < services_response->__sizeService; i++) {
+    assert_non_null(services_response->Service[i].Namespace);
+    assert_non_null(services_response->Service[i].XAddr);
+    assert_non_null(services_response->Service[i].Version);
+
+    if (strstr(services_response->Service[i].Namespace, "device/wsdl")) {
+      found_device = 1;
+    }
+  }
+  assert_true(found_device);
 
   // Step 8: Cleanup
   onvif_gsoap_cleanup(&ctx);
@@ -817,6 +940,12 @@ void test_integration_device_get_services_soap(void** state) {
  */
 void test_integration_device_system_reboot_soap(void** state) {
   (void)state;
+
+  // Configure platform configuration mock expectations for gSOAP verbosity lookup
+  expect_string(__wrap_platform_config_get_int, section, "logging");
+  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
+  expect_function_call(__wrap_platform_config_get_int);
+  will_return(__wrap_platform_config_get_int, 0);
 
   // Step 1: Create SOAP request envelope
   http_request_t* request =
@@ -850,8 +979,14 @@ void test_integration_device_system_reboot_soap(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(reboot_response);
 
-  // Step 7: Validate response data - Message should be present
+  // Step 7: Validate response data - Message should be present and non-empty
   assert_non_null(reboot_response->Message);
+  assert_true(strlen(reboot_response->Message) > 0);
+
+  // Validate the message contains expected content
+  assert_true(strstr(reboot_response->Message, "Rebooting") != NULL ||
+              strstr(reboot_response->Message, "reboot") != NULL ||
+              strstr(reboot_response->Message, "System") != NULL);
 
   // Step 8: Cleanup
   onvif_gsoap_cleanup(&ctx);

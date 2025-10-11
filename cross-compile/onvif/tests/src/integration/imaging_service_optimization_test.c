@@ -159,9 +159,6 @@ int teardown_imaging_integration(void** state) {
   // Cleanup real imaging service (this unregisters from dispatcher)
   onvif_imaging_cleanup();
 
-  // Note: Don't cleanup dispatcher - keep it alive for next test
-  // The dispatcher mutex gets destroyed and can't be reinitialized
-
   // Cleanup memory manager
   memory_manager_cleanup();
 
@@ -192,7 +189,6 @@ void test_integration_imaging_bulk_settings_validation(void** state) {
     .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
 
   // First call - should validate and apply all parameters
-  // Note: This test now uses real platform functions instead of mocks
   int result = onvif_imaging_set_settings(&settings);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -455,7 +451,6 @@ void test_integration_imaging_performance_regression(void** state) {
 void test_integration_imaging_get_settings_soap(void** state) {
   (void)state;
 
-  // Note: Imaging service is already initialized by setup_imaging_integration()
   // Platform mock, service dispatcher, and imaging service are ready
 
   // Configure platform configuration mock expectations for gSOAP verbosity lookup
@@ -509,8 +504,6 @@ void test_integration_imaging_get_settings_soap(void** state) {
   if (response.body) {
     ONVIF_FREE(response.body);
   }
-
-  // Note: Imaging service cleanup handled by teardown_imaging_integration()
 }
 
 /**

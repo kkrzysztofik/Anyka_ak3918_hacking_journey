@@ -37,38 +37,25 @@ void setup_http_verbose_mock(void) {
  */
 int setup_parsing_test(onvif_gsoap_context_t* ctx, const char* soap_request) {
   if (!ctx || !soap_request) {
-    printf("DEBUG: setup_parsing_test: Invalid parameters - ctx=%p, soap_request=%p\n", ctx,
-           soap_request);
     return ONVIF_ERROR_INVALID;
   }
-
-  printf("DEBUG: setup_parsing_test: Starting setup with SOAP request length: %zu\n",
-         strlen(soap_request));
 
   // Mock platform_config_get_int call for http_verbose check
   setup_http_verbose_mock();
 
   // Initialize context
-  printf("DEBUG: setup_parsing_test: Calling onvif_gsoap_init\n");
   int result = onvif_gsoap_init(ctx);
   if (result != ONVIF_SUCCESS) {
-    printf("DEBUG: setup_parsing_test: onvif_gsoap_init failed with result: %d\n", result);
     return result;
   }
-  printf("DEBUG: setup_parsing_test: onvif_gsoap_init succeeded\n");
 
   // Initialize request parsing
-  printf("DEBUG: setup_parsing_test: Calling onvif_gsoap_init_request_parsing\n");
   result = onvif_gsoap_init_request_parsing(ctx, soap_request, strlen(soap_request));
   if (result != ONVIF_SUCCESS) {
-    printf("DEBUG: setup_parsing_test: onvif_gsoap_init_request_parsing failed with result: %d\n",
-           result);
     onvif_gsoap_cleanup(ctx);
     return result;
   }
-  printf("DEBUG: setup_parsing_test: onvif_gsoap_init_request_parsing succeeded\n");
 
-  printf("DEBUG: setup_parsing_test: Setup completed successfully\n");
   return ONVIF_SUCCESS;
 }
 

@@ -552,16 +552,12 @@ int onvif_imaging_init(void* vi_handle) {
   // Initialize default imaging settings using helper function
   init_default_imaging_settings(&g_imaging_settings);
 
-  // Note: Imaging settings are now managed through the centralized config
-  // system The centralized config will be passed to the service initialization
   platform_log_notice("Imaging service initialized with default settings\n");
 
   // Initialize auto day/night configuration using helper function
   init_default_auto_config(&g_imaging_auto_config);
 
   // Load auto configuration
-  // Note: Auto configuration is now managed through the centralized config
-  // system
 
   // Initialize IR LED driver via HAL
   if (platform_irled_init(g_imaging_auto_config.ir_led_level) != 0) {
@@ -833,7 +829,6 @@ int onvif_imaging_set_auto_config(const struct auto_daynight_config* config) {
   g_imaging_settings.daynight = *config;
 
   // Save auto configuration section
-  // Note: Configuration saving is now handled by the centralized config system
   platform_log_notice("Auto day/night configuration updated\n");
 
   pthread_mutex_unlock(&g_imaging_mutex);

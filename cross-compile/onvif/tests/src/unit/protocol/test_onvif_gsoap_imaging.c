@@ -18,23 +18,6 @@
 #include "utils/error/error_handling.h"
 #include "utils/test_gsoap_utils.h"
 
-/* ============================================================================
- * Test Suite Setup/Teardown
- * ============================================================================ */
-
-// Setup/teardown functions are defined in test_onvif_gsoap_core.c
-// and shared across all gSOAP test modules
-
-/* ============================================================================
- * Helper Functions
- * ============================================================================ */
-
-// setup_parsing_test is now defined in test_gsoap_utils.c and shared across all test files
-
-/* ============================================================================
- * Imaging Service Parsing Tests
- * ============================================================================ */
-
 /**
  * @brief Test parsing GetImagingSettings request
  * @param state Test state (unused)
@@ -96,7 +79,3 @@ void test_unit_onvif_gsoap_parse_set_imaging_settings(void** state) {
   // Cleanup
   onvif_gsoap_cleanup(&ctx);
 }
-
-/* ============================================================================
- * Test functions are registered in test_protocol_runner.c
- * ============================================================================ */

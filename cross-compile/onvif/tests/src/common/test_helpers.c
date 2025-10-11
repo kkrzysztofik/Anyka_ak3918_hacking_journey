@@ -735,7 +735,7 @@ void test_helper_service_dispatch_success(void** state, const service_test_confi
   // Test dispatch through service dispatcher
   result = onvif_service_dispatcher_dispatch(config->service_name, operation, request, response);
 
-  // Note: This will likely return an error due to missing gSOAP context
+  // This will likely return an error due to missing gSOAP context
   // but we're testing the dispatch mechanism
   assert_true(result == ONVIF_SUCCESS || result == ONVIF_ERROR);
 
@@ -879,7 +879,7 @@ void test_helper_operation_handler_success(void** state, const service_test_conf
   // Test operation handler directly
   result = onvif_ptz_handle_operation(operation, request, response);
 
-  // Note: This will likely return an error due to missing gSOAP context
+  // This will likely return an error due to missing gSOAP context
   // but we're testing the handler mechanism
   assert_true(result == ONVIF_SUCCESS || result == ONVIF_ERROR);
 }
@@ -1136,6 +1136,3 @@ size_t test_helper_get_memory_usage(void) {
 /* ============================================================================
  * Generic Mock Framework Helpers
  * ============================================================================ */
-
-// NOTE: Generic mock framework helpers have been removed as part of CMocka migration.
-// These functions are no longer needed with CMocka's built-in mocking patterns.

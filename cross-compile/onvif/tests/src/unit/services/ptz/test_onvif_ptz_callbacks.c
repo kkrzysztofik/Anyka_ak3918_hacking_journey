@@ -19,8 +19,8 @@
 // Mock includes
 #include "../../../mocks/platform_mock.h"
 #include "../../../mocks/platform_ptz_mock.h"
-#include "platform/adapters/ptz_adapter.h"
 #include "../../../utils/test_gsoap_utils.h"
+#include "platform/adapters/ptz_adapter.h"
 
 /* ============================================================================
  * Test Configuration
@@ -158,7 +158,7 @@ void test_unit_ptz_service_registration_invalid_params(void** state) {
 void test_unit_ptz_service_registration_dispatcher_failure(void** state) {
   (void)state;
 
-  // Note: This test is difficult to implement with real dispatcher
+  // This test is difficult to implement with real dispatcher
   // because we'd need to register 16 dummy services to fill it up.
   // Since the real dispatcher is working correctly, we'll test that
   // PTZ service can register successfully (proves dispatcher has space)
@@ -237,7 +237,7 @@ void test_unit_ptz_operation_handler_success(void** state) {
   int registered = onvif_service_dispatcher_is_registered(TEST_PTZ_SERVICE_NAME);
   assert_int_equal(registered, 1);
 
-  // Note: Testing the actual operation handler would require proper gSOAP
+  // Testing the actual operation handler would require proper gSOAP
   // context setup which is complex. This test verifies the service is
   // registered and ready to handle operations. The operation handler
   // itself is tested in integration tests with proper gSOAP setup.
@@ -335,7 +335,7 @@ void test_unit_ptz_service_unregistration_failure_handling(void** state) {
   onvif_ptz_cleanup();
   onvif_ptz_cleanup();
 
-  // Note: After cleanup, teardown will also call dispatcher cleanup
+  // After cleanup, teardown will also call dispatcher cleanup
   // which will try to cleanup again - this tests idempotency
 }
 
@@ -360,7 +360,7 @@ void test_unit_ptz_service_callback_logging_failure(void** state) {
   int registered = onvif_service_dispatcher_is_registered(TEST_PTZ_SERVICE_NAME);
   assert_int_equal(registered, 1);
 
-  // Note: Actual logging verification would require log capture
+  // Actual logging verification would require log capture
   // This test verifies successful initialization path and logging exists
 }
 

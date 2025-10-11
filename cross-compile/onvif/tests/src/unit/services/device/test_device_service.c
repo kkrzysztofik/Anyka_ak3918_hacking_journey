@@ -67,7 +67,8 @@ void test_unit_device_system_reboot_success(void** state) {
   will_return(__wrap_platform_system, 0); // Success
 
   int result = onvif_device_system_reboot();
-  assert_int_equal(ONVIF_SUCCESS, result);}
+  assert_int_equal(ONVIF_SUCCESS, result);
+}
 
 /**
  * @brief Test system reboot failure
@@ -81,7 +82,8 @@ void test_unit_device_system_reboot_failure(void** state) {
   will_return(__wrap_platform_system, -1); // Failure
 
   int result = onvif_device_system_reboot();
-  assert_int_equal(ONVIF_ERROR, result);}
+  assert_int_equal(ONVIF_ERROR, result);
+}
 
 /* ============================================================================
  * Device Service Initialization Tests
@@ -116,7 +118,8 @@ void test_unit_device_init_success(void** state) {
   int result = onvif_device_init(g_test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  g_device_service_initialized = 1;}
+  g_device_service_initialized = 1;
+}
 
 /**
  * @brief Test device initialization with NULL config
@@ -126,7 +129,8 @@ void test_unit_device_init_null_config(void** state) {
   (void)state;
 
   int result = onvif_device_init(NULL);
-  assert_int_equal(ONVIF_ERROR_INVALID, result);}
+  assert_int_equal(ONVIF_ERROR_INVALID, result);
+}
 
 /**
  * @brief Test device initialization when already initialized
@@ -149,7 +153,8 @@ void test_unit_device_init_already_initialized(void** state) {
 
   // Second initialization should return success without reinitializing
   result = onvif_device_init(g_test_config);
-  assert_int_equal(ONVIF_SUCCESS, result);}
+  assert_int_equal(ONVIF_SUCCESS, result);
+}
 
 /**
  * @brief Test device initialization with gSOAP failure
@@ -163,7 +168,8 @@ void test_unit_device_init_gsoap_failure(void** state) {
   will_return(__wrap_onvif_gsoap_init, ONVIF_ERROR);
 
   int result = onvif_device_init(g_test_config);
-  assert_int_equal(ONVIF_ERROR, result);}
+  assert_int_equal(ONVIF_ERROR, result);
+}
 
 /**
  * @brief Test device initialization with buffer pool failure
@@ -181,7 +187,8 @@ void test_unit_device_init_buffer_pool_failure(void** state) {
   will_return(__wrap_buffer_pool_init, -1); // Failure
 
   int result = onvif_device_init(g_test_config);
-  assert_int_equal(ONVIF_ERROR, result);}
+  assert_int_equal(ONVIF_ERROR, result);
+}
 
 /* ============================================================================
  * Device Service Cleanup Tests
@@ -215,7 +222,8 @@ void test_unit_device_cleanup_success(void** state) {
 
   // Now test cleanup (void return - best effort)
   onvif_device_cleanup();
-  g_device_service_initialized = 0;}
+  g_device_service_initialized = 0;
+}
 
 /**
  * @brief Test device cleanup when not initialized
@@ -255,7 +263,8 @@ void test_unit_device_cleanup_unregister_failure(void** state) {
 
   // Test cleanup with unregister failure (void return - best effort, always succeeds)
   onvif_device_cleanup();
-  g_device_service_initialized = 0;}
+  g_device_service_initialized = 0;
+}
 
 /* ============================================================================
  * Device Operation Handler Tests
@@ -291,16 +300,16 @@ void test_unit_device_handle_operation_get_device_information(void** state) {
   expect_function_call(__wrap_onvif_gsoap_generate_response_with_callback);
   will_return(__wrap_onvif_gsoap_generate_response_with_callback, 0);
   expect_function_call(__wrap_onvif_gsoap_get_response_data);
-  will_return(__wrap_onvif_gsoap_get_response_data, 
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
-  
+  will_return(__wrap_onvif_gsoap_get_response_data,
+              "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
 
   // Create test request and response
   http_request_t request = {0};
   http_response_t response = {0};
 
   result = onvif_device_handle_operation("GetDeviceInformation", &request, &response);
-  assert_int_equal(ONVIF_SUCCESS, result);}
+  assert_int_equal(ONVIF_SUCCESS, result);
+}
 
 /**
  * @brief Test GetCapabilities operation
@@ -331,16 +340,16 @@ void test_unit_device_handle_operation_get_capabilities(void** state) {
   expect_function_call(__wrap_onvif_gsoap_generate_response_with_callback);
   will_return(__wrap_onvif_gsoap_generate_response_with_callback, 0);
   expect_function_call(__wrap_onvif_gsoap_get_response_data);
-  will_return(__wrap_onvif_gsoap_get_response_data, 
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
-  
+  will_return(__wrap_onvif_gsoap_get_response_data,
+              "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
 
   // Create test request and response
   http_request_t request = {0};
   http_response_t response = {0};
 
   result = onvif_device_handle_operation("GetCapabilities", &request, &response);
-  assert_int_equal(ONVIF_SUCCESS, result);}
+  assert_int_equal(ONVIF_SUCCESS, result);
+}
 
 /**
  * @brief Test GetSystemDateAndTime operation
@@ -371,16 +380,16 @@ void test_unit_device_handle_operation_get_system_date_time(void** state) {
   expect_function_call(__wrap_onvif_gsoap_generate_response_with_callback);
   will_return(__wrap_onvif_gsoap_generate_response_with_callback, 0);
   expect_function_call(__wrap_onvif_gsoap_get_response_data);
-  will_return(__wrap_onvif_gsoap_get_response_data, 
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
-  
+  will_return(__wrap_onvif_gsoap_get_response_data,
+              "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
 
   // Create test request and response
   http_request_t request = {0};
   http_response_t response = {0};
 
   result = onvif_device_handle_operation("GetSystemDateAndTime", &request, &response);
-  assert_int_equal(ONVIF_SUCCESS, result);}
+  assert_int_equal(ONVIF_SUCCESS, result);
+}
 
 /**
  * @brief Test GetServices operation
@@ -411,16 +420,16 @@ void test_unit_device_handle_operation_get_services(void** state) {
   expect_function_call(__wrap_onvif_gsoap_generate_response_with_callback);
   will_return(__wrap_onvif_gsoap_generate_response_with_callback, 0);
   expect_function_call(__wrap_onvif_gsoap_get_response_data);
-  will_return(__wrap_onvif_gsoap_get_response_data, 
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
-  
+  will_return(__wrap_onvif_gsoap_get_response_data,
+              "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
 
   // Create test request and response
   http_request_t request = {0};
   http_response_t response = {0};
 
   result = onvif_device_handle_operation("GetServices", &request, &response);
-  assert_int_equal(ONVIF_SUCCESS, result);}
+  assert_int_equal(ONVIF_SUCCESS, result);
+}
 
 /**
  * @brief Test SystemReboot operation
@@ -453,16 +462,17 @@ void test_unit_device_handle_operation_system_reboot(void** state) {
   expect_function_call(__wrap_onvif_gsoap_generate_response_with_callback);
   will_return(__wrap_onvif_gsoap_generate_response_with_callback, 0);
   expect_function_call(__wrap_onvif_gsoap_get_response_data);
-  will_return(__wrap_onvif_gsoap_get_response_data, 
+  will_return(
+    __wrap_onvif_gsoap_get_response_data,
     "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>"); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
-  
 
   // Create test request and response
   http_request_t request = {0};
   http_response_t response = {0};
 
   result = onvif_device_handle_operation("SystemReboot", &request, &response);
-  assert_int_equal(ONVIF_SUCCESS, result);}
+  assert_int_equal(ONVIF_SUCCESS, result);
+}
 
 /**
  * @brief Test unknown operation
@@ -494,7 +504,8 @@ void test_unit_device_handle_operation_unknown_operation(void** state) {
   http_response_t response = {0};
 
   result = onvif_device_handle_operation("UnknownOperation", &request, &response);
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);}
+  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
+}
 
 /**
  * @brief Test operation handler with NULL operation name
@@ -628,7 +639,7 @@ void test_unit_device_capabilities_handler_success(void** state) {
                                       "GetSystemDateAndTime", "GetServices", "SystemReboot"};
 
   for (size_t i = 0; i < sizeof(known_capabilities) / sizeof(known_capabilities[0]); i++) {
-    // Note: This would need to be implemented as a public function or tested through
+    // This would need to be implemented as a public function or tested through
     // the service registration mechanism
     // For now, we'll test the logic conceptually
     assert_string_not_equal(known_capabilities[i], NULL);
@@ -693,7 +704,8 @@ void test_unit_device_service_registration_success(void** state) {
 
   int result = onvif_device_init(g_test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
-  g_device_service_initialized = 1;}
+  g_device_service_initialized = 1;
+}
 
 /**
  * @brief Test device service registration with duplicate
@@ -717,7 +729,8 @@ void test_unit_device_service_registration_duplicate(void** state) {
   will_return(__wrap_buffer_pool_cleanup, 0);
 
   int result = onvif_device_init(g_test_config);
-  assert_int_equal(ONVIF_ERROR_DUPLICATE, result);}
+  assert_int_equal(ONVIF_ERROR_DUPLICATE, result);
+}
 
 /**
  * @brief Test device service registration with invalid parameters
@@ -728,7 +741,8 @@ void test_unit_device_service_registration_invalid_params(void** state) {
 
   // Test with NULL config
   int result = onvif_device_init(NULL);
-  assert_int_equal(ONVIF_ERROR_INVALID, result);}
+  assert_int_equal(ONVIF_ERROR_INVALID, result);
+}
 
 /**
  * @brief Test device service unregistration success
@@ -757,7 +771,8 @@ void test_unit_device_service_unregistration_success(void** state) {
 
   // Test unregistration (void return)
   onvif_device_cleanup();
-  g_device_service_initialized = 0;}
+  g_device_service_initialized = 0;
+}
 
 /**
  * @brief Test device service unregistration when not found
@@ -786,7 +801,8 @@ void test_unit_device_service_unregistration_not_found(void** state) {
 
   // Test unregistration with not found error (void return - best effort)
   onvif_device_cleanup();
-  g_device_service_initialized = 0;}
+  g_device_service_initialized = 0;
+}
 
 /* ============================================================================
  * Device Business Logic Tests
@@ -799,17 +815,17 @@ void test_unit_device_service_unregistration_not_found(void** state) {
  */
 // void test_unit_device_business_logic_get_device_information(void** state) {
 //   (void)state;
-// 
+//
 //   // This would test the business logic functions directly
 //   // For now, we test the configuration retrieval logic
-// 
+//
 //   // Test configuration retrieval
 //   char manufacturer[TEST_OPERATION_NAME_LEN] = {0};
 //   int result = config_get_string(g_test_config, "device", "manufacturer", manufacturer,
 //                                       sizeof(manufacturer), "Default");
 //   assert_int_equal(0, result);
 //   assert_string_equal(TEST_DEVICE_MANUFACTURER, manufacturer);
-// 
+//
 //   char model[TEST_OPERATION_NAME_LEN] = {0};
 //   result =
 //     config_get_string(g_test_config, "device", "model", model, sizeof(model), "Default");
@@ -847,7 +863,8 @@ void test_unit_device_business_logic_get_system_date_time(void** state) {
   assert_true(now != (time_t)-1);
 
   struct tm* tm_info = localtime(&now);
-  assert_non_null(tm_info);  assert_true(tm_info->tm_year + 1900 >= 2025);
+  assert_non_null(tm_info);
+  assert_true(tm_info->tm_year + 1900 >= 2025);
 }
 
 /**
@@ -951,7 +968,8 @@ void test_unit_device_memory_management(void** state) {
   g_device_service_initialized = 1;
   // Cleanup (void return)
   onvif_device_cleanup();
-  g_device_service_initialized = 0;}
+  g_device_service_initialized = 0;
+}
 
 /**
  * @brief Test device service configuration handling
@@ -959,22 +977,22 @@ void test_unit_device_memory_management(void** state) {
  */
 // void test_unit_device_configuration_handling(void** state) {
 //   (void)state;
-// 
+//
 //   // Test configuration retrieval
 //   char value[TEST_OPERATION_NAME_LEN] = {0};
-// 
+//
 //   // Test string configuration
 //   int result = config_get_string(g_test_config, "device", "manufacturer", value, sizeof(value),
 //                                       "Default");
 //   assert_int_equal(0, result);
 //   assert_string_equal(TEST_DEVICE_MANUFACTURER, value);
-// 
+//
 //   // Test integer configuration
 //   int int_value = 0;
 //   result = config_get_int(g_test_config, "onvif", "http_port", &int_value, TEST_HTTP_PORT);
 //   assert_int_equal(0, result);
 //   assert_int_equal(TEST_HTTP_PORT, int_value);
-// 
+//
 //   // Test fallback values
 //   char fallback_value[TEST_OPERATION_NAME_LEN] = {0};
 //   result = config_get_string(g_test_config, "nonexistent", "section", fallback_value,

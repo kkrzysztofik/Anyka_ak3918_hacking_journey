@@ -51,32 +51,17 @@ static void wait_for_turn_stop_mask(unsigned int expected_mask, int timeout_ms) 
 static int ptz_adapter_test_setup(void** state) {
   (void)state;
 
-  printf("DEBUG: setup starting\n");
-  fflush(stdout);
-
   // Initialize memory manager
   memory_manager_init();
-
-  printf("DEBUG: memory_manager_init done\n");
-  fflush(stdout);
 
   // Initialize platform mocks
   platform_ptz_mock_init();
 
-  printf("DEBUG: platform_ptz_mock_init done\n");
-  fflush(stdout);
-
   // Use REAL PTZ adapter functions (we're testing the adapter, not mocking it)
   ptz_adapter_mock_use_real_function(true);
 
-  printf("DEBUG: ptz_adapter_mock_use_real_function done\n");
-  fflush(stdout);
-
-  // Note: Platform PTZ functions remain mocked (they call unavailable hardware APIs)
+  // Platform PTZ functions remain mocked (they call unavailable hardware APIs)
   // Each test must set up platform mock expectations (will_return, expect_function_call, etc.)
-
-  printf("DEBUG: setup complete\n");
-  fflush(stdout);
 
   return 0;
 }
@@ -111,15 +96,12 @@ static int ptz_adapter_test_teardown(void** state) {
 void test_unit_ptz_adapter_init_success(void** state) {
   (void)state;
 
-  printf("DEBUG: test_unit_ptz_adapter_init_success starting\n");
-  fflush(stdout);
-
   // Mock platform_ptz_init (called by adapter init)
   expect_function_call(__wrap_platform_ptz_init);
   will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
 
   // Mock platform_ptz_move_to_position (called by adapter init to reset to center)
-  // Note: Adapter calls with (0, 0) for pan/tilt, mock expects pan/tilt/zoom
+  // Adapter calls with (0, 0) for pan/tilt, mock expects pan/tilt/zoom
   expect_function_call(__wrap_platform_ptz_move_to_position);
   expect_value(__wrap_platform_ptz_move_to_position, pan_deg, 0);
   expect_value(__wrap_platform_ptz_move_to_position, tilt_deg, 0);

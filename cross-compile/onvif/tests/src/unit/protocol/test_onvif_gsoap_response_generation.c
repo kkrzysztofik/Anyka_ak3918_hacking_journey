@@ -86,11 +86,9 @@ static void test_unit_onvif_gsoap_generate_device_info_response_success(void** s
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char response_buffer[2048];
 
-  // Test basic context validation
   assert_non_null(ctx);
   assert_int_equal(ctx->error_context.last_error_code, ONVIF_SUCCESS);
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_device_info_response(
     ctx, mock_device_info_valid.manufacturer, mock_device_info_valid.model,
     mock_device_info_valid.firmware_version, mock_device_info_valid.serial_number,
@@ -117,14 +115,12 @@ static void test_unit_onvif_gsoap_generate_device_info_response_success(void** s
   result = soap_test_parse_get_device_info_response(&parse_ctx, &response);
   assert_int_equal(result, ONVIF_SUCCESS);
 
-  // Field-by-field comparison with test data
   assert_string_equal(response->Manufacturer, mock_device_info_valid.manufacturer);
   assert_string_equal(response->Model, mock_device_info_valid.model);
   assert_string_equal(response->FirmwareVersion, mock_device_info_valid.firmware_version);
   assert_string_equal(response->SerialNumber, mock_device_info_valid.serial_number);
   assert_string_equal(response->HardwareId, mock_device_info_valid.hardware_id);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -132,9 +128,8 @@ static void test_unit_onvif_gsoap_generate_device_info_response_success(void** s
  * @brief Test device info response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_device_info_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_device_info_response(
     NULL, mock_device_info_valid.manufacturer, mock_device_info_valid.model,
     mock_device_info_valid.firmware_version, mock_device_info_valid.serial_number,
@@ -149,7 +144,6 @@ static void test_unit_onvif_gsoap_generate_device_info_response_null_context(voi
 static void test_unit_onvif_gsoap_generate_device_info_response_null_params(void** state) {
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
 
-  // Test with NULL manufacturer - the function should handle NULL gracefully
   int result = onvif_gsoap_generate_device_info_response(
     ctx, NULL, mock_device_info_valid.model, mock_device_info_valid.firmware_version,
     mock_device_info_valid.serial_number, mock_device_info_valid.hardware_id);
@@ -199,7 +193,6 @@ static void test_unit_onvif_gsoap_generate_device_info_response_empty_params(voi
   assert_string_equal(response->SerialNumber, mock_device_info_empty.serial_number);
   assert_string_equal(response->HardwareId, mock_device_info_empty.hardware_id);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -211,7 +204,6 @@ static void test_unit_onvif_gsoap_generate_system_reboot_response_success(void**
   char response_buffer[2048];
   const char* test_message = "System will reboot in 5 seconds";
 
-  // Test basic context validation
   assert_non_null(ctx);
   assert_int_equal(ctx->error_context.last_error_code, ONVIF_SUCCESS);
 
@@ -243,11 +235,9 @@ static void test_unit_onvif_gsoap_generate_system_reboot_response_success(void**
   result = soap_test_parse_system_reboot_response(&parse_ctx, &response);
   assert_int_equal(result, ONVIF_SUCCESS);
 
-  // Field-by-field comparison with test data
   assert_non_null(response->Message);
   assert_string_equal(response->Message, test_message);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -255,13 +245,12 @@ static void test_unit_onvif_gsoap_generate_system_reboot_response_success(void**
  * @brief Test system reboot response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_system_reboot_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
   const char* test_message = "System will reboot";
 
   // Prepare callback data
   system_reboot_callback_data_t callback_data = {.message = test_message};
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_response_with_callback(NULL, system_reboot_response_callback,
                                                            &callback_data);
 
@@ -274,7 +263,6 @@ static void test_unit_onvif_gsoap_generate_system_reboot_response_null_context(v
 static void test_unit_onvif_gsoap_generate_system_reboot_response_null_params(void** state) {
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
 
-  // Test with NULL message (NULL user_data) - callback should handle gracefully
   system_reboot_callback_data_t callback_data = {.message = NULL};
 
   int result = onvif_gsoap_generate_response_with_callback(ctx, system_reboot_response_callback,
@@ -293,11 +281,9 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_success(void** 
   const char* test_device_ip = "192.168.1.100";
   const int test_http_port = 80;
 
-  // Test basic context validation
   assert_non_null(ctx);
   assert_int_equal(ctx->error_context.last_error_code, ONVIF_SUCCESS);
 
-  // Test successful response generation using real functions with NULL capabilities (default)
   int result =
     onvif_gsoap_generate_capabilities_response(ctx, NULL, test_device_ip, test_http_port);
 
@@ -343,7 +329,6 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_success(void** 
   assert_string_equal(response->Capabilities->PTZ->XAddr,
                       "http://192.168.1.100:80/onvif/ptz_service");
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -351,11 +336,10 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_success(void** 
  * @brief Test GetCapabilities response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_capabilities_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
   const char* test_device_ip = "192.168.1.100";
   const int test_http_port = 80;
 
-  // Test with NULL context
   int result =
     onvif_gsoap_generate_capabilities_response(NULL, NULL, test_device_ip, test_http_port);
 
@@ -369,7 +353,6 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_null_params(voi
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   const int test_http_port = 80;
 
-  // Test with NULL device_ip - the function should handle NULL gracefully
   int result = onvif_gsoap_generate_capabilities_response(ctx, NULL, NULL, test_http_port);
 
   // The function should succeed even with NULL device_ip (it converts it to empty string)
@@ -451,7 +434,6 @@ static void test_unit_onvif_gsoap_generate_system_date_time_response_success(voi
   test_time.tm_min = 30;
   test_time.tm_sec = 45;
 
-  // Test successful response generation
   int result = onvif_gsoap_generate_system_date_time_response(ctx, &test_time);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -506,14 +488,13 @@ static void test_unit_onvif_gsoap_generate_system_date_time_response_success(voi
  * @brief Test GetSystemDateAndTime response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_system_date_time_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   struct tm test_time = {0};
   test_time.tm_year = 2025 - 1900;
   test_time.tm_mon = 0;
   test_time.tm_mday = 15;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_system_date_time_response(NULL, &test_time);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
@@ -525,7 +506,6 @@ static void test_unit_onvif_gsoap_generate_system_date_time_response_null_time(v
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char response_buffer[4096];
 
-  // Test with NULL time - should use current system time
   int result = onvif_gsoap_generate_system_date_time_response(ctx, NULL);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -573,7 +553,6 @@ static void test_unit_onvif_gsoap_generate_services_response_success(void** stat
   const int test_http_port = 80;
   const int include_capability = 0;
 
-  // Test successful response generation
   int result =
     onvif_gsoap_generate_services_response(ctx, include_capability, test_device_ip, test_http_port);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -620,12 +599,11 @@ static void test_unit_onvif_gsoap_generate_services_response_success(void** stat
  * @brief Test GetServices response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_services_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
   const char* test_device_ip = "192.168.1.100";
   const int test_http_port = 80;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_services_response(NULL, 0, test_device_ip, test_http_port);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
@@ -637,7 +615,6 @@ static void test_unit_onvif_gsoap_generate_services_response_null_params(void** 
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   const int test_http_port = 80;
 
-  // Test with NULL device_ip - should handle gracefully with empty string
   int result = onvif_gsoap_generate_services_response(ctx, 0, NULL, test_http_port);
 
   // Should succeed with empty device_ip
@@ -682,7 +659,6 @@ static void test_unit_onvif_gsoap_generate_profiles_response_success(void** stat
   test_profile.video_encoder.bitrate_limit = 2000000;
   test_profile.video_encoder.gov_length = 30;
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_profiles_response(ctx, &test_profile, 1);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -710,7 +686,6 @@ static void test_unit_onvif_gsoap_generate_profiles_response_success(void** stat
   assert_int_equal(response->__sizeProfiles, 1);
   assert_non_null(response->Profiles);
 
-  // Field-by-field comparison with test profile
   assert_string_equal(response->Profiles[0].token, test_profile.token);
   assert_string_equal(response->Profiles[0].Name, test_profile.name);
   assert_non_null(response->Profiles[0].fixed);
@@ -727,7 +702,7 @@ static void test_unit_onvif_gsoap_generate_profiles_response_success(void** stat
 
   // Validate video encoder configuration
   assert_non_null(response->Profiles[0].VideoEncoderConfiguration);
-  // Note: Encoding is an enum in gSOAP, skip string comparison
+  // Encoding is an enum in gSOAP, skip string comparison
   assert_int_equal(response->Profiles[0].VideoEncoderConfiguration->Resolution->Width,
                    test_profile.video_encoder.resolution.width);
   assert_int_equal(response->Profiles[0].VideoEncoderConfiguration->Resolution->Height,
@@ -735,7 +710,6 @@ static void test_unit_onvif_gsoap_generate_profiles_response_success(void** stat
   assert_float_equal(response->Profiles[0].VideoEncoderConfiguration->Quality,
                      test_profile.video_encoder.quality, 0.01f);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -743,9 +717,8 @@ static void test_unit_onvif_gsoap_generate_profiles_response_success(void** stat
  * @brief Test profiles response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_profiles_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_profiles_response(NULL, mock_profiles, mock_profile_count);
 
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -765,7 +738,6 @@ static void test_unit_onvif_gsoap_generate_stream_uri_response_success(void** st
   test_uri.invalid_after_connect = 0;
   test_uri.invalid_after_reboot = 0;
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_stream_uri_response(ctx, &test_uri);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -789,7 +761,6 @@ static void test_unit_onvif_gsoap_generate_stream_uri_response_success(void** st
   result = soap_test_parse_get_stream_uri_response(&parse_ctx, &response);
   assert_int_equal(result, ONVIF_SUCCESS);
 
-  // Field-by-field comparison with test URI
   assert_non_null(response->MediaUri);
   assert_string_equal(response->MediaUri->Uri, test_uri.uri);
   assert_int_equal(response->MediaUri->InvalidAfterConnect, test_uri.invalid_after_connect);
@@ -800,7 +771,6 @@ static void test_unit_onvif_gsoap_generate_stream_uri_response_success(void** st
   assert_non_null(strstr(response->MediaUri->Timeout, "PT"));
   assert_non_null(strstr(response->MediaUri->Timeout, "S"));
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -808,9 +778,8 @@ static void test_unit_onvif_gsoap_generate_stream_uri_response_success(void** st
  * @brief Test stream URI response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_stream_uri_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_stream_uri_response(NULL, &mock_stream_uri_valid);
 
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -829,7 +798,6 @@ static void test_unit_onvif_gsoap_generate_create_profile_response_success(void*
   strncpy(test_profile.name, "New Test Profile", sizeof(test_profile.name) - 1);
   test_profile.fixed = 0;
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_create_profile_response(ctx, &test_profile);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -853,14 +821,12 @@ static void test_unit_onvif_gsoap_generate_create_profile_response_success(void*
   result = soap_test_parse_create_profile_response(&parse_ctx, &response);
   assert_int_equal(result, ONVIF_SUCCESS);
 
-  // Field-by-field comparison with test profile
   assert_non_null(response->Profile);
   assert_string_equal(response->Profile->token, test_profile.token);
   assert_string_equal(response->Profile->Name, test_profile.name);
   assert_non_null(response->Profile->fixed);
   assert_int_equal(*response->Profile->fixed, test_profile.fixed);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -868,9 +834,8 @@ static void test_unit_onvif_gsoap_generate_create_profile_response_success(void*
  * @brief Test create profile response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_create_profile_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_create_profile_response(NULL, &mock_profiles[0]);
 
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -884,7 +849,6 @@ static void test_unit_onvif_gsoap_generate_set_video_source_configuration_respon
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char response_buffer[2048];
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_set_video_source_configuration_response(ctx);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -911,7 +875,6 @@ static void test_unit_onvif_gsoap_generate_set_video_source_configuration_respon
   // This is an empty response (no data fields), just validate it parsed successfully
   assert_non_null(response);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -920,9 +883,8 @@ static void test_unit_onvif_gsoap_generate_set_video_source_configuration_respon
  */
 static void test_unit_onvif_gsoap_generate_set_video_source_configuration_response_null_context(
   void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_set_video_source_configuration_response(NULL);
 
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -936,7 +898,6 @@ static void test_unit_onvif_gsoap_generate_set_video_encoder_configuration_respo
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char response_buffer[2048];
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_set_video_encoder_configuration_response(ctx);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -963,7 +924,6 @@ static void test_unit_onvif_gsoap_generate_set_video_encoder_configuration_respo
   // This is an empty response (no data fields), just validate it parsed successfully
   assert_non_null(response);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -972,9 +932,8 @@ static void test_unit_onvif_gsoap_generate_set_video_encoder_configuration_respo
  */
 static void test_unit_onvif_gsoap_generate_set_video_encoder_configuration_response_null_context(
   void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_set_video_encoder_configuration_response(NULL);
 
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -988,7 +947,6 @@ static void test_unit_onvif_gsoap_generate_start_multicast_streaming_response_su
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char response_buffer[2048];
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_start_multicast_streaming_response(ctx);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -1015,7 +973,6 @@ static void test_unit_onvif_gsoap_generate_start_multicast_streaming_response_su
   // This is an empty response (no data fields), just validate it parsed successfully
   assert_non_null(response);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -1024,9 +981,8 @@ static void test_unit_onvif_gsoap_generate_start_multicast_streaming_response_su
  */
 static void test_unit_onvif_gsoap_generate_start_multicast_streaming_response_null_context(
   void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_start_multicast_streaming_response(NULL);
 
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -1039,7 +995,6 @@ static void test_unit_onvif_gsoap_generate_stop_multicast_streaming_response_suc
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char response_buffer[2048];
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_stop_multicast_streaming_response(ctx);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -1066,7 +1021,6 @@ static void test_unit_onvif_gsoap_generate_stop_multicast_streaming_response_suc
   // This is an empty response (no data fields), just validate it parsed successfully
   assert_non_null(response);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -1075,9 +1029,8 @@ static void test_unit_onvif_gsoap_generate_stop_multicast_streaming_response_suc
  */
 static void test_unit_onvif_gsoap_generate_stop_multicast_streaming_response_null_context(
   void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_stop_multicast_streaming_response(NULL);
 
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -1104,7 +1057,6 @@ static void test_unit_onvif_gsoap_generate_get_metadata_configurations_response_
   test_config.multicast.ttl = 1;
   test_config.multicast.auto_start = 0;
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_get_metadata_configurations_response(ctx, &test_config, 1);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -1132,7 +1084,6 @@ static void test_unit_onvif_gsoap_generate_get_metadata_configurations_response_
   assert_int_equal(response->__sizeConfigurations, 1);
   assert_non_null(response->Configurations);
 
-  // Field-by-field comparison with test configuration
   assert_string_equal(response->Configurations[0].token, test_config.token);
   assert_string_equal(response->Configurations[0].Name, test_config.name);
   assert_int_equal(response->Configurations[0].UseCount, test_config.use_count);
@@ -1140,7 +1091,6 @@ static void test_unit_onvif_gsoap_generate_get_metadata_configurations_response_
   assert_non_null(response->Configurations[0].SessionTimeout);
   assert_string_equal(response->Configurations[0].SessionTimeout, "PT60S");
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -1149,9 +1099,8 @@ static void test_unit_onvif_gsoap_generate_get_metadata_configurations_response_
  */
 static void test_unit_onvif_gsoap_generate_get_metadata_configurations_response_null_context(
   void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   struct metadata_configuration test_config = {0};
   int result = onvif_gsoap_generate_get_metadata_configurations_response(NULL, &test_config, 1);
 
@@ -1166,7 +1115,6 @@ static void test_unit_onvif_gsoap_generate_set_metadata_configuration_response_s
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char response_buffer[2048];
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_set_metadata_configuration_response(ctx);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -1193,7 +1141,6 @@ static void test_unit_onvif_gsoap_generate_set_metadata_configuration_response_s
   // This is an empty response (no data fields), just validate it parsed successfully
   assert_non_null(response);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -1202,9 +1149,8 @@ static void test_unit_onvif_gsoap_generate_set_metadata_configuration_response_s
  */
 static void test_unit_onvif_gsoap_generate_set_metadata_configuration_response_null_context(
   void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_set_metadata_configuration_response(NULL);
 
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -1217,7 +1163,6 @@ static void test_unit_onvif_gsoap_generate_delete_profile_response_success(void*
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char response_buffer[2048];
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_delete_profile_response(ctx);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -1244,7 +1189,6 @@ static void test_unit_onvif_gsoap_generate_delete_profile_response_success(void*
   // This is an empty response (no data fields), just validate it parsed successfully
   assert_non_null(response);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -1252,9 +1196,8 @@ static void test_unit_onvif_gsoap_generate_delete_profile_response_success(void*
  * @brief Test delete profile response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_delete_profile_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_delete_profile_response(NULL);
 
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -1271,7 +1214,6 @@ static void test_unit_onvif_gsoap_generate_absolute_move_response_success(void**
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char response_buffer[2048];
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_absolute_move_response(ctx);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -1298,7 +1240,6 @@ static void test_unit_onvif_gsoap_generate_absolute_move_response_success(void**
   // This is an empty response (no data fields), just validate it parsed successfully
   assert_non_null(response);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -1306,9 +1247,8 @@ static void test_unit_onvif_gsoap_generate_absolute_move_response_success(void**
  * @brief Test absolute move response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_absolute_move_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_absolute_move_response(NULL);
 
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -1321,7 +1261,6 @@ static void test_unit_onvif_gsoap_generate_goto_preset_response_success(void** s
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char response_buffer[2048];
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_goto_preset_response(ctx);
 
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -1348,7 +1287,6 @@ static void test_unit_onvif_gsoap_generate_goto_preset_response_success(void** s
   // This is an empty response (no data fields), just validate it parsed successfully
   assert_non_null(response);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -1356,9 +1294,8 @@ static void test_unit_onvif_gsoap_generate_goto_preset_response_success(void** s
  * @brief Test goto preset response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_goto_preset_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
 
-  // Test with NULL context
   int result = onvif_gsoap_generate_goto_preset_response(NULL);
 
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -1375,7 +1312,6 @@ static void test_unit_onvif_gsoap_generate_fault_response_success(void** state) 
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char output_buffer[2048];
 
-  // Test successful response generation using real functions
   int result = onvif_gsoap_generate_fault_response(
     ctx, mock_fault_invalid_parameter.fault_code, mock_fault_invalid_parameter.fault_string,
     "test_actor", mock_fault_invalid_parameter.fault_detail, output_buffer, sizeof(output_buffer));
@@ -1413,7 +1349,6 @@ static void test_unit_onvif_gsoap_generate_fault_response_success(void** state) 
       strstr(fault->SOAP_ENV__Detail->__any, mock_fault_invalid_parameter.fault_detail));
   }
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -1421,10 +1356,9 @@ static void test_unit_onvif_gsoap_generate_fault_response_success(void** state) 
  * @brief Test fault response generation with NULL context
  */
 static void test_unit_onvif_gsoap_generate_fault_response_null_context(void** state) {
-  (void)state; // Unused parameter
+  (void)state;
   char output_buffer[2048];
 
-  // Test with NULL context - should still work with temporary context
   setup_http_verbose_mock(); // NULL context creates temp ctx which calls onvif_gsoap_init
   int result = onvif_gsoap_generate_fault_response(
     NULL, mock_fault_invalid_parameter.fault_code, mock_fault_invalid_parameter.fault_string,
@@ -1458,7 +1392,6 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_context(void** st
   assert_string_equal(fault->SOAP_ENV__Reason->SOAP_ENV__Text,
                       mock_fault_invalid_parameter.fault_string);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -1469,7 +1402,6 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_fault_code(void**
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char output_buffer[2048];
 
-  // Test with NULL fault code - should use default
   int result = onvif_gsoap_generate_fault_response(
     ctx, NULL, mock_fault_invalid_parameter.fault_string, "test_actor",
     mock_fault_invalid_parameter.fault_detail, output_buffer, sizeof(output_buffer));
@@ -1497,7 +1429,6 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_fault_code(void**
   assert_non_null(fault->SOAP_ENV__Reason);
   assert_non_null(fault->SOAP_ENV__Reason->SOAP_ENV__Text);
 
-  // Cleanup
   onvif_gsoap_cleanup(&parse_ctx);
 }
 
@@ -1508,7 +1439,6 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_fault_string(void
   onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
   char output_buffer[1024];
 
-  // Test with NULL fault string
   int result = onvif_gsoap_generate_fault_response(
     ctx, mock_fault_invalid_parameter.fault_code, NULL, "test_actor",
     mock_fault_invalid_parameter.fault_detail, output_buffer, sizeof(output_buffer));
@@ -1570,7 +1500,7 @@ static void test_unit_onvif_gsoap_generate_device_info_response_large_strings(vo
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Verify large string was not truncated
-  // Note: gSOAP may have internal limits on string sizes
+  // gSOAP may have internal limits on string sizes
   assert_non_null(response->Manufacturer);
   assert_true(strlen(response->Manufacturer) > 0);
   // Verify content matches (may be truncated by gSOAP implementation)

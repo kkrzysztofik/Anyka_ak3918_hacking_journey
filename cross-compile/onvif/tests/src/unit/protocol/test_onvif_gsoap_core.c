@@ -18,22 +18,6 @@
 #include "utils/error/error_handling.h"
 #include "utils/test_gsoap_utils.h"
 
-/* ============================================================================
- * Test Suite Setup/Teardown
- * ============================================================================ */
-
-// Setup/teardown functions are now defined in utils/test_gsoap_utils.c
-
-/* ============================================================================
- * Helper Functions
- * ============================================================================ */
-
-// setup_parsing_test is now defined in test_gsoap_utils.c and shared across all test files
-
-/* ============================================================================
- * Core Context Tests
- * ============================================================================ */
-
 /**
  * @brief Test gSOAP context initialization
  * @param state Test state (unused)
@@ -823,7 +807,3 @@ void test_unit_onvif_gsoap_finalize_parse_null_context(void** state) {
   int result = onvif_gsoap_finalize_parse(NULL);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
-
-/* ============================================================================
- * Test functions are registered in test_protocol_runner.c
- * ============================================================================ */

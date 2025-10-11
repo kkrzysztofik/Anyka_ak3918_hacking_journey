@@ -43,7 +43,7 @@ int __wrap_config_load(config_manager_t* config) {
 }
 
 config_validation_result_t __wrap_config_validate(const config_manager_t* config) {
-  // Note: config_validate doesn't exist in main project, so we can't call real function
+  // config_validate doesn't exist in main project, so we can't call real function
   check_expected_ptr(config);
   return (config_validation_result_t)mock();
 }
@@ -86,7 +86,7 @@ const config_parameter_t* __wrap_config_get_parameter(const config_manager_t* co
 }
 
 void __wrap_config_cleanup(config_manager_t* config) {
-  // Note: config_cleanup doesn't exist in main project, so we can't call real function
+  // config_cleanup doesn't exist in main project, so we can't call real function
   check_expected_ptr(config);
 }
 

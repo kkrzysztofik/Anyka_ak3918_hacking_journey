@@ -23,7 +23,8 @@
 int __real_http_server_start(int port, const struct application_config* config);
 int __real_http_server_stop(void);
 void __real_process_connection(void* conn);
-int __real_http_validate_authentication(const http_request_t* request, security_context_t* security_ctx);
+int __real_http_validate_authentication(const http_request_t* request,
+                                        security_context_t* security_ctx);
 
 /* ============================================================================
  * Conditional Mock/Real Function Control
@@ -137,6 +138,3 @@ int __wrap_http_validate_authentication(const http_request_t* request,
   // In a real implementation, this would validate the credentials
   return ONVIF_SUCCESS;
 }
-
-// HTTP metrics functions are defined in test_http_metrics_simple.c
-// to avoid multiple definition conflicts

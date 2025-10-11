@@ -91,7 +91,6 @@ typedef struct {
   int expected_result;
 } null_param_test_t;
 
-
 /* ============================================================================
  * Service Callback Test Helpers
  * ============================================================================ */
@@ -247,11 +246,8 @@ int test_helper_ptz_create_test_preset(struct ptz_preset* preset, const char* to
 #define TEST_HELPER_DECLARE_COUNTERS(name, ...)                                                    \
   static int g_##name##_counter_values[] = {__VA_ARGS__};                                          \
   static int* g_##name##_counters[] = {                                                            \
-    &g_##name##_counter_values[0],                                                                 \
-    &g_##name##_counter_values[1],                                                                 \
-    &g_##name##_counter_values[2],                                                                 \
-    &g_##name##_counter_values[3]                                                                  \
-  };                                                                                               \
+    &g_##name##_counter_values[0], &g_##name##_counter_values[1], &g_##name##_counter_values[2],   \
+    &g_##name##_counter_values[3]};                                                                \
   static void reset_##name##_state(void) {                                                         \
     test_state_config_t config = {                                                                 \
       .counters = g_##name##_counters,                                                             \
@@ -405,7 +401,6 @@ service_test_config_t test_helper_create_service_config(const char* service_name
                                                         int (*init_func)(void*),
                                                         void (*cleanup_func)(void));
 
-
 // Service Dispatch Helpers
 void test_helper_service_dispatch_success(void** state, const service_test_config_t* config,
                                           const char* operation, http_request_t* request,
@@ -459,8 +454,5 @@ void test_helper_service_callback_logging_failure(void** state,
 /* ============================================================================
  * Generic Mock Framework Helpers
  * ============================================================================ */
-
-// NOTE: Generic mock framework helpers have been removed as part of CMocka migration.
-// These functions are no longer needed with CMocka's built-in mocking patterns.
 
 #endif /* TEST_HELPERS_H */

@@ -74,7 +74,6 @@ static struct device_capabilities dev_caps = {.has_analytics = 0, // NOLINT
 // Device service configuration and state
 static struct {
   service_handler_config_t config;
-  // Note: gsoap_ctx removed - gSOAP contexts are now allocated per-request for thread safety
 } g_device_handler = // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
   {0};
 static int g_handler_initialized = 0; // NOLINT
@@ -209,12 +208,10 @@ static int get_device_information_business_logic(const service_handler_config_t*
     return ONVIF_ERROR;
   }
 
-  // Use smart response builder for final output with memory optimization
-  size_t estimated_size = smart_response_estimate_size(soap_response);
-  result =
-    smart_response_build(response, soap_response, estimated_size, &g_device_response_buffer_pool);
+  // Use smart response builder with dynamic buffer allocation
+  result = smart_response_build_with_dynamic_buffer(response, soap_response);
   if (result != ONVIF_SUCCESS) {
-    service_log_operation_failure(log_ctx, "smart_response_build", result,
+    service_log_operation_failure(log_ctx, "smart_response_build_with_dynamic_buffer", result,
                                   "Failed to build smart response");
     return result;
   }
@@ -276,12 +273,10 @@ static int get_capabilities_business_logic(const service_handler_config_t* confi
     return ONVIF_ERROR;
   }
 
-  // Use smart response builder for final output with memory optimization
-  size_t estimated_size = smart_response_estimate_size(soap_response);
-  result =
-    smart_response_build(response, soap_response, estimated_size, &g_device_response_buffer_pool);
+  // Use smart response builder with dynamic buffer allocation
+  result = smart_response_build_with_dynamic_buffer(response, soap_response);
   if (result != ONVIF_SUCCESS) {
-    service_log_operation_failure(log_ctx, "smart_response_build", result,
+    service_log_operation_failure(log_ctx, "smart_response_build_with_dynamic_buffer", result,
                                   "Failed to build smart response");
     return result;
   }
@@ -347,12 +342,10 @@ static int get_system_date_time_business_logic(const service_handler_config_t* c
     return ONVIF_ERROR;
   }
 
-  // Use smart response builder for final output with memory optimization
-  size_t estimated_size = smart_response_estimate_size(soap_response);
-  result =
-    smart_response_build(response, soap_response, estimated_size, &g_device_response_buffer_pool);
+  // Use smart response builder with dynamic buffer allocation
+  result = smart_response_build_with_dynamic_buffer(response, soap_response);
   if (result != ONVIF_SUCCESS) {
-    service_log_operation_failure(log_ctx, "smart_response_build", result,
+    service_log_operation_failure(log_ctx, "smart_response_build_with_dynamic_buffer", result,
                                   "Failed to build smart response");
     return result;
   }
@@ -405,12 +398,10 @@ static int get_services_business_logic(const service_handler_config_t* config,
     return ONVIF_ERROR;
   }
 
-  // Use smart response builder for final output with memory optimization
-  size_t estimated_size = smart_response_estimate_size(soap_response);
-  result =
-    smart_response_build(response, soap_response, estimated_size, &g_device_response_buffer_pool);
+  // Use smart response builder with dynamic buffer allocation
+  result = smart_response_build_with_dynamic_buffer(response, soap_response);
   if (result != ONVIF_SUCCESS) {
-    service_log_operation_failure(log_ctx, "smart_response_build", result,
+    service_log_operation_failure(log_ctx, "smart_response_build_with_dynamic_buffer", result,
                                   "Failed to build smart response");
     return result;
   }
@@ -468,12 +459,10 @@ static int system_reboot_business_logic(const service_handler_config_t* config,
     return ONVIF_ERROR;
   }
 
-  // Use smart response builder for final output with memory optimization
-  size_t estimated_size = smart_response_estimate_size(soap_response);
-  result =
-    smart_response_build(response, soap_response, estimated_size, &g_device_response_buffer_pool);
+  // Use smart response builder with dynamic buffer allocation
+  result = smart_response_build_with_dynamic_buffer(response, soap_response);
   if (result != ONVIF_SUCCESS) {
-    service_log_operation_failure(log_ctx, "smart_response_build", result,
+    service_log_operation_failure(log_ctx, "smart_response_build_with_dynamic_buffer", result,
                                   "Failed to build smart response");
     return result;
   }
