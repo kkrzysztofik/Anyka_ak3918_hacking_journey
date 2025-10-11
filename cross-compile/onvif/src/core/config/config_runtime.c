@@ -11,10 +11,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <pthread.h>
 
 #include "core/config/config_runtime.h"
 #include "core/config/config.h"
+#include "core/config/config_storage.h"
+#include "common/onvif_constants.h"
 #include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
 #include "utils/validation/common_validation.h"
@@ -26,12 +29,18 @@
 #define CONFIG_STRING_MAX_LEN_SHORT 32
 #define CONFIG_PORT_MIN 1
 #define CONFIG_PORT_MAX 65535
+#define CONFIG_PERSISTENCE_QUEUE_MAX 32
 
 /* Global state variables */
 static struct application_config* g_config_runtime_app_config = NULL;
 static pthread_mutex_t g_config_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_config_runtime_generation = 0;
 static int g_config_runtime_initialized = 0;
+
+/* Persistence queue state */
+static persistence_queue_entry_t g_persistence_queue[CONFIG_PERSISTENCE_QUEUE_MAX];
+static size_t g_persistence_queue_count = 0;
+static pthread_mutex_t g_persistence_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Schema definition for validation */
 static const config_schema_entry_t g_config_schema[] = {
@@ -81,6 +90,7 @@ static void* config_runtime_get_field_ptr(config_section_t section, const char* 
 static const config_schema_entry_t* config_runtime_find_schema_entry(config_section_t section, const char* key);
 static int config_runtime_validate_int_value(const config_schema_entry_t* schema, int value);
 static int config_runtime_validate_string_value(const config_schema_entry_t* schema, const char* value);
+static int config_runtime_find_queue_entry(config_section_t section, const char* key);
 
 /**
  * @brief Bootstrap the runtime configuration manager
@@ -112,6 +122,8 @@ int config_runtime_bootstrap(struct application_config* cfg)
  */
 int config_runtime_shutdown(void)
 {
+    int persist_count = 0;
+
     pthread_mutex_lock(&g_config_runtime_mutex);
 
     if (!g_config_runtime_initialized) {
@@ -119,10 +131,27 @@ int config_runtime_shutdown(void)
         return ONVIF_ERROR_NOT_INITIALIZED;
     }
 
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    /* Flush any pending persistence updates before shutdown */
+    pthread_mutex_lock(&g_persistence_queue_mutex);
+    persist_count = (int)g_persistence_queue_count;
+    pthread_mutex_unlock(&g_persistence_queue_mutex);
+
+    if (persist_count > 0) {
+        platform_log_info("[CONFIG] Flushing %d pending configuration updates to disk before shutdown\n", persist_count);
+        config_runtime_process_persistence_queue();
+    }
+
+    pthread_mutex_lock(&g_config_runtime_mutex);
     g_config_runtime_app_config = NULL;
     g_config_runtime_initialized = 0;
-
     pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    /* Clear persistence queue after flush */
+    pthread_mutex_lock(&g_persistence_queue_mutex);
+    g_persistence_queue_count = 0;
+    pthread_mutex_unlock(&g_persistence_queue_mutex);
 
     return ONVIF_SUCCESS;
 }
@@ -386,6 +415,9 @@ int config_runtime_set_int(config_section_t section, const char* key, int value)
 
     pthread_mutex_unlock(&g_config_runtime_mutex);
 
+    /* Queue for async persistence */
+    config_runtime_queue_persistence_update(section, key, &value, CONFIG_TYPE_INT);
+
     return ONVIF_SUCCESS;
 }
 
@@ -460,6 +492,9 @@ int config_runtime_set_string(config_section_t section, const char* key, const c
 
     pthread_mutex_unlock(&g_config_runtime_mutex);
 
+    /* Queue for async persistence */
+    config_runtime_queue_persistence_update(section, key, value, CONFIG_TYPE_STRING);
+
     return ONVIF_SUCCESS;
 }
 
@@ -520,6 +555,9 @@ int config_runtime_set_float(config_section_t section, const char* key, float va
 
     pthread_mutex_unlock(&g_config_runtime_mutex);
 
+    /* Queue for async persistence */
+    config_runtime_queue_persistence_update(section, key, &value, CONFIG_TYPE_FLOAT);
+
     return ONVIF_SUCCESS;
 }
 
@@ -555,28 +593,153 @@ uint32_t config_runtime_get_generation(void)
     return generation;
 }
 
-/* Stub implementations for remaining APIs */
+/* Persistence Queue Implementation (User Story 3) */
 
+/**
+ * @brief Find existing queue entry for coalescing
+ *
+ * @param[in] section Configuration section
+ * @param[in] key Configuration key
+ * @return Index of existing entry, or -1 if not found
+ */
+static int config_runtime_find_queue_entry(config_section_t section, const char* key)
+{
+    size_t i;
+
+    for (i = 0; i < g_persistence_queue_count; i++) {
+        if (g_persistence_queue[i].section == section &&
+            strcmp(g_persistence_queue[i].key, key) == 0) {
+            return (int)i;
+        }
+    }
+
+    return -1;
+}
+
+/**
+ * @brief Queue a configuration update for async persistence
+ *
+ * This function implements coalescing: multiple updates to the same key
+ * will replace the previous queued value rather than adding a new entry.
+ */
 int config_runtime_queue_persistence_update(config_section_t section, const char* key, const void* value, config_value_type_t type)
 {
-    (void)section;
-    (void)key;
-    (void)value;
-    (void)type;
-    /* TODO: Implement persistence queue */
+    int existing_index;
+    persistence_queue_entry_t* entry;
+
+    if (key == NULL || value == NULL) {
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    pthread_mutex_lock(&g_persistence_queue_mutex);
+
+    /* Check for existing entry (coalescing) */
+    existing_index = config_runtime_find_queue_entry(section, key);
+
+    if (existing_index >= 0) {
+        /* Update existing entry (coalescing) */
+        entry = &g_persistence_queue[existing_index];
+    } else {
+        /* Add new entry */
+        if (g_persistence_queue_count >= CONFIG_PERSISTENCE_QUEUE_MAX) {
+            pthread_mutex_unlock(&g_persistence_queue_mutex);
+            return ONVIF_ERROR_RESOURCE_LIMIT;
+        }
+
+        entry = &g_persistence_queue[g_persistence_queue_count];
+        g_persistence_queue_count++;
+
+        /* Initialize entry */
+        entry->section = section;
+        strncpy(entry->key, key, sizeof(entry->key) - 1);
+        entry->key[sizeof(entry->key) - 1] = '\0';
+        entry->type = type;
+    }
+
+    /* Copy the value based on type */
+    switch (type) {
+        case CONFIG_TYPE_INT:
+        case CONFIG_TYPE_BOOL:
+            entry->value.int_value = *(const int*)value;
+            break;
+
+        case CONFIG_TYPE_FLOAT:
+            entry->value.float_value = *(const float*)value;
+            break;
+
+        case CONFIG_TYPE_STRING:
+            strncpy(entry->value.string_value, (const char*)value, sizeof(entry->value.string_value) - 1);
+            entry->value.string_value[sizeof(entry->value.string_value) - 1] = '\0';
+            break;
+
+        default:
+            pthread_mutex_unlock(&g_persistence_queue_mutex);
+            return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Update timestamp */
+    entry->timestamp = (uint64_t)time(NULL);
+
+    pthread_mutex_unlock(&g_persistence_queue_mutex);
+
     return ONVIF_SUCCESS;
 }
 
+/**
+ * @brief Process pending persistence queue entries
+ *
+ * Writes all queued configuration updates to persistent storage.
+ * This function is called during shutdown or can be called periodically.
+ */
 int config_runtime_process_persistence_queue(void)
 {
-    /* TODO: Implement persistence queue processing */
+    int result = ONVIF_SUCCESS;
+    size_t queue_count = 0;
+
+    pthread_mutex_lock(&g_persistence_queue_mutex);
+    queue_count = g_persistence_queue_count;
+    pthread_mutex_unlock(&g_persistence_queue_mutex);
+
+    /* Early return if queue is empty */
+    if (queue_count == 0) {
+        return ONVIF_SUCCESS;
+    }
+
+    /* Save the current runtime configuration to disk */
+    result = config_storage_save(ONVIF_CONFIG_FILE, NULL);
+
+    if (result != ONVIF_SUCCESS) {
+        platform_log_error("[CONFIG] Failed to persist %zu configuration updates to %s (error=%d)\n",
+                          queue_count, ONVIF_CONFIG_FILE, result);
+        /* Don't clear queue on failure - allow retry */
+        return result;
+    }
+
+    /* Success - clear the queue */
+    pthread_mutex_lock(&g_persistence_queue_mutex);
+    g_persistence_queue_count = 0;
+    pthread_mutex_unlock(&g_persistence_queue_mutex);
+
+    platform_log_debug("[CONFIG] Successfully persisted %zu configuration updates to %s\n",
+                      queue_count, ONVIF_CONFIG_FILE);
+
     return ONVIF_SUCCESS;
 }
 
+/**
+ * @brief Get persistence queue status
+ *
+ * @return Number of pending operations, or -1 on error
+ */
 int config_runtime_get_persistence_status(void)
 {
-    /* TODO: Implement persistence status */
-    return 0;
+    int count;
+
+    pthread_mutex_lock(&g_persistence_queue_mutex);
+    count = (int)g_persistence_queue_count;
+    pthread_mutex_unlock(&g_persistence_queue_mutex);
+
+    return count;
 }
 
 int config_runtime_get_stream_profile(int profile_index, void* profile)

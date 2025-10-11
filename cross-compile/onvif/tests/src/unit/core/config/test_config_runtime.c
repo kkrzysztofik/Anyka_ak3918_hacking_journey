@@ -603,6 +603,188 @@ static void test_unit_config_runtime_set_bool_valid(void** state) {
 }
 
 /* ============================================================================
+ * Async Persistence Queue Tests (User Story 3)
+ * ============================================================================
+ */
+
+/**
+ * @brief Test config_runtime_set_int triggers immediate in-memory update (T037)
+ * Verify that value is immediately available after set
+ */
+static void test_unit_config_runtime_set_int_immediate_update(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Set value and verify immediate availability
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 9090);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Read back immediately - should reflect new value
+  int out_value = 0;
+  result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &out_value);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_int_equal(9090, out_value);
+}
+
+/**
+ * @brief Test persistence queue is populated on config update (T038)
+ * Verify that updates are added to persistence queue
+ */
+static void test_unit_config_runtime_persistence_queue_populated(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Check initial queue status (should be empty)
+  int queue_status = config_runtime_get_persistence_status();
+  assert_int_equal(0, queue_status);
+
+  // Perform config update
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 9091);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify queue now has 1 pending operation
+  queue_status = config_runtime_get_persistence_status();
+  assert_int_equal(1, queue_status);
+}
+
+/**
+ * @brief Test persistence queue coalescing for rapid updates (T039)
+ * Multiple updates to same key should coalesce to single persistence operation
+ */
+static void test_unit_config_runtime_persistence_queue_coalescing(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Perform multiple rapid updates to same key
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8001);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8002);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8003);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Queue should have only 1 entry (coalesced)
+  int queue_status = config_runtime_get_persistence_status();
+  assert_int_equal(1, queue_status);
+
+  // Verify final value is the latest update
+  int out_value = 0;
+  result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &out_value);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_int_equal(8003, out_value);
+}
+
+/**
+ * @brief Test persistence queue processes successfully (T042)
+ * Verify queue processing empties the queue
+ */
+static void test_unit_config_runtime_persistence_queue_process(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Add updates to queue
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8080);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_set_string(CONFIG_SECTION_DEVICE, "manufacturer", "Anyka");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify queue has pending operations
+  int queue_status = config_runtime_get_persistence_status();
+  assert_true(queue_status > 0);
+
+  // Process the queue
+  result = config_runtime_process_persistence_queue();
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify queue is now empty
+  queue_status = config_runtime_get_persistence_status();
+  assert_int_equal(0, queue_status);
+}
+
+/**
+ * @brief Test queue operations are thread-safe (T038)
+ * Verify no race conditions in queue management
+ */
+static void test_unit_config_runtime_persistence_queue_thread_safe(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Multiple sequential operations (simulating concurrent access)
+  for (int i = 0; i < 10; i++) {
+    result = config_runtime_set_int(CONFIG_SECTION_SERVER, "worker_threads", i + 1);
+    assert_int_equal(ONVIF_SUCCESS, result);
+  }
+
+  // Verify final value is correct
+  int out_value = 0;
+  result = config_runtime_get_int(CONFIG_SECTION_SERVER, "worker_threads", &out_value);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_int_equal(10, out_value);
+
+  // Queue should have 1 entry (coalesced from 10 updates)
+  int queue_status = config_runtime_get_persistence_status();
+  assert_int_equal(1, queue_status);
+}
+
+/**
+ * @brief Test mixed type updates in persistence queue (T038)
+ * Verify queue handles int, string, and bool updates
+ */
+static void test_unit_config_runtime_persistence_queue_mixed_types(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Update different types
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8080);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_set_string(CONFIG_SECTION_DEVICE, "manufacturer", "Test");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_set_bool(CONFIG_SECTION_LOGGING, "enabled", 1);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Queue should have 3 entries (different sections/keys)
+  int queue_status = config_runtime_get_persistence_status();
+  assert_int_equal(3, queue_status);
+
+  // Process queue
+  result = config_runtime_process_persistence_queue();
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify queue is empty
+  queue_status = config_runtime_get_persistence_status();
+  assert_int_equal(0, queue_status);
+}
+
+/* ============================================================================
  * Test Suite Registration (main() is provided by test_runner.c)
  * ============================================================================
  */
@@ -661,6 +843,20 @@ const struct CMUnitTest* get_config_runtime_unit_tests(size_t* count) {
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_int_valid, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_string_valid, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_bool_valid, setup, teardown),
+
+    /* Async Persistence Queue Tests (User Story 3) */
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_int_immediate_update, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_populated, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_coalescing, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_process, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_thread_safe, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_mixed_types, setup,
+                                    teardown),
   };
 
   *count = sizeof(tests) / sizeof(tests[0]);
