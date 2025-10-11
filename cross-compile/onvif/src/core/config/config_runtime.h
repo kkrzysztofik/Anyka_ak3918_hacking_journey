@@ -76,7 +76,7 @@ typedef struct {
 /* Core Runtime Manager APIs */
 
 /**
- * @brief Bootstrap the runtime configuration manager
+ * @brief Initialize the runtime configuration manager
  *
  * Initializes the runtime manager with the provided configuration structure.
  * This must be called before any other runtime configuration operations.
@@ -84,16 +84,16 @@ typedef struct {
  * @param[in,out] cfg Application configuration structure to manage
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int config_runtime_bootstrap(struct application_config* cfg);
+int config_runtime_init(struct application_config* cfg);
 
 /**
- * @brief Shutdown the runtime configuration manager
+ * @brief Cleanup the runtime configuration manager
  *
  * Cleans up resources and flushes any pending persistence operations.
  *
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int config_runtime_shutdown(void);
+int config_runtime_cleanup(void);
 
 /**
  * @brief Apply default values for all configuration parameters

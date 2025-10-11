@@ -80,6 +80,7 @@ static const config_schema_entry_t g_config_schema[] = {
     {CONFIG_SECTION_SERVER, "server", "cleanup_interval", CONFIG_TYPE_INT, 1, 1, 3600, 0, "300"},
 
     /* Stream Profile 1 (User Story 4) */
+    {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "High Definition"},
     {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "1920"},
     {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "1080"},
     {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "30"},
@@ -90,6 +91,7 @@ static const config_schema_entry_t g_config_schema[] = {
     {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
 
     /* Stream Profile 2 (User Story 4) */
+    {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "Standard Definition"},
     {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "1280"},
     {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "720"},
     {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "30"},
@@ -100,6 +102,7 @@ static const config_schema_entry_t g_config_schema[] = {
     {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
 
     /* Stream Profile 3 (User Story 4) */
+    {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "Mobile Stream"},
     {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "640"},
     {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "480"},
     {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "15"},
@@ -110,6 +113,7 @@ static const config_schema_entry_t g_config_schema[] = {
     {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
 
     /* Stream Profile 4 (User Story 4) */
+    {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "Low Bandwidth"},
     {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "320"},
     {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "240"},
     {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "10"},
@@ -135,7 +139,7 @@ static int config_runtime_find_queue_entry(config_section_t section, const char*
 /**
  * @brief Bootstrap the runtime configuration manager
  */
-int config_runtime_bootstrap(struct application_config* cfg)
+int config_runtime_init(struct application_config* cfg)
 {
     if (cfg == NULL) {
         return ONVIF_ERROR_INVALID_PARAMETER;
@@ -160,7 +164,7 @@ int config_runtime_bootstrap(struct application_config* cfg)
 /**
  * @brief Shutdown the runtime configuration manager
  */
-int config_runtime_shutdown(void)
+int config_runtime_cleanup(void)
 {
     int persist_count = 0;
 
@@ -813,6 +817,9 @@ int config_runtime_get_stream_profile(int profile_index, video_config_t* profile
     section = CONFIG_SECTION_STREAM_PROFILE_1 + profile_index;
 
     /* Retrieve all profile parameters */
+    result = config_runtime_get_string(section, "name", profile->name, sizeof(profile->name));
+    if (result != ONVIF_SUCCESS) return result;
+
     result = config_runtime_get_int(section, "width", &profile->width);
     if (result != ONVIF_SUCCESS) return result;
 
@@ -879,7 +886,10 @@ int config_runtime_set_stream_profile(int profile_index, const video_config_t* p
     /* Map profile index to section */
     section = CONFIG_SECTION_STREAM_PROFILE_1 + profile_index;
 
-    /* Set all profile parameters (schema validation happens in set_int) */
+    /* Set all profile parameters (schema validation happens in set_int/set_string) */
+    result = config_runtime_set_string(section, "name", profile->name);
+    if (result != ONVIF_SUCCESS) return result;
+
     result = config_runtime_set_int(section, "width", profile->width);
     if (result != ONVIF_SUCCESS) return result;
 
@@ -1217,7 +1227,10 @@ static void* config_runtime_get_field_ptr(config_section_t section, const char* 
     else if (section == CONFIG_SECTION_STREAM_PROFILE_1 || section == CONFIG_SECTION_STREAM_PROFILE_2 ||
              section == CONFIG_SECTION_STREAM_PROFILE_3 || section == CONFIG_SECTION_STREAM_PROFILE_4) {
         video_config_t* profile = (video_config_t*)section_ptr;
-        if (strcmp(key, "width") == 0) {
+        if (strcmp(key, "name") == 0) {
+            if (out_type) *out_type = CONFIG_TYPE_STRING;
+            return profile->name;
+        } else if (strcmp(key, "width") == 0) {
             if (out_type) *out_type = CONFIG_TYPE_INT;
             return &profile->width;
         } else if (strcmp(key, "height") == 0) {

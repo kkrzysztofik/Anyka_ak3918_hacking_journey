@@ -157,8 +157,8 @@
 - [X] T058 [US4] Implement config_runtime_get_stream_profile API (completed - high-level API implemented in config_runtime.c)
 - [X] T059 [US4] Implement config_runtime_set_stream_profile API (completed - high-level API implemented in config_runtime.c)
 - [X] T060 [US4] Implement config_runtime_validate_stream_profile API (completed - comprehensive validation implemented in config_runtime.c)
-- [ ] T061 [US4] Update onvif_media.c to use runtime stream profile configuration
-- [ ] T062 [US4] Add profile limit enforcement (max 4 profiles)
+- [X] T061 [US4] Update onvif_media.c to use runtime stream profile configuration (completed - media service now loads profiles from configuration)
+- [X] T062 [US4] Add profile limit enforcement (max 4 profiles) (completed - enforced in create/delete functions and config system)
 - [ ] T063 [US4] Implement runtime profile updates via SetVideoEncoderConfiguration
 - [ ] T064 [US4] Add seamless encoder updates without dropping connections
 

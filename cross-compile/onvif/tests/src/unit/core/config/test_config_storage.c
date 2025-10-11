@@ -73,7 +73,7 @@ static int teardown(void** state) {
     remove(TEST_CONFIG_FILE_INVALID);
 
     if (test_state->runtime_initialized) {
-      config_runtime_shutdown();
+      config_runtime_cleanup();
     }
 
     free(test_state);
@@ -142,7 +142,7 @@ static void test_unit_config_storage_load_valid_file(void** state) {
   assert_int_equal(0, file_result);
 
   // Initialize runtime manager first
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->runtime_initialized = 1;
 
@@ -164,7 +164,7 @@ static void test_unit_config_storage_load_missing_file(void** state) {
   remove(TEST_CONFIG_FILE_MISSING);
 
   // Initialize runtime manager first
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->runtime_initialized = 1;
 
@@ -183,7 +183,7 @@ static void test_unit_config_storage_load_null_path(void** state) {
   struct test_config_storage_state* test_state = (struct test_config_storage_state*)*state;
 
   // Initialize runtime manager first
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->runtime_initialized = 1;
 
@@ -217,7 +217,7 @@ static void test_unit_config_storage_save_success(void** state) {
   struct test_config_storage_state* test_state = (struct test_config_storage_state*)*state;
 
   // Initialize runtime manager
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->runtime_initialized = 1;
 
@@ -235,7 +235,7 @@ static void test_unit_config_storage_save_null_path(void** state) {
   struct test_config_storage_state* test_state = (struct test_config_storage_state*)*state;
 
   // Initialize runtime manager
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->runtime_initialized = 1;
 
@@ -274,7 +274,7 @@ static void test_unit_config_storage_reload_success(void** state) {
   assert_int_equal(0, file_result);
 
   // Initialize runtime manager
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->runtime_initialized = 1;
 
@@ -292,7 +292,7 @@ static void test_unit_config_storage_reload_null_path(void** state) {
   struct test_config_storage_state* test_state = (struct test_config_storage_state*)*state;
 
   // Initialize runtime manager
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->runtime_initialized = 1;
 

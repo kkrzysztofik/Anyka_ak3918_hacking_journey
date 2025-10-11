@@ -88,7 +88,7 @@ static int teardown(void** state) {
 
   if (test_state != NULL) {
     if (test_state->initialized) {
-      config_runtime_shutdown();
+      config_runtime_cleanup();
     }
     // Free allocated pointer members
     free(test_state->test_config.network);
@@ -113,10 +113,10 @@ static int teardown(void** state) {
 /**
  * @brief Test successful bootstrap with valid config
  */
-static void test_unit_config_runtime_bootstrap_success(void** state) {
+static void test_unit_config_runtime_init_success(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -128,26 +128,26 @@ static void test_unit_config_runtime_bootstrap_success(void** state) {
 /**
  * @brief Test bootstrap with NULL config parameter
  */
-static void test_unit_config_runtime_bootstrap_null_param(void** state) {
+static void test_unit_config_runtime_init_null_param(void** state) {
   (void)state;
 
-  int result = config_runtime_bootstrap(NULL);
+  int result = config_runtime_init(NULL);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 }
 
 /**
  * @brief Test bootstrap when already initialized
  */
-static void test_unit_config_runtime_bootstrap_already_initialized(void** state) {
+static void test_unit_config_runtime_init_already_initialized(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // First bootstrap
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
   // Second bootstrap should fail
-  result = config_runtime_bootstrap(&test_state->test_config);
+  result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_ERROR_ALREADY_EXISTS, result);
 }
 
@@ -159,16 +159,16 @@ static void test_unit_config_runtime_bootstrap_already_initialized(void** state)
 /**
  * @brief Test successful shutdown after initialization
  */
-static void test_unit_config_runtime_shutdown_success(void** state) {
+static void test_unit_config_runtime_cleanup_success(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize first
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
   // Shutdown
-  result = config_runtime_shutdown();
+  result = config_runtime_cleanup();
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 0;
 }
@@ -176,10 +176,10 @@ static void test_unit_config_runtime_shutdown_success(void** state) {
 /**
  * @brief Test shutdown when not initialized
  */
-static void test_unit_config_runtime_shutdown_not_initialized(void** state) {
+static void test_unit_config_runtime_cleanup_not_initialized(void** state) {
   (void)state;
 
-  int result = config_runtime_shutdown();
+  int result = config_runtime_cleanup();
   assert_int_equal(ONVIF_ERROR_NOT_INITIALIZED, result);
 }
 
@@ -195,7 +195,7 @@ static void test_unit_config_runtime_apply_defaults_success(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize first
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -230,7 +230,7 @@ static void test_unit_config_runtime_get_int_null_output(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize first
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -247,7 +247,7 @@ static void test_unit_config_runtime_get_int_null_key(void** state) {
   int out_value = 0;
 
   // Initialize first
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -279,7 +279,7 @@ static void test_unit_config_runtime_get_string_null_output(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize first
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -296,7 +296,7 @@ static void test_unit_config_runtime_get_string_zero_buffer(void** state) {
   char out_value[64] = {0};
 
   // Initialize first
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -329,7 +329,7 @@ static void test_unit_config_runtime_get_bool_null_output(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize first
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -361,7 +361,7 @@ static void test_unit_config_runtime_snapshot_success(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize first
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -395,7 +395,7 @@ static void test_unit_config_runtime_generation_increment(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -422,7 +422,7 @@ static void test_unit_config_runtime_validation_type_mismatch_string_to_int(void
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -440,7 +440,7 @@ static void test_unit_config_runtime_validation_type_mismatch_int_to_string(void
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -459,7 +459,7 @@ static void test_unit_config_runtime_validation_bounds_integer_too_low(void** st
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -476,7 +476,7 @@ static void test_unit_config_runtime_validation_bounds_integer_too_high(void** s
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -493,7 +493,7 @@ static void test_unit_config_runtime_validation_bounds_string_too_long(void** st
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -515,7 +515,7 @@ static void test_unit_config_runtime_validation_missing_required_key_get(void** 
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -533,7 +533,7 @@ static void test_unit_config_runtime_validation_missing_required_key_set(void** 
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -550,7 +550,7 @@ static void test_unit_config_runtime_set_int_valid(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -577,7 +577,7 @@ static void test_unit_config_runtime_set_string_valid(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -601,7 +601,7 @@ static void test_unit_config_runtime_set_bool_valid(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -629,7 +629,7 @@ static void test_unit_config_runtime_set_int_immediate_update(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -652,7 +652,7 @@ static void test_unit_config_runtime_persistence_queue_populated(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -677,7 +677,7 @@ static void test_unit_config_runtime_persistence_queue_coalescing(void** state) 
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -710,7 +710,7 @@ static void test_unit_config_runtime_persistence_queue_process(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -742,7 +742,7 @@ static void test_unit_config_runtime_persistence_queue_thread_safe(void** state)
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -771,7 +771,7 @@ static void test_unit_config_runtime_persistence_queue_mixed_types(void** state)
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -811,7 +811,7 @@ static void test_unit_config_runtime_stream_profile_validation_valid(void** stat
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -843,7 +843,7 @@ static void test_unit_config_runtime_stream_profile_limit_enforcement(void** sta
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -875,7 +875,7 @@ static void test_unit_config_runtime_stream_profile_invalid_width(void** state) 
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -896,7 +896,7 @@ static void test_unit_config_runtime_stream_profile_invalid_height(void** state)
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -917,7 +917,7 @@ static void test_unit_config_runtime_stream_profile_invalid_fps(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -938,7 +938,7 @@ static void test_unit_config_runtime_stream_profile_invalid_bitrate(void** state
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
 
   // Initialize
-  int result = config_runtime_bootstrap(&test_state->test_config);
+  int result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
@@ -963,12 +963,12 @@ static void test_unit_config_runtime_stream_profile_invalid_bitrate(void** state
  */
 const struct CMUnitTest* get_config_runtime_unit_tests(size_t* count) {
   static const struct CMUnitTest tests[] = {
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_bootstrap_success, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_bootstrap_null_param, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_bootstrap_already_initialized, setup,
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_init_success, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_init_null_param, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_init_already_initialized, setup,
                                     teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_shutdown_success, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_shutdown_not_initialized, setup,
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_cleanup_success, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_cleanup_not_initialized, setup,
                                     teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_apply_defaults_success, setup,
                                     teardown),

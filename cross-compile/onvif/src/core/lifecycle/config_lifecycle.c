@@ -127,7 +127,7 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
   }
 
   /* T019: Initialize runtime configuration manager with loaded config */
-  if (config_runtime_bootstrap(cfg) != ONVIF_SUCCESS) {
+  if (config_runtime_init(cfg) != ONVIF_SUCCESS) {
     platform_log_error("error: failed to initialize runtime configuration system\n");
     return -1;
   }
@@ -186,7 +186,7 @@ void config_lifecycle_free_memory(struct application_config* cfg) {
   platform_log_info("Freeing configuration memory...\n");
 
   /* T019: Shutdown runtime configuration system */
-  config_runtime_shutdown();
+  config_runtime_cleanup();
 
   if (cfg->imaging) {
     free(cfg->imaging);

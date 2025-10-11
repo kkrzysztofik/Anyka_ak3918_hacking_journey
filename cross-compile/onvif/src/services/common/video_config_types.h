@@ -12,6 +12,7 @@
  * @brief Video stream encoding configuration
  */
 typedef struct {
+  char name[64];  /**< Profile name (customizable) */
   int width;      /**< Video width in pixels */
   int height;     /**< Video height in pixels */
   int fps;        /**< Frames per second */

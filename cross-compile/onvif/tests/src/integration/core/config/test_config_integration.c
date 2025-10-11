@@ -82,7 +82,7 @@ static int teardown(void** state) {
   (void)state;
 
   if (test_state.runtime_initialized) {
-    config_runtime_shutdown();
+    config_runtime_cleanup();
     test_state.runtime_initialized = 0;
   }
 
@@ -159,7 +159,7 @@ static void test_integration_config_lifecycle_full(void** state) {
   create_test_config_file(test_state.test_config_path);
 
   /* Step 2: Bootstrap runtime manager with empty config */
-  result = config_runtime_bootstrap(&test_state.test_config);
+  result = config_runtime_init(&test_state.test_config);
   assert_int_equal(result, ONVIF_SUCCESS);
   test_state.runtime_initialized = 1;
 
@@ -202,7 +202,7 @@ static void test_integration_config_lifecycle_full(void** state) {
   assert_true(generation >= 0); /* Generation 0 is valid after bootstrap */
 
   /* Step 10: Proper shutdown */
-  result = config_runtime_shutdown();
+  result = config_runtime_cleanup();
   assert_int_equal(result, ONVIF_SUCCESS);
   test_state.runtime_initialized = 0;
 }
@@ -220,7 +220,7 @@ static void test_integration_config_lifecycle_missing_file(void** state) {
   int result;
 
   /* Step 1: Bootstrap runtime manager */
-  result = config_runtime_bootstrap(&test_state.test_config);
+  result = config_runtime_init(&test_state.test_config);
   assert_int_equal(result, ONVIF_SUCCESS);
   test_state.runtime_initialized = 1;
 
@@ -237,7 +237,7 @@ static void test_integration_config_lifecycle_missing_file(void** state) {
   assert_true(generation >= 0);
 
   /* Step 5: Proper shutdown */
-  result = config_runtime_shutdown();
+  result = config_runtime_cleanup();
   assert_int_equal(result, ONVIF_SUCCESS);
   test_state.runtime_initialized = 0;
 }
@@ -258,7 +258,7 @@ static void test_integration_config_single_source_of_truth(void** state) {
   /* Step 1: Setup - Create INI file, bootstrap runtime, then load */
   create_test_config_file(test_state.test_config_path);
 
-  result = config_runtime_bootstrap(&test_state.test_config);
+  result = config_runtime_init(&test_state.test_config);
   assert_int_equal(result, ONVIF_SUCCESS);
   test_state.runtime_initialized = 1;
 
@@ -281,7 +281,7 @@ static void test_integration_config_single_source_of_truth(void** state) {
   }
 
   /* Step 4: Cleanup */
-  config_runtime_shutdown();
+  config_runtime_cleanup();
   test_state.runtime_initialized = 0;
 }
 
@@ -302,7 +302,7 @@ static void test_integration_config_reload_consistency(void** state) {
   /* Step 1: Initial setup - Create INI file, bootstrap runtime, then load */
   create_test_config_file(test_state.test_config_path);
 
-  result = config_runtime_bootstrap(&test_state.test_config);
+  result = config_runtime_init(&test_state.test_config);
   assert_int_equal(result, ONVIF_SUCCESS);
   test_state.runtime_initialized = 1;
 
@@ -326,7 +326,7 @@ static void test_integration_config_reload_consistency(void** state) {
   assert_non_null(snapshot);
 
   /* Step 5: Cleanup */
-  config_runtime_shutdown();
+  config_runtime_cleanup();
   test_state.runtime_initialized = 0;
 }
 
@@ -350,7 +350,7 @@ static void test_integration_validation_error_handling(void** state) {
   int result;
 
   /* Step 1: Bootstrap runtime manager */
-  result = config_runtime_bootstrap(&test_state.test_config);
+  result = config_runtime_init(&test_state.test_config);
   assert_int_equal(result, ONVIF_SUCCESS);
   test_state.runtime_initialized = 1;
 
@@ -387,7 +387,7 @@ static void test_integration_validation_error_handling(void** state) {
   assert_true(generation > 0); /* Should have incremented from successful set */
 
   /* Step 8: Cleanup */
-  config_runtime_shutdown();
+  config_runtime_cleanup();
   test_state.runtime_initialized = 0;
 }
 
