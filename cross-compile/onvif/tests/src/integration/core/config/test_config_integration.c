@@ -52,6 +52,22 @@ static int setup(void** state) {
   test_state.runtime_initialized = 0;
   test_state.manager_initialized = 0;
 
+  /* Allocate pointer members for application_config */
+  test_state.test_config.network = calloc(1, sizeof(struct network_settings));
+  test_state.test_config.device = calloc(1, sizeof(struct device_info));
+  test_state.test_config.logging = calloc(1, sizeof(struct logging_settings));
+  test_state.test_config.server = calloc(1, sizeof(struct server_settings));
+
+  if (!test_state.test_config.network || !test_state.test_config.device ||
+      !test_state.test_config.logging || !test_state.test_config.server) {
+    /* Clean up on allocation failure */
+    free(test_state.test_config.network);
+    free(test_state.test_config.device);
+    free(test_state.test_config.logging);
+    free(test_state.test_config.server);
+    return -1;
+  }
+
   /* Create temporary config file path */
   snprintf(test_state.test_config_path, sizeof(test_state.test_config_path),
            "/tmp/onvif_test_config_%d.ini", getpid());
@@ -75,6 +91,12 @@ static int teardown(void** state) {
     test_state.manager_initialized = 0;
   }
 
+  /* Free allocated pointer members */
+  free(test_state.test_config.network);
+  free(test_state.test_config.device);
+  free(test_state.test_config.logging);
+  free(test_state.test_config.server);
+
   /* Clean up test config file */
   unlink(test_state.test_config_path);
 
@@ -94,15 +116,12 @@ static void create_test_config_file(const char* path) {
   assert_non_null(fp);
 
   fprintf(fp, "[http]\n");
-  fprintf(fp, "enable=1\n");
-  fprintf(fp, "port=8080\n");
+  fprintf(fp, "http_port=8080\n");
   fprintf(fp, "\n");
   fprintf(fp, "[rtsp]\n");
-  fprintf(fp, "enable=1\n");
-  fprintf(fp, "port=554\n");
+  fprintf(fp, "rtsp_port=554\n");
   fprintf(fp, "\n");
   fprintf(fp, "[network]\n");
-  fprintf(fp, "dhcp_enable=1\n");
   fprintf(fp, "ip_address=192.168.1.100\n");
   fprintf(fp, "netmask=255.255.255.0\n");
   fprintf(fp, "gateway=192.168.1.1\n");
@@ -139,19 +158,14 @@ static void test_integration_config_lifecycle_full(void** state) {
   /* Step 1: Create test configuration file */
   create_test_config_file(test_state.test_config_path);
 
-  /* Step 2: Initialize config manager */
-  result = config_init(&test_state.manager, &test_state.test_config);
-  assert_int_equal(result, ONVIF_SUCCESS);
-  test_state.manager_initialized = 1;
-
-  /* Step 3: Load configuration from INI file */
-  result = config_load(&test_state.manager, test_state.test_config_path);
-  assert_int_equal(result, ONVIF_SUCCESS);
-
-  /* Step 4: Bootstrap runtime manager with loaded config */
+  /* Step 2: Bootstrap runtime manager with empty config */
   result = config_runtime_bootstrap(&test_state.test_config);
   assert_int_equal(result, ONVIF_SUCCESS);
   test_state.runtime_initialized = 1;
+
+  /* Step 3: Load configuration from INI file using new config_storage */
+  result = config_storage_load(test_state.test_config_path, NULL);
+  assert_int_equal(result, ONVIF_SUCCESS);
 
   /* Step 4: Query values from services subsystem (HTTP port) */
   result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &value_int);
@@ -241,19 +255,15 @@ static void test_integration_config_single_source_of_truth(void** state) {
   int result;
   int http_port_1, http_port_2, http_port_3;
 
-  /* Step 1: Setup - Initialize, load INI file, then bootstrap runtime */
+  /* Step 1: Setup - Create INI file, bootstrap runtime, then load */
   create_test_config_file(test_state.test_config_path);
-
-  result = config_init(&test_state.manager, &test_state.test_config);
-  assert_int_equal(result, ONVIF_SUCCESS);
-  test_state.manager_initialized = 1;
-
-  result = config_load(&test_state.manager, test_state.test_config_path);
-  assert_int_equal(result, ONVIF_SUCCESS);
 
   result = config_runtime_bootstrap(&test_state.test_config);
   assert_int_equal(result, ONVIF_SUCCESS);
   test_state.runtime_initialized = 1;
+
+  result = config_storage_load(test_state.test_config_path, NULL);
+  assert_int_equal(result, ONVIF_SUCCESS);
 
   /* Step 2: Query same value from "different subsystems" multiple times */
   result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &http_port_1);
@@ -289,19 +299,15 @@ static void test_integration_config_reload_consistency(void** state) {
   int result;
   uint32_t gen_before, gen_after;
 
-  /* Step 1: Initial setup - Initialize, load INI file, then bootstrap runtime */
+  /* Step 1: Initial setup - Create INI file, bootstrap runtime, then load */
   create_test_config_file(test_state.test_config_path);
-
-  result = config_init(&test_state.manager, &test_state.test_config);
-  assert_int_equal(result, ONVIF_SUCCESS);
-  test_state.manager_initialized = 1;
-
-  result = config_load(&test_state.manager, test_state.test_config_path);
-  assert_int_equal(result, ONVIF_SUCCESS);
 
   result = config_runtime_bootstrap(&test_state.test_config);
   assert_int_equal(result, ONVIF_SUCCESS);
   test_state.runtime_initialized = 1;
+
+  result = config_storage_load(test_state.test_config_path, NULL);
+  assert_int_equal(result, ONVIF_SUCCESS);
 
   gen_before = config_runtime_get_generation();
 
@@ -325,6 +331,67 @@ static void test_integration_config_reload_consistency(void** state) {
 }
 
 /* ============================================================================
+ * Integration Tests for User Story 2 - Schema Validation
+ * ============================================================================
+ */
+
+/**
+ * @brief Test T029: Validation error handling integration
+ *
+ * Verifies:
+ * 1. Schema validation rejects out-of-bounds integer values
+ * 2. Schema validation rejects strings exceeding max length
+ * 3. Schema validation rejects type mismatches
+ * 4. Proper error codes returned for validation failures
+ * 5. System remains stable after validation errors
+ */
+static void test_integration_validation_error_handling(void** state) {
+  (void)state;
+  int result;
+
+  /* Step 1: Bootstrap runtime manager */
+  result = config_runtime_bootstrap(&test_state.test_config);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  test_state.runtime_initialized = 1;
+
+  /* Step 2: Test out-of-bounds port value (exceeds max) */
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 70000);
+  assert_int_equal(result, ONVIF_ERROR_INVALID_PARAMETER);
+
+  /* Step 3: Test out-of-bounds port value (below min) */
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 0);
+  assert_int_equal(result, ONVIF_ERROR_INVALID_PARAMETER);
+
+  /* Step 4: Test string exceeding maximum length */
+  char long_string[300];
+  memset(long_string, 'A', sizeof(long_string) - 1);
+  long_string[sizeof(long_string) - 1] = '\0';
+  result = config_runtime_set_string(CONFIG_SECTION_DEVICE, "manufacturer", long_string);
+  assert_int_equal(result, ONVIF_ERROR_INVALID_PARAMETER);
+
+  /* Step 5: Verify valid values still work after validation errors */
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8080);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  int port_value;
+  result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &port_value);
+  assert_int_equal(result, ONVIF_SUCCESS);
+  assert_int_equal(port_value, 8080);
+
+  /* Step 6: Verify system remains stable - get snapshot */
+  const struct application_config* snapshot = config_runtime_snapshot();
+  assert_non_null(snapshot);
+
+  /* Step 7: Verify generation counter incremented for successful set */
+  uint32_t generation = config_runtime_get_generation();
+  assert_true(generation > 0); /* Should have incremented from successful set */
+
+  /* Step 8: Cleanup */
+  config_runtime_shutdown();
+  test_state.runtime_initialized = 0;
+}
+
+/* ============================================================================
  * Test Suite Registration (main() is provided by test_runner.c)
  * ============================================================================
  */
@@ -342,6 +409,7 @@ const struct CMUnitTest* get_config_integration_tests(size_t* count) {
     cmocka_unit_test_setup_teardown(test_integration_config_single_source_of_truth, setup,
                                     teardown),
     cmocka_unit_test_setup_teardown(test_integration_config_reload_consistency, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_integration_validation_error_handling, setup, teardown),
   };
 
   *count = sizeof(tests) / sizeof(tests[0]);

@@ -6,6 +6,7 @@
  */
 
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +17,6 @@
 // Module under test
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
-#include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
 
 
@@ -46,6 +46,24 @@ static int setup(void** state) {
 
   // Initialize test configuration with default values
   memset(&test_state->test_config, 0, sizeof(struct application_config));
+
+  // Allocate pointer members
+  test_state->test_config.network = calloc(1, sizeof(struct network_settings));
+  test_state->test_config.device = calloc(1, sizeof(struct device_info));
+  test_state->test_config.logging = calloc(1, sizeof(struct logging_settings));
+  test_state->test_config.server = calloc(1, sizeof(struct server_settings));
+
+  if (!test_state->test_config.network || !test_state->test_config.device ||
+      !test_state->test_config.logging || !test_state->test_config.server) {
+    // Clean up on allocation failure
+    free(test_state->test_config.network);
+    free(test_state->test_config.device);
+    free(test_state->test_config.logging);
+    free(test_state->test_config.server);
+    free(test_state);
+    return -1;
+  }
+
   test_state->initialized = 0;
 
   *state = test_state;
@@ -62,6 +80,11 @@ static int teardown(void** state) {
     if (test_state->initialized) {
       config_runtime_shutdown();
     }
+    // Free allocated pointer members
+    free(test_state->test_config.network);
+    free(test_state->test_config.device);
+    free(test_state->test_config.logging);
+    free(test_state->test_config.server);
     free(test_state);
   }
 
@@ -198,7 +221,7 @@ static void test_unit_config_runtime_get_int_null_output(void** state) {
   test_state->initialized = 1;
 
   // Try to get with NULL output
-  result = config_runtime_get_int(CONFIG_SECTION_NETWORK, "http_port", NULL);
+  result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", NULL);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 }
 
@@ -215,7 +238,7 @@ static void test_unit_config_runtime_get_int_null_key(void** state) {
   test_state->initialized = 1;
 
   // Try to get with NULL key
-  result = config_runtime_get_int(CONFIG_SECTION_NETWORK, NULL, &out_value);
+  result = config_runtime_get_int(CONFIG_SECTION_ONVIF, NULL, &out_value);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 }
 
@@ -226,7 +249,7 @@ static void test_unit_config_runtime_get_int_not_initialized(void** state) {
   (void)state;
   int out_value = 0;
 
-  int result = config_runtime_get_int(CONFIG_SECTION_NETWORK, "http_port", &out_value);
+  int result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &out_value);
   assert_int_equal(ONVIF_ERROR_NOT_INITIALIZED, result);
 }
 
@@ -373,6 +396,213 @@ static void test_unit_config_runtime_generation_increment(void** state) {
 }
 
 /* ============================================================================
+ * Schema Validation Tests (User Story 2)
+ * ============================================================================
+ */
+
+/**
+ * @brief Test schema validation rejects type mismatch (T025)
+ * Attempt to set string value on integer field should fail
+ */
+static void test_unit_config_runtime_validation_type_mismatch_string_to_int(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Attempt to set string value on integer field (http_port)
+  // This should fail with type mismatch error
+  result = config_runtime_set_string(CONFIG_SECTION_ONVIF, "http_port", "not_a_number");
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test schema validation rejects type mismatch (T025)
+ * Attempt to set integer value on string field should fail
+ */
+static void test_unit_config_runtime_validation_type_mismatch_int_to_string(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Attempt to get string field as integer (manufacturer)
+  // This should fail with type mismatch error
+  int out_value = 0;
+  result = config_runtime_get_int(CONFIG_SECTION_DEVICE, "manufacturer", &out_value);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test schema validation rejects out-of-bounds integer (T026)
+ * HTTP port must be within valid range (1-65535)
+ */
+static void test_unit_config_runtime_validation_bounds_integer_too_low(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Attempt to set HTTP port to 0 (below minimum of 1)
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 0);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test schema validation rejects out-of-bounds integer (T026)
+ * HTTP port must be within valid range (1-65535)
+ */
+static void test_unit_config_runtime_validation_bounds_integer_too_high(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Attempt to set HTTP port to 70000 (above maximum of 65535)
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 70000);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test schema validation rejects out-of-bounds string (T026)
+ * String fields must respect max_length constraints
+ */
+static void test_unit_config_runtime_validation_bounds_string_too_long(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Create a string that exceeds maximum length (assume 64 chars for manufacturer)
+  char too_long_string[256];
+  memset(too_long_string, 'A', sizeof(too_long_string) - 1);
+  too_long_string[sizeof(too_long_string) - 1] = '\0';
+
+  // Attempt to set manufacturer to excessively long string
+  result = config_runtime_set_string(CONFIG_SECTION_DEVICE, "manufacturer", too_long_string);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test schema validation rejects missing required key (T027)
+ * Attempt to access non-existent configuration key
+ */
+static void test_unit_config_runtime_validation_missing_required_key_get(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Attempt to get non-existent key
+  int out_value = 0;
+  result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "nonexistent_key", &out_value);
+  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
+}
+
+/**
+ * @brief Test schema validation rejects missing required key (T027)
+ * Attempt to set non-existent configuration key
+ */
+static void test_unit_config_runtime_validation_missing_required_key_set(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Attempt to set non-existent key
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "nonexistent_key", 12345);
+  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
+}
+
+/**
+ * @brief Test config_runtime_set_int with validation (T028)
+ * Successful set within valid range
+ */
+static void test_unit_config_runtime_set_int_valid(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Set valid HTTP port value
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8080);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify the value was set correctly
+  int out_value = 0;
+  result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &out_value);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_int_equal(8080, out_value);
+
+  // Verify generation counter incremented
+  uint32_t generation = config_runtime_get_generation();
+  assert_true(generation > 0);
+}
+
+/**
+ * @brief Test config_runtime_set_string with validation (T028)
+ * Successful set within valid length constraints
+ */
+static void test_unit_config_runtime_set_string_valid(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Set valid manufacturer value
+  const char* expected_value = "Anyka Test";
+  result = config_runtime_set_string(CONFIG_SECTION_DEVICE, "manufacturer", expected_value);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify the value was set correctly
+  char out_value[64] = {0};
+  result = config_runtime_get_string(CONFIG_SECTION_DEVICE, "manufacturer", out_value, sizeof(out_value));
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_string_equal(expected_value, out_value);
+}
+
+/**
+ * @brief Test config_runtime_set_bool with validation (T028)
+ * Successful set with boolean validation
+ */
+static void test_unit_config_runtime_set_bool_valid(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Set boolean value to true (using logging->enabled)
+  result = config_runtime_set_bool(CONFIG_SECTION_LOGGING, "enabled", 1);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify the value was set correctly
+  int out_value = 0;
+  result = config_runtime_get_bool(CONFIG_SECTION_LOGGING, "enabled", &out_value);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_int_equal(1, out_value);
+}
+
+/* ============================================================================
  * Test Suite Registration (main() is provided by test_runner.c)
  * ============================================================================
  */
@@ -412,6 +642,25 @@ const struct CMUnitTest* get_config_runtime_unit_tests(size_t* count) {
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_snapshot_not_initialized, setup,
                                     teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_generation_increment, setup, teardown),
+
+    /* Schema Validation Tests (User Story 2) */
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_type_mismatch_string_to_int,
+                                    setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_type_mismatch_int_to_string,
+                                    setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_bounds_integer_too_low,
+                                    setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_bounds_integer_too_high,
+                                    setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_bounds_string_too_long,
+                                    setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_missing_required_key_get,
+                                    setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_missing_required_key_set,
+                                    setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_int_valid, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_string_valid, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_bool_valid, setup, teardown),
   };
 
   *count = sizeof(tests) / sizeof(tests[0]);

@@ -17,11 +17,15 @@
 #include "core/config/config.h"
 #include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
+#include "utils/validation/common_validation.h"
+#include "platform/platform.h"
 
 /* Constants */
 #define CONFIG_STRING_MAX_LEN_DEFAULT 256
 #define CONFIG_STRING_MAX_LEN_STANDARD 64
 #define CONFIG_STRING_MAX_LEN_SHORT 32
+#define CONFIG_PORT_MIN 1
+#define CONFIG_PORT_MAX 65535
 
 /* Global state variables */
 static struct application_config* g_config_runtime_app_config = NULL;
@@ -29,11 +33,54 @@ static pthread_mutex_t g_config_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_config_runtime_generation = 0;
 static int g_config_runtime_initialized = 0;
 
+/* Schema definition for validation */
+static const config_schema_entry_t g_config_schema[] = {
+    /* ONVIF Section */
+    {CONFIG_SECTION_ONVIF, "onvif", "enabled", CONFIG_TYPE_BOOL, 1, 0, 1, 0, "1"},
+    {CONFIG_SECTION_ONVIF, "onvif", "http_port", CONFIG_TYPE_INT, 1, CONFIG_PORT_MIN, CONFIG_PORT_MAX, 0, "8080"},
+    {CONFIG_SECTION_ONVIF, "onvif", "auth_enabled", CONFIG_TYPE_BOOL, 1, 0, 1, 0, "0"},
+    {CONFIG_SECTION_ONVIF, "onvif", "username", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_SHORT, "admin"},
+    {CONFIG_SECTION_ONVIF, "onvif", "password", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_SHORT, "admin"},
+
+    /* Network Section */
+    {CONFIG_SECTION_NETWORK, "network", "rtsp_port", CONFIG_TYPE_INT, 1, CONFIG_PORT_MIN, CONFIG_PORT_MAX, 0, "554"},
+    {CONFIG_SECTION_NETWORK, "network", "snapshot_port", CONFIG_TYPE_INT, 1, CONFIG_PORT_MIN, CONFIG_PORT_MAX, 0, "8080"},
+    {CONFIG_SECTION_NETWORK, "network", "ws_discovery_port", CONFIG_TYPE_INT, 1, CONFIG_PORT_MIN, CONFIG_PORT_MAX, 0, "3702"},
+
+    /* Device Section */
+    {CONFIG_SECTION_DEVICE, "device", "manufacturer", CONFIG_TYPE_STRING, 1, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "Anyka"},
+    {CONFIG_SECTION_DEVICE, "device", "model", CONFIG_TYPE_STRING, 1, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "AK3918"},
+    {CONFIG_SECTION_DEVICE, "device", "firmware_version", CONFIG_TYPE_STRING, 1, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "1.0"},
+    {CONFIG_SECTION_DEVICE, "device", "serial_number", CONFIG_TYPE_STRING, 1, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "000000"},
+    {CONFIG_SECTION_DEVICE, "device", "hardware_id", CONFIG_TYPE_STRING, 1, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "AK3918"},
+
+    /* Logging Section */
+    {CONFIG_SECTION_LOGGING, "logging", "enabled", CONFIG_TYPE_INT, 1, 0, 1, 0, "1"},
+    {CONFIG_SECTION_LOGGING, "logging", "use_colors", CONFIG_TYPE_INT, 0, 0, 1, 0, "1"},
+    {CONFIG_SECTION_LOGGING, "logging", "use_timestamps", CONFIG_TYPE_INT, 0, 0, 1, 0, "1"},
+    {CONFIG_SECTION_LOGGING, "logging", "min_level", CONFIG_TYPE_INT, 1, 0, 5, 0, "2"},
+    {CONFIG_SECTION_LOGGING, "logging", "tag", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_SHORT, "ONVIF"},
+    {CONFIG_SECTION_LOGGING, "logging", "http_verbose", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+    /* Server Section */
+    {CONFIG_SECTION_SERVER, "server", "worker_threads", CONFIG_TYPE_INT, 1, 1, 32, 0, "4"},
+    {CONFIG_SECTION_SERVER, "server", "max_connections", CONFIG_TYPE_INT, 1, 1, 1000, 0, "100"},
+    {CONFIG_SECTION_SERVER, "server", "connection_timeout", CONFIG_TYPE_INT, 1, 1, 300, 0, "30"},
+    {CONFIG_SECTION_SERVER, "server", "keepalive_timeout", CONFIG_TYPE_INT, 1, 1, 300, 0, "60"},
+    {CONFIG_SECTION_SERVER, "server", "epoll_timeout", CONFIG_TYPE_INT, 1, 1, 10000, 0, "1000"},
+    {CONFIG_SECTION_SERVER, "server", "cleanup_interval", CONFIG_TYPE_INT, 1, 1, 3600, 0, "300"},
+};
+
+static const size_t g_config_schema_count = sizeof(g_config_schema) / sizeof(g_config_schema[0]);
+
 /* Forward declarations */
 static int config_runtime_validate_section(config_section_t section);
 static int config_runtime_validate_key(const char* key);
 static void* config_runtime_get_section_ptr(config_section_t section);
 static void* config_runtime_get_field_ptr(config_section_t section, const char* key, config_value_type_t* out_type);
+static const config_schema_entry_t* config_runtime_find_schema_entry(config_section_t section, const char* key);
+static int config_runtime_validate_int_value(const config_schema_entry_t* schema, int value);
+static int config_runtime_validate_string_value(const config_schema_entry_t* schema, const char* value);
 
 /**
  * @brief Bootstrap the runtime configuration manager
@@ -155,7 +202,7 @@ int config_runtime_get_int(config_section_t section, const char* key, int* out_v
     /* Validate type matches */
     if (field_type != CONFIG_TYPE_INT && field_type != CONFIG_TYPE_BOOL) {
         pthread_mutex_unlock(&g_config_runtime_mutex);
-        return ONVIF_ERROR_INVALID;
+        return ONVIF_ERROR_INVALID_PARAMETER;
     }
 
     /* Copy the value */
@@ -205,7 +252,7 @@ int config_runtime_get_string(config_section_t section, const char* key, char* o
     /* Validate type matches */
     if (field_type != CONFIG_TYPE_STRING) {
         pthread_mutex_unlock(&g_config_runtime_mutex);
-        return ONVIF_ERROR_INVALID;
+        return ONVIF_ERROR_INVALID_PARAMETER;
     }
 
     /* Copy the string safely */
@@ -287,6 +334,7 @@ int config_runtime_set_int(config_section_t section, const char* key, int value)
 {
     config_value_type_t field_type = CONFIG_TYPE_INT;
     void* field_ptr = NULL;
+    const config_schema_entry_t* schema = NULL;
 
     if (key == NULL) {
         return ONVIF_ERROR_INVALID_PARAMETER;
@@ -317,7 +365,17 @@ int config_runtime_set_int(config_section_t section, const char* key, int value)
     /* Validate type matches */
     if (field_type != CONFIG_TYPE_INT && field_type != CONFIG_TYPE_BOOL) {
         pthread_mutex_unlock(&g_config_runtime_mutex);
-        return ONVIF_ERROR_INVALID;
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Find schema entry for bounds validation */
+    schema = config_runtime_find_schema_entry(section, key);
+    if (schema != NULL) {
+        /* Validate value against schema bounds */
+        if (config_runtime_validate_int_value(schema, value) != ONVIF_SUCCESS) {
+            pthread_mutex_unlock(&g_config_runtime_mutex);
+            return ONVIF_ERROR_INVALID_PARAMETER;
+        }
     }
 
     /* Set the value */
@@ -339,6 +397,7 @@ int config_runtime_set_string(config_section_t section, const char* key, const c
     config_value_type_t field_type = CONFIG_TYPE_STRING;
     void* field_ptr = NULL;
     char* str_field = NULL;
+    const config_schema_entry_t* schema = NULL;
     size_t max_len = CONFIG_STRING_MAX_LEN_DEFAULT;
 
     if (key == NULL || value == NULL) {
@@ -370,20 +429,25 @@ int config_runtime_set_string(config_section_t section, const char* key, const c
     /* Validate type matches */
     if (field_type != CONFIG_TYPE_STRING) {
         pthread_mutex_unlock(&g_config_runtime_mutex);
-        return ONVIF_ERROR_INVALID;
+        return ONVIF_ERROR_INVALID_PARAMETER;
     }
 
-    /* Determine max length based on section */
-    if (section == CONFIG_SECTION_LOGGING) {
-        max_len = CONFIG_STRING_MAX_LEN_SHORT;  /* tag field */
-    } else if (section == CONFIG_SECTION_ONVIF || section == CONFIG_SECTION_DEVICE) {
-        max_len = CONFIG_STRING_MAX_LEN_STANDARD;  /* standard fields */
-    }
-
-    /* Validate string length */
-    if (strlen(value) >= max_len) {
-        pthread_mutex_unlock(&g_config_runtime_mutex);
-        return ONVIF_ERROR_INVALID;
+    /* Find schema entry for length validation */
+    schema = config_runtime_find_schema_entry(section, key);
+    if (schema != NULL) {
+        /* Validate value against schema */
+        if (config_runtime_validate_string_value(schema, value) != ONVIF_SUCCESS) {
+            pthread_mutex_unlock(&g_config_runtime_mutex);
+            return ONVIF_ERROR_INVALID_PARAMETER;
+        }
+        max_len = schema->max_length;
+    } else {
+        /* Fallback: Determine max length based on section */
+        if (section == CONFIG_SECTION_LOGGING) {
+            max_len = CONFIG_STRING_MAX_LEN_SHORT;
+        } else if (section == CONFIG_SECTION_ONVIF || section == CONFIG_SECTION_DEVICE) {
+            max_len = CONFIG_STRING_MAX_LEN_STANDARD;
+        }
     }
 
     /* Copy the string safely */
@@ -746,4 +810,111 @@ static void* config_runtime_get_field_ptr(config_section_t section, const char* 
 
     /* Key not found in this section */
     return NULL;
+}
+
+/**
+ * @brief Find schema entry for a given section and key
+ *
+ * @param[in] section Configuration section
+ * @param[in] key Configuration key
+ * @return Pointer to schema entry, or NULL if not found
+ */
+static const config_schema_entry_t* config_runtime_find_schema_entry(config_section_t section, const char* key)
+{
+    size_t i;
+
+    if (key == NULL) {
+        return NULL;
+    }
+
+    for (i = 0; i < g_config_schema_count; i++) {
+        if (g_config_schema[i].section == section && strcmp(g_config_schema[i].key, key) == 0) {
+            return &g_config_schema[i];
+        }
+    }
+
+    return NULL;
+}
+
+/**
+ * @brief Validate integer value against schema bounds
+ *
+ * @param[in] schema Schema entry with validation rules
+ * @param[in] value Value to validate
+ * @return ONVIF_SUCCESS if valid, error code otherwise
+ */
+static int config_runtime_validate_int_value(const config_schema_entry_t* schema, int value)
+{
+    validation_result_t validation_result;
+
+    if (schema == NULL) {
+        platform_log_error("[CONFIG] Schema validation failed: NULL schema pointer\n");
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Check if this is an integer or boolean type */
+    if (schema->type != CONFIG_TYPE_INT && schema->type != CONFIG_TYPE_BOOL) {
+        platform_log_error("[CONFIG] Schema validation failed for '%s.%s': Expected integer or boolean type, got type %d\n",
+                         schema->section_name, schema->key, schema->type);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Use common validation utility for integer bounds checking */
+    validation_result = validate_int(schema->key, value, schema->min_value, schema->max_value);
+
+    if (!validation_is_valid(&validation_result)) {
+        /* Log structured validation error */
+        platform_log_error("[CONFIG] Configuration validation failed for '%s.%s': %s (value=%d, min=%d, max=%d)\n",
+                         schema->section_name, schema->key,
+                         validation_get_error_message(&validation_result),
+                         value, schema->min_value, schema->max_value);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Validate string value against schema constraints
+ *
+ * @param[in] schema Schema entry with validation rules
+ * @param[in] value String value to validate
+ * @return ONVIF_SUCCESS if valid, error code otherwise
+ */
+static int config_runtime_validate_string_value(const config_schema_entry_t* schema, const char* value)
+{
+    validation_result_t validation_result;
+
+    if (schema == NULL) {
+        platform_log_error("[CONFIG] String validation failed: NULL schema pointer\n");
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    if (value == NULL) {
+        platform_log_error("[CONFIG] String validation failed for '%s.%s': NULL value provided\n",
+                         schema->section_name, schema->key);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Check if this is a string type */
+    if (schema->type != CONFIG_TYPE_STRING) {
+        platform_log_error("[CONFIG] Schema validation failed for '%s.%s': Expected string type, got type %d\n",
+                         schema->section_name, schema->key, schema->type);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Use common validation utility for string validation */
+    /* Note: max_length includes null terminator, so we check against max_length-1 */
+    validation_result = validate_string(schema->key, value, 0, schema->max_length - 1, 1);
+
+    if (!validation_is_valid(&validation_result)) {
+        /* Log structured validation error */
+        platform_log_error("[CONFIG] Configuration validation failed for '%s.%s': %s (length=%zu, max=%zu)\n",
+                         schema->section_name, schema->key,
+                         validation_get_error_message(&validation_result),
+                         strlen(value), schema->max_length - 1);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    return ONVIF_SUCCESS;
 }

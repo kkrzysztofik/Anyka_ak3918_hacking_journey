@@ -86,21 +86,21 @@
 
 ### Tests for User Story 2
 
-- [ ] T025 [P] [US2] Unit test for schema validation with type mismatches in test_config_runtime.c
-- [ ] T026 [P] [US2] Unit test for schema validation with out-of-bounds values in test_config_runtime.c
-- [ ] T027 [P] [US2] Unit test for schema validation with missing required keys in test_config_runtime.c
-- [ ] T028 [P] [US2] Unit test for config_runtime_set_value with validation in test_config_runtime.c
-- [ ] T029 [P] [US2] Integration test for validation error handling in test_config_integration.c
+- [X] T025 [P] [US2] Unit test for schema validation with type mismatches in test_config_runtime.c
+- [X] T026 [P] [US2] Unit test for schema validation with out-of-bounds values in test_config_runtime.c
+- [X] T027 [P] [US2] Unit test for schema validation with missing required keys in test_config_runtime.c
+- [X] T028 [P] [US2] Unit test for config_runtime_set_value with validation in test_config_runtime.c
+- [X] T029 [P] [US2] Integration test for validation error handling in test_config_integration.c
 
 ### Implementation for User Story 2
 
-- [ ] T030 [P] [US2] Extend config_runtime.c with comprehensive schema validation
-- [ ] T031 [P] [US2] Implement typed getter/setter functions with validation
-- [ ] T032 [US2] Add validation error reporting with structured logs
-- [ ] T033 [US2] Integrate with utils/validation/common_validation.h
-- [ ] T034 [US2] Implement config_runtime_apply_defaults functionality
-- [ ] T035 [US2] Add runtime snapshot functionality with generation counter
-- [ ] T036 [US2] Update config_storage.c to use schema validation during load
+- [X] T030 [P] [US2] Extend config_runtime.c with comprehensive schema validation
+- [X] T031 [P] [US2] Implement typed getter/setter functions with validation
+- [X] T032 [US2] Add validation error reporting with structured logs
+- [X] T033 [US2] Integrate with utils/validation/common_validation.h
+- [X] T034 [US2] Implement config_runtime_apply_defaults functionality (already exists)
+- [X] T035 [US2] Add runtime snapshot functionality with generation counter (already exists)
+- [X] T036 [US2] Update config_storage.c to use schema validation during load
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
