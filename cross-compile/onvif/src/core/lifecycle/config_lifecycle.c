@@ -126,6 +126,12 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
     platform_log_warning("warning: using default configuration (embedded)\n");
   }
 
+  /* T019: Initialize runtime configuration manager with loaded config */
+  if (config_runtime_bootstrap(cfg) != ONVIF_SUCCESS) {
+    platform_log_error("error: failed to initialize runtime configuration system\n");
+    return -1;
+  }
+
   // Initialize stream configurations from anyka_cfg.ini parameters
   int main_fps = 15; // Default to 15fps for sensor compatibility
   int main_kbps = 2048;
@@ -178,6 +184,9 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
 
 void config_lifecycle_free_memory(struct application_config* cfg) {
   platform_log_info("Freeing configuration memory...\n");
+
+  /* T019: Shutdown runtime configuration system */
+  config_runtime_shutdown();
 
   if (cfg->imaging) {
     free(cfg->imaging);

@@ -8,6 +8,9 @@
 #include "test_suites.h"
 
 #include "unit/core/test_config_auth.h"
+#include "unit/core/config/test_config_runtime.h"
+#include "unit/core/config/test_config_storage.h"
+#include "integration/core/config/test_config_integration.h"
 #include "unit/networking/test_http_server_auth.h"
 #include "unit/utils/test_hash_utils.h"
 #include "utils/test_gsoap_utils.h"
@@ -48,6 +51,20 @@ const test_suite_t g_test_suites[] = {
    .full_name = "Configuration Authentication",
    .category = TEST_CATEGORY_UNIT,
    .get_tests = get_config_auth_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  {.name = "config-runtime",
+   .full_name = "Configuration Runtime Manager",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_config_runtime_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  {.name = "config-storage",
+   .full_name = "Configuration Storage Layer",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_config_storage_unit_tests,
    .setup = NULL,
    .teardown = NULL},
 
@@ -182,6 +199,14 @@ const test_suite_t g_test_suites[] = {
    .full_name = "SOAP Error Handling",
    .category = TEST_CATEGORY_INTEGRATION,
    .get_tests = get_soap_error_integration_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  // Configuration integration tests
+  {.name = "config-integration",
+   .full_name = "Configuration System Integration",
+   .category = TEST_CATEGORY_INTEGRATION,
+   .get_tests = get_config_integration_tests,
    .setup = NULL,
    .teardown = NULL},
 };
