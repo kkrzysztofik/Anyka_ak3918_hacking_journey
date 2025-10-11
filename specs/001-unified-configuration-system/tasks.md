@@ -144,19 +144,19 @@
 
 ### Tests for User Story 4
 
-- [ ] T051 [P] [US4] Unit test for stream profile schema validation in test_config_runtime.c
-- [ ] T052 [P] [US4] Unit test for stream profile limit enforcement in test_config_runtime.c
-- [ ] T053 [P] [US4] Unit test for stream profile parameter validation in test_config_runtime.c
-- [ ] T054 [P] [US4] Integration test for media service profile integration in tests/src/integration/services/test_media_integration.c
-- [ ] T055 [P] [US4] End-to-end test for ONVIF GetProfiles with configured profiles
+- [X] T051 [P] [US4] Unit test for stream profile schema validation in test_config_runtime.c
+- [X] T052 [P] [US4] Unit test for stream profile limit enforcement in test_config_runtime.c
+- [X] T053 [P] [US4] Unit test for stream profile parameter validation in test_config_runtime.c
+- [ ] T054 [P] [US4] Integration test for media service profile integration in tests/src/integration/services/test_media_integration.c (deferred - unit tests provide coverage)
+- [ ] T055 [P] [US4] End-to-end test for ONVIF GetProfiles with configured profiles (deferred - requires ONVIF service integration)
 
 ### Implementation for User Story 4
 
-- [ ] T056 [P] [US4] Extend config_runtime.h with stream profile schema sections
-- [ ] T057 [P] [US4] Add stream profile parameter definitions to config_runtime.c
-- [ ] T058 [US4] Implement config_runtime_get_stream_profile API
-- [ ] T059 [US4] Implement config_runtime_set_stream_profile API
-- [ ] T060 [US4] Implement config_runtime_validate_stream_profile API
+- [X] T056 [P] [US4] Extend config_runtime.h with stream profile schema sections (completed - added 4 profile sections to config.h)
+- [X] T057 [P] [US4] Add stream profile parameter definitions to config_runtime.c (completed - added schema entries for all 4 profiles)
+- [X] T058 [US4] Implement config_runtime_get_stream_profile API (completed - high-level API implemented in config_runtime.c)
+- [X] T059 [US4] Implement config_runtime_set_stream_profile API (completed - high-level API implemented in config_runtime.c)
+- [X] T060 [US4] Implement config_runtime_validate_stream_profile API (completed - comprehensive validation implemented in config_runtime.c)
 - [ ] T061 [US4] Update onvif_media.c to use runtime stream profile configuration
 - [ ] T062 [US4] Add profile limit enforcement (max 4 profiles)
 - [ ] T063 [US4] Implement runtime profile updates via SetVideoEncoderConfiguration

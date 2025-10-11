@@ -78,6 +78,46 @@ static const config_schema_entry_t g_config_schema[] = {
     {CONFIG_SECTION_SERVER, "server", "keepalive_timeout", CONFIG_TYPE_INT, 1, 1, 300, 0, "60"},
     {CONFIG_SECTION_SERVER, "server", "epoll_timeout", CONFIG_TYPE_INT, 1, 1, 10000, 0, "1000"},
     {CONFIG_SECTION_SERVER, "server", "cleanup_interval", CONFIG_TYPE_INT, 1, 1, 3600, 0, "300"},
+
+    /* Stream Profile 1 (User Story 4) */
+    {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "1920"},
+    {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "1080"},
+    {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "30"},
+    {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "bitrate", CONFIG_TYPE_INT, 0, 64, 16384, 0, "4096"},
+    {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "gop_size", CONFIG_TYPE_INT, 0, 1, 300, 0, "60"},
+    {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "profile", CONFIG_TYPE_INT, 0, 0, 2, 0, "1"},
+    {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "codec_type", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+    {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+    /* Stream Profile 2 (User Story 4) */
+    {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "1280"},
+    {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "720"},
+    {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "30"},
+    {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "bitrate", CONFIG_TYPE_INT, 0, 64, 16384, 0, "2048"},
+    {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "gop_size", CONFIG_TYPE_INT, 0, 1, 300, 0, "60"},
+    {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "profile", CONFIG_TYPE_INT, 0, 0, 2, 0, "1"},
+    {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "codec_type", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+    {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+    /* Stream Profile 3 (User Story 4) */
+    {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "640"},
+    {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "480"},
+    {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "15"},
+    {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "bitrate", CONFIG_TYPE_INT, 0, 64, 16384, 0, "512"},
+    {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "gop_size", CONFIG_TYPE_INT, 0, 1, 300, 0, "30"},
+    {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "profile", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+    {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "codec_type", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+    {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+    /* Stream Profile 4 (User Story 4) */
+    {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "320"},
+    {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "240"},
+    {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "10"},
+    {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "bitrate", CONFIG_TYPE_INT, 0, 64, 16384, 0, "256"},
+    {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "gop_size", CONFIG_TYPE_INT, 0, 1, 300, 0, "20"},
+    {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "profile", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+    {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "codec_type", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+    {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
 };
 
 static const size_t g_config_schema_count = sizeof(g_config_schema) / sizeof(g_config_schema[0]);
@@ -742,27 +782,222 @@ int config_runtime_get_persistence_status(void)
     return count;
 }
 
-int config_runtime_get_stream_profile(int profile_index, void* profile)
+/**
+ * @brief Get stream profile configuration
+ */
+int config_runtime_get_stream_profile(int profile_index, video_config_t* profile)
 {
-    (void)profile_index;
-    (void)profile;
-    /* TODO: Implement stream profile getter */
-    return ONVIF_ERROR_NOT_IMPLEMENTED;
+    config_section_t section;
+    int result;
+
+    /* Validate parameters */
+    if (profile_index < 0 || profile_index > 3) {
+        platform_log_error("[CONFIG] Invalid profile index: %d (valid range: 0-3)\n", profile_index);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    if (profile == NULL) {
+        platform_log_error("[CONFIG] NULL profile pointer\n");
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Check initialization */
+    pthread_mutex_lock(&g_config_runtime_mutex);
+    if (!g_config_runtime_initialized) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_INITIALIZED;
+    }
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    /* Map profile index to section */
+    section = CONFIG_SECTION_STREAM_PROFILE_1 + profile_index;
+
+    /* Retrieve all profile parameters */
+    result = config_runtime_get_int(section, "width", &profile->width);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_get_int(section, "height", &profile->height);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_get_int(section, "fps", &profile->fps);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_get_int(section, "bitrate", &profile->bitrate);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_get_int(section, "gop_size", &profile->gop_size);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_get_int(section, "profile", &profile->profile);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_get_int(section, "codec_type", &profile->codec_type);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_get_int(section, "br_mode", &profile->br_mode);
+    if (result != ONVIF_SUCCESS) return result;
+
+    platform_log_debug("[CONFIG] Retrieved stream profile %d: %dx%d@%dfps, %dkbps\n",
+                      profile_index + 1, profile->width, profile->height, profile->fps, profile->bitrate);
+
+    return ONVIF_SUCCESS;
 }
 
-int config_runtime_set_stream_profile(int profile_index, const void* profile)
+/**
+ * @brief Set stream profile configuration
+ */
+int config_runtime_set_stream_profile(int profile_index, const video_config_t* profile)
 {
-    (void)profile_index;
-    (void)profile;
-    /* TODO: Implement stream profile setter */
-    return ONVIF_ERROR_NOT_IMPLEMENTED;
+    config_section_t section;
+    int result;
+
+    /* Validate parameters */
+    if (profile_index < 0 || profile_index > 3) {
+        platform_log_error("[CONFIG] Invalid profile index: %d (valid range: 0-3)\n", profile_index);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    if (profile == NULL) {
+        platform_log_error("[CONFIG] NULL profile pointer\n");
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate profile parameters first */
+    result = config_runtime_validate_stream_profile(profile);
+    if (result != ONVIF_SUCCESS) {
+        return result;
+    }
+
+    /* Check initialization */
+    pthread_mutex_lock(&g_config_runtime_mutex);
+    if (!g_config_runtime_initialized) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_INITIALIZED;
+    }
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    /* Map profile index to section */
+    section = CONFIG_SECTION_STREAM_PROFILE_1 + profile_index;
+
+    /* Set all profile parameters (schema validation happens in set_int) */
+    result = config_runtime_set_int(section, "width", profile->width);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_set_int(section, "height", profile->height);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_set_int(section, "fps", profile->fps);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_set_int(section, "bitrate", profile->bitrate);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_set_int(section, "gop_size", profile->gop_size);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_set_int(section, "profile", profile->profile);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_set_int(section, "codec_type", profile->codec_type);
+    if (result != ONVIF_SUCCESS) return result;
+
+    result = config_runtime_set_int(section, "br_mode", profile->br_mode);
+    if (result != ONVIF_SUCCESS) return result;
+
+    platform_log_info("[CONFIG] Updated stream profile %d: %dx%d@%dfps, %dkbps\n",
+                     profile_index + 1, profile->width, profile->height, profile->fps, profile->bitrate);
+
+    return ONVIF_SUCCESS;
 }
 
-int config_runtime_validate_stream_profile(const void* profile)
+/**
+ * @brief Validate stream profile parameters
+ */
+int config_runtime_validate_stream_profile(const video_config_t* profile)
 {
-    (void)profile;
-    /* TODO: Implement stream profile validation */
-    return ONVIF_ERROR_NOT_IMPLEMENTED;
+    const config_schema_entry_t* schema_entry;
+
+    if (profile == NULL) {
+        platform_log_error("[CONFIG] NULL profile pointer for validation\n");
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate width */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "width");
+    if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->width) != ONVIF_SUCCESS) {
+        platform_log_error("[CONFIG] Invalid width: %d (valid range: %d-%d)\n",
+                          profile->width, schema_entry->min_value, schema_entry->max_value);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate height */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "height");
+    if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->height) != ONVIF_SUCCESS) {
+        platform_log_error("[CONFIG] Invalid height: %d (valid range: %d-%d)\n",
+                          profile->height, schema_entry->min_value, schema_entry->max_value);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate FPS */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "fps");
+    if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->fps) != ONVIF_SUCCESS) {
+        platform_log_error("[CONFIG] Invalid FPS: %d (valid range: %d-%d)\n",
+                          profile->fps, schema_entry->min_value, schema_entry->max_value);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate bitrate */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "bitrate");
+    if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->bitrate) != ONVIF_SUCCESS) {
+        platform_log_error("[CONFIG] Invalid bitrate: %d (valid range: %d-%d kbps)\n",
+                          profile->bitrate, schema_entry->min_value, schema_entry->max_value);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate GOP size */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "gop_size");
+    if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->gop_size) != ONVIF_SUCCESS) {
+        platform_log_error("[CONFIG] Invalid GOP size: %d (valid range: %d-%d)\n",
+                          profile->gop_size, schema_entry->min_value, schema_entry->max_value);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate profile */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "profile");
+    if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->profile) != ONVIF_SUCCESS) {
+        platform_log_error("[CONFIG] Invalid profile: %d (valid range: %d-%d)\n",
+                          profile->profile, schema_entry->min_value, schema_entry->max_value);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate codec type */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "codec_type");
+    if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->codec_type) != ONVIF_SUCCESS) {
+        platform_log_error("[CONFIG] Invalid codec type: %d (valid range: %d-%d)\n",
+                          profile->codec_type, schema_entry->min_value, schema_entry->max_value);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate bitrate mode */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "br_mode");
+    if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->br_mode) != ONVIF_SUCCESS) {
+        platform_log_error("[CONFIG] Invalid bitrate mode: %d (valid range: %d-%d)\n",
+                          profile->br_mode, schema_entry->min_value, schema_entry->max_value);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    platform_log_debug("[CONFIG] Stream profile validation passed: %dx%d@%dfps, %dkbps\n",
+                      profile->width, profile->height, profile->fps, profile->bitrate);
+
+    return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Get stream profile count
+ */
+int config_runtime_get_stream_profile_count(void)
+{
+    return 4; /* Fixed at 4 profiles per FR-012, FR-013 */
 }
 
 int config_runtime_hash_password(const char* password, char* hash_output, size_t output_size)
@@ -848,6 +1083,14 @@ static void* config_runtime_get_section_ptr(config_section_t section)
             return g_config_runtime_app_config->main_stream;
         case CONFIG_SECTION_SUB_STREAM:
             return g_config_runtime_app_config->sub_stream;
+        case CONFIG_SECTION_STREAM_PROFILE_1:
+            return g_config_runtime_app_config->stream_profile_1;
+        case CONFIG_SECTION_STREAM_PROFILE_2:
+            return g_config_runtime_app_config->stream_profile_2;
+        case CONFIG_SECTION_STREAM_PROFILE_3:
+            return g_config_runtime_app_config->stream_profile_3;
+        case CONFIG_SECTION_STREAM_PROFILE_4:
+            return g_config_runtime_app_config->stream_profile_4;
         case CONFIG_SECTION_IMAGING:
             return g_config_runtime_app_config->imaging;
         case CONFIG_SECTION_AUTO_DAYNIGHT:
@@ -968,6 +1211,36 @@ static void* config_runtime_get_field_ptr(config_section_t section, const char* 
         } else if (strcmp(key, "cleanup_interval") == 0) {
             if (out_type) *out_type = CONFIG_TYPE_INT;
             return &server->cleanup_interval;
+        }
+    }
+    /* Map stream profile keys (User Story 4) */
+    else if (section == CONFIG_SECTION_STREAM_PROFILE_1 || section == CONFIG_SECTION_STREAM_PROFILE_2 ||
+             section == CONFIG_SECTION_STREAM_PROFILE_3 || section == CONFIG_SECTION_STREAM_PROFILE_4) {
+        video_config_t* profile = (video_config_t*)section_ptr;
+        if (strcmp(key, "width") == 0) {
+            if (out_type) *out_type = CONFIG_TYPE_INT;
+            return &profile->width;
+        } else if (strcmp(key, "height") == 0) {
+            if (out_type) *out_type = CONFIG_TYPE_INT;
+            return &profile->height;
+        } else if (strcmp(key, "fps") == 0) {
+            if (out_type) *out_type = CONFIG_TYPE_INT;
+            return &profile->fps;
+        } else if (strcmp(key, "bitrate") == 0) {
+            if (out_type) *out_type = CONFIG_TYPE_INT;
+            return &profile->bitrate;
+        } else if (strcmp(key, "gop_size") == 0) {
+            if (out_type) *out_type = CONFIG_TYPE_INT;
+            return &profile->gop_size;
+        } else if (strcmp(key, "profile") == 0) {
+            if (out_type) *out_type = CONFIG_TYPE_INT;
+            return &profile->profile;
+        } else if (strcmp(key, "codec_type") == 0) {
+            if (out_type) *out_type = CONFIG_TYPE_INT;
+            return &profile->codec_type;
+        } else if (strcmp(key, "br_mode") == 0) {
+            if (out_type) *out_type = CONFIG_TYPE_INT;
+            return &profile->br_mode;
         }
     }
 

@@ -52,14 +52,24 @@ static int setup(void** state) {
   test_state->test_config.device = calloc(1, sizeof(struct device_info));
   test_state->test_config.logging = calloc(1, sizeof(struct logging_settings));
   test_state->test_config.server = calloc(1, sizeof(struct server_settings));
+  test_state->test_config.stream_profile_1 = calloc(1, sizeof(video_config_t));
+  test_state->test_config.stream_profile_2 = calloc(1, sizeof(video_config_t));
+  test_state->test_config.stream_profile_3 = calloc(1, sizeof(video_config_t));
+  test_state->test_config.stream_profile_4 = calloc(1, sizeof(video_config_t));
 
   if (!test_state->test_config.network || !test_state->test_config.device ||
-      !test_state->test_config.logging || !test_state->test_config.server) {
+      !test_state->test_config.logging || !test_state->test_config.server ||
+      !test_state->test_config.stream_profile_1 || !test_state->test_config.stream_profile_2 ||
+      !test_state->test_config.stream_profile_3 || !test_state->test_config.stream_profile_4) {
     // Clean up on allocation failure
     free(test_state->test_config.network);
     free(test_state->test_config.device);
     free(test_state->test_config.logging);
     free(test_state->test_config.server);
+    free(test_state->test_config.stream_profile_1);
+    free(test_state->test_config.stream_profile_2);
+    free(test_state->test_config.stream_profile_3);
+    free(test_state->test_config.stream_profile_4);
     free(test_state);
     return -1;
   }
@@ -85,6 +95,10 @@ static int teardown(void** state) {
     free(test_state->test_config.device);
     free(test_state->test_config.logging);
     free(test_state->test_config.server);
+    free(test_state->test_config.stream_profile_1);
+    free(test_state->test_config.stream_profile_2);
+    free(test_state->test_config.stream_profile_3);
+    free(test_state->test_config.stream_profile_4);
     free(test_state);
   }
 
@@ -785,6 +799,159 @@ static void test_unit_config_runtime_persistence_queue_mixed_types(void** state)
 }
 
 /* ============================================================================
+ * Stream Profile Configuration Tests (User Story 4)
+ * ============================================================================
+ */
+
+/**
+ * @brief Test stream profile schema validation - valid parameters (T051)
+ * Verify that valid stream profile parameters are accepted
+ */
+static void test_unit_config_runtime_stream_profile_validation_valid(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Set valid stream profile parameters for profile 1
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", 1920);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "height", 1080);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "fps", 30);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "bitrate", 4000);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify values were set correctly
+  int out_value = 0;
+  result = config_runtime_get_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", &out_value);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_int_equal(1920, out_value);
+}
+
+/**
+ * @brief Test stream profile limit enforcement - max 4 profiles (T052)
+ * Verify that only 4 stream profiles can be configured
+ */
+static void test_unit_config_runtime_stream_profile_limit_enforcement(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Configure all 4 valid profiles
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", 1920);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_2, "width", 1280);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_3, "width", 640);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_4, "width", 320);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // All 4 profiles should be configurable
+  int out_value = 0;
+  result = config_runtime_get_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", &out_value);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_int_equal(1920, out_value);
+}
+
+/**
+ * @brief Test stream profile parameter validation - invalid width (T053)
+ * Verify that invalid width values are rejected
+ */
+static void test_unit_config_runtime_stream_profile_invalid_width(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Try to set invalid width (too small)
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", 10);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  // Try to set invalid width (too large)
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", 10000);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test stream profile parameter validation - invalid height (T053)
+ * Verify that invalid height values are rejected
+ */
+static void test_unit_config_runtime_stream_profile_invalid_height(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Try to set invalid height (too small)
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "height", 10);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  // Try to set invalid height (too large)
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "height", 10000);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test stream profile parameter validation - invalid FPS (T053)
+ * Verify that invalid FPS values are rejected
+ */
+static void test_unit_config_runtime_stream_profile_invalid_fps(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Try to set invalid FPS (zero)
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "fps", 0);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  // Try to set invalid FPS (too high)
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "fps", 200);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test stream profile parameter validation - invalid bitrate (T053)
+ * Verify that invalid bitrate values are rejected
+ */
+static void test_unit_config_runtime_stream_profile_invalid_bitrate(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_bootstrap(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Try to set invalid bitrate (too low)
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "bitrate", 10);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  // Try to set invalid bitrate (too high)
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "bitrate", 100000);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/* ============================================================================
  * Test Suite Registration (main() is provided by test_runner.c)
  * ============================================================================
  */
@@ -856,6 +1023,20 @@ const struct CMUnitTest* get_config_runtime_unit_tests(size_t* count) {
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_thread_safe, setup,
                                     teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_mixed_types, setup,
+                                    teardown),
+
+    /* Stream Profile Configuration Tests (User Story 4) */
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_validation_valid, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_limit_enforcement, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_width, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_height, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_fps, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_bitrate, setup,
                                     teardown),
   };
 

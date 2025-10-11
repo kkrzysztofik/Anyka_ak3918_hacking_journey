@@ -257,28 +257,52 @@ int config_runtime_get_persistence_status(void);
 /**
  * @brief Get stream profile configuration
  *
- * @param[in] profile_index Profile index (0-3)
- * @param[out] profile Output profile structure
- * @return ONVIF_SUCCESS on success, error code on failure
+ * Retrieves the complete configuration for the specified stream profile.
+ * Profile index maps to CONFIG_SECTION_STREAM_PROFILE_1 through _4.
+ *
+ * @param[in] profile_index Profile index (0-3 for profiles 1-4)
+ * @param[out] profile Output profile structure (video_config_t)
+ * @return ONVIF_SUCCESS on success
+ * @return ONVIF_ERROR_INVALID_PARAMETER if profile_index out of range or profile is NULL
+ * @return ONVIF_ERROR_NOT_INITIALIZED if runtime manager not initialized
  */
-int config_runtime_get_stream_profile(int profile_index, void* profile);
+int config_runtime_get_stream_profile(int profile_index, video_config_t* profile);
 
 /**
  * @brief Set stream profile configuration
  *
- * @param[in] profile_index Profile index (0-3)
- * @param[in] profile Input profile structure
- * @return ONVIF_SUCCESS on success, error code on failure
+ * Updates the complete configuration for the specified stream profile.
+ * Validates all parameters against schema rules and updates immediately.
+ * Changes are queued for async persistence.
+ *
+ * @param[in] profile_index Profile index (0-3 for profiles 1-4)
+ * @param[in] profile Input profile structure (video_config_t)
+ * @return ONVIF_SUCCESS on success
+ * @return ONVIF_ERROR_INVALID_PARAMETER if profile_index out of range, profile is NULL, or validation fails
+ * @return ONVIF_ERROR_NOT_INITIALIZED if runtime manager not initialized
  */
-int config_runtime_set_stream_profile(int profile_index, const void* profile);
+int config_runtime_set_stream_profile(int profile_index, const video_config_t* profile);
 
 /**
  * @brief Validate stream profile parameters
  *
- * @param[in] profile Profile structure to validate
- * @return ONVIF_SUCCESS if valid, error code on failure
+ * Validates all stream profile parameters against schema rules without updating.
+ * Useful for pre-validation before committing changes.
+ *
+ * @param[in] profile Profile structure to validate (video_config_t)
+ * @return ONVIF_SUCCESS if all parameters are valid
+ * @return ONVIF_ERROR_INVALID_PARAMETER if any parameter fails validation
  */
-int config_runtime_validate_stream_profile(const void* profile);
+int config_runtime_validate_stream_profile(const video_config_t* profile);
+
+/**
+ * @brief Get stream profile count
+ *
+ * Returns the maximum number of stream profiles supported.
+ *
+ * @return Maximum number of stream profiles (always 4)
+ */
+int config_runtime_get_stream_profile_count(void);
 
 /* User Credential Management (User Story 5) */
 

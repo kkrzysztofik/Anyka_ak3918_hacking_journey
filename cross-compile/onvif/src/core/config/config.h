@@ -76,6 +76,10 @@ struct application_config {
   struct server_settings* server;             /* HTTP server configuration */
   video_config_t* main_stream;                /* main stream (vs0) configuration */
   video_config_t* sub_stream;                 /* sub stream (vs1) configuration */
+  video_config_t* stream_profile_1;           /* stream profile 1 configuration (User Story 4) */
+  video_config_t* stream_profile_2;           /* stream profile 2 configuration (User Story 4) */
+  video_config_t* stream_profile_3;           /* stream profile 3 configuration (User Story 4) */
+  video_config_t* stream_profile_4;           /* stream profile 4 configuration (User Story 4) */
 };
 
 /**
