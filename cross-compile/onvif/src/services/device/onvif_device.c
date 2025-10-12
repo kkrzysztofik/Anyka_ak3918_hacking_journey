@@ -8,10 +8,12 @@
 #include "onvif_device.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "core/config/config.h"
 #include "networking/common/buffer_pool.h"
@@ -107,6 +109,36 @@ int onvif_device_system_reboot(void) {
   platform_log_error("All reboot methods failed - system may not support reboot\n");
   service_log_operation_failure(&log_ctx, "system_reboot", -1, "All reboot methods failed");
   return ONVIF_ERROR;
+}
+
+/**
+ * @brief Deferred reboot thread function
+ * @param arg Unused thread argument
+ * @return NULL
+ * @note This function waits briefly to allow response transmission, then reboots
+ *
+ * ONVIF Spec Requirement (Section 5.2.9):
+ * "The device SHALL send the response message and then initiate the reboot process."
+ *
+ * The 2-second delay ensures:
+ * 1. HTTP response is fully transmitted to client
+ * 2. TCP ACK handshake completes
+ * 3. Network buffers are flushed
+ */
+static void* deferred_reboot_thread(void* arg) {
+  (void)arg;
+
+  platform_log_info("Deferred reboot thread started - waiting 2 seconds for response transmission\n");
+
+  // Wait for response to be fully transmitted before initiating reboot
+  sleep(2);
+
+  platform_log_notice("Deferred reboot delay complete - initiating system reboot now\n");
+
+  // Execute the actual reboot command
+  onvif_device_system_reboot();
+
+  return NULL;
 }
 
 /* ============================================================================
@@ -406,6 +438,14 @@ static int get_services_business_logic(const service_handler_config_t* config,
  * @param error_ctx Error context
  * @param callback_data System reboot callback data structure
  * @return ONVIF_SUCCESS if business logic succeeds, error code if it fails
+ *
+ * ONVIF Spec Compliance (Section 5.2.9 SystemReboot):
+ * "The device SHALL send the response message and then initiate the reboot process."
+ *
+ * Implementation:
+ * 1. Generate and send SOAP response with success message
+ * 2. Launch background thread to defer reboot execution
+ * 3. Thread waits 2 seconds for TCP transmission, then reboots
  */
 static int system_reboot_business_logic(const service_handler_config_t* config,
                                         const http_request_t* request, http_response_t* response,
@@ -414,23 +454,20 @@ static int system_reboot_business_logic(const service_handler_config_t* config,
                                         void* callback_data) {
   (void)config;
   (void)request;
+  (void)error_ctx;
   if (!callback_data) {
     return ONVIF_ERROR_INVALID;
   }
 
   system_reboot_callback_data_t* reboot_data = (system_reboot_callback_data_t*)callback_data;
 
-  // Call the system reboot function
-  int result = onvif_device_system_reboot();
-  if (result != ONVIF_SUCCESS) {
-    return error_handle_system(error_ctx, result, "system_reboot_execution", response);
-  }
-
-  // Set reboot message
+  // Set reboot message FIRST (before generating response)
   reboot_data->message = "System reboot initiated";
 
+  service_log_info(log_ctx, "SystemReboot requested - preparing response before reboot");
+
   // Generate response using gSOAP callback
-  result = onvif_gsoap_generate_response_with_callback(gsoap_ctx, system_reboot_response_callback,
+  int result = onvif_gsoap_generate_response_with_callback(gsoap_ctx, system_reboot_response_callback,
                                                        (void*)reboot_data);
   if (result != 0) {
     service_log_operation_failure(log_ctx, "gsoap_response_generation", result,
@@ -453,6 +490,27 @@ static int system_reboot_business_logic(const service_handler_config_t* config,
                                   "Failed to build smart response");
     return result;
   }
+
+  // Response is now ready to be sent to client
+  service_log_info(log_ctx, "SystemReboot response generated successfully - scheduling deferred reboot");
+
+  // Launch background thread to defer reboot execution
+  // This ensures response is fully transmitted before system reboots
+  pthread_t reboot_thread;
+  int pthread_result = pthread_create(&reboot_thread, NULL, deferred_reboot_thread, NULL);
+  if (pthread_result != 0) {
+    platform_log_error("Failed to create deferred reboot thread (error: %d)\n", pthread_result);
+    service_log_operation_failure(log_ctx, "pthread_create", pthread_result,
+                                  "Failed to create deferred reboot thread");
+    // Note: We still return success because response was generated
+    // Reboot will not happen, but client received valid response
+    return ONVIF_SUCCESS;
+  }
+
+  // Detach thread so it can run independently
+  pthread_detach(reboot_thread);
+
+  platform_log_notice("SystemReboot response sent - reboot will execute in 2 seconds\n");
 
   return ONVIF_SUCCESS;
 }
