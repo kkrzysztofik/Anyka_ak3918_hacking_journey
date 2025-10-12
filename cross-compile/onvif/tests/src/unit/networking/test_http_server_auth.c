@@ -12,6 +12,7 @@
 #include "cmocka_wrapper.h"
 #include "common/test_helpers.h"
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
 #include "mocks/http_server_mock.h"
 #include "mocks/mock_service_dispatcher.h"
 #include "networking/http/http_auth.h"
@@ -26,14 +27,55 @@ TEST_HELPER_CREATE_MOCK_HANDLERS(http_server_auth)
 TEST_HELPER_DECLARE_COUNTERS(http_server_auth, 0, 0, 0, 0)
 
 /* ============================================================================
+ * Forward Declarations
+ * ============================================================================ */
+
+static struct application_config* create_test_app_config(int auth_enabled);
+static void free_test_app_config(struct application_config* app_config);
+
+/* ============================================================================
  * Test Setup/Teardown
  * ============================================================================ */
 
-static int setup_http_server_auth_tests(void** state) {
-  (void)state;
+// Test-specific state structure
+struct http_server_auth_test_state {
+  struct application_config* runtime_config;
+};
 
+static int setup_http_server_auth_tests(void** state) {
   // Initialize memory manager for proper memory leak detection
   memory_manager_init();
+
+  // Create test state for this specific test
+  struct http_server_auth_test_state* test_state =
+    test_malloc(sizeof(struct http_server_auth_test_state));
+  if (!test_state) {
+    return -1;
+  }
+
+  // Create application config for runtime init
+  test_state->runtime_config = create_test_app_config(1);
+  if (!test_state->runtime_config) {
+    test_free(test_state);
+    return -1;
+  }
+
+  // Initialize runtime config system for authentication tests
+  int result = config_runtime_init(test_state->runtime_config);
+  if (result != ONVIF_SUCCESS && result != ONVIF_ERROR_ALREADY_EXISTS) {
+    free_test_app_config(test_state->runtime_config);
+    test_free(test_state);
+    return -1;
+  }
+
+  // Add test user for authentication validation
+  result = config_runtime_add_user("admin", "admin");
+  if (result != ONVIF_SUCCESS && result != ONVIF_ERROR_ALREADY_EXISTS) {
+    config_runtime_cleanup();
+    free_test_app_config(test_state->runtime_config);
+    test_free(test_state);
+    return -1;
+  }
 
   // Enable real HTTP server functions for integration testing
   http_server_mock_use_real_function(true);
@@ -43,11 +85,14 @@ static int setup_http_server_auth_tests(void** state) {
 
   http_server_auth_reset_mock_state();
   reset_http_server_auth_state();
+
+  *state = test_state;
   return 0;
 }
 
 static int teardown_http_server_auth_tests(void** state) {
-  (void)state;
+  struct http_server_auth_test_state* test_state =
+    (struct http_server_auth_test_state*)*state;
 
   // Reset global HTTP app config to prevent test pollution
   extern const struct application_config* g_http_app_config;
@@ -61,6 +106,16 @@ static int teardown_http_server_auth_tests(void** state) {
 
   // Cleanup service dispatcher mock (pure CMocka pattern)
   mock_service_dispatcher_cleanup();
+
+  // Cleanup runtime config system
+  if (test_state) {
+    config_runtime_cleanup();
+    if (test_state->runtime_config) {
+      free_test_app_config(test_state->runtime_config);
+    }
+    test_free(test_state);
+  }
+
   return 0;
 }
 

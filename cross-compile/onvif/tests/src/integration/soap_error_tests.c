@@ -28,11 +28,29 @@
 #include "data/soap_test_envelopes.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
 
+// Mock control headers for integration testing
+#include "mocks/buffer_pool_mock.h"
+#include "mocks/config_mock.h"
+#include "mocks/gsoap_mock.h"
+#include "mocks/http_server_mock.h"
+#include "mocks/mock_service_dispatcher.h"
+#include "mocks/network_mock.h"
+#include "mocks/smart_response_mock.h"
+
 /**
  * @brief Setup function for SOAP error tests
  */
 int soap_error_tests_setup(void** state) {
   (void)state;
+
+  /* Enable real functions for integration testing (not platform layer) */
+  service_dispatcher_mock_use_real_function(true);
+  gsoap_mock_use_real_function(true);
+  network_mock_use_real_function(true);
+  http_server_mock_use_real_function(true);
+  buffer_pool_mock_use_real_function(true);
+  smart_response_mock_use_real_function(true);
+  config_mock_use_real_function(true);
 
   // Initialize memory manager for tracking
   memory_manager_init();
@@ -64,6 +82,15 @@ int soap_error_tests_teardown(void** state) {
 
   // Cleanup service dispatcher
   onvif_service_dispatcher_cleanup();
+
+  /* Reset mock functions to default state */
+  service_dispatcher_mock_use_real_function(false);
+  gsoap_mock_use_real_function(false);
+  network_mock_use_real_function(false);
+  http_server_mock_use_real_function(false);
+  buffer_pool_mock_use_real_function(false);
+  smart_response_mock_use_real_function(false);
+  config_mock_use_real_function(false);
 
   return 0;
 }

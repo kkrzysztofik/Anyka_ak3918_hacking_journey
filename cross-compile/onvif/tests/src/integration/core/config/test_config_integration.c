@@ -29,6 +29,9 @@
 #include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
 
+/* Mock control headers for integration testing */
+#include "mocks/config_mock.h"
+
 /* ============================================================================
  * Test State and Fixtures
  * ============================================================================
@@ -47,6 +50,9 @@ static struct {
  */
 static int setup(void** state) {
   (void)state;
+
+  /* Enable real functions for integration testing (not platform layer) */
+  config_mock_use_real_function(true);
 
   memset(&test_state, 0, sizeof(test_state));
   test_state.runtime_initialized = 0;
@@ -99,6 +105,9 @@ static int teardown(void** state) {
 
   /* Clean up test config file */
   unlink(test_state.test_config_path);
+
+  /* Reset mock functions to default state */
+  config_mock_use_real_function(false);
 
   return 0;
 }

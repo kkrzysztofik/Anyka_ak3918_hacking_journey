@@ -27,6 +27,11 @@
 #include "utils/error/error_handling.h"
 #include "utils/security/hash_utils.h"
 
+/* Mock control headers for integration testing */
+#include "mocks/config_mock.h"
+#include "mocks/http_server_mock.h"
+#include "mocks/network_mock.h"
+
 /* Test constants */
 #define TEST_USERNAME "testuser"
 #define TEST_PASSWORD "testpass123"
@@ -54,6 +59,11 @@ static int http_auth_integration_setup(void** state)
   if (!test_state) {
     return -1;
   }
+
+  /* Enable real functions for integration testing (not platform layer) */
+  config_mock_use_real_function(true);
+  http_server_mock_use_real_function(true);
+  network_mock_use_real_function(true);
 
   /* Initialize configuration structures */
   memset(&test_state->config_mgr, 0, sizeof(config_manager_t));
@@ -96,6 +106,11 @@ static int http_auth_integration_teardown(void** state)
     config_runtime_cleanup();
     free(test_state);
   }
+
+  /* Reset mock functions to default state */
+  config_mock_use_real_function(false);
+  http_server_mock_use_real_function(false);
+  network_mock_use_real_function(false);
 
   return 0;
 }
