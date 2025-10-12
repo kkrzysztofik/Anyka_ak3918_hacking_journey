@@ -112,42 +112,25 @@ int onvif_util_handle_service_request(const service_handler_config_t* config,
                                       void* callback_data);
 
 /**
- * @brief Get configuration string with fallback and error handling
- * @param handler Service handler instance
+ * @brief Simplified configuration string getter with fallback
  * @param section Configuration section
  * @param key Configuration key
  * @param value Output value buffer
  * @param value_size Size of value buffer
  * @param default_value Default value if config not found
- * @param log_ctx Service logging context
- * @param error_ctx Error context
- * @param response ONVIF response
- * @param config_name Configuration name for logging
  * @return ONVIF_SUCCESS if successful, error code if it fails
  */
-int onvif_util_get_config_string_with_fallback(
-  onvif_service_handler_instance_t* handler, config_section_t section, const char* key, char* value,
-  size_t value_size, const char* default_value, service_log_context_t* log_ctx,
-  error_context_t* error_ctx, http_response_t* response, const char* config_name);
+int config_get_string_or_default(config_section_t section, const char* key, char* value,
+                                  size_t value_size, const char* default_value);
 
 /**
- * @brief Get configuration integer with fallback and error handling
- * @param handler Service handler instance
+ * @brief Simplified configuration integer getter with fallback
  * @param section Configuration section
  * @param key Configuration key
- * @param value Output value pointer
  * @param default_value Default value if config not found
- * @param log_ctx Service logging context
- * @param error_ctx Error context
- * @param response ONVIF response
- * @param config_name Configuration name for logging
- * @return ONVIF_SUCCESS if successful, error code if it fails
+ * @return Configuration value or default
  */
-int onvif_util_get_config_int_with_fallback(onvif_service_handler_instance_t* handler,
-                                            config_section_t section, const char* key, int* value,
-                                            int default_value, service_log_context_t* log_ctx,
-                                            error_context_t* error_ctx, http_response_t* response,
-                                            const char* config_name);
+int config_get_int_or_default(config_section_t section, const char* key, int default_value);
 
 /**
  * @brief Convert service type to string

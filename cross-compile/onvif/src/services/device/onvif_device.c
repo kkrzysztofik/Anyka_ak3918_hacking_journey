@@ -144,43 +144,41 @@ static int get_device_information_business_logic(const service_handler_config_t*
 
   device_info_callback_data_t* device_info_data = (device_info_callback_data_t*)callback_data;
 
-  // Retrieve configuration values with fallback directly into callback data
-  int result = onvif_util_get_config_string_with_fallback(
-    (onvif_service_handler_instance_t*)&g_device_handler, CONFIG_SECTION_DEVICE, "manufacturer",
-    device_info_data->manufacturer, sizeof(device_info_data->manufacturer),
-    DEVICE_MANUFACTURER_DEFAULT, log_ctx, error_ctx, response, "manufacturer");
+  // Retrieve configuration values with fallback directly into callback data using simplified API
+  int result = config_get_string_or_default(CONFIG_SECTION_DEVICE, "manufacturer",
+                                            device_info_data->manufacturer,
+                                            sizeof(device_info_data->manufacturer),
+                                            DEVICE_MANUFACTURER_DEFAULT);
   if (result != ONVIF_SUCCESS) {
     return result;
   }
 
-  result = onvif_util_get_config_string_with_fallback(
-    (onvif_service_handler_instance_t*)&g_device_handler, CONFIG_SECTION_DEVICE, "model",
-    device_info_data->model, sizeof(device_info_data->model), DEVICE_MODEL_DEFAULT, log_ctx,
-    error_ctx, response, "model");
+  result = config_get_string_or_default(CONFIG_SECTION_DEVICE, "model", device_info_data->model,
+                                        sizeof(device_info_data->model), DEVICE_MODEL_DEFAULT);
   if (result != ONVIF_SUCCESS) {
     return result;
   }
 
-  result = onvif_util_get_config_string_with_fallback(
-    (onvif_service_handler_instance_t*)&g_device_handler, CONFIG_SECTION_DEVICE, "firmware_version",
-    device_info_data->firmware_version, sizeof(device_info_data->firmware_version),
-    DEVICE_FIRMWARE_VER_DEFAULT, log_ctx, error_ctx, response, "firmware_version");
+  result = config_get_string_or_default(CONFIG_SECTION_DEVICE, "firmware_version",
+                                        device_info_data->firmware_version,
+                                        sizeof(device_info_data->firmware_version),
+                                        DEVICE_FIRMWARE_VER_DEFAULT);
   if (result != ONVIF_SUCCESS) {
     return result;
   }
 
-  result = onvif_util_get_config_string_with_fallback(
-    (onvif_service_handler_instance_t*)&g_device_handler, CONFIG_SECTION_DEVICE, "serial_number",
-    device_info_data->serial_number, sizeof(device_info_data->serial_number), DEVICE_SERIAL_DEFAULT,
-    log_ctx, error_ctx, response, "serial_number");
+  result = config_get_string_or_default(CONFIG_SECTION_DEVICE, "serial_number",
+                                        device_info_data->serial_number,
+                                        sizeof(device_info_data->serial_number),
+                                        DEVICE_SERIAL_DEFAULT);
   if (result != ONVIF_SUCCESS) {
     return result;
   }
 
-  result = onvif_util_get_config_string_with_fallback(
-    (onvif_service_handler_instance_t*)&g_device_handler, CONFIG_SECTION_DEVICE, "hardware_id",
-    device_info_data->hardware_id, sizeof(device_info_data->hardware_id),
-    DEVICE_HARDWARE_ID_DEFAULT, log_ctx, error_ctx, response, "hardware_id");
+  result = config_get_string_or_default(CONFIG_SECTION_DEVICE, "hardware_id",
+                                        device_info_data->hardware_id,
+                                        sizeof(device_info_data->hardware_id),
+                                        DEVICE_HARDWARE_ID_DEFAULT);
   if (result != ONVIF_SUCCESS) {
     return result;
   }
@@ -243,21 +241,15 @@ static int get_capabilities_business_logic(const service_handler_config_t* confi
 
   capabilities_callback_data_t* capabilities_data = (capabilities_callback_data_t*)callback_data;
 
-  // Get HTTP port from configuration with fallback
-  int http_port = DEFAULT_HTTP_PORT;
-  int result = onvif_util_get_config_int_with_fallback(
-    (onvif_service_handler_instance_t*)&g_device_handler, CONFIG_SECTION_ONVIF, "http_port",
-    &http_port, DEFAULT_HTTP_PORT, log_ctx, error_ctx, response, "http_port");
-  if (result != ONVIF_SUCCESS) {
-    return result;
-  }
+  // Get HTTP port from configuration with fallback using simplified API
+  int http_port = config_get_int_or_default(CONFIG_SECTION_ONVIF, "http_port", DEFAULT_HTTP_PORT);
   service_log_info(log_ctx, "HTTP port configured as %d", http_port);
 
   // Set capabilities data
   capabilities_data->capabilities = &dev_caps;
 
   // Generate response using gSOAP callback
-  result = onvif_gsoap_generate_response_with_callback(gsoap_ctx, capabilities_response_callback,
+  int result = onvif_gsoap_generate_response_with_callback(gsoap_ctx, capabilities_response_callback,
                                                        (void*)capabilities_data);
   if (result != 0) {
     service_log_operation_failure(log_ctx, "gsoap_response_generation", result,

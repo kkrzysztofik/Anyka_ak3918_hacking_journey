@@ -14,6 +14,7 @@
 
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
 #include "protocol/gsoap/onvif_gsoap_response.h"
 #include "utils/memory/smart_response_builder.h"
 
@@ -134,46 +135,43 @@ int onvif_util_handle_service_request(const service_handler_config_t* config,
 }
 
 /**
- * @brief Get configuration string with fallback and error handling
+ * @brief Simplified configuration string getter with fallback
  */
-int onvif_util_get_config_string_with_fallback(
-  onvif_service_handler_instance_t* handler, config_section_t section, const char* key, char* value,
-  size_t value_size, const char* default_value, service_log_context_t* log_ctx,
-  error_context_t* error_ctx, http_response_t* response, const char* config_name) {
-  if (!handler || !key || !value || !default_value) {
+int config_get_string_or_default(config_section_t section, const char* key, char* value,
+                                  size_t value_size, const char* default_value) {
+  if (!key || !value || !default_value) {
     return ONVIF_ERROR;
   }
 
-  // Try to get from config, fallback to default
-  const char* config_value = default_value;
-  // TODO: Implement actual config lookup
-  // For now, use default value
+  // Try to get from runtime configuration
+  int result = config_runtime_get_string(section, key, value, value_size);
 
-  // Copy to output buffer
-  strncpy(value, config_value, value_size - 1);
-  value[value_size - 1] = '\0';
+  // If not found or error, use default value
+  if (result != ONVIF_SUCCESS) {
+    strncpy(value, default_value, value_size - 1);
+    value[value_size - 1] = '\0';
+  }
 
   return ONVIF_SUCCESS;
 }
 
 /**
- * @brief Get configuration integer with fallback and error handling
+ * @brief Simplified configuration integer getter with fallback
  */
-int onvif_util_get_config_int_with_fallback(onvif_service_handler_instance_t* handler,
-                                            config_section_t section, const char* key, int* value,
-                                            int default_value, service_log_context_t* log_ctx,
-                                            error_context_t* error_ctx, http_response_t* response,
-                                            const char* config_name) {
-  if (!handler || !key || !value) {
-    return ONVIF_ERROR;
+int config_get_int_or_default(config_section_t section, const char* key, int default_value) {
+  if (!key) {
+    return default_value;
   }
 
-  // Try to get from config, fallback to default
-  *value = default_value;
-  // TODO: Implement actual config lookup
-  // For now, use default value
+  int value = default_value;
+  int result = config_runtime_get_int(section, key, &value);
 
-  return ONVIF_SUCCESS;
+  // If not found or error, return default value
+  if (result != ONVIF_SUCCESS) {
+    return default_value;
+  }
+
+  return value;
 }
 
 /**
