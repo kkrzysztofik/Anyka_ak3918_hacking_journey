@@ -304,6 +304,55 @@ int config_runtime_validate_stream_profile(const video_config_t* profile);
  */
 int config_runtime_get_stream_profile_count(void);
 
+/* PTZ Preset Profile Management */
+
+/* Forward declaration - full definition in services/ptz/onvif_ptz.h */
+typedef struct ptz_preset_list ptz_preset_list_t;
+
+/**
+ * @brief Get PTZ presets for a specific profile
+ *
+ * Retrieves all presets for the specified media profile.
+ * Each profile has its own isolated preset storage (max 4 presets per profile).
+ * Profile index maps to CONFIG_SECTION_PTZ_PRESET_PROFILE_1 through _4.
+ *
+ * @param[in] profile_index Profile index (0-3 for profiles 1-4)
+ * @param[out] presets Output preset list structure (ptz_preset_list_t)
+ * @return ONVIF_SUCCESS on success
+ * @return ONVIF_ERROR_INVALID_PARAMETER if profile_index out of range or presets is NULL
+ * @return ONVIF_ERROR_NOT_INITIALIZED if runtime manager not initialized
+ */
+int config_runtime_get_ptz_profile_presets(int profile_index, ptz_preset_list_t* presets);
+
+/**
+ * @brief Set PTZ presets for a specific profile
+ *
+ * Updates all presets for the specified media profile.
+ * Validates all parameters against schema rules (pan: -180 to 180, tilt: -90 to 90, zoom: 0 to 1).
+ * Changes are applied immediately and queued for async persistence.
+ * Unused preset slots (beyond preset_count) are automatically cleared.
+ *
+ * @param[in] profile_index Profile index (0-3 for profiles 1-4)
+ * @param[in] presets Input preset list structure (ptz_preset_list_t)
+ * @return ONVIF_SUCCESS on success
+ * @return ONVIF_ERROR_INVALID_PARAMETER if profile_index out of range, presets is NULL, or validation fails
+ * @return ONVIF_ERROR_NOT_INITIALIZED if runtime manager not initialized
+ */
+int config_runtime_set_ptz_profile_presets(int profile_index, const ptz_preset_list_t* presets);
+
+/**
+ * @brief Validate PTZ preset list parameters
+ *
+ * Validates all preset parameters against schema rules without updating.
+ * Checks preset count (0-4), position values (pan/tilt/zoom bounds),
+ * and ensures tokens and names are not empty.
+ *
+ * @param[in] presets Preset list structure to validate (ptz_preset_list_t)
+ * @return ONVIF_SUCCESS if all parameters are valid
+ * @return ONVIF_ERROR_INVALID_PARAMETER if any parameter fails validation
+ */
+int config_runtime_validate_ptz_profile_presets(const ptz_preset_list_t* presets);
+
 /* User Credential Management (User Story 5) */
 
 /**

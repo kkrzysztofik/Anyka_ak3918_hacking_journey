@@ -106,6 +106,15 @@ struct ptz_preset {
   struct ptz_vector ptz_position;
 };
 
+/**
+ * @brief PTZ preset list for a single media profile
+ * Each profile has its own isolated preset storage (max 4 presets per profile)
+ */
+typedef struct ptz_preset_list {
+  int preset_count;            /**< Number of active presets (0-4) */
+  struct ptz_preset presets[4]; /**< Preset array (max 4 per profile) */
+} ptz_preset_list_t;
+
 int onvif_ptz_get_nodes(struct ptz_node** nodes, int* count); /**< Get all PTZ nodes. */
 int onvif_ptz_get_node(const char* node_token,
                        struct ptz_node* node); /**< Retrieve PTZ node capabilities. */

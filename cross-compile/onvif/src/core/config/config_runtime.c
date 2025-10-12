@@ -19,6 +19,7 @@
 #include "core/config/config_storage.h"
 #include "common/onvif_constants.h"
 #include "services/common/onvif_types.h"
+#include "services/ptz/onvif_ptz.h"
 #include "utils/error/error_handling.h"
 #include "utils/validation/common_validation.h"
 #include "utils/security/hash_utils.h"
@@ -123,6 +124,98 @@ static const config_schema_entry_t g_config_schema[] = {
     {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "profile", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
     {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "codec_type", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
     {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+    /* PTZ Preset Profile 1 - 4 presets max per profile */
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset_count", CONFIG_TYPE_INT, 0, 0, 4, 0, "0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset1_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset1_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset1_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset1_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset1_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset2_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset2_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset2_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset2_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset2_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset3_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset3_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset3_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset3_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset3_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset4_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset4_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset4_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset4_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset4_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+
+    /* PTZ Preset Profile 2 - 4 presets max per profile */
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset_count", CONFIG_TYPE_INT, 0, 0, 4, 0, "0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset1_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset1_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset1_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset1_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset1_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset2_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset2_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset2_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset2_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset2_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset3_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset3_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset3_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset3_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset3_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset4_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset4_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset4_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset4_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset4_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+
+    /* PTZ Preset Profile 3 - 4 presets max per profile */
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset_count", CONFIG_TYPE_INT, 0, 0, 4, 0, "0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset1_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset1_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset1_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset1_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset1_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset2_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset2_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset2_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset2_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset2_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset3_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset3_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset3_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset3_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset3_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset4_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset4_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset4_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset4_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset4_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+
+    /* PTZ Preset Profile 4 - 4 presets max per profile */
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset_count", CONFIG_TYPE_INT, 0, 0, 4, 0, "0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset1_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset1_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset1_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset1_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset1_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset2_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset2_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset2_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset2_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset2_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset3_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset3_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset3_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset3_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset3_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset4_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset4_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset4_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset4_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+    {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset4_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
 };
 
 static const size_t g_config_schema_count = sizeof(g_config_schema) / sizeof(g_config_schema[0]);
@@ -134,6 +227,7 @@ static void* config_runtime_get_section_ptr(config_section_t section);
 static void* config_runtime_get_field_ptr(config_section_t section, const char* key, config_value_type_t* out_type);
 static const config_schema_entry_t* config_runtime_find_schema_entry(config_section_t section, const char* key);
 static int config_runtime_validate_int_value(const config_schema_entry_t* schema, int value);
+static int config_runtime_validate_float_value(const config_schema_entry_t* schema, float value);
 static int config_runtime_validate_string_value(const config_schema_entry_t* schema, const char* value);
 static int config_runtime_find_queue_entry(config_section_t section, const char* key);
 static int config_runtime_validate_username(const char* username);
@@ -1014,6 +1108,255 @@ int config_runtime_get_stream_profile_count(void)
     return 4; /* Fixed at 4 profiles per FR-012, FR-013 */
 }
 
+/* PTZ Preset Profile Management */
+
+/**
+ * @brief Get PTZ presets for a specific profile
+ */
+int config_runtime_get_ptz_profile_presets(int profile_index, ptz_preset_list_t* presets)
+{
+    config_section_t section;
+    int result;
+    int i;
+    char key[64];
+
+    /* Validate parameters */
+    if (profile_index < 0 || profile_index > 3) {
+        platform_log_error("[CONFIG] Invalid PTZ profile index: %d (valid range: 0-3)\n", profile_index);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    if (presets == NULL) {
+        platform_log_error("[CONFIG] NULL presets pointer\n");
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Check initialization */
+    pthread_mutex_lock(&g_config_runtime_mutex);
+    if (!g_config_runtime_initialized) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_INITIALIZED;
+    }
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    /* Map profile index to section */
+    section = CONFIG_SECTION_PTZ_PRESET_PROFILE_1 + profile_index;
+
+    /* Get preset count */
+    result = config_runtime_get_int(section, "preset_count", &presets->preset_count);
+    if (result != ONVIF_SUCCESS) return result;
+
+    /* Retrieve each preset */
+    for (i = 0; i < presets->preset_count && i < 4; i++) {
+        /* Get token */
+        snprintf(key, sizeof(key), "preset%d_token", i + 1);
+        result = config_runtime_get_string(section, key, presets->presets[i].token,
+                                          sizeof(presets->presets[i].token));
+        if (result != ONVIF_SUCCESS) return result;
+
+        /* Get name */
+        snprintf(key, sizeof(key), "preset%d_name", i + 1);
+        result = config_runtime_get_string(section, key, presets->presets[i].name,
+                                          sizeof(presets->presets[i].name));
+        if (result != ONVIF_SUCCESS) return result;
+
+        /* Get pan */
+        snprintf(key, sizeof(key), "preset%d_pan", i + 1);
+        result = config_runtime_get_float(section, key, &presets->presets[i].ptz_position.pan_tilt.x);
+        if (result != ONVIF_SUCCESS) return result;
+
+        /* Get tilt */
+        snprintf(key, sizeof(key), "preset%d_tilt", i + 1);
+        result = config_runtime_get_float(section, key, &presets->presets[i].ptz_position.pan_tilt.y);
+        if (result != ONVIF_SUCCESS) return result;
+
+        /* Get zoom */
+        snprintf(key, sizeof(key), "preset%d_zoom", i + 1);
+        result = config_runtime_get_float(section, key, &presets->presets[i].ptz_position.zoom);
+        if (result != ONVIF_SUCCESS) return result;
+
+        /* Set space URI (empty for now, will be set by PTZ service) */
+        presets->presets[i].ptz_position.space[0] = '\0';
+    }
+
+    platform_log_debug("[CONFIG] Retrieved %d PTZ presets for profile %d\n",
+                      presets->preset_count, profile_index + 1);
+
+    return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Set PTZ presets for a specific profile
+ */
+int config_runtime_set_ptz_profile_presets(int profile_index, const ptz_preset_list_t* presets)
+{
+    config_section_t section;
+    int result;
+    int i;
+    char key[64];
+
+    /* Validate parameters */
+    if (profile_index < 0 || profile_index > 3) {
+        platform_log_error("[CONFIG] Invalid PTZ profile index: %d (valid range: 0-3)\n", profile_index);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    if (presets == NULL) {
+        platform_log_error("[CONFIG] NULL presets pointer\n");
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate presets first */
+    result = config_runtime_validate_ptz_profile_presets(presets);
+    if (result != ONVIF_SUCCESS) {
+        return result;
+    }
+
+    /* Check initialization */
+    pthread_mutex_lock(&g_config_runtime_mutex);
+    if (!g_config_runtime_initialized) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_INITIALIZED;
+    }
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    /* Map profile index to section */
+    section = CONFIG_SECTION_PTZ_PRESET_PROFILE_1 + profile_index;
+
+    /* Set preset count */
+    result = config_runtime_set_int(section, "preset_count", presets->preset_count);
+    if (result != ONVIF_SUCCESS) return result;
+
+    /* Set each preset */
+    for (i = 0; i < presets->preset_count && i < 4; i++) {
+        /* Set token */
+        snprintf(key, sizeof(key), "preset%d_token", i + 1);
+        result = config_runtime_set_string(section, key, presets->presets[i].token);
+        if (result != ONVIF_SUCCESS) return result;
+
+        /* Set name */
+        snprintf(key, sizeof(key), "preset%d_name", i + 1);
+        result = config_runtime_set_string(section, key, presets->presets[i].name);
+        if (result != ONVIF_SUCCESS) return result;
+
+        /* Set pan */
+        snprintf(key, sizeof(key), "preset%d_pan", i + 1);
+        result = config_runtime_set_float(section, key, presets->presets[i].ptz_position.pan_tilt.x);
+        if (result != ONVIF_SUCCESS) return result;
+
+        /* Set tilt */
+        snprintf(key, sizeof(key), "preset%d_tilt", i + 1);
+        result = config_runtime_set_float(section, key, presets->presets[i].ptz_position.pan_tilt.y);
+        if (result != ONVIF_SUCCESS) return result;
+
+        /* Set zoom */
+        snprintf(key, sizeof(key), "preset%d_zoom", i + 1);
+        result = config_runtime_set_float(section, key, presets->presets[i].ptz_position.zoom);
+        if (result != ONVIF_SUCCESS) return result;
+    }
+
+    /* Clear remaining preset slots */
+    for (i = presets->preset_count; i < 4; i++) {
+        /* Clear token */
+        snprintf(key, sizeof(key), "preset%d_token", i + 1);
+        result = config_runtime_set_string(section, key, "");
+        if (result != ONVIF_SUCCESS) return result;
+
+        /* Clear name */
+        snprintf(key, sizeof(key), "preset%d_name", i + 1);
+        result = config_runtime_set_string(section, key, "");
+        if (result != ONVIF_SUCCESS) return result;
+
+        /* Reset positions to zero */
+        snprintf(key, sizeof(key), "preset%d_pan", i + 1);
+        result = config_runtime_set_float(section, key, 0.0f);
+        if (result != ONVIF_SUCCESS) return result;
+
+        snprintf(key, sizeof(key), "preset%d_tilt", i + 1);
+        result = config_runtime_set_float(section, key, 0.0f);
+        if (result != ONVIF_SUCCESS) return result;
+
+        snprintf(key, sizeof(key), "preset%d_zoom", i + 1);
+        result = config_runtime_set_float(section, key, 0.0f);
+        if (result != ONVIF_SUCCESS) return result;
+    }
+
+    platform_log_info("[CONFIG] Updated %d PTZ presets for profile %d\n",
+                     presets->preset_count, profile_index + 1);
+
+    return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Validate PTZ preset list parameters
+ */
+int config_runtime_validate_ptz_profile_presets(const ptz_preset_list_t* presets)
+{
+    const config_schema_entry_t* schema_entry;
+    int i;
+
+    if (presets == NULL) {
+        platform_log_error("[CONFIG] NULL presets pointer for validation\n");
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate preset count */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "preset_count");
+    if (schema_entry && config_runtime_validate_int_value(schema_entry, presets->preset_count) != ONVIF_SUCCESS) {
+        platform_log_error("[CONFIG] Invalid preset count: %d (valid range: %d-%d)\n",
+                          presets->preset_count, schema_entry->min_value, schema_entry->max_value);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate each preset's position values */
+    for (i = 0; i < presets->preset_count && i < 4; i++) {
+        /* Validate pan (-180 to 180) */
+        schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "preset1_pan");
+        if (schema_entry && config_runtime_validate_float_value(schema_entry,
+            presets->presets[i].ptz_position.pan_tilt.x) != ONVIF_SUCCESS) {
+            platform_log_error("[CONFIG] Invalid pan for preset %d: %.2f (valid range: %.2f-%.2f)\n",
+                              i + 1, presets->presets[i].ptz_position.pan_tilt.x,
+                              (float)schema_entry->min_value, (float)schema_entry->max_value);
+            return ONVIF_ERROR_INVALID_PARAMETER;
+        }
+
+        /* Validate tilt (-90 to 90) */
+        schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "preset1_tilt");
+        if (schema_entry && config_runtime_validate_float_value(schema_entry,
+            presets->presets[i].ptz_position.pan_tilt.y) != ONVIF_SUCCESS) {
+            platform_log_error("[CONFIG] Invalid tilt for preset %d: %.2f (valid range: %.2f-%.2f)\n",
+                              i + 1, presets->presets[i].ptz_position.pan_tilt.y,
+                              (float)schema_entry->min_value, (float)schema_entry->max_value);
+            return ONVIF_ERROR_INVALID_PARAMETER;
+        }
+
+        /* Validate zoom (0 to 1) */
+        schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "preset1_zoom");
+        if (schema_entry && config_runtime_validate_float_value(schema_entry,
+            presets->presets[i].ptz_position.zoom) != ONVIF_SUCCESS) {
+            platform_log_error("[CONFIG] Invalid zoom for preset %d: %.2f (valid range: %.2f-%.2f)\n",
+                              i + 1, presets->presets[i].ptz_position.zoom,
+                              (float)schema_entry->min_value, (float)schema_entry->max_value);
+            return ONVIF_ERROR_INVALID_PARAMETER;
+        }
+
+        /* Validate token and name are not empty */
+        if (presets->presets[i].token[0] == '\0') {
+            platform_log_error("[CONFIG] Empty token for preset %d\n", i + 1);
+            return ONVIF_ERROR_INVALID_PARAMETER;
+        }
+
+        if (presets->presets[i].name[0] == '\0') {
+            platform_log_error("[CONFIG] Empty name for preset %d\n", i + 1);
+            return ONVIF_ERROR_INVALID_PARAMETER;
+        }
+    }
+
+    platform_log_debug("[CONFIG] PTZ preset list validation passed: %d presets\n", presets->preset_count);
+
+    return ONVIF_SUCCESS;
+}
+
 /* User Credential Management Implementation (User Story 5) */
 
 /**
@@ -1563,6 +1906,36 @@ static int config_runtime_validate_int_value(const config_schema_entry_t* schema
                          schema->section_name, schema->key,
                          validation_get_error_message(&validation_result),
                          value, schema->min_value, schema->max_value);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Validate float value against schema bounds
+ */
+static int config_runtime_validate_float_value(const config_schema_entry_t* schema, float value)
+{
+    if (schema == NULL) {
+        platform_log_error("[CONFIG] Schema validation failed: NULL schema pointer\n");
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Check if this is a float type */
+    if (schema->type != CONFIG_TYPE_FLOAT) {
+        platform_log_error("[CONFIG] Schema validation failed for '%s.%s': Expected float type, got type %d\n",
+                         schema->section_name, schema->key, schema->type);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate bounds (min_value and max_value are stored as ints in schema) */
+    float min = (float)schema->min_value;
+    float max = (float)schema->max_value;
+
+    if (value < min || value > max) {
+        platform_log_error("[CONFIG] Configuration validation failed for '%s.%s': Value %.2f out of range (min=%.2f, max=%.2f)\n",
+                         schema->section_name, schema->key, value, min, max);
         return ONVIF_ERROR_INVALID_PARAMETER;
     }
 

@@ -20,6 +20,8 @@
 
 // ONVIF project includes
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
+#include "core/config/config_storage.h"
 #include "platform/adapters/ptz_adapter.h"
 #include "platform/platform.h"
 #include "services/ptz/onvif_ptz.h"
@@ -36,11 +38,15 @@
 
 // Mock includes
 #include "mocks/buffer_pool_mock.h"
+#include "mocks/config_mock.h"
 #include "mocks/gsoap_mock.h"
 #include "mocks/mock_service_dispatcher.h"
 #include "mocks/platform_mock.h"
 #include "mocks/platform_ptz_mock.h"
 #include "mocks/ptz_adapter_mock.h"
+
+// Test configuration file path
+#define TEST_CONFIG_PATH "configs/ptz_test_config.ini"
 
 // Test profile token constants
 #define TEST_PROFILE_TOKEN      "ProfileToken1"
@@ -115,27 +121,6 @@
 #define TEST_PRESET_NAME_BUFFER_SIZE 32
 
 /**
- * @brief Setup mock expectations for platform configuration calls during gSOAP initialization
- *
- * This function configures the required mock expectations for platform_config_get_int
- * calls that occur during real gSOAP initialization. The gSOAP implementation itself
- * is real (not mocked), but it calls platform functions that need to be mocked.
- */
-static void setup_platform_config_mock_expectations(void) {
-  // Configure platform configuration mock expectations for gSOAP verbosity lookup
-  // Real gSOAP initialization calls platform_config_get_int("logging", "http_verbose", 0) twice
-  expect_string(__wrap_platform_config_get_int, section, "logging");
-  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
-  expect_function_call(__wrap_platform_config_get_int);
-  will_return(__wrap_platform_config_get_int, 0);
-
-  expect_string(__wrap_platform_config_get_int, section, "logging");
-  expect_string(__wrap_platform_config_get_int, key, "http_verbose");
-  expect_function_call(__wrap_platform_config_get_int);
-  will_return(__wrap_platform_config_get_int, 0);
-}
-
-/**
  * @brief Setup function for PTZ integration tests
  * @param state Test state pointer
  * @return 0 on success, -1 on failure
@@ -155,6 +140,7 @@ int ptz_service_setup(void** state) {
   buffer_pool_mock_use_real_function(true);
   gsoap_mock_use_real_function(true);
   ptz_adapter_mock_use_real_function(true);
+  config_mock_use_real_function(true);
 
   // Initialize service dispatcher
   int result = onvif_service_dispatcher_init();
@@ -171,6 +157,39 @@ int ptz_service_setup(void** state) {
   expect_value(__wrap_platform_ptz_move_to_position, tilt_deg, 0);
   expect_function_call(__wrap_platform_ptz_move_to_position);
   will_return(__wrap_platform_ptz_move_to_position, PLATFORM_SUCCESS);
+
+  // Heap-allocate application config structure (required for config_runtime_init)
+  // CRITICAL: Must be heap-allocated because config_runtime_init() stores the pointer
+  struct application_config* app_config = calloc(1, sizeof(struct application_config));
+  assert_non_null(app_config);
+
+  // Allocate pointer members for application_config (required for config_storage_load)
+  app_config->network = calloc(1, sizeof(struct network_settings));
+  app_config->device = calloc(1, sizeof(struct device_info));
+  app_config->logging = calloc(1, sizeof(struct logging_settings));
+  app_config->server = calloc(1, sizeof(struct server_settings));
+  assert_non_null(app_config->network);
+  assert_non_null(app_config->device);
+  assert_non_null(app_config->logging);
+  assert_non_null(app_config->server);
+
+  // Initialize runtime configuration system
+  result = config_runtime_init(app_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Load configuration from test INI file (replaces manual defaults initialization)
+  result = config_storage_load(TEST_CONFIG_PATH, NULL);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Initialize empty PTZ preset data for all 4 profiles
+  // CRITICAL: PTZ preset storage requires explicit initialization via dedicated API
+  // The config_storage_load() only handles basic key-value pairs, not complex structures
+  for (int i = 0; i < 4; i++) {
+    ptz_preset_list_t empty_presets = {.preset_count = 0};
+    memset(empty_presets.presets, 0, sizeof(empty_presets.presets));
+    result = config_runtime_set_ptz_profile_presets(i, &empty_presets);
+    assert_int_equal(ONVIF_SUCCESS, result);
+  }
 
   // Initialize PTZ service with mock config
   config_manager_t* config = malloc(sizeof(config_manager_t));
@@ -205,7 +224,7 @@ int ptz_service_reset(void** state) {
 
   // CRITICAL: Reset preset state between tests to prevent overflow
   // This ensures each test starts with a clean preset slate
-  int reset_result = onvif_ptz_reset_presets();
+  (void)onvif_ptz_reset_presets();
 
   // No need to reinitialize - service remains initialized
   return 0;
@@ -231,6 +250,13 @@ int ptz_service_teardown(void** state) {
   // Free config first, before leak checking
   free(config);
 
+  // Clean up runtime configuration system
+  config_runtime_cleanup();
+
+  // Set up expectation for platform_ptz_cleanup (called by ptz_adapter_cleanup)
+  expect_function_call(__wrap_platform_ptz_cleanup);
+  will_return(__wrap_platform_ptz_cleanup, PLATFORM_SUCCESS);
+
   // Cleanup PTZ service (this unregisters from dispatcher)
   onvif_ptz_cleanup();
   ptz_adapter_cleanup();
@@ -243,6 +269,7 @@ int ptz_service_teardown(void** state) {
   buffer_pool_mock_use_real_function(false);
   gsoap_mock_use_real_function(false);
   ptz_adapter_mock_use_real_function(false);
+  config_mock_use_real_function(false);
 
   return 0;
 }
@@ -1051,9 +1078,6 @@ void test_integration_ptz_get_nodes_soap(void** state) {
 
   // PTZ init is idempotent, so calling it multiple times is safe
 
-  // Setup mock expectations for platform config calls during real gSOAP initialization
-  setup_platform_config_mock_expectations();
-
   // Step 1: Create SOAP request envelope
   http_request_t* request =
     soap_test_create_request("GetNodes", SOAP_PTZ_GET_NODES, "/onvif/ptz_service");
@@ -1112,9 +1136,6 @@ void test_integration_ptz_get_nodes_soap(void** state) {
 void test_integration_ptz_absolute_move_soap(void** state) {
   (void)state;
 
-  // Setup mock expectations for platform config calls during real gSOAP initialization
-  setup_platform_config_mock_expectations();
-
   // Step 1: Create SOAP request envelope
   http_request_t* request =
     soap_test_create_request("AbsoluteMove", SOAP_PTZ_ABSOLUTE_MOVE, "/onvif/ptz_service");
@@ -1160,9 +1181,6 @@ void test_integration_ptz_absolute_move_soap(void** state) {
  */
 void test_integration_ptz_get_presets_soap(void** state) {
   (void)state;
-
-  // Setup mock expectations for platform config calls during real gSOAP initialization
-  setup_platform_config_mock_expectations();
 
   // Step 1: Create SOAP request envelope
   http_request_t* request =
@@ -1213,9 +1231,6 @@ void test_integration_ptz_get_presets_soap(void** state) {
 void test_integration_ptz_set_preset_soap(void** state) {
   (void)state;
 
-  // Setup mock expectations for platform config calls during real gSOAP initialization
-  setup_platform_config_mock_expectations();
-
   // Step 1: Create SOAP request envelope
   http_request_t* request =
     soap_test_create_request("SetPreset", SOAP_PTZ_SET_PRESET, "/onvif/ptz_service");
@@ -1264,9 +1279,6 @@ void test_integration_ptz_set_preset_soap(void** state) {
 void test_integration_ptz_goto_preset_soap(void** state) {
   (void)state;
 
-  // Setup mock expectations for platform config calls during real gSOAP initialization
-  setup_platform_config_mock_expectations();
-
   // Step 1: Create SOAP request envelope
   http_request_t* request =
     soap_test_create_request("GotoPreset", SOAP_PTZ_GOTO_PRESET, "/onvif/ptz_service");
@@ -1312,9 +1324,6 @@ void test_integration_ptz_goto_preset_soap(void** state) {
  */
 void test_integration_ptz_remove_preset_soap(void** state) {
   (void)state;
-
-  // Setup mock expectations for platform config calls during real gSOAP initialization
-  setup_platform_config_mock_expectations();
 
   // Step 1: Create SOAP request envelope
   http_request_t* request =
