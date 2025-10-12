@@ -103,6 +103,47 @@ void __wrap_config_cleanup(config_manager_t* config);
 int __wrap_config_get_summary(const config_manager_t* config, char* buffer, size_t buffer_size);
 
 /* ============================================================================
+ * CMocka Wrapped Runtime Configuration Functions
+ * ============================================================================ */
+
+/**
+ * @brief CMocka wrapped config_runtime_get_int
+ * @param section Configuration section
+ * @param key Configuration key
+ * @param out_value Output integer value
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_get_int(config_section_t section, const char* key, int* out_value);
+
+/**
+ * @brief CMocka wrapped config_runtime_set_int
+ * @param section Configuration section
+ * @param key Configuration key
+ * @param value Integer value to set
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_set_int(config_section_t section, const char* key, int value);
+
+/**
+ * @brief CMocka wrapped config_runtime_get_string
+ * @param section Configuration section
+ * @param key Configuration key
+ * @param out_value Output string buffer
+ * @param buffer_size Size of output buffer
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_get_string(config_section_t section, const char* key, char* out_value, size_t buffer_size);
+
+/**
+ * @brief CMocka wrapped config_runtime_set_string
+ * @param section Configuration section
+ * @param key Configuration key
+ * @param value String value to set
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_set_string(config_section_t section, const char* key, const char* value);
+
+/* ============================================================================
  * Conditional Mock/Real Function Control
  * ============================================================================ */
 

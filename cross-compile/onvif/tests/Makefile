@@ -163,6 +163,10 @@ WRAP_FUNCTIONS := \
 	platform_config_get_string \
 	platform_config_get_int \
 	platform_get_system_info \
+	config_runtime_get_int \
+	config_runtime_set_int \
+	config_runtime_get_string \
+	config_runtime_set_string \
 	onvif_service_dispatcher_register_service \
 	onvif_service_dispatcher_unregister_service \
 	onvif_service_dispatcher_init \
