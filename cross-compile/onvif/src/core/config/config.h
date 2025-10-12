@@ -65,6 +65,17 @@ struct server_settings {
   int cleanup_interval;   /* Periodic cleanup interval in seconds (1-60) */
 };
 
+/* User credentials for ONVIF authentication (User Story 5) */
+#define MAX_USERS 8
+#define MAX_USERNAME_LENGTH 32
+#define MAX_PASSWORD_HASH_LENGTH 128  /* Salted SHA256: salt$hash (32+1+64 hex chars) */
+
+struct user_credential {
+  char username[MAX_USERNAME_LENGTH + 1]; /* Username (3-32 alphanumeric chars) */
+  char password_hash[MAX_PASSWORD_HASH_LENGTH + 1]; /* Salted SHA256: salt$hash format */
+  int active; /* Is this user slot active? */
+};
+
 /* Full application configuration */
 struct application_config {
   struct onvif_settings onvif;                /* core ONVIF settings */
@@ -80,6 +91,7 @@ struct application_config {
   video_config_t* stream_profile_2;           /* stream profile 2 configuration (User Story 4) */
   video_config_t* stream_profile_3;           /* stream profile 3 configuration (User Story 4) */
   video_config_t* stream_profile_4;           /* stream profile 4 configuration (User Story 4) */
+  struct user_credential users[MAX_USERS];    /* user credentials array (User Story 5) */
 };
 
 /**

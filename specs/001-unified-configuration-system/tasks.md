@@ -174,24 +174,24 @@
 
 ### Tests for User Story 5
 
-- [ ] T065 [P] [US5] Unit test for user credential schema validation in test_config_runtime.c
-- [ ] T066 [P] [US5] Unit test for user limit enforcement in test_config_runtime.c
-- [ ] T067 [P] [US5] Unit test for password hashing with SHA256 in test_config_runtime.c
-- [ ] T068 [P] [US5] Unit test for password verification in test_config_runtime.c
-- [ ] T069 [P] [US5] Unit test for user management operations in test_config_runtime.c
-- [ ] T070 [P] [US5] Integration test for authentication integration in tests/src/integration/networking/test_http_auth_integration.c
-- [ ] T071 [P] [US5] End-to-end test for ONVIF authentication with managed users
+- [X] T065 [P] [US5] Unit test for user credential schema validation in test_config_runtime.c (completed - 4 tests added)
+- [X] T066 [P] [US5] Unit test for user limit enforcement in test_config_runtime.c (completed - 8-user limit test added)
+- [X] T067 [P] [US5] Unit test for password hashing with SHA256 in test_config_runtime.c (completed - 3 tests added)
+- [X] T068 [P] [US5] Unit test for password verification in test_config_runtime.c (completed - 3 tests added)
+- [X] T069 [P] [US5] Unit test for user management operations in test_config_runtime.c (completed - 3 tests added)
+- [ ] T070 [P] [US5] Integration test for authentication integration in tests/src/integration/networking/test_http_auth_integration.c (deferred - unit tests provide coverage)
+- [ ] T071 [P] [US5] End-to-end test for ONVIF authentication with managed users (deferred - requires ONVIF service integration)
 
 ### Implementation for User Story 5
 
-- [ ] T072 [P] [US5] Extend config_runtime.h with user management schema sections
-- [ ] T073 [P] [US5] Add user parameter definitions to config_runtime.c
-- [ ] T074 [US5] Implement config_runtime_hash_password using utils/security/sha256.c
-- [ ] T075 [US5] Implement config_runtime_verify_password API
-- [ ] T076 [US5] Implement config_runtime_add_user API
-- [ ] T077 [US5] Implement config_runtime_remove_user API
-- [ ] T078 [US5] Implement config_runtime_update_user_password API
-- [ ] T079 [US5] Add user limit enforcement (max 8 users)
+- [X] T072 [P] [US5] Extend config_runtime.h with user management schema sections (completed - added user_credential struct and users array to application_config)
+- [X] T073 [P] [US5] Add user parameter definitions to config_runtime.c (completed - added CONFIG_SECTION_USER_1 through USER_8)
+- [X] T074 [US5] Implement config_runtime_hash_password using utils/security/sha256.c (completed - SHA256-based password hashing)
+- [X] T075 [US5] Implement config_runtime_verify_password API (completed - constant-time password verification)
+- [X] T076 [US5] Implement config_runtime_add_user API (completed - validates username, enforces limits, hashes password)
+- [X] T077 [US5] Implement config_runtime_remove_user API (completed - marks user inactive and clears data)
+- [X] T078 [US5] Implement config_runtime_update_user_password API (completed - updates password hash for existing user)
+- [X] T079 [US5] Add user limit enforcement (max 8 users) (completed - enforced in add_user and find_free_user_slot)
 - [ ] T080 [US5] Update http_auth.c to use runtime user management
 - [ ] T081 [US5] Add user enumeration for management interfaces
 - [ ] T082 [US5] Implement authentication attempt logging without credential exposure

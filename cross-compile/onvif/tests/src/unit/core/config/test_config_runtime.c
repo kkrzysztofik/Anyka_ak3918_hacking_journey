@@ -952,6 +952,360 @@ static void test_unit_config_runtime_stream_profile_invalid_bitrate(void** state
 }
 
 /* ============================================================================
+ * User Credential Management Tests (User Story 5)
+ * ============================================================================
+ */
+
+/**
+ * @brief Test user credential schema validation - valid username (T065)
+ * Verify that valid usernames are accepted
+ */
+static void test_unit_config_runtime_user_validation_valid_username(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_init(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Valid usernames: 3-32 alphanumeric characters
+  result = config_runtime_add_user("user1", "password123");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_add_user("admin", "adminpass");
+  assert_int_equal(ONVIF_SUCCESS, result);
+}
+
+/**
+ * @brief Test user credential schema validation - invalid username too short (T065)
+ * Usernames must be at least 3 characters
+ */
+static void test_unit_config_runtime_user_validation_username_too_short(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_init(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Try to add user with username too short (less than 3 chars)
+  result = config_runtime_add_user("ab", "password123");
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test user credential schema validation - invalid username too long (T065)
+ * Usernames must be at most 32 characters
+ */
+static void test_unit_config_runtime_user_validation_username_too_long(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_init(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Try to add user with username too long (more than 32 chars)
+  char long_username[64];
+  memset(long_username, 'a', 33);
+  long_username[33] = '\0';
+
+  result = config_runtime_add_user(long_username, "password123");
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test user credential schema validation - invalid username characters (T065)
+ * Usernames must contain only alphanumeric characters
+ */
+static void test_unit_config_runtime_user_validation_username_invalid_chars(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_init(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Try to add user with invalid characters (spaces, special chars)
+  result = config_runtime_add_user("user name", "password123");
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  result = config_runtime_add_user("user@name", "password123");
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test user limit enforcement - maximum 8 users (T066)
+ * Verify that only 8 users can be created
+ */
+static void test_unit_config_runtime_user_limit_enforcement(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_init(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Add 8 valid users
+  result = config_runtime_add_user("user1", "pass1");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_add_user("user2", "pass2");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_add_user("user3", "pass3");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_add_user("user4", "pass4");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_add_user("user5", "pass5");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_add_user("user6", "pass6");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_add_user("user7", "pass7");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_add_user("user8", "pass8");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Try to add 9th user - should fail
+  result = config_runtime_add_user("user9", "pass9");
+  assert_int_equal(ONVIF_ERROR_OUT_OF_RESOURCES, result);
+}
+
+/**
+ * @brief Test password hashing with salted SHA256 (T067)
+ * Verify that passwords are properly hashed using salt$hash format
+ */
+static void test_unit_config_runtime_hash_password_success(void** state) {
+  (void)state;
+
+  char hash_output[129] = {0};
+  int result = config_runtime_hash_password("testpassword", hash_output, sizeof(hash_output));
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify hash format: salt$hash (32 hex + $ + 64 hex = 97 chars)
+  size_t hash_len = strlen(hash_output);
+  assert_true(hash_len >= 97);  // At least 97 characters
+
+  // Verify presence of $ separator
+  char* separator = strchr(hash_output, '$');
+  assert_non_null(separator);
+
+  // Verify salt is 32 hex characters
+  size_t salt_len = separator - hash_output;
+  assert_int_equal(32, salt_len);
+
+  // Verify hash is 64 hex characters after separator
+  size_t hash_part_len = strlen(separator + 1);
+  assert_int_equal(64, hash_part_len);
+
+  // Verify salt contains only hex digits
+  for (size_t i = 0; i < salt_len; i++) {
+    assert_true((hash_output[i] >= '0' && hash_output[i] <= '9') ||
+                (hash_output[i] >= 'a' && hash_output[i] <= 'f') ||
+                (hash_output[i] >= 'A' && hash_output[i] <= 'F'));
+  }
+
+  // Verify hash part contains only hex digits
+  const char* hash_part = separator + 1;
+  for (size_t i = 0; i < hash_part_len; i++) {
+    assert_true((hash_part[i] >= '0' && hash_part[i] <= '9') ||
+                (hash_part[i] >= 'a' && hash_part[i] <= 'f') ||
+                (hash_part[i] >= 'A' && hash_part[i] <= 'F'));
+  }
+}
+
+/**
+ * @brief Test password hashing with NULL parameters (T067)
+ */
+static void test_unit_config_runtime_hash_password_null_params(void** state) {
+  (void)state;
+
+  char hash_output[129] = {0};
+
+  // NULL password
+  int result = config_runtime_hash_password(NULL, hash_output, sizeof(hash_output));
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  // NULL output buffer
+  result = config_runtime_hash_password("password", NULL, 129);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  // Output buffer too small (less than ONVIF_PASSWORD_HASH_SIZE = 128)
+  result = config_runtime_hash_password("password", hash_output, 64);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test password hashing with random salt (T067)
+ * Same password should produce DIFFERENT hashes due to random salt
+ */
+static void test_unit_config_runtime_hash_password_consistency(void** state) {
+  (void)state;
+
+  char hash1[129] = {0};
+  char hash2[129] = {0};
+
+  int result = config_runtime_hash_password("testpassword", hash1, sizeof(hash1));
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  result = config_runtime_hash_password("testpassword", hash2, sizeof(hash2));
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Same password should produce DIFFERENT hashes due to random salt
+  assert_string_not_equal(hash1, hash2);
+
+  // But both should be valid salted hash format (salt$hash)
+  char* sep1 = strchr(hash1, '$');
+  char* sep2 = strchr(hash2, '$');
+  assert_non_null(sep1);
+  assert_non_null(sep2);
+
+  // Both should have 32-char salt and 64-char hash
+  assert_int_equal(32, sep1 - hash1);
+  assert_int_equal(32, sep2 - hash2);
+  assert_int_equal(64, strlen(sep1 + 1));
+  assert_int_equal(64, strlen(sep2 + 1));
+}
+
+/**
+ * @brief Test password verification - successful match (T068)
+ */
+static void test_unit_config_runtime_verify_password_success(void** state) {
+  (void)state;
+
+  // Hash a password with salt
+  char hash[129] = {0};
+  int result = config_runtime_hash_password("mypassword", hash, sizeof(hash));
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify correct password
+  result = config_runtime_verify_password("mypassword", hash);
+  assert_int_equal(ONVIF_SUCCESS, result);
+}
+
+/**
+ * @brief Test password verification - failed match (T068)
+ */
+static void test_unit_config_runtime_verify_password_failure(void** state) {
+  (void)state;
+
+  // Hash a password with salt
+  char hash[129] = {0};
+  int result = config_runtime_hash_password("mypassword", hash, sizeof(hash));
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Verify incorrect password
+  result = config_runtime_verify_password("wrongpassword", hash);
+  assert_int_equal(ONVIF_ERROR_AUTHENTICATION_FAILED, result);
+}
+
+/**
+ * @brief Test password verification with NULL parameters (T068)
+ */
+static void test_unit_config_runtime_verify_password_null_params(void** state) {
+  (void)state;
+
+  char hash[129] = {0};
+  config_runtime_hash_password("password", hash, sizeof(hash));
+
+  // NULL password
+  int result = config_runtime_verify_password(NULL, hash);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  // NULL hash
+  result = config_runtime_verify_password("password", NULL);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/**
+ * @brief Test user management - add and remove user (T069)
+ */
+static void test_unit_config_runtime_user_management_add_remove(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_init(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Add a user
+  result = config_runtime_add_user("testuser", "testpass");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Try to add duplicate user - should fail
+  result = config_runtime_add_user("testuser", "otherpass");
+  assert_int_equal(ONVIF_ERROR_ALREADY_EXISTS, result);
+
+  // Remove the user
+  result = config_runtime_remove_user("testuser");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Try to remove non-existent user - should fail
+  result = config_runtime_remove_user("testuser");
+  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
+}
+
+/**
+ * @brief Test user management - update password (T069)
+ */
+static void test_unit_config_runtime_user_management_update_password(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_init(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Add a user
+  result = config_runtime_add_user("testuser", "oldpass");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Update password
+  result = config_runtime_update_user_password("testuser", "newpass");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Try to update password for non-existent user - should fail
+  result = config_runtime_update_user_password("nonexistent", "somepass");
+  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
+}
+
+/**
+ * @brief Test user management with NULL parameters (T069)
+ */
+static void test_unit_config_runtime_user_management_null_params(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize
+  int result = config_runtime_init(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // NULL username in add_user
+  result = config_runtime_add_user(NULL, "password");
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  // NULL password in add_user
+  result = config_runtime_add_user("username", NULL);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  // NULL username in remove_user
+  result = config_runtime_remove_user(NULL);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  // NULL parameters in update_user_password
+  result = config_runtime_update_user_password(NULL, "newpass");
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+
+  result = config_runtime_update_user_password("username", NULL);
+  assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
+}
+
+/* ============================================================================
  * Test Suite Registration (main() is provided by test_runner.c)
  * ============================================================================
  */
@@ -1037,6 +1391,30 @@ const struct CMUnitTest* get_config_runtime_unit_tests(size_t* count) {
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_fps, setup,
                                     teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_bitrate, setup,
+                                    teardown),
+
+    /* User Credential Management Tests (User Story 5) */
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_valid_username, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_too_short, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_too_long, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_invalid_chars,
+                                    setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_limit_enforcement, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_success, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_null_params, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_consistency, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_success, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_failure, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_null_params, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_management_add_remove, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_management_update_password, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_management_null_params, setup,
                                     teardown),
   };
 

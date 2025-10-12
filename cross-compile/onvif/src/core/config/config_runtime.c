@@ -21,6 +21,7 @@
 #include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
 #include "utils/validation/common_validation.h"
+#include "utils/security/hash_utils.h"
 #include "platform/platform.h"
 
 /* Constants */
@@ -135,6 +136,9 @@ static const config_schema_entry_t* config_runtime_find_schema_entry(config_sect
 static int config_runtime_validate_int_value(const config_schema_entry_t* schema, int value);
 static int config_runtime_validate_string_value(const config_schema_entry_t* schema, const char* value);
 static int config_runtime_find_queue_entry(config_section_t section, const char* key);
+static int config_runtime_validate_username(const char* username);
+static int config_runtime_find_user_index(const char* username);
+static int config_runtime_find_free_user_slot(void);
 
 /**
  * @brief Bootstrap the runtime configuration manager
@@ -1010,44 +1014,213 @@ int config_runtime_get_stream_profile_count(void)
     return 4; /* Fixed at 4 profiles per FR-012, FR-013 */
 }
 
+/* User Credential Management Implementation (User Story 5) */
+
+/**
+ * @brief Hash password using salted SHA256 from hash_utils
+ * Generates random salt and produces salt$hash format
+ */
 int config_runtime_hash_password(const char* password, char* hash_output, size_t output_size)
 {
-    (void)password;
-    (void)hash_output;
-    (void)output_size;
-    /* TODO: Implement password hashing */
-    return ONVIF_ERROR_NOT_IMPLEMENTED;
+    /* Validate parameters */
+    if (password == NULL || hash_output == NULL) {
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Output buffer must hold salted hash: salt$hash format (128 bytes) */
+    if (output_size < ONVIF_PASSWORD_HASH_SIZE) {
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Use hash_utils salted password hashing */
+    return onvif_hash_password(password, hash_output, output_size);
 }
 
-int config_runtime_verify_password(const char* password, const char* hash)
+/**
+ * @brief Verify password against stored salted hash
+ */
+int config_runtime_verify_password(const char* password, const char* stored_hash)
 {
-    (void)password;
-    (void)hash;
-    /* TODO: Implement password verification */
-    return ONVIF_ERROR_NOT_IMPLEMENTED;
+    int result;
+
+    /* Validate parameters */
+    if (password == NULL || stored_hash == NULL) {
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Use hash_utils salted password verification */
+    result = onvif_verify_password(password, stored_hash);
+
+    /* Convert hash_utils result to config_runtime result */
+    if (result == ONVIF_SUCCESS) {
+        return ONVIF_SUCCESS;
+    }
+
+    if (result == ONVIF_ERROR_AUTH_FAILED) {
+        return ONVIF_ERROR_AUTHENTICATION_FAILED;
+    }
+
+    return result;
 }
 
+/**
+ * @brief Add a new user account
+ */
 int config_runtime_add_user(const char* username, const char* password)
 {
-    (void)username;
-    (void)password;
-    /* TODO: Implement user addition */
-    return ONVIF_ERROR_NOT_IMPLEMENTED;
+    int user_index;
+    int result;
+    char password_hash[ONVIF_PASSWORD_HASH_SIZE] = {0};
+
+    /* Validate parameters */
+    if (username == NULL || password == NULL) {
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate username format */
+    result = config_runtime_validate_username(username);
+    if (result != ONVIF_SUCCESS) {
+        return result;
+    }
+
+    pthread_mutex_lock(&g_config_runtime_mutex);
+
+    if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_INITIALIZED;
+    }
+
+    /* Check if user already exists */
+    user_index = config_runtime_find_user_index(username);
+    if (user_index >= 0) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_ALREADY_EXISTS;
+    }
+
+    /* Find free slot */
+    user_index = config_runtime_find_free_user_slot();
+    if (user_index < 0) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_OUT_OF_RESOURCES;
+    }
+
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    /* Hash the password */
+    result = config_runtime_hash_password(password, password_hash, sizeof(password_hash));
+    if (result != ONVIF_SUCCESS) {
+        return result;
+    }
+
+    /* Add the user */
+    pthread_mutex_lock(&g_config_runtime_mutex);
+
+    strncpy(g_config_runtime_app_config->users[user_index].username, username, MAX_USERNAME_LENGTH);
+    g_config_runtime_app_config->users[user_index].username[MAX_USERNAME_LENGTH] = '\0';
+
+    strncpy(g_config_runtime_app_config->users[user_index].password_hash, password_hash, MAX_PASSWORD_HASH_LENGTH);
+    g_config_runtime_app_config->users[user_index].password_hash[MAX_PASSWORD_HASH_LENGTH] = '\0';
+
+    g_config_runtime_app_config->users[user_index].active = 1;
+
+    g_config_runtime_generation++;
+
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    platform_log_info("[CONFIG] Added user: %s\n", username);
+
+    return ONVIF_SUCCESS;
 }
 
+/**
+ * @brief Remove a user account
+ */
 int config_runtime_remove_user(const char* username)
 {
-    (void)username;
-    /* TODO: Implement user removal */
-    return ONVIF_ERROR_NOT_IMPLEMENTED;
+    int user_index;
+
+    /* Validate parameters */
+    if (username == NULL) {
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    pthread_mutex_lock(&g_config_runtime_mutex);
+
+    if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_INITIALIZED;
+    }
+
+    /* Find user */
+    user_index = config_runtime_find_user_index(username);
+    if (user_index < 0) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_FOUND;
+    }
+
+    /* Mark as inactive and clear data */
+    g_config_runtime_app_config->users[user_index].active = 0;
+    memset(g_config_runtime_app_config->users[user_index].username, 0, sizeof(g_config_runtime_app_config->users[user_index].username));
+    memset(g_config_runtime_app_config->users[user_index].password_hash, 0, sizeof(g_config_runtime_app_config->users[user_index].password_hash));
+
+    g_config_runtime_generation++;
+
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    platform_log_info("[CONFIG] Removed user: %s\n", username);
+
+    return ONVIF_SUCCESS;
 }
 
+/**
+ * @brief Update user password
+ */
 int config_runtime_update_user_password(const char* username, const char* new_password)
 {
-    (void)username;
-    (void)new_password;
-    /* TODO: Implement password update */
-    return ONVIF_ERROR_NOT_IMPLEMENTED;
+    int user_index;
+    int result;
+    char password_hash[ONVIF_PASSWORD_HASH_SIZE] = {0};
+
+    /* Validate parameters */
+    if (username == NULL || new_password == NULL) {
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    pthread_mutex_lock(&g_config_runtime_mutex);
+
+    if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_INITIALIZED;
+    }
+
+    /* Find user */
+    user_index = config_runtime_find_user_index(username);
+    if (user_index < 0) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_FOUND;
+    }
+
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    /* Hash the new password */
+    result = config_runtime_hash_password(new_password, password_hash, sizeof(password_hash));
+    if (result != ONVIF_SUCCESS) {
+        return result;
+    }
+
+    /* Update the password hash */
+    pthread_mutex_lock(&g_config_runtime_mutex);
+
+    strncpy(g_config_runtime_app_config->users[user_index].password_hash, password_hash, MAX_PASSWORD_HASH_LENGTH);
+    g_config_runtime_app_config->users[user_index].password_hash[MAX_PASSWORD_HASH_LENGTH] = '\0';
+
+    g_config_runtime_generation++;
+
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    platform_log_info("[CONFIG] Updated password for user: %s\n", username);
+
+    return ONVIF_SUCCESS;
 }
 
 /* Helper functions */
@@ -1366,4 +1539,81 @@ static int config_runtime_validate_string_value(const config_schema_entry_t* sch
     }
 
     return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Validate username format
+ * Username must be 3-32 alphanumeric characters
+ */
+static int config_runtime_validate_username(const char* username)
+{
+    size_t len;
+    size_t i;
+
+    if (username == NULL) {
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    len = strlen(username);
+
+    /* Check length */
+    if (len < 3 || len > MAX_USERNAME_LENGTH) {
+        platform_log_error("[CONFIG] Invalid username length: %zu (valid range: 3-%d)\n", len, MAX_USERNAME_LENGTH);
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Check for alphanumeric characters only */
+    for (i = 0; i < len; i++) {
+        if (!((username[i] >= 'a' && username[i] <= 'z') ||
+              (username[i] >= 'A' && username[i] <= 'Z') ||
+              (username[i] >= '0' && username[i] <= '9'))) {
+            platform_log_error("[CONFIG] Invalid character in username: '%c' at position %zu\n", username[i], i);
+            return ONVIF_ERROR_INVALID_PARAMETER;
+        }
+    }
+
+    return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Find user index by username
+ * @return User index (0-7) if found, -1 if not found
+ */
+static int config_runtime_find_user_index(const char* username)
+{
+    int i;
+
+    if (username == NULL || g_config_runtime_app_config == NULL) {
+        return -1;
+    }
+
+    for (i = 0; i < MAX_USERS; i++) {
+        if (g_config_runtime_app_config->users[i].active &&
+            strcmp(g_config_runtime_app_config->users[i].username, username) == 0) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+/**
+ * @brief Find first free user slot
+ * @return Free slot index (0-7) if found, -1 if all slots full
+ */
+static int config_runtime_find_free_user_slot(void)
+{
+    int i;
+
+    if (g_config_runtime_app_config == NULL) {
+        return -1;
+    }
+
+    for (i = 0; i < MAX_USERS; i++) {
+        if (!g_config_runtime_app_config->users[i].active) {
+            return i;
+        }
+    }
+
+    return -1;
 }

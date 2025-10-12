@@ -36,9 +36,10 @@
 #define ONVIF_ERROR_AUTHORIZATION_FAILED  -17
 
 /* Service dispatcher error codes */
-#define ONVIF_ERROR_NOT_INITIALIZED -40
-#define ONVIF_ERROR_RESOURCE_LIMIT  -41
-#define ONVIF_ERROR_DUPLICATE       -42
+#define ONVIF_ERROR_NOT_INITIALIZED  -40
+#define ONVIF_ERROR_RESOURCE_LIMIT   -41
+#define ONVIF_ERROR_DUPLICATE        -42
+#define ONVIF_ERROR_OUT_OF_RESOURCES -43
 
 /* Hash utility error codes */
 #define ONVIF_ERROR_BUFFER_TOO_SMALL -50
