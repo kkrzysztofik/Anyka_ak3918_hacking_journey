@@ -12,6 +12,9 @@
 
 #include "networking/http/http_parser.h"
 
+/* Forward declaration for gSOAP context */
+struct soap;
+
 /* ============================================================================
  * Standardized Service Callback Interface
  * ============================================================================ */
@@ -31,6 +34,20 @@
 typedef int (*onvif_service_operation_handler_t)(const char* operation_name,
                                                  const http_request_t* request,
                                                  http_response_t* response);
+
+/**
+ * @brief Get service capability structure callback
+ * @param ctx gSOAP context for allocating structures
+ * @param capabilities_ptr Output pointer to capability structure (type depends on service)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ *
+ * Service-specific capability types:
+ * - Device: tt__DeviceCapabilities*
+ * - Media: tt__MediaCapabilities*
+ * - PTZ: tt__PTZCapabilities*
+ * - Imaging: tt__ImagingCapabilities*
+ */
+typedef int (*onvif_service_get_capabilities_t)(struct soap* ctx, void** capabilities_ptr);
 
 /**
  * @brief Service registration information
@@ -58,8 +75,11 @@ typedef struct {
   /** Service capabilities check (optional) */
   int (*capabilities_handler)(const char* capability_name);
 
+  /** Get service capability structure (optional) */
+  onvif_service_get_capabilities_t get_capabilities;
+
   /** Reserved for future extensions */
-  void* reserved[4];
+  void* reserved[3];
 } onvif_service_registration_t;
 
 /**
@@ -118,6 +138,23 @@ int onvif_service_dispatcher_is_registered(const char* service_name);
 int onvif_service_dispatcher_get_services(const char** services, size_t max_services);
 
 /**
+ * @brief Get service capability structure
+ *
+ * Queries a registered service for its ONVIF capability structure.
+ * The capability structure is allocated using the provided gSOAP context
+ * and is managed by that context's memory.
+ *
+ * @param service_name Service to query (e.g., "device", "media", "ptz", "imaging")
+ * @param ctx gSOAP context for memory allocation
+ * @param capabilities_ptr Output pointer to service capability structure
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_NOT_FOUND if service not registered,
+ *         ONVIF_ERROR_NOT_SUPPORTED if service doesn't provide capabilities,
+ *         other error code on failure
+ */
+int onvif_service_dispatcher_get_capabilities(const char* service_name, struct soap* ctx,
+                                              void** capabilities_ptr);
+
+/**
  * @brief Initialize service dispatcher
  *
  * Must be called before any service registration or dispatch operations.
@@ -162,12 +199,8 @@ extern int g_cleanup_in_progress;
   {                                                                                                \
     .service_name = (name), .namespace_uri = (ns), .operation_handler = (handler),                 \
     .init_handler = (init_fn), .cleanup_handler = (cleanup_fn), .capabilities_handler = NULL,      \
-    .reserved = {                                                                                  \
-      NULL,                                                                                        \
-      NULL,                                                                                        \
-      NULL,                                                                                        \
-      NULL                                                                                         \
-    }                                                                                              \
+    .get_capabilities = NULL,                                                                      \
+    .reserved = {NULL, NULL, NULL}                                                                 \
   }
 
 /**

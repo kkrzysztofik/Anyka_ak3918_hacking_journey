@@ -284,8 +284,28 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_success(void** 
   assert_non_null(ctx);
   assert_int_equal(ctx->error_context.last_error_code, ONVIF_SUCCESS);
 
+  // Create test capabilities structure with Device, Media, and PTZ services
+  struct tt__Capabilities* test_caps = soap_new_tt__Capabilities(&ctx->soap, 1);
+  assert_non_null(test_caps);
+  soap_default_tt__Capabilities(&ctx->soap, test_caps);
+
+  // Device capabilities
+  test_caps->Device = soap_new_tt__DeviceCapabilities(&ctx->soap, 1);
+  assert_non_null(test_caps->Device);
+  test_caps->Device->XAddr = soap_strdup(&ctx->soap, "http://192.168.1.100:80/onvif/device_service");
+
+  // Media capabilities
+  test_caps->Media = soap_new_tt__MediaCapabilities(&ctx->soap, 1);
+  assert_non_null(test_caps->Media);
+  test_caps->Media->XAddr = soap_strdup(&ctx->soap, "http://192.168.1.100:80/onvif/media_service");
+
+  // PTZ capabilities
+  test_caps->PTZ = soap_new_tt__PTZCapabilities(&ctx->soap, 1);
+  assert_non_null(test_caps->PTZ);
+  test_caps->PTZ->XAddr = soap_strdup(&ctx->soap, "http://192.168.1.100:80/onvif/ptz_service");
+
   int result =
-    onvif_gsoap_generate_capabilities_response(ctx, NULL, test_device_ip, test_http_port);
+    onvif_gsoap_generate_capabilities_response(ctx, test_caps, test_device_ip, test_http_port);
 
   assert_int_equal(result, ONVIF_SUCCESS);
 

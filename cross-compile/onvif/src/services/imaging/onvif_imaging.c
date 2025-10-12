@@ -458,6 +458,40 @@ static int imaging_service_capabilities_handler(const char* capability_name) {
 }
 
 /**
+ * @brief Generate Imaging service capability structure
+ * @param ctx gSOAP context for memory allocation
+ * @param capabilities_ptr Output pointer to tt__ImagingCapabilities*
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ */
+static int imaging_service_get_capabilities(struct soap* ctx, void** capabilities_ptr) {
+  if (!ctx || !capabilities_ptr) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Allocate ImagingCapabilities structure
+  struct tt__ImagingCapabilities* caps = soap_new_tt__ImagingCapabilities(ctx, 1);
+  if (!caps) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+  soap_default_tt__ImagingCapabilities(ctx, caps);
+
+  // Get device IP and port from runtime config
+  char device_ip[64];
+  int http_port;
+  config_runtime_get_string(CONFIG_SECTION_NETWORK, "device_ip", device_ip, sizeof(device_ip),
+                            "192.168.1.100");
+  config_runtime_get_int(CONFIG_SECTION_NETWORK, "http_port", &http_port, 8080);
+
+  // Build XAddr
+  char xaddr[256];
+  snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/imaging_service", device_ip, http_port);
+  caps->XAddr = soap_strdup(ctx, xaddr);
+
+  *capabilities_ptr = (void*)caps;
+  return ONVIF_SUCCESS;
+}
+
+/**
  * @brief Imaging service registration structure using standardized interface
  */
 static const onvif_service_registration_t g_imaging_service_registration = {
@@ -467,7 +501,8 @@ static const onvif_service_registration_t g_imaging_service_registration = {
   .init_handler = NULL, // Service is initialized explicitly before registration
   .cleanup_handler = imaging_service_cleanup_handler,
   .capabilities_handler = imaging_service_capabilities_handler,
-  .reserved = {NULL, NULL, NULL, NULL}};
+  .get_capabilities = imaging_service_get_capabilities,
+  .reserved = {NULL, NULL, NULL}};
 
 /* ============================================================================
  * Operation Dispatch Table

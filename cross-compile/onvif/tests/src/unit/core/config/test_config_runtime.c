@@ -19,6 +19,9 @@
 #include "core/config/config_runtime.h"
 #include "utils/error/error_handling.h"
 
+// Test mocks
+#include "mocks/config_mock.h"
+
 
 /* ============================================================================
  * Test Fixtures and Setup
@@ -76,6 +79,9 @@ static int setup(void** state) {
 
   test_state->initialized = 0;
 
+  // Enable real config_runtime functions for these tests
+  config_mock_use_real_function(true);
+
   *state = test_state;
   return 0;
 }
@@ -101,6 +107,9 @@ static int teardown(void** state) {
     free(test_state->test_config.stream_profile_4);
     free(test_state);
   }
+
+  // Restore mock behavior for other test suites
+  config_mock_use_real_function(false);
 
   return 0;
 }

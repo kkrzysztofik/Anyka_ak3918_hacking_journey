@@ -519,6 +519,40 @@ static int ptz_service_capabilities_handler(const char* capability_name) {
 }
 
 /**
+ * @brief Generate PTZ service capability structure
+ * @param ctx gSOAP context for memory allocation
+ * @param capabilities_ptr Output pointer to tt__PTZCapabilities*
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ */
+static int ptz_service_get_capabilities(struct soap* ctx, void** capabilities_ptr) {
+  if (!ctx || !capabilities_ptr) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Allocate PTZCapabilities structure
+  struct tt__PTZCapabilities* caps = soap_new_tt__PTZCapabilities(ctx, 1);
+  if (!caps) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+  soap_default_tt__PTZCapabilities(ctx, caps);
+
+  // Get device IP and port from runtime config
+  char device_ip[64];
+  int http_port;
+  config_runtime_get_string(CONFIG_SECTION_NETWORK, "device_ip", device_ip, sizeof(device_ip),
+                            "192.168.1.100");
+  config_runtime_get_int(CONFIG_SECTION_NETWORK, "http_port", &http_port, 8080);
+
+  // Build XAddr
+  char xaddr[256];
+  snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/ptz_service", device_ip, http_port);
+  caps->XAddr = soap_strdup(ctx, xaddr);
+
+  *capabilities_ptr = (void*)caps;
+  return ONVIF_SUCCESS;
+}
+
+/**
  * @brief PTZ service registration structure using standardized interface
  */
 static const onvif_service_registration_t g_ptz_service_registration = {
@@ -528,7 +562,8 @@ static const onvif_service_registration_t g_ptz_service_registration = {
   .init_handler = NULL, // Service is initialized explicitly before registration
   .cleanup_handler = ptz_service_cleanup_handler,
   .capabilities_handler = ptz_service_capabilities_handler,
-  .reserved = {NULL, NULL, NULL, NULL}};
+  .get_capabilities = ptz_service_get_capabilities,
+  .reserved = {NULL, NULL, NULL}};
 
 /* ============================================================================
  * PTZ Service Operation Definitions

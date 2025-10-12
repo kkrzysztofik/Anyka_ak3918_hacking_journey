@@ -20,6 +20,9 @@
 #include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
 
+// Test mocks
+#include "mocks/config_mock.h"
+
 
 /* ============================================================================
  * Test Fixtures and Setup
@@ -57,6 +60,9 @@ static int setup(void** state) {
   snprintf(test_state->test_file_path, sizeof(test_state->test_file_path), "%s", TEST_CONFIG_FILE);
   test_state->runtime_initialized = 0;
 
+  // Enable real config_runtime functions for these tests
+  config_mock_use_real_function(true);
+
   *state = test_state;
   return 0;
 }
@@ -78,6 +84,9 @@ static int teardown(void** state) {
 
     free(test_state);
   }
+
+  // Restore mock behavior for other test suites
+  config_mock_use_real_function(false);
 
   return 0;
 }

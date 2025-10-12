@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
 #include "networking/common/buffer_pool.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
@@ -262,21 +263,68 @@ static int get_capabilities_business_logic(const service_handler_config_t* confi
                                            error_context_t* error_ctx, void* callback_data) {
   (void)config;
   (void)request;
+  (void)error_ctx;
   if (!callback_data) {
     return ONVIF_ERROR_INVALID;
   }
 
   capabilities_callback_data_t* capabilities_data = (capabilities_callback_data_t*)callback_data;
 
-  // Get HTTP port from configuration with fallback using simplified API
-  int http_port = config_get_int_or_default(CONFIG_SECTION_ONVIF, "http_port", DEFAULT_HTTP_PORT);
-  service_log_info(log_ctx, "HTTP port configured as %d", http_port);
+  // Allocate root Capabilities structure
+  struct tt__Capabilities* caps = soap_new_tt__Capabilities(&gsoap_ctx->soap, 1);
+  if (!caps) {
+    service_log_operation_failure(log_ctx, "allocate_capabilities", ONVIF_ERROR_MEMORY_ALLOCATION,
+                                  "Failed to allocate Capabilities structure");
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+  soap_default_tt__Capabilities(&gsoap_ctx->soap, caps);
 
-  // Set capabilities data to NULL - gSOAP callback will create and populate the structure
-  capabilities_data->capabilities = NULL;
+  // Query Device service for its capabilities
+  void* device_caps_ptr = NULL;
+  int result = onvif_service_dispatcher_get_capabilities("device", &gsoap_ctx->soap, &device_caps_ptr);
+  if (result == ONVIF_SUCCESS && device_caps_ptr) {
+    caps->Device = (struct tt__DeviceCapabilities*)device_caps_ptr;
+    service_log_info(log_ctx, "Device capabilities retrieved successfully");
+  } else {
+    service_log_operation_failure(log_ctx, "query_device_capabilities", result,
+                                  "Failed to query device capabilities");
+  }
+
+  // Query Media service for its capabilities
+  void* media_caps_ptr = NULL;
+  result = onvif_service_dispatcher_get_capabilities("Media", &gsoap_ctx->soap, &media_caps_ptr);
+  if (result == ONVIF_SUCCESS && media_caps_ptr) {
+    caps->Media = (struct tt__MediaCapabilities*)media_caps_ptr;
+    service_log_info(log_ctx, "Media capabilities retrieved successfully");
+  } else {
+    service_log_info(log_ctx, "Media service not registered or no capabilities available");
+  }
+
+  // Query PTZ service for its capabilities
+  void* ptz_caps_ptr = NULL;
+  result = onvif_service_dispatcher_get_capabilities("ptz", &gsoap_ctx->soap, &ptz_caps_ptr);
+  if (result == ONVIF_SUCCESS && ptz_caps_ptr) {
+    caps->PTZ = (struct tt__PTZCapabilities*)ptz_caps_ptr;
+    service_log_info(log_ctx, "PTZ capabilities retrieved successfully");
+  } else {
+    service_log_info(log_ctx, "PTZ service not registered or no capabilities available");
+  }
+
+  // Query Imaging service for its capabilities
+  void* imaging_caps_ptr = NULL;
+  result = onvif_service_dispatcher_get_capabilities("imaging", &gsoap_ctx->soap, &imaging_caps_ptr);
+  if (result == ONVIF_SUCCESS && imaging_caps_ptr) {
+    caps->Imaging = (struct tt__ImagingCapabilities*)imaging_caps_ptr;
+    service_log_info(log_ctx, "Imaging capabilities retrieved successfully");
+  } else {
+    service_log_info(log_ctx, "Imaging service not registered or no capabilities available");
+  }
+
+  // Set the aggregated capabilities in callback data
+  capabilities_data->capabilities = caps;
 
   // Generate response using gSOAP callback
-  int result = onvif_gsoap_generate_response_with_callback(gsoap_ctx, capabilities_response_callback,
+  result = onvif_gsoap_generate_response_with_callback(gsoap_ctx, capabilities_response_callback,
                                                        (void*)capabilities_data);
   if (result != 0) {
     service_log_operation_failure(log_ctx, "gsoap_response_generation", result,
@@ -300,6 +348,7 @@ static int get_capabilities_business_logic(const service_handler_config_t* confi
     return result;
   }
 
+  service_log_info(log_ctx, "GetCapabilities response generated successfully with dynamic service capabilities");
   return ONVIF_SUCCESS;
 }
 
@@ -692,6 +741,81 @@ static int device_service_capabilities_handler(const char* capability_name) {
 }
 
 /**
+ * @brief Generate Device service capability structure
+ * @param ctx gSOAP context for memory allocation
+ * @param capabilities_ptr Output pointer to tt__DeviceCapabilities*
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ *
+ * Generates a complete Device service capability structure including:
+ * - XAddr (service endpoint URL)
+ * - System capabilities (discovery, firmware upgrade, logging, supported ONVIF versions)
+ * - Network capabilities (optional - IP filtering, IPv6, DynDNS, etc.)
+ */
+static int device_service_get_capabilities(struct soap* ctx, void** capabilities_ptr) {
+  if (!ctx || !capabilities_ptr) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Allocate DeviceCapabilities structure
+  struct tt__DeviceCapabilities* caps = soap_new_tt__DeviceCapabilities(ctx, 1);
+  if (!caps) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+  soap_default_tt__DeviceCapabilities(ctx, caps);
+
+  // Get device IP and port from runtime config with defaults
+  char device_ip[64] = "192.168.1.100";
+  int http_port = 8080;
+  config_runtime_get_string(CONFIG_SECTION_NETWORK, "device_ip", device_ip, sizeof(device_ip));
+  config_runtime_get_int(CONFIG_SECTION_NETWORK, "http_port", &http_port);
+
+  // Build XAddr
+  char xaddr[256];
+  snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/device_service", device_ip, http_port);
+  caps->XAddr = soap_strdup(ctx, xaddr);
+
+  // System Capabilities (required sub-structure)
+  caps->System = soap_new_tt__SystemCapabilities(ctx, 1);
+  if (!caps->System) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+  soap_default_tt__SystemCapabilities(ctx, caps->System);
+
+  caps->System->DiscoveryResolve = xsd__boolean__true_;
+  caps->System->DiscoveryBye = xsd__boolean__true_;
+  caps->System->RemoteDiscovery = xsd__boolean__true_;
+  caps->System->SystemBackup = xsd__boolean__false_;
+  caps->System->SystemLogging = xsd__boolean__false_;
+  caps->System->FirmwareUpgrade = xsd__boolean__false_;
+
+  // ONVIF Version - 24.12 (December 2024)
+  caps->System->__sizeSupportedVersions = 1;
+  caps->System->SupportedVersions = soap_new_tt__OnvifVersion(ctx, 1);
+  if (!caps->System->SupportedVersions) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+  caps->System->SupportedVersions[0].Major = 24;
+  caps->System->SupportedVersions[0].Minor = 12;
+
+  // Network Capabilities (optional but recommended)
+  caps->Network = soap_new_tt__NetworkCapabilities(ctx, 1);
+  if (caps->Network) {
+    soap_default_tt__NetworkCapabilities(ctx, caps->Network);
+    caps->Network->IPFilter = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
+    if (caps->Network->IPFilter) *caps->Network->IPFilter = xsd__boolean__false_;
+    caps->Network->ZeroConfiguration = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
+    if (caps->Network->ZeroConfiguration) *caps->Network->ZeroConfiguration = xsd__boolean__false_;
+    caps->Network->IPVersion6 = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
+    if (caps->Network->IPVersion6) *caps->Network->IPVersion6 = xsd__boolean__false_;
+    caps->Network->DynDNS = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
+    if (caps->Network->DynDNS) *caps->Network->DynDNS = xsd__boolean__false_;
+  }
+
+  *capabilities_ptr = (void*)caps;
+  return ONVIF_SUCCESS;
+}
+
+/**
  * @brief Device service registration structure using standardized interface
  */
 static const onvif_service_registration_t g_device_service_registration = {
@@ -701,7 +825,8 @@ static const onvif_service_registration_t g_device_service_registration = {
   .init_handler = NULL, // Service is initialized explicitly before registration
   .cleanup_handler = device_service_cleanup_handler,
   .capabilities_handler = device_service_capabilities_handler,
-  .reserved = {NULL, NULL, NULL, NULL}};
+  .get_capabilities = device_service_get_capabilities,
+  .reserved = {NULL, NULL, NULL}};
 
 /* ============================================================================
  * Public API Functions

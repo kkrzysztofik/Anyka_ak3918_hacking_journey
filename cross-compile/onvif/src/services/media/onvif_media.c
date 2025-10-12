@@ -1834,6 +1834,53 @@ static const service_action_def_t media_actions[] = {
   {"GetMetadataConfigurations", handle_get_metadata_configurations, 1},
   {"SetMetadataConfiguration", handle_set_metadata_configuration, 1}};
 
+/**
+ * @brief Generate Media service capability structure
+ * @param ctx gSOAP context for memory allocation
+ * @param capabilities_ptr Output pointer to tt__MediaCapabilities*
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ */
+static int media_service_get_capabilities(struct soap* ctx, void** capabilities_ptr) {
+  if (!ctx || !capabilities_ptr) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Allocate MediaCapabilities structure
+  struct tt__MediaCapabilities* caps = soap_new_tt__MediaCapabilities(ctx, 1);
+  if (!caps) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+  soap_default_tt__MediaCapabilities(ctx, caps);
+
+  // Get device IP and port from runtime config with defaults
+  char device_ip[64] = "192.168.1.100";
+  int http_port = 8080;
+  config_runtime_get_string(CONFIG_SECTION_NETWORK, "device_ip", device_ip, sizeof(device_ip));
+  config_runtime_get_int(CONFIG_SECTION_NETWORK, "http_port", &http_port);
+
+  // Build XAddr
+  char xaddr[256];
+  snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/media_service", device_ip, http_port);
+  caps->XAddr = soap_strdup(ctx, xaddr);
+
+  // StreamingCapabilities (REQUIRED for Media)
+  caps->StreamingCapabilities = soap_new_tt__RealTimeStreamingCapabilities(ctx, 1);
+  if (!caps->StreamingCapabilities) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+  soap_default_tt__RealTimeStreamingCapabilities(ctx, caps->StreamingCapabilities);
+
+  caps->StreamingCapabilities->RTPMulticast = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
+  if (caps->StreamingCapabilities->RTPMulticast) *caps->StreamingCapabilities->RTPMulticast = xsd__boolean__false_;
+  caps->StreamingCapabilities->RTP_USCORETCP = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
+  if (caps->StreamingCapabilities->RTP_USCORETCP) *caps->StreamingCapabilities->RTP_USCORETCP = xsd__boolean__true_;
+  caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
+  if (caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP) *caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP = xsd__boolean__true_;
+
+  *capabilities_ptr = (void*)caps;
+  return ONVIF_SUCCESS;
+}
+
 int onvif_media_init(config_manager_t* config) {
   // Allow NULL config for unit testing flexibility (matches PTZ/Device pattern)
   if (g_handler_initialized) {
@@ -1867,7 +1914,8 @@ int onvif_media_init(config_manager_t* config) {
       .init_handler = NULL,
       .cleanup_handler = NULL,
       .capabilities_handler = NULL,
-      .reserved = {NULL, NULL, NULL, NULL}};
+      .get_capabilities = media_service_get_capabilities,
+      .reserved = {NULL, NULL, NULL}};
 #ifdef UNIT_TESTING
     int dispatch_result = onvif_service_unit_register(&registration, &g_handler_initialized,
                                                       onvif_media_cleanup, "Media");

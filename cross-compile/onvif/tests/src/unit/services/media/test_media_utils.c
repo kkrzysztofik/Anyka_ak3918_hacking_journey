@@ -16,6 +16,7 @@
 #include "utils/error/error_handling.h"
 #include "core/config/config_runtime.h"
 #include "core/config/config_storage.h"
+#include "mocks/config_mock.h"
 
 // Test constants derived from media service defaults
 #define TEST_MEDIA_PROFILE_COUNT        4  /* Updated for User Story 4 - 4 profiles */
@@ -38,6 +39,9 @@ static int media_tests_setup(void** state) {
 
     /* Clear test state */
     memset(&g_media_test_state, 0, sizeof(g_media_test_state));
+
+    /* Enable real config_runtime functions for media tests */
+    config_mock_use_real_function(true);
 
     /* Allocate stream profiles */
     g_media_test_state.test_config.stream_profile_1 = calloc(1, sizeof(video_config_t));
@@ -77,6 +81,10 @@ static int media_tests_teardown(void** state) {
     free(g_media_test_state.test_config.stream_profile_4);
 
     memset(&g_media_test_state, 0, sizeof(g_media_test_state));
+
+    /* Restore mock behavior for other test suites */
+    config_mock_use_real_function(false);
+
     return 0;
 }
 

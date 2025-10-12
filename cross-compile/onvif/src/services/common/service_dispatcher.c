@@ -340,3 +340,52 @@ int onvif_service_dispatcher_get_services(const char** services, size_t max_serv
   pthread_mutex_unlock(&g_dispatcher_mutex);
   return (int)count;
 }
+
+int onvif_service_dispatcher_get_capabilities(const char* service_name, struct soap* ctx,
+                                              void** capabilities_ptr) {
+  pthread_mutex_lock(&g_dispatcher_mutex);
+
+  if (!g_dispatcher_initialized) {
+    platform_log_error("Service dispatcher not initialized");
+    pthread_mutex_unlock(&g_dispatcher_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  if (!service_name || !ctx || !capabilities_ptr) {
+    platform_log_error("Invalid parameters for get_capabilities");
+    pthread_mutex_unlock(&g_dispatcher_mutex);
+    return ONVIF_ERROR_INVALID;
+  }
+
+  service_registry_entry_t* entry = find_service_entry(service_name);
+  if (!entry) {
+    platform_log_debug("Service not found for capabilities query: %s", service_name);
+    pthread_mutex_unlock(&g_dispatcher_mutex);
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+
+  // Check if service provides capability structure callback
+  if (!entry->registration.get_capabilities) {
+    platform_log_debug("Service %s does not provide capability structure", service_name);
+    pthread_mutex_unlock(&g_dispatcher_mutex);
+    return ONVIF_ERROR_NOT_SUPPORTED;
+  }
+
+  // Store callback reference before unlocking mutex
+  onvif_service_get_capabilities_t get_capabilities_fn = entry->registration.get_capabilities;
+
+  pthread_mutex_unlock(&g_dispatcher_mutex);
+
+  // Call the get_capabilities callback without holding the mutex
+  // This allows the callback to potentially call other dispatcher functions
+  int result = get_capabilities_fn(ctx, capabilities_ptr);
+
+  if (result == ONVIF_SUCCESS) {
+    platform_log_debug("Service capability structure retrieved successfully: %s", service_name);
+  } else {
+    platform_log_error("Failed to retrieve capability structure for service: %s (result: %d)",
+                       service_name, result);
+  }
+
+  return result;
+}

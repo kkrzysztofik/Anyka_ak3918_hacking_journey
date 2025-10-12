@@ -77,6 +77,7 @@ int device_info_response_callback(struct soap* soap, void* user_data) {
 
 /**
  * @brief Capabilities response callback function
+ * @note Now uses dynamically queried service capabilities instead of hardcoded values
  */
 int capabilities_response_callback(struct soap* soap, void* user_data) {
   if (!soap || !user_data) {
@@ -91,75 +92,16 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  /* Use provided capabilities if available, otherwise create default */
+  /* Use provided capabilities structure (should always be provided now) */
   if (data->capabilities) {
     response->Capabilities = (struct tt__Capabilities*)data->capabilities;
   } else {
-    /* Create default capabilities structure */
+    /* Fallback: create minimal valid empty capabilities structure */
     response->Capabilities = soap_new_tt__Capabilities(soap, 1);
     if (!response->Capabilities) {
       return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
-    /* Properly initialize the structure with default values */
     soap_default_tt__Capabilities(soap, response->Capabilities);
-
-    /* Create minimal valid AnalyticsCapabilities to prevent segfaults */
-    response->Capabilities->Analytics = soap_new_tt__AnalyticsCapabilities(soap, 1);
-    if (response->Capabilities->Analytics) {
-      /* Initialize all fields to default values (NULL for pointers, 0 for ints, etc.) */
-      soap_default_tt__AnalyticsCapabilities(soap, response->Capabilities->Analytics);
-
-      response->Capabilities->Analytics->XAddr =
-        soap_strdup(soap, "http://localhost:8080/onvif/analytics_service");
-      response->Capabilities->Analytics->RuleSupport = xsd__boolean__false_;
-      response->Capabilities->Analytics->AnalyticsModuleSupport = xsd__boolean__false_;
-    }
-  }
-
-  /* Only create default capabilities if we created a new structure */
-  if (!data->capabilities) {
-
-    /* Build service URLs using configured device IP and port */
-    char device_xaddr[256];
-    char media_xaddr[256];
-    char ptz_xaddr[256];
-    snprintf(device_xaddr, sizeof(device_xaddr), "http://%s:%d/onvif/device_service",
-             data->device_ip, data->http_port);
-    snprintf(media_xaddr, sizeof(media_xaddr), "http://%s:%d/onvif/media_service", data->device_ip,
-             data->http_port);
-    snprintf(ptz_xaddr, sizeof(ptz_xaddr), "http://%s:%d/onvif/ptz_service", data->device_ip,
-             data->http_port);
-
-    /* Create device capabilities */
-    response->Capabilities->Device = soap_new_tt__DeviceCapabilities(soap, 1);
-    if (!response->Capabilities->Device) {
-      return ONVIF_ERROR_MEMORY_ALLOCATION;
-    }
-    /* Initialize all nested fields to prevent segfaults during serialization */
-    soap_default_tt__DeviceCapabilities(soap, response->Capabilities->Device);
-
-    /* Set device capabilities XAddr */
-    response->Capabilities->Device->XAddr = soap_strdup(soap, device_xaddr);
-
-    /* Create media capabilities */
-    response->Capabilities->Media = soap_new_tt__MediaCapabilities(soap, 1);
-    if (!response->Capabilities->Media) {
-      return ONVIF_ERROR_MEMORY_ALLOCATION;
-    }
-    /* Initialize all nested fields to prevent segfaults during serialization */
-    soap_default_tt__MediaCapabilities(soap, response->Capabilities->Media);
-
-    response->Capabilities->Media->XAddr = soap_strdup(soap, media_xaddr);
-
-    /* Create PTZ capabilities */
-    response->Capabilities->PTZ = soap_new_tt__PTZCapabilities(soap, 1);
-    if (!response->Capabilities->PTZ) {
-      return ONVIF_ERROR_MEMORY_ALLOCATION;
-    }
-    /* Initialize all nested fields to prevent segfaults during serialization */
-    soap_default_tt__PTZCapabilities(soap, response->Capabilities->PTZ);
-
-    response->Capabilities->PTZ->XAddr = soap_strdup(soap, ptz_xaddr);
   }
 
   /* Serialize response within SOAP body */
