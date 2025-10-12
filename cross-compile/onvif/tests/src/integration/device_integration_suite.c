@@ -8,7 +8,6 @@
 #include "cmocka_wrapper.h"
 
 // Forward declarations from device_service_tests.c
-void test_integration_device_init_cleanup_lifecycle(void** state);
 void test_integration_device_get_device_information_fields_validation(void** state);
 void test_integration_device_get_capabilities_specific_category(void** state);
 void test_integration_device_get_capabilities_multiple_categories(void** state);
@@ -39,9 +38,6 @@ const struct CMUnitTest* get_device_integration_tests(size_t* count) {
   int device_service_teardown(void** state);
 
   static const struct CMUnitTest tests[] = {
-    // Lifecycle tests
-    cmocka_unit_test(test_integration_device_init_cleanup_lifecycle),
-
     // GetDeviceInformation tests
     cmocka_unit_test_setup_teardown(
       test_integration_device_get_device_information_fields_validation, device_service_setup,

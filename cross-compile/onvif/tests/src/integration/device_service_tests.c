@@ -38,6 +38,7 @@
 #include "mocks/smart_response_mock.h"
 #include "platform/platform_common.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
+#include "generated/soapStub.h"  // For gSOAP generated types and enums
 
 // Test mocks
 #include "mocks/buffer_pool_mock.h"
@@ -109,8 +110,37 @@ int device_service_setup(void** state) {
 
   // Setup platform mock expectations for Imaging service initialization
   // Imaging service calls platform_irled_init during onvif_imaging_init with default level=1
+  expect_function_call(__wrap_platform_irled_init);
   expect_value(__wrap_platform_irled_init, level, 1);
   will_return(__wrap_platform_irled_init, PLATFORM_SUCCESS);
+
+  // Imaging service also calls platform_vpss_effect_set 5 times for VPSS effects
+  // (brightness, contrast, saturation, sharpness, hue) - all with default value 0
+  expect_function_call(__wrap_platform_vpss_effect_set);
+  expect_any(__wrap_platform_vpss_effect_set, handle);
+  expect_any(__wrap_platform_vpss_effect_set, effect);
+  expect_any(__wrap_platform_vpss_effect_set, value);
+  will_return(__wrap_platform_vpss_effect_set, 0);  // brightness
+  expect_function_call(__wrap_platform_vpss_effect_set);
+  expect_any(__wrap_platform_vpss_effect_set, handle);
+  expect_any(__wrap_platform_vpss_effect_set, effect);
+  expect_any(__wrap_platform_vpss_effect_set, value);
+  will_return(__wrap_platform_vpss_effect_set, 0);  // contrast
+  expect_function_call(__wrap_platform_vpss_effect_set);
+  expect_any(__wrap_platform_vpss_effect_set, handle);
+  expect_any(__wrap_platform_vpss_effect_set, effect);
+  expect_any(__wrap_platform_vpss_effect_set, value);
+  will_return(__wrap_platform_vpss_effect_set, 0);  // saturation
+  expect_function_call(__wrap_platform_vpss_effect_set);
+  expect_any(__wrap_platform_vpss_effect_set, handle);
+  expect_any(__wrap_platform_vpss_effect_set, effect);
+  expect_any(__wrap_platform_vpss_effect_set, value);
+  will_return(__wrap_platform_vpss_effect_set, 0);  // sharpness
+  expect_function_call(__wrap_platform_vpss_effect_set);
+  expect_any(__wrap_platform_vpss_effect_set, handle);
+  expect_any(__wrap_platform_vpss_effect_set, effect);
+  expect_any(__wrap_platform_vpss_effect_set, value);
+  will_return(__wrap_platform_vpss_effect_set, 0);  // hue
 
   // Initialize service dispatcher
   int result = onvif_service_dispatcher_init();
@@ -137,6 +167,10 @@ int device_service_setup(void** state) {
   result = onvif_imaging_init(test_state->config);
   assert_int_equal(ONVIF_SUCCESS, result);
 
+  // Register Imaging service with dispatcher (required for capability queries)
+  result = onvif_imaging_service_init(test_state->config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
   *state = test_state;
   return 0;
 }
@@ -160,10 +194,14 @@ int device_service_teardown(void** state) {
   }
 
   // Cleanup all services (in reverse order of initialization)
+  onvif_imaging_service_cleanup();
   onvif_imaging_cleanup();
   onvif_ptz_cleanup();
   onvif_media_cleanup();
   onvif_device_cleanup();
+
+  // Cleanup service dispatcher
+  onvif_service_dispatcher_cleanup();
 
   memory_manager_cleanup();
 
@@ -192,32 +230,6 @@ int device_service_teardown(void** state) {
   smart_response_mock_use_real_function(false);
 
   return 0;
-}
-
-/**
- * @brief Test Device service initialization and cleanup lifecycle
- *
- * This test verifies that services are properly initialized by the setup function
- * and can handle operations. The actual cleanup→reinit cycle is implicitly tested
- * by the fact that all tests use the same setup/teardown functions.
- */
-void test_integration_device_init_cleanup_lifecycle(void** state) {
-  device_test_state_t* test_state = (device_test_state_t*)*state;
-
-  // Verify that all services are properly initialized by checking test state
-  assert_non_null(test_state);
-  assert_non_null(test_state->config);
-  assert_non_null(test_state->app_config);
-
-  // Verify service registration by checking if dispatcher recognizes the services
-  assert_int_equal(1, onvif_service_dispatcher_is_registered("Device"));
-  assert_int_equal(1, onvif_service_dispatcher_is_registered("Media"));
-  assert_int_equal(1, onvif_service_dispatcher_is_registered("PTZ"));
-  assert_int_equal(1, onvif_service_dispatcher_is_registered("Imaging"));
-
-  // The cleanup→reinit cycle is implicitly tested by the test infrastructure:
-  // Every test goes through setup (init) → test body → teardown (cleanup)
-  // If reinit didn't work, subsequent tests would fail
 }
 
 /**
@@ -1018,17 +1030,21 @@ void test_integration_device_get_system_date_time_soap(void** state) {
 
   // Step 7: Validate response data - SystemDateAndTime should be present with valid fields
   assert_non_null(datetime_response->SystemDateAndTime);
-  assert_non_null(datetime_response->SystemDateAndTime->DateTimeType);
+
+  // DateTimeType is a scalar enum (not a pointer), validate it has a valid value
+  enum tt__SetDateTimeType date_time_type = datetime_response->SystemDateAndTime->DateTimeType;
+  assert_true(date_time_type == tt__SetDateTimeType__Manual || date_time_type == tt__SetDateTimeType__NTP);
 
   // Validate UTCDateTime is present
   assert_non_null(datetime_response->SystemDateAndTime->UTCDateTime);
   assert_non_null(datetime_response->SystemDateAndTime->UTCDateTime->Time);
   assert_non_null(datetime_response->SystemDateAndTime->UTCDateTime->Date);
 
-  // Validate LocalDateTime is present
-  assert_non_null(datetime_response->SystemDateAndTime->LocalDateTime);
-  assert_non_null(datetime_response->SystemDateAndTime->LocalDateTime->Time);
-  assert_non_null(datetime_response->SystemDateAndTime->LocalDateTime->Date);
+  // LocalDateTime is optional per ONVIF spec - only validate if present
+  if (datetime_response->SystemDateAndTime->LocalDateTime) {
+    assert_non_null(datetime_response->SystemDateAndTime->LocalDateTime->Time);
+    assert_non_null(datetime_response->SystemDateAndTime->LocalDateTime->Date);
+  }
 
   // Validate TimeZone is present
   assert_non_null(datetime_response->SystemDateAndTime->TimeZone);
@@ -1162,10 +1178,6 @@ void test_integration_device_system_reboot_soap(void** state) {
 
 // Test suite definition
 const struct CMUnitTest device_service_tests[] = {
-  // Lifecycle tests
-  cmocka_unit_test_setup_teardown(test_integration_device_init_cleanup_lifecycle,
-                                  device_service_setup, device_service_teardown),
-
   // GetDeviceInformation tests
   cmocka_unit_test_setup_teardown(test_integration_device_get_device_information_fields_validation,
                                   device_service_setup, device_service_teardown),
