@@ -13,6 +13,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core/config/config.h"
+#include "core/config/config_runtime.h"
 #include "platform/platform.h"
 #include "stdsoap2.h"
 #include "utils/common/time_utils.h"
@@ -53,8 +55,11 @@ int onvif_gsoap_init(onvif_gsoap_context_t* ctx) {
 
   /* Enable gSOAP message logging based on configuration flag */
   {
-    int http_verbose = platform_config_get_int("logging", "http_verbose", 1);
-    if (http_verbose) {
+    int http_verbose = 1;  /* Default to enabled */
+    int result = config_runtime_get_int(CONFIG_SECTION_LOGGING, "http_verbose", &http_verbose);
+
+    /* If config lookup fails, use default (already set to 1) */
+    if (result == ONVIF_SUCCESS && http_verbose) {
       soap_set_recv_logfile(&ctx->soap, "/tmp/onvif_recv.log");
       soap_set_sent_logfile(&ctx->soap, "/tmp/onvif_sent.log");
       soap_set_test_logfile(&ctx->soap, "/tmp/onvif_test.log");
