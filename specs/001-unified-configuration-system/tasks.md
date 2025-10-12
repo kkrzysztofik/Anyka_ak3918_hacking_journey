@@ -192,9 +192,9 @@
 - [X] T077 [US5] Implement config_runtime_remove_user API (completed - marks user inactive and clears data)
 - [X] T078 [US5] Implement config_runtime_update_user_password API (completed - updates password hash for existing user)
 - [X] T079 [US5] Add user limit enforcement (max 8 users) (completed - enforced in add_user and find_free_user_slot)
-- [ ] T080 [US5] Update http_auth.c to use runtime user management
-- [ ] T081 [US5] Add user enumeration for management interfaces
-- [ ] T082 [US5] Implement authentication attempt logging without credential exposure
+- [X] T080 [US5] Update http_auth.c to use runtime user management (completed - integrated config_runtime_authenticate_user)
+- [X] T081 [US5] Add user enumeration for management interfaces (completed - implemented config_runtime_enumerate_users)
+- [X] T082 [US5] Implement authentication attempt logging without credential exposure (completed - logs username only)
 
 **Checkpoint**: All user stories should now be independently functional
 

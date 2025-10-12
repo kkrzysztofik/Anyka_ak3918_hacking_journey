@@ -352,6 +352,32 @@ int config_runtime_remove_user(const char* username);
 int config_runtime_update_user_password(const char* username, const char* new_password);
 
 /**
+ * @brief Authenticate user with username and password
+ *
+ * @param[in] username Username
+ * @param[in] password Plaintext password
+ * @return ONVIF_SUCCESS if authentication succeeds
+ * @return ONVIF_ERROR_NOT_FOUND if user doesn't exist
+ * @return ONVIF_ERROR_AUTHENTICATION_FAILED if password is incorrect
+ * @return ONVIF_ERROR_INVALID_PARAMETER if parameters are invalid
+ * @return ONVIF_ERROR_NOT_INITIALIZED if runtime manager not initialized
+ */
+int config_runtime_authenticate_user(const char* username, const char* password);
+
+/**
+ * @brief Get list of all usernames
+ *
+ * Returns the list of active usernames in the system for management interfaces.
+ * The usernames array must be pre-allocated by the caller.
+ *
+ * @param[out] usernames Array of username buffers (each MAX_USERNAME_LENGTH+1 bytes)
+ * @param[in] max_users Maximum number of users to retrieve (array size)
+ * @param[out] user_count Actual number of users returned
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+int config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users, int* user_count);
+
+/**
  * @}
  */
 

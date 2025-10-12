@@ -209,6 +209,14 @@ const test_suite_t g_test_suites[] = {
    .get_tests = get_config_integration_tests,
    .setup = NULL,
    .teardown = NULL},
+
+  // HTTP authentication integration tests
+  {.name = "http-auth-integration",
+   .full_name = "HTTP Authentication Integration",
+   .category = TEST_CATEGORY_INTEGRATION,
+   .get_tests = get_http_auth_integration_tests,
+   .setup = NULL,
+   .teardown = NULL},
 };
 
 /**

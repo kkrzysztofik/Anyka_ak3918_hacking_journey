@@ -400,10 +400,8 @@ int http_validate_authentication(const http_request_t* request, security_context
                                      "Application configuration not available for authentication");
   }
 
-  // Use http_auth module for validation
-  int auth_result =
-    http_auth_validate_basic(request, &g_http_auth_config, g_http_app_config->onvif.username,
-                             g_http_app_config->onvif.password);
+  // Use http_auth module for validation (credentials now verified against runtime user management)
+  int auth_result = http_auth_validate_basic(request, &g_http_auth_config);
 
   if (auth_result != HTTP_AUTH_SUCCESS) {
     service_log_context_t log_ctx;

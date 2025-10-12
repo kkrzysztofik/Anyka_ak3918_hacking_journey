@@ -74,6 +74,7 @@ const struct CMUnitTest* get_media_integration_tests(size_t* count);
 const struct CMUnitTest* get_device_integration_tests(size_t* count);
 const struct CMUnitTest* get_imaging_integration_tests(size_t* count);
 const struct CMUnitTest* get_soap_error_integration_tests(size_t* count);
+const struct CMUnitTest* get_http_auth_integration_tests(size_t* count);
 
 // Setup/teardown function declarations for integration tests
 int ptz_service_setup(void** state);

@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "core/config/config_runtime.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
@@ -110,10 +111,12 @@ void http_auth_cleanup(struct http_auth_config* auth_config) {
 
 /**
  * Validate HTTP Basic authentication credentials
+ *
+ * Validates credentials against the runtime user management system only.
+ * Legacy config-based authentication has been removed.
  */
 int http_auth_validate_basic(const http_request_t* request,
-                             const struct http_auth_config* auth_config,
-                             const char* config_username, const char* config_password) {
+                             const struct http_auth_config* auth_config) {
   if (!request || !auth_config) {
     return HTTP_AUTH_ERROR_NULL;
   }
@@ -138,9 +141,8 @@ int http_auth_validate_basic(const http_request_t* request,
     return HTTP_AUTH_ERROR_PARSE_FAILED;
   }
 
-  // Verify credentials
-  if (http_auth_verify_credentials(username, password, config_username, config_password) !=
-      HTTP_AUTH_SUCCESS) {
+  // Verify credentials against runtime user management system
+  if (http_auth_verify_credentials(username, password) != HTTP_AUTH_SUCCESS) {
     platform_log_error("Authentication failed for user %s from %s\n", username, request->client_ip);
     return HTTP_AUTH_UNAUTHENTICATED;
   }
@@ -232,21 +234,45 @@ int http_auth_parse_basic_credentials(const char* auth_header, char* username, c
 }
 
 /**
- * Verify Basic authentication credentials against global config
+ * Verify Basic authentication credentials against runtime user management system
+ *
+ * This function authenticates users exclusively through the runtime user management
+ * system (config_runtime). Legacy config-based authentication has been removed.
  */
-int http_auth_verify_credentials(const char* username, const char* password,
-                                 const char* config_username, const char* config_password) {
-  if (!username || !password || !config_username || !config_password) {
+int http_auth_verify_credentials(const char* username, const char* password) {
+  int result;
+
+  if (!username || !password) {
+    platform_log_error("[HTTP_AUTH] NULL credentials provided\n");
     return HTTP_AUTH_ERROR_NULL;
   }
 
-  // Check if username matches
-  if (strcmp(username, config_username) != 0) {
+  /* Log authentication attempt without exposing credentials (T082) */
+  platform_log_info("[HTTP_AUTH] Authentication attempt for user: %s\n", username);
+
+  /* Authenticate against runtime user management system */
+  result = config_runtime_authenticate_user(username, password);
+  if (result == ONVIF_SUCCESS) {
+    platform_log_info("[HTTP_AUTH] Authentication successful for user: %s\n", username);
+    return HTTP_AUTH_SUCCESS;
+  }
+
+  if (result == ONVIF_ERROR_AUTHENTICATION_FAILED) {
+    /* User found but password is wrong */
+    platform_log_warning("[HTTP_AUTH] Authentication failed for user: %s (password mismatch)\n", username);
     return HTTP_AUTH_UNAUTHENTICATED;
   }
 
-  // Check if password matches using case-sensitive comparison
-  return strcmp(password, config_password) == 0 ? HTTP_AUTH_SUCCESS : HTTP_AUTH_UNAUTHENTICATED;
+  if (result == ONVIF_ERROR_NOT_FOUND) {
+    /* User not found in system */
+    platform_log_warning("[HTTP_AUTH] Authentication failed for user: %s (user not found)\n", username);
+    return HTTP_AUTH_UNAUTHENTICATED;
+  }
+
+  /* System error */
+  platform_log_error("[HTTP_AUTH] System error during authentication for user: %s (error: %d)\n",
+                     username, result);
+  return HTTP_AUTH_ERROR_INVALID;
 }
 
 /**

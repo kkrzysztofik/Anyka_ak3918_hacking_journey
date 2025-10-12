@@ -1223,6 +1223,79 @@ int config_runtime_update_user_password(const char* username, const char* new_pa
     return ONVIF_SUCCESS;
 }
 
+/**
+ * @brief Authenticate user with username and password
+ */
+int config_runtime_authenticate_user(const char* username, const char* password)
+{
+    int user_index = -1;
+    int result = ONVIF_ERROR_INVALID_PARAMETER;
+
+    /* Validate parameters */
+    if (username == NULL || password == NULL) {
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    pthread_mutex_lock(&g_config_runtime_mutex);
+
+    if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_INITIALIZED;
+    }
+
+    /* Find user */
+    user_index = config_runtime_find_user_index(username);
+    if (user_index < 0) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_FOUND;
+    }
+
+    /* Verify password against stored hash */
+    result = config_runtime_verify_password(password, g_config_runtime_app_config->users[user_index].password_hash);
+
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    return result;
+}
+
+/**
+ * @brief Get list of all usernames (T081)
+ */
+int config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users, int* user_count)
+{
+    int i = 0;
+    int count = 0;
+
+    /* Validate parameters */
+    if (usernames == NULL || user_count == NULL || max_users <= 0) {
+        return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    pthread_mutex_lock(&g_config_runtime_mutex);
+
+    if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+        pthread_mutex_unlock(&g_config_runtime_mutex);
+        return ONVIF_ERROR_NOT_INITIALIZED;
+    }
+
+    /* Iterate through all user slots and copy active usernames */
+    for (i = 0; i < MAX_USERS && count < max_users; i++) {
+        if (g_config_runtime_app_config->users[i].active) {
+            strncpy(usernames[count], g_config_runtime_app_config->users[i].username, MAX_USERNAME_LENGTH);
+            usernames[count][MAX_USERNAME_LENGTH] = '\0';
+            count++;
+        }
+    }
+
+    *user_count = count;
+
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+
+    platform_log_debug("[CONFIG] Enumerated %d active users\n", count);
+
+    return ONVIF_SUCCESS;
+}
+
 /* Helper functions */
 
 static int config_runtime_validate_section(config_section_t section)
