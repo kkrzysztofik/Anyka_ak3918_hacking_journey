@@ -1542,13 +1542,16 @@ static int set_video_source_configuration_business_logic(
 
 /**
  * @brief Business logic callback for SetVideoEncoderConfiguration operation
+ *
+ * This function implements T063: Runtime profile updates via SetVideoEncoderConfiguration.
+ * It extracts encoder parameters from the ONVIF request, updates the runtime configuration,
+ * and reloads the cached profile to ensure changes take effect immediately.
  */
 static int set_video_encoder_configuration_business_logic(
   const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
   onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx, error_context_t* error_ctx,
   void* callback_data) {
   (void)config;
-  (void)error_ctx;
   (void)callback_data;
 
   service_log_info(log_ctx, "Processing SetVideoEncoderConfiguration request");
@@ -1561,7 +1564,7 @@ static int set_video_encoder_configuration_business_logic(
     return ONVIF_ERROR;
   }
 
-  // Parse SetVideoEncoderConfiguration request using new gSOAP parsing function
+  // Parse SetVideoEncoderConfiguration request using gSOAP parsing function
   struct _trt__SetVideoEncoderConfiguration* set_video_encoder_req = NULL;
   result = onvif_gsoap_parse_set_video_encoder_config(gsoap_ctx, &set_video_encoder_req);
   if (result != ONVIF_SUCCESS || !set_video_encoder_req) {
@@ -1571,24 +1574,98 @@ static int set_video_encoder_configuration_business_logic(
                                   response);
   }
 
-  // Extract configuration from parsed structure
+  // Extract and validate configuration from parsed structure
   if (!set_video_encoder_req->Configuration || !set_video_encoder_req->Configuration->token) {
     return error_handle_parameter(error_ctx, "Configuration.token", "missing", response);
   }
-  const char* config_token = set_video_encoder_req->Configuration->token;
 
-  // Parse video encoder configuration parameters
-  struct video_encoder_configuration encoder_config;
-  memset(&encoder_config, 0, sizeof(encoder_config));
-  strncpy(encoder_config.token, config_token, sizeof(encoder_config.token) - 1);
+  struct tt__VideoEncoderConfiguration* onvif_config = set_video_encoder_req->Configuration;
+  const char* config_token = onvif_config->token;
 
-  // Set configuration
-  result = onvif_media_set_video_encoder_configuration(config_token, &encoder_config);
-  if (result != ONVIF_SUCCESS) {
-    return error_handle_system(error_ctx, result, "set_video_encoder_config", response);
+  // Map encoder token to profile index (VideoEncoder0 -> 0, VideoEncoder1 -> 1, etc.)
+  int profile_index = -1;
+  if (strncmp(config_token, "VideoEncoder", 12) == 0) {
+    profile_index = atoi(config_token + 12);
   }
 
-  service_log_info(log_ctx, "SetVideoEncoderConfiguration request completed successfully");
+  if (profile_index < 0 || profile_index >= get_active_profile_count()) {
+    service_log_operation_failure(log_ctx, "map_encoder_token", profile_index,
+                                  "Invalid encoder token or profile index");
+    return error_handle_parameter(error_ctx, "Configuration.token", "invalid", response);
+  }
+
+  // Get current profile configuration from runtime
+  video_config_t video_config;
+  result = config_runtime_get_stream_profile(profile_index, &video_config);
+  if (result != ONVIF_SUCCESS) {
+    service_log_operation_failure(log_ctx, "get_stream_profile", result,
+                                  "Failed to retrieve current profile configuration");
+    return error_handle_system(error_ctx, result, "get_stream_profile", response);
+  }
+
+  // Update video_config with ONVIF parameters (T063)
+
+  // Update resolution if provided
+  if (onvif_config->Resolution) {
+    video_config.width = onvif_config->Resolution->Width;
+    video_config.height = onvif_config->Resolution->Height;
+    service_log_info(log_ctx, "Updated resolution: %dx%d", video_config.width, video_config.height);
+  }
+
+  // Update rate control parameters if provided
+  if (onvif_config->RateControl) {
+    video_config.fps = onvif_config->RateControl->FrameRateLimit;
+    video_config.bitrate = onvif_config->RateControl->BitrateLimit;
+    service_log_info(log_ctx, "Updated rate control: %d fps, %d kbps",
+                    video_config.fps, video_config.bitrate);
+  }
+
+  // Update GOP length from codec-specific configuration
+  if (onvif_config->H264 && onvif_config->H264->GovLength > 0) {
+    video_config.gop_size = onvif_config->H264->GovLength;
+    video_config.codec_type = 0; // H.264
+    service_log_info(log_ctx, "Updated H.264 GOP length: %d", video_config.gop_size);
+  } else if (onvif_config->MPEG4 && onvif_config->MPEG4->GovLength > 0) {
+    video_config.gop_size = onvif_config->MPEG4->GovLength;
+    video_config.codec_type = 0; // Treat as H.264 (MPEG4 not widely used)
+    service_log_info(log_ctx, "Updated MPEG4 GOP length: %d", video_config.gop_size);
+  }
+
+  // Map encoding type to codec_type
+  switch (onvif_config->Encoding) {
+    case tt__VideoEncoding__JPEG:
+      video_config.codec_type = 2; // MJPEG
+      break;
+    case tt__VideoEncoding__MPEG4:
+      video_config.codec_type = 0; // Treat as H.264
+      break;
+    case tt__VideoEncoding__H264:
+      video_config.codec_type = 0; // H.264
+      break;
+    default:
+      video_config.codec_type = 0; // Default to H.264
+      break;
+  }
+
+  // Update runtime configuration with validation
+  result = config_runtime_set_stream_profile(profile_index, &video_config);
+  if (result != ONVIF_SUCCESS) {
+    service_log_operation_failure(log_ctx, "set_stream_profile", result,
+                                  "Failed to update runtime profile configuration");
+    return error_handle_system(error_ctx, result, "set_stream_profile", response);
+  }
+
+  // Reload cached profile to apply changes immediately
+  result = build_media_profile_from_config(profile_index, &g_media_profiles[profile_index]);
+  if (result != ONVIF_SUCCESS) {
+    service_log_operation_failure(log_ctx, "reload_cached_profile", result,
+                                  "Failed to reload cached profile after update");
+    return error_handle_system(error_ctx, result, "reload_cached_profile", response);
+  }
+
+  service_log_info(log_ctx, "SetVideoEncoderConfiguration completed: Profile %d updated successfully",
+                  profile_index + 1);
+
   return ONVIF_SUCCESS;
 }
 
