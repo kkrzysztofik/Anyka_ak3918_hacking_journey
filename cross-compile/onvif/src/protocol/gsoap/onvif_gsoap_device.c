@@ -106,6 +106,9 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     /* Create minimal valid AnalyticsCapabilities to prevent segfaults */
     response->Capabilities->Analytics = soap_new_tt__AnalyticsCapabilities(soap, 1);
     if (response->Capabilities->Analytics) {
+      /* Initialize all fields to default values (NULL for pointers, 0 for ints, etc.) */
+      soap_default_tt__AnalyticsCapabilities(soap, response->Capabilities->Analytics);
+
       response->Capabilities->Analytics->XAddr =
         soap_strdup(soap, "http://localhost:8080/onvif/analytics_service");
       response->Capabilities->Analytics->RuleSupport = xsd__boolean__false_;
@@ -132,6 +135,8 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     if (!response->Capabilities->Device) {
       return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
+    /* Initialize all nested fields to prevent segfaults during serialization */
+    soap_default_tt__DeviceCapabilities(soap, response->Capabilities->Device);
 
     /* Set device capabilities XAddr */
     response->Capabilities->Device->XAddr = soap_strdup(soap, device_xaddr);
@@ -141,6 +146,8 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     if (!response->Capabilities->Media) {
       return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
+    /* Initialize all nested fields to prevent segfaults during serialization */
+    soap_default_tt__MediaCapabilities(soap, response->Capabilities->Media);
 
     response->Capabilities->Media->XAddr = soap_strdup(soap, media_xaddr);
 
@@ -149,6 +156,8 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     if (!response->Capabilities->PTZ) {
       return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
+    /* Initialize all nested fields to prevent segfaults during serialization */
+    soap_default_tt__PTZCapabilities(soap, response->Capabilities->PTZ);
 
     response->Capabilities->PTZ->XAddr = soap_strdup(soap, ptz_xaddr);
   }

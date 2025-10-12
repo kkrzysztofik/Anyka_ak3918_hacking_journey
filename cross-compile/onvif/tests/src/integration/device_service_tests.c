@@ -58,6 +58,12 @@
 #define TEST_DELAY_10MS  10
 #define TEST_DELAY_100MS 100
 
+// Test state structure to hold both app_config and config pointers
+typedef struct {
+  struct application_config* app_config;
+  config_manager_t* config;
+} device_test_state_t;
+
 /**
  * @brief Setup function for Device service integration tests
  * @param state Test state pointer
@@ -71,11 +77,17 @@ int device_service_setup(void** state) {
   // Initialize memory manager for tracking
   memory_manager_init();
 
-  // Initialize application config structure (required for config_runtime_init)
-  struct application_config app_config = {0};
+  // Allocate test state structure
+  device_test_state_t* test_state = calloc(1, sizeof(device_test_state_t));
+  assert_non_null(test_state);
+
+  // Heap-allocate application config structure (required for config_runtime_init)
+  // CRITICAL: Must be heap-allocated because config_runtime_init() stores the pointer
+  test_state->app_config = calloc(1, sizeof(struct application_config));
+  assert_non_null(test_state->app_config);
 
   // Initialize runtime configuration system
-  int config_result = config_runtime_init(&app_config);
+  int config_result = config_runtime_init(test_state->app_config);
   assert_int_equal(ONVIF_SUCCESS, config_result);
 
   // Apply default configuration values
@@ -96,15 +108,15 @@ int device_service_setup(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Initialize Device service with mock config
-  config_manager_t* config = malloc(sizeof(config_manager_t));
-  assert_non_null(config);
-  memset(config, 0, sizeof(config_manager_t));
+  test_state->config = malloc(sizeof(config_manager_t));
+  assert_non_null(test_state->config);
+  memset(test_state->config, 0, sizeof(config_manager_t));
 
   // Initialize Device service
-  result = onvif_device_init(config);
+  result = onvif_device_init(test_state->config);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  *state = config;
+  *state = test_state;
   return 0;
 }
 
@@ -118,10 +130,13 @@ int device_service_setup(void** state) {
  * - Memory manager cleanup
  */
 int device_service_teardown(void** state) {
-  config_manager_t* config = (config_manager_t*)*state;
+  device_test_state_t* test_state = (device_test_state_t*)*state;
 
   // Free config first, before leak checking
-  free(config);
+  if (test_state && test_state->config) {
+    free(test_state->config);
+    test_state->config = NULL;
+  }
 
   // Cleanup Device service (this unregisters from dispatcher)
   onvif_device_cleanup();
@@ -130,6 +145,18 @@ int device_service_teardown(void** state) {
 
   // Cleanup runtime configuration system
   config_runtime_cleanup();
+
+  // CRITICAL: Free heap-allocated app_config AFTER config_runtime_cleanup()
+  // config_runtime_cleanup() sets the global pointer to NULL, so we can safely free now
+  if (test_state && test_state->app_config) {
+    free(test_state->app_config);
+    test_state->app_config = NULL;
+  }
+
+  // Free test state structure
+  if (test_state) {
+    free(test_state);
+  }
 
   // Restore mock behavior for subsequent tests
   service_dispatcher_mock_use_real_function(false);
@@ -151,11 +178,13 @@ void test_integration_device_init_cleanup_lifecycle(void** state) {
 
   memory_manager_init();
 
-  // Initialize application config structure (required for config_runtime_init)
-  struct application_config app_config = {0};
+  // Heap-allocate application config structure (required for config_runtime_init)
+  // CRITICAL: Must be heap-allocated because config_runtime_init() stores the pointer
+  struct application_config* app_config = calloc(1, sizeof(struct application_config));
+  assert_non_null(app_config);
 
   // Initialize runtime configuration system
-  int config_result = config_runtime_init(&app_config);
+  int config_result = config_runtime_init(app_config);
   assert_int_equal(ONVIF_SUCCESS, config_result);
 
   // Apply default configuration values
@@ -200,6 +229,9 @@ void test_integration_device_init_cleanup_lifecycle(void** state) {
 
   // Cleanup runtime configuration system
   config_runtime_cleanup();
+
+  // CRITICAL: Free heap-allocated app_config AFTER config_runtime_cleanup()
+  free(app_config);
 
   // Restore mock behavior for subsequent tests
   service_dispatcher_mock_use_real_function(false);
@@ -817,10 +849,12 @@ void test_integration_device_concurrent_mixed_operations(void** state) {
  * @brief Test Device service configuration integration
  */
 void test_integration_device_config_integration(void** state) {
-  config_manager_t* config = (config_manager_t*)*state;
+  device_test_state_t* test_state = (device_test_state_t*)*state;
 
   // Verify configuration is properly integrated
-  assert_non_null(config);
+  assert_non_null(test_state);
+  assert_non_null(test_state->config);
+  assert_non_null(test_state->app_config);
 
   // Config manager structure is validated by successful initialization
   // Device service stores config pointer and uses it for operation handlers

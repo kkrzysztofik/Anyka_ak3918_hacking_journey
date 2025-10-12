@@ -62,14 +62,9 @@
 #define SERVICE_NAMESPACE_LEN      128
 #define SERVICE_XADDR_LEN          256
 
-// Global device capabilities - must be non-const as capabilities may change at
-// runtime
-static struct device_capabilities dev_caps = {.has_analytics = 0, // NOLINT
-                                              .has_device = 1,
-                                              .has_events = 0,
-                                              .has_imaging = 1,
-                                              .has_media = 1,
-                                              .has_ptz = 1};
+// Global device capabilities structure (gSOAP type)
+// Note: This is initialized to NULL and allocated dynamically on first use
+static struct tt__Capabilities* g_device_capabilities = NULL; // NOLINT
 
 // Device service configuration and state
 static struct {
@@ -245,8 +240,8 @@ static int get_capabilities_business_logic(const service_handler_config_t* confi
   int http_port = config_get_int_or_default(CONFIG_SECTION_ONVIF, "http_port", DEFAULT_HTTP_PORT);
   service_log_info(log_ctx, "HTTP port configured as %d", http_port);
 
-  // Set capabilities data
-  capabilities_data->capabilities = &dev_caps;
+  // Set capabilities data to NULL - gSOAP callback will create and populate the structure
+  capabilities_data->capabilities = NULL;
 
   // Generate response using gSOAP callback
   int result = onvif_gsoap_generate_response_with_callback(gsoap_ctx, capabilities_response_callback,
