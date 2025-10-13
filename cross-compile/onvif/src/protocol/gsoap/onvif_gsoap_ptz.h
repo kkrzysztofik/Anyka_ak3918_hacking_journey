@@ -199,6 +199,8 @@ int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
  * @return 0 on success, error code on failure
  */
 int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const char* preset_token);
+int onvif_gsoap_generate_remove_preset_response(onvif_gsoap_context_t* ctx);
+int ptz_remove_preset_response_callback(struct soap* soap, void* user_data);
 
 /**
  * @brief Generate PTZ GotoPreset response

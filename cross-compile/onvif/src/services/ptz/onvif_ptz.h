@@ -134,7 +134,8 @@ int onvif_ptz_goto_home_position(const char* profile_token,
 int onvif_ptz_set_home_position(const char* profile_token);      /**< SetHomePosition. */
 int onvif_ptz_get_presets(const char* profile_token, struct ptz_preset** preset_list,
                           int* count); /**< GetPresets list. */
-int onvif_ptz_set_preset(const char* profile_token, const char* preset_name, char* preset_token,
+int onvif_ptz_set_preset(const char* profile_token, const char* preset_name,
+                         const char* input_preset_token, char* output_preset_token,
                          size_t token_size); /**< SetPreset. */
 int onvif_ptz_goto_preset(const char* profile_token, const char* preset_token,
                           const struct ptz_speed* speed); /**< GotoPreset. */

@@ -486,9 +486,11 @@ int ptz_set_preset_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  // Note: SetPresetResponse struct is empty in ONVIF spec
-  // The preset token is returned in the SetPreset request parsing, not in response generation
-  (void)data; // Suppress unused parameter warning
+  // Set the PresetToken in the response
+  response->PresetToken = soap_strdup(soap, data->preset_token);
+  if (!response->PresetToken) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
 
   if (soap_put__tptz__SetPresetResponse(soap, response, "tptz:SetPresetResponse", NULL) !=
       SOAP_OK) {
@@ -516,6 +518,34 @@ int ptz_goto_preset_response_callback(struct soap* soap, void* user_data) {
   }
 
   return ONVIF_SUCCESS;
+}
+
+int ptz_remove_preset_response_callback(struct soap* soap, void* user_data) {
+  (void)user_data;
+
+  struct _tptz__RemovePresetResponse* response = soap_new__tptz__RemovePresetResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  if (soap_put__tptz__RemovePresetResponse(soap, response, "tptz:RemovePresetResponse", NULL) !=
+      SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+int onvif_gsoap_generate_remove_preset_response(onvif_gsoap_context_t* ctx) {
+  if (!ctx) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
+                          "onvif_gsoap_generate_remove_preset_response",
+                          "Invalid parameters for remove preset response");
+    return ONVIF_ERROR_INVALID;
+  }
+
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_remove_preset_response_callback,
+                                                     NULL);
 }
 
 /* ============================================================================

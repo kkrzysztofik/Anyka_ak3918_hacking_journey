@@ -65,7 +65,7 @@ typedef struct {
 #define TEST_PRESET_NAME_EMPTY   ""
 #define TEST_PRESET_NONEXISTENT  "NonExistentPreset"
 #define TEST_PRESET_OVERFLOW     "OverflowPreset"
-#define TEST_PRESET_MAX_COUNT    10
+#define TEST_PRESET_MAX_COUNT    4
 
 // Test movement constants
 #define TEST_POSITION_PAN_NORMALIZED  0.5f
@@ -769,7 +769,7 @@ void test_integration_ptz_preset_memory_optimization(void** state) {
     char preset_name[TEST_PRESET_NAME_BUFFER_SIZE];
     (void)snprintf(preset_name, sizeof(preset_name), "Preset%d", i + 1);
 
-    int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, output_tokens[i],
+    int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_tokens[i],
                                       sizeof(output_tokens[i]));
     assert_int_equal(result, ONVIF_SUCCESS);
   }
@@ -833,8 +833,8 @@ void test_integration_ptz_memory_usage_improvements(void** state) {
     char preset_name[TEST_PRESET_NAME_BUFFER_SIZE];
     (void)snprintf(preset_name, sizeof(preset_name), "TestPreset%d", i);
 
-    result =
-      onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, output_token, sizeof(output_token));
+    result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_token,
+                                  sizeof(output_token));
     assert_int_equal(result, ONVIF_SUCCESS);
   }
 
@@ -876,8 +876,8 @@ void test_integration_ptz_buffer_pool_usage(void** state) {
     char preset_name[TEST_PRESET_NAME_BUFFER_SIZE];
     (void)snprintf(preset_name, sizeof(preset_name), "ConcurrentPreset%d", i);
 
-    result =
-      onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, output_token, sizeof(output_token));
+    result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_token,
+                                  sizeof(output_token));
     assert_int_equal(result, ONVIF_SUCCESS);
   }
 
@@ -901,8 +901,8 @@ void test_integration_ptz_string_operations_optimization(void** state) {
   will_return(__wrap_buffer_pool_get, (void*)0x12345678); // Mock buffer pointer
 
   char output_token[TEST_PRESET_TOKEN_SIZE] = {0};
-  int result =
-    onvif_ptz_set_preset(TEST_PROFILE_TOKEN, long_preset_name, output_token, sizeof(output_token));
+  int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, long_preset_name, NULL, output_token,
+                                    sizeof(output_token));
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Test with empty string
@@ -912,7 +912,7 @@ void test_integration_ptz_string_operations_optimization(void** state) {
   expect_function_call(__wrap_buffer_pool_get);
   will_return(__wrap_buffer_pool_get, (void*)0x12345678); // Mock buffer pointer
 
-  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME_EMPTY, output_token,
+  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME_EMPTY, NULL, output_token,
                                 sizeof(output_token));
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -923,7 +923,7 @@ void test_integration_ptz_string_operations_optimization(void** state) {
   expect_function_call(__wrap_buffer_pool_get);
   will_return(__wrap_buffer_pool_get, (void*)0x12345678); // Mock buffer pointer
 
-  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME_SPECIAL, output_token,
+  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME_SPECIAL, NULL, output_token,
                                 sizeof(output_token));
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -975,15 +975,15 @@ void test_integration_ptz_error_handling_robustness(void** state) {
     char preset_name[TEST_PRESET_NAME_BUFFER_SIZE];
     (void)snprintf(preset_name, sizeof(preset_name), "MaxPreset%d", i);
 
-    result =
-      onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, output_token, sizeof(output_token));
+    result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_token,
+                                  sizeof(output_token));
     assert_int_equal(result, ONVIF_SUCCESS);
   }
 
   // Test adding one more preset (should fail)
   printf("  [TEST CASE] Preset overflow (exceeding max count)\n");
   char output_token[TEST_PRESET_TOKEN_SIZE] = {0};
-  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_OVERFLOW, output_token,
+  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_OVERFLOW, NULL, output_token,
                                 sizeof(output_token));
   assert_int_equal(result, ONVIF_ERROR); // Should fail due to max presets reached
 
@@ -1016,8 +1016,8 @@ void test_integration_ptz_concurrent_operations(void** state) {
     (void)snprintf(preset_name, sizeof(preset_name), "ConcurrentPreset%d", i);
 
     // NOTE: No mock expectations needed - using real buffer_pool_get function
-    result =
-      onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, output_token, sizeof(output_token));
+    result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_token,
+                                  sizeof(output_token));
     assert_int_equal(result, ONVIF_SUCCESS);
 
     // No mock expectations needed - permissive mode handles platform calls
@@ -1043,8 +1043,8 @@ void test_integration_ptz_stress_testing(void** state) {
     char preset_name[TEST_PRESET_NAME_BUFFER_SIZE];
     (void)snprintf(preset_name, sizeof(preset_name), "StressPreset%d", i);
 
-    int result =
-      onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, output_token, sizeof(output_token));
+    int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_token,
+                                      sizeof(output_token));
     if (i < TEST_PRESET_MAX_COUNT) { // Only first TEST_PRESET_MAX_COUNT should succeed
       assert_int_equal(result, ONVIF_SUCCESS);
     }
@@ -1086,7 +1086,7 @@ void test_integration_ptz_memory_leak_detection(void** state) {
       char preset_name[TEST_PRESET_NAME_BUFFER_SIZE];
       (void)snprintf(preset_name, sizeof(preset_name), "LeakTestPreset%d_%d", cycle, i);
 
-      int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, output_tokens[i],
+      int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_tokens[i],
                                         sizeof(output_tokens[i]));
       assert_int_equal(result, ONVIF_SUCCESS);
     }

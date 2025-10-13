@@ -10,6 +10,7 @@
 #include <stdbool.h>
 
 #include "cmocka_wrapper.h"
+#include "services/ptz/onvif_ptz.h"
 
 /* ============================================================================
  * Conditional Mock/Real Function Control
@@ -105,8 +106,10 @@ int __wrap_config_get_summary(const config_manager_t* config, char* buffer, size
 /* Declare real functions for runtime configuration */
 extern int __real_config_runtime_get_int(config_section_t section, const char* key, int* out_value);
 extern int __real_config_runtime_set_int(config_section_t section, const char* key, int value);
-extern int __real_config_runtime_get_string(config_section_t section, const char* key, char* out_value, size_t buffer_size);
-extern int __real_config_runtime_set_string(config_section_t section, const char* key, const char* value);
+extern int __real_config_runtime_get_string(config_section_t section, const char* key,
+                                            char* out_value, size_t buffer_size);
+extern int __real_config_runtime_set_string(config_section_t section, const char* key,
+                                            const char* value);
 
 int __wrap_config_runtime_get_int(config_section_t section, const char* key, int* out_value) {
   if (g_use_real_functions) {
@@ -130,7 +133,8 @@ int __wrap_config_runtime_set_int(config_section_t section, const char* key, int
   return (int)mock();
 }
 
-int __wrap_config_runtime_get_string(config_section_t section, const char* key, char* out_value, size_t buffer_size) {
+int __wrap_config_runtime_get_string(config_section_t section, const char* key, char* out_value,
+                                     size_t buffer_size) {
   if (g_use_real_functions) {
     return __real_config_runtime_get_string(section, key, out_value, buffer_size);
   }
@@ -150,5 +154,32 @@ int __wrap_config_runtime_set_string(config_section_t section, const char* key, 
   check_expected(section);
   check_expected_ptr(key);
   check_expected_ptr(value);
+  return (int)mock();
+}
+
+/* Declare real functions for PTZ configuration */
+extern int __real_config_runtime_get_ptz_profile_presets(int profile_index,
+                                                         ptz_preset_list_t* presets);
+extern int __real_config_runtime_set_ptz_profile_presets(int profile_index,
+                                                         const ptz_preset_list_t* presets);
+
+int __wrap_config_runtime_get_ptz_profile_presets(int profile_index, ptz_preset_list_t* presets) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_get_ptz_profile_presets(profile_index, presets);
+  }
+  function_called();
+  check_expected(profile_index);
+  check_expected_ptr(presets);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_set_ptz_profile_presets(int profile_index,
+                                                  const ptz_preset_list_t* presets) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_set_ptz_profile_presets(profile_index, presets);
+  }
+  function_called();
+  check_expected(profile_index);
+  check_expected_ptr(presets);
   return (int)mock();
 }
