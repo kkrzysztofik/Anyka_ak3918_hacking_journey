@@ -34,24 +34,33 @@ void test_integration_ptz_remove_preset_soap(void** state);
  */
 const struct CMUnitTest* get_ptz_integration_tests(size_t* count) {
   static const struct CMUnitTest tests[] = {
+    // FAST TESTS FIRST (no preset creation or minimal presets)
     cmocka_unit_test(test_integration_ptz_relative_move_functionality),
     cmocka_unit_test(test_integration_ptz_continuous_move_functionality),
-    cmocka_unit_test(test_integration_ptz_continuous_move_timeout_cleanup),
     cmocka_unit_test(test_integration_ptz_stop_functionality),
-    cmocka_unit_test(test_integration_ptz_preset_memory_optimization),
-    cmocka_unit_test(test_integration_ptz_memory_usage_improvements),
-    cmocka_unit_test(test_integration_ptz_buffer_pool_usage),
-    cmocka_unit_test(test_integration_ptz_string_operations_optimization),
-    cmocka_unit_test(test_integration_ptz_error_handling_robustness),
-    cmocka_unit_test(test_integration_ptz_concurrent_operations),
-    cmocka_unit_test(test_integration_ptz_stress_testing),
-    cmocka_unit_test(test_integration_ptz_memory_leak_detection),
+
+    // SOAP integration tests (create 1 preset each - within limit)
     cmocka_unit_test(test_integration_ptz_get_nodes_soap),
     cmocka_unit_test(test_integration_ptz_absolute_move_soap),
     cmocka_unit_test(test_integration_ptz_get_presets_soap),
     cmocka_unit_test(test_integration_ptz_set_preset_soap),
     cmocka_unit_test(test_integration_ptz_goto_preset_soap),
     cmocka_unit_test(test_integration_ptz_remove_preset_soap),
+
+    // MODERATE TESTS (create few presets - within limit)
+    cmocka_unit_test(test_integration_ptz_preset_memory_optimization),
+    cmocka_unit_test(test_integration_ptz_buffer_pool_usage),
+    cmocka_unit_test(test_integration_ptz_string_operations_optimization),
+    cmocka_unit_test(test_integration_ptz_error_handling_robustness),
+
+    // LONG TESTS LAST (create many presets - may exceed limit)
+    cmocka_unit_test(test_integration_ptz_memory_usage_improvements),
+    cmocka_unit_test(test_integration_ptz_stress_testing),
+    cmocka_unit_test(test_integration_ptz_memory_leak_detection),
+    cmocka_unit_test(test_integration_ptz_concurrent_operations),
+
+    // LONGEST TEST LAST (timeout operations with cleanup)
+    cmocka_unit_test(test_integration_ptz_continuous_move_timeout_cleanup),
   };
   *count = sizeof(tests) / sizeof(tests[0]);
   return tests;

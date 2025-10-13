@@ -12,6 +12,7 @@
 #include <stddef.h>
 
 #include "cmocka_wrapper.h"
+#include "networking/http/http_parser.h"
 
 
 #ifdef __cplusplus
@@ -31,14 +32,12 @@ struct buffer_pool_t;
 
 /**
  * @brief CMocka wrapped smart response build with dynamic buffer
- * @param soap SOAP context pointer
- * @param response_func Response function pointer
- * @param response Response data pointer
+ * @param response HTTP response structure
+ * @param soap_content SOAP content string
  * @return Result code (configured via will_return)
  */
-int __wrap_smart_response_build_with_dynamic_buffer(struct soap* soap,
-                                                    int (*response_func)(struct soap*, const void*),
-                                                    const void* response);
+int __wrap_smart_response_build_with_dynamic_buffer(http_response_t* response,
+                                                    const char* soap_content);
 
 /**
  * @brief CMocka wrapped smart response build with buffer pool
@@ -91,9 +90,8 @@ void smart_response_mock_use_real_function(bool use_real);
  * @brief Set up expectations for successful smart response build with dynamic buffer
  */
 #define EXPECT_SMART_RESPONSE_BUILD_DYNAMIC_SUCCESS()                                              \
-  expect_any(__wrap_smart_response_build_with_dynamic_buffer, soap);                               \
-  expect_any(__wrap_smart_response_build_with_dynamic_buffer, response_func);                      \
   expect_any(__wrap_smart_response_build_with_dynamic_buffer, response);                           \
+  expect_any(__wrap_smart_response_build_with_dynamic_buffer, soap_content);                       \
   will_return(__wrap_smart_response_build_with_dynamic_buffer, 0)
 
 /**

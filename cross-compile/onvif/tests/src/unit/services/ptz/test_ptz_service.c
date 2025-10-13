@@ -341,7 +341,7 @@ void test_unit_ptz_get_nodes_success(void** state) {
   assert_int_equal(count, 1);
   assert_string_equal(nodes[0].token, "PTZNode0");
   assert_string_equal(nodes[0].name, "PTZ Node");
-  assert_int_equal(nodes[0].maximum_number_of_presets, TEST_PTZ_MAX_PRESETS);
+  assert_int_equal(nodes[0].maximum_number_of_presets, 4); // PTZ_MAX_PRESETS
   assert_int_equal(nodes[0].home_supported, 1);
 }
 
@@ -360,7 +360,7 @@ void test_unit_ptz_get_node_success(void** state) {
   assert_int_equal(result, ONVIF_SUCCESS);
   assert_string_equal(node.token, "PTZNode0");
   assert_string_equal(node.name, "PTZ Node");
-  assert_int_equal(node.maximum_number_of_presets, TEST_PTZ_MAX_PRESETS);
+  assert_int_equal(node.maximum_number_of_presets, 4); // PTZ_MAX_PRESETS
   assert_int_equal(node.home_supported, 1);
 }
 

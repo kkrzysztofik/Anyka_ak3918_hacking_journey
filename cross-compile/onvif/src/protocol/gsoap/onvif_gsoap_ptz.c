@@ -89,8 +89,7 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _tptz__GetNod
  * @note Extracts ProfileToken, Position (PanTilt and Zoom), and optional Speed
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
-                                    struct _tptz__AbsoluteMove** out) {
+int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx, struct _tptz__AbsoluteMove** out) {
   /* 1. Validate context and begin parse operation */
   int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "AbsoluteMove", __func__);
   if (result != ONVIF_SUCCESS) {
@@ -113,7 +112,8 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
   }
 
   /* 4. Parse the actual AbsoluteMove structure */
-  struct _tptz__AbsoluteMove* result_ptr = soap_get__tptz__AbsoluteMove(&ctx->soap, *out, NULL, NULL);
+  struct _tptz__AbsoluteMove* result_ptr =
+    soap_get__tptz__AbsoluteMove(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
@@ -289,8 +289,7 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _tptz__Goto
  * @note PresetToken identifies which preset to remove from profile
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
-                                    struct _tptz__RemovePreset** out) {
+int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx, struct _tptz__RemovePreset** out) {
   /* 1. Validate context and begin parse operation */
   int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "RemovePreset", __func__);
   if (result != ONVIF_SUCCESS) {
@@ -313,7 +312,8 @@ int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
   }
 
   /* 4. Parse the actual RemovePreset structure */
-  struct _tptz__RemovePreset* result_ptr = soap_get__tptz__RemovePreset(&ctx->soap, *out, NULL, NULL);
+  struct _tptz__RemovePreset* result_ptr =
+    soap_get__tptz__RemovePreset(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
@@ -359,11 +359,43 @@ int ptz_nodes_response_callback(struct soap* soap, void* user_data) {
 
     node->token = soap_strdup(soap, src_node->token);
     node->Name = soap_strdup(soap, src_node->name);
-    node->FixedHomePosition = src_node->home_supported ? xsd__boolean__true_ : xsd__boolean__false_;
+    node->FixedHomePosition = soap_new_xsd__boolean(soap, 1);
+    if (node->FixedHomePosition) {
+      *(node->FixedHomePosition) =
+        src_node->home_supported ? xsd__boolean__true_ : xsd__boolean__false_;
+    }
+
+    // Initialize required fields to prevent NULL pointer access
+    node->SupportedPTZSpaces = soap_new_tt__PTZSpaces(soap, 1);
+    if (node->SupportedPTZSpaces) {
+      node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace =
+        soap_new_tt__Space2DDescription(soap, 1);
+      if (node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace) {
+        node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->URI =
+          soap_strdup(soap, src_node->supported_ptz_spaces.absolute_pan_tilt_position_space.uri);
+        node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->XRange =
+          soap_new_tt__FloatRange(soap, 1);
+        if (node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->XRange) {
+          node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->XRange->Min =
+            src_node->supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.min;
+          node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->XRange->Max =
+            src_node->supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.max;
+        }
+        node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->YRange =
+          soap_new_tt__FloatRange(soap, 1);
+        if (node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->YRange) {
+          node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->YRange->Min =
+            src_node->supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.min;
+          node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->YRange->Max =
+            src_node->supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.max;
+        }
+      }
+    }
+
+    node->MaximumNumberOfPresets = src_node->maximum_number_of_presets;
   }
 
-  if (soap_put__tptz__GetNodesResponse(soap, response, "tptz:GetNodesResponse", NULL) !=
-      SOAP_OK) {
+  if (soap_put__tptz__GetNodesResponse(soap, response, "tptz:GetNodesResponse", NULL) != SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 

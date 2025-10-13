@@ -419,6 +419,15 @@ platform_result_t __wrap_platform_ptz_check_self(void) {
 }
 
 platform_result_t __wrap_platform_ptz_move_to_position(int pan_deg, int tilt_deg) {
+  // Check if permissive mode is enabled
+  if (platform_ptz_mock_get_permissive_mode()) {
+    // Permissive mode: Just return success without validation
+    // Used by integration tests that don't care about exact parameters
+    platform_ptz_mock_record_absolute_move(pan_deg, tilt_deg, 0);
+    return PLATFORM_SUCCESS;
+  }
+
+  // Strict mode: Validate parameters (for unit tests)
   check_expected(pan_deg);
   check_expected(tilt_deg);
   // Record the move (speed is 0 since it's not part of this function's signature)

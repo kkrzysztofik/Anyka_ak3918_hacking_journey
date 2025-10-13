@@ -11,6 +11,7 @@
 #include <stddef.h>
 
 #include "cmocka_wrapper.h"
+#include "networking/http/http_parser.h"
 
 
 /* ============================================================================
@@ -31,16 +32,14 @@ void smart_response_mock_use_real_function(bool use_real) {
  * CMocka Wrapped Smart Response Functions
  * ============================================================================ */
 
-int __wrap_smart_response_build_with_dynamic_buffer(struct soap* soap,
-                                                    int (*response_func)(struct soap*, const void*),
-                                                    const void* response) {
+int __wrap_smart_response_build_with_dynamic_buffer(http_response_t* response,
+                                                    const char* soap_content) {
   if (g_use_real_functions) {
-    return __real_smart_response_build_with_dynamic_buffer(soap, response_func, response);
+    return __real_smart_response_build_with_dynamic_buffer(response, soap_content);
   }
 
-  check_expected_ptr(soap);
-  check_expected_ptr(response_func);
   check_expected_ptr(response);
+  check_expected_ptr(soap_content);
   return (int)mock();
 }
 

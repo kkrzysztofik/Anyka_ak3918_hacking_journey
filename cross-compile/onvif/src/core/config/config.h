@@ -18,6 +18,7 @@ struct imaging_settings;
 struct auto_daynight_config;
 struct network_settings;
 struct device_info;
+struct ptz_preset_profile;
 
 /* Core ONVIF daemon settings */
 struct onvif_settings {
@@ -76,6 +77,31 @@ struct user_credential {
   int active; /* Is this user slot active? */
 };
 
+/* PTZ Preset Profile Storage - 4 presets max per profile */
+struct ptz_preset_profile {
+  int preset_count;                    /* Number of active presets (0-4) */
+  char preset1_token[64];              /* Preset 1 token */
+  char preset1_name[64];               /* Preset 1 name */
+  float preset1_pan;                   /* Preset 1 pan position (-180 to 180) */
+  float preset1_tilt;                  /* Preset 1 tilt position (-90 to 90) */
+  float preset1_zoom;                  /* Preset 1 zoom level (0 to 1) */
+  char preset2_token[64];              /* Preset 2 token */
+  char preset2_name[64];               /* Preset 2 name */
+  float preset2_pan;                   /* Preset 2 pan position (-180 to 180) */
+  float preset2_tilt;                  /* Preset 2 tilt position (-90 to 90) */
+  float preset2_zoom;                  /* Preset 2 zoom level (0 to 1) */
+  char preset3_token[64];              /* Preset 3 token */
+  char preset3_name[64];               /* Preset 3 name */
+  float preset3_pan;                   /* Preset 3 pan position (-180 to 180) */
+  float preset3_tilt;                  /* Preset 3 tilt position (-90 to 90) */
+  float preset3_zoom;                  /* Preset 3 zoom level (0 to 1) */
+  char preset4_token[64];              /* Preset 4 token */
+  char preset4_name[64];               /* Preset 4 name */
+  float preset4_pan;                   /* Preset 4 pan position (-180 to 180) */
+  float preset4_tilt;                  /* Preset 4 tilt position (-90 to 90) */
+  float preset4_zoom;                  /* Preset 4 zoom level (0 to 1) */
+};
+
 /* Full application configuration */
 struct application_config {
   struct onvif_settings onvif;                /* core ONVIF settings */
@@ -91,6 +117,10 @@ struct application_config {
   video_config_t* stream_profile_2;           /* stream profile 2 configuration (User Story 4) */
   video_config_t* stream_profile_3;           /* stream profile 3 configuration (User Story 4) */
   video_config_t* stream_profile_4;           /* stream profile 4 configuration (User Story 4) */
+  struct ptz_preset_profile* ptz_preset_profile_1; /* PTZ preset profile 1 storage */
+  struct ptz_preset_profile* ptz_preset_profile_2; /* PTZ preset profile 2 storage */
+  struct ptz_preset_profile* ptz_preset_profile_3; /* PTZ preset profile 3 storage */
+  struct ptz_preset_profile* ptz_preset_profile_4; /* PTZ preset profile 4 storage */
   struct user_credential users[MAX_USERS];    /* user credentials array (User Story 5) */
 };
 

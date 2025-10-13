@@ -46,6 +46,9 @@ static struct {
 
 static unsigned int g_ptz_turn_stop_mask = 0;
 static int g_ptz_async_mode_enabled = 0;
+
+// Permissive mode flag for integration tests
+static bool g_platform_ptz_permissive_mode = false;
 static pthread_t g_ptz_async_main_thread;
 static pthread_mutex_t g_ptz_async_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -194,6 +197,14 @@ void platform_ptz_mock_set_async_mode(bool enable) {
     printf("[MOCK][PTZ] async mode disabled\n");
   }
   pthread_mutex_unlock(&g_ptz_async_lock);
+}
+
+void platform_ptz_mock_set_permissive_mode(bool permissive) {
+  g_platform_ptz_permissive_mode = permissive;
+}
+
+bool platform_ptz_mock_get_permissive_mode(void) {
+  return g_platform_ptz_permissive_mode;
 }
 
 void platform_ptz_mock_record_cleanup(void) {
