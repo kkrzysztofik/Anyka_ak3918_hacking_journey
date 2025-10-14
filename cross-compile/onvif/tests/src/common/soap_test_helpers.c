@@ -866,6 +866,154 @@ int soap_test_parse_remove_preset_response(onvif_gsoap_context_t* ctx,
   return ONVIF_SUCCESS;
 }
 
+int soap_test_parse_get_node_response(onvif_gsoap_context_t* ctx,
+                                     struct _tptz__GetNodeResponse** response) {
+  if (!ctx || !response) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  *response = (struct _tptz__GetNodeResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _tptz__GetNodeResponse));
+  if (!*response) {
+    return ONVIF_ERROR_MEMORY;
+  }
+
+  soap_default__tptz__GetNodeResponse(&ctx->soap, *response);
+
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tptz__GetNodeResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+int soap_test_parse_get_configuration_response(onvif_gsoap_context_t* ctx,
+                                              struct _tptz__GetConfigurationResponse** response) {
+  if (!ctx || !response) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  *response = (struct _tptz__GetConfigurationResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _tptz__GetConfigurationResponse));
+  if (!*response) {
+    return ONVIF_ERROR_MEMORY;
+  }
+
+  soap_default__tptz__GetConfigurationResponse(&ctx->soap, *response);
+
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tptz__GetConfigurationResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+int soap_test_parse_get_status_response(onvif_gsoap_context_t* ctx,
+                                       struct _tptz__GetStatusResponse** response) {
+  if (!ctx || !response) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  *response = (struct _tptz__GetStatusResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _tptz__GetStatusResponse));
+  if (!*response) {
+    return ONVIF_ERROR_MEMORY;
+  }
+
+  soap_default__tptz__GetStatusResponse(&ctx->soap, *response);
+
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tptz__GetStatusResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+int soap_test_parse_goto_home_position_response(onvif_gsoap_context_t* ctx,
+                                               struct _tptz__GotoHomePositionResponse** response) {
+  if (!ctx || !response) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  *response = (struct _tptz__GotoHomePositionResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _tptz__GotoHomePositionResponse));
+  if (!*response) {
+    return ONVIF_ERROR_MEMORY;
+  }
+
+  soap_default__tptz__GotoHomePositionResponse(&ctx->soap, *response);
+
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__tptz__GotoHomePositionResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
 /* ============================================================================
  * Device Service - Additional Response Parsers
  * ============================================================================ */

@@ -8,9 +8,11 @@
 #ifndef SOAP_TEST_HELPERS_H
 #define SOAP_TEST_HELPERS_H
 
+#include <stddef.h>
+
 #include "networking/http/http_parser.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
-#include <stddef.h>
+
 
 /* Forward declarations for gSOAP structures */
 struct _trt__GetProfilesResponse;
@@ -34,6 +36,10 @@ struct _tptz__GetPresetsResponse;
 struct _tptz__SetPresetResponse;
 struct _tptz__GotoPresetResponse;
 struct _tptz__RemovePresetResponse;
+struct _tptz__GetNodeResponse;
+struct _tptz__GetConfigurationResponse;
+struct _tptz__GetStatusResponse;
+struct _tptz__GotoHomePositionResponse;
 
 /* Device Service Response Structures */
 struct _tds__GetCapabilitiesResponse;
@@ -76,8 +82,7 @@ void soap_test_free_request(http_request_t* request);
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Caller must call soap_test_cleanup_response_parsing() and onvif_gsoap_cleanup() when done
  */
-int soap_test_init_response_parsing(onvif_gsoap_context_t* ctx,
-                                    const http_response_t* response);
+int soap_test_init_response_parsing(onvif_gsoap_context_t* ctx, const http_response_t* response);
 
 /**
  * @brief Cleanup response parsing resources
@@ -155,8 +160,8 @@ int soap_test_parse_delete_profile_response(onvif_gsoap_context_t* ctx,
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Response structure is allocated from gSOAP managed memory
  */
-int soap_test_parse_set_video_source_config_response(onvif_gsoap_context_t* ctx,
-                                                     struct _trt__SetVideoSourceConfigurationResponse** response);
+int soap_test_parse_set_video_source_config_response(
+  onvif_gsoap_context_t* ctx, struct _trt__SetVideoSourceConfigurationResponse** response);
 
 /**
  * @brief Parse SOAP response for Media SetVideoEncoderConfiguration
@@ -165,8 +170,8 @@ int soap_test_parse_set_video_source_config_response(onvif_gsoap_context_t* ctx,
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Response structure is allocated from gSOAP managed memory
  */
-int soap_test_parse_set_video_encoder_config_response(onvif_gsoap_context_t* ctx,
-                                                      struct _trt__SetVideoEncoderConfigurationResponse** response);
+int soap_test_parse_set_video_encoder_config_response(
+  onvif_gsoap_context_t* ctx, struct _trt__SetVideoEncoderConfigurationResponse** response);
 
 /**
  * @brief Parse SOAP response for Media GetMetadataConfigurations
@@ -175,8 +180,8 @@ int soap_test_parse_set_video_encoder_config_response(onvif_gsoap_context_t* ctx
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Response structure is allocated from gSOAP managed memory
  */
-int soap_test_parse_get_metadata_configs_response(onvif_gsoap_context_t* ctx,
-                                                  struct _trt__GetMetadataConfigurationsResponse** response);
+int soap_test_parse_get_metadata_configs_response(
+  onvif_gsoap_context_t* ctx, struct _trt__GetMetadataConfigurationsResponse** response);
 
 /**
  * @brief Parse SOAP response for Media SetMetadataConfiguration
@@ -185,8 +190,8 @@ int soap_test_parse_get_metadata_configs_response(onvif_gsoap_context_t* ctx,
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Response structure is allocated from gSOAP managed memory
  */
-int soap_test_parse_set_metadata_config_response(onvif_gsoap_context_t* ctx,
-                                                 struct _trt__SetMetadataConfigurationResponse** response);
+int soap_test_parse_set_metadata_config_response(
+  onvif_gsoap_context_t* ctx, struct _trt__SetMetadataConfigurationResponse** response);
 
 /**
  * @brief Parse SOAP response for Media StartMulticastStreaming
@@ -195,8 +200,8 @@ int soap_test_parse_set_metadata_config_response(onvif_gsoap_context_t* ctx,
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Response structure is allocated from gSOAP managed memory
  */
-int soap_test_parse_start_multicast_response(onvif_gsoap_context_t* ctx,
-                                             struct _trt__StartMulticastStreamingResponse** response);
+int soap_test_parse_start_multicast_response(
+  onvif_gsoap_context_t* ctx, struct _trt__StartMulticastStreamingResponse** response);
 
 /**
  * @brief Parse SOAP response for Media StopMulticastStreaming
@@ -260,6 +265,46 @@ int soap_test_parse_goto_preset_response(onvif_gsoap_context_t* ctx,
 int soap_test_parse_remove_preset_response(onvif_gsoap_context_t* ctx,
                                            struct _tptz__RemovePresetResponse** response);
 
+/**
+ * @brief Parse GetNode response from gSOAP context
+ * @param ctx gSOAP context (already initialized with soap_test_init_response_parsing)
+ * @param response Parsed response structure (output)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Response structure is allocated from gSOAP managed memory
+ */
+int soap_test_parse_get_node_response(onvif_gsoap_context_t* ctx,
+                                      struct _tptz__GetNodeResponse** response);
+
+/**
+ * @brief Parse GetConfiguration response from gSOAP context
+ * @param ctx gSOAP context (already initialized with soap_test_init_response_parsing)
+ * @param response Parsed response structure (output)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Response structure is allocated from gSOAP managed memory
+ */
+int soap_test_parse_get_configuration_response(onvif_gsoap_context_t* ctx,
+                                               struct _tptz__GetConfigurationResponse** response);
+
+/**
+ * @brief Parse GetStatus response from gSOAP context
+ * @param ctx gSOAP context (already initialized with soap_test_init_response_parsing)
+ * @param response Parsed response structure (output)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Response structure is allocated from gSOAP managed memory
+ */
+int soap_test_parse_get_status_response(onvif_gsoap_context_t* ctx,
+                                        struct _tptz__GetStatusResponse** response);
+
+/**
+ * @brief Parse GotoHomePosition response from gSOAP context
+ * @param ctx gSOAP context (already initialized with soap_test_init_response_parsing)
+ * @param response Parsed response structure (output)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Response structure is allocated from gSOAP managed memory
+ */
+int soap_test_parse_goto_home_position_response(onvif_gsoap_context_t* ctx,
+                                                struct _tptz__GotoHomePositionResponse** response);
+
 /* Device Service - Additional Response Parsers */
 
 /**
@@ -279,8 +324,8 @@ int soap_test_parse_get_capabilities_response(onvif_gsoap_context_t* ctx,
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Response structure is allocated from gSOAP managed memory
  */
-int soap_test_parse_get_system_date_time_response(onvif_gsoap_context_t* ctx,
-                                                  struct _tds__GetSystemDateAndTimeResponse** response);
+int soap_test_parse_get_system_date_time_response(
+  onvif_gsoap_context_t* ctx, struct _tds__GetSystemDateAndTimeResponse** response);
 
 /**
  * @brief Parse SOAP response for Device GetServices
@@ -311,8 +356,8 @@ int soap_test_parse_system_reboot_response(onvif_gsoap_context_t* ctx,
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Response structure is allocated from gSOAP managed memory
  */
-int soap_test_parse_set_imaging_settings_response(onvif_gsoap_context_t* ctx,
-                                                  struct _timg__SetImagingSettingsResponse** response);
+int soap_test_parse_set_imaging_settings_response(
+  onvif_gsoap_context_t* ctx, struct _timg__SetImagingSettingsResponse** response);
 
 /* ============================================================================
  * Response Validation

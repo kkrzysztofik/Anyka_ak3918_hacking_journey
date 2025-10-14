@@ -214,6 +214,42 @@
     "</tptz:RemovePreset>" \
     SOAP_ENVELOPE_FOOTER
 
+/* GetNode - Gets a specific PTZ node */
+#define SOAP_PTZ_GET_NODE \
+    SOAP_ENVELOPE_HEADER \
+    "<tptz:GetNode>" \
+    "<tptz:NodeToken>PTZNodeToken</tptz:NodeToken>" \
+    "</tptz:GetNode>" \
+    SOAP_ENVELOPE_FOOTER
+
+/* GetConfiguration - Gets PTZ configuration */
+#define SOAP_PTZ_GET_CONFIGURATION \
+    SOAP_ENVELOPE_HEADER \
+    "<tptz:GetConfiguration>" \
+    "<tptz:PTZConfigurationToken>PTZConfig0</tptz:PTZConfigurationToken>" \
+    "</tptz:GetConfiguration>" \
+    SOAP_ENVELOPE_FOOTER
+
+/* GetStatus - Gets current PTZ status */
+#define SOAP_PTZ_GET_STATUS \
+    SOAP_ENVELOPE_HEADER \
+    "<tptz:GetStatus>" \
+    "<tptz:ProfileToken>ptz_profile_1</tptz:ProfileToken>" \
+    "</tptz:GetStatus>" \
+    SOAP_ENVELOPE_FOOTER
+
+/* GotoHomePosition - Moves PTZ to home position */
+#define SOAP_PTZ_GOTO_HOME_POSITION \
+    SOAP_ENVELOPE_HEADER \
+    "<tptz:GotoHomePosition>" \
+    "<tptz:ProfileToken>ptz_profile_1</tptz:ProfileToken>" \
+    "<tptz:Speed>" \
+    "<tt:PanTilt x=\"0.5\" y=\"0.5\" space=\"http://www.onvif.org/ver10/tptz/PanTiltSpaces/GenericSpeedSpace\"/>" \
+    "<tt:Zoom x=\"0.5\" space=\"http://www.onvif.org/ver10/tptz/ZoomSpaces/ZoomGenericSpeedSpace\"/>" \
+    "</tptz:Speed>" \
+    "</tptz:GotoHomePosition>" \
+    SOAP_ENVELOPE_FOOTER
+
 /* ============================================================================
  * Device Service Test Envelopes (4 operations)
  * ============================================================================ */

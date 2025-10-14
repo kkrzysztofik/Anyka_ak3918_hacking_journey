@@ -370,6 +370,9 @@ int onvif_ptz_set_preset(const char* profile_token, // NOLINT
   ONVIF_CHECK_NULL(preset_name);
   ONVIF_CHECK_NULL(output_preset_token);
 
+  platform_log_debug("[PTZ] onvif_ptz_set_preset() called: profile='%s' preset_name='%s' input_token='%s'\n",
+                    profile_token, preset_name, input_preset_token ? input_preset_token : "NULL");
+
   // Get profile index from token
   int profile_index = get_profile_index_from_token(profile_token);
   if (profile_index < 0) {
@@ -385,6 +388,8 @@ int onvif_ptz_set_preset(const char* profile_token, // NOLINT
 
   // Get profile-specific preset list
   ptz_preset_list_t* profile = &g_profile_presets[profile_index];
+  platform_log_debug("[PTZ] Profile %d current preset_count=%d before set operation\n",
+                    profile_index + 1, profile->preset_count);
 
   /* Get current position; if unavailable, fall back to neutral (0,0,0) */
   struct ptz_status status;
@@ -564,6 +569,9 @@ int onvif_ptz_goto_preset(const char* profile_token, // NOLINT
   ONVIF_CHECK_NULL(profile_token);
   ONVIF_CHECK_NULL(preset_token_to_goto);
 
+  platform_log_debug("[PTZ] onvif_ptz_goto_preset() called: profile='%s' preset_token='%s'\n",
+                    profile_token, preset_token_to_goto);
+
   // Get profile index from token
   int profile_index = get_profile_index_from_token(profile_token);
   if (profile_index < 0) {
@@ -571,23 +579,35 @@ int onvif_ptz_goto_preset(const char* profile_token, // NOLINT
     return ONVIF_ERROR_INVALID_PARAMETER;
   }
 
+  platform_log_debug("[PTZ] Profile index resolved: %d (from token '%s')\n", profile_index, profile_token);
+
   // Ensure presets are loaded from configuration
   int result = load_ptz_presets_from_config();
   if (result != ONVIF_SUCCESS) {
+    platform_log_error("[PTZ] Failed to load presets from config (result=%d)\n", result);
     return result;
   }
+
+  // Get profile-specific preset list to show current state
+  ptz_preset_list_t* profile = &g_profile_presets[profile_index];
+  platform_log_debug("[PTZ] Profile %d current preset_count=%d before goto operation\n",
+                    profile_index + 1, profile->preset_count);
 
   // Find preset in profile
   int preset_index = 0;
   result = find_preset_by_token_in_profile(profile_index, preset_token_to_goto, &preset_index);
   if (result != ONVIF_SUCCESS) {
-    platform_log_error("[PTZ] Preset token '%s' not found in profile %s\n", preset_token_to_goto,
-                       profile_token);
+    platform_log_error("[PTZ] Preset token '%s' not found in profile %s (preset_count=%d)\n",
+                      preset_token_to_goto, profile_token, profile->preset_count);
+    // Log all available presets for debugging
+    for (int i = 0; i < profile->preset_count; i++) {
+      platform_log_debug("[PTZ]   Available preset[%d]: token='%s' name='%s'\n",
+                        i, profile->presets[i].token, profile->presets[i].name);
+    }
     return ONVIF_ERROR_NOT_FOUND;
   }
 
-  // Get profile-specific preset list
-  ptz_preset_list_t* profile = &g_profile_presets[profile_index];
+  platform_log_debug("[PTZ] Found preset at index %d in profile %d\n", preset_index, profile_index + 1);
 
   /* Move to preset position */
   platform_log_info("[PTZ] Moving to preset '%s' in profile %s\n", preset_token_to_goto,
@@ -1339,20 +1359,35 @@ void onvif_ptz_cleanup(void) {
  */
 static int load_ptz_presets_from_config(void) {
   if (g_presets_loaded) {
+    platform_log_debug("[PTZ] Presets already loaded (g_presets_loaded=1), skipping reload\n");
     return ONVIF_SUCCESS;
   }
+
+  platform_log_debug("[PTZ] Loading presets from configuration (g_presets_loaded=0)\n");
 
   // Load presets for all 4 profiles
   for (int i = 0; i < PTZ_PROFILE_COUNT; i++) {
     int result = config_runtime_get_ptz_profile_presets(i, &g_profile_presets[i]);
-    if (result != ONVIF_SUCCESS) {
-      platform_log_error("[PTZ] Failed to load presets for profile %d from configuration\n", i + 1);
+    platform_log_debug("[PTZ] config_runtime_get_ptz_profile_presets(profile=%d) returned %d\n", i, result);
+
+    if (result == ONVIF_ERROR_NOT_FOUND) {
+      // Configuration not initialized yet - treat as empty (valid fresh/reset state)
+      g_profile_presets[i].preset_count = 0;
+      memset(g_profile_presets[i].presets, 0, sizeof(g_profile_presets[i].presets));
+      platform_log_debug("[PTZ] No presets found for profile %d (fresh state) - initialized to 0 presets\n", i + 1);
+      continue;
+    } else if (result != ONVIF_SUCCESS) {
+      platform_log_error("[PTZ] Failed to load presets for profile %d from configuration (error=%d)\n", i + 1, result);
       return result;
     }
+
+    // Successfully loaded presets
+    platform_log_debug("[PTZ] Loaded %d presets for profile %d from configuration\n",
+                      g_profile_presets[i].preset_count, i + 1);
   }
 
   g_presets_loaded = 1;
-  platform_log_info("[PTZ] Loaded presets for %d profiles from runtime configuration\n",
+  platform_log_info("[PTZ] Loaded presets for %d profiles from runtime configuration (g_presets_loaded set to 1)\n",
                     PTZ_PROFILE_COUNT);
   return ONVIF_SUCCESS;
 }
@@ -1469,6 +1504,8 @@ static int reset_preset_state(void) {
   memset(g_profile_presets, 0, sizeof(g_profile_presets));
   g_presets_loaded = 0;
 
+  platform_log_debug("[PTZ] reset_preset_state() called - cleared in-memory preset data (g_presets_loaded=0)\n");
+
   return ONVIF_SUCCESS;
 }
 
@@ -1477,5 +1514,6 @@ static int reset_preset_state(void) {
  * @return ONVIF_SUCCESS on success
  */
 int onvif_ptz_reset_presets(void) {
+  platform_log_debug("[PTZ] onvif_ptz_reset_presets() called - delegating to reset_preset_state()\n");
   return reset_preset_state();
 }
