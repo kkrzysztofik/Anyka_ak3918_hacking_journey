@@ -204,11 +204,11 @@ int device_service_setup(void** state) {
   test_state->config->app_config = test_state->app_config;
 
   // Initialize Device service
-  result = onvif_device_init(test_state->config);
+  result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Initialize Media service (required for GetCapabilities integration)
-  result = onvif_media_init(test_state->config);
+  result = onvif_media_init();
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Initialize PTZ service (required for GetCapabilities integration)

@@ -375,14 +375,11 @@ platform_result_t platform_snapshot_capture(platform_snapshot_handle_t handle,
                                             platform_snapshot_t* snapshot, uint32_t timeout_ms);
 void platform_snapshot_release(platform_snapshot_handle_t handle, platform_snapshot_t* snapshot);
 
-/* Configuration functions */
-platform_result_t platform_config_load(const char* filename);
-platform_result_t platform_config_save(const char* filename);
-const char* platform_config_get_string(const char* section, const char* key,
-                                       const char* default_value);
-int platform_config_get_int(const char* section, const char* key, int default_value);
-
-/* Include enhanced logging utilities */
+/**
+ * @defgroup platform_logging Logging Functions
+ * @brief Platform logging interface
+ * @{
+ */
 
 /* Legacy logging functions - now use enhanced logging internally */
 int platform_log_error(const char* format, ...);
@@ -390,6 +387,14 @@ int platform_log_warning(const char* format, ...);
 int platform_log_notice(const char* format, ...);
 int platform_log_info(const char* format, ...);
 int platform_log_debug(const char* format, ...);
+
+/** @} */
+
+/**
+ * @defgroup platform_system System Information
+ * @brief System monitoring and information functions
+ * @{
+ */
 
 /* System monitoring functions */
 typedef struct {
@@ -406,5 +411,7 @@ typedef struct {
  * @return PLATFORM_SUCCESS on success, error code on failure
  */
 platform_result_t platform_get_system_info(platform_system_info_t* info);
+
+/** @} */
 
 #endif /* ONVIF_PLATFORM_H */

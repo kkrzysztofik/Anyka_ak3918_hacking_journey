@@ -62,7 +62,7 @@ int soap_error_tests_setup(void** state) {
   }
 
   // Initialize media service (as representative service for error testing)
-  result = onvif_media_init(NULL);
+  result = onvif_media_init();
   if (result != ONVIF_SUCCESS) {
     onvif_service_dispatcher_cleanup();
     return -1;

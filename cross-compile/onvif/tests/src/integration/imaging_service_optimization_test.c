@@ -132,6 +132,13 @@ int setup_imaging_integration(void** state) {
   test_state->app_config->auto_daynight = calloc(1, sizeof(struct auto_daynight_config));
   assert_non_null(test_state->app_config->auto_daynight);
 
+  // Enable real functions for integration testing BEFORE calling config_runtime_init
+  service_dispatcher_mock_use_real_function(true);
+  buffer_pool_mock_use_real_function(true);
+  config_mock_use_real_function(true);
+  gsoap_mock_use_real_function(true);
+  smart_response_mock_use_real_function(true);
+
   // Initialize runtime configuration system
   int config_result = config_runtime_init(test_state->app_config);
   assert_int_equal(ONVIF_SUCCESS, config_result);
@@ -139,13 +146,6 @@ int setup_imaging_integration(void** state) {
   // Apply default configuration values
   config_result = config_runtime_apply_defaults();
   assert_int_equal(ONVIF_SUCCESS, config_result);
-
-  // Enable real functions for integration testing (test real service interactions)
-  service_dispatcher_mock_use_real_function(true);
-  buffer_pool_mock_use_real_function(true);
-  config_mock_use_real_function(true);
-  gsoap_mock_use_real_function(true);
-  smart_response_mock_use_real_function(true);
 
   // Initialize config manager for imaging service
   test_state->config = malloc(sizeof(config_manager_t));
@@ -209,7 +209,7 @@ int teardown_imaging_integration(void** state) {
   // Cleanup memory manager
   memory_manager_cleanup();
 
-  // Cleanup runtime configuration system
+  // Cleanup runtime configuration system (while real functions are still enabled)
   config_runtime_cleanup();
 
   // Free imaging and auto_daynight structures BEFORE freeing app_config
@@ -233,7 +233,7 @@ int teardown_imaging_integration(void** state) {
     free(test_state);
   }
 
-  // Restore mock behavior for subsequent tests
+  // Restore mock behavior for subsequent tests (AFTER config cleanup)
   service_dispatcher_mock_use_real_function(false);
   buffer_pool_mock_use_real_function(false);
   config_mock_use_real_function(false);

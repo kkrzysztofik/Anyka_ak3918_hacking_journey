@@ -86,7 +86,7 @@ void test_unit_media_callback_registration_success(void** state) {
   (void)state;
 
   setup_http_verbose_mock();
-  int result = onvif_media_init(NULL);
+  int result = onvif_media_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
 }
@@ -95,8 +95,8 @@ void test_unit_media_callback_registration_duplicate(void** state) {
   (void)state;
 
   setup_http_verbose_mock();
-  assert_int_equal(ONVIF_SUCCESS, onvif_media_init(NULL));
-  assert_int_equal(ONVIF_SUCCESS, onvif_media_init(NULL));
+  assert_int_equal(ONVIF_SUCCESS, onvif_media_init());
+  assert_int_equal(ONVIF_SUCCESS, onvif_media_init());
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
 }
 
@@ -104,7 +104,7 @@ void test_unit_media_callback_registration_null_config(void** state) {
   (void)state;
 
   setup_http_verbose_mock();
-  int result = onvif_media_init(&g_mock_config);
+  int result = onvif_media_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
 }
@@ -115,7 +115,7 @@ void test_unit_media_callback_registration_dispatcher_failure(void** state) {
   media_pre_register_service();
 
   setup_http_verbose_mock();
-  int result = onvif_media_init(&g_mock_config);
+  int result = onvif_media_init();
   assert_int_equal(ONVIF_ERROR_ALREADY_EXISTS, result);
   // Service should remain registered with original handler after ALREADY_EXISTS error
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
@@ -125,8 +125,8 @@ void test_unit_media_callback_double_initialization(void** state) {
   (void)state;
 
   setup_http_verbose_mock();
-  assert_int_equal(ONVIF_SUCCESS, onvif_media_init(NULL));
-  assert_int_equal(ONVIF_SUCCESS, onvif_media_init(&g_mock_config));
+  assert_int_equal(ONVIF_SUCCESS, onvif_media_init());
+  assert_int_equal(ONVIF_SUCCESS, onvif_media_init());
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
 }
 
@@ -134,7 +134,7 @@ void test_unit_media_callback_unregistration_success(void** state) {
   (void)state;
 
   setup_http_verbose_mock();
-  assert_int_equal(ONVIF_SUCCESS, onvif_media_init(NULL));
+  assert_int_equal(ONVIF_SUCCESS, onvif_media_init());
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
 
   onvif_media_cleanup();
@@ -152,7 +152,7 @@ void test_unit_media_callback_unregistration_failure(void** state) {
   (void)state;
 
   setup_http_verbose_mock();
-  assert_int_equal(ONVIF_SUCCESS, onvif_media_init(NULL));
+  assert_int_equal(ONVIF_SUCCESS, onvif_media_init());
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_MEDIA_SERVICE_NAME));
 
   // Remove service manually to force unregister path to encounter NOT_FOUND

@@ -157,11 +157,205 @@ int __wrap_config_runtime_set_string(config_section_t section, const char* key, 
   return (int)mock();
 }
 
+/* Declare real functions for boolean and float configuration */
+extern int __real_config_runtime_get_bool(config_section_t section, const char* key, int* out_value);
+extern int __real_config_runtime_set_bool(config_section_t section, const char* key, int value);
+extern int __real_config_runtime_get_float(config_section_t section, const char* key, float* out_value);
+extern int __real_config_runtime_set_float(config_section_t section, const char* key, float value);
+
+int __wrap_config_runtime_get_bool(config_section_t section, const char* key, int* out_value) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_get_bool(section, key, out_value);
+  }
+  function_called();
+  check_expected(section);
+  check_expected_ptr(key);
+  check_expected_ptr(out_value);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_set_bool(config_section_t section, const char* key, int value) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_set_bool(section, key, value);
+  }
+  function_called();
+  check_expected(section);
+  check_expected_ptr(key);
+  check_expected(value);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_get_float(config_section_t section, const char* key, float* out_value) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_get_float(section, key, out_value);
+  }
+  function_called();
+  check_expected(section);
+  check_expected_ptr(key);
+  check_expected_ptr(out_value);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_set_float(config_section_t section, const char* key, float value) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_set_float(section, key, value);
+  }
+  function_called();
+  check_expected(section);
+  check_expected_ptr(key);
+  // Note: float values are passed as int via cmocka, so we check as int
+  check_expected(*(int*)&value);
+  return (int)mock();
+}
+
+/* ============================================================================
+ * CMocka Wrapped Core Configuration Management Functions
+ * ============================================================================ */
+
+/* Declare real functions for core configuration management */
+extern int __real_config_runtime_init(struct application_config* cfg);
+extern int __real_config_runtime_cleanup(void);
+extern int __real_config_runtime_apply_defaults(void);
+extern const struct application_config* __real_config_runtime_snapshot(void);
+extern uint32_t __real_config_runtime_get_generation(void);
+
+int __wrap_config_runtime_init(struct application_config* cfg) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_init(cfg);
+  }
+  function_called();
+  check_expected_ptr(cfg);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_cleanup(void) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_cleanup();
+  }
+  function_called();
+  return (int)mock();
+}
+
+int __wrap_config_runtime_apply_defaults(void) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_apply_defaults();
+  }
+  function_called();
+  return (int)mock();
+}
+
+const struct application_config* __wrap_config_runtime_snapshot(void) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_snapshot();
+  }
+  function_called();
+  return (const struct application_config*)mock();
+}
+
+uint32_t __wrap_config_runtime_get_generation(void) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_get_generation();
+  }
+  function_called();
+  return (uint32_t)mock();
+}
+
+/* ============================================================================
+ * CMocka Wrapped Persistence Functions
+ * ============================================================================ */
+
+/* Declare real functions for persistence operations */
+extern int __real_config_runtime_queue_persistence_update(config_section_t section, const char* key,
+                                                          const void* value, config_value_type_t type);
+extern int __real_config_runtime_process_persistence_queue(void);
+extern int __real_config_runtime_get_persistence_status(void);
+
+int __wrap_config_runtime_queue_persistence_update(config_section_t section, const char* key,
+                                                   const void* value, config_value_type_t type) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_queue_persistence_update(section, key, value, type);
+  }
+  function_called();
+  check_expected(section);
+  check_expected_ptr(key);
+  check_expected_ptr(value);
+  check_expected(type);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_process_persistence_queue(void) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_process_persistence_queue();
+  }
+  function_called();
+  return (int)mock();
+}
+
+int __wrap_config_runtime_get_persistence_status(void) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_get_persistence_status();
+  }
+  function_called();
+  return (int)mock();
+}
+
+/* ============================================================================
+ * CMocka Wrapped Stream Profile Functions
+ * ============================================================================ */
+
+/* Declare real functions for stream profile operations */
+extern int __real_config_runtime_get_stream_profile(int profile_index, video_config_t* profile);
+extern int __real_config_runtime_set_stream_profile(int profile_index, const video_config_t* profile);
+extern int __real_config_runtime_validate_stream_profile(const video_config_t* profile);
+extern int __real_config_runtime_get_stream_profile_count(void);
+
+int __wrap_config_runtime_get_stream_profile(int profile_index, video_config_t* profile) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_get_stream_profile(profile_index, profile);
+  }
+  function_called();
+  check_expected(profile_index);
+  check_expected_ptr(profile);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_set_stream_profile(int profile_index, const video_config_t* profile) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_set_stream_profile(profile_index, profile);
+  }
+  function_called();
+  check_expected(profile_index);
+  check_expected_ptr(profile);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_validate_stream_profile(const video_config_t* profile) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_validate_stream_profile(profile);
+  }
+  function_called();
+  check_expected_ptr(profile);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_get_stream_profile_count(void) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_get_stream_profile_count();
+  }
+  function_called();
+  return (int)mock();
+}
+
+/* ============================================================================
+ * CMocka Wrapped PTZ Preset Functions
+ * ============================================================================ */
+
 /* Declare real functions for PTZ configuration */
 extern int __real_config_runtime_get_ptz_profile_presets(int profile_index,
                                                          ptz_preset_list_t* presets);
 extern int __real_config_runtime_set_ptz_profile_presets(int profile_index,
                                                          const ptz_preset_list_t* presets);
+extern int __real_config_runtime_validate_ptz_profile_presets(const ptz_preset_list_t* presets);
 
 int __wrap_config_runtime_get_ptz_profile_presets(int profile_index, ptz_preset_list_t* presets) {
   if (g_use_real_functions) {
@@ -181,5 +375,101 @@ int __wrap_config_runtime_set_ptz_profile_presets(int profile_index,
   function_called();
   check_expected(profile_index);
   check_expected_ptr(presets);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_validate_ptz_profile_presets(const ptz_preset_list_t* presets) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_validate_ptz_profile_presets(presets);
+  }
+  function_called();
+  check_expected_ptr(presets);
+  return (int)mock();
+}
+
+/* ============================================================================
+ * CMocka Wrapped User Management Functions
+ * ============================================================================ */
+
+/* Declare real functions for user management */
+extern int __real_config_runtime_hash_password(const char* password, char* hash_output,
+                                               size_t output_size);
+extern int __real_config_runtime_verify_password(const char* password, const char* hash);
+extern int __real_config_runtime_add_user(const char* username, const char* password);
+extern int __real_config_runtime_remove_user(const char* username);
+extern int __real_config_runtime_update_user_password(const char* username, const char* new_password);
+extern int __real_config_runtime_authenticate_user(const char* username, const char* password);
+extern int __real_config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1],
+                                                 int max_users, int* user_count);
+
+int __wrap_config_runtime_hash_password(const char* password, char* hash_output, size_t output_size) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_hash_password(password, hash_output, output_size);
+  }
+  function_called();
+  check_expected_ptr(password);
+  check_expected_ptr(hash_output);
+  check_expected(output_size);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_verify_password(const char* password, const char* hash) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_verify_password(password, hash);
+  }
+  function_called();
+  check_expected_ptr(password);
+  check_expected_ptr(hash);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_add_user(const char* username, const char* password) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_add_user(username, password);
+  }
+  function_called();
+  check_expected_ptr(username);
+  check_expected_ptr(password);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_remove_user(const char* username) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_remove_user(username);
+  }
+  function_called();
+  check_expected_ptr(username);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_update_user_password(const char* username, const char* new_password) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_update_user_password(username, new_password);
+  }
+  function_called();
+  check_expected_ptr(username);
+  check_expected_ptr(new_password);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_authenticate_user(const char* username, const char* password) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_authenticate_user(username, password);
+  }
+  function_called();
+  check_expected_ptr(username);
+  check_expected_ptr(password);
+  return (int)mock();
+}
+
+int __wrap_config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users,
+                                          int* user_count) {
+  if (g_use_real_functions) {
+    return __real_config_runtime_enumerate_users(usernames, max_users, user_count);
+  }
+  function_called();
+  check_expected_ptr(usernames);
+  check_expected(max_users);
+  check_expected_ptr(user_count);
   return (int)mock();
 }

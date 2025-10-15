@@ -13,6 +13,7 @@
 #include "common/test_helpers.h"
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
+#include "mocks/config_mock.h"
 #include "mocks/http_server_mock.h"
 #include "mocks/mock_service_dispatcher.h"
 #include "networking/http/http_auth.h"
@@ -60,6 +61,9 @@ static int setup_http_server_auth_tests(void** state) {
     return -1;
   }
 
+  // Enable real config functions for integration testing with real authentication
+  config_mock_use_real_function(true);
+
   // Initialize runtime config system for authentication tests
   int result = config_runtime_init(test_state->runtime_config);
   if (result != ONVIF_SUCCESS && result != ONVIF_ERROR_ALREADY_EXISTS) {
@@ -101,13 +105,10 @@ static int teardown_http_server_auth_tests(void** state) {
   // Reset HTTP auth config to prevent memory leaks
   http_server_reset_auth_config();
 
-  // Disable real functions to restore mock behavior for other tests
-  http_server_mock_use_real_function(false);
-
   // Cleanup service dispatcher mock (pure CMocka pattern)
   mock_service_dispatcher_cleanup();
 
-  // Cleanup runtime config system
+  // Cleanup runtime config system (while real functions are still enabled)
   if (test_state) {
     config_runtime_cleanup();
     if (test_state->runtime_config) {
@@ -115,6 +116,10 @@ static int teardown_http_server_auth_tests(void** state) {
     }
     test_free(test_state);
   }
+
+  // Disable real functions to restore mock behavior for other tests
+  http_server_mock_use_real_function(false);
+  config_mock_use_real_function(false);
 
   return 0;
 }

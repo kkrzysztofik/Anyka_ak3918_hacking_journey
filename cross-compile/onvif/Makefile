@@ -71,7 +71,6 @@ SRCS := \
 	src/core/main/onvifd.c \
 	src/platform/platform_anyka.c \
 	src/platform/adapters/ptz_adapter.c \
-	src/core/config/config.c \
 	src/core/config/config_runtime.c \
 	src/core/config/config_storage.c \
 	src/core/lifecycle/service_manager.c \

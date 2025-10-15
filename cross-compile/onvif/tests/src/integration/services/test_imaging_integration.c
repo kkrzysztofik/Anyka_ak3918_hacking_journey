@@ -82,6 +82,15 @@ int imaging_service_setup(void** state) {
   test_state->app_config->auto_daynight = calloc(1, sizeof(struct auto_daynight_config));
   assert_non_null(test_state->app_config->auto_daynight);
 
+  // Enable real functions for integration testing BEFORE calling config_runtime_init
+  service_dispatcher_mock_use_real_function(true);
+  buffer_pool_mock_use_real_function(true);
+  config_mock_use_real_function(true);
+  gsoap_mock_use_real_function(true);
+  http_server_mock_use_real_function(true);
+  network_mock_use_real_function(true);
+  smart_response_mock_use_real_function(true);
+
   // Initialize runtime configuration system
   // Note: If already initialized by another test, this will return ONVIF_ERROR_ALREADY_EXISTS
   int config_result = config_runtime_init(test_state->app_config);
@@ -120,15 +129,6 @@ int imaging_service_setup(void** state) {
     assert_int_equal(ONVIF_SUCCESS, config_result);
   }
 
-  // Enable real functions for integration testing (not platform layer)
-  service_dispatcher_mock_use_real_function(true);
-  buffer_pool_mock_use_real_function(true);
-  config_mock_use_real_function(true);
-  gsoap_mock_use_real_function(true);
-  http_server_mock_use_real_function(true);
-  network_mock_use_real_function(true);
-  smart_response_mock_use_real_function(true);
-
   // Initialize config manager for imaging service
   test_state->config = malloc(sizeof(config_manager_t));
   assert_non_null(test_state->config);
@@ -154,7 +154,7 @@ int imaging_service_teardown(void** state) {
 
   memory_manager_cleanup();
 
-  // Cleanup runtime configuration system
+  // Cleanup runtime configuration system (while real functions are still enabled)
   // Note: Only cleanup if we were the ones who initialized it
   // If another test initialized it, we should leave it alone
   if (test_state && test_state->config_initialized_by_this_test) {
@@ -181,15 +181,6 @@ int imaging_service_teardown(void** state) {
   if (test_state) {
     free(test_state);
   }
-
-  // Restore mock behavior for subsequent tests
-  service_dispatcher_mock_use_real_function(false);
-  buffer_pool_mock_use_real_function(false);
-  config_mock_use_real_function(false);
-  gsoap_mock_use_real_function(false);
-  http_server_mock_use_real_function(false);
-  network_mock_use_real_function(false);
-  smart_response_mock_use_real_function(false);
 
   return 0;
 }

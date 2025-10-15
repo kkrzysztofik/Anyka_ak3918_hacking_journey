@@ -233,10 +233,10 @@
 
 **Purpose**: Improvements that affect multiple user stories
 
-- [ ] T098 [P] Update Doxygen documentation for all new APIs
-- [ ] T099 [P] Update cross-compile/onvif/README.md with unified configuration flow
-- [ ] T100 [P] Update docs/refactoring/06_code_quality.md with new patterns
-- [ ] T101 [P] Remove deprecated platform*config*\* declarations from platform.h
+- [X] T098 [P] Update Doxygen documentation for all new APIs (completed - config_runtime.h and config_storage.h have comprehensive Doxygen documentation with 27+ functions documented)
+- [X] T099 [P] Update cross-compile/onvif/README.md with unified configuration flow (completed - added Section 3.5 with 178-line comprehensive unified configuration documentation)
+- [X] T100 [P] Update docs/refactoring/06_code_quality.md with new patterns (completed - created 617-line code quality guide with best practices, migration guide, and testing patterns)
+- [X] T101 [P] Remove deprecated platform*config*\* declarations from platform.h (completed - removed legacy fallback from open_config_file() in config.c, removed platform_config_* from platform.h declarations, added Doxygen groups; all tests passing)
 - [ ] T102 [P] Update mock implementations in tests/src/mocks/
 - [ ] T103 [P] Add comprehensive unit tests for edge cases
 - [ ] T104 [P] Performance optimization and benchmarking

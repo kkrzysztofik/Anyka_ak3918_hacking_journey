@@ -324,11 +324,7 @@ int __wrap_onvif_media_set_metadata_configuration(const char* configuration_toke
 /**
  * @brief Mock implementation of onvif_media_init
  */
-int __wrap_onvif_media_init(config_manager_t* config) {
-  if (config == NULL) {
-    return ONVIF_ERROR_NULL;
-  }
-
-
+int __wrap_onvif_media_init(void) {
+  function_called();
   return (int)mock();
 }

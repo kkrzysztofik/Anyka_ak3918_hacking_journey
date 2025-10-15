@@ -645,12 +645,9 @@ static int handle_get_capabilities(const service_handler_config_t* config,
     snprintf(callback_data.device_ip, sizeof(callback_data.device_ip), "localhost");
   }
 
-  // Get HTTP port from configuration with fallback to default
-  if (config && config->config && config->config->app_config) {
-    callback_data.http_port = config->config->app_config->onvif.http_port;
-  } else {
-    callback_data.http_port = DEFAULT_HTTP_PORT;
-  }
+  // Get HTTP port from runtime configuration with fallback to default
+  callback_data.http_port = DEFAULT_HTTP_PORT;
+  config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &callback_data.http_port);
 
   // Use the enhanced callback-based handler
   return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
@@ -682,12 +679,9 @@ static int handle_get_services(const service_handler_config_t* config,
     snprintf(callback_data.device_ip, sizeof(callback_data.device_ip), "localhost");
   }
 
-  // Get HTTP port from configuration with fallback to default
-  if (config && config->config && config->config->app_config) {
-    callback_data.http_port = config->config->app_config->onvif.http_port;
-  } else {
-    callback_data.http_port = DEFAULT_HTTP_PORT;
-  }
+  // Get HTTP port from runtime configuration with fallback to default
+  callback_data.http_port = DEFAULT_HTTP_PORT;
+  config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &callback_data.http_port);
 
   // Use the enhanced callback-based handler
   return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
@@ -835,12 +829,12 @@ static const onvif_service_registration_t g_device_service_registration = {
 
 /**
  * @brief Initialize the ONVIF Device service
- * @param config Configuration manager instance
  * @return ONVIF_SUCCESS on success, error code on failure
  * @note This function initializes the device service handler and registers
  * with the standardized dispatcher
+ * @note Uses config_runtime API for configuration access
  */
-int onvif_device_init(config_manager_t* config) {
+int onvif_device_init(void) {
   if (g_handler_initialized) {
     return ONVIF_SUCCESS;
   }
@@ -848,7 +842,7 @@ int onvif_device_init(config_manager_t* config) {
   // Initialize device handler configuration
   g_device_handler.config.service_type = ONVIF_SERVICE_DEVICE;
   g_device_handler.config.service_name = "Device";
-  g_device_handler.config.config = config;
+  g_device_handler.config.config = NULL; // No longer using old config system
   g_device_handler.config.enable_validation = 1;
   g_device_handler.config.enable_logging = 1;
 

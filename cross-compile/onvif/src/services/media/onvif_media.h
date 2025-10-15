@@ -209,10 +209,10 @@ int onvif_media_handle_request(
 
 /**
  * @brief Initialize media service
- * @param config Centralized configuration
  * @return 0 on success, negative error code on failure
+ * @note Uses config_runtime API for configuration access
  */
-int onvif_media_init(config_manager_t* config);
+int onvif_media_init(void);
 
 /**
  * @brief Clean up media service

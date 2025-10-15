@@ -12,6 +12,7 @@
 
 #include "cmocka_wrapper.h"
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -142,6 +143,227 @@ int __wrap_config_runtime_get_string(config_section_t section, const char* key, 
  * @return Result code (configured via will_return)
  */
 int __wrap_config_runtime_set_string(config_section_t section, const char* key, const char* value);
+
+/**
+ * @brief CMocka wrapped config_runtime_get_bool
+ * @param section Configuration section
+ * @param key Configuration key
+ * @param out_value Output boolean value
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_get_bool(config_section_t section, const char* key, int* out_value);
+
+/**
+ * @brief CMocka wrapped config_runtime_set_bool
+ * @param section Configuration section
+ * @param key Configuration key
+ * @param value Boolean value to set
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_set_bool(config_section_t section, const char* key, int value);
+
+/**
+ * @brief CMocka wrapped config_runtime_get_float
+ * @param section Configuration section
+ * @param key Configuration key
+ * @param out_value Output float value
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_get_float(config_section_t section, const char* key, float* out_value);
+
+/**
+ * @brief CMocka wrapped config_runtime_set_float
+ * @param section Configuration section
+ * @param key Configuration key
+ * @param value Float value to set
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_set_float(config_section_t section, const char* key, float value);
+
+/* ============================================================================
+ * CMocka Wrapped Core Configuration Management Functions
+ * ============================================================================ */
+
+/**
+ * @brief CMocka wrapped config_runtime_init
+ * @param cfg Application configuration structure
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_init(struct application_config* cfg);
+
+/**
+ * @brief CMocka wrapped config_runtime_cleanup
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_cleanup(void);
+
+/**
+ * @brief CMocka wrapped config_runtime_apply_defaults
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_apply_defaults(void);
+
+/**
+ * @brief CMocka wrapped config_runtime_snapshot
+ * @return Application configuration snapshot (configured via will_return)
+ */
+const struct application_config* __wrap_config_runtime_snapshot(void);
+
+/**
+ * @brief CMocka wrapped config_runtime_get_generation
+ * @return Generation counter (configured via will_return)
+ */
+uint32_t __wrap_config_runtime_get_generation(void);
+
+/* ============================================================================
+ * CMocka Wrapped Persistence Functions
+ * ============================================================================ */
+
+/**
+ * @brief CMocka wrapped config_runtime_queue_persistence_update
+ * @param section Configuration section
+ * @param key Configuration key
+ * @param value Value to persist
+ * @param type Value type
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_queue_persistence_update(config_section_t section, const char* key,
+                                                   const void* value, config_value_type_t type);
+
+/**
+ * @brief CMocka wrapped config_runtime_process_persistence_queue
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_process_persistence_queue(void);
+
+/**
+ * @brief CMocka wrapped config_runtime_get_persistence_status
+ * @return Status code (configured via will_return)
+ */
+int __wrap_config_runtime_get_persistence_status(void);
+
+/* ============================================================================
+ * CMocka Wrapped Stream Profile Functions
+ * ============================================================================ */
+
+/**
+ * @brief CMocka wrapped config_runtime_get_stream_profile
+ * @param profile_index Profile index (0-3)
+ * @param profile Output profile configuration
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_get_stream_profile(int profile_index, video_config_t* profile);
+
+/**
+ * @brief CMocka wrapped config_runtime_set_stream_profile
+ * @param profile_index Profile index (0-3)
+ * @param profile Profile configuration to set
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_set_stream_profile(int profile_index, const video_config_t* profile);
+
+/**
+ * @brief CMocka wrapped config_runtime_validate_stream_profile
+ * @param profile Profile configuration to validate
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_validate_stream_profile(const video_config_t* profile);
+
+/**
+ * @brief CMocka wrapped config_runtime_get_stream_profile_count
+ * @return Profile count (configured via will_return)
+ */
+int __wrap_config_runtime_get_stream_profile_count(void);
+
+/* ============================================================================
+ * CMocka Wrapped PTZ Preset Functions
+ * ============================================================================ */
+
+/**
+ * @brief CMocka wrapped config_runtime_get_ptz_profile_presets
+ * @param profile_index PTZ profile index (1-4)
+ * @param presets Output preset list
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_get_ptz_profile_presets(int profile_index, ptz_preset_list_t* presets);
+
+/**
+ * @brief CMocka wrapped config_runtime_set_ptz_profile_presets
+ * @param profile_index PTZ profile index (1-4)
+ * @param presets Preset list to set
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_set_ptz_profile_presets(int profile_index,
+                                                  const ptz_preset_list_t* presets);
+
+/**
+ * @brief CMocka wrapped config_runtime_validate_ptz_profile_presets
+ * @param presets Preset list to validate
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_validate_ptz_profile_presets(const ptz_preset_list_t* presets);
+
+/* ============================================================================
+ * CMocka Wrapped User Management Functions
+ * ============================================================================ */
+
+/**
+ * @brief CMocka wrapped config_runtime_hash_password
+ * @param password Password to hash
+ * @param hash_output Output hash buffer
+ * @param output_size Size of output buffer
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_hash_password(const char* password, char* hash_output, size_t output_size);
+
+/**
+ * @brief CMocka wrapped config_runtime_verify_password
+ * @param password Password to verify
+ * @param hash Hash to verify against
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_verify_password(const char* password, const char* hash);
+
+/**
+ * @brief CMocka wrapped config_runtime_add_user
+ * @param username Username to add
+ * @param password Password for user
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_add_user(const char* username, const char* password);
+
+/**
+ * @brief CMocka wrapped config_runtime_remove_user
+ * @param username Username to remove
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_remove_user(const char* username);
+
+/**
+ * @brief CMocka wrapped config_runtime_update_user_password
+ * @param username Username to update
+ * @param new_password New password
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_update_user_password(const char* username, const char* new_password);
+
+/**
+ * @brief CMocka wrapped config_runtime_authenticate_user
+ * @param username Username to authenticate
+ * @param password Password to verify
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_authenticate_user(const char* username, const char* password);
+
+/**
+ * @brief CMocka wrapped config_runtime_enumerate_users
+ * @param usernames Output usernames array
+ * @param max_users Maximum users to enumerate
+ * @param user_count Output user count
+ * @return Result code (configured via will_return)
+ */
+int __wrap_config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users,
+                                          int* user_count);
 
 /* ============================================================================
  * Conditional Mock/Real Function Control

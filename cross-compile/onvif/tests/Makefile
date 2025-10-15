@@ -167,8 +167,32 @@ WRAP_FUNCTIONS := \
 	config_runtime_set_int \
 	config_runtime_get_string \
 	config_runtime_set_string \
+	config_runtime_get_bool \
+	config_runtime_set_bool \
+	config_runtime_get_float \
+	config_runtime_set_float \
+	config_runtime_init \
+	config_runtime_cleanup \
+	config_runtime_apply_defaults \
+	config_runtime_snapshot \
+	config_runtime_get_generation \
+	config_runtime_queue_persistence_update \
+	config_runtime_process_persistence_queue \
+	config_runtime_get_persistence_status \
+	config_runtime_get_stream_profile \
+	config_runtime_set_stream_profile \
+	config_runtime_validate_stream_profile \
+	config_runtime_get_stream_profile_count \
 	config_runtime_get_ptz_profile_presets \
 	config_runtime_set_ptz_profile_presets \
+	config_runtime_validate_ptz_profile_presets \
+	config_runtime_hash_password \
+	config_runtime_verify_password \
+	config_runtime_add_user \
+	config_runtime_remove_user \
+	config_runtime_update_user_password \
+	config_runtime_authenticate_user \
+	config_runtime_enumerate_users \
 	onvif_service_dispatcher_register_service \
 	onvif_service_dispatcher_unregister_service \
 	onvif_service_dispatcher_init \
@@ -237,7 +261,6 @@ UTILS_TEST_SRCS := \
 	src/unit/utils/test_memory_utils.c \
 	src/unit/utils/test_logging_utils.c \
 	src/unit/utils/test_hash_utils.c \
-	src/unit/core/test_config_auth.c \
 	src/unit/core/config/test_config_runtime.c \
 	src/unit/core/config/test_config_storage.c
 
@@ -288,7 +311,6 @@ INTEGRATION_TEST_SRCS := \
 	src/integration/services/test_snapshot_integration.c \
 	src/integration/device_service_tests.c \
 	src/integration/soap_error_tests.c \
-	src/integration/core/config/test_config_integration.c \
 	src/integration/networking/test_http_auth_integration.c \
 	src/integration/networking/test_network_integration.c
 
@@ -366,7 +388,6 @@ MAIN_SRCS := \
 	../src/platform/adapters/ptz_adapter.c \
 	../src/utils/network/network_utils.c \
 	../src/utils/error/error_handling.c \
-	../src/core/config/config.c \
 	../src/core/config/config_runtime.c \
 	../src/core/config/config_storage.c
 

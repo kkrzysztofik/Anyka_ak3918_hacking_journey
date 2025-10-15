@@ -18,6 +18,8 @@
 
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
+#include "core/config/config_storage.h"
 #include "platform/platform.h"
 #include "services/common/onvif_imaging_types.h"
 #include "services/common/video_config_types.h"
@@ -25,8 +27,7 @@
 #include "utils/stream/stream_config_utils.h"
 
 /* Global configuration state */
-static volatile bool g_config_loaded = false;           // NOLINT
-static config_manager_t g_config_global_config_manager; // NOLINT
+static volatile bool g_config_loaded = false; // NOLINT
 
 /* ---------------------------- Public Interface ------------------------- */
 
@@ -113,23 +114,16 @@ int config_lifecycle_allocate_memory(struct application_config* cfg) {
 int config_lifecycle_load_configuration(struct application_config* cfg) {
   platform_log_info("Loading configuration...\n");
 
-  /* Initialize config_manager structure to prevent garbage data */
-  memset(&g_config_global_config_manager, 0, sizeof(config_manager_t));
-
-  if (config_init(&g_config_global_config_manager, cfg) != ONVIF_SUCCESS) {
-    platform_log_error("error: failed to initialize config\n");
-    return -1;
-  }
-
-  if (config_load(&g_config_global_config_manager, ONVIF_CONFIG_FILE) != ONVIF_SUCCESS) {
-    platform_log_warning("warning: failed to read config at %s\n", ONVIF_CONFIG_FILE);
-    platform_log_warning("warning: using default configuration (embedded)\n");
-  }
-
   /* T019: Initialize runtime configuration manager with loaded config */
   if (config_runtime_init(cfg) != ONVIF_SUCCESS) {
     platform_log_error("error: failed to initialize runtime configuration system\n");
     return -1;
+  }
+
+  /* Load configuration from INI file using new storage system */
+  if (config_storage_load(ONVIF_CONFIG_FILE, NULL) != ONVIF_SUCCESS) {
+    platform_log_warning("warning: failed to read config at %s\n", ONVIF_CONFIG_FILE);
+    platform_log_warning("warning: using default configuration (embedded)\n");
   }
 
   // Initialize stream configurations from anyka_cfg.ini parameters
@@ -138,21 +132,11 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
   int sub_fps = 15; // Default to 15fps for sensor compatibility
   int sub_kbps = 800;
 
-  // Try to get values from config file, but use sensor frame rate if available
-  int config_main_fps = 25;
-  int config_sub_fps = 25;
-  config_get_value(&g_config_global_config_manager, CONFIG_SECTION_MAIN_STREAM, "main_fps",
-                   &config_main_fps, CONFIG_TYPE_INT);
-  config_get_value(&g_config_global_config_manager, CONFIG_SECTION_MAIN_STREAM, "main_kbps",
-                   &main_kbps, CONFIG_TYPE_INT);
-  config_get_value(&g_config_global_config_manager, CONFIG_SECTION_SUB_STREAM, "sub_fps",
-                   &config_sub_fps, CONFIG_TYPE_INT);
-  config_get_value(&g_config_global_config_manager, CONFIG_SECTION_SUB_STREAM, "sub_kbps",
-                   &sub_kbps, CONFIG_TYPE_INT);
-
-  // Use config values, but ensure they're compatible with sensor capabilities
-  main_fps = config_main_fps;
-  sub_fps = config_sub_fps;
+  // Try to get values from config file using new runtime API
+  config_runtime_get_int(CONFIG_SECTION_MAIN_STREAM, "main_fps", &main_fps);
+  config_runtime_get_int(CONFIG_SECTION_MAIN_STREAM, "main_kbps", &main_kbps);
+  config_runtime_get_int(CONFIG_SECTION_SUB_STREAM, "sub_fps", &sub_fps);
+  config_runtime_get_int(CONFIG_SECTION_SUB_STREAM, "sub_kbps", &sub_kbps);
 
   // Initialize main stream configuration
   if (stream_config_init_from_anyka(cfg->main_stream, true, (unsigned int)main_kbps, main_fps) !=
@@ -169,12 +153,21 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
   }
 
   /* Print loaded configuration for debugging and verification */
-  char config_summary[1024];
-  if (config_get_summary(&g_config_global_config_manager, config_summary, sizeof(config_summary)) ==
-      ONVIF_SUCCESS) {
-    platform_log_notice("Loaded configuration:\n%s\n", config_summary);
+  const struct application_config* snapshot = config_runtime_snapshot();
+  if (snapshot) {
+    platform_log_notice("Loaded configuration:\n");
+    platform_log_notice("ONVIF: enabled=%d, port=%d, auth_enabled=%d\n",
+                        snapshot->onvif.enabled,
+                        snapshot->onvif.http_port,
+                        snapshot->onvif.auth_enabled);
+    if (snapshot->imaging) {
+      platform_log_notice("Imaging: brightness=%d, contrast=%d, saturation=%d\n",
+                          snapshot->imaging->brightness,
+                          snapshot->imaging->contrast,
+                          snapshot->imaging->saturation);
+    }
   } else {
-    platform_log_warning("warning: failed to generate configuration summary\n");
+    platform_log_warning("warning: failed to get configuration snapshot\n");
   }
 
   g_config_loaded = true;
@@ -226,8 +219,38 @@ bool config_lifecycle_loaded(void) {
 }
 
 int config_lifecycle_get_summary(char* summary, size_t size) {
-  if (!g_config_loaded) {
+  if (!g_config_loaded || !summary || size == 0) {
     return -1;
   }
-  return config_get_summary(&g_config_global_config_manager, summary, size);
+
+  const struct application_config* snapshot = config_runtime_snapshot();
+  if (!snapshot) {
+    return -1;
+  }
+
+  int result = snprintf(
+    summary, size,
+    "ONVIF: enabled=%d, port=%d, auth_enabled=%d, user=%s\n"
+    "Imaging: brightness=%d, contrast=%d, saturation=%d, sharpness=%d, hue=%d\n"
+    "Auto Day/Night: enabled=%d, mode=%d, thresholds=%d/%d, lock_time=%ds",
+    snapshot->onvif.enabled,
+    snapshot->onvif.http_port,
+    snapshot->onvif.auth_enabled,
+    snapshot->onvif.username,
+    snapshot->imaging ? snapshot->imaging->brightness : 0,
+    snapshot->imaging ? snapshot->imaging->contrast : 0,
+    snapshot->imaging ? snapshot->imaging->saturation : 0,
+    snapshot->imaging ? snapshot->imaging->sharpness : 0,
+    snapshot->imaging ? snapshot->imaging->hue : 0,
+    snapshot->auto_daynight ? snapshot->auto_daynight->enable_auto_switching : 0,
+    snapshot->auto_daynight ? snapshot->auto_daynight->mode : 0,
+    snapshot->auto_daynight ? snapshot->auto_daynight->day_to_night_threshold : 0,
+    snapshot->auto_daynight ? snapshot->auto_daynight->night_to_day_threshold : 0,
+    snapshot->auto_daynight ? snapshot->auto_daynight->lock_time_seconds : 0);
+
+  if (result < 0 || (size_t)result >= size) {
+    return -1; // Truncation or error
+  }
+
+  return 0;
 }

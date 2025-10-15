@@ -86,10 +86,10 @@ int onvif_device_system_reboot(void); /**< Reboot the system. */
 
 /**
  * @brief Initialize device service
- * @param config Centralized configuration
  * @return 0 on success, negative error code on failure
+ * @note Uses config_runtime API for configuration access
  */
-int onvif_device_init(config_manager_t* config);
+int onvif_device_init(void);
 
 /**
  * @brief Handle ONVIF device service requests by operation name

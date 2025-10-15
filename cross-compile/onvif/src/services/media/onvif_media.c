@@ -1905,15 +1905,14 @@ static int media_service_get_capabilities(struct soap* ctx, void** capabilities_
   return ONVIF_SUCCESS;
 }
 
-int onvif_media_init(config_manager_t* config) {
-  // Allow NULL config for unit testing flexibility (matches PTZ/Device pattern)
+int onvif_media_init(void) {
   if (g_handler_initialized) {
     return ONVIF_SUCCESS;
   }
 
   service_handler_config_t handler_config = {.service_type = ONVIF_SERVICE_MEDIA,
                                              .service_name = "Media",
-                                             .config = config,
+                                             .config = NULL, // No longer using old config system
                                              .enable_validation = 1,
                                              .enable_logging = 1};
 

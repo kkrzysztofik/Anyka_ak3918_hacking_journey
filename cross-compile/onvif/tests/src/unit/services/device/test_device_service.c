@@ -115,7 +115,7 @@ void test_unit_device_init_success(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
 
   g_device_service_initialized = 1;
@@ -128,7 +128,7 @@ void test_unit_device_init_success(void** state) {
 void test_unit_device_init_null_config(void** state) {
   (void)state;
 
-  int result = onvif_device_init(NULL);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_ERROR_INVALID, result);
 }
 
@@ -147,12 +147,12 @@ void test_unit_device_init_already_initialized(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_register_service);
   will_return(__wrap_onvif_service_dispatcher_register_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
   // Second initialization should return success without reinitializing
-  result = onvif_device_init(g_test_config);
+  result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
 }
 
@@ -167,7 +167,7 @@ void test_unit_device_init_gsoap_failure(void** state) {
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_ERROR);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_ERROR, result);
 }
 
@@ -186,7 +186,7 @@ void test_unit_device_init_buffer_pool_failure(void** state) {
   expect_function_call(__wrap_buffer_pool_init);
   will_return(__wrap_buffer_pool_init, -1); // Failure
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_ERROR, result);
 }
 
@@ -216,7 +216,7 @@ void test_unit_device_cleanup_success(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -257,7 +257,7 @@ void test_unit_device_cleanup_unregister_failure(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_ERROR); // Failure
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -292,7 +292,7 @@ void test_unit_device_handle_operation_get_device_information(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -332,7 +332,7 @@ void test_unit_device_handle_operation_get_capabilities(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -372,7 +372,7 @@ void test_unit_device_handle_operation_get_system_date_time(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -412,7 +412,7 @@ void test_unit_device_handle_operation_get_services(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -452,7 +452,7 @@ void test_unit_device_handle_operation_system_reboot(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -495,7 +495,7 @@ void test_unit_device_handle_operation_unknown_operation(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -528,7 +528,7 @@ void test_unit_device_handle_operation_null_operation(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -561,7 +561,7 @@ void test_unit_device_handle_operation_null_request(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -593,7 +593,7 @@ void test_unit_device_handle_operation_null_response(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -702,7 +702,7 @@ void test_unit_device_service_registration_success(void** state) {
   expect_function_call(__wrap_buffer_pool_cleanup);
   will_return(__wrap_buffer_pool_cleanup, 0);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 }
@@ -728,7 +728,7 @@ void test_unit_device_service_registration_duplicate(void** state) {
   expect_function_call(__wrap_buffer_pool_cleanup);
   will_return(__wrap_buffer_pool_cleanup, 0);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_ERROR_DUPLICATE, result);
 }
 
@@ -740,7 +740,7 @@ void test_unit_device_service_registration_invalid_params(void** state) {
   (void)state;
 
   // Test with NULL config
-  int result = onvif_device_init(NULL);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_ERROR_INVALID, result);
 }
 
@@ -765,7 +765,7 @@ void test_unit_device_service_unregistration_success(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -795,7 +795,7 @@ void test_unit_device_service_unregistration_not_found(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_ERROR_NOT_FOUND);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
 
@@ -963,7 +963,7 @@ void test_unit_device_memory_management(void** state) {
   expect_function_call(__wrap_onvif_service_dispatcher_unregister_service);
   will_return(__wrap_onvif_service_dispatcher_unregister_service, ONVIF_SUCCESS);
 
-  int result = onvif_device_init(g_test_config);
+  int result = onvif_device_init();
   assert_int_equal(ONVIF_SUCCESS, result);
   g_device_service_initialized = 1;
   // Cleanup (void return)

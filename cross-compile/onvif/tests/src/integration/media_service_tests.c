@@ -138,7 +138,7 @@ int media_service_setup(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Initialize media service
-  result = onvif_media_init(test_state->config);
+  result = onvif_media_init();
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Reset URI cache to ensure test independence
