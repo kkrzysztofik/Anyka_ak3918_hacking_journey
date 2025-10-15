@@ -340,6 +340,8 @@ static config_section_t config_storage_parse_section_name(const char* section_na
         return CONFIG_SECTION_LOGGING;
     } else if (strcmp(section_name, "server") == 0) {
         return CONFIG_SECTION_SERVER;
+    } else if (strcmp(section_name, "snapshot") == 0) {
+        return CONFIG_SECTION_SNAPSHOT;
     }
 
     return CONFIG_SECTION_ONVIF;  /* Default to ONVIF section */

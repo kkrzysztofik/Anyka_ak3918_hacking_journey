@@ -17,6 +17,7 @@
 
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
@@ -39,7 +40,7 @@ static pthread_mutex_t g_snapshot_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 static onvif_service_handler_instance_t g_snapshot_handler; // NOLINT
 static int g_handler_initialized = 0;                       // NOLINT
 
-/* Default snapshot resolution */
+/* Default snapshot resolution fallbacks */
 #define DEFAULT_SNAPSHOT_WIDTH  640
 #define DEFAULT_SNAPSHOT_HEIGHT 480
 
@@ -50,6 +51,21 @@ int onvif_snapshot_init(void) {
 
   platform_log_info("Initializing ONVIF Snapshot service\n");
 
+  // Get configuration from unified config system
+  const struct application_config* config = config_runtime_snapshot();
+  int snapshot_width = DEFAULT_SNAPSHOT_WIDTH;   // fallback default
+  int snapshot_height = DEFAULT_SNAPSHOT_HEIGHT; // fallback default
+
+  if (config && config->snapshot) {
+    snapshot_width = config->snapshot->width;
+    snapshot_height = config->snapshot->height;
+    platform_log_info("Using snapshot resolution from config: %dx%d\n",
+                     snapshot_width, snapshot_height);
+  } else {
+    platform_log_warning("No snapshot config available, using defaults: %dx%d\n",
+                        snapshot_width, snapshot_height);
+  }
+
   // Open video input for snapshots
   platform_result_t result = platform_vi_open(&g_vi_handle);
   if (result != PLATFORM_SUCCESS) {
@@ -57,9 +73,9 @@ int onvif_snapshot_init(void) {
     return ONVIF_ERROR;
   }
 
-  // Initialize snapshot capture
-  result = platform_snapshot_init(&g_snapshot_handle, g_vi_handle, DEFAULT_SNAPSHOT_WIDTH,
-                                  DEFAULT_SNAPSHOT_HEIGHT);
+  // Initialize snapshot capture with configured resolution
+  result = platform_snapshot_init(&g_snapshot_handle, g_vi_handle, snapshot_width,
+                                  snapshot_height);
   if (result != PLATFORM_SUCCESS) {
     platform_log_error("Failed to initialize snapshot capture\n");
     platform_vi_close(g_vi_handle);
@@ -68,7 +84,8 @@ int onvif_snapshot_init(void) {
   }
 
   g_snapshot_initialized = true;
-  platform_log_info("ONVIF Snapshot service initialized successfully\n");
+  platform_log_info("ONVIF Snapshot service initialized successfully with %dx%d\n",
+                   snapshot_width, snapshot_height);
   return ONVIF_SUCCESS;
 }
 

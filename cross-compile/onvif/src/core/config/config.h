@@ -66,6 +66,14 @@ struct server_settings {
   int cleanup_interval;   /* Periodic cleanup interval in seconds (1-60) */
 };
 
+/* Snapshot service configuration (Service Integration - T086) */
+struct snapshot_settings {
+  int width;              /* Snapshot image width (160-2048 pixels, default 640) */
+  int height;             /* Snapshot image height (120-2048 pixels, default 480) */
+  int quality;            /* JPEG quality (1-100, default 85) */
+  char format[32];        /* Image format (default "jpeg") */
+};
+
 /* User credentials for ONVIF authentication (User Story 5) */
 #define MAX_USERS 8
 #define MAX_USERNAME_LENGTH 32
@@ -111,6 +119,7 @@ struct application_config {
   struct device_info* device;                 /* device identification info */
   struct logging_settings* logging;           /* logging configuration */
   struct server_settings* server;             /* HTTP server configuration */
+  struct snapshot_settings* snapshot;         /* snapshot service configuration (T086) */
   video_config_t* main_stream;                /* main stream (vs0) configuration */
   video_config_t* sub_stream;                 /* sub stream (vs1) configuration */
   video_config_t* stream_profile_1;           /* stream profile 1 configuration (User Story 4) */

@@ -245,6 +245,186 @@ ffplay rtsp://<IP>:554/vs0
 
 ---
 
+## 3.5. Unified Configuration System
+
+The ONVIF daemon features a modern, schema-driven unified configuration system that provides centralized configuration management across all services and subsystems.
+
+### Architecture Overview
+
+The unified configuration system consists of three layers:
+
+1. **Storage Layer** (`config_storage.h/c`) - Atomic INI file operations with safe persistence
+2. **Runtime Manager** (`config_runtime.h/c`) - Schema-driven validation with immediate updates
+3. **Configuration Schema** (`config.h`) - Centralized configuration structure definitions
+
+```
+┌─────────────────────────────────────────┐
+│   ONVIF Services & Subsystems           │
+│  (Device, Media, PTZ, Imaging, etc.)    │
+└──────────┬──────────────────────────────┘
+           │
+┌──────────▼──────────────────────────────┐
+│   Runtime Configuration Manager          │
+│  (Schema-driven validation & caching)   │
+│  - Typed getter/setter functions        │
+│  - Generation counters for change detect│
+│  - Thread-safe operations               │
+│  - Async persistence queue              │
+└──────────┬──────────────────────────────┘
+           │
+┌──────────▼──────────────────────────────┐
+│   Storage Layer (INI Format)            │
+│  (Atomic writes, safe persistence)      │
+└──────────┬──────────────────────────────┘
+           │
+    /etc/jffs2/ankya_cfg.ini
+```
+
+### Key Features
+
+**Schema-Driven Validation:**
+- All configuration sections and parameters have defined types and bounds
+- Parameters are validated on load and update
+- Invalid values are rejected with detailed error messages
+- Type safety with compile-time checks
+
+**Runtime Management:**
+- Centralized access point for all configuration data
+- Immediate in-memory updates without daemon restart
+- Thread-safe operations with proper locking
+- Generation counters detect configuration changes
+
+**Async Persistence:**
+- Configuration updates are queued and persisted to disk
+- Coalescing mechanism prevents excessive disk writes
+- Non-blocking persistence operations
+- Atomic file operations prevent corruption
+
+**Configuration Access:**
+
+Services access configuration through simple APIs:
+
+```c
+// Get configuration values
+int http_port;
+config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &http_port);
+
+// Set configuration values (with validation and persistence)
+config_runtime_set_int(CONFIG_SECTION_PTZ, "max_pan_speed", 90);
+
+// Get current configuration snapshot
+const struct application_config* config = config_runtime_snapshot();
+if (config && config->network) {
+    const char* device_ip = config->network->device_ip;
+}
+```
+
+### Supported Configuration Sections
+
+**Core Sections:**
+- `[onvif]` - ONVIF daemon settings (http_port, auth_enabled, etc.)
+- `[network]` - Network configuration (device_ip, rtsp_port, etc.)
+- `[device]` - Device information and capabilities
+- `[server]` - HTTP server settings (worker_threads, max_connections, etc.)
+- `[logging]` - Logging configuration (http_verbose, enabled, etc.)
+- `[autoir]` - Auto day/night configuration
+
+**Service Sections:**
+- `[media]` - Media service configuration
+- `[ptz]` - PTZ service configuration
+- `[imaging]` - Imaging service configuration
+- `[snapshot]` - Snapshot service configuration
+
+**Profile Sections (up to 4 profiles):**
+- `[stream_profile_1]` - Video stream profile 1
+- `[stream_profile_2]` - Video stream profile 2
+- `[stream_profile_3]` - Video stream profile 3
+- `[stream_profile_4]` - Video stream profile 4
+
+**User Management Sections (up to 8 users):**
+- `[user_1]` through `[user_8]` - User account credentials
+
+### Configuration Lifecycle
+
+1. **Daemon Startup:**
+   - `config_runtime_init()` initializes the runtime manager
+   - `config_storage_load()` loads INI file
+   - `config_runtime_apply_defaults()` fills in missing values
+
+2. **Runtime Operation:**
+   - Services call `config_runtime_get_*()` to read configuration
+   - Services call `config_runtime_set_*()` to update configuration
+   - Updates are validated against schema
+   - Changes are queued for async persistence
+
+3. **Persistence:**
+   - `config_runtime_process_persistence_queue()` processes queued updates
+   - Updates are written to disk atomically (temp file + rename)
+   - Corruption is prevented by atomic operations
+
+4. **Daemon Shutdown:**
+   - `config_runtime_cleanup()` flushes pending persistence
+   - Configuration state is saved to disk
+
+### Configuration Files
+
+**Main Configuration:** `/etc/jffs2/ankya_cfg.ini`
+
+Example INI file structure:
+
+```ini
+[onvif]
+enabled=1
+http_port=8080
+auth_enabled=0
+
+[network]
+device_ip=192.168.1.100
+rtsp_port=554
+ws_discovery_port=3702
+
+[device]
+manufacturer=Anyka
+model=AK3918
+firmware=v1.0.0
+
+[server]
+worker_threads=4
+max_connections=100
+connection_timeout=30
+
+[stream_profile_1]
+width=1920
+height=1080
+framerate=25
+bitrate=2000
+
+[user_1]
+username=admin
+password_hash=<sha256-hash>
+```
+
+### Error Handling
+
+The unified configuration system provides comprehensive error handling:
+
+- **ONVIF_SUCCESS** - Operation completed successfully
+- **ONVIF_ERROR_NOT_FOUND** - Configuration parameter not found
+- **ONVIF_ERROR_INVALID_PARAMETER** - Parameter validation failed
+- **ONVIF_VALIDATION_FAILED** - Value out of bounds or invalid format
+- **ONVIF_ERROR_NOT_INITIALIZED** - Configuration system not initialized
+
+All errors are logged with context information to help diagnose configuration issues.
+
+### API Reference
+
+See [Doxygen Documentation](docs/html/index.html) for complete API reference:
+- `config_runtime.h` - Runtime configuration API
+- `config_storage.h` - Storage layer API
+- `config.h` - Configuration schema definitions
+
+---
+
 ## 4. Documentation Generation
 
 The ONVIF project includes comprehensive Doxygen documentation generation with call graphs, class diagrams, and detailed API documentation.
@@ -350,7 +530,7 @@ Documentation generation is fully integrated with the build system:
 
 ---
 
-## 5. Configuration (`/etc/jffs2/ankya_cfg.ini`)
+## 5. Configuration Management
 
 Primary path: `/etc/jffs2/ankya_cfg.ini` (single canonical file). Relevant sections/keys used by ONVIF daemon:
 

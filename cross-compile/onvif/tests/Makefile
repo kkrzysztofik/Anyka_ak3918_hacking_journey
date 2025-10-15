@@ -228,7 +228,9 @@ TEST_SUITE_REGISTRY_SRCS := \
 	src/integration/media_integration_suite.c \
 	src/integration/device_integration_suite.c \
 	src/integration/imaging_integration_suite.c \
-	src/integration/networking/http_auth_integration_suite.c
+	src/integration/snapshot_integration_suite.c \
+	src/integration/networking/http_auth_integration_suite.c \
+	src/integration/network_integration_suite.c
 
 # Test source files for each module
 UTILS_TEST_SRCS := \
@@ -283,10 +285,12 @@ INTEGRATION_TEST_SRCS := \
 	src/integration/media_service_tests.c \
 	src/integration/imaging_service_optimization_test.c \
 	src/integration/services/test_imaging_integration.c \
+	src/integration/services/test_snapshot_integration.c \
 	src/integration/device_service_tests.c \
 	src/integration/soap_error_tests.c \
 	src/integration/core/config/test_config_integration.c \
-	src/integration/networking/test_http_auth_integration.c
+	src/integration/networking/test_http_auth_integration.c \
+	src/integration/networking/test_network_integration.c
 
 # All test sources (for legacy runner)
 TEST_SRCS := $(UTILS_TEST_SRCS) $(NETWORKING_TEST_SRCS) $(PROTOCOL_TEST_SRCS) \

@@ -366,6 +366,13 @@ static const config_schema_entry_t g_config_schema[] = {
   {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "ir_led_level", CONFIG_TYPE_INT, 0, 0, 100, 0, "1"},
   {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "enable_auto_switching", CONFIG_TYPE_INT, 0, 0, 1,
    0, "1"},
+
+  /* Snapshot Configuration (Service Integration - T086) */
+  {CONFIG_SECTION_SNAPSHOT, "snapshot", "width", CONFIG_TYPE_INT, 0, 160, 2048, 0, "640"},
+  {CONFIG_SECTION_SNAPSHOT, "snapshot", "height", CONFIG_TYPE_INT, 0, 120, 2048, 0, "480"},
+  {CONFIG_SECTION_SNAPSHOT, "snapshot", "quality", CONFIG_TYPE_INT, 0, 1, 100, 0, "85"},
+  {CONFIG_SECTION_SNAPSHOT, "snapshot", "format", CONFIG_TYPE_STRING, 0, 0, 0,
+   CONFIG_STRING_MAX_LEN_SHORT, "jpeg"},
 };
 
 static const size_t g_config_schema_count = sizeof(g_config_schema) / sizeof(g_config_schema[0]);
@@ -493,6 +500,15 @@ int config_runtime_apply_defaults(void) {
     g_config_runtime_app_config->auto_daynight->ir_led_mode = IR_LED_AUTO;
     g_config_runtime_app_config->auto_daynight->ir_led_level = 1;
     g_config_runtime_app_config->auto_daynight->enable_auto_switching = 1;
+  }
+
+  /* Snapshot service configuration defaults (T086) */
+  if (g_config_runtime_app_config->snapshot) {
+    g_config_runtime_app_config->snapshot->width = 640;
+    g_config_runtime_app_config->snapshot->height = 480;
+    g_config_runtime_app_config->snapshot->quality = 85;
+    strncpy(g_config_runtime_app_config->snapshot->format, "jpeg", 31);
+    g_config_runtime_app_config->snapshot->format[31] = '\0';
   }
 
   g_config_runtime_app_config->onvif.enabled = 1;
@@ -1896,6 +1912,8 @@ static void* config_runtime_get_section_ptr(config_section_t section) {
     return g_config_runtime_app_config->imaging;
   case CONFIG_SECTION_AUTO_DAYNIGHT:
     return g_config_runtime_app_config->auto_daynight;
+  case CONFIG_SECTION_SNAPSHOT:
+    return g_config_runtime_app_config->snapshot;
   case CONFIG_SECTION_PTZ_PRESET_PROFILE_1:
     return g_config_runtime_app_config->ptz_preset_profile_1;
   case CONFIG_SECTION_PTZ_PRESET_PROFILE_2:
@@ -2239,6 +2257,27 @@ static void* config_runtime_get_field_ptr(config_section_t section, const char* 
       if (out_type)
         *out_type = CONFIG_TYPE_INT;
       return &auto_dn->enable_auto_switching;
+    }
+  }
+  /* Map snapshot section keys (T086 - Service Integration) */
+  else if (section == CONFIG_SECTION_SNAPSHOT) {
+    struct snapshot_settings* snapshot = (struct snapshot_settings*)section_ptr;
+    if (strcmp(key, "width") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &snapshot->width;
+    } else if (strcmp(key, "height") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &snapshot->height;
+    } else if (strcmp(key, "quality") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &snapshot->quality;
+    } else if (strcmp(key, "format") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_STRING;
+      return snapshot->format;
     }
   }
 

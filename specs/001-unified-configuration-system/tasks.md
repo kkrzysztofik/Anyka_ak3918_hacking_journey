@@ -209,8 +209,8 @@
 - [X] T083 [P] [INT] Integration test for device service configuration in tests/src/integration/services/test_device_integration.c (validated - device service uses unified config, 18/18 tests passing)
 - [X] T084 [P] [INT] Integration test for PTZ service configuration in tests/src/integration/services/test_ptz_integration.c (validated - PTZ service uses unified config, integration tests exist with 4/18 passing functional tests)
 - [X] T085 [P] [INT] Integration test for imaging service configuration in tests/src/integration/services/test_imaging_integration.c (completed - imaging config schema added to config_runtime, integration test validates schema integration, 6/6 tests passing)
-- [ ] T086 [P] [INT] Integration test for snapshot service configuration in tests/src/integration/services/test_snapshot_integration.c
-- [ ] T087 [P] [INT] Integration test for networking layer configuration in tests/src/integration/networking/test_network_integration.c
+- [X] T086 [P] [INT] Integration test for snapshot service configuration in tests/src/integration/services/test_snapshot_integration.c (completed - snapshot config schema added to config_runtime, INI-based testing, 3/3 tests passing)
+- [X] T087 [P] [INT] Integration test for networking layer configuration in tests/src/integration/networking/test_network_integration.c (completed - network config integration with unified system, INI-based testing, 5/5 tests passing)
 
 ### Implementation for Service Integration
 

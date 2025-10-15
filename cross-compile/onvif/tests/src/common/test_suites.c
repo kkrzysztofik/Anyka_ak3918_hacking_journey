@@ -15,6 +15,12 @@
 #include "unit/utils/test_hash_utils.h"
 #include "utils/test_gsoap_utils.h"
 
+// Forward declarations for T086 (Snapshot integration tests)
+extern const struct CMUnitTest* get_snapshot_integration_tests(size_t* count);
+
+// Forward declarations for T087 (Network layer integration tests)
+extern const struct CMUnitTest* get_network_integration_tests(size_t* count);
+
 /**
  * @brief Global test suite registry
  *
@@ -194,6 +200,14 @@ const test_suite_t g_test_suites[] = {
    .setup = setup_imaging_integration,
    .teardown = teardown_imaging_integration},
 
+  // Snapshot service integration tests (T086)
+  {.name = "snapshot-integration",
+   .full_name = "Snapshot Service Integration",
+   .category = TEST_CATEGORY_INTEGRATION,
+   .get_tests = get_snapshot_integration_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
   // SOAP error tests
   {.name = "soap-errors",
    .full_name = "SOAP Error Handling",
@@ -215,6 +229,14 @@ const test_suite_t g_test_suites[] = {
    .full_name = "HTTP Authentication Integration",
    .category = TEST_CATEGORY_INTEGRATION,
    .get_tests = get_http_auth_integration_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  // Network layer integration tests (T087)
+  {.name = "network-integration",
+   .full_name = "Network Layer Integration",
+   .category = TEST_CATEGORY_INTEGRATION,
+   .get_tests = get_network_integration_tests,
    .setup = NULL,
    .teardown = NULL},
 };
