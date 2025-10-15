@@ -17,6 +17,7 @@
 
 // CMocka mock includes
 #include "../../../mocks/buffer_pool_mock.h"
+#include "../../../mocks/config_mock.h"
 #include "../../../mocks/gsoap_mock.h"
 #include "../../../mocks/mock_service_dispatcher.h"
 #include "../../../mocks/platform_mock.h"
@@ -33,7 +34,14 @@
  * Test State and Helper Functions
  * ============================================================================ */
 
-static config_manager_t g_mock_config;
+// Test configuration file path
+#define TEST_IMAGING_CONFIG_PATH "configs/imaging_test_config.ini"
+
+// Test state structure to hold config pointers
+typedef struct {
+  config_manager_t* config;
+  struct application_config* app_config;
+} imaging_test_state_t;
 
 static int dummy_operation_handler(const char* operation_name, const http_request_t* request,
                                    http_response_t* response) {
@@ -47,25 +55,59 @@ static void imaging_dependencies_set_real(bool enable) {
   service_dispatcher_mock_use_real_function(enable);
   buffer_pool_mock_use_real_function(enable);
   gsoap_mock_use_real_function(enable);
-}
-
-static void imaging_reset_state(void) {
-  onvif_imaging_service_cleanup();
-  memset(&g_mock_config, 0, sizeof(g_mock_config));
+  config_mock_use_real_function(enable);
 }
 
 /**
  * @brief Setup function for imaging callback tests
  */
 int setup_imaging_unit_tests(void** state) {
-  (void)state;
-
   mock_service_dispatcher_init();
   imaging_dependencies_set_real(true);
 
-  onvif_service_dispatcher_init();
-  imaging_reset_state();
+  // Initialize service dispatcher
+  int result = onvif_service_dispatcher_init();
+  assert_int_equal(ONVIF_SUCCESS, result);
 
+  // Heap-allocate application config structure
+  struct application_config* app_config = calloc(1, sizeof(struct application_config));
+  assert_non_null(app_config);
+
+  // Allocate pointer members for application_config
+  app_config->imaging = calloc(1, sizeof(struct imaging_settings));
+  app_config->auto_daynight = calloc(1, sizeof(struct auto_daynight_config));
+  app_config->network = calloc(1, sizeof(struct network_settings));
+  app_config->device = calloc(1, sizeof(struct device_info));
+  app_config->logging = calloc(1, sizeof(struct logging_settings));
+  app_config->server = calloc(1, sizeof(struct server_settings));
+  assert_non_null(app_config->imaging);
+  assert_non_null(app_config->auto_daynight);
+  assert_non_null(app_config->network);
+  assert_non_null(app_config->device);
+  assert_non_null(app_config->logging);
+  assert_non_null(app_config->server);
+
+  // Initialize runtime configuration system
+  result = config_runtime_init(app_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Load configuration from test INI file
+  result = config_storage_load(TEST_IMAGING_CONFIG_PATH, NULL);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  // Initialize config manager
+  config_manager_t* config = malloc(sizeof(config_manager_t));
+  assert_non_null(config);
+  memset(config, 0, sizeof(config_manager_t));
+  config->app_config = app_config;
+
+  // Store config pointers in test state for cleanup
+  imaging_test_state_t* test_state = calloc(1, sizeof(imaging_test_state_t));
+  assert_non_null(test_state);
+  test_state->config = config;
+  test_state->app_config = app_config;
+
+  *state = test_state;
   return 0;
 }
 
@@ -73,8 +115,31 @@ int setup_imaging_unit_tests(void** state) {
  * @brief Teardown function for imaging callback tests
  */
 int teardown_imaging_unit_tests(void** state) {
-  (void)state;
+  imaging_test_state_t* test_state = (imaging_test_state_t*)*state;
+  config_manager_t* config = test_state->config;
+  struct application_config* app_config = test_state->app_config;
 
+  // Free application_config members first
+  if (app_config) {
+    free(app_config->imaging);
+    free(app_config->auto_daynight);
+    free(app_config->network);
+    free(app_config->device);
+    free(app_config->logging);
+    free(app_config->server);
+    free(app_config);
+  }
+
+  // Free config
+  free(config);
+
+  // Free test state structure
+  free(test_state);
+
+  // Clean up runtime configuration system
+  config_runtime_cleanup();
+
+  // Cleanup imaging service
   onvif_imaging_service_cleanup();
   onvif_service_dispatcher_cleanup();
 
@@ -92,10 +157,10 @@ int teardown_imaging_unit_tests(void** state) {
  * @brief Test imaging service registration success (CMOCKA PATTERNS)
  */
 void test_unit_imaging_callback_registration_success(void** state) {
-  (void)state;
+  imaging_test_state_t* test_state = (imaging_test_state_t*)*state;
 
-  // Initialize imaging service with real dispatcher
-  int result = onvif_imaging_service_init(NULL);
+  // Initialize imaging service with real config
+  int result = onvif_imaging_service_init(test_state->config);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Verify service is registered with dispatcher
@@ -106,13 +171,13 @@ void test_unit_imaging_callback_registration_success(void** state) {
  * @brief Test imaging service registration with duplicate (CMOCKA PATTERNS)
  */
 void test_unit_imaging_callback_registration_duplicate(void** state) {
-  (void)state;
+  imaging_test_state_t* test_state = (imaging_test_state_t*)*state;
 
   // First initialization should succeed
-  assert_int_equal(ONVIF_SUCCESS, onvif_imaging_service_init(NULL));
+  assert_int_equal(ONVIF_SUCCESS, onvif_imaging_service_init(test_state->config));
 
   // Second initialization should also succeed (idempotent)
-  assert_int_equal(ONVIF_SUCCESS, onvif_imaging_service_init(NULL));
+  assert_int_equal(ONVIF_SUCCESS, onvif_imaging_service_init(test_state->config));
 
   // Verify service is still registered
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_IMAGING_SERVICE_NAME));
@@ -124,12 +189,12 @@ void test_unit_imaging_callback_registration_duplicate(void** state) {
 void test_unit_imaging_callback_registration_null_config(void** state) {
   (void)state;
 
-  // Initialize imaging service with NULL config should succeed
+  // Initialize imaging service with NULL config should fail (unified config required)
   int result = onvif_imaging_service_init(NULL);
-  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_int_equal(ONVIF_ERROR_INVALID, result);
 
-  // Verify service is registered
-  assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_IMAGING_SERVICE_NAME));
+  // Verify service is NOT registered (init failed)
+  assert_int_equal(0, onvif_service_dispatcher_is_registered(TEST_IMAGING_SERVICE_NAME));
 }
 
 
@@ -141,10 +206,10 @@ void test_unit_imaging_callback_registration_null_config(void** state) {
  * @brief Test imaging service unregistration success (CMOCKA PATTERNS)
  */
 void test_unit_imaging_callback_unregistration_success(void** state) {
-  (void)state;
+  imaging_test_state_t* test_state = (imaging_test_state_t*)*state;
 
   // First register the service
-  int result = onvif_imaging_service_init(NULL);
+  int result = onvif_imaging_service_init(test_state->config);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_int_equal(1, onvif_service_dispatcher_is_registered(TEST_IMAGING_SERVICE_NAME));
 

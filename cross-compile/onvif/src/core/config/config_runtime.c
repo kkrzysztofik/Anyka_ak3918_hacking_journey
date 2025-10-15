@@ -20,6 +20,7 @@
 #include "core/config/config.h"
 #include "core/config/config_storage.h"
 #include "platform/platform.h"
+#include "services/common/onvif_imaging_types.h"
 #include "services/common/onvif_types.h"
 #include "services/ptz/onvif_ptz.h"
 #include "utils/error/error_handling.h"
@@ -345,6 +346,26 @@ static const config_schema_entry_t g_config_schema[] = {
    0, -90, 90, 0, "0.0"},
   {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset4_zoom", CONFIG_TYPE_FLOAT,
    0, 0, 1, 0, "0.0"},
+
+  /* Imaging Section */
+  {CONFIG_SECTION_IMAGING, "imaging", "brightness", CONFIG_TYPE_INT, 0, -100, 100, 0, "0"},
+  {CONFIG_SECTION_IMAGING, "imaging", "contrast", CONFIG_TYPE_INT, 0, -100, 100, 0, "0"},
+  {CONFIG_SECTION_IMAGING, "imaging", "saturation", CONFIG_TYPE_INT, 0, -100, 100, 0, "0"},
+  {CONFIG_SECTION_IMAGING, "imaging", "sharpness", CONFIG_TYPE_INT, 0, -100, 100, 0, "0"},
+  {CONFIG_SECTION_IMAGING, "imaging", "hue", CONFIG_TYPE_INT, 0, -180, 180, 0, "0"},
+
+  /* Auto Day/Night Section */
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "mode", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "day_to_night_threshold", CONFIG_TYPE_INT, 0, 0,
+   100, 0, "30"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "night_to_day_threshold", CONFIG_TYPE_INT, 0, 0,
+   100, 0, "70"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "lock_time_seconds", CONFIG_TYPE_INT, 0, 1, 600, 0,
+   "10"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "ir_led_mode", CONFIG_TYPE_INT, 0, 0, 2, 0, "2"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "ir_led_level", CONFIG_TYPE_INT, 0, 0, 100, 0, "1"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "enable_auto_switching", CONFIG_TYPE_INT, 0, 0, 1,
+   0, "1"},
 };
 
 static const size_t g_config_schema_count = sizeof(g_config_schema) / sizeof(g_config_schema[0]);
@@ -454,6 +475,24 @@ int config_runtime_apply_defaults(void) {
   if (g_config_runtime_app_config->logging) {
     g_config_runtime_app_config->logging->enabled = 1;
     g_config_runtime_app_config->logging->min_level = 2; /* NOTICE */
+  }
+
+  if (g_config_runtime_app_config->imaging) {
+    g_config_runtime_app_config->imaging->brightness = 0;
+    g_config_runtime_app_config->imaging->contrast = 0;
+    g_config_runtime_app_config->imaging->saturation = 0;
+    g_config_runtime_app_config->imaging->sharpness = 0;
+    g_config_runtime_app_config->imaging->hue = 0;
+  }
+
+  if (g_config_runtime_app_config->auto_daynight) {
+    g_config_runtime_app_config->auto_daynight->mode = DAY_NIGHT_AUTO;
+    g_config_runtime_app_config->auto_daynight->day_to_night_threshold = 30;
+    g_config_runtime_app_config->auto_daynight->night_to_day_threshold = 70;
+    g_config_runtime_app_config->auto_daynight->lock_time_seconds = 10;
+    g_config_runtime_app_config->auto_daynight->ir_led_mode = IR_LED_AUTO;
+    g_config_runtime_app_config->auto_daynight->ir_led_level = 1;
+    g_config_runtime_app_config->auto_daynight->enable_auto_switching = 1;
   }
 
   g_config_runtime_app_config->onvif.enabled = 1;
@@ -2142,6 +2181,64 @@ static void* config_runtime_get_field_ptr(config_section_t section, const char* 
       if (out_type)
         *out_type = CONFIG_TYPE_FLOAT;
       return &profile->preset4_zoom;
+    }
+  }
+  /* Map imaging section keys */
+  else if (section == CONFIG_SECTION_IMAGING) {
+    struct imaging_settings* imaging = (struct imaging_settings*)section_ptr;
+    if (strcmp(key, "brightness") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &imaging->brightness;
+    } else if (strcmp(key, "contrast") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &imaging->contrast;
+    } else if (strcmp(key, "saturation") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &imaging->saturation;
+    } else if (strcmp(key, "sharpness") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &imaging->sharpness;
+    } else if (strcmp(key, "hue") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &imaging->hue;
+    }
+  }
+  /* Map auto day/night section keys */
+  else if (section == CONFIG_SECTION_AUTO_DAYNIGHT) {
+    struct auto_daynight_config* auto_dn = (struct auto_daynight_config*)section_ptr;
+    if (strcmp(key, "mode") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return (int*)&auto_dn->mode;
+    } else if (strcmp(key, "day_to_night_threshold") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &auto_dn->day_to_night_threshold;
+    } else if (strcmp(key, "night_to_day_threshold") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &auto_dn->night_to_day_threshold;
+    } else if (strcmp(key, "lock_time_seconds") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &auto_dn->lock_time_seconds;
+    } else if (strcmp(key, "ir_led_mode") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return (int*)&auto_dn->ir_led_mode;
+    } else if (strcmp(key, "ir_led_level") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &auto_dn->ir_led_level;
+    } else if (strcmp(key, "enable_auto_switching") == 0) {
+      if (out_type)
+        *out_type = CONFIG_TYPE_INT;
+      return &auto_dn->enable_auto_switching;
     }
   }
 

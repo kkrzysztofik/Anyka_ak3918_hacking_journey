@@ -11,10 +11,13 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "common/onvif_constants.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
+#include "protocol/gsoap/onvif_gsoap_response.h"
+#include "utils/memory/memory_manager.h"
 
 /* SOAP Fault Codes - using constants from common/onvif_constants.h */
 
@@ -101,13 +104,40 @@ int error_handle_pattern(const error_context_t* context, error_pattern_t pattern
   // Log error
   error_log_with_context(context, &result, NULL);
 
-  // Set HTTP response for SOAP fault
-  response->status_code = HTTP_STATUS_INTERNAL_ERROR;
-  response->content_type = "application/soap+xml; charset=utf-8";
-  response->body = (char*)result.soap_fault_string;
-  response->body_length = strlen(result.soap_fault_string);
+  // Generate SOAP Fault XML envelope
+  const size_t soap_buffer_size = 4096;
+  char* soap_fault_xml = (char*)ONVIF_MALLOC(soap_buffer_size);
+  if (!soap_fault_xml) {
+    return ONVIF_ERROR_MEMORY;
+  }
 
-  return ONVIF_SUCCESS;
+  // Use custom message if provided, otherwise use default fault string
+  const char* fault_message = custom_message ? custom_message : result.soap_fault_string;
+
+  int xml_length = onvif_gsoap_generate_fault_response(
+    NULL,  // ctx - will create temporary context
+    result.soap_fault_code,  // fault_code (e.g., "soap:Sender" or "soap:Receiver")
+    fault_message,           // fault_string (descriptive error message)
+    NULL,                    // fault_actor (optional)
+    NULL,                    // fault_detail (optional)
+    soap_fault_xml,          // output_buffer
+    soap_buffer_size         // buffer_size
+  );
+
+  if (xml_length < 0) {
+    ONVIF_FREE(soap_fault_xml);
+    return ONVIF_ERROR;
+  }
+
+  // Set HTTP response for SOAP fault
+  // SOAP faults should return HTTP 200 with fault in body (per SOAP 1.2 spec)
+  response->status_code = HTTP_STATUS_OK;
+  response->content_type = "application/soap+xml; charset=utf-8";
+  response->body = soap_fault_xml;
+  response->body_length = (size_t)xml_length;
+
+  // Return special error code to indicate SOAP fault was generated
+  return ONVIF_ERROR_SOAP_FAULT;
 }
 
 int error_handle_validation(const error_context_t* context, int validation_result,
@@ -162,9 +192,40 @@ int error_handle_system(const error_context_t* context, int error_code, const ch
     return ONVIF_ERROR_INVALID;
   }
 
+  // Map error code to human-readable message
+  const char* error_description = "Unknown error";
+  switch (error_code) {
+    case ONVIF_ERROR_NOT_FOUND:
+      error_description = "Resource not found";
+      break;
+    case ONVIF_ERROR_NOT_SUPPORTED:
+      error_description = "Operation not supported";
+      break;
+    case ONVIF_ERROR_DUPLICATE:
+      error_description = "Resource already exists";
+      break;
+    case ONVIF_ERROR_INVALID:
+      error_description = "Invalid parameter";
+      break;
+    case ONVIF_ERROR_MEMORY:
+      error_description = "Memory allocation failed";
+      break;
+    case ONVIF_ERROR_NOT_IMPLEMENTED:
+      error_description = "Feature not implemented";
+      break;
+    case ONVIF_ERROR:
+    default:
+      error_description = "Internal error";
+      break;
+  }
+
   char custom_message[256];
-  (void)snprintf(custom_message, sizeof(custom_message), "System error %d during %s", error_code,
-                 operation ? operation : "unknown operation");
+  if (operation) {
+    (void)snprintf(custom_message, sizeof(custom_message), "%s during %s", error_description,
+                   operation);
+  } else {
+    (void)snprintf(custom_message, sizeof(custom_message), "%s", error_description);
+  }
 
   return error_handle_pattern(context, ERROR_PATTERN_INTERNAL_ERROR, custom_message, response);
 }

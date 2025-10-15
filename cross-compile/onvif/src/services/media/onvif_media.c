@@ -125,9 +125,8 @@ static int g_profiles_loaded = 0;                        // NOLINT
 /**
  * @brief Get active profile count from runtime configuration
  */
-static int get_active_profile_count(void)
-{
-    return config_runtime_get_stream_profile_count();
+static int get_active_profile_count(void) {
+  return config_runtime_get_stream_profile_count();
 }
 
 /**
@@ -136,116 +135,118 @@ static int get_active_profile_count(void)
  * @param profile Output media_profile structure
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-static int build_media_profile_from_config(int profile_index, struct media_profile* profile)
-{
-    if (profile_index < 0 || profile_index >= get_active_profile_count()) {
-        return ONVIF_ERROR_INVALID_PARAMETER;
-    }
+static int build_media_profile_from_config(int profile_index, struct media_profile* profile) {
+  if (profile_index < 0 || profile_index >= get_active_profile_count()) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
 
-    /* Get video configuration from runtime */
-    video_config_t video_config;
-    int result = config_runtime_get_stream_profile(profile_index, &video_config);
-    if (result != ONVIF_SUCCESS) {
-        platform_log_error("[MEDIA] Failed to get stream profile %d from configuration\n",
-                          profile_index + 1);
-        return result;
-    }
+  /* Get video configuration from runtime */
+  video_config_t video_config;
+  int result = config_runtime_get_stream_profile(profile_index, &video_config);
+  if (result != ONVIF_SUCCESS) {
+    platform_log_error("[MEDIA] Failed to get stream profile %d from configuration\n",
+                       profile_index + 1);
+    return result;
+  }
 
-    /* Initialize profile structure */
-    memset(profile, 0, sizeof(struct media_profile));
+  /* Initialize profile structure */
+  memset(profile, 0, sizeof(struct media_profile));
 
-    /* Set profile token (Profile1, Profile2, etc.) */
-    snprintf(profile->token, sizeof(profile->token), "%s%d",
-             MEDIA_PROFILE_TOKEN_PREFIX, profile_index + 1);
+  /* Set profile token (Profile1, Profile2, etc.) */
+  snprintf(profile->token, sizeof(profile->token), "%s%d", MEDIA_PROFILE_TOKEN_PREFIX,
+           profile_index + 1);
 
-    /* Set profile name from configuration, fallback to auto-generated if not set */
-    if (video_config.name[0] != '\0') {
-        snprintf(profile->name, sizeof(profile->name), "%s", video_config.name);
-    } else {
-        snprintf(profile->name, sizeof(profile->name), "Video Profile %d", profile_index + 1);
-    }
+  /* Set profile name from configuration, fallback to auto-generated if not set */
+  if (video_config.name[0] != '\0') {
+    snprintf(profile->name, sizeof(profile->name), "%s", video_config.name);
+  } else {
+    snprintf(profile->name, sizeof(profile->name), "Video Profile %d", profile_index + 1);
+  }
 
-    /* All profiles are fixed (cannot be deleted) */
-    profile->fixed = 1;
+  /* All profiles are fixed (cannot be deleted) */
+  profile->fixed = 1;
 
-    /* Configure video source */
-    strncpy(profile->video_source.source_token, "VideoSource0",
-            sizeof(profile->video_source.source_token) - 1);
-    profile->video_source.bounds.width = video_config.width;
-    profile->video_source.bounds.height = video_config.height;
-    profile->video_source.bounds.x = 0;
-    profile->video_source.bounds.y = 0;
+  /* Configure video source */
+  strncpy(profile->video_source.source_token, "VideoSource0",
+          sizeof(profile->video_source.source_token) - 1);
+  profile->video_source.bounds.width = video_config.width;
+  profile->video_source.bounds.height = video_config.height;
+  profile->video_source.bounds.x = 0;
+  profile->video_source.bounds.y = 0;
 
-    /* Configure video encoder */
-    snprintf(profile->video_encoder.token, sizeof(profile->video_encoder.token),
-             "VideoEncoder%d", profile_index);
+  /* Configure video encoder */
+  snprintf(profile->video_encoder.token, sizeof(profile->video_encoder.token), "VideoEncoder%d",
+           profile_index);
 
-    /* Map codec_type to encoding string */
-    const char* encoding = "H264";  /* Default */
-    if (video_config.codec_type == 0) encoding = "H264";
-    else if (video_config.codec_type == 1) encoding = "H265";
-    else if (video_config.codec_type == 2) encoding = "MJPEG";
-    strncpy(profile->video_encoder.encoding, encoding, sizeof(profile->video_encoder.encoding) - 1);
+  /* Map codec_type to encoding string */
+  const char* encoding = "H264"; /* Default */
+  if (video_config.codec_type == 0)
+    encoding = "H264";
+  else if (video_config.codec_type == 1)
+    encoding = "H265";
+  else if (video_config.codec_type == 2)
+    encoding = "MJPEG";
+  strncpy(profile->video_encoder.encoding, encoding, sizeof(profile->video_encoder.encoding) - 1);
 
-    profile->video_encoder.resolution.width = video_config.width;
-    profile->video_encoder.resolution.height = video_config.height;
-    profile->video_encoder.quality = (profile_index == 0) ? MEDIA_MAIN_QUALITY_DEFAULT : MEDIA_SUB_QUALITY_DEFAULT;
-    profile->video_encoder.framerate_limit = video_config.fps;
-    profile->video_encoder.encoding_interval = 1;
-    profile->video_encoder.bitrate_limit = video_config.bitrate;
-    profile->video_encoder.gov_length = video_config.gop_size;
+  profile->video_encoder.resolution.width = video_config.width;
+  profile->video_encoder.resolution.height = video_config.height;
+  profile->video_encoder.quality =
+    (profile_index == 0) ? MEDIA_MAIN_QUALITY_DEFAULT : MEDIA_SUB_QUALITY_DEFAULT;
+  profile->video_encoder.framerate_limit = video_config.fps;
+  profile->video_encoder.encoding_interval = 1;
+  profile->video_encoder.bitrate_limit = video_config.bitrate;
+  profile->video_encoder.gov_length = video_config.gop_size;
 
-    /* Configure audio source */
-    strncpy(profile->audio_source.source_token, "AudioSource0",
-            sizeof(profile->audio_source.source_token) - 1);
+  /* Configure audio source */
+  strncpy(profile->audio_source.source_token, "AudioSource0",
+          sizeof(profile->audio_source.source_token) - 1);
 
-    /* Configure audio encoder */
-    snprintf(profile->audio_encoder.token, sizeof(profile->audio_encoder.token),
-             "AudioEncoder%d", profile_index);
-    strncpy(profile->audio_encoder.encoding, "AAC", sizeof(profile->audio_encoder.encoding) - 1);
-    profile->audio_encoder.bitrate = MEDIA_AUDIO_BITRATE_DEFAULT;
-    profile->audio_encoder.sample_rate = AUDIO_SAMPLE_RATE_16KHZ;
+  /* Configure audio encoder */
+  snprintf(profile->audio_encoder.token, sizeof(profile->audio_encoder.token), "AudioEncoder%d",
+           profile_index);
+  strncpy(profile->audio_encoder.encoding, "AAC", sizeof(profile->audio_encoder.encoding) - 1);
+  profile->audio_encoder.bitrate = MEDIA_AUDIO_BITRATE_DEFAULT;
+  profile->audio_encoder.sample_rate = AUDIO_SAMPLE_RATE_16KHZ;
 
-    /* Configure PTZ */
-    strncpy(profile->ptz.node_token, "PTZNode0", sizeof(profile->ptz.node_token) - 1);
-    strncpy(profile->ptz.default_absolute_pan_tilt_position_space,
-            "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
-            sizeof(profile->ptz.default_absolute_pan_tilt_position_space) - 1);
-    strncpy(profile->ptz.default_relative_pan_tilt_translation_space,
-            "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace",
-            sizeof(profile->ptz.default_relative_pan_tilt_translation_space) - 1);
-    strncpy(profile->ptz.default_continuous_pan_tilt_velocity_space,
-            "http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace",
-            sizeof(profile->ptz.default_continuous_pan_tilt_velocity_space) - 1);
+  /* Configure PTZ */
+  strncpy(profile->ptz.node_token, "PTZNode0", sizeof(profile->ptz.node_token) - 1);
+  strncpy(profile->ptz.default_absolute_pan_tilt_position_space,
+          "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
+          sizeof(profile->ptz.default_absolute_pan_tilt_position_space) - 1);
+  strncpy(profile->ptz.default_relative_pan_tilt_translation_space,
+          "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace",
+          sizeof(profile->ptz.default_relative_pan_tilt_translation_space) - 1);
+  strncpy(profile->ptz.default_continuous_pan_tilt_velocity_space,
+          "http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace",
+          sizeof(profile->ptz.default_continuous_pan_tilt_velocity_space) - 1);
 
-    platform_log_debug("[MEDIA] Built profile %d: %s - %dx%d@%dfps %dkbps %s\n",
-                      profile_index + 1, profile->token, video_config.width, video_config.height,
-                      video_config.fps, video_config.bitrate, encoding);
+  platform_log_debug("[MEDIA] Built profile %d: %s - %dx%d@%dfps %dkbps %s\n", profile_index + 1,
+                     profile->token, video_config.width, video_config.height, video_config.fps,
+                     video_config.bitrate, encoding);
 
-    return ONVIF_SUCCESS;
+  return ONVIF_SUCCESS;
 }
 
 /**
  * @brief Load all profiles from runtime configuration
  */
-static int load_profiles_from_config(void)
-{
-    if (g_profiles_loaded) {
-        return ONVIF_SUCCESS;
-    }
-
-    int profile_count = get_active_profile_count();
-    for (int i = 0; i < profile_count; i++) {
-        int result = build_media_profile_from_config(i, &g_media_profiles[i]);
-        if (result != ONVIF_SUCCESS) {
-            platform_log_error("[MEDIA] Failed to load profile %d from configuration\n", i + 1);
-            return result;
-        }
-    }
-
-    g_profiles_loaded = 1;
-    platform_log_info("[MEDIA] Loaded %d profiles from runtime configuration\n", profile_count);
+static int load_profiles_from_config(void) {
+  if (g_profiles_loaded) {
     return ONVIF_SUCCESS;
+  }
+
+  int profile_count = get_active_profile_count();
+  for (int i = 0; i < profile_count; i++) {
+    int result = build_media_profile_from_config(i, &g_media_profiles[i]);
+    if (result != ONVIF_SUCCESS) {
+      platform_log_error("[MEDIA] Failed to load profile %d from configuration\n", i + 1);
+      return result;
+    }
+  }
+
+  g_profiles_loaded = 1;
+  platform_log_info("[MEDIA] Loaded %d profiles from runtime configuration\n", profile_count);
+  return ONVIF_SUCCESS;
 }
 
 // Static cached URIs for memory optimization
@@ -410,7 +411,8 @@ int onvif_media_create_profile(const char* name, const char* token, struct media
   }
 
   /* For now, profile creation is not fully supported as profiles are managed via configuration */
-  platform_log_warning("[MEDIA] Profile creation requested but not implemented: use configuration system\n");
+  platform_log_warning(
+    "[MEDIA] Profile creation requested but not implemented: use configuration system\n");
   return ONVIF_ERROR_NOT_SUPPORTED;
 }
 
@@ -436,7 +438,8 @@ int onvif_media_delete_profile(const char* profile_token) {
   }
 
   /* Profile deletion not supported for config-managed profiles */
-  platform_log_warning("[MEDIA] Profile deletion requested but not implemented: use configuration system\n");
+  platform_log_warning(
+    "[MEDIA] Profile deletion requested but not implemented: use configuration system\n");
   return ONVIF_ERROR_NOT_SUPPORTED;
 }
 
@@ -1367,11 +1370,9 @@ static int get_stream_uri_business_logic(const service_handler_config_t* config,
   }
 
   // Use smart response builder for final output with memory optimization
-  size_t estimated_size = smart_response_estimate_size(soap_response);
-  result =
-    smart_response_build(response, soap_response, estimated_size, &g_media_response_buffer_pool);
+  result = smart_response_build_with_dynamic_buffer(response, soap_response);
   if (result != ONVIF_SUCCESS) {
-    service_log_operation_failure(log_ctx, "smart_response_build", result,
+    service_log_operation_failure(log_ctx, "smart_response_build_with_dynamic_buffer", result,
                                   "Failed to build smart response");
     return result;
   }
@@ -1418,10 +1419,26 @@ static int create_profile_business_logic(const service_handler_config_t* config,
   const char* profile_token =
     create_profile_req->Token ? *create_profile_req->Token : "CustomProfile";
 
+  // Check current profile count before attempting creation
+  int profile_count = get_active_profile_count();
+
   // Create profile
   struct media_profile profile;
   result = onvif_media_create_profile(profile_name, profile_token, &profile);
   if (result != ONVIF_SUCCESS) {
+    // Provide specific error messages based on the failure reason
+    if (result == ONVIF_ERROR_NOT_SUPPORTED && profile_count >= 4) {
+      // Maximum profiles reached
+      return error_handle_pattern(error_ctx, ERROR_PATTERN_INTERNAL_ERROR,
+                                   "Maximum limit of 4 profiles reached", response);
+    }
+    if (result == ONVIF_ERROR_DUPLICATE) {
+      // Token already exists
+      char error_msg[512];
+      (void)snprintf(error_msg, sizeof(error_msg), "Profile token '%s' already exists", profile_token);
+      return error_handle_pattern(error_ctx, ERROR_PATTERN_INTERNAL_ERROR, error_msg, response);
+    }
+    // Other errors - use generic handler
     return error_handle_system(error_ctx, result, "create_profile", response);
   }
 
@@ -1616,8 +1633,8 @@ static int set_video_encoder_configuration_business_logic(
   if (onvif_config->RateControl) {
     video_config.fps = onvif_config->RateControl->FrameRateLimit;
     video_config.bitrate = onvif_config->RateControl->BitrateLimit;
-    service_log_info(log_ctx, "Updated rate control: %d fps, %d kbps",
-                    video_config.fps, video_config.bitrate);
+    service_log_info(log_ctx, "Updated rate control: %d fps, %d kbps", video_config.fps,
+                     video_config.bitrate);
   }
 
   // Update GOP length from codec-specific configuration
@@ -1633,18 +1650,18 @@ static int set_video_encoder_configuration_business_logic(
 
   // Map encoding type to codec_type
   switch (onvif_config->Encoding) {
-    case tt__VideoEncoding__JPEG:
-      video_config.codec_type = 2; // MJPEG
-      break;
-    case tt__VideoEncoding__MPEG4:
-      video_config.codec_type = 0; // Treat as H.264
-      break;
-    case tt__VideoEncoding__H264:
-      video_config.codec_type = 0; // H.264
-      break;
-    default:
-      video_config.codec_type = 0; // Default to H.264
-      break;
+  case tt__VideoEncoding__JPEG:
+    video_config.codec_type = 2; // MJPEG
+    break;
+  case tt__VideoEncoding__MPEG4:
+    video_config.codec_type = 0; // Treat as H.264
+    break;
+  case tt__VideoEncoding__H264:
+    video_config.codec_type = 0; // H.264
+    break;
+  default:
+    video_config.codec_type = 0; // Default to H.264
+    break;
   }
 
   // Update runtime configuration with validation
@@ -1663,8 +1680,9 @@ static int set_video_encoder_configuration_business_logic(
     return error_handle_system(error_ctx, result, "reload_cached_profile", response);
   }
 
-  service_log_info(log_ctx, "SetVideoEncoderConfiguration completed: Profile %d updated successfully",
-                  profile_index + 1);
+  service_log_info(log_ctx,
+                   "SetVideoEncoderConfiguration completed: Profile %d updated successfully",
+                   profile_index + 1);
 
   return ONVIF_SUCCESS;
 }
@@ -1870,12 +1888,18 @@ static int media_service_get_capabilities(struct soap* ctx, void** capabilities_
   }
   soap_default_tt__RealTimeStreamingCapabilities(ctx, caps->StreamingCapabilities);
 
-  caps->StreamingCapabilities->RTPMulticast = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-  if (caps->StreamingCapabilities->RTPMulticast) *caps->StreamingCapabilities->RTPMulticast = xsd__boolean__false_;
-  caps->StreamingCapabilities->RTP_USCORETCP = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-  if (caps->StreamingCapabilities->RTP_USCORETCP) *caps->StreamingCapabilities->RTP_USCORETCP = xsd__boolean__true_;
-  caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-  if (caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP) *caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP = xsd__boolean__true_;
+  caps->StreamingCapabilities->RTPMulticast =
+    (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
+  if (caps->StreamingCapabilities->RTPMulticast)
+    *caps->StreamingCapabilities->RTPMulticast = xsd__boolean__false_;
+  caps->StreamingCapabilities->RTP_USCORETCP =
+    (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
+  if (caps->StreamingCapabilities->RTP_USCORETCP)
+    *caps->StreamingCapabilities->RTP_USCORETCP = xsd__boolean__true_;
+  caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP =
+    (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
+  if (caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP)
+    *caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP = xsd__boolean__true_;
 
   *capabilities_ptr = (void*)caps;
   return ONVIF_SUCCESS;

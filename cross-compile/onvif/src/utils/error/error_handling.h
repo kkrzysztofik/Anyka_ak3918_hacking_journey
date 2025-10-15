@@ -34,6 +34,7 @@
 #define ONVIF_ERROR_SERIALIZATION_FAILED  -15
 #define ONVIF_ERROR_AUTHENTICATION_FAILED -16
 #define ONVIF_ERROR_AUTHORIZATION_FAILED  -17
+#define ONVIF_ERROR_SOAP_FAULT            -18 /* SOAP fault generated, use response as-is */
 
 /* Service dispatcher error codes */
 #define ONVIF_ERROR_NOT_INITIALIZED  -40

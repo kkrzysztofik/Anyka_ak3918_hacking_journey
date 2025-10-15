@@ -104,7 +104,7 @@ void test_unit_onvif_gsoap_parse_get_stream_uri(void** state) {
   assert_non_null(request);
 
   assert_non_null(request->ProfileToken);
-  assert_string_equal(request->ProfileToken, "profile_1");
+  assert_string_equal(request->ProfileToken, "Profile1");
 
   assert_non_null(request->StreamSetup);
   assert_non_null(request->StreamSetup->Transport);
@@ -214,7 +214,7 @@ void test_unit_onvif_gsoap_parse_set_video_encoder_config(void** state) {
 
   assert_non_null(request->Configuration);
   assert_non_null(request->Configuration->token);
-  assert_string_equal(request->Configuration->token, "video_enc_config_1");
+  assert_string_equal(request->Configuration->token, "VideoEncoder0");
 
   onvif_gsoap_cleanup(&ctx);
 }

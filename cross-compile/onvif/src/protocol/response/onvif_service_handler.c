@@ -27,6 +27,12 @@
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
 
+// HTTP status code constants
+#define HTTP_STATUS_OK 200
+#define HTTP_STATUS_BAD_REQUEST 400
+#define HTTP_STATUS_INTERNAL_SERVER_ERROR 500
+#define HTTP_STATUS_CLOCKS_PER_MS 1000
+
 /* ============================================================================
  * Service Handler Management
  * ============================================================================
@@ -77,6 +83,9 @@ int onvif_service_handler_handle_request(onvif_service_handler_instance_t* handl
     return ONVIF_ERROR_INVALID;
   }
 
+  // Initialize response status code to 500 (will be set to 200 on success)
+  response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
   // Find action handler by action name
   service_action_def_t* action_def = NULL;
   for (size_t i = 0; i < handler->action_count; i++) {
@@ -105,7 +114,14 @@ int onvif_service_handler_handle_request(onvif_service_handler_instance_t* handl
   clock_t end_time = clock();
   platform_log_info("Service Handler: Action handler completed with result %d\n", result);
   platform_log_info("Service Handler: Processing time: %ld ms\n",
-                    (end_time - start_time) / (CLOCKS_PER_SEC / 1000));
+                    (end_time - start_time) / (CLOCKS_PER_SEC / HTTP_STATUS_CLOCKS_PER_MS));
+
+  // If action handler succeeded and response has body, ensure status code is 200
+  if (result == ONVIF_SUCCESS && response->body && response->body_length > 0) {
+    if (response->status_code == HTTP_STATUS_INTERNAL_SERVER_ERROR || response->status_code == 0) {
+      response->status_code = HTTP_STATUS_OK;
+    }
+  }
 
   // Update action statistics
   for (size_t i = 0; i < handler->stats.action_stats_count; i++) {

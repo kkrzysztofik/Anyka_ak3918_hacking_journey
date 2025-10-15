@@ -1221,6 +1221,43 @@ int soap_test_parse_set_imaging_settings_response(
   return ONVIF_SUCCESS;
 }
 
+int soap_test_parse_get_imaging_settings_response(
+  onvif_gsoap_context_t* ctx, struct _timg__GetImagingSettingsResponse** response) {
+  if (!ctx || !response) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  *response = (struct _timg__GetImagingSettingsResponse*)soap_malloc(
+    &ctx->soap, sizeof(struct _timg__GetImagingSettingsResponse));
+  if (!*response) {
+    return ONVIF_ERROR_MEMORY;
+  }
+
+  soap_default__timg__GetImagingSettingsResponse(&ctx->soap, *response);
+
+  if (soap_begin_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_envelope_begin_in(&ctx->soap) != SOAP_OK || soap_body_begin_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_in__timg__GetImagingSettingsResponse(&ctx->soap, NULL, *response, NULL) == NULL) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_body_end_in(&ctx->soap) != SOAP_OK || soap_envelope_end_in(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  if (soap_end_recv(&ctx->soap) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
 /* ============================================================================
  * Response Validation Implementation
  * ============================================================================ */
@@ -1257,16 +1294,26 @@ int soap_test_check_soap_fault(const http_response_t* response, char* fault_code
     return -1;
   }
 
-  // Simple check for SOAP fault
-  if (strstr(response->body, "<soap:Fault>") || strstr(response->body, "<s:Fault>")) {
+  // Check for SOAP fault (support both SOAP 1.1 and SOAP 1.2 namespaces)
+  if (strstr(response->body, "<soap:Fault>") || strstr(response->body, "<s:Fault>") ||
+      strstr(response->body, "<SOAP-ENV:Fault>")) {
+    
     // Extract fault code if buffer provided
     if (fault_code) {
-      soap_test_extract_element_text(response->body, "faultcode", fault_code, 256);
+      // Try SOAP 1.2 format first (SOAP-ENV:Code/SOAP-ENV:Value)
+      if (!soap_test_extract_element_text(response->body, "SOAP-ENV:Value", fault_code, 256)) {
+        // Fallback to SOAP 1.1 format (faultcode)
+        soap_test_extract_element_text(response->body, "faultcode", fault_code, 256);
+      }
     }
 
     // Extract fault string if buffer provided
     if (fault_string) {
-      soap_test_extract_element_text(response->body, "faultstring", fault_string, 512);
+      // Try SOAP 1.2 format first (SOAP-ENV:Reason/SOAP-ENV:Text)
+      if (!soap_test_extract_element_text(response->body, "SOAP-ENV:Text", fault_string, 512)) {
+        // Fallback to SOAP 1.1 format (faultstring)
+        soap_test_extract_element_text(response->body, "faultstring", fault_string, 512);
+      }
     }
 
     return 1; // Fault exists
@@ -1285,20 +1332,26 @@ int soap_test_extract_element_text(const char* xml, const char* element_name, ch
     return ONVIF_ERROR_INVALID;
   }
 
-  // Build opening tag
-  char open_tag[128];
-  snprintf(open_tag, sizeof(open_tag), "<%s>", element_name);
+  // Build element pattern (element may have attributes)
+  char element_pattern[128];
+  snprintf(element_pattern, sizeof(element_pattern), "<%s", element_name);
 
   // Build closing tag
   char close_tag[128];
   snprintf(close_tag, sizeof(close_tag), "</%s>", element_name);
 
   // Find opening tag
-  const char* start = strstr(xml, open_tag);
-  if (!start) {
+  const char* element_start = strstr(xml, element_pattern);
+  if (!element_start) {
     return ONVIF_ERROR_NOT_FOUND;
   }
-  start += strlen(open_tag);
+
+  // Find the end of the opening tag (could be '>' or ' ' for attributes)
+  const char* tag_end = strchr(element_start, '>');
+  if (!tag_end) {
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+  const char* start = tag_end + 1;  // Start after the '>'
 
   // Find closing tag
   const char* end = strstr(start, close_tag);

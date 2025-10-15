@@ -73,47 +73,55 @@ int smart_response_build_with_buffer_pool(http_response_t* response, const char*
     return -1; // Input validation per AGENTS.md
   }
 
-  size_t content_length = strlen(soap_content);
-
-  // Check if response fits in buffer pool
-  if (content_length < BUFFER_SIZE) {
-    char* pool_buffer = buffer_pool_get(buffer_pool);
-    if (pool_buffer) {
-      // Use pool buffer directly - zero-copy for small responses
-      memcpy(pool_buffer, soap_content, content_length);
-      pool_buffer[content_length] = '\0';
-
-      // Allocate final response buffer
-      response->body = ONVIF_MALLOC(content_length + 1);
-      if (!response->body) {
-        buffer_pool_return(buffer_pool, pool_buffer);
-        return -1;
-      }
-
-      // Single copy from pool to final response
-      memcpy(response->body, pool_buffer, content_length);
-      response->body[content_length] = '\0';
-      response->body_length = content_length;
-
-      // Return buffer to pool
-      buffer_pool_return(buffer_pool, pool_buffer);
-
-      platform_log_debug("Pool response: %zu bytes (saved %zu bytes)", content_length,
-                         ONVIF_RESPONSE_BUFFER_SIZE - content_length);
-      return 0;
-    }
-    // Pool exhausted - fall back to direct allocation
-    platform_log_warning("Buffer pool exhausted, falling back to direct allocation for %zu "
-                         "bytes",
-                         content_length);
+  // Check if buffer pool is initialized
+  if (!buffer_pool->initialized) {
+    platform_log_warning("Buffer pool not initialized, falling back to direct allocation");
+    // Fall through to direct allocation
   } else {
-    // Response too large for buffer pool - use direct allocation
-    platform_log_debug("Response too large for buffer pool (%zu bytes), using direct "
-                       "allocation",
-                       content_length);
+    size_t content_length = strlen(soap_content);
+
+    // Check if response fits in buffer pool
+    if (content_length < BUFFER_SIZE) {
+      char* pool_buffer = buffer_pool_get(buffer_pool);
+      if (pool_buffer) {
+        // Use pool buffer directly - zero-copy for small responses
+        memcpy(pool_buffer, soap_content, content_length);
+        pool_buffer[content_length] = '\0';
+
+        // Allocate final response buffer
+        response->body = ONVIF_MALLOC(content_length + 1);
+        if (!response->body) {
+          buffer_pool_return(buffer_pool, pool_buffer);
+          return -1;
+        }
+
+        // Single copy from pool to final response
+        memcpy(response->body, pool_buffer, content_length);
+        response->body[content_length] = '\0';
+        response->body_length = content_length;
+
+        // Return buffer to pool
+        buffer_pool_return(buffer_pool, pool_buffer);
+
+        platform_log_debug("Pool response: %zu bytes (saved %zu bytes)", content_length,
+                           ONVIF_RESPONSE_BUFFER_SIZE - content_length);
+        return 0;
+      }
+      // Pool exhausted - fall back to direct allocation
+      platform_log_warning("Buffer pool exhausted, falling back to direct allocation for %zu "
+                           "bytes",
+                           content_length);
+    } else {
+      // Response too large for buffer pool - use direct allocation
+      platform_log_debug("Response too large for buffer pool (%zu bytes), using direct "
+                         "allocation",
+                         content_length);
+    }
   }
 
-  // Direct allocation fallback
+  // Direct allocation fallback (used when buffer pool is not initialized, exhausted, or response is
+  // too large)
+  size_t content_length = strlen(soap_content);
   response->body = ONVIF_MALLOC(content_length + 1);
   if (!response->body) {
     return -1;
@@ -146,7 +154,7 @@ int smart_response_build(http_response_t* response, const char* soap_content, si
 
   // Strategy selection based on estimated size - optimized for buffer pool
   // utilization
-  if (estimated_size <= BUFFER_POOL_SIZE_THRESHOLD) {
+  if (estimated_size <= BUFFER_POOL_SIZE_THRESHOLD && buffer_pool && buffer_pool->initialized) {
     // Small to medium response (≤32KB) - use buffer pool for maximum
     // utilization
     platform_log_debug("Using buffer pool for response: %zu bytes (≤32KB)", estimated_size);

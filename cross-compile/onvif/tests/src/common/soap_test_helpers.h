@@ -49,6 +49,7 @@ struct _tds__SystemRebootResponse;
 
 /* Imaging Service Response Structures */
 struct _timg__SetImagingSettingsResponse;
+struct _timg__GetImagingSettingsResponse;
 
 /* ============================================================================
  * HTTP Request Builder
@@ -358,6 +359,16 @@ int soap_test_parse_system_reboot_response(onvif_gsoap_context_t* ctx,
  */
 int soap_test_parse_set_imaging_settings_response(
   onvif_gsoap_context_t* ctx, struct _timg__SetImagingSettingsResponse** response);
+
+/**
+ * @brief Parse SOAP response for Imaging GetImagingSettings
+ * @param ctx gSOAP context (already initialized with soap_test_init_response_parsing)
+ * @param response Parsed response structure (output)
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ * @note Response structure is allocated from gSOAP managed memory
+ */
+int soap_test_parse_get_imaging_settings_response(
+  onvif_gsoap_context_t* ctx, struct _timg__GetImagingSettingsResponse** response);
 
 /* ============================================================================
  * Response Validation

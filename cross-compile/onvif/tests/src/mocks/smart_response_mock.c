@@ -11,8 +11,8 @@
 #include <stddef.h>
 
 #include "cmocka_wrapper.h"
+#include "networking/common/buffer_pool.h"
 #include "networking/http/http_parser.h"
-
 
 /* ============================================================================
  * Conditional Mock/Real Function Control
@@ -43,41 +43,37 @@ int __wrap_smart_response_build_with_dynamic_buffer(http_response_t* response,
   return (int)mock();
 }
 
-int __wrap_smart_response_build_with_buffer_pool(struct soap* soap,
-                                                 int (*response_func)(struct soap*, const void*),
-                                                 const void* response, struct buffer_pool_t* pool) {
+int __wrap_smart_response_build_with_buffer_pool(http_response_t* response,
+                                                 const char* soap_content,
+                                                 buffer_pool_t* buffer_pool) {
   if (g_use_real_functions) {
-    return __real_smart_response_build_with_buffer_pool(soap, response_func, response, pool);
+    return __real_smart_response_build_with_buffer_pool(response, soap_content, buffer_pool);
   }
 
-  check_expected_ptr(soap);
-  check_expected_ptr(response_func);
   check_expected_ptr(response);
-  check_expected_ptr(pool);
+  check_expected_ptr(soap_content);
+  check_expected_ptr(buffer_pool);
   return (int)mock();
 }
 
-int __wrap_smart_response_build(struct soap* soap, int (*response_func)(struct soap*, const void*),
-                                const void* response) {
+int __wrap_smart_response_build(http_response_t* response, const char* soap_content,
+                                size_t estimated_size, buffer_pool_t* buffer_pool) {
   if (g_use_real_functions) {
-    return __real_smart_response_build(soap, response_func, response);
+    return __real_smart_response_build(response, soap_content, estimated_size, buffer_pool);
   }
 
-  check_expected_ptr(soap);
-  check_expected_ptr(response_func);
   check_expected_ptr(response);
+  check_expected_ptr(soap_content);
+  check_expected(estimated_size);
+  check_expected_ptr(buffer_pool);
   return (int)mock();
 }
 
-size_t __wrap_smart_response_estimate_size(struct soap* soap,
-                                           int (*response_func)(struct soap*, const void*),
-                                           const void* response) {
+size_t __wrap_smart_response_estimate_size(const char* soap_content) {
   if (g_use_real_functions) {
-    return __real_smart_response_estimate_size(soap, response_func, response);
+    return __real_smart_response_estimate_size(soap_content);
   }
 
-  check_expected_ptr(soap);
-  check_expected_ptr(response_func);
-  check_expected_ptr(response);
+  check_expected_ptr(soap_content);
   return (size_t)mock();
 }

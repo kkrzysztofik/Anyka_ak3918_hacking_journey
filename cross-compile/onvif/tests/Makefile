@@ -282,6 +282,7 @@ INTEGRATION_TEST_SRCS := \
 	src/integration/ptz_service_tests.c \
 	src/integration/media_service_tests.c \
 	src/integration/imaging_service_optimization_test.c \
+	src/integration/services/test_imaging_integration.c \
 	src/integration/device_service_tests.c \
 	src/integration/soap_error_tests.c \
 	src/integration/core/config/test_config_integration.c \

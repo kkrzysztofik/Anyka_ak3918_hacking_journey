@@ -20,6 +20,7 @@
 // ONVIF project includes
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
+#include "core/config/config_storage.h"
 #include "networking/http/http_parser.h"
 #include "services/common/service_dispatcher.h"
 #include "services/device/onvif_device.h"
@@ -59,6 +60,9 @@
 // Test concurrent operations count
 #define TEST_CONCURRENT_OPS 10
 
+// Test configuration file path
+#define TEST_CONFIG_PATH "./configs/device_test_config.ini"
+
 // Test delay constants
 #define TEST_DELAY_10MS  10
 #define TEST_DELAY_100MS 100
@@ -91,20 +95,67 @@ int device_service_setup(void** state) {
   test_state->app_config = calloc(1, sizeof(struct application_config));
   assert_non_null(test_state->app_config);
 
-  // Initialize runtime configuration system
-  int config_result = config_runtime_init(test_state->app_config);
-  assert_int_equal(ONVIF_SUCCESS, config_result);
-
-  // Apply default configuration values
-  config_result = config_runtime_apply_defaults();
-  assert_int_equal(ONVIF_SUCCESS, config_result);
+  // Allocate pointer members for application_config (required for config_storage_load)
+  test_state->app_config->network = calloc(1, sizeof(struct network_settings));
+  assert_non_null(test_state->app_config->network);
+  test_state->app_config->imaging = calloc(1, sizeof(struct imaging_settings));
+  assert_non_null(test_state->app_config->imaging);
+  test_state->app_config->auto_daynight = calloc(1, sizeof(struct auto_daynight_config));
+  assert_non_null(test_state->app_config->auto_daynight);
+  test_state->app_config->device = calloc(1, sizeof(struct device_info));
+  assert_non_null(test_state->app_config->device);
+  test_state->app_config->logging = calloc(1, sizeof(struct logging_settings));
+  assert_non_null(test_state->app_config->logging);
+  test_state->app_config->server = calloc(1, sizeof(struct server_settings));
+  assert_non_null(test_state->app_config->server);
+  test_state->app_config->main_stream = calloc(1, sizeof(video_config_t));
+  assert_non_null(test_state->app_config->main_stream);
+  test_state->app_config->sub_stream = calloc(1, sizeof(video_config_t));
+  assert_non_null(test_state->app_config->sub_stream);
+  test_state->app_config->stream_profile_1 = calloc(1, sizeof(video_config_t));
+  assert_non_null(test_state->app_config->stream_profile_1);
+  test_state->app_config->stream_profile_2 = calloc(1, sizeof(video_config_t));
+  assert_non_null(test_state->app_config->stream_profile_2);
+  test_state->app_config->stream_profile_3 = calloc(1, sizeof(video_config_t));
+  assert_non_null(test_state->app_config->stream_profile_3);
+  test_state->app_config->stream_profile_4 = calloc(1, sizeof(video_config_t));
+  assert_non_null(test_state->app_config->stream_profile_4);
+  test_state->app_config->ptz_preset_profile_1 = calloc(1, sizeof(struct ptz_preset_profile));
+  assert_non_null(test_state->app_config->ptz_preset_profile_1);
+  test_state->app_config->ptz_preset_profile_2 = calloc(1, sizeof(struct ptz_preset_profile));
+  assert_non_null(test_state->app_config->ptz_preset_profile_2);
+  test_state->app_config->ptz_preset_profile_3 = calloc(1, sizeof(struct ptz_preset_profile));
+  assert_non_null(test_state->app_config->ptz_preset_profile_3);
+  test_state->app_config->ptz_preset_profile_4 = calloc(1, sizeof(struct ptz_preset_profile));
+  assert_non_null(test_state->app_config->ptz_preset_profile_4);
 
   // Enable real functions for integration testing (not platform layer)
+  // CRITICAL: Must enable config mock real functions BEFORE calling config_storage_load()
   service_dispatcher_mock_use_real_function(true);
   buffer_pool_mock_use_real_function(true);
   config_mock_use_real_function(true);
   gsoap_mock_use_real_function(true);
   http_server_mock_use_real_function(true);
+
+  // Cleanup any previous config runtime state (defensive programming for failed test cleanup)
+  config_runtime_cleanup();
+
+  // Initialize runtime configuration system
+  int config_result = config_runtime_init(test_state->app_config);
+  assert_int_equal(ONVIF_SUCCESS, config_result);
+
+  // Apply default configuration values (CRITICAL for all services to work properly)
+  config_result = config_runtime_apply_defaults();
+  assert_int_equal(ONVIF_SUCCESS, config_result);
+
+  // Set device-specific configuration values required by tests
+  // These override defaults from config_runtime_apply_defaults()
+  config_runtime_set_string(CONFIG_SECTION_DEVICE, "manufacturer", "Anyka");
+  config_runtime_set_string(CONFIG_SECTION_DEVICE, "model", "AK3918 Camera");
+  config_runtime_set_string(CONFIG_SECTION_DEVICE, "firmware_version", "1.0.0");
+  config_runtime_set_string(CONFIG_SECTION_DEVICE, "serial_number", "AK3918-001");
+  config_runtime_set_string(CONFIG_SECTION_DEVICE, "hardware_id", "1.0");
+
   network_mock_use_real_function(true);
   smart_response_mock_use_real_function(true);
 
@@ -150,6 +201,7 @@ int device_service_setup(void** state) {
   test_state->config = malloc(sizeof(config_manager_t));
   assert_non_null(test_state->config);
   memset(test_state->config, 0, sizeof(config_manager_t));
+  test_state->config->app_config = test_state->app_config;
 
   // Initialize Device service
   result = onvif_device_init(test_state->config);
@@ -163,12 +215,14 @@ int device_service_setup(void** state) {
   result = onvif_ptz_init(test_state->config);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  // Initialize Imaging service (required for GetCapabilities integration)
-  result = onvif_imaging_init(test_state->config);
+  // CRITICAL: Initialize Imaging service HANDLER before initializing the service itself
+  // This registers the service with the dispatcher
+  result = onvif_imaging_service_init(test_state->config);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  // Register Imaging service with dispatcher (required for capability queries)
-  result = onvif_imaging_service_init(test_state->config);
+  // Initialize Imaging service (required for GetCapabilities integration)
+  // Must be called AFTER imaging_service_init to ensure proper dispatcher registration
+  result = onvif_imaging_init(test_state->config);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   *state = test_state;
@@ -207,6 +261,26 @@ int device_service_teardown(void** state) {
 
   // Cleanup runtime configuration system
   config_runtime_cleanup();
+
+  // Free all pointer members of app_config (in reverse order of allocation)
+  if (test_state && test_state->app_config) {
+    free(test_state->app_config->ptz_preset_profile_4);
+    free(test_state->app_config->ptz_preset_profile_3);
+    free(test_state->app_config->ptz_preset_profile_2);
+    free(test_state->app_config->ptz_preset_profile_1);
+    free(test_state->app_config->stream_profile_4);
+    free(test_state->app_config->stream_profile_3);
+    free(test_state->app_config->stream_profile_2);
+    free(test_state->app_config->stream_profile_1);
+    free(test_state->app_config->sub_stream);
+    free(test_state->app_config->main_stream);
+    free(test_state->app_config->server);
+    free(test_state->app_config->logging);
+    free(test_state->app_config->device);
+    free(test_state->app_config->auto_daynight);
+    free(test_state->app_config->imaging);
+    free(test_state->app_config->network);
+  }
 
   // CRITICAL: Free heap-allocated app_config AFTER config_runtime_cleanup()
   // config_runtime_cleanup() sets the global pointer to NULL, so we can safely free now
@@ -529,7 +603,7 @@ void test_integration_device_get_services_namespaces(void** state) {
 
   // Step 1: Create SOAP request envelope
   http_request_t* request =
-    soap_test_create_request("GetServices", SOAP_DEVICE_GET_CAPABILITIES, "/onvif/device_service");
+    soap_test_create_request("GetServices", SOAP_DEVICE_GET_SERVICES, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -1064,9 +1138,9 @@ void test_integration_device_get_system_date_time_soap(void** state) {
 void test_integration_device_get_services_soap(void** state) {
   (void)state;
 
-  // Step 1: Create SOAP request envelope (using DEVICE_GET_CAPABILITIES as placeholder)
+  // Step 1: Create SOAP request envelope
   http_request_t* request =
-    soap_test_create_request("GetServices", SOAP_DEVICE_GET_CAPABILITIES, "/onvif/device_service");
+    soap_test_create_request("GetServices", SOAP_DEVICE_GET_SERVICES, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure

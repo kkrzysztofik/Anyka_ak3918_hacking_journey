@@ -22,12 +22,15 @@
 #include "common/time_utils.h"
 #include "imaging_service_optimization_tests.h"
 #include "mocks/buffer_pool_mock.h"
+#include "mocks/config_mock.h"
 #include "mocks/gsoap_mock.h"
 #include "mocks/mock_service_dispatcher.h"
 #include "mocks/platform_mock.h"
 #include "mocks/smart_response_mock.h"
 
 // ONVIF project includes
+#include "core/config/config.h"
+#include "core/config/config_runtime.h"
 #include "services/common/onvif_imaging_types.h"
 #include "services/common/service_dispatcher.h"
 #include "services/imaging/onvif_imaging.h"
@@ -104,68 +107,138 @@
  * Test Setup and Teardown
  * ============================================================================ */
 
-int setup_imaging_integration(void** state) {
-  (void)state;
+// Test state structure to hold both app_config and config pointers
+typedef struct {
+  struct application_config* app_config;
+  config_manager_t* config;
+} imaging_optimization_test_state_t;
 
+int setup_imaging_integration(void** state) {
   // Initialize memory manager for tracking
   memory_manager_init();
+
+  // Allocate test state structure
+  imaging_optimization_test_state_t* test_state =
+    calloc(1, sizeof(imaging_optimization_test_state_t));
+  assert_non_null(test_state);
+
+  // Heap-allocate application config structure (required for config_runtime_init)
+  test_state->app_config = calloc(1, sizeof(struct application_config));
+  assert_non_null(test_state->app_config);
+
+  // Allocate imaging and auto_daynight structures (required for config_runtime_init)
+  test_state->app_config->imaging = calloc(1, sizeof(struct imaging_settings));
+  assert_non_null(test_state->app_config->imaging);
+  test_state->app_config->auto_daynight = calloc(1, sizeof(struct auto_daynight_config));
+  assert_non_null(test_state->app_config->auto_daynight);
+
+  // Initialize runtime configuration system
+  int config_result = config_runtime_init(test_state->app_config);
+  assert_int_equal(ONVIF_SUCCESS, config_result);
+
+  // Apply default configuration values
+  config_result = config_runtime_apply_defaults();
+  assert_int_equal(ONVIF_SUCCESS, config_result);
 
   // Enable real functions for integration testing (test real service interactions)
   service_dispatcher_mock_use_real_function(true);
   buffer_pool_mock_use_real_function(true);
+  config_mock_use_real_function(true);
   gsoap_mock_use_real_function(true);
   smart_response_mock_use_real_function(true);
 
-  // Configure platform mock expectations for imaging service initialization
-  // The imaging service init calls platform_irled_init(level) and applies VPSS settings
+  // Initialize config manager for imaging service
+  test_state->config = malloc(sizeof(config_manager_t));
+  assert_non_null(test_state->config);
+  memset(test_state->config, 0, sizeof(config_manager_t));
+  test_state->config->app_config = test_state->app_config;
 
-  // 1. IR LED initialization
-  expect_function_call(__wrap_platform_irled_init);
-  expect_any(__wrap_platform_irled_init, level);
-  will_return(__wrap_platform_irled_init, PLATFORM_SUCCESS);
-
-  // 2. VPSS effect settings (brightness, contrast, saturation, sharpness, hue)
-  //    Called during apply_imaging_settings_to_vpss() if vi_handle is non-NULL
-  //    Since we pass NULL to onvif_imaging_init(), vi_handle will be NULL, so these won't be called
-  //    No need to mock VPSS calls
-
-  // Initialize service dispatcher
+  // Initialize service dispatcher first
   int result = onvif_service_dispatcher_init();
   if (result != ONVIF_SUCCESS) {
     printf("Failed to initialize service dispatcher: %d\n", result);
     return -1;
   }
 
-  // Initialize real imaging service
+  // Configure platform mock expectations for imaging service initialization
+  // The imaging service init calls platform_irled_init(level) and applies VPSS settings
+
+  // 1. IR LED initialization - expect to be called with a level from config (default is 1)
+  expect_function_call(__wrap_platform_irled_init);
+  expect_value(__wrap_platform_irled_init, level, 1);
+  will_return(__wrap_platform_irled_init, PLATFORM_SUCCESS);
+
+  // 2. IR LED mode setting - NOT called with default IR_LED_AUTO mode
+  // Only called if mode is IR_LED_ON or IR_LED_OFF, but default is IR_LED_AUTO
+
+  // 3. VPSS effect settings (brightness, contrast, saturation, sharpness, hue)
+  //    Called during apply_imaging_settings_to_vpss() if vi_handle is non-NULL
+  //    Since we pass NULL to onvif_imaging_init(), vi_handle will be NULL, so these won't be called
+  //    No need to mock VPSS calls
+
+  // Initialize imaging service handler for SOAP operations
+  result = onvif_imaging_service_init(test_state->config);
+  if (result != ONVIF_SUCCESS) {
+    printf("Failed to initialize imaging service handler: %d\n", result);
+    return -1;
+  }
+
+  // Initialize real imaging service AFTER handler is set up
   result = onvif_imaging_init(NULL);
   if (result != ONVIF_SUCCESS) {
     printf("Failed to initialize imaging service: %d\n", result);
     return -1;
   }
 
-  // Initialize imaging service handler for SOAP operations
-  result = onvif_imaging_service_init(NULL);
-  if (result != ONVIF_SUCCESS) {
-    printf("Failed to initialize imaging service handler: %d\n", result);
-    return -1;
-  }
-
+  *state = test_state;
   return 0;
 }
 
 int teardown_imaging_integration(void** state) {
-  (void)state;
+  imaging_optimization_test_state_t* test_state = (imaging_optimization_test_state_t*)*state;
 
   // Cleanup real imaging service (this unregisters from dispatcher)
   onvif_imaging_cleanup();
 
+  // Free config first, before leak checking
+  if (test_state && test_state->config) {
+    free(test_state->config);
+    test_state->config = NULL;
+  }
+
   // Cleanup memory manager
   memory_manager_cleanup();
+
+  // Cleanup runtime configuration system
+  config_runtime_cleanup();
+
+  // Free imaging and auto_daynight structures BEFORE freeing app_config
+  if (test_state && test_state->app_config) {
+    if (test_state->app_config->imaging) {
+      free(test_state->app_config->imaging);
+      test_state->app_config->imaging = NULL;
+    }
+    if (test_state->app_config->auto_daynight) {
+      free(test_state->app_config->auto_daynight);
+      test_state->app_config->auto_daynight = NULL;
+    }
+
+    // Free heap-allocated app_config AFTER freeing its members
+    free(test_state->app_config);
+    test_state->app_config = NULL;
+  }
+
+  // Free test state structure
+  if (test_state) {
+    free(test_state);
+  }
 
   // Restore mock behavior for subsequent tests
   service_dispatcher_mock_use_real_function(false);
   buffer_pool_mock_use_real_function(false);
+  config_mock_use_real_function(false);
   gsoap_mock_use_real_function(false);
+  smart_response_mock_use_real_function(false);
 
   return 0;
 }
@@ -487,19 +560,27 @@ void test_integration_imaging_get_settings_soap(void** state) {
   int has_fault = soap_test_check_soap_fault(&response, fault_code, fault_string);
   assert_int_equal(0, has_fault);
 
-  // Step 7: Validate SOAP response contains expected elements
-  assert_true(strstr(response.body, "GetImagingSettingsResponse") != NULL);
-  assert_true(strstr(response.body, "Brightness") != NULL);
+  // Step 7: Parse SOAP response using gSOAP
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(onvif_gsoap_context_t));
+  result = soap_test_init_response_parsing(&ctx, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
 
-  // Step 8: Verify response contains ImagingSettings with valid brightness value
-  char brightness_value[64] = {0};
-  result = soap_test_extract_element_text(response.body, "Brightness", brightness_value,
-                                          sizeof(brightness_value));
-  if (result == ONVIF_SUCCESS) {
-    assert_true(strlen(brightness_value) > 0);
+  struct _timg__GetImagingSettingsResponse* settings_response = NULL;
+  result = soap_test_parse_get_imaging_settings_response(&ctx, &settings_response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_non_null(settings_response);
+
+  // Step 8: Validate parsed response data
+  assert_non_null(settings_response->ImagingSettings);
+  // Brightness is optional in ONVIF, but if present, verify it's valid
+  if (settings_response->ImagingSettings->Brightness) {
+    assert_true(*settings_response->ImagingSettings->Brightness >= -100.0F);
+    assert_true(*settings_response->ImagingSettings->Brightness <= 100.0F);
   }
 
   // Step 9: Cleanup resources
+  onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
     ONVIF_FREE(response.body);
