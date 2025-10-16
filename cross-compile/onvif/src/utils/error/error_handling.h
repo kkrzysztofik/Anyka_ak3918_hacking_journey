@@ -35,6 +35,8 @@
 #define ONVIF_ERROR_AUTHENTICATION_FAILED -16
 #define ONVIF_ERROR_AUTHORIZATION_FAILED  -17
 #define ONVIF_ERROR_SOAP_FAULT            -18 /* SOAP fault generated, use response as-is */
+#define ONVIF_ERROR_INITIALIZATION        -19 /* Initialization/setup failure */
+#define ONVIF_ERROR_HARDWARE              -20 /* Hardware/platform operation failure */
 
 /* Service dispatcher error codes */
 #define ONVIF_ERROR_NOT_INITIALIZED  -40

@@ -18,6 +18,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "utils/error/error_handling.h"
+
 // Add missing function declarations
 extern int gethostname(char* name, size_t len);
 
@@ -80,7 +82,7 @@ static int fetch_local_ip_address(char* ip_str, size_t ip_str_size) {
 
   if (ifaddrs_ptr)
     freeifaddrs(ifaddrs_ptr);
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -98,7 +100,7 @@ int get_local_ip_address(char* ip_str, size_t ip_str_size) {
   if (__atomic_load_n(&g_ip_cache_initialized, __ATOMIC_ACQUIRE)) {
     strncpy(ip_str, g_cached_ip, ip_str_size - 1);
     ip_str[ip_str_size - 1] = '\0';
-    return 0;
+    return ONVIF_SUCCESS;
   }
 
   // Slow path: initialize cache (thread-safe)
@@ -115,7 +117,7 @@ int get_local_ip_address(char* ip_str, size_t ip_str_size) {
   // Copy from cache
   strncpy(ip_str, g_cached_ip, ip_str_size - 1);
   ip_str[ip_str_size - 1] = '\0';
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -127,13 +129,13 @@ int get_device_hostname(char* hostname, size_t hostname_size) {
 
   if (gethostname(hostname, hostname_size) == 0) {
     hostname[hostname_size - 1] = '\0';
-    return 0;
+    return ONVIF_SUCCESS;
   }
 
   // fallback hostname
   strncpy(hostname, "anyka-camera", hostname_size - 1);
   hostname[hostname_size - 1] = '\0';
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -156,5 +158,5 @@ int build_device_url(const char* protocol, int port, const char* path, char* url
     snprintf(url, url_size, "%s://%s%s", protocol, ip_str, path);
   }
 
-  return 0;
+  return ONVIF_SUCCESS;
 }

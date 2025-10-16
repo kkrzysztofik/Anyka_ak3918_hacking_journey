@@ -41,7 +41,7 @@ static volatile bool g_video_system_initialized = false;      // NOLINT
 
 /**
  * @brief Match sensor configuration for proper hardware initialization
- * @return 0 on success, -1 on failure
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
 static int match_sensor_configuration(void) {
   if (platform_vi_match_sensor("/etc/jffs2") != 0) {
@@ -50,23 +50,23 @@ static int match_sensor_configuration(void) {
       platform_log_warning("warning: failed to match sensor at /data/sensor, trying /data\n");
       if (platform_vi_match_sensor("/data") != 0) {
         platform_log_warning("warning: failed to match sensor, video input disabled\n");
-        return -1;
+        return ONVIF_ERROR_HARDWARE;
       }
     }
   }
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
  * @brief Initialize video input handle and get sensor information
  * @param resolution Output parameter for sensor resolution
  * @param sensor_fps Output parameter for sensor frame rate
- * @return 0 on success, -1 on failure
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
 static int initialize_video_input(platform_video_resolution_t* resolution, int* sensor_fps) {
   if (platform_vi_open(&g_video_vi_handle) != 0) {
     platform_log_warning("warning: failed to open video input, RTSP streaming disabled\n");
-    return -1;
+    return ONVIF_ERROR_HARDWARE;
   }
 
   platform_vi_get_sensor_resolution(g_video_vi_handle, resolution);
@@ -81,14 +81,14 @@ static int initialize_video_input(platform_video_resolution_t* resolution, int* 
     *sensor_fps = 15;
   }
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
  * @brief Configure video channel attributes for main and sub streams
  * @param vi_handle Video input handle
  * @param resolution Sensor resolution
- * @return 0 on success, -1 on failure
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
 static int configure_video_channels(platform_vi_handle_t vi_handle,
                                     const platform_video_resolution_t* resolution) {
@@ -106,25 +106,25 @@ static int configure_video_channels(platform_vi_handle_t vi_handle,
 
   if (platform_vi_set_channel_attr(g_video_vi_handle, &channel_attr) != PLATFORM_SUCCESS) {
     platform_log_error("Failed to set video channel attributes, RTSP streaming disabled\n");
-    return -1;
+    return ONVIF_ERROR_HARDWARE;
   }
 
   platform_log_debug("Video channel attributes set successfully\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
  * @brief Start global video capture
  * @param vi_handle Video input handle
- * @return 0 on success, -1 on failure
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
 static int start_global_capture(platform_vi_handle_t vi_handle) {
   if (platform_vi_start_global_capture(vi_handle) != PLATFORM_SUCCESS) {
     platform_log_error("Failed to start global video capture, RTSP streaming disabled\n");
-    return -1;
+    return ONVIF_ERROR_HARDWARE;
   }
   platform_log_info("Global video capture started successfully\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -291,7 +291,7 @@ static void configure_main_stream(const struct application_config* cfg,
  * @brief Create and configure multi-stream RTSP server
  * @param video_config Main stream video configuration
  * @param audio_config Main stream audio configuration
- * @return 0 on success, -1 on failure
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
 static int create_rtsp_server(const video_config_t* video_config,
                               const audio_config_t* audio_config) {
@@ -300,7 +300,7 @@ static int create_rtsp_server(const video_config_t* video_config,
     g_video_rtsp_multistream_server = rtsp_multistream_server_create(554, g_video_vi_handle);
     if (!g_video_rtsp_multistream_server) {
       platform_log_error("Failed to create multi-stream RTSP server\n");
-      return -1;
+      return ONVIF_ERROR_INITIALIZATION;
     }
     g_video_rtsp_server_initialized = true;
     platform_log_info("Multi-stream RTSP server created successfully\n");
@@ -313,21 +313,21 @@ static int create_rtsp_server(const video_config_t* video_config,
     platform_log_error("Failed to add main stream to multi-stream server\n");
     rtsp_multistream_server_destroy(g_video_rtsp_multistream_server);
     g_video_rtsp_multistream_server = NULL;
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
 
   platform_log_info("Sub stream (/vs1) disabled - only main stream (/vs0) available\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
  * @brief Start the multi-stream RTSP server
- * @return 0 on success, -1 on failure
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
 static int start_rtsp_server(void) {
   if (!g_video_rtsp_multistream_server) {
     platform_log_warning("Cannot start RTSP server - server not created\n");
-    return -1;
+    return ONVIF_ERROR_NOT_INITIALIZED;
   }
 
   int start_result = rtsp_multistream_server_start(g_video_rtsp_multistream_server);
@@ -336,11 +336,11 @@ static int start_rtsp_server(void) {
     rtsp_multistream_server_destroy(g_video_rtsp_multistream_server);
     g_video_rtsp_multistream_server = NULL;
     g_video_rtsp_server_initialized = false;
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
 
   platform_log_notice("Multi-stream RTSP server started successfully\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /* ---------------------------- Public Interface ------------------------- */
@@ -349,29 +349,29 @@ int video_lifecycle_init(const struct application_config* cfg) {
   platform_log_info("Initializing video input...\n");
 
   // Step 1: Match sensor configuration
-  if (match_sensor_configuration() != 0) {
-    return -1;
+  if (match_sensor_configuration() != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_HARDWARE;
   }
 
   // Step 2: Initialize video input and get sensor info
   platform_video_resolution_t resolution;
   int sensor_fps = 15; // Initialize with default value
-  if (initialize_video_input(&resolution, &sensor_fps) != 0) {
-    return -1;
+  if (initialize_video_input(&resolution, &sensor_fps) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_HARDWARE;
   }
 
   // Step 3: Configure video channels
-  if (configure_video_channels(g_video_vi_handle, &resolution) != 0) {
+  if (configure_video_channels(g_video_vi_handle, &resolution) != ONVIF_SUCCESS) {
     platform_vi_close(g_video_vi_handle);
     g_video_vi_handle = NULL;
-    return -1;
+    return ONVIF_ERROR_HARDWARE;
   }
 
   // Step 4: Start global video capture
-  if (start_global_capture(g_video_vi_handle) != 0) {
+  if (start_global_capture(g_video_vi_handle) != ONVIF_SUCCESS) {
     platform_vi_close(g_video_vi_handle);
     g_video_vi_handle = NULL;
-    return -1;
+    return ONVIF_ERROR_HARDWARE;
   }
 
   // Step 5: Configure main stream
@@ -380,21 +380,21 @@ int video_lifecycle_init(const struct application_config* cfg) {
   configure_main_stream(cfg, &resolution, sensor_fps, &main_video_config, &main_audio_config);
 
   // Step 6: Create RTSP server and add main stream
-  if (create_rtsp_server(&main_video_config, &main_audio_config) != 0) {
+  if (create_rtsp_server(&main_video_config, &main_audio_config) != ONVIF_SUCCESS) {
     platform_vi_close(g_video_vi_handle);
     g_video_vi_handle = NULL;
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
 
   // Step 7: Start RTSP server
-  if (start_rtsp_server() != 0) {
+  if (start_rtsp_server() != ONVIF_SUCCESS) {
     platform_vi_close(g_video_vi_handle);
     g_video_vi_handle = NULL;
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
 
   g_video_system_initialized = true;
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 void video_lifecycle_cleanup(void) {

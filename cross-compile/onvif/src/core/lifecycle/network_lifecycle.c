@@ -46,7 +46,7 @@ int network_lifecycle_init(const struct application_config* cfg) {
   // Start HTTP server (fatal if fails)
   if (http_server_start(cfg->onvif.http_port, cfg) != 0) {
     platform_log_error("failed to start HTTP server on port %d\n", cfg->onvif.http_port);
-    return -1;
+    return ONVIF_ERROR_NETWORK;
   }
 
   // Start WS-Discovery (non-fatal if fails)
@@ -59,7 +59,7 @@ int network_lifecycle_init(const struct application_config* cfg) {
 
   g_network_services_initialized = true;
   platform_log_info("Network services initialized successfully\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 void network_lifecycle_cleanup(void) {

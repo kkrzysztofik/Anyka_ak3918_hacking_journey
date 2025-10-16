@@ -60,7 +60,7 @@ static char g_dynamic_buffer_error_msg[MEMORY_MANAGER_ERROR_MSG_SIZE] = {0}; // 
 
 int memory_manager_init(void) {
   if (g_memory_manager_initialized) {
-    return 0;
+    return ONVIF_SUCCESS;
   }
 
   g_memory_tracker.capacity = MEMORY_MANAGER_INITIAL_CAPACITY;
@@ -74,7 +74,7 @@ int memory_manager_init(void) {
   g_memory_manager_initialized = true;
 
   platform_log_info("Memory manager initialized\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 void memory_manager_cleanup(void) {
@@ -142,7 +142,7 @@ size_t memory_manager_get_allocated_size(void) {
 
 int memory_manager_check_leaks(void) {
   if (!g_memory_manager_initialized) {
-    return 0;
+    return ONVIF_SUCCESS;
   }
 
   int leak_count = 0;
@@ -163,13 +163,13 @@ int memory_manager_check_leaks(void) {
   }
 
   platform_log_info("No memory leaks detected\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 static int memory_tracker_add(void* ptr, size_t size, const char* file, int line,
                               const char* function) {
   if (!g_memory_manager_initialized) {
-    return 0; // Not tracking
+    return ONVIF_SUCCESS; // Not tracking
   }
 
   NULL_CHECK_RETURN(ptr, -1);
@@ -196,18 +196,18 @@ static int memory_tracker_add(void* ptr, size_t size, const char* file, int line
   g_memory_tracker.allocations[g_memory_tracker.count].function = function;
   g_memory_tracker.count++;
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 static int memory_tracker_remove(void* ptr) {
   if (!g_memory_manager_initialized || !ptr) {
-    return 0;
+    return ONVIF_SUCCESS;
   }
 
   for (size_t i = 0; i < g_memory_tracker.count; i++) {
     if (g_memory_tracker.allocations[i].ptr == ptr) {
       g_memory_tracker.allocations[i].ptr = NULL;
-      return 0;
+      return ONVIF_SUCCESS;
     }
   }
 
@@ -307,7 +307,7 @@ int memory_safe_strcpy(char* dest, size_t dest_size, const char* src) {
   }
 
   strcpy(dest, src);
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int memory_safe_strncpy(char* dest, size_t dest_size, const char* src, size_t n) {
@@ -318,7 +318,7 @@ int memory_safe_strncpy(char* dest, size_t dest_size, const char* src, size_t n)
   size_t copy_len = n < dest_size - 1 ? n : dest_size - 1;
   strncpy(dest, src, copy_len);
   dest[copy_len] = '\0';
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int memory_safe_snprintf(char* dest, size_t dest_size, const char* format, ...) {
@@ -520,7 +520,7 @@ int dynamic_buffer_init(dynamic_buffer_t* buffer, size_t initial_size) {
   buffer->stats.current_size = initial_size;
 
   platform_log_debug("Dynamic Buffer: Initialized with %zu bytes", initial_size);
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
@@ -545,13 +545,13 @@ int dynamic_buffer_init_custom(dynamic_buffer_t* buffer, size_t initial_size,
 
   // Initialize with default settings first
   int result = dynamic_buffer_init(buffer, initial_size);
-  if (result != 0) {
+  if (result != ONVIF_SUCCESS) {
     return result;
   }
 
   platform_log_debug("Dynamic Buffer: Custom initialization - growth: %zu, max: %zu", growth_factor,
                      max_size);
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 void dynamic_buffer_cleanup(dynamic_buffer_t* buffer) {
@@ -598,7 +598,7 @@ int dynamic_buffer_ensure_capacity(dynamic_buffer_t* buffer, size_t required_cap
 
   // Check if we already have enough capacity
   if (buffer->capacity >= required_capacity) {
-    return 0;
+    return ONVIF_SUCCESS;
   }
 
   // Calculate new size
@@ -626,7 +626,7 @@ int dynamic_buffer_ensure_capacity(dynamic_buffer_t* buffer, size_t required_cap
   buffer->stats.current_size = new_size;
 
   platform_log_debug("Dynamic Buffer: Expanded to %zu bytes", new_size);
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int dynamic_buffer_append(dynamic_buffer_t* buffer, const void* data, size_t length) {
@@ -635,12 +635,12 @@ int dynamic_buffer_append(dynamic_buffer_t* buffer, const void* data, size_t len
   }
 
   if (length == 0) {
-    return 0; // Nothing to append
+    return ONVIF_SUCCESS; // Nothing to append
   }
 
   // Ensure we have enough capacity
   int result = dynamic_buffer_ensure_capacity(buffer, buffer->length + length + 1);
-  if (result != 0) {
+  if (result != ONVIF_SUCCESS) {
     return result;
   }
 
@@ -650,7 +650,7 @@ int dynamic_buffer_append(dynamic_buffer_t* buffer, const void* data, size_t len
   buffer->data[buffer->length] = '\0'; // Null-terminate
   buffer->stats.total_bytes_written += length;
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int dynamic_buffer_appendf(dynamic_buffer_t* buffer, const char* format, ...) {
@@ -693,7 +693,7 @@ int dynamic_buffer_appendf(dynamic_buffer_t* buffer, const char* format, ...) {
 
 int dynamic_buffer_append_string(dynamic_buffer_t* buffer, const char* str) {
   if (!str) {
-    return 0; // NULL string is treated as empty
+    return ONVIF_SUCCESS; // NULL string is treated as empty
   }
 
   return dynamic_buffer_append(buffer, str, strlen(str));
@@ -863,7 +863,7 @@ int buffer_validate_string(const char* str, size_t max_len, buffer_safety_flags_
   }
 
   g_buffer_safety_stats.total_validations++;
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int buffer_safe_append_xml_element(char* buffer, size_t buffer_size, const char* element_name,
@@ -942,7 +942,7 @@ static int append_html_entity(char* dest, size_t* dest_pos, size_t dest_size, co
 
   strcpy(dest + *dest_pos, entity);
   *dest_pos += entity_len;
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int buffer_safe_escape_xml(char* dest, size_t dest_size, const char* src, size_t src_len) {

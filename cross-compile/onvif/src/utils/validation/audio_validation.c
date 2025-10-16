@@ -12,6 +12,7 @@
 #include "audio_validation.h"
 
 #include "platform/platform_common.h"
+#include "utils/error/error_handling.h"
 
 /**
  * @brief Validate audio configuration parameters
@@ -127,7 +128,7 @@ int audio_validation_get_default_config(platform_audio_config_t* config) {
   config->codec = PLATFORM_AUDIO_CODEC_AAC; // AAC as default for better compression
   config->bitrate = 64000;                  // 64 kbps default bitrate for AAC
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**

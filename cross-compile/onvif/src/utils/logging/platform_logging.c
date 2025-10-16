@@ -16,6 +16,7 @@
 #include <time.h>
 
 #include "core/config/config.h"
+#include "utils/error/error_handling.h"
 
 /* Log level strings */
 static const char* LOG_LEVEL_STRINGS[] = {"DEBUG", "INFO ", "NOTICE", "WARN ", "ERROR"};
@@ -71,7 +72,7 @@ static int get_timestamp(char* buffer, size_t size) {
   /* Add milliseconds */
   snprintf(buffer + written, size - written, ".%03ld", tv.tv_usec / 1000);
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**

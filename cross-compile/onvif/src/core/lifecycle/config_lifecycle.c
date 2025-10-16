@@ -38,7 +38,7 @@ int config_lifecycle_allocate_memory(struct application_config* cfg) {
   cfg->imaging = malloc(sizeof(struct imaging_settings));
   if (!cfg->imaging) {
     platform_log_error("Failed to allocate memory for imaging settings\n");
-    return -1;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
   memset(cfg->imaging, 0, sizeof(struct imaging_settings));
 
@@ -46,7 +46,7 @@ int config_lifecycle_allocate_memory(struct application_config* cfg) {
   if (!cfg->auto_daynight) {
     platform_log_error("Failed to allocate memory for auto day/night config\n");
     free(cfg->imaging);
-    return -1;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
   memset(cfg->auto_daynight, 0, sizeof(struct auto_daynight_config));
 
@@ -56,7 +56,7 @@ int config_lifecycle_allocate_memory(struct application_config* cfg) {
     platform_log_error("Failed to allocate memory for network settings\n");
     free(cfg->imaging);
     free(cfg->auto_daynight);
-    return -1;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
   memset(cfg->network, 0, sizeof(struct network_settings));
 
@@ -66,7 +66,7 @@ int config_lifecycle_allocate_memory(struct application_config* cfg) {
     free(cfg->imaging);
     free(cfg->auto_daynight);
     free(cfg->network);
-    return -1;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
   memset(cfg->device, 0, sizeof(struct device_info));
 
@@ -77,7 +77,7 @@ int config_lifecycle_allocate_memory(struct application_config* cfg) {
     free(cfg->auto_daynight);
     free(cfg->network);
     free(cfg->device);
-    return -1;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
   memset(cfg->logging, 0, sizeof(struct logging_settings));
 
@@ -90,7 +90,7 @@ int config_lifecycle_allocate_memory(struct application_config* cfg) {
     free(cfg->network);
     free(cfg->device);
     free(cfg->logging);
-    return -1;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
   memset(cfg->main_stream, 0, sizeof(video_config_t));
 
@@ -103,12 +103,12 @@ int config_lifecycle_allocate_memory(struct application_config* cfg) {
     free(cfg->device);
     free(cfg->logging);
     free(cfg->main_stream);
-    return -1;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
   memset(cfg->sub_stream, 0, sizeof(video_config_t));
 
   platform_log_info("Configuration memory allocated successfully\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int config_lifecycle_load_configuration(struct application_config* cfg) {
@@ -117,7 +117,7 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
   /* T019: Initialize runtime configuration manager with loaded config */
   if (config_runtime_init(cfg) != ONVIF_SUCCESS) {
     platform_log_error("error: failed to initialize runtime configuration system\n");
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
 
   /* Load configuration from INI file using new storage system */
@@ -172,7 +172,7 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
 
   g_config_loaded = true;
   platform_log_info("Configuration loaded successfully\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 void config_lifecycle_free_memory(struct application_config* cfg) {
@@ -220,12 +220,12 @@ bool config_lifecycle_loaded(void) {
 
 int config_lifecycle_get_summary(char* summary, size_t size) {
   if (!g_config_loaded || !summary || size == 0) {
-    return -1;
+    return ONVIF_ERROR_INVALID_PARAMETER;
   }
 
   const struct application_config* snapshot = config_runtime_snapshot();
   if (!snapshot) {
-    return -1;
+    return ONVIF_ERROR_NOT_INITIALIZED;
   }
 
   int result = snprintf(
@@ -249,8 +249,8 @@ int config_lifecycle_get_summary(char* summary, size_t size) {
     snapshot->auto_daynight ? snapshot->auto_daynight->lock_time_seconds : 0);
 
   if (result < 0 || (size_t)result >= size) {
-    return -1; // Truncation or error
+    return ONVIF_ERROR_BUFFER_TOO_SMALL;
   }
 
-  return 0;
+  return ONVIF_SUCCESS;
 }

@@ -13,6 +13,7 @@
 #include "/home/kmk/anyka-dev/cross-compile/onvif/src/networking/http/http_parser.h"
 #include "common/onvif_constants.h"
 #include "platform/platform.h"
+#include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
 
 /* ============================================================================
@@ -55,7 +56,7 @@ int smart_response_build_with_dynamic_buffer(http_response_t* response, const ch
 
   platform_log_debug("Response allocated: %zu bytes (saved %zu bytes)", response_length,
                      ONVIF_RESPONSE_BUFFER_SIZE - response_length);
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -105,7 +106,7 @@ int smart_response_build_with_buffer_pool(http_response_t* response, const char*
 
         platform_log_debug("Pool response: %zu bytes (saved %zu bytes)", content_length,
                            ONVIF_RESPONSE_BUFFER_SIZE - content_length);
-        return 0;
+        return ONVIF_SUCCESS;
       }
       // Pool exhausted - fall back to direct allocation
       platform_log_warning("Buffer pool exhausted, falling back to direct allocation for %zu "
@@ -133,7 +134,7 @@ int smart_response_build_with_buffer_pool(http_response_t* response, const char*
   response->body_length = content_length;
 
   platform_log_debug("Direct response: %zu bytes", content_length);
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -178,7 +179,7 @@ int smart_response_build(http_response_t* response, const char* soap_content, si
   response->body_length = content_length;
 
   platform_log_debug("Large response: %zu bytes (direct allocation)", response->body_length);
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
