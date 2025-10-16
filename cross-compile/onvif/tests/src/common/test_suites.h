@@ -76,6 +76,10 @@ const struct CMUnitTest* get_imaging_integration_tests(size_t* count);
 const struct CMUnitTest* get_soap_error_integration_tests(size_t* count);
 const struct CMUnitTest* get_http_auth_integration_tests(size_t* count);
 
+// Polish phase test suite exports (T104-T106)
+const struct CMUnitTest* get_config_performance_integration_tests(size_t* count);
+const struct CMUnitTest* get_config_security_integration_tests(size_t* count);
+
 // Setup/teardown function declarations for integration tests
 int ptz_service_setup(void** state);
 int ptz_service_teardown(void** state);

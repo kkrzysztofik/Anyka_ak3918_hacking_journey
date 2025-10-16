@@ -222,6 +222,26 @@ const test_suite_t g_test_suites[] = {
    .get_tests = get_network_integration_tests,
    .setup = NULL,
    .teardown = NULL},
+
+  // ============================================================================
+  // Polish Phase Test Suites (T104-T106)
+  // ============================================================================
+
+  // Configuration performance tests (T104)
+  {.name = "config-performance",
+   .full_name = "Configuration System Performance Benchmarking",
+   .category = TEST_CATEGORY_INTEGRATION,
+   .get_tests = get_config_performance_integration_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  // Configuration security tests (T105)
+  {.name = "config-security",
+   .full_name = "Configuration System Security Hardening",
+   .category = TEST_CATEGORY_INTEGRATION,
+   .get_tests = get_config_security_integration_tests,
+   .setup = NULL,
+   .teardown = NULL},
 };
 
 /**
