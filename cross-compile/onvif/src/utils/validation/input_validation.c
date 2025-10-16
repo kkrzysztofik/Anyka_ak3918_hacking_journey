@@ -20,6 +20,10 @@
 #include "utils/string/string_shims.h"
 #include "utils/validation/common_validation.h"
 
+/* ============================================================================
+ * Constants and Macros
+ * ============================================================================ */
+
 /* Utility macros */
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
@@ -29,7 +33,9 @@
 #define HTTP_MAX_REALM_LEN       128
 #define HTTP_MAX_AUTH_HEADER_LEN 1024
 
-/* Fallback implementations for missing functions */
+/* ============================================================================
+ * Validation Data - Centralized Single Source of Truth
+ * ============================================================================ */
 
 /* Centralized validation data - single source of truth */
 static const char* const valid_http_methods[] = {"GET", "POST", "HEAD", "OPTIONS", NULL};
@@ -147,6 +153,10 @@ static const char* const valid_soap_actions[] = {"GetCapabilities",
                                                  "GetOptions",
                                                  NULL};
 
+/* ============================================================================
+ * INTERNAL HELPERS - Array Validation
+ * ============================================================================ */
+
 /* Helper function to check if string is in array */
 static int is_string_in_array(const char* str, const char* const array[]) {
   ONVIF_VALIDATE_NULL(str, "string");
@@ -159,6 +169,10 @@ static int is_string_in_array(const char* str, const char* const array[]) {
   }
   return ONVIF_VALIDATION_FAILED;
 }
+
+/* ============================================================================
+ * PUBLIC API - HTTP Protocol Validation
+ * ============================================================================ */
 
 /**
  * @brief Validate HTTP method
@@ -317,6 +331,10 @@ int validate_xml_content(const char* xml, size_t max_length) {
   return ONVIF_VALIDATION_SUCCESS;
 }
 
+/* ============================================================================
+ * PUBLIC API - String Sanitization
+ * ============================================================================ */
+
 /**
  * @brief Sanitize string input
  * @param input Input string to sanitize
@@ -385,7 +403,9 @@ int sanitize_string_input(const char* input, char* output, size_t output_size) {
   return 1;
 }
 
-/* ==================== HTTP Authentication Validation Functions ==================== */
+/* ============================================================================
+ * PUBLIC API - HTTP Authentication Validation
+ * ============================================================================ */
 
 /**
  * @brief Validate username for security and format
@@ -575,7 +595,9 @@ int validate_and_decode_base64(const char* encoded, char* decoded, size_t decode
   return ONVIF_VALIDATION_SUCCESS;
 }
 
-/* ==================== HTTP Request Validation (Execution Logic) ==================== */
+/* ============================================================================
+ * PUBLIC API - HTTP Request Validation
+ * ============================================================================ */
 
 /**
  * @brief Validate HTTP request comprehensively

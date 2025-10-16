@@ -37,6 +37,10 @@
  * @note Uses existing memory_manager utilities per AGENTS.md standards
  * @note soap_content should already contain complete SOAP envelope from gSOAP
  */
+/* ============================================================================
+ * PUBLIC API - Response Building
+ * ============================================================================ */
+
 int smart_response_build_with_dynamic_buffer(http_response_t* response, const char* soap_content) {
   if (!response || !soap_content) {
     return -1; // Input validation per AGENTS.md

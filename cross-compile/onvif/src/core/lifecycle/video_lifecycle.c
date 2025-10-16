@@ -34,6 +34,10 @@ static platform_vi_handle_t g_video_vi_handle = NULL;               // NOLINT
 static rtsp_multistream_server_t* g_video_rtsp_multistream_server = // NOLINT
   NULL;
 static volatile bool g_video_rtsp_server_initialized = false; // NOLINT
+/* ============================================================================
+ * Global State
+ * ============================================================================ */
+
 static volatile bool g_video_system_initialized = false;      // NOLINT
 
 /* ---------------------------- Video Initialization Helpers
@@ -43,6 +47,10 @@ static volatile bool g_video_system_initialized = false;      // NOLINT
  * @brief Match sensor configuration for proper hardware initialization
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
+/* ============================================================================
+ * INTERNAL HELPERS - Hardware Configuration
+ * ============================================================================ */
+
 static int match_sensor_configuration(void) {
   if (platform_vi_match_sensor("/etc/jffs2") != 0) {
     platform_log_warning("warning: failed to match sensor at /etc/jffs2, trying backup path\n");
@@ -396,6 +404,10 @@ int video_lifecycle_init(const struct application_config* cfg) {
   g_video_system_initialized = true;
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * PUBLIC API - Cleanup
+ * ============================================================================ */
 
 void video_lifecycle_cleanup(void) {
   static bool cleanup_done = false;

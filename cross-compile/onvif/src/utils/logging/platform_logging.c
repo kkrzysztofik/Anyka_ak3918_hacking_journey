@@ -19,6 +19,10 @@
 #include "utils/error/error_handling.h"
 
 /* Log level strings */
+/* ============================================================================
+ * Global State
+ * ============================================================================ */
+
 static const char* LOG_LEVEL_STRINGS[] = {"DEBUG", "INFO ", "NOTICE", "WARN ", "ERROR"};
 
 /* Log level colors for terminal output */
@@ -46,6 +50,10 @@ static platform_logging_config_t g_log_config = { // NOLINT
  * @param size Size of the buffer
  * @return 0 on success, -1 on error
  */
+/* ============================================================================
+ * INTERNAL HELPERS - Timestamp Formatting
+ * ============================================================================ */
+
 static int get_timestamp(char* buffer, size_t size) {
   if (!buffer || size < 32) {
     return -1;

@@ -18,6 +18,7 @@
 
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
 #include "generated/soapH.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
@@ -241,9 +242,24 @@ int onvif_service_handler_get_config_value(onvif_service_handler_instance_t* han
     return ONVIF_ERROR_INVALID;
   }
 
-  // TODO: Implement configuration value retrieval
-  // This would integrate with the config manager
-  return ONVIF_ERROR_NOT_IMPLEMENTED;
+  // Dispatch to appropriate config_runtime function based on value type
+  switch (value_type) {
+    case CONFIG_TYPE_INT:
+      return config_runtime_get_int(section, key, (int*)value_ptr);
+
+    case CONFIG_TYPE_BOOL:
+      return config_runtime_get_bool(section, key, (int*)value_ptr);
+
+    case CONFIG_TYPE_FLOAT:
+      return config_runtime_get_float(section, key, (float*)value_ptr);
+
+    case CONFIG_TYPE_STRING:
+      // String requires buffer size - use a reasonable default of 256 bytes
+      return config_runtime_get_string(section, key, (char*)value_ptr, 256);
+
+    default:
+      return ONVIF_ERROR_INVALID;
+  }
 }
 
 int onvif_service_handler_set_config_value(onvif_service_handler_instance_t* handler,
@@ -253,9 +269,23 @@ int onvif_service_handler_set_config_value(onvif_service_handler_instance_t* han
     return ONVIF_ERROR_INVALID;
   }
 
-  // TODO: Implement configuration value setting
-  // This would integrate with the config manager
-  return ONVIF_ERROR_NOT_IMPLEMENTED;
+  // Dispatch to appropriate config_runtime function based on value type
+  switch (value_type) {
+    case CONFIG_TYPE_INT:
+      return config_runtime_set_int(section, key, *(const int*)value_ptr);
+
+    case CONFIG_TYPE_BOOL:
+      return config_runtime_set_bool(section, key, *(const int*)value_ptr);
+
+    case CONFIG_TYPE_FLOAT:
+      return config_runtime_set_float(section, key, *(const float*)value_ptr);
+
+    case CONFIG_TYPE_STRING:
+      return config_runtime_set_string(section, key, (const char*)value_ptr);
+
+    default:
+      return ONVIF_ERROR_INVALID;
+  }
 }
 
 void onvif_service_handler_log(onvif_service_handler_instance_t* handler, const char* action_name,

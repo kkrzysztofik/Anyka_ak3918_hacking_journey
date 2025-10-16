@@ -30,6 +30,10 @@
 #include "utils/memory/memory_manager.h"
 #include "utils/network/network_utils.h"
 
+/* ============================================================================
+ * Global State - Snapshot Service
+ * ============================================================================ */
+
 /* Snapshot service state */
 static bool g_snapshot_initialized = false;                          // NOLINT
 static platform_snapshot_handle_t g_snapshot_handle = NULL;          // NOLINT
@@ -43,6 +47,10 @@ static int g_handler_initialized = 0;                       // NOLINT
 /* Default snapshot resolution fallbacks */
 #define DEFAULT_SNAPSHOT_WIDTH  640
 #define DEFAULT_SNAPSHOT_HEIGHT 480
+
+/* ============================================================================
+ * PUBLIC API - Snapshot Lifecycle
+ * ============================================================================ */
 
 int onvif_snapshot_init(void) {
   if (g_snapshot_initialized) {
@@ -112,6 +120,10 @@ void onvif_snapshot_cleanup(void) {
 
   pthread_mutex_unlock(&g_snapshot_mutex);
 }
+
+/* ============================================================================
+ * PUBLIC API - Snapshot Capture Operations
+ * ============================================================================ */
 
 int onvif_snapshot_capture(const snapshot_dimensions_t* dimensions, uint8_t** data, size_t* size) {
   if (!g_snapshot_initialized || !dimensions || !data || !size) {
@@ -191,6 +203,10 @@ int onvif_snapshot_get_uri(const char* profile_token, struct stream_uri* uri) {
 
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * Service Handler Integration
+ * ============================================================================ */
 
 /* Service handler action implementations */
 // NOTE: GetSnapshotUri has been removed - it belongs in the imaging service

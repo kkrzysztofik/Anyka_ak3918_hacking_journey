@@ -1007,10 +1007,20 @@ static int goto_ptz_preset_business_logic(const service_handler_config_t* config
   }
   const char* preset_token = goto_preset_req->PresetToken;
 
-  // Parse PTZ speed from request (optional) - for now, initialize with defaults
+  // Parse PTZ speed from request (optional)
   struct ptz_speed speed;
   memset(&speed, 0, sizeof(speed));
-  // TODO: Implement proper PTZ speed parsing using gSOAP parsing functions
+
+  // Extract speed from gSOAP structure if provided
+  if (goto_preset_req->Speed) {
+    if (goto_preset_req->Speed->PanTilt) {
+      speed.pan_tilt.x = goto_preset_req->Speed->PanTilt->x;
+      speed.pan_tilt.y = goto_preset_req->Speed->PanTilt->y;
+    }
+    if (goto_preset_req->Speed->Zoom) {
+      speed.zoom = goto_preset_req->Speed->Zoom->x;
+    }
+  }
 
   // Goto preset using existing function
   result = onvif_ptz_goto_preset(profile_token, preset_token, &speed);

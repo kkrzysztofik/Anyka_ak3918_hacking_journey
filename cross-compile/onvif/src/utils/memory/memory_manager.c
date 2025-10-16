@@ -51,12 +51,72 @@
  * ============================================================================
  */
 
+/* ============================================================================
+ * Global State
+ * ============================================================================ */
+
 static memory_tracker_t g_memory_tracker = {0};           // NOLINT
 static bool g_memory_manager_initialized = false;         // NOLINT
 static buffer_safety_stats_t g_buffer_safety_stats = {0}; // NOLINT
 
 // Global error message buffer for dynamic buffers
 static char g_dynamic_buffer_error_msg[MEMORY_MANAGER_ERROR_MSG_SIZE] = {0}; // NOLINT
+
+/* ============================================================================
+ * INTERNAL HELPERS - Memory Tracking
+ * ============================================================================ */
+
+static int memory_tracker_add(void* ptr, size_t size, const char* file, int line,
+                              const char* function) {
+  if (!g_memory_manager_initialized) {
+    return ONVIF_SUCCESS; // Not tracking
+  }
+
+  NULL_CHECK_RETURN(ptr, -1);
+  NULL_CHECK_RETURN(file, -1);
+  NULL_CHECK_RETURN(function, -1);
+
+  if (g_memory_tracker.count >= g_memory_tracker.capacity) {
+    // Expand tracker
+    size_t new_capacity = g_memory_tracker.capacity * 2;
+    memory_allocation_t* new_allocations =
+        realloc(g_memory_tracker.allocations, new_capacity * sizeof(memory_allocation_t));
+    if (!new_allocations) {
+      return -1;
+    }
+    g_memory_tracker.allocations = new_allocations;
+    g_memory_tracker.capacity = new_capacity;
+  }
+
+  g_memory_tracker.allocations[g_memory_tracker.count].ptr = ptr;
+  g_memory_tracker.allocations[g_memory_tracker.count].size = size;
+  g_memory_tracker.allocations[g_memory_tracker.count].file = file;
+  g_memory_tracker.allocations[g_memory_tracker.count].line = line;
+  g_memory_tracker.allocations[g_memory_tracker.count].function = function;
+  g_memory_tracker.count++;
+
+  return ONVIF_SUCCESS;
+}
+
+static int memory_tracker_remove(void* ptr) {
+  if (!g_memory_manager_initialized || !ptr) {
+    return ONVIF_SUCCESS;
+  }
+
+  for (size_t i = 0; i < g_memory_tracker.count; i++) {
+    if (g_memory_tracker.allocations[i].ptr == ptr) {
+      g_memory_tracker.allocations[i].ptr = NULL;
+      return ONVIF_SUCCESS;
+    }
+  }
+
+  platform_log_warning("Attempted to free untracked memory at %p\n", ptr);
+  return -1;
+}
+
+/* ============================================================================
+ * PUBLIC API - Initialization and Cleanup
+ * ============================================================================ */
 
 int memory_manager_init(void) {
   if (g_memory_manager_initialized) {
@@ -166,54 +226,9 @@ int memory_manager_check_leaks(void) {
   return ONVIF_SUCCESS;
 }
 
-static int memory_tracker_add(void* ptr, size_t size, const char* file, int line,
-                              const char* function) {
-  if (!g_memory_manager_initialized) {
-    return ONVIF_SUCCESS; // Not tracking
-  }
-
-  NULL_CHECK_RETURN(ptr, -1);
-  NULL_CHECK_RETURN(file, -1);
-  NULL_CHECK_RETURN(function, -1);
-
-  if (g_memory_tracker.count >= g_memory_tracker.capacity) {
-    // Expand tracker
-    size_t new_capacity = g_memory_tracker.capacity * 2;
-    memory_allocation_t* new_allocations =
-      realloc(g_memory_tracker.allocations, new_capacity * sizeof(memory_allocation_t));
-    if (!new_allocations) {
-      platform_log_error("Failed to expand memory tracker\n");
-      return -1;
-    }
-    g_memory_tracker.allocations = new_allocations;
-    g_memory_tracker.capacity = new_capacity;
-  }
-
-  g_memory_tracker.allocations[g_memory_tracker.count].ptr = ptr;
-  g_memory_tracker.allocations[g_memory_tracker.count].size = size;
-  g_memory_tracker.allocations[g_memory_tracker.count].file = file;
-  g_memory_tracker.allocations[g_memory_tracker.count].line = line;
-  g_memory_tracker.allocations[g_memory_tracker.count].function = function;
-  g_memory_tracker.count++;
-
-  return ONVIF_SUCCESS;
-}
-
-static int memory_tracker_remove(void* ptr) {
-  if (!g_memory_manager_initialized || !ptr) {
-    return ONVIF_SUCCESS;
-  }
-
-  for (size_t i = 0; i < g_memory_tracker.count; i++) {
-    if (g_memory_tracker.allocations[i].ptr == ptr) {
-      g_memory_tracker.allocations[i].ptr = NULL;
-      return ONVIF_SUCCESS;
-    }
-  }
-
-  platform_log_warning("Attempted to free untracked memory at %p\n", ptr);
-  return -1;
-}
+/* ============================================================================
+ * PUBLIC API - Memory Allocation
+ * ============================================================================ */
 
 void* onvif_malloc(size_t size, const char* file, int line, const char* function) {
   NULL_CHECK_RETURN(file, NULL);

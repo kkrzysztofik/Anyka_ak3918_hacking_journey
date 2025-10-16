@@ -21,6 +21,10 @@
 #include "utils/error/error_handling.h"
 #include "utils/logging/platform_logging.h"
 
+/* ============================================================================
+ * Global State - Security Configuration and Rate Limiting
+ * ============================================================================ */
+
 /* Global security configuration */
 static security_level_t g_security_level = SECURITY_LEVEL_BASIC; // NOLINT
 static int g_max_requests_per_minute = MAX_REQUESTS_PER_MINUTE;  // NOLINT
@@ -31,7 +35,10 @@ static int g_rate_limit_window = 60; /* seconds */               // NOLINT
 static rate_limit_entry_t g_rate_limits[MAX_RATE_LIMIT_ENTRIES]; // NOLINT
 static int g_rate_limit_count = 0;                               // NOLINT
 
-/* Security initialization */
+/* ============================================================================
+ * PUBLIC API - Initialization and Cleanup
+ * ============================================================================ */
+
 int security_init(security_level_t level) {
   g_security_level = level;
 
@@ -51,7 +58,10 @@ void security_cleanup(void) {
   ONVIF_LOG_INFO("Security system cleaned up\n");
 }
 
-/* Input validation functions */
+/* ============================================================================
+ * PUBLIC API - Input Validation Functions
+ * ============================================================================ */
+
 int security_validate_http_headers(const http_request_t* request, security_context_t* context) {
   if (!request || !context) {
     return ONVIF_ERROR;
@@ -140,6 +150,10 @@ int security_validate_xml_structure(const char* xml, size_t length, security_con
   return ONVIF_SUCCESS;
 }
 
+/* ============================================================================
+ * INTERNAL HELPERS - Character Escaping
+ * ============================================================================ */
+
 /**
  * @brief Escape a single character to HTML entity
  * @param character Character to escape
@@ -194,6 +208,10 @@ static size_t escape_character(char character, char* output, size_t out_pos, siz
   return 0;
 }
 
+/* ============================================================================
+ * PUBLIC API - Input Sanitization
+ * ============================================================================ */
+
 int security_sanitize_input(const char* input, char* output, size_t output_size,
                             security_context_t* context) {
   ONVIF_VALIDATE_NULL(input, "input");
@@ -220,7 +238,10 @@ int security_sanitize_input(const char* input, char* output, size_t output_size,
   return ONVIF_SUCCESS;
 }
 
-/* Rate limiting functions */
+/* ============================================================================
+ * PUBLIC API - Rate Limiting Functions
+ * ============================================================================ */
+
 int security_check_rate_limit(const char* client_ip, security_context_t* context) {
   ONVIF_VALIDATE_NULL(client_ip, "client_ip");
 
@@ -293,7 +314,10 @@ int security_is_client_blocked(const char* client_ip, security_context_t* contex
   return 0; // Not blocked if not found
 }
 
-/* Attack detection functions */
+/* ============================================================================
+ * PUBLIC API - Attack Detection Functions
+ * ============================================================================ */
+
 int security_detect_sql_injection(const char* input) {
   ONVIF_VALIDATE_NULL(input, "input");
 
@@ -375,7 +399,10 @@ int security_detect_xxe_attack(const char* xml, size_t length) {
   return ONVIF_SUCCESS;
 }
 
-/* Logging functions */
+/* ============================================================================
+ * PUBLIC API - Security Logging Functions
+ * ============================================================================ */
+
 void security_log_attack(const char* attack_type, const char* client_ip, const char* details) {
   ONVIF_LOG_ERROR("SECURITY ALERT: %s attack from %s - %s\n", attack_type ? attack_type : "Unknown",
                   client_ip ? client_ip : "Unknown", details ? details : "No details");
@@ -387,7 +414,10 @@ void security_log_security_event(const char* event_type, const char* client_ip, 
                   event_type ? event_type : "Unknown", client_ip ? client_ip : "Unknown");
 }
 
-/* Utility functions */
+/* ============================================================================
+ * PUBLIC API - Utility Functions
+ * ============================================================================ */
+
 const char* security_get_client_ip(const connection_t* conn) {
   if (!conn) {
     return "unknown";
@@ -454,7 +484,10 @@ int security_is_private_ip(const char* ip_address) {
   return 0;
 }
 
-/* Security headers functions */
+/* ============================================================================
+ * PUBLIC API - Security Headers Functions
+ * ============================================================================ */
+
 int security_add_security_headers(http_response_t* response, security_context_t* context) {
   ONVIF_VALIDATE_NULL(response, "response");
 
@@ -500,7 +533,10 @@ int security_add_security_headers(http_response_t* response, security_context_t*
   return ONVIF_SUCCESS;
 }
 
-/* Comprehensive request validation functions */
+/* ============================================================================
+ * PUBLIC API - Comprehensive Request Validation
+ * ============================================================================ */
+
 int security_validate_request(const http_request_t* request, security_context_t* context) {
   ONVIF_VALIDATE_NULL(request, "request");
   ONVIF_VALIDATE_NULL(context, "context");

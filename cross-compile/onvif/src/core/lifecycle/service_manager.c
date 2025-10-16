@@ -21,7 +21,15 @@
 #include "services/media/onvif_media.h"
 #include "services/ptz/onvif_ptz.h"
 
+/* ============================================================================
+ * Global State
+ * ============================================================================ */
+
 static volatile bool g_service_services_initialized = false; // NOLINT
+
+/* ============================================================================
+ * PUBLIC API - Service Initialization
+ * ============================================================================ */
 
 int onvif_services_init(platform_vi_handle_t vi_handle) {
   if (g_service_services_initialized) {
@@ -74,6 +82,10 @@ int onvif_services_init(platform_vi_handle_t vi_handle) {
 
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * PUBLIC API - Cleanup
+ * ============================================================================ */
 
 void onvif_services_cleanup(void) {
   if (!g_service_services_initialized) {

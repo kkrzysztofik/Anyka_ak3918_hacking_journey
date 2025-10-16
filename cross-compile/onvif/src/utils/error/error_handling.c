@@ -19,6 +19,10 @@
 #include "protocol/gsoap/onvif_gsoap_response.h"
 #include "utils/memory/memory_manager.h"
 
+/* ============================================================================
+ * Constants and Types
+ * ============================================================================ */
+
 /* SOAP Fault Codes - using constants from common/onvif_constants.h */
 
 typedef struct {
@@ -43,6 +47,10 @@ static const error_pattern_def_t error_patterns[] = {
   {ERROR_PATTERN_AUTHORIZATION_FAILED, "Authorization failed", SOAP_FAULT_SENDER,
    "Authorization failed"}};
 
+/* ============================================================================
+ * INTERNAL HELPERS - Error Pattern Lookup
+ * ============================================================================ */
+
 static const error_pattern_def_t* find_error_pattern(error_pattern_t pattern) {
   for (size_t i = 0; i < sizeof(error_patterns) / sizeof(error_patterns[0]); i++) {
     if (error_patterns[i].pattern == pattern) {
@@ -51,6 +59,10 @@ static const error_pattern_def_t* find_error_pattern(error_pattern_t pattern) {
   }
   return NULL;
 }
+
+/* ============================================================================
+ * PUBLIC API - Error Context Management
+ * ============================================================================ */
 
 int error_context_init(error_context_t* context,
                        const char* service_name,    // NOLINT
@@ -88,6 +100,10 @@ int error_create_result_from_pattern(error_pattern_t pattern, const char* custom
 
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * PUBLIC API - Error Handling Functions
+ * ============================================================================ */
 
 int error_handle_pattern(const error_context_t* context, error_pattern_t pattern,
                          const char* custom_message, http_response_t* response) {
@@ -230,6 +246,10 @@ int error_handle_system(const error_context_t* context, int error_code, const ch
   return error_handle_pattern(context, ERROR_PATTERN_INTERNAL_ERROR, custom_message, response);
 }
 
+/* ============================================================================
+ * PUBLIC API - Logging Functions
+ * ============================================================================ */
+
 void onvif_log_error_context(const error_context_t* ctx) {
   if (!ctx) {
     return;
@@ -269,6 +289,10 @@ void onvif_log_error_with_context(int error_code,
 
   onvif_log_error_context(&ctx);
 }
+
+/* ============================================================================
+ * PUBLIC API - Utility Functions
+ * ============================================================================ */
 
 const char* error_get_message_for_pattern(error_pattern_t pattern) {
   const error_pattern_def_t* def = find_error_pattern(pattern);
@@ -354,7 +378,10 @@ void error_log_with_context(const error_context_t* context, const error_result_t
   }
 }
 
-/* Standardized error handling functions */
+/* ============================================================================
+ * PUBLIC API - Standardized Error Handling
+ * ============================================================================ */
+
 int onvif_standardized_validation(const char* field_name, int validation_result,
                                   const char* error_context) {
   if (validation_result == ONVIF_VALIDATION_SUCCESS) {

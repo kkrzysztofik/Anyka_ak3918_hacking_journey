@@ -11,6 +11,10 @@
 #include <sys/time.h>
 #include <time.h>
 
+/* ============================================================================
+ * PUBLIC API - Time Utility Functions
+ * ============================================================================ */
+
 /**
  * @brief Get current timestamp in microseconds
  * @return Timestamp in microseconds since epoch

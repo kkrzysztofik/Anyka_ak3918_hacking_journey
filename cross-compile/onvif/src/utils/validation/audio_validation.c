@@ -14,6 +14,10 @@
 #include "platform/platform_common.h"
 #include "utils/error/error_handling.h"
 
+/* ============================================================================
+ * PUBLIC API - Validation Functions
+ * ============================================================================ */
+
 /**
  * @brief Validate audio configuration parameters
  * @param config Audio configuration to validate (must not be NULL)
@@ -108,6 +112,10 @@ int audio_validation_validate_codec(platform_audio_codec_t codec) {
     return 0;
   }
 }
+
+/* ============================================================================
+ * PUBLIC API - Configuration Helpers
+ * ============================================================================ */
 
 /**
  * @brief Get default audio configuration

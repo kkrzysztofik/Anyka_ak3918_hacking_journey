@@ -26,10 +26,15 @@
 #include "utils/error/error_handling.h"
 #include "utils/stream/stream_config_utils.h"
 
-/* Global configuration state */
+/* ============================================================================
+ * Global State
+ * ============================================================================ */
+
 static volatile bool g_config_loaded = false; // NOLINT
 
-/* ---------------------------- Public Interface ------------------------- */
+/* ============================================================================
+ * PUBLIC API - Memory Management
+ * ============================================================================ */
 
 int config_lifecycle_allocate_memory(struct application_config* cfg) {
   platform_log_info("Allocating configuration memory...\n");
@@ -111,6 +116,10 @@ int config_lifecycle_allocate_memory(struct application_config* cfg) {
   return ONVIF_SUCCESS;
 }
 
+/* ============================================================================
+ * PUBLIC API - Configuration Loading
+ * ============================================================================ */
+
 int config_lifecycle_load_configuration(struct application_config* cfg) {
   platform_log_info("Loading configuration...\n");
 
@@ -174,6 +183,10 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
   platform_log_info("Configuration loaded successfully\n");
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * PUBLIC API - Cleanup and Utility
+ * ============================================================================ */
 
 void config_lifecycle_free_memory(struct application_config* cfg) {
   platform_log_info("Freeing configuration memory...\n");

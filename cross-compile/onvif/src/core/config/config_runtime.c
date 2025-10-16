@@ -525,6 +525,10 @@ int config_runtime_apply_defaults(void) {
 /**
  * @brief Get integer configuration value with validation
  */
+/* ============================================================================
+ * PUBLIC API - Getters
+ * ============================================================================ */
+
 int config_runtime_get_int(config_section_t section, const char* key, int* out_value) {
   config_value_type_t field_type = CONFIG_TYPE_INT;
   void* field_ptr = NULL;
@@ -684,6 +688,10 @@ int config_runtime_get_float(config_section_t section, const char* key, float* o
 /**
  * @brief Set integer configuration value with validation
  */
+/* ============================================================================
+ * PUBLIC API - Setters
+ * ============================================================================ */
+
 int config_runtime_set_int(config_section_t section, const char* key, int value) {
   config_value_type_t field_type = CONFIG_TYPE_INT;
   void* field_ptr = NULL;
@@ -902,6 +910,10 @@ const struct application_config* config_runtime_snapshot(void) {
 /**
  * @brief Get current configuration generation counter
  */
+/* ============================================================================
+ * PUBLIC API - Metadata and Utilities
+ * ============================================================================ */
+
 uint32_t config_runtime_get_generation(void) {
   uint32_t generation;
 

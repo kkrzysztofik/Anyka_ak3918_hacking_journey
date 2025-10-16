@@ -110,6 +110,10 @@
 #define MEDIA_XML_VIDEO_SOURCE_TAG  "<trt:VideoSourceToken>"
 #define MEDIA_XML_AUDIO_SOURCE_TAG  "<trt:AudioSourceToken>"
 
+/* ============================================================================
+ * Forward Declarations and Global State
+ * ============================================================================ */
+
 /* Helper functions */
 static int parse_profile_token(onvif_gsoap_context_t* gsoap_ctx, char* token, size_t token_size);
 static int parse_protocol(onvif_gsoap_context_t* gsoap_ctx, char* protocol, size_t protocol_size);
@@ -121,6 +125,10 @@ static int get_active_profile_count(void);
 /* Cached media profiles dynamically built from runtime configuration */
 static struct media_profile g_media_profiles[4] = {{0}}; // NOLINT - max 4 profiles
 static int g_profiles_loaded = 0;                        // NOLINT
+
+/* ============================================================================
+ * INTERNAL HELPERS - Profile Management
+ * ============================================================================ */
 
 /**
  * @brief Get active profile count from runtime configuration
@@ -348,6 +356,10 @@ static struct media_profile* find_profile_optimized(const char* profile_token) {
   return NULL;
 }
 
+/* ============================================================================
+ * PUBLIC API - Profile Operations
+ * ============================================================================ */
+
 int onvif_media_get_profiles(struct media_profile** profile_list, int* count) {
   ONVIF_CHECK_NULL(profile_list);
   ONVIF_CHECK_NULL(count);
@@ -442,6 +454,10 @@ int onvif_media_delete_profile(const char* profile_token) {
     "[MEDIA] Profile deletion requested but not implemented: use configuration system\n");
   return ONVIF_ERROR_NOT_SUPPORTED;
 }
+
+/* ============================================================================
+ * PUBLIC API - Video/Audio Source Operations
+ * ============================================================================ */
 
 int onvif_media_get_video_sources(struct video_source** sources, int* count) {
   static struct video_source video_sources[] = {
@@ -611,7 +627,10 @@ int onvif_media_set_metadata_configuration(const char* configuration_token,
   return ONVIF_ERROR_NOT_FOUND;
 }
 
-/* Configuration Management Functions */
+/* ============================================================================
+ * PUBLIC API - Configuration Management
+ * ============================================================================ */
+
 int onvif_media_set_video_source_configuration(const char* configuration_token,
                                                const struct video_source_configuration* config) {
   ONVIF_CHECK_NULL(configuration_token);
@@ -716,6 +735,10 @@ int onvif_media_set_audio_encoder_configuration(const char* configuration_token,
 
   return ONVIF_ERROR_NOT_FOUND;
 }
+
+/* ============================================================================
+ * PUBLIC API - Stream URI Operations
+ * ============================================================================ */
 
 int onvif_media_get_stream_uri(const char* profile_token, const char* protocol,
                                struct stream_uri* uri) {

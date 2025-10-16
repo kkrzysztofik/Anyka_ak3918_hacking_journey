@@ -62,6 +62,10 @@ int network_lifecycle_init(const struct application_config* cfg) {
   return ONVIF_SUCCESS;
 }
 
+/* ============================================================================
+ * PUBLIC API - Cleanup
+ * ============================================================================ */
+
 void network_lifecycle_cleanup(void) {
   static bool cleanup_done = false;
 

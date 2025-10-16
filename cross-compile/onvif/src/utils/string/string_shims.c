@@ -12,6 +12,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* ============================================================================
+ * Fallback Implementations - Standard String Functions
+ * ============================================================================ */
+
 /* Fallback implementation for missing strcasecmp function */
 #ifndef strcasecmp
 int strcasecmp(const char* s1, const char* s2) {
@@ -84,6 +88,10 @@ size_t strnlen(const char* s, size_t maxlen) {
   return len;
 }
 #endif
+
+/* ============================================================================
+ * PUBLIC API - String Utility Functions
+ * ============================================================================ */
 
 /* Trim leading and trailing whitespace from a string */
 void trim_whitespace(char* s) {

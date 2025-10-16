@@ -20,11 +20,16 @@
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
 
-/* Global platform state - static variables with internal linkage only */
+/* ============================================================================
+ * Global State
+ * ============================================================================ */
+
 static volatile bool g_platform_initialized = false; // NOLINT
 static volatile int g_platform_status = 0;           // NOLINT
 
-/* ---------------------------- Public Interface ------------------------- */
+/* ============================================================================
+ * PUBLIC API - Platform Initialization
+ * ============================================================================ */
 
 int platform_lifecycle_init(void) {
   platform_log_info("Initializing platform...\n");
@@ -47,6 +52,10 @@ int platform_lifecycle_init(void) {
   platform_log_info("Platform initialized successfully\n");
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * PUBLIC API - Cleanup
+ * ============================================================================ */
 
 void platform_lifecycle_cleanup(void) {
   static bool cleanup_done = false;

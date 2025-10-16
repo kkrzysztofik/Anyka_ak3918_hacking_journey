@@ -44,6 +44,10 @@ static volatile int g_signal_running = 1; // NOLINT
  *
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
+/* ============================================================================
+ * INTERNAL HELPERS - Console Management
+ * ============================================================================ */
+
 static int block_console_input(void) {
   int null_fd = open("/dev/null", O_RDONLY);
   if (null_fd == -1) {
@@ -119,6 +123,10 @@ static bool check_eof_condition(void) {
 
 /* ---------------------------- Public Interface ------------------------- */
 
+/* ============================================================================
+ * PUBLIC API - Signal Handler Registration
+ * ============================================================================ */
+
 int signal_lifecycle_register_handlers(void) {
   platform_log_info("Registering signal handlers...\n");
 
@@ -161,6 +169,10 @@ int signal_lifecycle_register_handlers(void) {
 bool signal_lifecycle_should_continue(void) {
   return g_signal_running;
 }
+
+/* ============================================================================
+ * PUBLIC API - Daemon Loop
+ * ============================================================================ */
 
 void signal_lifecycle_run_daemon_loop(const struct application_config* cfg) {
   platform_log_info("ONVIF daemon running... (Press Ctrl+C to stop)\n");

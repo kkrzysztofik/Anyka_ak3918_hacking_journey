@@ -143,6 +143,10 @@ int onvif_util_handle_service_request(const service_handler_config_t* config,
   return ONVIF_SUCCESS;
 }
 
+/* ============================================================================
+ * Configuration Helper Functions
+ * ============================================================================ */
+
 /**
  * @brief Simplified configuration string getter with fallback
  */
@@ -182,6 +186,10 @@ int config_get_int_or_default(config_section_t section, const char* key, int def
 
   return value;
 }
+
+/* ============================================================================
+ * Service Type Conversion Functions
+ * ============================================================================ */
 
 /**
  * @brief Convert service type to string
