@@ -68,8 +68,6 @@ static platform_vi_handle_t g_vi_handle = NULL;     // NOLINT
 static platform_venc_handle_t g_venc_handle = NULL; // NOLINT
 static platform_ai_handle_t g_ai_handle = NULL;     // NOLINT
 static platform_aenc_handle_t g_aenc_handle = NULL; // NOLINT
-static platform_video_config_t g_video_config;      // NOLINT
-static platform_audio_config_t g_audio_config;      // NOLINT
 
 /* Thread-safe counters and flags with mutex protection */
 static uint32_t g_encoder_active_count = 0;     // NOLINT
@@ -170,19 +168,6 @@ static int map_video_codec(platform_video_codec_t codec) {
   }
 }
 
-static int map_platform_enc_type(int platform_enc_type) {
-  switch (platform_enc_type) {
-  case PLATFORM_H264_ENC_TYPE:
-    return H264_ENC_TYPE;
-  case PLATFORM_HEVC_ENC_TYPE:
-    return HEVC_ENC_TYPE;
-  case PLATFORM_MJPEG_ENC_TYPE:
-    return MJPEG_ENC_TYPE;
-  default:
-    return -1;
-  }
-}
-
 static int map_platform_profile(int platform_profile) {
   switch (platform_profile) {
   case PLATFORM_PROFILE_MAIN:
@@ -203,54 +188,6 @@ static int map_platform_br_mode(int platform_br_mode) {
   default:
     return -1;
   }
-}
-
-static int map_platform_frame_type(int platform_frame_type) {
-  switch (platform_frame_type) {
-  case PLATFORM_FRAME_TYPE_I:
-    return FRAME_TYPE_I;
-  case PLATFORM_FRAME_TYPE_P:
-    return FRAME_TYPE_P;
-  case PLATFORM_FRAME_TYPE_B:
-    return FRAME_TYPE_B;
-  default:
-    return -1;
-  }
-}
-
-static int map_audio_codec(platform_audio_codec_t codec) {
-  switch (codec) {
-  case PLATFORM_AUDIO_CODEC_PCM:
-  case PLATFORM_AUDIO_CODEC_G711A:
-  case PLATFORM_AUDIO_CODEC_G711U:
-    return AK_AUDIO_TYPE_UNKNOWN; // Use PCM as default, G711 not directly
-                                  // supported
-  case PLATFORM_AUDIO_CODEC_AAC:
-    return AK_AUDIO_TYPE_AAC;
-  default:
-    return -1;
-  }
-}
-
-/**
- * @brief Map platform audio codec to Anyka audio type with validation
- * @param codec Platform audio codec type
- * @return Anyka audio type or -1 if unsupported
- * @note Validates codec support before mapping
- */
-static int map_audio_codec_with_validation(platform_audio_codec_t codec) {
-  int anyka_type = map_audio_codec(codec);
-  if (anyka_type < 0) {
-    platform_log_error("Unsupported audio codec: %d\n", codec);
-    return -1;
-  }
-
-  // Additional validation for AAC codec
-  if (codec == PLATFORM_AUDIO_CODEC_AAC) {
-    platform_log_debug("AAC codec selected (Anyka type: %d)\n", anyka_type);
-  }
-
-  return anyka_type;
 }
 
 static int map_vpss_effect(platform_vpss_effect_t effect) {
@@ -278,32 +215,6 @@ static int map_daynight_mode(platform_daynight_mode_t mode) {
     return VI_MODE_NIGHT;
   case PLATFORM_DAYNIGHT_AUTO:
     return VI_MODE_DAY; // Use DAY as default for AUTO
-  default:
-    return -1;
-  }
-}
-
-static int map_ptz_axis(platform_ptz_axis_t axis) {
-  switch (axis) {
-  case PLATFORM_PTZ_AXIS_PAN:
-    return PTZ_DEV_H;
-  case PLATFORM_PTZ_AXIS_TILT:
-    return PTZ_DEV_V;
-  default:
-    return -1;
-  }
-}
-
-static int map_ptz_direction(platform_ptz_direction_t direction) {
-  switch (direction) {
-  case PLATFORM_PTZ_DIRECTION_LEFT:
-    return PTZ_TURN_LEFT;
-  case PLATFORM_PTZ_DIRECTION_RIGHT:
-    return PTZ_TURN_RIGHT;
-  case PLATFORM_PTZ_DIRECTION_UP:
-    return PTZ_TURN_UP;
-  case PLATFORM_PTZ_DIRECTION_DOWN:
-    return PTZ_TURN_DOWN;
   default:
     return -1;
   }
@@ -1113,7 +1024,6 @@ platform_result_t platform_aenc_init(platform_aenc_stream_handle_t* handle,
     *handle = NULL;
   }
   return PLATFORM_ERROR_NOT_SUPPORTED;
-
   /* Original implementation commented out to prevent segmentation fault
   if (!handle || !config) {
       platform_log_error("platform_aenc_init: Invalid parameters (handle=%p,
@@ -1504,202 +1414,9 @@ platform_result_t platform_irled_get_status(void) {
   return (platform_result_t)status;
 }
 
-/* Configuration functions */
-static char g_config_buffer[4096] = {0}; // NOLINT
-static bool g_config_loaded = false;     // NOLINT
-
-platform_result_t platform_config_load(const char* filename) {
-  if (!filename) {
-    return PLATFORM_ERROR_NULL;
-  }
-
-  FILE* config_file = fopen(filename, "r");
-  if (!config_file) {
-    platform_log_warning("Failed to open config file: %s\n", filename);
-    return PLATFORM_ERROR_IO;
-  }
-
-  size_t bytes_read = fread(g_config_buffer, 1, sizeof(g_config_buffer) - 1, config_file);
-  int close_result = fclose(config_file);
-  if (close_result != 0) {
-    platform_log_warning("Failed to close config file: %s\n", filename);
-  }
-
-  if (bytes_read == 0) {
-    platform_log_warning("Config file is empty: %s\n", filename);
-    return PLATFORM_ERROR_IO;
-  }
-
-  g_config_buffer[bytes_read] = '\0';
-  g_config_loaded = true;
-
-  platform_log_info("Configuration loaded from: %s\n", filename);
-  return PLATFORM_SUCCESS;
-}
-
-platform_result_t platform_config_save(const char* filename) {
-  if (!filename) {
-    return PLATFORM_ERROR_NULL;
-  }
-
-  FILE* config_file = fopen(filename, "w");
-  if (!config_file) {
-    platform_log_error("Failed to create config file: %s\n", filename);
-    return PLATFORM_ERROR_IO;
-  }
-
-  size_t bytes_written = fwrite(g_config_buffer, 1, strlen(g_config_buffer), config_file);
-  int close_result = fclose(config_file);
-  if (close_result != 0) {
-    platform_log_warning("Failed to close config file: %s\n", filename);
-  }
-
-  if (bytes_written != strlen(g_config_buffer)) {
-    platform_log_error("Failed to write complete config to: %s\n", filename);
-    return PLATFORM_ERROR_IO;
-  }
-
-  platform_log_info("Configuration saved to: %s\n", filename);
-  return PLATFORM_SUCCESS;
-}
-
-/**
- * @brief Find the start of a configuration section
- * @param section Section name to find
- * @return Pointer to section start or NULL if not found
- */
-static char* find_config_section(const char* section) {
-  char search_pattern[256];
-  (void)snprintf(search_pattern, sizeof(search_pattern), "[%s]", section);
-  return strstr(g_config_buffer, search_pattern);
-}
-
-/**
- * @brief Find the next line in configuration
- * @param line_start Current line start position
- * @return Pointer to next line or end of buffer
- */
-static char* find_next_line(char* line_start) {
-  char* line_end = strchr(line_start, '\n');
-  if (!line_end) {
-    return g_config_buffer + strlen(g_config_buffer);
-  }
-  return line_end;
-}
-
-/**
- * @brief Check if a line contains the specified key
- * @param key Key to search for
- * @param line_start Start of the line
- * @param line_end End of the line
- * @return Pointer to equals sign if key found, NULL otherwise
- */
-static char* find_key_in_line(const char* key, char* line_start, // NOLINT
-                              const char* line_end) {
-  char* equals = strchr(line_start, '=');
-  if (!equals || equals >= line_end) {
-    return NULL;
-  }
-
-  // Trim whitespace from key
-  char* key_end = equals;
-  while (key_end > line_start && (*key_end == ' ' || *key_end == '\t')) {
-    key_end--;
-  }
-
-  size_t key_len = key_end - line_start;
-  if (strncmp(line_start, key, key_len) == 0) {
-    return equals;
-  }
-
-  return NULL;
-}
-
-/**
- * @brief Extract and clean value from configuration line
- * @param equals_pos Position of equals sign
- * @param line_end End of the line
- * @return Extracted value (static buffer)
- */
-static const char* extract_config_value(char* equals_pos, const char* line_end) {
-  char* value_start = equals_pos + 1;
-
-  // Skip leading whitespace
-  while (*value_start == ' ' || *value_start == '\t') {
-    value_start++;
-  }
-
-  // Trim trailing whitespace
-  const char* value_end = line_end;
-  while (value_end > value_start &&
-         (value_end[-1] == ' ' || value_end[-1] == '\t' || value_end[-1] == '\r')) {
-    value_end--;
-  }
-
-  static char value_buffer[256];
-  size_t value_len = value_end - value_start;
-  if (value_len >= sizeof(value_buffer)) {
-    value_len = sizeof(value_buffer) - 1;
-  }
-
-  strncpy(value_buffer, value_start, value_len);
-  value_buffer[value_len] = '\0';
-
-  return value_buffer;
-}
-
-const char* platform_config_get_string(const char* section,
-                                       const char* key,             // NOLINT
-                                       const char* default_value) { // NOLINT
-  if (!section || !key || !g_config_loaded) {
-    return default_value;
-  }
-
-  char* section_start = find_config_section(section);
-  if (!section_start) {
-    return default_value;
-  }
-
-  char* line_start = strchr(section_start, '\n');
-  if (!line_start) {
-    return default_value;
-  }
-  line_start++; // Skip the newline
-
-  while (*line_start && *line_start != '[') {
-    char* line_end = find_next_line(line_start);
-    char* equals = find_key_in_line(key, line_start, line_end);
-
-    if (equals) {
-      return extract_config_value(equals, line_end);
-    }
-
-    line_start = line_end;
-    if (*line_start == '\n') {
-      line_start++;
-    }
-  }
-
-  return default_value;
-}
-
-int platform_config_get_int(const char* section, const char* key, int default_value) {
-  const char* str_value = platform_config_get_string(section, key, NULL);
-  if (!str_value) {
-    return default_value;
-  }
-
-  char* endptr = NULL;
-  long int_value = strtol(str_value, &endptr, 10);
-  if (endptr == str_value || *endptr != '\0') {
-    return default_value;
-  }
-
-  return (int)int_value;
-}
-
-/* Logging functions - now use enhanced logging with timestamps and log levels
- */
+/* ============================================================================
+ * Logging Functions
+ * ============================================================================ */
 int platform_log_error(const char* format, ...) {
   va_list args;
   va_start(args, format);
@@ -2718,49 +2435,6 @@ static void platform_venc_log_buffer_status(uint32_t buffer_count, uint32_t max_
   }
 }
 
-/**
- * @brief Log FPS switch detection
- * @param old_fps Previous FPS value
- * @param new_fps New FPS value
- * @param context Context string for logging
- * @note Follows ak_venc.c reference implementation FPS switch logging
- */
-static void platform_venc_log_fps_switch(uint32_t old_fps, uint32_t new_fps, const char* context) {
-  platform_log_warning("VENC_FPS[%s]: *** FPS switch detected %u -> %u ***\n",
-                       context ? context : "unknown", old_fps, new_fps);
-
-  // Update performance tracking
-  g_venc_perf.previous_sensor_fps = old_fps;
-  g_venc_perf.sensor_fps = new_fps;
-  g_venc_perf.fps_switch_detected = true;
-  g_venc_perf.last_fps_switch_time = get_time_ms();
-}
-
-/**
- * @brief Log frame timing information
- * @param capture_time Time taken for capture
- * @param encode_time Time taken for encoding
- * @param total_time Total processing time
- * @param context Context string for logging
- * @note Follows ak_venc.c reference implementation timing logging
- */
-static void platform_venc_log_frame_timing(uint64_t capture_time, uint64_t encode_time,
-                                           uint64_t total_time, const char* context) {
-  platform_log_debug("VENC_TIMING[%s]: capture=%llums, encode=%llums, total=%llums\n",
-                     context ? context : "unknown", capture_time, encode_time, total_time);
-
-  // Log warnings for slow operations
-  if (capture_time > 50) {
-    platform_log_warning("VENC_TIMING[%s]: Slow capture detected (%llums)\n",
-                         context ? context : "unknown", capture_time);
-  }
-
-  if (encode_time > 100) {
-    platform_log_warning("VENC_TIMING[%s]: Slow encoding detected (%llums)\n",
-                         context ? context : "unknown", encode_time);
-  }
-}
-
 /* Utility function for range validation to reduce code duplication */
 static bool validate_range(int value, int min, int max, const char* name) {
   if (value < min || value > max) {
@@ -2784,11 +2458,6 @@ static void unlock_platform_mutex(void) {
 }
 
 /* Logging utility functions for common patterns */
-static void log_stream_success(const char* function_name, uint32_t len, bool is_keyframe) {
-  platform_log_debug("%s: Success (len=%u, keyframe=%s)\n", function_name, len,
-                     is_keyframe ? "true" : "false");
-}
-
 /**
  * @brief Validate video encoder configuration parameters
  * @param config Video encoder configuration to validate
