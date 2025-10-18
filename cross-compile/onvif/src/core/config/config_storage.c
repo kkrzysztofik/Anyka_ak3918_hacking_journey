@@ -35,6 +35,10 @@ static int config_storage_parse_ini(const char* path);
 static void config_storage_trim_whitespace(char* str);
 static config_section_t config_storage_parse_section_name(const char* section_name);
 
+/* ============================================================================
+ * PUBLIC API - File Operations
+ * ============================================================================ */
+
 /**
  * @brief Load configuration from INI file with schema validation
  *
@@ -107,6 +111,10 @@ int config_storage_reload(const char* path)
     return config_storage_load(path, NULL);
 }
 
+/* ============================================================================
+ * PUBLIC API - Atomic Write Operations
+ * ============================================================================ */
+
 /**
  * @brief Perform atomic file write operation
  */
@@ -168,6 +176,10 @@ cleanup:
 
     return result;
 }
+
+/* ============================================================================
+ * PUBLIC API - Validation & Checksums
+ * ============================================================================ */
 
 /**
  * @brief Validate configuration file format
@@ -247,6 +259,10 @@ uint32_t config_storage_calculate_checksum(const void* data, size_t size)
     return checksum;
 }
 
+/* ============================================================================
+ * PUBLIC API - Error Logging
+ * ============================================================================ */
+
 /**
  * @brief Log storage operation error
  */
@@ -263,7 +279,9 @@ void config_storage_log_error(const char* operation, const char* path, int error
                       operation, path, error_code);
 }
 
-/* Helper functions */
+/* ============================================================================
+ * PRIVATE HELPERS - File Operations
+ * ============================================================================ */
 
 static int config_storage_check_file_size(const char* path)
 {
@@ -279,6 +297,10 @@ static int config_storage_check_file_size(const char* path)
 
     return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * PRIVATE HELPERS - String Processing
+ * ============================================================================ */
 
 /**
  * @brief Trim leading and trailing whitespace from string (in-place)
@@ -346,6 +368,10 @@ static config_section_t config_storage_parse_section_name(const char* section_na
 
     return CONFIG_SECTION_ONVIF;  /* Default to ONVIF section */
 }
+
+/* ============================================================================
+ * PRIVATE HELPERS - INI Parsing
+ * ============================================================================ */
 
 /**
  * @brief Parse INI file and load values into runtime configuration
