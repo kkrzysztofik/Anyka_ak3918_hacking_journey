@@ -48,9 +48,9 @@
 #define TEST_PROFILE_COUNT     4
 
 // Test buffer constants
-#define TEST_FAULT_CODE_BUFFER_SIZE 256
-#define TEST_FAULT_STRING_BUFFER_SIZE 512
-#define TEST_PROFILE_TOKEN_BUFFER_SIZE 256
+#define TEST_FAULT_CODE_BUFFER_SIZE    256
+#define TEST_FAULT_STRING_BUFFER_SIZE  512
+#define TEST_PROFILE_TOKEN_BUFFER_SIZE 64
 
 // Test protocol constants
 #define TEST_PROTOCOL_RTSP        "RTSP"
@@ -77,11 +77,6 @@
 #define TEST_ITERATIONS_CONCURRENT      10
 #define TEST_PROGRESS_INTERVAL          1000
 #define TEST_STRESS_OPERATIONS_PER_ITER 3
-
-// Test buffer constants
-#define TEST_FAULT_CODE_BUFFER_SIZE    256
-#define TEST_FAULT_STRING_BUFFER_SIZE  512
-#define TEST_PROFILE_TOKEN_BUFFER_SIZE 64
 
 // Test state structure to hold both config and app_config pointers
 typedef struct {
@@ -548,8 +543,8 @@ void test_integration_media_delete_profile_positive_soap(void** state) {
   // This test demonstrates proper handling when a deletable profile exists
 
   // First try to create a profile to delete
-  http_request_t* create_request = soap_test_create_request(
-    "CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
+  http_request_t* create_request =
+    soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
   assert_non_null(create_request);
 
   http_response_t create_response;
@@ -564,18 +559,18 @@ void test_integration_media_delete_profile_positive_soap(void** state) {
   // Check if profile was created successfully
   char fault_code[TEST_FAULT_CODE_BUFFER_SIZE] = {0};
   int has_fault = soap_test_check_soap_fault(&create_response, fault_code, NULL);
-  
+
   if (has_fault == 0) {
     // Parse the created profile token
     onvif_gsoap_context_t create_ctx;
     memset(&create_ctx, 0, sizeof(onvif_gsoap_context_t));
     result = soap_test_init_response_parsing(&create_ctx, &create_response);
-    
+
     if (result == ONVIF_SUCCESS) {
       struct _trt__CreateProfileResponse* profile_response = NULL;
       result = soap_test_parse_create_profile_response(&create_ctx, &profile_response);
-      
-      if (result == ONVIF_SUCCESS && profile_response && profile_response->Profile && 
+
+      if (result == ONVIF_SUCCESS && profile_response && profile_response->Profile &&
           profile_response->Profile->token) {
         strncpy(created_token, profile_response->Profile->token, sizeof(created_token) - 1);
         can_delete = 1;
@@ -595,9 +590,10 @@ void test_integration_media_delete_profile_positive_soap(void** state) {
   }
 
   // Now delete the created profile
-  // Update the SOAP envelope with the created token (or use SOAP_MEDIA_DELETE_PROFILE with the token)
-  http_request_t* request = soap_test_create_request(
-    "DeleteProfile", SOAP_MEDIA_DELETE_PROFILE, "/onvif/media_service");
+  // Update the SOAP envelope with the created token (or use SOAP_MEDIA_DELETE_PROFILE with the
+  // token)
+  http_request_t* request =
+    soap_test_create_request("DeleteProfile", SOAP_MEDIA_DELETE_PROFILE, "/onvif/media_service");
   assert_non_null(request);
 
   http_response_t response;
@@ -611,7 +607,7 @@ void test_integration_media_delete_profile_positive_soap(void** state) {
 
   // Should succeed
   has_fault = soap_test_check_soap_fault(&response, fault_code, NULL);
-  
+
   if (has_fault == 0) {
     onvif_gsoap_context_t ctx;
     memset(&ctx, 0, sizeof(onvif_gsoap_context_t));
@@ -644,8 +640,8 @@ void test_integration_media_delete_profile_negative_soap(void** state) {
   // Try to delete a non-existent profile
   // This test validates error handling for invalid profile deletion
 
-  http_request_t* request = soap_test_create_request(
-    "DeleteProfile", SOAP_MEDIA_DELETE_PROFILE, "/onvif/media_service");
+  http_request_t* request =
+    soap_test_create_request("DeleteProfile", SOAP_MEDIA_DELETE_PROFILE, "/onvif/media_service");
   assert_non_null(request);
 
   http_response_t response;
@@ -661,7 +657,7 @@ void test_integration_media_delete_profile_negative_soap(void** state) {
   char fault_code[TEST_FAULT_CODE_BUFFER_SIZE] = {0};
   char fault_string[TEST_FAULT_STRING_BUFFER_SIZE] = {0};
   int has_fault = soap_test_check_soap_fault(&response, fault_code, fault_string);
-  assert_int_equal(1, has_fault);  // EXPECT fault
+  assert_int_equal(1, has_fault); // EXPECT fault
 
   // Cleanup
   soap_test_free_request(request);
@@ -669,7 +665,6 @@ void test_integration_media_delete_profile_negative_soap(void** state) {
     ONVIF_FREE(response.body);
   }
 }
-
 
 /**
  * @brief SOAP test for Media SetVideoEncoderConfiguration operation
@@ -766,9 +761,6 @@ void test_integration_media_get_metadata_configs_soap(void** state) {
   }
 }
 
-
-
-
 /**
  * @brief SOAP test for Media CreateProfile operation - positive case
  */
@@ -777,14 +769,15 @@ void test_integration_media_create_profile_positive_soap(void** state) {
 
   // First, try to create a temporary profile that we can delete to make space
   // This ensures we test the actual creation behavior, not just error handling
-  http_request_t* temp_create_request = soap_test_create_request(
-    "CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
+  http_request_t* temp_create_request =
+    soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
   assert_non_null(temp_create_request);
 
   http_response_t temp_create_response;
   memset(&temp_create_response, 0, sizeof(http_response_t));
 
-  int result = onvif_media_handle_request("CreateProfile", temp_create_request, &temp_create_response);
+  int result =
+    onvif_media_handle_request("CreateProfile", temp_create_request, &temp_create_response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   char temp_token[TEST_PROFILE_TOKEN_BUFFER_SIZE] = {0};
@@ -840,8 +833,8 @@ void test_integration_media_create_profile_positive_soap(void** state) {
   }
 
   // Now perform the actual test - create a profile with space available
-  http_request_t* request = soap_test_create_request(
-    "CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
+  http_request_t* request =
+    soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
   assert_non_null(request);
 
   http_response_t response;
@@ -892,8 +885,8 @@ void test_integration_media_create_profile_negative_soap(void** state) {
 
   // Try to fill up to max profiles
   for (int i = 0; i < 4; i++) {
-    http_request_t* fill_request = soap_test_create_request(
-      "CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
+    http_request_t* fill_request =
+      soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
     http_response_t fill_response;
     memset(&fill_response, 0, sizeof(http_response_t));
 
@@ -913,8 +906,8 @@ void test_integration_media_create_profile_negative_soap(void** state) {
   }
 
   // Now try to create one more profile - this MUST fail with max profiles error
-  http_request_t* request = soap_test_create_request(
-    "CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
+  http_request_t* request =
+    soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
   assert_non_null(request);
 
   http_response_t response;
@@ -932,7 +925,7 @@ void test_integration_media_create_profile_negative_soap(void** state) {
   char fault_string[TEST_FAULT_STRING_BUFFER_SIZE] = {0};
   int has_fault = soap_test_check_soap_fault(&response, fault_code, fault_string);
   printf("  [DEBUG] has_fault=%d, fault_string='%s'\n", has_fault, fault_string);
-  assert_int_equal(1, has_fault);  // EXPECT fault
+  assert_int_equal(1, has_fault); // EXPECT fault
   assert_true(strstr(fault_string, "Maximum limit") != NULL || strstr(fault_string, "max") != NULL);
 
   // Cleanup
@@ -1002,14 +995,14 @@ const struct CMUnitTest media_service_optimization_tests[] = {
                                   media_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_media_get_stream_uri_soap, media_service_setup,
                                   media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_create_profile_positive_soap, media_service_setup,
-                                  media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_create_profile_negative_soap, media_service_setup,
-                                  media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_delete_profile_positive_soap, media_service_setup,
-                                  media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_delete_profile_negative_soap, media_service_setup,
-                                  media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_create_profile_positive_soap,
+                                  media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_create_profile_negative_soap,
+                                  media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_delete_profile_positive_soap,
+                                  media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_delete_profile_negative_soap,
+                                  media_service_setup, media_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_media_set_video_encoder_config_soap,
                                   media_service_setup, media_service_teardown),
   cmocka_unit_test_setup_teardown(test_integration_media_get_metadata_configs_soap,

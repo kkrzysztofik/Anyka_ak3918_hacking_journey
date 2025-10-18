@@ -97,6 +97,10 @@ void test_unit_device_system_reboot_failure(void** state) {
 void test_unit_device_init_success(void** state) {
   (void)state;
 
+  // Mock config_runtime_is_initialized to return true
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
+
   // Mock successful gSOAP initialization
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
@@ -122,14 +126,18 @@ void test_unit_device_init_success(void** state) {
 }
 
 /**
- * @brief Test device initialization with NULL config
+ * @brief Test device initialization when config_runtime is not initialized
  * @param state Test state (unused)
  */
-void test_unit_device_init_null_config(void** state) {
+void test_unit_device_init_config_runtime_not_initialized(void** state) {
   (void)state;
 
+  // Mock config_runtime_is_initialized to return false
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 0); // Not initialized
+
   int result = onvif_device_init();
-  assert_int_equal(ONVIF_ERROR_INVALID, result);
+  assert_int_equal(ONVIF_ERROR_NOT_INITIALIZED, result);
 }
 
 /**
@@ -140,6 +148,8 @@ void test_unit_device_init_already_initialized(void** state) {
   (void)state;
 
   // First initialization
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_buffer_pool_init);
@@ -163,6 +173,10 @@ void test_unit_device_init_already_initialized(void** state) {
 void test_unit_device_init_gsoap_failure(void** state) {
   (void)state;
 
+  // Mock config_runtime_is_initialized to return true
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
+
   // Mock gSOAP initialization failure
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_ERROR);
@@ -177,6 +191,10 @@ void test_unit_device_init_gsoap_failure(void** state) {
  */
 void test_unit_device_init_buffer_pool_failure(void** state) {
   (void)state;
+
+  // Mock config_runtime_is_initialized to return true
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
 
   // Mock successful gSOAP but failed buffer pool
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -203,6 +221,8 @@ void test_unit_device_cleanup_success(void** state) {
   (void)state;
 
   // First initialize the service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -244,6 +264,8 @@ void test_unit_device_cleanup_unregister_failure(void** state) {
   (void)state;
 
   // First initialize the service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -279,6 +301,8 @@ void test_unit_device_handle_operation_get_device_information(void** state) {
   (void)state;
 
   // Initialize service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -319,6 +343,8 @@ void test_unit_device_handle_operation_get_capabilities(void** state) {
   (void)state;
 
   // Initialize service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -359,6 +385,8 @@ void test_unit_device_handle_operation_get_system_date_time(void** state) {
   (void)state;
 
   // Initialize service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -399,6 +427,8 @@ void test_unit_device_handle_operation_get_services(void** state) {
   (void)state;
 
   // Initialize service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -439,6 +469,8 @@ void test_unit_device_handle_operation_system_reboot(void** state) {
   (void)state;
 
   // Initialize service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -482,6 +514,8 @@ void test_unit_device_handle_operation_unknown_operation(void** state) {
   (void)state;
 
   // Initialize service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -515,6 +549,8 @@ void test_unit_device_handle_operation_null_operation(void** state) {
   (void)state;
 
   // Initialize service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -548,6 +584,8 @@ void test_unit_device_handle_operation_null_request(void** state) {
   (void)state;
 
   // Initialize service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -580,6 +618,8 @@ void test_unit_device_handle_operation_null_response(void** state) {
   (void)state;
 
   // Initialize service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -752,6 +792,8 @@ void test_unit_device_service_unregistration_success(void** state) {
   (void)state;
 
   // Initialize service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -950,6 +992,8 @@ void test_unit_device_memory_management(void** state) {
   // Test memory allocation and cleanup
 
   // Initialize service
+  expect_function_call(__wrap_config_runtime_is_initialized);
+  will_return(__wrap_config_runtime_is_initialized, 1); // Initialized
   expect_function_call(__wrap_onvif_gsoap_init);
   will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -1017,7 +1061,7 @@ const struct CMUnitTest device_test_suite[] = {
 
   // Initialization tests
   cmocka_unit_test(test_unit_device_init_success),
-  cmocka_unit_test(test_unit_device_init_null_config),
+  cmocka_unit_test(test_unit_device_init_config_runtime_not_initialized),
   cmocka_unit_test(test_unit_device_init_already_initialized),
   cmocka_unit_test(test_unit_device_init_gsoap_failure),
   cmocka_unit_test(test_unit_device_init_buffer_pool_failure),

@@ -96,12 +96,48 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
   if (data->capabilities) {
     response->Capabilities = (struct tt__Capabilities*)data->capabilities;
   } else {
-    /* Fallback: create minimal valid empty capabilities structure */
+    /* Fallback: create capabilities with Device, Media, and PTZ services */
     response->Capabilities = soap_new_tt__Capabilities(soap, 1);
     if (!response->Capabilities) {
       return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
     soap_default_tt__Capabilities(soap, response->Capabilities);
+
+    /* Device capabilities */
+    response->Capabilities->Device = soap_new_tt__DeviceCapabilities(soap, 1);
+    if (!response->Capabilities->Device) {
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
+    }
+    soap_default_tt__DeviceCapabilities(soap, response->Capabilities->Device);
+
+    char device_xaddr[256];
+    (void)snprintf(device_xaddr, sizeof(device_xaddr), "http://%s:%d/onvif/device_service",
+                   data->device_ip, data->http_port);
+    response->Capabilities->Device->XAddr = soap_strdup(soap, device_xaddr);
+
+    /* Media capabilities */
+    response->Capabilities->Media = soap_new_tt__MediaCapabilities(soap, 1);
+    if (!response->Capabilities->Media) {
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
+    }
+    soap_default_tt__MediaCapabilities(soap, response->Capabilities->Media);
+
+    char media_xaddr[256];
+    (void)snprintf(media_xaddr, sizeof(media_xaddr), "http://%s:%d/onvif/media_service", data->device_ip,
+                   data->http_port);
+    response->Capabilities->Media->XAddr = soap_strdup(soap, media_xaddr);
+
+    /* PTZ capabilities */
+    response->Capabilities->PTZ = soap_new_tt__PTZCapabilities(soap, 1);
+    if (!response->Capabilities->PTZ) {
+      return ONVIF_ERROR_MEMORY_ALLOCATION;
+    }
+    soap_default_tt__PTZCapabilities(soap, response->Capabilities->PTZ);
+
+    char ptz_xaddr[256];
+    (void)snprintf(ptz_xaddr, sizeof(ptz_xaddr), "http://%s:%d/onvif/ptz_service", data->device_ip,
+                   data->http_port);
+    response->Capabilities->PTZ->XAddr = soap_strdup(soap, ptz_xaddr);
   }
 
   /* Serialize response within SOAP body */

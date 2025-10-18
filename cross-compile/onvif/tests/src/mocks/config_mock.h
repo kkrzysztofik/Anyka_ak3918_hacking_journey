@@ -133,7 +133,8 @@ int __wrap_config_runtime_set_int(config_section_t section, const char* key, int
  * @param buffer_size Size of output buffer
  * @return Result code (configured via will_return)
  */
-int __wrap_config_runtime_get_string(config_section_t section, const char* key, char* out_value, size_t buffer_size);
+int __wrap_config_runtime_get_string(config_section_t section, const char* key, char* out_value,
+                                     size_t buffer_size);
 
 /**
  * @brief CMocka wrapped config_runtime_set_string
@@ -196,6 +197,12 @@ int __wrap_config_runtime_init(struct application_config* cfg);
  * @return Result code (configured via will_return)
  */
 int __wrap_config_runtime_cleanup(void);
+
+/**
+ * @brief CMocka wrapped config_runtime_is_initialized
+ * @return 1 if initialized, 0 if not (configured via will_return)
+ */
+int __wrap_config_runtime_is_initialized(void);
 
 /**
  * @brief CMocka wrapped config_runtime_apply_defaults
@@ -314,7 +321,8 @@ int __wrap_config_runtime_validate_ptz_profile_presets(const ptz_preset_list_t* 
  * @param output_size Size of output buffer
  * @return Result code (configured via will_return)
  */
-int __wrap_config_runtime_hash_password(const char* password, char* hash_output, size_t output_size);
+int __wrap_config_runtime_hash_password(const char* password, char* hash_output,
+                                        size_t output_size);
 
 /**
  * @brief CMocka wrapped config_runtime_verify_password

@@ -22,9 +22,12 @@ RUN apt-get update && apt-get install -y \
     make \
     clang \
     clang-tools \
+    clangd \
     cppcheck \
     curl \
     unzip \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and extract local Anyka toolchain
@@ -50,13 +53,19 @@ RUN curl -Lo snyk-linux https://downloads.snyk.io/cli/stable/snyk-linux \
     && mv snyk-linux /usr/local/bin/snyk \
     && rm snyk-linux.sha256
 
+# Install clangd-tidy (faster alternative to clang-tidy)
+# Using --break-system-packages for Docker container (safe in isolated environment)
+RUN pip3 install --break-system-packages clangd-tidy
+
 # Verify installation
 RUN arm-anykav200-linux-uclibcgnueabi-gcc -v
 RUN doxygen --version
 RUN dot -V
 RUN clang --version
+RUN clangd --version
 RUN cppcheck --version
 RUN snyk --version
+RUN clangd-tidy --version
 
 # Set working directory
 WORKDIR /workspace

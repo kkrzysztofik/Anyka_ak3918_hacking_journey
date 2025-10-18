@@ -28,8 +28,8 @@ static int g_mock_action_result = ONVIF_SUCCESS;
  * @brief Mock action handler for testing
  */
 static int mock_action_handler(const service_handler_config_t* config,
-                                const http_request_t* request, http_response_t* response,
-                                onvif_gsoap_context_t* gsoap_ctx) {
+                               const http_request_t* request, http_response_t* response,
+                               onvif_gsoap_context_t* gsoap_ctx) {
   (void)config;
   (void)request;
   (void)response;
@@ -82,7 +82,9 @@ void test_unit_service_handler_init_success(void** state) {
                                      .enable_logging = 1};
 
   service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1},
+    {.action_name = "GetDeviceInformation",
+     .handler = mock_action_handler,
+     .requires_validation = 1},
     {.action_name = "GetCapabilities", .handler = mock_action_handler, .requires_validation = 1}};
 
   size_t action_count = sizeof(actions) / sizeof(actions[0]);
@@ -121,8 +123,9 @@ void test_unit_service_handler_init_null_handler(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Test with NULL handler
   int result = onvif_service_handler_init(NULL, &config, actions, 1);
@@ -137,8 +140,9 @@ void test_unit_service_handler_init_null_config(void** state) {
   (void)state;
 
   onvif_service_handler_instance_t handler;
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Test with NULL config
   int result = onvif_service_handler_init(&handler, NULL, actions, 1);
@@ -178,8 +182,9 @@ void test_unit_service_handler_init_zero_action_count(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Test with zero action count
   int result = onvif_service_handler_init(&handler, &config, actions, 0);
@@ -204,8 +209,9 @@ void test_unit_service_handler_cleanup_success(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Configure gSOAP mock expectations
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -253,7 +259,9 @@ void test_unit_service_handler_cleanup_after_init(void** state) {
                                      .enable_logging = 1};
 
   service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1},
+    {.action_name = "GetDeviceInformation",
+     .handler = mock_action_handler,
+     .requires_validation = 1},
     {.action_name = "GetCapabilities", .handler = mock_action_handler, .requires_validation = 1},
     {.action_name = "GetServices", .handler = mock_action_handler, .requires_validation = 0}};
 
@@ -298,8 +306,9 @@ void test_unit_service_handler_cleanup_double_cleanup(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Configure gSOAP mock expectations
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -342,7 +351,9 @@ void test_unit_service_handler_init_actions_allocation(void** state) {
                                      .enable_logging = 1};
 
   service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1},
+    {.action_name = "GetDeviceInformation",
+     .handler = mock_action_handler,
+     .requires_validation = 1},
     {.action_name = "GetCapabilities", .handler = mock_action_handler, .requires_validation = 1}};
 
   size_t action_count = sizeof(actions) / sizeof(actions[0]);
@@ -387,8 +398,9 @@ void test_unit_service_handler_init_gsoap_allocation(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Configure gSOAP mock expectations
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -474,8 +486,9 @@ void test_unit_service_handler_handle_request_success(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Initialize handler
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -511,7 +524,8 @@ void test_unit_service_handler_handle_request_null_handler(void** state) {
   http_request_t request = {0};
   http_response_t response = {0};
 
-  int result = onvif_service_handler_handle_request(NULL, "GetDeviceInformation", &request, &response);
+  int result =
+    onvif_service_handler_handle_request(NULL, "GetDeviceInformation", &request, &response);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
@@ -540,7 +554,8 @@ void test_unit_service_handler_handle_request_null_response(void** state) {
   onvif_service_handler_instance_t handler = {0};
   http_request_t request = {0};
 
-  int result = onvif_service_handler_handle_request(&handler, "GetDeviceInformation", &request, NULL);
+  int result =
+    onvif_service_handler_handle_request(&handler, "GetDeviceInformation", &request, NULL);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
@@ -558,8 +573,9 @@ void test_unit_service_handler_handle_request_unknown_action(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Initialize handler
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -572,7 +588,8 @@ void test_unit_service_handler_handle_request_unknown_action(void** state) {
   http_request_t request = {0};
   http_response_t response = {0};
 
-  int result_handle = onvif_service_handler_handle_request(&handler, "UnknownAction", &request, &response);
+  int result_handle =
+    onvif_service_handler_handle_request(&handler, "UnknownAction", &request, &response);
   assert_int_equal(result_handle, ONVIF_SUCCESS);
   assert_int_equal(g_mock_action_call_count, 0); // Action should not be called
 
@@ -595,8 +612,9 @@ void test_unit_service_handler_handle_request_action_handler_error(void** state)
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Initialize handler
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -699,7 +717,8 @@ void test_unit_service_handler_generate_success_null_handler(void** state) {
 
   http_response_t response = {0};
 
-  int result = onvif_service_handler_generate_success(NULL, "GetDeviceInformation", "<body/>", &response);
+  int result =
+    onvif_service_handler_generate_success(NULL, "GetDeviceInformation", "<body/>", &response);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
@@ -712,8 +731,8 @@ void test_unit_service_handler_generate_error_null_handler(void** state) {
 
   http_response_t response = {0};
 
-  int result = onvif_service_handler_generate_error(NULL, "GetDeviceInformation",
-                                                     ERROR_PATTERN_VALIDATION_FAILED, "Test error", &response);
+  int result = onvif_service_handler_generate_error(
+    NULL, "GetDeviceInformation", ERROR_PATTERN_VALIDATION_FAILED, "Test error", &response);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
@@ -731,8 +750,9 @@ void test_unit_service_handler_reset_xml_builder_success(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Initialize handler
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -777,8 +797,9 @@ void test_unit_service_handler_get_gsoap_context(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Initialize handler
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -814,7 +835,7 @@ void test_unit_service_handler_get_config_value_null_handler(void** state) {
 
   int value = 0;
   int result = onvif_service_handler_get_config_value(NULL, CONFIG_SECTION_DEVICE, "test_key",
-                                                       &value, CONFIG_TYPE_INT);
+                                                      &value, CONFIG_TYPE_INT);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
@@ -827,8 +848,8 @@ void test_unit_service_handler_get_config_value_null_key(void** state) {
 
   onvif_service_handler_instance_t handler = {0};
   int value = 0;
-  int result = onvif_service_handler_get_config_value(&handler, CONFIG_SECTION_DEVICE, NULL,
-                                                       &value, CONFIG_TYPE_INT);
+  int result = onvif_service_handler_get_config_value(&handler, CONFIG_SECTION_DEVICE, NULL, &value,
+                                                      CONFIG_TYPE_INT);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
@@ -841,7 +862,7 @@ void test_unit_service_handler_get_config_value_null_value_ptr(void** state) {
 
   onvif_service_handler_instance_t handler = {0};
   int result = onvif_service_handler_get_config_value(&handler, CONFIG_SECTION_DEVICE, "test_key",
-                                                       NULL, CONFIG_TYPE_INT);
+                                                      NULL, CONFIG_TYPE_INT);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
@@ -854,7 +875,7 @@ void test_unit_service_handler_set_config_value_null_handler(void** state) {
 
   int value = 100;
   int result = onvif_service_handler_set_config_value(NULL, CONFIG_SECTION_DEVICE, "test_key",
-                                                       &value, CONFIG_TYPE_INT);
+                                                      &value, CONFIG_TYPE_INT);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
@@ -867,8 +888,8 @@ void test_unit_service_handler_set_config_value_null_key(void** state) {
 
   onvif_service_handler_instance_t handler = {0};
   int value = 100;
-  int result = onvif_service_handler_set_config_value(&handler, CONFIG_SECTION_DEVICE, NULL,
-                                                       &value, CONFIG_TYPE_INT);
+  int result = onvif_service_handler_set_config_value(&handler, CONFIG_SECTION_DEVICE, NULL, &value,
+                                                      CONFIG_TYPE_INT);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
@@ -881,7 +902,7 @@ void test_unit_service_handler_set_config_value_null_value_ptr(void** state) {
 
   onvif_service_handler_instance_t handler = {0};
   int result = onvif_service_handler_set_config_value(&handler, CONFIG_SECTION_DEVICE, "test_key",
-                                                       NULL, CONFIG_TYPE_INT);
+                                                      NULL, CONFIG_TYPE_INT);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 }
 
@@ -903,8 +924,9 @@ void test_unit_service_handler_get_stats_success(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Initialize handler
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -968,8 +990,9 @@ void test_unit_service_handler_register_action_success(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Initialize handler
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -1006,8 +1029,9 @@ void test_unit_service_handler_register_action_duplicate(void** state) {
                                      .enable_validation = 1,
                                      .enable_logging = 1};
 
-  service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1}};
+  service_action_def_t actions[] = {{.action_name = "GetDeviceInformation",
+                                     .handler = mock_action_handler,
+                                     .requires_validation = 1}};
 
   // Initialize handler
   expect_function_call(__wrap_onvif_gsoap_init);
@@ -1017,8 +1041,9 @@ void test_unit_service_handler_register_action_duplicate(void** state) {
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Try to register duplicate action
-  service_action_def_t duplicate_action = {
-    .action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1};
+  service_action_def_t duplicate_action = {.action_name = "GetDeviceInformation",
+                                           .handler = mock_action_handler,
+                                           .requires_validation = 1};
 
   int result_register = onvif_service_handler_register_action(&handler, &duplicate_action);
   assert_int_equal(result_register, ONVIF_ERROR);
@@ -1044,7 +1069,9 @@ void test_unit_service_handler_unregister_action_success(void** state) {
                                      .enable_logging = 1};
 
   service_action_def_t actions[] = {
-    {.action_name = "GetDeviceInformation", .handler = mock_action_handler, .requires_validation = 1},
+    {.action_name = "GetDeviceInformation",
+     .handler = mock_action_handler,
+     .requires_validation = 1},
     {.action_name = "GetCapabilities", .handler = mock_action_handler, .requires_validation = 1}};
 
   // Initialize handler
@@ -1059,6 +1086,255 @@ void test_unit_service_handler_unregister_action_success(void** state) {
   int result_unregister = onvif_service_handler_unregister_action(&handler, "GetCapabilities");
   assert_int_equal(result_unregister, ONVIF_SUCCESS);
   assert_int_equal(handler.action_count, 1);
+
+  // Cleanup
+  expect_function_call(__wrap_onvif_gsoap_cleanup);
+  onvif_service_handler_cleanup(&handler);
+}
+
+/* ============================================================================
+ * Status Code Bug Fix Tests
+ * ============================================================================ */
+
+/**
+ * @brief Mock action handler that sets specific error status code
+ */
+static int mock_action_handler_with_error_status(const service_handler_config_t* config,
+                                                 const http_request_t* request,
+                                                 http_response_t* response,
+                                                 onvif_gsoap_context_t* gsoap_ctx) {
+  (void)config;
+  (void)request;
+  (void)gsoap_ctx;
+
+  g_mock_action_call_count++;
+
+  // Set specific error status code (e.g., 400 Bad Request)
+  response->status_code = 400;
+  response->body = (char*)"Bad Request";
+  response->body_length = strlen("Bad Request");
+  response->content_type = "application/soap+xml";
+
+  return ONVIF_ERROR; // Handler fails but sets specific error code
+}
+
+/**
+ * @brief Mock action handler that sets specific success status code
+ */
+static int mock_action_handler_with_success_status(const service_handler_config_t* config,
+                                                   const http_request_t* request,
+                                                   http_response_t* response,
+                                                   onvif_gsoap_context_t* gsoap_ctx) {
+  (void)config;
+  (void)request;
+  (void)gsoap_ctx;
+
+  g_mock_action_call_count++;
+
+  // Set specific success status code (e.g., 201 Created)
+  response->status_code = 201;
+  response->body = (char*)"Created";
+  response->body_length = strlen("Created");
+  response->content_type = "application/soap+xml";
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Mock action handler that fails without setting status code
+ */
+static int mock_action_handler_fail_no_status(const service_handler_config_t* config,
+                                              const http_request_t* request,
+                                              http_response_t* response,
+                                              onvif_gsoap_context_t* gsoap_ctx) {
+  (void)config;
+  (void)request;
+  (void)response;
+  (void)gsoap_ctx;
+
+  g_mock_action_call_count++;
+
+  // Handler fails but doesn't set status code - should default to 500
+  return ONVIF_ERROR;
+}
+
+/**
+ * @brief Test that handler-set error status codes are respected
+ * @param state Test state (unused)
+ */
+void test_unit_service_handler_status_code_respects_handler_error(void** state) {
+  (void)state;
+
+  onvif_service_handler_instance_t handler;
+  service_handler_config_t config = {.service_type = ONVIF_SERVICE_DEVICE,
+                                     .service_name = "device",
+                                     .config = NULL,
+                                     .enable_validation = 1,
+                                     .enable_logging = 1};
+
+  service_action_def_t actions[] = {{.action_name = "TestAction",
+                                     .handler = mock_action_handler_with_error_status,
+                                     .requires_validation = 1}};
+
+  // Initialize handler
+  expect_function_call(__wrap_onvif_gsoap_init);
+  will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
+
+  int result = onvif_service_handler_init(&handler, &config, actions, 1);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Test request handling
+  http_request_t request = {0};
+  http_response_t response = {0};
+
+  // Expect gSOAP reset call before handling request
+  expect_function_call(__wrap_onvif_gsoap_reset);
+
+  int result_handle =
+    onvif_service_handler_handle_request(&handler, "TestAction", &request, &response);
+
+  // Handler should fail but status code should be respected
+  assert_int_equal(result_handle, ONVIF_ERROR);
+  assert_int_equal(response.status_code, 400); // Handler-set error code should be preserved
+  assert_string_equal(response.body, "Bad Request");
+  assert_int_equal(g_mock_action_call_count, 1);
+
+  // Cleanup
+  expect_function_call(__wrap_onvif_gsoap_cleanup);
+  onvif_service_handler_cleanup(&handler);
+}
+
+/**
+ * @brief Test that handler-set success status codes are respected
+ * @param state Test state (unused)
+ */
+void test_unit_service_handler_status_code_respects_handler_success(void** state) {
+  (void)state;
+
+  onvif_service_handler_instance_t handler;
+  service_handler_config_t config = {.service_type = ONVIF_SERVICE_DEVICE,
+                                     .service_name = "device",
+                                     .config = NULL,
+                                     .enable_validation = 1,
+                                     .enable_logging = 1};
+
+  service_action_def_t actions[] = {{.action_name = "TestAction",
+                                     .handler = mock_action_handler_with_success_status,
+                                     .requires_validation = 1}};
+
+  // Initialize handler
+  expect_function_call(__wrap_onvif_gsoap_init);
+  will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
+
+  int result = onvif_service_handler_init(&handler, &config, actions, 1);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Test request handling
+  http_request_t request = {0};
+  http_response_t response = {0};
+
+  // Expect gSOAP reset call before handling request
+  expect_function_call(__wrap_onvif_gsoap_reset);
+
+  int result_handle =
+    onvif_service_handler_handle_request(&handler, "TestAction", &request, &response);
+
+  // Handler should succeed and status code should be respected
+  assert_int_equal(result_handle, ONVIF_SUCCESS);
+  assert_int_equal(response.status_code, 201); // Handler-set success code should be preserved
+  assert_string_equal(response.body, "Created");
+  assert_int_equal(g_mock_action_call_count, 1);
+
+  // Cleanup
+  expect_function_call(__wrap_onvif_gsoap_cleanup);
+  onvif_service_handler_cleanup(&handler);
+}
+
+/**
+ * @brief Test that default 500 status code is set when handler fails without setting status
+ * @param state Test state (unused)
+ */
+void test_unit_service_handler_status_code_defaults_to_500_on_failure(void** state) {
+  (void)state;
+
+  onvif_service_handler_instance_t handler;
+  service_handler_config_t config = {.service_type = ONVIF_SERVICE_DEVICE,
+                                     .service_name = "device",
+                                     .config = NULL,
+                                     .enable_validation = 1,
+                                     .enable_logging = 1};
+
+  service_action_def_t actions[] = {{.action_name = "TestAction",
+                                     .handler = mock_action_handler_fail_no_status,
+                                     .requires_validation = 1}};
+
+  // Initialize handler
+  expect_function_call(__wrap_onvif_gsoap_init);
+  will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
+
+  int result = onvif_service_handler_init(&handler, &config, actions, 1);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Test request handling
+  http_request_t request = {0};
+  http_response_t response = {0};
+
+  // Expect gSOAP reset call before handling request
+  expect_function_call(__wrap_onvif_gsoap_reset);
+
+  int result_handle =
+    onvif_service_handler_handle_request(&handler, "TestAction", &request, &response);
+
+  // Handler should fail and status code should default to 500
+  assert_int_equal(result_handle, ONVIF_ERROR);
+  assert_int_equal(response.status_code,
+                   500); // Should default to 500 when handler doesn't set status
+  assert_int_equal(g_mock_action_call_count, 1);
+
+  // Cleanup
+  expect_function_call(__wrap_onvif_gsoap_cleanup);
+  onvif_service_handler_cleanup(&handler);
+}
+
+/**
+ * @brief Test that default 200 status code is set when handler succeeds without setting status
+ * @param state Test state (unused)
+ */
+void test_unit_service_handler_status_code_defaults_to_200_on_success(void** state) {
+  (void)state;
+
+  onvif_service_handler_instance_t handler;
+  service_handler_config_t config = {.service_type = ONVIF_SERVICE_DEVICE,
+                                     .service_name = "device",
+                                     .config = NULL,
+                                     .enable_validation = 1,
+                                     .enable_logging = 1};
+
+  service_action_def_t actions[] = {
+    {.action_name = "TestAction", .handler = mock_action_handler, .requires_validation = 1}};
+
+  // Initialize handler
+  expect_function_call(__wrap_onvif_gsoap_init);
+  will_return(__wrap_onvif_gsoap_init, ONVIF_SUCCESS);
+
+  int result = onvif_service_handler_init(&handler, &config, actions, 1);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Test request handling
+  http_request_t request = {0};
+  http_response_t response = {0};
+
+  // Expect gSOAP reset call before handling request
+  expect_function_call(__wrap_onvif_gsoap_reset);
+
+  int result_handle =
+    onvif_service_handler_handle_request(&handler, "TestAction", &request, &response);
+
+  // Handler should succeed and status code should default to 200
+  assert_int_equal(result_handle, ONVIF_SUCCESS);
+  assert_int_equal(response.status_code,
+                   200); // Should default to 200 when handler succeeds without setting status
+  assert_int_equal(g_mock_action_call_count, 1);
 
   // Cleanup
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -1164,6 +1440,16 @@ const struct CMUnitTest service_handler_tests[] = {
   cmocka_unit_test_setup_teardown(test_unit_service_handler_register_action_duplicate,
                                   setup_service_handler_tests, teardown_service_handler_tests),
   cmocka_unit_test_setup_teardown(test_unit_service_handler_unregister_action_success,
+                                  setup_service_handler_tests, teardown_service_handler_tests),
+
+  // Status code bug fix tests
+  cmocka_unit_test_setup_teardown(test_unit_service_handler_status_code_respects_handler_error,
+                                  setup_service_handler_tests, teardown_service_handler_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_handler_status_code_respects_handler_success,
+                                  setup_service_handler_tests, teardown_service_handler_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_handler_status_code_defaults_to_500_on_failure,
+                                  setup_service_handler_tests, teardown_service_handler_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_handler_status_code_defaults_to_200_on_success,
                                   setup_service_handler_tests, teardown_service_handler_tests),
 };
 

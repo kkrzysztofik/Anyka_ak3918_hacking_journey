@@ -29,10 +29,10 @@
 #include "utils/memory/memory_manager.h"
 
 // HTTP status code constants
-#define HTTP_STATUS_OK 200
-#define HTTP_STATUS_BAD_REQUEST 400
+#define HTTP_STATUS_OK                    200
+#define HTTP_STATUS_BAD_REQUEST           400
 #define HTTP_STATUS_INTERNAL_SERVER_ERROR 500
-#define HTTP_STATUS_CLOCKS_PER_MS 1000
+#define HTTP_STATUS_CLOCKS_PER_MS         1000
 
 /* ============================================================================
  * Service Handler Management
@@ -84,8 +84,8 @@ int onvif_service_handler_handle_request(onvif_service_handler_instance_t* handl
     return ONVIF_ERROR_INVALID;
   }
 
-  // Initialize response status code to 500 (will be set to 200 on success)
-  response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+  // Initialize response status code to unset value (0) - will be set by handler or default logic
+  response->status_code = 0;
 
   // Find action handler by action name
   service_action_def_t* action_def = NULL;
@@ -117,11 +117,18 @@ int onvif_service_handler_handle_request(onvif_service_handler_instance_t* handl
   platform_log_info("Service Handler: Processing time: %ld ms\n",
                     (end_time - start_time) / (CLOCKS_PER_SEC / HTTP_STATUS_CLOCKS_PER_MS));
 
-  // If action handler succeeded and response has body, ensure status code is 200
-  if (result == ONVIF_SUCCESS && response->body && response->body_length > 0) {
-    if (response->status_code == HTTP_STATUS_INTERNAL_SERVER_ERROR || response->status_code == 0) {
+  // Set appropriate status code based on handler result and response
+  if (result == ONVIF_SUCCESS) {
+    // Handler succeeded - set to 200 if not already set by handler
+    if (response->status_code == 0) {
       response->status_code = HTTP_STATUS_OK;
     }
+  } else {
+    // Handler failed - set to 500 if handler didn't set a specific error code
+    if (response->status_code == 0) {
+      response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+    }
+    // If handler set a specific error code (400, 404, etc.), respect it
   }
 
   // Update action statistics
@@ -244,21 +251,21 @@ int onvif_service_handler_get_config_value(onvif_service_handler_instance_t* han
 
   // Dispatch to appropriate config_runtime function based on value type
   switch (value_type) {
-    case CONFIG_TYPE_INT:
-      return config_runtime_get_int(section, key, (int*)value_ptr);
+  case CONFIG_TYPE_INT:
+    return config_runtime_get_int(section, key, (int*)value_ptr);
 
-    case CONFIG_TYPE_BOOL:
-      return config_runtime_get_bool(section, key, (int*)value_ptr);
+  case CONFIG_TYPE_BOOL:
+    return config_runtime_get_bool(section, key, (int*)value_ptr);
 
-    case CONFIG_TYPE_FLOAT:
-      return config_runtime_get_float(section, key, (float*)value_ptr);
+  case CONFIG_TYPE_FLOAT:
+    return config_runtime_get_float(section, key, (float*)value_ptr);
 
-    case CONFIG_TYPE_STRING:
-      // String requires buffer size - use a reasonable default of 256 bytes
-      return config_runtime_get_string(section, key, (char*)value_ptr, 256);
+  case CONFIG_TYPE_STRING:
+    // String requires buffer size - use a reasonable default of 256 bytes
+    return config_runtime_get_string(section, key, (char*)value_ptr, 256);
 
-    default:
-      return ONVIF_ERROR_INVALID;
+  default:
+    return ONVIF_ERROR_INVALID;
   }
 }
 
@@ -271,20 +278,20 @@ int onvif_service_handler_set_config_value(onvif_service_handler_instance_t* han
 
   // Dispatch to appropriate config_runtime function based on value type
   switch (value_type) {
-    case CONFIG_TYPE_INT:
-      return config_runtime_set_int(section, key, *(const int*)value_ptr);
+  case CONFIG_TYPE_INT:
+    return config_runtime_set_int(section, key, *(const int*)value_ptr);
 
-    case CONFIG_TYPE_BOOL:
-      return config_runtime_set_bool(section, key, *(const int*)value_ptr);
+  case CONFIG_TYPE_BOOL:
+    return config_runtime_set_bool(section, key, *(const int*)value_ptr);
 
-    case CONFIG_TYPE_FLOAT:
-      return config_runtime_set_float(section, key, *(const float*)value_ptr);
+  case CONFIG_TYPE_FLOAT:
+    return config_runtime_set_float(section, key, *(const float*)value_ptr);
 
-    case CONFIG_TYPE_STRING:
-      return config_runtime_set_string(section, key, (const char*)value_ptr);
+  case CONFIG_TYPE_STRING:
+    return config_runtime_set_string(section, key, (const char*)value_ptr);
 
-    default:
-      return ONVIF_ERROR_INVALID;
+  default:
+    return ONVIF_ERROR_INVALID;
   }
 }
 

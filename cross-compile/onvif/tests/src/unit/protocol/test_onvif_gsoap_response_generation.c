@@ -16,6 +16,7 @@
 #include "services/common/onvif_types.h"
 #include "services/media/onvif_media.h"
 #include "utils/error/error_handling.h"
+#include "utils/test_gsoap_utils.h"
 
 // ============================================================================
 // Test Setup and Teardown
@@ -292,7 +293,8 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_success(void** 
   // Device capabilities
   test_caps->Device = soap_new_tt__DeviceCapabilities(&ctx->soap, 1);
   assert_non_null(test_caps->Device);
-  test_caps->Device->XAddr = soap_strdup(&ctx->soap, "http://192.168.1.100:80/onvif/device_service");
+  test_caps->Device->XAddr =
+    soap_strdup(&ctx->soap, "http://192.168.1.100:80/onvif/device_service");
 
   // Media capabilities
   test_caps->Media = soap_new_tt__MediaCapabilities(&ctx->soap, 1);
@@ -344,6 +346,56 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_success(void** 
                       "http://192.168.1.100:80/onvif/media_service");
 
   // Verify PTZ capabilities
+  assert_non_null(response->Capabilities->PTZ);
+  assert_non_null(response->Capabilities->PTZ->XAddr);
+  assert_string_equal(response->Capabilities->PTZ->XAddr,
+                      "http://192.168.1.100:80/onvif/ptz_service");
+
+  onvif_gsoap_cleanup(&parse_ctx);
+}
+
+/**
+ * @brief Test GetCapabilities response generation with NULL capabilities (fallback path)
+ */
+static void test_unit_onvif_gsoap_generate_capabilities_response_null_fallback(void** state) {
+  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  char response_buffer[4096];
+  const char* test_device_ip = "192.168.1.100";
+  const int test_http_port = 80;
+
+  // Pass NULL for capabilities to trigger fallback path
+  int result =
+    onvif_gsoap_generate_capabilities_response(ctx, NULL, test_device_ip, test_http_port);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Extract and parse response
+  int response_size = get_serialized_response(ctx, response_buffer, sizeof(response_buffer));
+  assert_true(response_size > 0);
+
+  http_response_t http_resp = {
+    .body = response_buffer, .body_length = strlen(response_buffer), .status_code = 200};
+
+  onvif_gsoap_context_t parse_ctx;
+  setup_http_verbose_mock();
+  result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  struct _tds__GetCapabilitiesResponse* response;
+  result = soap_test_parse_get_capabilities_response(&parse_ctx, &response);
+  assert_int_equal(result, ONVIF_SUCCESS);
+
+  // Verify Device, Media, and PTZ capabilities with correct XAddr URLs
+  assert_non_null(response->Capabilities);
+  assert_non_null(response->Capabilities->Device);
+  assert_non_null(response->Capabilities->Device->XAddr);
+  assert_string_equal(response->Capabilities->Device->XAddr,
+                      "http://192.168.1.100:80/onvif/device_service");
+
+  assert_non_null(response->Capabilities->Media);
+  assert_non_null(response->Capabilities->Media->XAddr);
+  assert_string_equal(response->Capabilities->Media->XAddr,
+                      "http://192.168.1.100:80/onvif/media_service");
+
   assert_non_null(response->Capabilities->PTZ);
   assert_non_null(response->Capabilities->PTZ->XAddr);
   assert_string_equal(response->Capabilities->PTZ->XAddr,
@@ -1604,6 +1656,9 @@ const struct CMUnitTest response_generation_tests[] = {
                                   response_generation_setup, response_generation_teardown),
   cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_capabilities_response_success,
                                   response_generation_setup, response_generation_teardown),
+  cmocka_unit_test_setup_teardown(
+    test_unit_onvif_gsoap_generate_capabilities_response_null_fallback, response_generation_setup,
+    response_generation_teardown),
   cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_capabilities_response_null_context,
                                   response_generation_setup, response_generation_teardown),
   cmocka_unit_test_setup_teardown(test_unit_onvif_gsoap_generate_capabilities_response_null_params,
