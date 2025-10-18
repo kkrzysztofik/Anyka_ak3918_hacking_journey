@@ -288,6 +288,10 @@ find_pr_diff_files() {
 # =============================================================================
 
 parse_arguments() {
+    # First, handle common arguments
+    parse_common_arguments "$@"
+
+    # Then handle script-specific arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
             -h|--help)
@@ -314,15 +318,14 @@ parse_arguments() {
                 PR_DIFF=true
                 shift
                 ;;
+            -c|--check|-d|--dry-run|-f|--files)
+                # These are already handled by parse_common_arguments
+                shift
+                ;;
             *)
-                # Try common argument parsing first
-                if ! parse_common_arguments "$@"; then
-                    log_error "Unknown option: $1"
-                    print_usage
-                    exit 1
-                fi
-                # parse_common_arguments handles the shifting
-                break
+                log_error "Unknown option: $1"
+                print_usage
+                exit 1
                 ;;
         esac
     done
