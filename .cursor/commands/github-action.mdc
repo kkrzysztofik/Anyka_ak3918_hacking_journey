@@ -1,0 +1,126 @@
+---
+description: GitHub Actions workflow for ONVIF embedded C project with CMocka testing
+globs:
+alwaysApply: false
+---
+
+## ONVIF Project GitHub Action Rules
+
+### Project-Specific Requirements
+
+- **Target Platform**: Anyka AK3918 ARM-based IP camera with cross-compilation
+- **Build System**: Make-based with native cross-compilation support
+- **Testing Framework**: CMocka for unit tests (196 tests across 17 suites)
+- **Code Quality**: Clang static analyzer, Cppcheck, Snyk, custom linting scripts
+- **Documentation**: Doxygen for code documentation generation
+- **Primary Language**: C (embedded systems development)
+
+### Essential Checks Before Creating Workflow
+
+1. **Verify build system**: Check `cross-compile/onvif/Makefile` exists and understand build targets
+2. **Check testing framework**: Verify `cross-compile/onvif/tests/Makefile` and CMocka setup
+3. **Identify toolchain**: Confirm ARM cross-compilation toolchain requirements
+4. **Check quality tools**: Verify linting scripts in `cross-compile/onvif/scripts/`
+5. **Verify documentation**: Check `Doxyfile` exists for documentation generation
+6. **Check branch**: Use `git branch -a | cat` to verify whether we use `main` or `master` branch
+
+### Workflow Structure Requirements
+
+- **Always use `env:` variables** and secrets attached to jobs instead of global workflows
+- **Use native compilation** for unit tests (development machine)
+- **Use cross-compilation** for target builds (ARM Anyka platform)
+- **Extract common steps** into composite actions in separate files
+- **Support both debug and release builds** with proper BUILD_TYPE handling
+
+### Build and Test Commands
+
+**Main Project Build:**
+
+```bash
+make -C cross-compile/onvif                    # Build release version
+make -C cross-compile/onvif debug              # Build debug version
+make -C cross-compile/onvif clean              # Clean build artifacts
+```
+
+**Testing Commands:**
+
+```bash
+make -C cross-compile/onvif test               # Run all tests (196 tests)
+make -C cross-compile/onvif test-unit          # Run unit tests only (129 tests)
+make -C cross-compile/onvif test-integration   # Run integration tests (67 tests)
+make -C cross-compile/onvif test SUITE=ptz-*   # Run specific test suites
+```
+
+**Code Quality Commands:**
+
+```bash
+make -C cross-compile/onvif lint-check         # Check for linting issues
+make -C cross-compile/onvif format-check       # Check code formatting
+make -C cross-compile/onvif static-analysis    # Run all static analysis tools
+```
+
+**Documentation Commands:**
+
+```bash
+make -C cross-compile/onvif docs               # Generate Doxygen documentation
+```
+
+### Required Workflow Jobs
+
+1. **Build & Test Matrix**:
+
+   - Debug build + unit tests
+   - Release build + integration tests
+   - Cross-compilation verification
+
+2. **Code Quality**:
+
+   - Linting (custom scripts)
+   - Static analysis (Clang, Cppcheck, Snyk)
+   - Code formatting verification
+
+3. **Security**:
+   - Snyk security analysis
+   - Dependency vulnerability scanning
+
+### Environment Setup
+
+- **Ubuntu 22.04 LTS** (recommended for embedded development)
+- **ARM cross-compilation toolchain** setup
+- **CMocka testing framework** installation
+- **gSOAP libraries** for ONVIF protocol
+- **Development tools**: make, gcc, clang, cppcheck, doxygen
+
+### Final Verification Steps
+
+1. For each public action, check the most up-to-date version (use only major version):
+
+```bash
+curl -s https://api.github.com/repos/{owner}/{repo}/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([0-9]+).*/\1/'
+```
+
+2. (Ask if needed) Check for deprecated actions:
+
+```bash
+curl -s https://raw.githubusercontent.com/{owner}/{repo}/refs/tags/v{TAG_VERSION}/README.md
+```
+
+3. (Ask if needed) Verify action is not archived:
+
+```bash
+curl -s https://api.github.com/repos/{owner}/{repo} | grep '"archived":'
+```
+
+4. (Ask if needed) For linter issues, fetch action description:
+
+```bash
+curl -s https://raw.githubusercontent.com/{owner}/{repo}/refs/heads/{main/master}/action.yml
+```
+
+### ONVIF-Specific Considerations
+
+- **Cross-compilation complexity**: ARM toolchain setup and library dependencies
+- **Embedded constraints**: Memory and performance considerations
+- **ONVIF compliance**: Protocol-specific testing requirements
+- **Hardware abstraction**: Platform-specific code testing with mocks
+- **Security focus**: Input validation and secure coding practices
