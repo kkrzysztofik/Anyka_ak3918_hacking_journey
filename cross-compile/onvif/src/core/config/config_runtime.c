@@ -395,6 +395,10 @@ static int config_runtime_validate_username(const char* username);
 static int config_runtime_find_user_index(const char* username);
 static int config_runtime_find_free_user_slot(void);
 
+/* ============================================================================
+ * PUBLIC API - Initialization & Lifecycle
+ * ============================================================================ */
+
 /**
  * @brief Bootstrap the runtime configuration manager
  */
@@ -564,12 +568,13 @@ int config_runtime_apply_defaults(void) {
   return ONVIF_SUCCESS;
 }
 
+/* ============================================================================
+ * PUBLIC API - Basic Type Getters
+ * ============================================================================ */
+
 /**
  * @brief Get integer configuration value with validation
  */
-/* ============================================================================
- * PUBLIC API - Getters
- * ============================================================================ */
 
 int config_runtime_get_int(config_section_t section, const char* key, int* out_value) {
   config_value_type_t field_type = CONFIG_TYPE_INT;
@@ -727,12 +732,13 @@ int config_runtime_get_float(config_section_t section, const char* key, float* o
   return ONVIF_SUCCESS;
 }
 
+/* ============================================================================
+ * PUBLIC API - Basic Type Setters
+ * ============================================================================ */
+
 /**
  * @brief Set integer configuration value with validation
  */
-/* ============================================================================
- * PUBLIC API - Setters
- * ============================================================================ */
 
 int config_runtime_set_int(config_section_t section, const char* key, int value) {
   config_value_type_t field_type = CONFIG_TYPE_INT;
@@ -932,6 +938,10 @@ int config_runtime_set_float(config_section_t section, const char* key, float va
   return ONVIF_SUCCESS;
 }
 
+/* ============================================================================
+ * PUBLIC API - Runtime Status & Snapshot
+ * ============================================================================ */
+
 /**
  * @brief Get current configuration snapshot
  */
@@ -952,10 +962,6 @@ const struct application_config* config_runtime_snapshot(void) {
 /**
  * @brief Get current configuration generation counter
  */
-/* ============================================================================
- * PUBLIC API - Metadata and Utilities
- * ============================================================================ */
-
 uint32_t config_runtime_get_generation(void) {
   uint32_t generation;
 
@@ -986,6 +992,10 @@ static int config_runtime_find_queue_entry(config_section_t section, const char*
 
   return -1;
 }
+
+/* ============================================================================
+ * PUBLIC API - Persistence Queue Management
+ * ============================================================================ */
 
 /**
  * @brief Queue a configuration update for async persistence
@@ -1110,6 +1120,10 @@ int config_runtime_get_persistence_status(void) {
 
   return count;
 }
+
+/* ============================================================================
+ * PUBLIC API - Stream Profile Management
+ * ============================================================================ */
 
 /**
  * @brief Get stream profile configuration
@@ -1358,7 +1372,9 @@ int config_runtime_get_stream_profile_count(void) {
   return 4; /* Fixed at 4 profiles per FR-012, FR-013 */
 }
 
-/* PTZ Preset Profile Management */
+/* ============================================================================
+ * PUBLIC API - PTZ Preset Profile Management
+ * ============================================================================ */
 
 /**
  * @brief Get PTZ presets for a specific profile
@@ -1632,7 +1648,9 @@ int config_runtime_validate_ptz_profile_presets(const ptz_preset_list_t* presets
   return ONVIF_SUCCESS;
 }
 
-/* User Credential Management Implementation (User Story 5) */
+/* ============================================================================
+ * PUBLIC API - User Credential Management
+ * ============================================================================ */
 
 /**
  * @brief Hash password using salted SHA256 from hash_utils
@@ -1914,7 +1932,9 @@ int config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], in
   return ONVIF_SUCCESS;
 }
 
-/* Helper functions */
+/* ============================================================================
+ * PRIVATE HELPERS - Validation
+ * ============================================================================ */
 
 static int config_runtime_validate_section(config_section_t section) {
   /* Validate that section is within reasonable bounds */
@@ -1930,6 +1950,10 @@ static int config_runtime_validate_key(const char* key) {
   }
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * PRIVATE HELPERS - Schema & Field Access
+ * ============================================================================ */
 
 /**
  * @brief Get pointer to configuration section structure
@@ -2512,6 +2536,10 @@ static int config_runtime_validate_username(const char* username) {
 
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * PRIVATE HELPERS - User Management
+ * ============================================================================ */
 
 /**
  * @brief Find user index by username
