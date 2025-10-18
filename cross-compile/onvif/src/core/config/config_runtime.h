@@ -18,12 +18,13 @@
 #ifndef CONFIG_RUNTIME_H
 #define CONFIG_RUNTIME_H
 
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <pthread.h>
 
 #include "core/config/config.h"
 #include "services/common/onvif_types.h"
+
 
 /**
  * @defgroup config_runtime Runtime Configuration Manager
@@ -47,30 +48,30 @@
  * @brief Configuration schema entry with validation rules
  */
 typedef struct {
-    config_section_t section;         /**< Configuration section */
-    const char* section_name;         /**< Section name string */
-    const char* key;                  /**< Configuration key */
-    config_value_type_t type;         /**< Value type (from config.h) */
-    int required;                     /**< Is this entry required? */
-    int min_value;                    /**< Minimum value (for int/float) */
-    int max_value;                    /**< Maximum value (for int/float) */
-    size_t max_length;                /**< Maximum length (for strings) */
-    const char* default_literal;      /**< Default value as string */
+  config_section_t section;    /**< Configuration section */
+  const char* section_name;    /**< Section name string */
+  const char* key;             /**< Configuration key */
+  config_value_type_t type;    /**< Value type (from config.h) */
+  int required;                /**< Is this entry required? */
+  int min_value;               /**< Minimum value (for int/float) */
+  int max_value;               /**< Maximum value (for int/float) */
+  size_t max_length;           /**< Maximum length (for strings) */
+  const char* default_literal; /**< Default value as string */
 } config_schema_entry_t;
 
 /**
  * @brief Configuration persistence queue entry
  */
 typedef struct {
-    config_section_t section;         /**< Configuration section */
-    char key[64];                     /**< Configuration key */
-    config_value_type_t type;         /**< Value type (from config.h) */
-    union {
-        int int_value;
-        float float_value;
-        char string_value[256];
-    } value;                          /**< Value union */
-    uint64_t timestamp;               /**< Queue timestamp */
+  config_section_t section; /**< Configuration section */
+  char key[64];             /**< Configuration key */
+  config_value_type_t type; /**< Value type (from config.h) */
+  union {
+    int int_value;
+    float float_value;
+    char string_value[256];
+  } value;            /**< Value union */
+  uint64_t timestamp; /**< Queue timestamp */
 } persistence_queue_entry_t;
 
 /* Core Runtime Manager APIs */
@@ -94,6 +95,13 @@ int config_runtime_init(struct application_config* cfg);
  * @return ONVIF_SUCCESS on success, error code on failure
  */
 int config_runtime_cleanup(void);
+
+/**
+ * @brief Check if the runtime configuration manager is initialized
+ *
+ * @return 1 if initialized, 0 if not initialized
+ */
+int config_runtime_is_initialized(void);
 
 /**
  * @brief Apply default values for all configuration parameters
@@ -125,7 +133,8 @@ int config_runtime_get_int(config_section_t section, const char* key, int* out_v
  * @param[in] buffer_size Size of output buffer
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int config_runtime_get_string(config_section_t section, const char* key, char* out_value, size_t buffer_size);
+int config_runtime_get_string(config_section_t section, const char* key, char* out_value,
+                              size_t buffer_size);
 
 /**
  * @brief Get boolean configuration value with validation
@@ -232,7 +241,8 @@ uint32_t config_runtime_get_generation(void);
  * @param[in] type Value type
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int config_runtime_queue_persistence_update(config_section_t section, const char* key, const void* value, config_value_type_t type);
+int config_runtime_queue_persistence_update(config_section_t section, const char* key,
+                                            const void* value, config_value_type_t type);
 
 /**
  * @brief Process pending persistence queue entries
@@ -278,7 +288,8 @@ int config_runtime_get_stream_profile(int profile_index, video_config_t* profile
  * @param[in] profile_index Profile index (0-3 for profiles 1-4)
  * @param[in] profile Input profile structure (video_config_t)
  * @return ONVIF_SUCCESS on success
- * @return ONVIF_ERROR_INVALID_PARAMETER if profile_index out of range, profile is NULL, or validation fails
+ * @return ONVIF_ERROR_INVALID_PARAMETER if profile_index out of range, profile is NULL, or
+ * validation fails
  * @return ONVIF_ERROR_NOT_INITIALIZED if runtime manager not initialized
  */
 int config_runtime_set_stream_profile(int profile_index, const video_config_t* profile);
@@ -335,7 +346,8 @@ int config_runtime_get_ptz_profile_presets(int profile_index, ptz_preset_list_t*
  * @param[in] profile_index Profile index (0-3 for profiles 1-4)
  * @param[in] presets Input preset list structure (ptz_preset_list_t)
  * @return ONVIF_SUCCESS on success
- * @return ONVIF_ERROR_INVALID_PARAMETER if profile_index out of range, presets is NULL, or validation fails
+ * @return ONVIF_ERROR_INVALID_PARAMETER if profile_index out of range, presets is NULL, or
+ * validation fails
  * @return ONVIF_ERROR_NOT_INITIALIZED if runtime manager not initialized
  */
 int config_runtime_set_ptz_profile_presets(int profile_index, const ptz_preset_list_t* presets);
@@ -424,7 +436,8 @@ int config_runtime_authenticate_user(const char* username, const char* password)
  * @param[out] user_count Actual number of users returned
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users, int* user_count);
+int config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users,
+                                   int* user_count);
 
 /**
  * @}

@@ -125,6 +125,13 @@ int http_auth_validate_basic(const http_request_t* request,
     return HTTP_AUTH_SUCCESS; // Authentication not required
   }
 
+  // Check if config_runtime is initialized before attempting to use it
+  if (!config_runtime_is_initialized()) {
+    platform_log_error(
+      "[HTTP_AUTH] config_runtime not initialized - authentication cannot proceed\n");
+    return HTTP_AUTH_ERROR_INVALID;
+  }
+
   // Find Authorization header
   char auth_header[HTTP_MAX_AUTH_HEADER_LEN] = {0};
   if (find_header_value(request->headers, request->header_count, "Authorization", auth_header,
@@ -259,13 +266,15 @@ int http_auth_verify_credentials(const char* username, const char* password) {
 
   if (result == ONVIF_ERROR_AUTHENTICATION_FAILED) {
     /* User found but password is wrong */
-    platform_log_warning("[HTTP_AUTH] Authentication failed for user: %s (password mismatch)\n", username);
+    platform_log_warning("[HTTP_AUTH] Authentication failed for user: %s (password mismatch)\n",
+                         username);
     return HTTP_AUTH_UNAUTHENTICATED;
   }
 
   if (result == ONVIF_ERROR_NOT_FOUND) {
     /* User not found in system */
-    platform_log_warning("[HTTP_AUTH] Authentication failed for user: %s (user not found)\n", username);
+    platform_log_warning("[HTTP_AUTH] Authentication failed for user: %s (user not found)\n",
+                         username);
     return HTTP_AUTH_UNAUTHENTICATED;
   }
 

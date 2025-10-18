@@ -24,6 +24,7 @@ jobs:
       - name: Run Linting Script
         run: |
           cd cross-compile/onvif
+          chmod +x scripts/lint_code.sh
           ./scripts/lint_code.sh --check --pr-diff
 
   unit-test:

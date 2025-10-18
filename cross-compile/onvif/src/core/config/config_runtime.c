@@ -34,7 +34,7 @@
 #define CONFIG_PORT_MIN                1
 #define CONFIG_PORT_MAX                65535
 #define CONFIG_PERSISTENCE_QUEUE_MAX   32
-#define CONFIG_DECIMAL_BASE            10  /* Base for decimal number parsing */
+#define CONFIG_DECIMAL_BASE            10 /* Base for decimal number parsing */
 
 /* Global state variables */
 static struct application_config* g_config_runtime_app_config = NULL;
@@ -364,7 +364,8 @@ static const config_schema_entry_t g_config_schema[] = {
   {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "lock_time_seconds", CONFIG_TYPE_INT, 0, 1, 600, 0,
    "10"},
   {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "ir_led_mode", CONFIG_TYPE_INT, 0, 0, 2, 0, "2"},
-  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "ir_led_level", CONFIG_TYPE_INT, 0, 0, 100, 0, "1"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "ir_led_level", CONFIG_TYPE_INT, 0, 0, 100, 0,
+   "1"},
   {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "enable_auto_switching", CONFIG_TYPE_INT, 0, 0, 1,
    0, "1"},
 
@@ -464,6 +465,19 @@ int config_runtime_cleanup(void) {
 }
 
 /**
+ * @brief Check if the runtime configuration manager is initialized
+ */
+int config_runtime_is_initialized(void) {
+  int initialized = 0;
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+  initialized = g_config_runtime_initialized;
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  return initialized;
+}
+
+/**
  * @brief Apply default values for all configuration parameters
  *
  * Iterates through the schema and applies default_literal values to all
@@ -505,54 +519,54 @@ int config_runtime_apply_defaults(void) {
 
     /* Parse and apply default value based on type */
     switch (entry->type) {
-      case CONFIG_TYPE_INT:
-      case CONFIG_TYPE_BOOL: {
-        long parsed_value = strtol(entry->default_literal, &endptr, CONFIG_DECIMAL_BASE);
-        if (endptr != entry->default_literal && *endptr == '\0') {
-          *(int*)field_ptr = (int)parsed_value;
-          applied_count++;
-        } else {
-          platform_log_warning("[CONFIG] Failed to parse int default for %s.%s: '%s'\n",
-                               entry->section_name, entry->key, entry->default_literal);
-          skipped_count++;
-        }
-        break;
-      }
-
-      case CONFIG_TYPE_FLOAT: {
-        double parsed_value = strtod(entry->default_literal, &endptr);
-        if (endptr != entry->default_literal && *endptr == '\0') {
-          *(float*)field_ptr = (float)parsed_value;
-          applied_count++;
-        } else {
-          platform_log_warning("[CONFIG] Failed to parse float default for %s.%s: '%s'\n",
-                               entry->section_name, entry->key, entry->default_literal);
-          skipped_count++;
-        }
-        break;
-      }
-
-      case CONFIG_TYPE_STRING: {
-        char* dest = (char*)field_ptr;
-        size_t max_len = entry->max_length;
-
-        /* Safe string copy with bounds checking */
-        if (max_len > 0) {
-          strncpy(dest, entry->default_literal, max_len - 1);
-          dest[max_len - 1] = '\0';
-        } else {
-          /* Fallback for strings without explicit max_length */
-          strncpy(dest, entry->default_literal, CONFIG_STRING_MAX_LEN_DEFAULT - 1);
-          dest[CONFIG_STRING_MAX_LEN_DEFAULT - 1] = '\0';
-        }
+    case CONFIG_TYPE_INT:
+    case CONFIG_TYPE_BOOL: {
+      long parsed_value = strtol(entry->default_literal, &endptr, CONFIG_DECIMAL_BASE);
+      if (endptr != entry->default_literal && *endptr == '\0') {
+        *(int*)field_ptr = (int)parsed_value;
         applied_count++;
-        break;
-      }
-
-      default:
-        /* Unknown type - skip */
+      } else {
+        platform_log_warning("[CONFIG] Failed to parse int default for %s.%s: '%s'\n",
+                             entry->section_name, entry->key, entry->default_literal);
         skipped_count++;
-        break;
+      }
+      break;
+    }
+
+    case CONFIG_TYPE_FLOAT: {
+      double parsed_value = strtod(entry->default_literal, &endptr);
+      if (endptr != entry->default_literal && *endptr == '\0') {
+        *(float*)field_ptr = (float)parsed_value;
+        applied_count++;
+      } else {
+        platform_log_warning("[CONFIG] Failed to parse float default for %s.%s: '%s'\n",
+                             entry->section_name, entry->key, entry->default_literal);
+        skipped_count++;
+      }
+      break;
+    }
+
+    case CONFIG_TYPE_STRING: {
+      char* dest = (char*)field_ptr;
+      size_t max_len = entry->max_length;
+
+      /* Safe string copy with bounds checking */
+      if (max_len > 0) {
+        strncpy(dest, entry->default_literal, max_len - 1);
+        dest[max_len - 1] = '\0';
+      } else {
+        /* Fallback for strings without explicit max_length */
+        strncpy(dest, entry->default_literal, CONFIG_STRING_MAX_LEN_DEFAULT - 1);
+        dest[CONFIG_STRING_MAX_LEN_DEFAULT - 1] = '\0';
+      }
+      applied_count++;
+      break;
+    }
+
+    default:
+      /* Unknown type - skip */
+      skipped_count++;
+      break;
     }
   }
 
@@ -562,8 +576,8 @@ int config_runtime_apply_defaults(void) {
   pthread_mutex_unlock(&g_config_runtime_mutex);
 
   /* Log summary for diagnostics */
-  platform_log_debug("[CONFIG] Applied %zu defaults, skipped %zu entries\n",
-                     applied_count, skipped_count);
+  platform_log_debug("[CONFIG] Applied %zu defaults, skipped %zu entries\n", applied_count,
+                     skipped_count);
 
   return ONVIF_SUCCESS;
 }

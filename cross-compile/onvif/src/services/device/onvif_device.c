@@ -129,7 +129,8 @@ int onvif_device_system_reboot(void) {
 static void* deferred_reboot_thread(void* arg) {
   (void)arg;
 
-  platform_log_info("Deferred reboot thread started - waiting 2 seconds for response transmission\n");
+  platform_log_info(
+    "Deferred reboot thread started - waiting 2 seconds for response transmission\n");
 
   // Wait for response to be fully transmitted before initiating reboot
   sleep(2);
@@ -173,10 +174,9 @@ static int get_device_information_business_logic(const service_handler_config_t*
   device_info_callback_data_t* device_info_data = (device_info_callback_data_t*)callback_data;
 
   // Retrieve configuration values with fallback directly into callback data using simplified API
-  int result = config_get_string_or_default(CONFIG_SECTION_DEVICE, "manufacturer",
-                                            device_info_data->manufacturer,
-                                            sizeof(device_info_data->manufacturer),
-                                            DEVICE_MANUFACTURER_DEFAULT);
+  int result = config_get_string_or_default(
+    CONFIG_SECTION_DEVICE, "manufacturer", device_info_data->manufacturer,
+    sizeof(device_info_data->manufacturer), DEVICE_MANUFACTURER_DEFAULT);
   if (result != ONVIF_SUCCESS) {
     return result;
   }
@@ -187,26 +187,23 @@ static int get_device_information_business_logic(const service_handler_config_t*
     return result;
   }
 
-  result = config_get_string_or_default(CONFIG_SECTION_DEVICE, "firmware_version",
-                                        device_info_data->firmware_version,
-                                        sizeof(device_info_data->firmware_version),
-                                        DEVICE_FIRMWARE_VER_DEFAULT);
+  result = config_get_string_or_default(
+    CONFIG_SECTION_DEVICE, "firmware_version", device_info_data->firmware_version,
+    sizeof(device_info_data->firmware_version), DEVICE_FIRMWARE_VER_DEFAULT);
   if (result != ONVIF_SUCCESS) {
     return result;
   }
 
-  result = config_get_string_or_default(CONFIG_SECTION_DEVICE, "serial_number",
-                                        device_info_data->serial_number,
-                                        sizeof(device_info_data->serial_number),
-                                        DEVICE_SERIAL_DEFAULT);
+  result = config_get_string_or_default(
+    CONFIG_SECTION_DEVICE, "serial_number", device_info_data->serial_number,
+    sizeof(device_info_data->serial_number), DEVICE_SERIAL_DEFAULT);
   if (result != ONVIF_SUCCESS) {
     return result;
   }
 
-  result = config_get_string_or_default(CONFIG_SECTION_DEVICE, "hardware_id",
-                                        device_info_data->hardware_id,
-                                        sizeof(device_info_data->hardware_id),
-                                        DEVICE_HARDWARE_ID_DEFAULT);
+  result = config_get_string_or_default(
+    CONFIG_SECTION_DEVICE, "hardware_id", device_info_data->hardware_id,
+    sizeof(device_info_data->hardware_id), DEVICE_HARDWARE_ID_DEFAULT);
   if (result != ONVIF_SUCCESS) {
     return result;
   }
@@ -281,7 +278,8 @@ static int get_capabilities_business_logic(const service_handler_config_t* confi
 
   // Query Device service for its capabilities
   void* device_caps_ptr = NULL;
-  int result = onvif_service_dispatcher_get_capabilities("device", &gsoap_ctx->soap, &device_caps_ptr);
+  int result =
+    onvif_service_dispatcher_get_capabilities("device", &gsoap_ctx->soap, &device_caps_ptr);
   if (result == ONVIF_SUCCESS && device_caps_ptr) {
     caps->Device = (struct tt__DeviceCapabilities*)device_caps_ptr;
     service_log_info(log_ctx, "Device capabilities retrieved successfully");
@@ -312,7 +310,8 @@ static int get_capabilities_business_logic(const service_handler_config_t* confi
 
   // Query Imaging service for its capabilities
   void* imaging_caps_ptr = NULL;
-  result = onvif_service_dispatcher_get_capabilities("imaging", &gsoap_ctx->soap, &imaging_caps_ptr);
+  result =
+    onvif_service_dispatcher_get_capabilities("imaging", &gsoap_ctx->soap, &imaging_caps_ptr);
   if (result == ONVIF_SUCCESS && imaging_caps_ptr) {
     caps->Imaging = (struct tt__ImagingCapabilities*)imaging_caps_ptr;
     service_log_info(log_ctx, "Imaging capabilities retrieved successfully");
@@ -348,7 +347,8 @@ static int get_capabilities_business_logic(const service_handler_config_t* confi
     return result;
   }
 
-  service_log_info(log_ctx, "GetCapabilities response generated successfully with dynamic service capabilities");
+  service_log_info(
+    log_ctx, "GetCapabilities response generated successfully with dynamic service capabilities");
   return ONVIF_SUCCESS;
 }
 
@@ -516,8 +516,8 @@ static int system_reboot_business_logic(const service_handler_config_t* config,
   service_log_info(log_ctx, "SystemReboot requested - preparing response before reboot");
 
   // Generate response using gSOAP callback
-  int result = onvif_gsoap_generate_response_with_callback(gsoap_ctx, system_reboot_response_callback,
-                                                       (void*)reboot_data);
+  int result = onvif_gsoap_generate_response_with_callback(
+    gsoap_ctx, system_reboot_response_callback, (void*)reboot_data);
   if (result != 0) {
     service_log_operation_failure(log_ctx, "gsoap_response_generation", result,
                                   "Failed to generate gSOAP response");
@@ -541,7 +541,8 @@ static int system_reboot_business_logic(const service_handler_config_t* config,
   }
 
   // Response is now ready to be sent to client
-  service_log_info(log_ctx, "SystemReboot response generated successfully - scheduling deferred reboot");
+  service_log_info(log_ctx,
+                   "SystemReboot response generated successfully - scheduling deferred reboot");
 
   // Launch background thread to defer reboot execution
   // This ensures response is fully transmitted before system reboots
@@ -796,13 +797,18 @@ static int device_service_get_capabilities(struct soap* ctx, void** capabilities
   if (caps->Network) {
     soap_default_tt__NetworkCapabilities(ctx, caps->Network);
     caps->Network->IPFilter = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-    if (caps->Network->IPFilter) *caps->Network->IPFilter = xsd__boolean__false_;
-    caps->Network->ZeroConfiguration = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-    if (caps->Network->ZeroConfiguration) *caps->Network->ZeroConfiguration = xsd__boolean__false_;
+    if (caps->Network->IPFilter)
+      *caps->Network->IPFilter = xsd__boolean__false_;
+    caps->Network->ZeroConfiguration =
+      (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
+    if (caps->Network->ZeroConfiguration)
+      *caps->Network->ZeroConfiguration = xsd__boolean__false_;
     caps->Network->IPVersion6 = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-    if (caps->Network->IPVersion6) *caps->Network->IPVersion6 = xsd__boolean__false_;
+    if (caps->Network->IPVersion6)
+      *caps->Network->IPVersion6 = xsd__boolean__false_;
     caps->Network->DynDNS = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-    if (caps->Network->DynDNS) *caps->Network->DynDNS = xsd__boolean__false_;
+    if (caps->Network->DynDNS)
+      *caps->Network->DynDNS = xsd__boolean__false_;
   }
 
   *capabilities_ptr = (void*)caps;
@@ -837,6 +843,13 @@ static const onvif_service_registration_t g_device_service_registration = {
 int onvif_device_init(void) {
   if (g_handler_initialized) {
     return ONVIF_SUCCESS;
+  }
+
+  // Check if config_runtime is initialized before attempting to use it
+  if (!config_runtime_is_initialized()) {
+    platform_log_error(
+      "[DEVICE] config_runtime not initialized - device service cannot be initialized\n");
+    return ONVIF_ERROR_NOT_INITIALIZED;
   }
 
   // Initialize device handler configuration

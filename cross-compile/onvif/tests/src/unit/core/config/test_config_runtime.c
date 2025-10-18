@@ -22,7 +22,6 @@
 // Test mocks
 #include "mocks/config_mock.h"
 
-
 /* ============================================================================
  * Test Fixtures and Setup
  * ============================================================================
@@ -158,6 +157,58 @@ static void test_unit_config_runtime_init_already_initialized(void** state) {
   // Second bootstrap should fail
   result = config_runtime_init(&test_state->test_config);
   assert_int_equal(ONVIF_ERROR_ALREADY_EXISTS, result);
+}
+
+/**
+ * @brief Test config_runtime_is_initialized when not initialized
+ */
+static void test_unit_config_runtime_is_initialized_false(void** state) {
+  (void)state;
+
+  // Should return 0 when not initialized
+  int initialized = config_runtime_is_initialized();
+  assert_int_equal(0, initialized);
+}
+
+/**
+ * @brief Test config_runtime_is_initialized when initialized
+ */
+static void test_unit_config_runtime_is_initialized_true(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize config_runtime
+  int result = config_runtime_init(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Should return 1 when initialized
+  int initialized = config_runtime_is_initialized();
+  assert_int_equal(1, initialized);
+}
+
+/**
+ * @brief Test config_runtime_is_initialized after cleanup
+ */
+static void test_unit_config_runtime_is_initialized_after_cleanup(void** state) {
+  struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
+
+  // Initialize config_runtime
+  int result = config_runtime_init(&test_state->test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 1;
+
+  // Verify it's initialized
+  int initialized = config_runtime_is_initialized();
+  assert_int_equal(1, initialized);
+
+  // Cleanup
+  result = config_runtime_cleanup();
+  assert_int_equal(ONVIF_SUCCESS, result);
+  test_state->initialized = 0;
+
+  // Should return 0 after cleanup
+  initialized = config_runtime_is_initialized();
+  assert_int_equal(0, initialized);
 }
 
 /* ============================================================================
@@ -597,7 +648,8 @@ static void test_unit_config_runtime_set_string_valid(void** state) {
 
   // Verify the value was set correctly
   char out_value[64] = {0};
-  result = config_runtime_get_string(CONFIG_SECTION_DEVICE, "manufacturer", out_value, sizeof(out_value));
+  result =
+    config_runtime_get_string(CONFIG_SECTION_DEVICE, "manufacturer", out_value, sizeof(out_value));
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_string_equal(expected_value, out_value);
 }
@@ -1098,7 +1150,7 @@ static void test_unit_config_runtime_hash_password_success(void** state) {
 
   // Verify hash format: salt$hash (32 hex + $ + 64 hex = 97 chars)
   size_t hash_len = strlen(hash_output);
-  assert_true(hash_len >= 97);  // At least 97 characters
+  assert_true(hash_len >= 97); // At least 97 characters
 
   // Verify presence of $ separator
   char* separator = strchr(hash_output, '$');
@@ -1330,6 +1382,10 @@ const struct CMUnitTest* get_config_runtime_unit_tests(size_t* count) {
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_init_null_param, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_init_already_initialized, setup,
                                     teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_is_initialized_false, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_is_initialized_true, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_is_initialized_after_cleanup, setup,
+                                    teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_cleanup_success, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_cleanup_not_initialized, setup,
                                     teardown),
@@ -1391,8 +1447,8 @@ const struct CMUnitTest* get_config_runtime_unit_tests(size_t* count) {
     /* Stream Profile Configuration Tests (User Story 4) */
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_validation_valid, setup,
                                     teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_limit_enforcement, setup,
-                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_limit_enforcement,
+                                    setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_width, setup,
                                     teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_height, setup,
@@ -1405,18 +1461,24 @@ const struct CMUnitTest* get_config_runtime_unit_tests(size_t* count) {
     /* User Credential Management Tests (User Story 5) */
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_valid_username, setup,
                                     teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_too_short, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_too_long, setup,
-                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_too_short,
+                                    setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_too_long,
+                                    setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_invalid_chars,
                                     setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_limit_enforcement, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_success, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_null_params, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_consistency, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_success, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_failure, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_limit_enforcement, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_success, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_null_params, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_consistency, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_success, setup,
+                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_failure, setup,
+                                    teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_null_params, setup,
                                     teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_management_add_remove, setup,
