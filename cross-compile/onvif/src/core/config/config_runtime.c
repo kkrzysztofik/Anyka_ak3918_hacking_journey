@@ -34,6 +34,7 @@
 #define CONFIG_PORT_MIN                1
 #define CONFIG_PORT_MAX                65535
 #define CONFIG_PERSISTENCE_QUEUE_MAX   32
+#define CONFIG_DECIMAL_BASE            10  /* Base for decimal number parsing */
 
 /* Global state variables */
 static struct application_config* g_config_runtime_app_config = NULL;
@@ -460,8 +461,17 @@ int config_runtime_cleanup(void) {
 
 /**
  * @brief Apply default values for all configuration parameters
+ *
+ * Iterates through the schema and applies default_literal values to all
+ * configuration fields. Uses direct field assignment (not setter functions)
+ * to avoid queueing defaults for persistence.
  */
 int config_runtime_apply_defaults(void) {
+  size_t entry_idx = 0;
+  size_t applied_count = 0;
+  size_t skipped_count = 0;
+  char* endptr = NULL;
+
   pthread_mutex_lock(&g_config_runtime_mutex);
 
   if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
@@ -469,55 +479,87 @@ int config_runtime_apply_defaults(void) {
     return ONVIF_ERROR_NOT_INITIALIZED;
   }
 
-  /* Apply default values using existing config system */
-  /* For now, we set reasonable defaults directly */
-  /* TODO: In Phase 4 (Schema-Driven Validation), this will load from schema */
+  /* Schema-driven default loading - iterate through all schema entries */
+  for (entry_idx = 0; entry_idx < g_config_schema_count; entry_idx++) {
+    const config_schema_entry_t* entry = &g_config_schema[entry_idx];
+    config_value_type_t field_type = entry->type;
+    void* field_ptr = NULL;
 
-  if (g_config_runtime_app_config->network) {
-    g_config_runtime_app_config->network->rtsp_port = 554;
-    g_config_runtime_app_config->network->snapshot_port = 8080;
-    g_config_runtime_app_config->network->ws_discovery_port = 3702;
+    /* Skip entries without default values */
+    if (entry->default_literal == NULL || entry->default_literal[0] == '\0') {
+      skipped_count++;
+      continue;
+    }
+
+    /* Get pointer to the configuration field */
+    field_ptr = config_runtime_get_field_ptr(entry->section, entry->key, &field_type);
+    if (field_ptr == NULL) {
+      /* Field doesn't exist in current config structure - skip silently */
+      skipped_count++;
+      continue;
+    }
+
+    /* Parse and apply default value based on type */
+    switch (entry->type) {
+      case CONFIG_TYPE_INT:
+      case CONFIG_TYPE_BOOL: {
+        long parsed_value = strtol(entry->default_literal, &endptr, CONFIG_DECIMAL_BASE);
+        if (endptr != entry->default_literal && *endptr == '\0') {
+          *(int*)field_ptr = (int)parsed_value;
+          applied_count++;
+        } else {
+          platform_log_warning("[CONFIG] Failed to parse int default for %s.%s: '%s'\n",
+                               entry->section_name, entry->key, entry->default_literal);
+          skipped_count++;
+        }
+        break;
+      }
+
+      case CONFIG_TYPE_FLOAT: {
+        double parsed_value = strtod(entry->default_literal, &endptr);
+        if (endptr != entry->default_literal && *endptr == '\0') {
+          *(float*)field_ptr = (float)parsed_value;
+          applied_count++;
+        } else {
+          platform_log_warning("[CONFIG] Failed to parse float default for %s.%s: '%s'\n",
+                               entry->section_name, entry->key, entry->default_literal);
+          skipped_count++;
+        }
+        break;
+      }
+
+      case CONFIG_TYPE_STRING: {
+        char* dest = (char*)field_ptr;
+        size_t max_len = entry->max_length;
+
+        /* Safe string copy with bounds checking */
+        if (max_len > 0) {
+          strncpy(dest, entry->default_literal, max_len - 1);
+          dest[max_len - 1] = '\0';
+        } else {
+          /* Fallback for strings without explicit max_length */
+          strncpy(dest, entry->default_literal, CONFIG_STRING_MAX_LEN_DEFAULT - 1);
+          dest[CONFIG_STRING_MAX_LEN_DEFAULT - 1] = '\0';
+        }
+        applied_count++;
+        break;
+      }
+
+      default:
+        /* Unknown type - skip */
+        skipped_count++;
+        break;
+    }
   }
 
-  if (g_config_runtime_app_config->logging) {
-    g_config_runtime_app_config->logging->enabled = 1;
-    g_config_runtime_app_config->logging->min_level = 2; /* NOTICE */
-  }
-
-  if (g_config_runtime_app_config->imaging) {
-    g_config_runtime_app_config->imaging->brightness = 0;
-    g_config_runtime_app_config->imaging->contrast = 0;
-    g_config_runtime_app_config->imaging->saturation = 0;
-    g_config_runtime_app_config->imaging->sharpness = 0;
-    g_config_runtime_app_config->imaging->hue = 0;
-  }
-
-  if (g_config_runtime_app_config->auto_daynight) {
-    g_config_runtime_app_config->auto_daynight->mode = DAY_NIGHT_AUTO;
-    g_config_runtime_app_config->auto_daynight->day_to_night_threshold = 30;
-    g_config_runtime_app_config->auto_daynight->night_to_day_threshold = 70;
-    g_config_runtime_app_config->auto_daynight->lock_time_seconds = 10;
-    g_config_runtime_app_config->auto_daynight->ir_led_mode = IR_LED_AUTO;
-    g_config_runtime_app_config->auto_daynight->ir_led_level = 1;
-    g_config_runtime_app_config->auto_daynight->enable_auto_switching = 1;
-  }
-
-  /* Snapshot service configuration defaults (T086) */
-  if (g_config_runtime_app_config->snapshot) {
-    g_config_runtime_app_config->snapshot->width = 640;
-    g_config_runtime_app_config->snapshot->height = 480;
-    g_config_runtime_app_config->snapshot->quality = 85;
-    strncpy(g_config_runtime_app_config->snapshot->format, "jpeg", 31);
-    g_config_runtime_app_config->snapshot->format[31] = '\0';
-  }
-
-  g_config_runtime_app_config->onvif.enabled = 1;
-  g_config_runtime_app_config->onvif.http_port = 8080;
-  g_config_runtime_app_config->onvif.auth_enabled = 0;
-
+  /* Increment generation counter to signal configuration change */
   g_config_runtime_generation++;
 
   pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Log summary for diagnostics */
+  platform_log_debug("[CONFIG] Applied %zu defaults, skipped %zu entries\n",
+                     applied_count, skipped_count);
 
   return ONVIF_SUCCESS;
 }
