@@ -93,7 +93,15 @@ check_compile_commands() {
         log_warning "Warning: compile_commands.json not found"
         log_info "Generating compile_commands.json..."
         if [[ -f "$PROJECT_ROOT/scripts/generate_compile_commands.sh" ]]; then
-            "$PROJECT_ROOT/scripts/generate_compile_commands.sh"
+            if [[ -x "$PROJECT_ROOT/scripts/generate_compile_commands.sh" ]]; then
+                log_info "Running generate_compile_commands.sh..."
+                "$PROJECT_ROOT/scripts/generate_compile_commands.sh"
+            else
+                log_error "Error: generate_compile_commands.sh is not executable"
+                log_info "Fixing permissions..."
+                chmod +x "$PROJECT_ROOT/scripts/generate_compile_commands.sh"
+                "$PROJECT_ROOT/scripts/generate_compile_commands.sh"
+            fi
         else
             log_error "Error: generate_compile_commands.sh not found"
             log_info "Please run 'make compile-commands' to generate compile_commands.json"
@@ -250,6 +258,17 @@ find_pr_diff_files() {
     local git_root
     git_root=$(git rev-parse --show-toplevel)
 
+    # Debug: Log environment and git information
+    log_info "=== PR DIFF DEBUG INFO ==="
+    log_info "GITHUB_BASE_REF: ${GITHUB_BASE_REF:-'not set'}"
+    log_info "GITHUB_HEAD_REF: ${GITHUB_HEAD_REF:-'not set'}"
+    log_info "GITHUB_REF: ${GITHUB_REF:-'not set'}"
+    log_info "Git root: $git_root"
+    log_info "Project root: $PROJECT_ROOT"
+    log_info "Current working directory: $(pwd)"
+    log_info "Git branch: $(git branch --show-current 2>/dev/null || echo 'detached HEAD')"
+    log_info "Git HEAD: $(git rev-parse HEAD 2>/dev/null || echo 'unknown')"
+
     # Fetch the base branch to ensure we have it locally
     log_info "Fetching base branch: origin/$GITHUB_BASE_REF"
     if ! git fetch origin "$GITHUB_BASE_REF"; then
@@ -257,27 +276,68 @@ find_pr_diff_files() {
         return 1
     fi
 
+    # Debug: Show all files changed in PR
+    log_info "All files changed in PR (origin/$GITHUB_BASE_REF...HEAD):"
+    local all_changed_files
+    all_changed_files=$(git diff --name-only "origin/$GITHUB_BASE_REF...HEAD" 2>/dev/null || echo "")
+    if [[ -n "$all_changed_files" ]]; then
+        echo "$all_changed_files" | while IFS= read -r file; do
+            log_info "  - $file"
+        done
+    else
+        log_warning "  No files found in git diff"
+    fi
+
     # Get files changed in PR (base branch to HEAD)
+    local total_files=0
+    local c_files=0
+    local filtered_files=0
+
+    # Debug: Show the regex pattern being used
+    log_info "Using regex pattern for C/C++ files: ^(cross-compile/onvif/)?src/.*\.(c|h|cpp|hpp|cc|hh)$"
+
     while IFS= read -r file; do
+        total_files=$((total_files + 1))
+        log_info "Processing file $total_files: $file"
+
         # Only include C/C++ source files in src directory (exclude tests)
         # Handle both git root relative paths and working directory relative paths
         if [[ "$file" =~ ^(cross-compile/onvif/)?src/.*\.(c|h|cpp|hpp|cc|hh)$ ]]; then
+            c_files=$((c_files + 1))
+            log_info "  ✓ Matches C/C++ pattern in src/ directory"
+
             # Convert to absolute path if relative
+            local abs_file="$file"
             if [[ "$file" != /* ]]; then
                 # If it starts with cross-compile/onvif/, use git root
                 if [[ "$file" =~ ^cross-compile/onvif/ ]]; then
-                    file="$git_root/$file"
+                    abs_file="$git_root/$file"
+                    log_info "  → Converted to absolute path: $abs_file"
                 else
                     # Otherwise, it's relative to current working directory
-                    file="$PROJECT_ROOT/$file"
+                    abs_file="$PROJECT_ROOT/$file"
+                    log_info "  → Converted to absolute path: $abs_file"
                 fi
             fi
+
             # Check if file exists after converting to absolute path
-            if [[ -f "$file" ]]; then
-                pr_files+=("$file")
+            if [[ -f "$abs_file" ]]; then
+                filtered_files=$((filtered_files + 1))
+                pr_files+=("$abs_file")
+                log_info "  ✓ File exists, added to lint list"
+            else
+                log_warning "  ✗ File does not exist: $abs_file"
             fi
+        else
+            log_info "  - Skipped (not a C/C++ file in src/ directory)"
         fi
     done < <(git diff --name-only "origin/$GITHUB_BASE_REF...HEAD")
+
+    log_info "=== PR DIFF SUMMARY ==="
+    log_info "Total files changed: $total_files"
+    log_info "C/C++ files in src/: $c_files"
+    log_info "Files added to lint list: $filtered_files"
+    log_info "========================="
 
     # Output the files (one per line)
     printf '%s\n' "${pr_files[@]}"
@@ -392,6 +452,14 @@ main() {
             exit 0
         fi
         log_info "Found ${#files[@]} PR-modified C file(s) to lint"
+
+        # Debug: Show the actual files that will be linted
+        log_info "Files to be linted:"
+        for file in "${files[@]}"; do
+            local relative_file
+            relative_file=$(get_relative_path "$file")
+            log_info "  - $relative_file"
+        done
     else
         # Find and lint all global C files (excluding test files)
         log_info "Scanning for global C source files..."

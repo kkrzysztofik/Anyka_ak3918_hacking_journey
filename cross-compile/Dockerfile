@@ -28,6 +28,8 @@ RUN apt-get update && apt-get install -y \
     unzip \
     python3 \
     python3-pip \
+    bc \
+    ccache \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and extract local Anyka toolchain
@@ -66,6 +68,8 @@ RUN clangd --version
 RUN cppcheck --version
 RUN snyk --version
 RUN clangd-tidy --version
+RUN bc --version
+RUN ccache --version
 
 # Set working directory
 WORKDIR /workspace

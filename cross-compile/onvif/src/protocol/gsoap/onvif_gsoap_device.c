@@ -123,8 +123,8 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     soap_default_tt__MediaCapabilities(soap, response->Capabilities->Media);
 
     char media_xaddr[256];
-    (void)snprintf(media_xaddr, sizeof(media_xaddr), "http://%s:%d/onvif/media_service", data->device_ip,
-                   data->http_port);
+    (void)snprintf(media_xaddr, sizeof(media_xaddr), "http://%s:%d/onvif/media_service",
+                   data->device_ip, data->http_port);
     response->Capabilities->Media->XAddr = soap_strdup(soap, media_xaddr);
 
     /* PTZ capabilities */
