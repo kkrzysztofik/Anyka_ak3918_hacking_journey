@@ -244,6 +244,13 @@ find_pr_diff_files() {
     # Check if we're in a git repository
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
         log_error "Error: Not in a git repository"
+        log_info "Current working directory: $(pwd)"
+        log_info "Directory contents:"
+        ls -la . || true
+        log_info "Parent directory contents:"
+        ls -la .. || true
+        log_info "Checking for .git directory:"
+        find . -name ".git" -type d 2>/dev/null || log_info "No .git directory found"
         return 1
     fi
 
