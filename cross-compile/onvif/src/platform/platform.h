@@ -43,11 +43,7 @@
 #define PLATFORM_FRAME_TYPE_P 1
 #define PLATFORM_FRAME_TYPE_B 2
 
-typedef enum {
-  PLATFORM_DAYNIGHT_DAY = 0,
-  PLATFORM_DAYNIGHT_NIGHT = 1,
-  PLATFORM_DAYNIGHT_AUTO = 2
-} platform_daynight_mode_t;
+typedef enum { PLATFORM_DAYNIGHT_DAY = 0, PLATFORM_DAYNIGHT_NIGHT = 1, PLATFORM_DAYNIGHT_AUTO = 2 } platform_daynight_mode_t;
 
 /* Additional video resolution type */
 typedef struct {
@@ -116,8 +112,7 @@ void platform_vi_close(platform_vi_handle_t handle);
  * @param resolution Pointer to store resolution information
  * @return PLATFORM_SUCCESS on success, error code on failure
  */
-platform_result_t platform_vi_get_sensor_resolution(platform_vi_handle_t handle,
-                                                    platform_video_resolution_t* resolution);
+platform_result_t platform_vi_get_sensor_resolution(platform_vi_handle_t handle, platform_video_resolution_t* resolution);
 
 /**
  * @brief Switch between day and night modes
@@ -125,8 +120,7 @@ platform_result_t platform_vi_get_sensor_resolution(platform_vi_handle_t handle,
  * @param mode Day/night mode to switch to
  * @return PLATFORM_SUCCESS on success, error code on failure
  */
-platform_result_t platform_vi_switch_day_night(platform_vi_handle_t handle,
-                                               platform_daynight_mode_t mode);
+platform_result_t platform_vi_switch_day_night(platform_vi_handle_t handle, platform_daynight_mode_t mode);
 
 /**
  * @brief Set video flip and mirror settings
@@ -166,8 +160,7 @@ platform_result_t platform_vi_capture_off(platform_vi_handle_t handle);
  * @note This must be called after platform_vi_open() and before
  * platform_vi_capture_on()
  */
-platform_result_t platform_vi_set_channel_attr(platform_vi_handle_t handle,
-                                               const platform_video_channel_attr_t* attr);
+platform_result_t platform_vi_set_channel_attr(platform_vi_handle_t handle, const platform_video_channel_attr_t* attr);
 
 /**
  * @brief Get current sensor frame rate
@@ -193,8 +186,7 @@ platform_result_t platform_vi_get_fps(platform_vi_handle_t handle, int* fps);
  * @param value New effect value
  * @return PLATFORM_SUCCESS on success, error code on failure
  */
-platform_result_t platform_vpss_effect_set(platform_vi_handle_t handle,
-                                           platform_vpss_effect_t effect, int value);
+platform_result_t platform_vpss_effect_set(platform_vi_handle_t handle, platform_vpss_effect_t effect, int value);
 
 /**
  * @brief Get current video processing effect value
@@ -203,8 +195,7 @@ platform_result_t platform_vpss_effect_set(platform_vi_handle_t handle,
  * @param value Pointer to store current effect value
  * @return PLATFORM_SUCCESS on success, error code on failure
  */
-platform_result_t platform_vpss_effect_get(platform_vi_handle_t handle,
-                                           platform_vpss_effect_t effect, int* value);
+platform_result_t platform_vpss_effect_get(platform_vi_handle_t handle, platform_vpss_effect_t effect, int* value);
 
 /** @} */
 
@@ -219,8 +210,7 @@ platform_result_t platform_vpss_effect_get(platform_vi_handle_t handle,
  * @param config Video encoding configuration
  * @return PLATFORM_SUCCESS on success, error code on failure
  */
-platform_result_t platform_venc_init(platform_venc_handle_t* handle,
-                                     const platform_video_config_t* config);
+platform_result_t platform_venc_init(platform_venc_handle_t* handle, const platform_video_config_t* config);
 
 /**
  * @brief Validate video encoder configuration parameters
@@ -243,8 +233,7 @@ void platform_venc_cleanup(platform_venc_handle_t handle);
  * @param size Pointer to store frame size
  * @return PLATFORM_SUCCESS on success, error code on failure
  */
-platform_result_t platform_venc_get_frame(platform_venc_handle_t handle, uint8_t** data,
-                                          uint32_t* size);
+platform_result_t platform_venc_get_frame(platform_venc_handle_t handle, uint8_t** data, uint32_t* size);
 
 /**
  * @brief Release encoded video frame
@@ -263,8 +252,7 @@ typedef struct {
   bool is_keyframe;
 } platform_venc_stream_t;
 
-platform_result_t platform_venc_get_stream(platform_venc_handle_t handle,
-                                           platform_venc_stream_t* stream, uint32_t timeout_ms);
+platform_result_t platform_venc_get_stream(platform_venc_handle_t handle, platform_venc_stream_t* stream, uint32_t timeout_ms);
 void platform_venc_release_stream(platform_venc_handle_t handle, platform_venc_stream_t* stream);
 
 /**
@@ -274,8 +262,7 @@ void platform_venc_release_stream(platform_venc_handle_t handle, platform_venc_s
  * @param stream_handle Pointer to store requested stream handle
  * @return PLATFORM_SUCCESS on success, error code on failure
  */
-platform_result_t platform_venc_request_stream(platform_vi_handle_t vi_handle,
-                                               platform_venc_handle_t venc_handle,
+platform_result_t platform_venc_request_stream(platform_vi_handle_t vi_handle, platform_venc_handle_t venc_handle,
                                                platform_venc_stream_handle_t* stream_handle);
 
 /**
@@ -291,8 +278,7 @@ void platform_venc_cancel_stream(platform_venc_stream_handle_t stream_handle);
  * @param timeout_ms Timeout in milliseconds
  * @return PLATFORM_SUCCESS on success, error code on failure
  */
-platform_result_t platform_venc_get_stream_by_handle(platform_venc_stream_handle_t stream_handle,
-                                                     platform_venc_stream_t* stream,
+platform_result_t platform_venc_get_stream_by_handle(platform_venc_stream_handle_t stream_handle, platform_venc_stream_t* stream,
                                                      uint32_t timeout_ms);
 
 /**
@@ -300,8 +286,7 @@ platform_result_t platform_venc_get_stream_by_handle(platform_venc_stream_handle
  * @param stream_handle Stream handle
  * @param stream Stream struct to release
  */
-void platform_venc_release_stream_by_handle(platform_venc_stream_handle_t stream_handle,
-                                            platform_venc_stream_t* stream);
+void platform_venc_release_stream_by_handle(platform_venc_stream_handle_t stream_handle, platform_venc_stream_t* stream);
 
 /**
  * @brief Get encoder stream buffer status (for debugging)
@@ -313,8 +298,7 @@ void platform_venc_release_stream_by_handle(platform_venc_stream_handle_t stream
  * @note This function provides debugging information about the encoder stream
  * buffer status
  */
-platform_result_t platform_venc_get_buffer_status(platform_venc_stream_handle_t stream_handle,
-                                                  uint32_t* buffer_count, uint32_t* max_buffers,
+platform_result_t platform_venc_get_buffer_status(platform_venc_stream_handle_t stream_handle, uint32_t* buffer_count, uint32_t* max_buffers,
                                                   uint32_t* overflow_count);
 
 /* Audio Input (AI) functions */
@@ -322,11 +306,9 @@ platform_result_t platform_ai_open(platform_ai_handle_t* handle);
 void platform_ai_close(platform_ai_handle_t handle);
 
 /* Audio Encoder functions */
-platform_result_t platform_aenc_init(platform_aenc_stream_handle_t* handle,
-                                     const platform_audio_config_t* config);
+platform_result_t platform_aenc_init(platform_aenc_stream_handle_t* handle, const platform_audio_config_t* config);
 void platform_aenc_cleanup(platform_aenc_stream_handle_t handle);
-platform_result_t platform_aenc_get_frame(platform_aenc_stream_handle_t handle, uint8_t** data,
-                                          uint32_t* size);
+platform_result_t platform_aenc_get_frame(platform_aenc_stream_handle_t handle, uint8_t** data, uint32_t* size);
 void platform_aenc_release_frame(platform_aenc_stream_handle_t handle, const uint8_t* data);
 
 /* Audio Encoder Stream functions (for RTSP) */
@@ -336,10 +318,8 @@ typedef struct {
   uint32_t timestamp;
 } platform_aenc_stream_t;
 
-platform_result_t platform_aenc_get_stream(platform_aenc_stream_handle_t handle,
-                                           platform_aenc_stream_t* stream, uint32_t timeout_ms);
-void platform_aenc_release_stream(platform_aenc_stream_handle_t handle,
-                                  platform_aenc_stream_t* stream);
+platform_result_t platform_aenc_get_stream(platform_aenc_stream_handle_t handle, platform_aenc_stream_t* stream, uint32_t timeout_ms);
+void platform_aenc_release_stream(platform_aenc_stream_handle_t handle, platform_aenc_stream_t* stream);
 
 /* PTZ functions */
 platform_result_t platform_ptz_init(void);
@@ -368,11 +348,9 @@ typedef struct {
 
 typedef void* platform_snapshot_handle_t;
 
-platform_result_t platform_snapshot_init(platform_snapshot_handle_t* handle,
-                                         platform_vi_handle_t vi_handle, int width, int height);
+platform_result_t platform_snapshot_init(platform_snapshot_handle_t* handle, platform_vi_handle_t vi_handle, int width, int height);
 void platform_snapshot_cleanup(platform_snapshot_handle_t handle);
-platform_result_t platform_snapshot_capture(platform_snapshot_handle_t handle,
-                                            platform_snapshot_t* snapshot, uint32_t timeout_ms);
+platform_result_t platform_snapshot_capture(platform_snapshot_handle_t handle, platform_snapshot_t* snapshot, uint32_t timeout_ms);
 void platform_snapshot_release(platform_snapshot_handle_t handle, platform_snapshot_t* snapshot);
 
 /**
@@ -381,7 +359,10 @@ void platform_snapshot_release(platform_snapshot_handle_t handle, platform_snaps
  * @{
  */
 
-/* Legacy logging functions - now use enhanced logging internally */
+/* Platform logging convenience functions - use enhanced logging internally
+ * These are the recommended public API for logging throughout the codebase.
+ * They wrap platform_log_printf() with automatic file/function/line tracking.
+ */
 int platform_log_error(const char* format, ...);
 int platform_log_warning(const char* format, ...);
 int platform_log_notice(const char* format, ...);

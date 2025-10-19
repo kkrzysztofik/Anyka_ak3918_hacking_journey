@@ -29,6 +29,33 @@
 #include "utils/error/error_handling.h"
 #include "utils/stream/stream_config_utils.h"
 
+/* Video resolution constants (pixels) */
+#define VIDEO_RESOLUTION_WIDTH_VGA  640  /* VGA width */
+#define VIDEO_RESOLUTION_HEIGHT_VGA 480  /* VGA height */
+#define VIDEO_RESOLUTION_WIDTH_FHD  1920 /* Full HD width */
+#define VIDEO_RESOLUTION_HEIGHT_FHD 1080 /* Full HD height */
+
+/* Video frame rate constants (fps) */
+#define VIDEO_FPS_DEFAULT     15   /* Default fallback FPS */
+#define VIDEO_FPS_MIN         5    /* Minimum allowed FPS */
+#define VIDEO_GOP_DEFAULT     50   /* Default GOP size */
+#define VIDEO_GOP_MAX_SECONDS 10   /* Maximum GOP in seconds */
+
+/* Video bitrate constants (kbps) */
+#define VIDEO_BITRATE_DEFAULT 2000 /* Default bitrate */
+
+/* Audio default constants */
+#define AUDIO_SAMPLE_RATE_DEFAULT    16000 /* Default sample rate (16 kHz) */
+#define AUDIO_CHANNELS_DEFAULT       1     /* Default channels (mono) */
+#define AUDIO_BITS_PER_SAMPLE_DEFAULT 16   /* Default bits per sample */
+#define AUDIO_BITRATE_DEFAULT        64000 /* Default AAC bitrate (64 kbps) */
+
+/* RTSP constants */
+#define RTSP_PORT_DEFAULT 554  /* Default RTSP port */
+
+/* Buffer size constants */
+#define BUFFER_SIZE_MEDIUM 256 /* Medium buffer size */
+
 /* Global video system state - static variables with internal linkage only */
 static platform_vi_handle_t g_video_vi_handle = NULL;               // NOLINT
 static rtsp_multistream_server_t* g_video_rtsp_multistream_server = // NOLINT
@@ -81,12 +108,12 @@ static int initialize_video_input(platform_video_resolution_t* resolution, int* 
   platform_log_info("Video input initialized: %dx%d\n", resolution->width, resolution->height);
 
   // Detect actual sensor frame rate for proper encoder configuration
-  *sensor_fps = 15; // Default fallback
+  *sensor_fps = VIDEO_FPS_DEFAULT; // Default fallback
   if (platform_vi_get_fps(g_video_vi_handle, sensor_fps) == PLATFORM_SUCCESS) {
     platform_log_info("Detected sensor frame rate: %d fps\n", *sensor_fps);
   } else {
-    platform_log_warning("warning: failed to detect sensor frame rate, using default 15fps\n");
-    *sensor_fps = 15;
+    platform_log_warning("warning: failed to detect sensor frame rate, using default fps\n");
+    *sensor_fps = VIDEO_FPS_DEFAULT;
   }
 
   return ONVIF_SUCCESS;
@@ -109,8 +136,8 @@ static int configure_video_channels(platform_vi_handle_t vi_handle,
             [PLATFORM_VIDEO_CHN_SUB] = {
               // Sub channel - 1/2 main resolution, but
               // constrained to hardware limits
-              .width = (resolution->width / 2 > 640) ? 640 : resolution->width / 2,
-              .height = (resolution->height / 2 > 480) ? 480 : resolution->height / 2}}};
+              .width = (resolution->width / 2 > VIDEO_RESOLUTION_WIDTH_VGA) ? VIDEO_RESOLUTION_WIDTH_VGA : resolution->width / 2,
+              .height = (resolution->height / 2 > VIDEO_RESOLUTION_HEIGHT_VGA) ? VIDEO_RESOLUTION_HEIGHT_VGA : resolution->height / 2}}};
 
   if (platform_vi_set_channel_attr(g_video_vi_handle, &channel_attr) != PLATFORM_SUCCESS) {
     platform_log_error("Failed to set video channel attributes, RTSP streaming disabled\n");
@@ -140,11 +167,11 @@ static int start_global_capture(platform_vi_handle_t vi_handle) {
  * @param audio_config Output audio configuration
  */
 static void init_audio_config(audio_config_t* audio_config) {
-  audio_config->sample_rate = 16000;
-  audio_config->channels = 1;
-  audio_config->bits_per_sample = 16;
+  audio_config->sample_rate = AUDIO_SAMPLE_RATE_DEFAULT;
+  audio_config->channels = AUDIO_CHANNELS_DEFAULT;
+  audio_config->bits_per_sample = AUDIO_BITS_PER_SAMPLE_DEFAULT;
   audio_config->codec_type = PLATFORM_AUDIO_CODEC_AAC;
-  audio_config->bitrate = 64000;
+  audio_config->bitrate = AUDIO_BITRATE_DEFAULT;
 }
 
 /**
@@ -154,8 +181,8 @@ static void init_audio_config(audio_config_t* audio_config) {
  */
 static void set_video_resolution(video_config_t* video_config,
                                  const platform_video_resolution_t* resolution) {
-  video_config->width = (resolution->width > 1920) ? 1920 : resolution->width;
-  video_config->height = (resolution->height > 1080) ? 1080 : resolution->height;
+  video_config->width = (resolution->width > VIDEO_RESOLUTION_WIDTH_FHD) ? VIDEO_RESOLUTION_WIDTH_FHD : resolution->width;
+  video_config->height = (resolution->height > VIDEO_RESOLUTION_HEIGHT_FHD) ? VIDEO_RESOLUTION_HEIGHT_FHD : resolution->height;
 }
 
 /**
@@ -168,7 +195,7 @@ static void configure_frame_rate(video_config_t* video_config, const struct appl
                                  int sensor_fps) {
   if (cfg && cfg->main_stream && cfg->main_stream->fps > 0) {
     // Config specifies FPS, validate against sensor capabilities
-    if (cfg->main_stream->fps <= sensor_fps * 2 && cfg->main_stream->fps >= 5) {
+    if (cfg->main_stream->fps <= sensor_fps * 2 && cfg->main_stream->fps >= VIDEO_FPS_MIN) {
       video_config->fps = cfg->main_stream->fps;
     } else {
       platform_log_warning("Config FPS %d outside valid range (5-%d), using sensor FPS %d\n",
@@ -203,8 +230,8 @@ static void copy_config_values(video_config_t* video_config, const struct applic
  */
 static void set_default_video_config(video_config_t* video_config, int sensor_fps) {
   video_config->fps = sensor_fps;
-  video_config->bitrate = 2000;
-  video_config->gop_size = (sensor_fps > 0) ? sensor_fps * 2 : 50;
+  video_config->bitrate = VIDEO_BITRATE_DEFAULT;
+  video_config->gop_size = (sensor_fps > 0) ? sensor_fps * 2 : VIDEO_GOP_DEFAULT;
   video_config->profile = PLATFORM_PROFILE_MAIN;
   video_config->codec_type = PLATFORM_H264_ENC_TYPE;
   video_config->br_mode = PLATFORM_BR_MODE_CBR;
@@ -218,14 +245,14 @@ static void set_default_video_config(video_config_t* video_config, int sensor_fp
  */
 static void validate_gop_size(video_config_t* video_config) {
   if (video_config->gop_size <= 0) {
-    video_config->gop_size = (video_config->fps > 0) ? video_config->fps * 2 : 50;
+    video_config->gop_size = (video_config->fps > 0) ? video_config->fps * 2 : VIDEO_GOP_DEFAULT;
     platform_log_debug("validate_gop_size: Adjusted GOP size to %d for main stream (fps: "
                        "%d)\n",
                        video_config->gop_size, video_config->fps);
   }
 
   // Ensure GOP size is reasonable for the frame rate
-  int max_reasonable_gop = video_config->fps * 10; // Max 10 seconds worth of frames
+  int max_reasonable_gop = video_config->fps * VIDEO_GOP_MAX_SECONDS; // Max seconds worth of frames
   if (video_config->gop_size > max_reasonable_gop) {
     video_config->gop_size = max_reasonable_gop;
     platform_log_debug("validate_gop_size: Reduced GOP size to %d for main stream (max "
@@ -280,7 +307,7 @@ static void configure_main_stream(const struct application_config* cfg,
     }
 
     // Log configuration summary
-    char config_summary[256];
+    char config_summary[BUFFER_SIZE_MEDIUM];
     if (stream_config_get_summary(cfg->main_stream, true, config_summary, sizeof(config_summary)) ==
         ONVIF_SUCCESS) {
       platform_log_info("Main stream configuration: %s\n", config_summary);
@@ -305,7 +332,7 @@ static int create_rtsp_server(const video_config_t* video_config,
                               const audio_config_t* audio_config) {
   // Create multi-stream RTSP server (only if not already created)
   if (!g_video_rtsp_server_initialized) {
-    g_video_rtsp_multistream_server = rtsp_multistream_server_create(554, g_video_vi_handle);
+    g_video_rtsp_multistream_server = rtsp_multistream_server_create(RTSP_PORT_DEFAULT, g_video_vi_handle);
     if (!g_video_rtsp_multistream_server) {
       platform_log_error("Failed to create multi-stream RTSP server\n");
       return ONVIF_ERROR_INITIALIZATION;
@@ -363,7 +390,7 @@ int video_lifecycle_init(const struct application_config* cfg) {
 
   // Step 2: Initialize video input and get sensor info
   platform_video_resolution_t resolution;
-  int sensor_fps = 15; // Initialize with default value
+  int sensor_fps = VIDEO_FPS_DEFAULT; // Initialize with default value
   if (initialize_video_input(&resolution, &sensor_fps) != ONVIF_SUCCESS) {
     return ONVIF_ERROR_HARDWARE;
   }

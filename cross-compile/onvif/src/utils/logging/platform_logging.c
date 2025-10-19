@@ -18,6 +18,14 @@
 #include "core/config/config.h"
 #include "utils/error/error_handling.h"
 
+/* ============================================================================
+ * Constants - Logging
+ * ============================================================================ */
+
+/* Timestamp buffer size and conversion constants */
+#define LOG_TIMESTAMP_BUFFER_SIZE  32   /* Buffer size for formatted timestamp */
+#define LOG_US_TO_MS_DIVISOR       1000 /* Microseconds to milliseconds conversion */
+
 /* Log level strings */
 /* ============================================================================
  * Global State
@@ -55,12 +63,12 @@ static platform_logging_config_t g_log_config = { // NOLINT
  * ============================================================================ */
 
 static int get_timestamp(char* buffer, size_t size) {
-  if (!buffer || size < 32) {
+  if (!buffer || size < LOG_TIMESTAMP_BUFFER_SIZE) {
     return -1;
   }
 
   struct timeval tv;
-  struct tm* tm_info;
+  struct tm* tm_info = NULL;
 
   if (gettimeofday(&tv, NULL) != 0) {
     return -1;
@@ -72,13 +80,13 @@ static int get_timestamp(char* buffer, size_t size) {
   }
 
   /* Format: YYYY-MM-DD HH:MM:SS.mmm */
-  int written = strftime(buffer, size, "%Y-%m-%d %H:%M:%S", tm_info);
+  size_t written = strftime(buffer, size, "%Y-%m-%d %H:%M:%S", tm_info);
   if (written == 0) {
     return -1;
   }
 
   /* Add milliseconds */
-  snprintf(buffer + written, size - written, ".%03ld", tv.tv_usec / 1000);
+  snprintf(buffer + written, size - written, ".%03ld", tv.tv_usec / LOG_US_TO_MS_DIVISOR);
 
   return ONVIF_SUCCESS;
 }
@@ -108,7 +116,7 @@ int platform_log_printf(platform_log_level_t level, const char* file, const char
     return 0;
   }
 
-  char timestamp[32];
+  char timestamp[LOG_TIMESTAMP_BUFFER_SIZE];
   int chars_written = 0;
 
   /* Get timestamp if enabled */

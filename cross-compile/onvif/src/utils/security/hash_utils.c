@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "platform/platform.h"
 #include "sha256.h"
 #include "utils/error/error_handling.h"
 

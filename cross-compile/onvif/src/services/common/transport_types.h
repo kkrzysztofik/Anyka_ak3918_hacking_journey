@@ -33,12 +33,10 @@ typedef enum {
  *
  * Maps to gSOAP's tt__NetworkProtocolType enum values:
  * - ONVIF_NETWORK_HTTP = tt__NetworkProtocolType__HTTP (0)
- * - ONVIF_NETWORK_HTTPS = tt__NetworkProtocolType__HTTPS (1)
  * - ONVIF_NETWORK_RTSP = tt__NetworkProtocolType__RTSP (2)
  */
 typedef enum {
   ONVIF_NETWORK_HTTP = 0,    /**< HTTP network protocol */
-  ONVIF_NETWORK_HTTPS = 1,   /**< HTTPS network protocol */
   ONVIF_NETWORK_RTSP = 2,    /**< RTSP network protocol */
   ONVIF_NETWORK_UNKNOWN = -1 /**< Unknown/invalid network protocol */
 } onvif_network_protocol_t;

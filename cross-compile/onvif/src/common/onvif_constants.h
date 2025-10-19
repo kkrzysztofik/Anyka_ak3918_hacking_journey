@@ -9,8 +9,6 @@
 #define ONVIF_CONSTANTS_H
 
 /* Network Ports */
-#define ONVIF_HTTP_PORT_DEFAULT     8080
-#define ONVIF_HTTPS_PORT_DEFAULT    443
 #define ONVIF_RTSP_PORT_DEFAULT     554
 #define ONVIF_SNAPSHOT_PORT_DEFAULT 3000
 #define ONVIF_HTTP_STANDARD_PORT    80
@@ -56,8 +54,8 @@
 #define TM_YEAR_OFFSET 1900
 
 /* ONVIF Version Constants */
-#define ONVIF_VERSION_MAJOR 2
-#define ONVIF_VERSION_MINOR 5
+#define ONVIF_VERSION_MAJOR 24 /* ONVIF specification version (December 2024) */
+#define ONVIF_VERSION_MINOR 12 /* ONVIF specification version (December 2024) */
 
 /* HTTP Status Codes */
 #define HTTP_STATUS_OK             200
@@ -65,9 +63,6 @@
 #define HTTP_STATUS_UNAUTHORIZED   401
 #define HTTP_STATUS_NOT_FOUND      404
 #define HTTP_STATUS_INTERNAL_ERROR 500
-
-/* ONVIF Error Codes */
-#define ONVIF_ERROR_DUPLICATE 1001
 
 /* SOAP Fault Codes */
 #define SOAP_FAULT_RECEIVER "soap:Receiver"
@@ -78,5 +73,7 @@
 #define WSD_HELLO_TEMPLATE         "<Hello>%s-%s-%s-%d</Hello>"
 #define WSD_BYE_TEMPLATE           "<Bye>%s-%s</Bye>"
 #define WSD_PROBE_MATCH_TEMPLATE   "<ProbeMatch>%s-%s-%s-%d</ProbeMatch>"
+
+/* Error return codes are defined in utils/error/error_handling.h */
 
 #endif /* ONVIF_CONSTANTS_H */

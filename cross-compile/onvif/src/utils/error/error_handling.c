@@ -10,10 +10,11 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "common/onvif_constants.h"
+#include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap_response.h"
@@ -22,6 +23,11 @@
 /* ============================================================================
  * Constants and Types
  * ============================================================================ */
+
+/* Error message buffer sizes */
+#define ERROR_MESSAGE_BUFFER_SIZE 256  /* Standard error message buffer */
+#define ERROR_DETAIL_BUFFER_SIZE  512  /* Detailed error message buffer */
+#define ERROR_CONTEXT_BUFFER_SIZE 1024 /* Extended context buffer */
 
 /* SOAP Fault Codes - using constants from common/onvif_constants.h */
 
@@ -131,13 +137,13 @@ int error_handle_pattern(const error_context_t* context, error_pattern_t pattern
   const char* fault_message = custom_message ? custom_message : result.soap_fault_string;
 
   int xml_length = onvif_gsoap_generate_fault_response(
-    NULL,  // ctx - will create temporary context
-    result.soap_fault_code,  // fault_code (e.g., "soap:Sender" or "soap:Receiver")
-    fault_message,           // fault_string (descriptive error message)
-    NULL,                    // fault_actor (optional)
-    NULL,                    // fault_detail (optional)
-    soap_fault_xml,          // output_buffer
-    soap_buffer_size         // buffer_size
+    NULL,                   // ctx - will create temporary context
+    result.soap_fault_code, // fault_code (e.g., "soap:Sender" or "soap:Receiver")
+    fault_message,          // fault_string (descriptive error message)
+    NULL,                   // fault_actor (optional)
+    NULL,                   // fault_detail (optional)
+    soap_fault_xml,         // output_buffer
+    soap_buffer_size        // buffer_size
   );
 
   if (xml_length < 0) {
@@ -162,7 +168,7 @@ int error_handle_validation(const error_context_t* context, int validation_resul
     return ONVIF_ERROR_INVALID;
   }
 
-  char custom_message[256];
+  char custom_message[ERROR_MESSAGE_BUFFER_SIZE];
   (void)snprintf(custom_message, sizeof(custom_message),
                  "Validation failed for field '%s' (code: %d)", field_name ? field_name : "unknown",
                  validation_result);
@@ -176,7 +182,7 @@ int error_handle_parameter(const error_context_t* context, const char* parameter
     return ONVIF_ERROR_INVALID;
   }
 
-  char custom_message[256];
+  char custom_message[ERROR_MESSAGE_BUFFER_SIZE];
   (void)snprintf(custom_message, sizeof(custom_message), "Parameter error: %s for parameter '%s'",
                  error_type ? error_type : "unknown error",
                  parameter_name ? parameter_name : "unknown");
@@ -195,7 +201,7 @@ int error_handle_service(const error_context_t* context, int error_code, const c
     return ONVIF_ERROR_INVALID;
   }
 
-  char custom_message[256];
+  char custom_message[ERROR_MESSAGE_BUFFER_SIZE];
   (void)snprintf(custom_message, sizeof(custom_message), "Service error %d: %s", error_code,
                  error_message ? error_message : "Unknown service error");
 
@@ -211,31 +217,31 @@ int error_handle_system(const error_context_t* context, int error_code, const ch
   // Map error code to human-readable message
   const char* error_description = "Unknown error";
   switch (error_code) {
-    case ONVIF_ERROR_NOT_FOUND:
-      error_description = "Resource not found";
-      break;
-    case ONVIF_ERROR_NOT_SUPPORTED:
-      error_description = "Operation not supported";
-      break;
-    case ONVIF_ERROR_DUPLICATE:
-      error_description = "Resource already exists";
-      break;
-    case ONVIF_ERROR_INVALID:
-      error_description = "Invalid parameter";
-      break;
-    case ONVIF_ERROR_MEMORY:
-      error_description = "Memory allocation failed";
-      break;
-    case ONVIF_ERROR_NOT_IMPLEMENTED:
-      error_description = "Feature not implemented";
-      break;
-    case ONVIF_ERROR:
-    default:
-      error_description = "Internal error";
-      break;
+  case ONVIF_ERROR_NOT_FOUND:
+    error_description = "Resource not found";
+    break;
+  case ONVIF_ERROR_NOT_SUPPORTED:
+    error_description = "Operation not supported";
+    break;
+  case ONVIF_ERROR_DUPLICATE:
+    error_description = "Resource already exists";
+    break;
+  case ONVIF_ERROR_INVALID:
+    error_description = "Invalid parameter";
+    break;
+  case ONVIF_ERROR_MEMORY:
+    error_description = "Memory allocation failed";
+    break;
+  case ONVIF_ERROR_NOT_IMPLEMENTED:
+    error_description = "Feature not implemented";
+    break;
+  case ONVIF_ERROR:
+  default:
+    error_description = "Internal error";
+    break;
   }
 
-  char custom_message[256];
+  char custom_message[ERROR_MESSAGE_BUFFER_SIZE];
   if (operation) {
     (void)snprintf(custom_message, sizeof(custom_message), "%s during %s", error_description,
                    operation);
@@ -369,7 +375,7 @@ void error_log_with_context(const error_context_t* context, const error_result_t
     return;
   }
 
-  char summary[512];
+  char summary[ERROR_DETAIL_BUFFER_SIZE];
   if (error_create_summary(context, result, summary, sizeof(summary)) == ONVIF_SUCCESS) {
     (void)platform_log_error("ERROR: %s", summary);
     if (additional_info) {
@@ -423,7 +429,7 @@ void onvif_standardized_log_error(const char* function, const char* file, int li
   va_start(args, message);
 
   // Log with standardized format
-  char full_message[1024];
+  char full_message[ERROR_CONTEXT_BUFFER_SIZE];
   (void)vsnprintf(full_message, sizeof(full_message), message, args);
   (void)platform_log_error("[%s:%d] %s: %s\n", file, line, function, full_message);
 

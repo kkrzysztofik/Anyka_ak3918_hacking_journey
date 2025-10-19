@@ -33,6 +33,26 @@
 #define HTTP_MAX_REALM_LEN       128
 #define HTTP_MAX_AUTH_HEADER_LEN 1024
 
+/* Path and SOAP validation constants */
+#define VALIDATION_MAX_PATH_LEN     1024 /* Maximum path length for validation */
+#define ONVIF_PATH_PREFIX_LEN       7    /* Length of "/onvif/" prefix */
+#define VALIDATION_MAX_SOAP_ACTION  64   /* Maximum SOAP action length */
+
+/* XML entity escape lengths */
+#define XML_ENTITY_LT_LEN    4  /* "&lt;" */
+#define XML_ENTITY_GT_LEN    4  /* "&gt;" */
+#define XML_ENTITY_AMP_LEN   5  /* "&amp;" */
+#define XML_ENTITY_QUOT_LEN  6  /* "&quot;" */
+#define XML_ENTITY_APOS_LEN  6  /* "&apos;" */
+
+/* HTTP Basic auth constants */
+#define HTTP_BASIC_PREFIX_LEN     6  /* "Basic " */
+#define HTTP_BASIC_PREFIX_BUF_LEN 7  /* "Basic " + null */
+
+/* ASCII printable character range */
+#define ASCII_PRINTABLE_MIN 32   /* Space */
+#define ASCII_PRINTABLE_MAX 126  /* Tilde */
+
 /* ============================================================================
  * Validation Data - Centralized Single Source of Truth
  * ============================================================================ */
@@ -206,13 +226,13 @@ int validate_http_path(const char* path) {
   }
 
   // Check for null bytes
-  if (strlen(path) != strnlen(path, 1024)) {
+  if (strlen(path) != strnlen(path, VALIDATION_MAX_PATH_LEN)) {
     ONVIF_LOG_ERROR("Null byte in path detected: %s\n", path);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Check for valid ONVIF paths only
-  if (strncmp(path, "/onvif/", 7) != 0) {
+  if (strncmp(path, "/onvif/", ONVIF_PATH_PREFIX_LEN) != 0) {
     ONVIF_LOG_ERROR("Invalid ONVIF path: %s\n", path);
     return ONVIF_VALIDATION_FAILED;
   }
@@ -268,8 +288,8 @@ int validate_soap_action(const char* action) {
     ONVIF_LOG_ERROR("SOAP action is empty\n");
     return ONVIF_VALIDATION_FAILED;
   }
-  if (len > 64) {
-    ONVIF_LOG_ERROR("SOAP action too long: %zu (max: 64)\n", len);
+  if (len > VALIDATION_MAX_SOAP_ACTION) {
+    ONVIF_LOG_ERROR("SOAP action too long: %zu (max: %d)\n", len, VALIDATION_MAX_SOAP_ACTION);
     return ONVIF_VALIDATION_FAILED;
   }
 
@@ -359,33 +379,33 @@ int sanitize_string_input(const char* input, char* output, size_t output_size) {
     // Remove or escape dangerous characters
     switch (character) {
     case '<':
-      if (out_pos + 4 < output_size - 1) {
+      if (out_pos + XML_ENTITY_LT_LEN < output_size - 1) {
         strcpy(output + out_pos, "&lt;");
-        out_pos += 4;
+        out_pos += XML_ENTITY_LT_LEN;
       }
       break;
     case '>':
-      if (out_pos + 4 < output_size - 1) {
+      if (out_pos + XML_ENTITY_GT_LEN < output_size - 1) {
         strcpy(output + out_pos, "&gt;");
-        out_pos += 4;
+        out_pos += XML_ENTITY_GT_LEN;
       }
       break;
     case '&':
-      if (out_pos + 5 < output_size - 1) {
+      if (out_pos + XML_ENTITY_AMP_LEN < output_size - 1) {
         strcpy(output + out_pos, "&amp;");
-        out_pos += 5;
+        out_pos += XML_ENTITY_AMP_LEN;
       }
       break;
     case '"':
-      if (out_pos + 6 < output_size - 1) {
+      if (out_pos + XML_ENTITY_QUOT_LEN < output_size - 1) {
         strcpy(output + out_pos, "&quot;");
-        out_pos += 6;
+        out_pos += XML_ENTITY_QUOT_LEN;
       }
       break;
     case '\'':
-      if (out_pos + 6 < output_size - 1) {
+      if (out_pos + XML_ENTITY_APOS_LEN < output_size - 1) {
         strcpy(output + out_pos, "&apos;");
-        out_pos += 6;
+        out_pos += XML_ENTITY_APOS_LEN;
       }
       break;
     case '\0':
@@ -432,9 +452,9 @@ int validate_username_input(const char* username) {
   }
 
   // Check for valid characters (alphanumeric, underscore, hyphen, dot)
-  for (const char* p = username; *p; p++) {
-    if (!isalnum(*p) && *p != '_' && *p != '-' && *p != '.') {
-      platform_log_warning("Username contains invalid character '%c': %s", *p, username);
+  for (const char* ptr = username; *ptr; ptr++) {
+    if (!isalnum(*ptr) && *ptr != '_' && *ptr != '-' && *ptr != '.') {
+      platform_log_warning("Username contains invalid character '%c': %s", *ptr, username);
       return ONVIF_VALIDATION_FAILED;
     }
   }
@@ -467,8 +487,8 @@ int validate_password_input(const char* password) {
   }
 
   // Check for null bytes or control characters
-  for (const char* p = password; *p; p++) {
-    if (*p == '\0' || iscntrl(*p)) {
+  for (const char* ptr = password; *ptr; ptr++) {
+    if (*ptr == '\0' || iscntrl(*ptr)) {
       platform_log_warning("Password contains invalid control character");
       return ONVIF_VALIDATION_FAILED;
     }
@@ -489,7 +509,7 @@ int validate_auth_header_input(const char* auth_header) {
 
   // Use common validation utilities
   validation_result_t result =
-    validate_string("auth_header", auth_header, 6, HTTP_MAX_AUTH_HEADER_LEN - 1, 0);
+    validate_string("auth_header", auth_header, HTTP_BASIC_PREFIX_LEN, HTTP_MAX_AUTH_HEADER_LEN - 1, 0);
   if (!validation_is_valid(&result)) {
     platform_log_warning("Invalid Authorization header: %s", validation_get_error_message(&result));
     return ONVIF_VALIDATION_FAILED;
@@ -502,14 +522,14 @@ int validate_auth_header_input(const char* auth_header) {
   }
 
   // Validate Basic auth format
-  if (strnlen(auth_header, 6) < 6) {
+  if (strnlen(auth_header, HTTP_BASIC_PREFIX_LEN) < HTTP_BASIC_PREFIX_LEN) {
     platform_log_warning("Authorization header too short");
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Check for "Basic " prefix (case-insensitive)
-  char prefix[7] = {0};
-  strncpy(prefix, auth_header, 6);
+  char prefix[HTTP_BASIC_PREFIX_BUF_LEN] = {0};
+  strncpy(prefix, auth_header, HTTP_BASIC_PREFIX_LEN);
   if (strcasecmp(prefix, "Basic ") != 0) {
     platform_log_warning("Authorization header does not start with 'Basic ': %s", prefix);
     return ONVIF_VALIDATION_FAILED;
@@ -542,9 +562,9 @@ int validate_realm_input(const char* realm) {
   }
 
   // Check for valid characters (printable ASCII, no quotes)
-  for (const char* p = realm; *p; p++) {
-    if (*p < 32 || *p > 126 || *p == '"' || *p == '\\') {
-      platform_log_warning("Realm contains invalid character '%c': %s", *p, realm);
+  for (const char* ptr = realm; *ptr; ptr++) {
+    if (*ptr < ASCII_PRINTABLE_MIN || *ptr > ASCII_PRINTABLE_MAX || *ptr == '"' || *ptr == '\\') {
+      platform_log_warning("Realm contains invalid character '%c': %s", *ptr, realm);
       return ONVIF_VALIDATION_FAILED;
     }
   }

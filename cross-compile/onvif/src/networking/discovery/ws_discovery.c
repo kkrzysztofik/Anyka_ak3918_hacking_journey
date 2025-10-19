@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #include "common/onvif_constants.h"
+#include "core/config/config.h"
 #include "platform/platform.h"
 #include "utils/network/network_utils.h"
 
@@ -47,7 +48,7 @@ static int g_discovery_socket = -1;  // NOLINT
 static pthread_t g_discovery_thread; // NOLINT
 
 // Global configuration
-static int g_http_port = ONVIF_HTTP_PORT_DEFAULT;       // NOLINT
+static int g_http_port = HTTP_PORT_DEFAULT;       // NOLINT
 static char g_endpoint_uuid[ONVIF_MAX_XADDR_LEN] = {0}; // NOLINT
                                                         /* urn:uuid:... */
 static pthread_mutex_t g_endpoint_uuid_mutex =          // NOLINT

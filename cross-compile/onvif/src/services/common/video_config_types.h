@@ -8,11 +8,14 @@
 #ifndef VIDEO_CONFIG_TYPES_H
 #define VIDEO_CONFIG_TYPES_H
 
+/* Video configuration constants */
+#define VIDEO_PROFILE_NAME_SIZE 64  /* Maximum video profile name length */
+
 /**
  * @brief Video stream encoding configuration
  */
 typedef struct {
-  char name[64];  /**< Profile name (customizable) */
+  char name[VIDEO_PROFILE_NAME_SIZE];  /**< Profile name (customizable) */
   int width;      /**< Video width in pixels */
   int height;     /**< Video height in pixels */
   int fps;        /**< Frames per second */

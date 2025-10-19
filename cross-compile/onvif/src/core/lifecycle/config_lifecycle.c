@@ -27,6 +27,15 @@
 #include "utils/stream/stream_config_utils.h"
 
 /* ============================================================================
+ * Constants - Video Stream Defaults
+ * ============================================================================ */
+
+/* Default video stream parameters */
+#define CONFIG_DEFAULT_FPS       15   /* Default FPS for sensor compatibility */
+#define CONFIG_MAIN_KBPS_DEFAULT 2048 /* Main stream default bitrate (kbps) */
+#define CONFIG_SUB_KBPS_DEFAULT  800  /* Sub stream default bitrate (kbps) */
+
+/* ============================================================================
  * Global State
  * ============================================================================ */
 
@@ -136,10 +145,10 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
   }
 
   // Initialize stream configurations from anyka_cfg.ini parameters
-  int main_fps = 15; // Default to 15fps for sensor compatibility
-  int main_kbps = 2048;
-  int sub_fps = 15; // Default to 15fps for sensor compatibility
-  int sub_kbps = 800;
+  int main_fps = CONFIG_DEFAULT_FPS; // Default FPS for sensor compatibility
+  int main_kbps = CONFIG_MAIN_KBPS_DEFAULT;
+  int sub_fps = CONFIG_DEFAULT_FPS; // Default FPS for sensor compatibility
+  int sub_kbps = CONFIG_SUB_KBPS_DEFAULT;
 
   // Try to get values from config file using new runtime API
   config_runtime_get_int(CONFIG_SECTION_MAIN_STREAM, "main_fps", &main_fps);
@@ -148,15 +157,13 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
   config_runtime_get_int(CONFIG_SECTION_SUB_STREAM, "sub_kbps", &sub_kbps);
 
   // Initialize main stream configuration
-  if (stream_config_init_from_anyka(cfg->main_stream, true, (unsigned int)main_kbps, main_fps) !=
-      ONVIF_SUCCESS) {
+  if (stream_config_init_from_anyka(cfg->main_stream, true, (unsigned int)main_kbps, main_fps) != ONVIF_SUCCESS) {
     platform_log_warning("warning: failed to initialize main stream config, using defaults\n");
     stream_config_init_defaults(cfg->main_stream, true);
   }
 
   // Initialize sub stream configuration
-  if (stream_config_init_from_anyka(cfg->sub_stream, false, (unsigned int)sub_kbps, sub_fps) !=
-      ONVIF_SUCCESS) {
+  if (stream_config_init_from_anyka(cfg->sub_stream, false, (unsigned int)sub_kbps, sub_fps) != ONVIF_SUCCESS) {
     platform_log_warning("warning: failed to initialize sub stream config, using defaults\n");
     stream_config_init_defaults(cfg->sub_stream, false);
   }
@@ -165,14 +172,10 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
   const struct application_config* snapshot = config_runtime_snapshot();
   if (snapshot) {
     platform_log_notice("Loaded configuration:\n");
-    platform_log_notice("ONVIF: enabled=%d, port=%d, auth_enabled=%d\n",
-                        snapshot->onvif.enabled,
-                        snapshot->onvif.http_port,
+    platform_log_notice("ONVIF: enabled=%d, port=%d, auth_enabled=%d\n", snapshot->onvif.enabled, snapshot->onvif.http_port,
                         snapshot->onvif.auth_enabled);
     if (snapshot->imaging) {
-      platform_log_notice("Imaging: brightness=%d, contrast=%d, saturation=%d\n",
-                          snapshot->imaging->brightness,
-                          snapshot->imaging->contrast,
+      platform_log_notice("Imaging: brightness=%d, contrast=%d, saturation=%d\n", snapshot->imaging->brightness, snapshot->imaging->contrast,
                           snapshot->imaging->saturation);
     }
   } else {
@@ -241,25 +244,18 @@ int config_lifecycle_get_summary(char* summary, size_t size) {
     return ONVIF_ERROR_NOT_INITIALIZED;
   }
 
-  int result = snprintf(
-    summary, size,
-    "ONVIF: enabled=%d, port=%d, auth_enabled=%d, user=%s\n"
-    "Imaging: brightness=%d, contrast=%d, saturation=%d, sharpness=%d, hue=%d\n"
-    "Auto Day/Night: enabled=%d, mode=%d, thresholds=%d/%d, lock_time=%ds",
-    snapshot->onvif.enabled,
-    snapshot->onvif.http_port,
-    snapshot->onvif.auth_enabled,
-    snapshot->onvif.username,
-    snapshot->imaging ? snapshot->imaging->brightness : 0,
-    snapshot->imaging ? snapshot->imaging->contrast : 0,
-    snapshot->imaging ? snapshot->imaging->saturation : 0,
-    snapshot->imaging ? snapshot->imaging->sharpness : 0,
-    snapshot->imaging ? snapshot->imaging->hue : 0,
-    snapshot->auto_daynight ? snapshot->auto_daynight->enable_auto_switching : 0,
-    snapshot->auto_daynight ? snapshot->auto_daynight->mode : 0,
-    snapshot->auto_daynight ? snapshot->auto_daynight->day_to_night_threshold : 0,
-    snapshot->auto_daynight ? snapshot->auto_daynight->night_to_day_threshold : 0,
-    snapshot->auto_daynight ? snapshot->auto_daynight->lock_time_seconds : 0);
+  int result = snprintf(summary, size,
+                        "ONVIF: enabled=%d, port=%d, auth_enabled=%d\n"
+                        "Imaging: brightness=%d, contrast=%d, saturation=%d, sharpness=%d, hue=%d\n"
+                        "Auto Day/Night: enabled=%d, mode=%d, thresholds=%d/%d, lock_time=%ds",
+                        snapshot->onvif.enabled, snapshot->onvif.http_port, snapshot->onvif.auth_enabled,
+                        snapshot->imaging ? snapshot->imaging->brightness : 0, snapshot->imaging ? snapshot->imaging->contrast : 0,
+                        snapshot->imaging ? snapshot->imaging->saturation : 0, snapshot->imaging ? snapshot->imaging->sharpness : 0,
+                        snapshot->imaging ? snapshot->imaging->hue : 0, snapshot->auto_daynight ? snapshot->auto_daynight->enable_auto_switching : 0,
+                        snapshot->auto_daynight ? snapshot->auto_daynight->mode : 0,
+                        snapshot->auto_daynight ? snapshot->auto_daynight->day_to_night_threshold : 0,
+                        snapshot->auto_daynight ? snapshot->auto_daynight->night_to_day_threshold : 0,
+                        snapshot->auto_daynight ? snapshot->auto_daynight->lock_time_seconds : 0);
 
   if (result < 0 || (size_t)result >= size) {
     return ONVIF_ERROR_BUFFER_TOO_SMALL;

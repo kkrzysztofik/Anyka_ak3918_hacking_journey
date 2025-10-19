@@ -48,6 +48,10 @@ static int g_handler_initialized = 0;                       // NOLINT
 #define DEFAULT_SNAPSHOT_WIDTH  640
 #define DEFAULT_SNAPSHOT_HEIGHT 480
 
+/* Snapshot timeout constants */
+#define SNAPSHOT_CAPTURE_TIMEOUT_MS  5000 /* Snapshot capture timeout in milliseconds (5 seconds) */
+#define SNAPSHOT_URI_TIMEOUT_SECONDS 60   /* Snapshot URI validity timeout in seconds (1 minute) */
+
 /* ============================================================================
  * PUBLIC API - Snapshot Lifecycle
  * ============================================================================ */
@@ -150,7 +154,7 @@ int onvif_snapshot_capture(const snapshot_dimensions_t* dimensions, uint8_t** da
   pthread_mutex_lock(&g_snapshot_mutex);
 
   platform_snapshot_t snapshot;
-  platform_result_t result = platform_snapshot_capture(g_snapshot_handle, &snapshot, 5000);
+  platform_result_t result = platform_snapshot_capture(g_snapshot_handle, &snapshot, SNAPSHOT_CAPTURE_TIMEOUT_MS);
 
   if (result != PLATFORM_SUCCESS) {
     platform_log_error("Failed to capture snapshot\n");
@@ -199,7 +203,7 @@ int onvif_snapshot_get_uri(const char* profile_token, struct stream_uri* uri) {
   build_device_url("http", ONVIF_SNAPSHOT_PORT_DEFAULT, SNAPSHOT_PATH, uri->uri, sizeof(uri->uri));
   uri->invalid_after_connect = 0;
   uri->invalid_after_reboot = 0;
-  uri->timeout = 60;
+  uri->timeout = SNAPSHOT_URI_TIMEOUT_SECONDS;
 
   return ONVIF_SUCCESS;
 }

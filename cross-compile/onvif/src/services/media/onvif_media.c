@@ -49,6 +49,16 @@
 #define AUDIO_SAMPLE_RATE_44KHZ 44100
 #define AUDIO_SAMPLE_RATE_48KHZ 48000
 
+// Network configuration buffer sizes and defaults
+#define MEDIA_IP_BUFFER_SIZE           64   /* IP address buffer size */
+#define MEDIA_XADDR_BUFFER_SIZE        256  /* XAddr URL buffer size */
+
+// Token parsing constants
+#define MEDIA_VIDEO_ENCODER_PREFIX_LEN 12   /* Length of "VideoEncoder" prefix */
+
+// Error message buffer sizes
+#define MEDIA_ERROR_MESSAGE_SIZE       512  /* Error message buffer size */
+
 // Timeout constants
 #define MEDIA_DEFAULT_TIMEOUT_SECONDS 60
 
@@ -188,12 +198,13 @@ static int build_media_profile_from_config(int profile_index, struct media_profi
 
   /* Map codec_type to encoding string */
   const char* encoding = "H264"; /* Default */
-  if (video_config.codec_type == 0)
+  if (video_config.codec_type == 0) {
     encoding = "H264";
-  else if (video_config.codec_type == 1)
+  } else if (video_config.codec_type == 1) {
     encoding = "H265";
-  else if (video_config.codec_type == 2)
+  } else if (video_config.codec_type == 2) {
     encoding = "MJPEG";
+  }
   strncpy(profile->video_encoder.encoding, encoding, sizeof(profile->video_encoder.encoding) - 1);
 
   profile->video_encoder.resolution.width = video_config.width;
@@ -779,7 +790,7 @@ int onvif_media_get_stream_uri(const char* profile_token, const char* protocol,
 
   // Handle other protocols
   if (strcmp(protocol, "HTTP") == 0) {
-    build_device_url("http", ONVIF_HTTP_PORT_DEFAULT, "/onvif/streaming", uri->uri,
+    build_device_url("http", HTTP_PORT_DEFAULT, "/onvif/streaming", uri->uri,
                      sizeof(uri->uri));
     // Append profile parameter
     char profile_param[MEDIA_URL_PARAM_SIZE];
@@ -1453,12 +1464,13 @@ static int create_profile_business_logic(const service_handler_config_t* config,
     if (result == ONVIF_ERROR_NOT_SUPPORTED && profile_count >= 4) {
       // Maximum profiles reached
       return error_handle_pattern(error_ctx, ERROR_PATTERN_INTERNAL_ERROR,
-                                   "Maximum limit of 4 profiles reached", response);
+                                  "Maximum limit of 4 profiles reached", response);
     }
     if (result == ONVIF_ERROR_DUPLICATE) {
       // Token already exists
-      char error_msg[512];
-      (void)snprintf(error_msg, sizeof(error_msg), "Profile token '%s' already exists", profile_token);
+      char error_msg[MEDIA_ERROR_MESSAGE_SIZE];
+      (void)snprintf(error_msg, sizeof(error_msg), "Profile token '%s' already exists",
+                     profile_token);
       return error_handle_pattern(error_ctx, ERROR_PATTERN_INTERNAL_ERROR, error_msg, response);
     }
     // Other errors - use generic handler
@@ -1624,8 +1636,8 @@ static int set_video_encoder_configuration_business_logic(
 
   // Map encoder token to profile index (VideoEncoder0 -> 0, VideoEncoder1 -> 1, etc.)
   int profile_index = -1;
-  if (strncmp(config_token, "VideoEncoder", 12) == 0) {
-    profile_index = atoi(config_token + 12);
+  if (strncmp(config_token, "VideoEncoder", MEDIA_VIDEO_ENCODER_PREFIX_LEN) == 0) {
+    profile_index = atoi(config_token + MEDIA_VIDEO_ENCODER_PREFIX_LEN);
   }
 
   if (profile_index < 0 || profile_index >= get_active_profile_count()) {
@@ -1894,13 +1906,13 @@ static int media_service_get_capabilities(struct soap* ctx, void** capabilities_
   soap_default_tt__MediaCapabilities(ctx, caps);
 
   // Get device IP and port from runtime config with defaults
-  char device_ip[64] = "192.168.1.100";
-  int http_port = 8080;
+  char device_ip[MEDIA_IP_BUFFER_SIZE] = "192.168.1.100";
+  int http_port = HTTP_PORT_DEFAULT;
   config_runtime_get_string(CONFIG_SECTION_NETWORK, "device_ip", device_ip, sizeof(device_ip));
   config_runtime_get_int(CONFIG_SECTION_NETWORK, "http_port", &http_port);
 
   // Build XAddr
-  char xaddr[256];
+  char xaddr[MEDIA_XADDR_BUFFER_SIZE];
   snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/media_service", device_ip, http_port);
   caps->XAddr = soap_strdup(ctx, xaddr);
 
@@ -1913,16 +1925,19 @@ static int media_service_get_capabilities(struct soap* ctx, void** capabilities_
 
   caps->StreamingCapabilities->RTPMulticast =
     (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-  if (caps->StreamingCapabilities->RTPMulticast)
+  if (caps->StreamingCapabilities->RTPMulticast) {
     *caps->StreamingCapabilities->RTPMulticast = xsd__boolean__false_;
+  }
   caps->StreamingCapabilities->RTP_USCORETCP =
     (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-  if (caps->StreamingCapabilities->RTP_USCORETCP)
+  if (caps->StreamingCapabilities->RTP_USCORETCP) {
     *caps->StreamingCapabilities->RTP_USCORETCP = xsd__boolean__true_;
+  }
   caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP =
     (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-  if (caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP)
+  if (caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP) {
     *caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP = xsd__boolean__true_;
+  }
 
   *capabilities_ptr = (void*)caps;
   return ONVIF_SUCCESS;

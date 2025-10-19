@@ -24,8 +24,9 @@
  * Initialize authentication configuration
  */
 int rtsp_auth_init(struct rtsp_auth_config* auth_config) {
-  if (!auth_config)
+  if (!auth_config) {
     return -1;
+  }
 
   memset(auth_config, 0, sizeof(struct rtsp_auth_config));
   auth_config->auth_type = RTSP_AUTH_NONE;
@@ -40,8 +41,9 @@ int rtsp_auth_init(struct rtsp_auth_config* auth_config) {
  * Cleanup authentication configuration
  */
 void rtsp_auth_cleanup(struct rtsp_auth_config* auth_config) {
-  if (!auth_config)
+  if (!auth_config) {
     return;
+  }
 
   struct rtsp_user* user = auth_config->users;
   while (user) {
@@ -57,8 +59,9 @@ void rtsp_auth_cleanup(struct rtsp_auth_config* auth_config) {
  */
 int rtsp_auth_add_user(struct rtsp_auth_config* auth_config, const char* username,
                        const char* password) {
-  if (!auth_config || !username || !password)
+  if (!auth_config || !username || !password) {
     return -1;
+  }
 
   // Check if user already exists
   struct rtsp_user* existing = auth_config->users;
@@ -74,8 +77,9 @@ int rtsp_auth_add_user(struct rtsp_auth_config* auth_config, const char* usernam
 
   // Create new user
   struct rtsp_user* user = malloc(sizeof(struct rtsp_user));
-  if (!user)
+  if (!user) {
     return -1;
+  }
 
   strncpy(user->username, username, sizeof(user->username) - 1);
   user->username[sizeof(user->username) - 1] = '\0';
@@ -92,8 +96,9 @@ int rtsp_auth_add_user(struct rtsp_auth_config* auth_config, const char* usernam
  * Remove user from authentication system
  */
 int rtsp_auth_remove_user(struct rtsp_auth_config* auth_config, const char* username) {
-  if (!auth_config || !username)
+  if (!auth_config || !username) {
     return -1;
+  }
 
   struct rtsp_user* user = auth_config->users;
   struct rtsp_user* prev = NULL;
@@ -119,8 +124,9 @@ int rtsp_auth_remove_user(struct rtsp_auth_config* auth_config, const char* user
  * Generate random nonce for digest authentication
  */
 void rtsp_auth_generate_nonce(char* nonce, size_t nonce_size) {
-  if (!nonce || nonce_size < 16)
+  if (!nonce || nonce_size < 16) {
     return;
+  }
 
   const char charset[] = "0123456789abcdef";
   srand((unsigned int)time(NULL));
@@ -136,8 +142,9 @@ void rtsp_auth_generate_nonce(char* nonce, size_t nonce_size) {
  */
 int rtsp_auth_parse_credentials(const char* auth_header, char* username, char* password,
                                 char* realm, char* nonce, char* response) {
-  if (!auth_header || !username || !password)
+  if (!auth_header || !username || !password) {
     return -1;
+  }
 
   // Skip "Basic " or "Digest " prefix
   const char* credentials = auth_header;
@@ -147,8 +154,9 @@ int rtsp_auth_parse_credentials(const char* auth_header, char* username, char* p
     // Decode base64
     size_t len = strlen(credentials);
     char* decoded = malloc(len + 1);
-    if (!decoded)
+    if (!decoded) {
       return -1;
+    }
 
     // Simple base64 decode (in production, use proper base64 library)
     int decoded_len = 0;
@@ -194,45 +202,57 @@ int rtsp_auth_parse_credentials(const char* auth_header, char* username, char* p
     char* token = strtok((char*)credentials, ",");
     while (token) {
       // Skip whitespace
-      while (*token == ' ')
+      while (*token == ' ') {
         token++;
+      }
 
       if (strncmp(token, "username=", 9) == 0) {
         char* value = token + 9;
-        if (*value == '"')
+        if (*value == '"') {
           value++;
+        }
         char* end = strchr(value, '"');
-        if (end)
+        if (end) {
           *end = '\0';
+        }
         strncpy(username, value, RTSP_MAX_USERNAME_LEN - 1);
         username[RTSP_MAX_USERNAME_LEN - 1] = '\0';
       } else if (strncmp(token, "realm=", 6) == 0) {
         char* value = token + 6;
-        if (*value == '"')
+        if (*value == '"') {
           value++;
+        }
         char* end = strchr(value, '"');
-        if (end)
+        if (end) {
           *end = '\0';
-        if (realm)
+        }
+        if (realm) {
           strncpy(realm, value, RTSP_MAX_REALM_LEN - 1);
+        }
       } else if (strncmp(token, "nonce=", 6) == 0) {
         char* value = token + 6;
-        if (*value == '"')
+        if (*value == '"') {
           value++;
+        }
         char* end = strchr(value, '"');
-        if (end)
+        if (end) {
           *end = '\0';
-        if (nonce)
+        }
+        if (nonce) {
           strncpy(nonce, value, RTSP_MAX_NONCE_LEN - 1);
+        }
       } else if (strncmp(token, "response=", 9) == 0) {
         char* value = token + 9;
-        if (*value == '"')
+        if (*value == '"') {
           value++;
+        }
         char* end = strchr(value, '"');
-        if (end)
+        if (end) {
           *end = '\0';
-        if (response)
+        }
+        if (response) {
           strncpy(response, value, RTSP_MAX_RESPONSE_LEN - 1);
+        }
       }
 
       token = strtok(NULL, ",");
@@ -248,8 +268,9 @@ int rtsp_auth_parse_credentials(const char* auth_header, char* username, char* p
  * Validate Basic authentication
  */
 int rtsp_auth_validate_basic(rtsp_session_t* session, const char* auth_header) {
-  if (!session || !auth_header)
+  if (!session || !auth_header) {
     return -1;
+  }
 
   char username[RTSP_MAX_USERNAME_LEN];
   char password[RTSP_MAX_PASSWORD_LEN];
@@ -279,8 +300,9 @@ int rtsp_auth_validate_basic(rtsp_session_t* session, const char* auth_header) {
 int rtsp_auth_verify_digest(const char* username, const char* password, const char* realm,
                             const char* nonce, const char* method, const char* uri,
                             const char* response) {
-  if (!username || !password || !realm || !nonce || !method || !uri || !response)
+  if (!username || !password || !realm || !nonce || !method || !uri || !response) {
     return -1;
+  }
 
   // Generate expected response
   char ha1_input[512];
@@ -306,8 +328,9 @@ int rtsp_auth_verify_digest(const char* username, const char* password, const ch
  */
 int rtsp_auth_validate_digest(rtsp_session_t* session, const char* auth_header, const char* method,
                               const char* uri) {
-  if (!session || !auth_header || !method || !uri)
+  if (!session || !auth_header || !method || !uri) {
     return -1;
+  }
 
   char username[RTSP_MAX_USERNAME_LEN];
   char password[RTSP_MAX_PASSWORD_LEN];
@@ -347,8 +370,9 @@ int rtsp_auth_validate_digest(rtsp_session_t* session, const char* auth_header, 
  * Check if authentication is required
  */
 int rtsp_auth_require_auth(rtsp_session_t* session) {
-  if (!session || !session->server)
+  if (!session || !session->server) {
     return 0;
+  }
 
   if (!session->server->auth_config.enabled) {
     return 0; // No auth required
@@ -365,8 +389,9 @@ int rtsp_auth_require_auth(rtsp_session_t* session) {
  * Handle authentication required response
  */
 int rtsp_handle_auth_required(rtsp_session_t* session) {
-  if (!session)
+  if (!session) {
     return -1;
+  }
 
   char www_auth_header[512];
   if (rtsp_generate_www_authenticate_header(session, www_auth_header, sizeof(www_auth_header)) <
@@ -382,8 +407,9 @@ int rtsp_handle_auth_required(rtsp_session_t* session) {
  */
 int rtsp_generate_www_authenticate_header(rtsp_session_t* session, char* header,
                                           size_t header_size) {
-  if (!session || !header || header_size < 64)
+  if (!session || !header || header_size < 64) {
     return -1;
+  }
 
   if (session->server->auth_config.auth_type == RTSP_AUTH_BASIC) {
     snprintf(header, header_size, "WWW-Authenticate: Basic realm=\"%s\"\r\n",

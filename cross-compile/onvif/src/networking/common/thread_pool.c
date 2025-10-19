@@ -5,8 +5,8 @@
  * @date 2025
  */
 
-#include <bits/pthreadtypes.h>
 #define _GNU_SOURCE
+#include <bits/pthreadtypes.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>

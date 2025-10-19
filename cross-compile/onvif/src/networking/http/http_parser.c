@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include "common/onvif_constants.h"
+#include "networking/http/http_constants.h"
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
@@ -40,9 +41,6 @@
 #define HTTP_CONTENT_LENGTH_BUFFER_SIZE 32
 #define HTTP_STRTOL_BASE                10
 #define HTTP_RESPONSE_BUFFER_SIZE       512
-#define HTTP_STATUS_OK                  200
-#define HTTP_STATUS_BAD_REQUEST         400
-#define HTTP_STATUS_NOT_FOUND           404
 #define HTTP_MAX_HEADER_LINE_LENGTH     8192
 
 /* Safe string functions are now provided by utils/safe_string.h */

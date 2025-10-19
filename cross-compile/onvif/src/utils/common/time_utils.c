@@ -11,6 +11,12 @@
 #include <sys/time.h>
 #include <time.h>
 
+/* Time conversion constants */
+#define TIME_MS_PER_SECOND  1000      /* Milliseconds per second */
+#define TIME_US_PER_SECOND  1000000ULL /* Microseconds per second */
+#define TIME_NS_PER_MS      1000000   /* Nanoseconds per millisecond */
+#define TIME_NS_PER_US      1000      /* Nanoseconds per microsecond */
+
 /* ============================================================================
  * PUBLIC API - Time Utility Functions
  * ============================================================================ */
@@ -22,7 +28,7 @@
 uint64_t get_timestamp_us(void) {
   struct timeval tv;
   gettimeofday(&tv, NULL);
-  return (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec;
+  return (uint64_t)tv.tv_sec * TIME_US_PER_SECOND + (uint64_t)tv.tv_usec;
 }
 
 /**
@@ -32,7 +38,7 @@ uint64_t get_timestamp_us(void) {
 uint64_t get_time_ms(void) {
   struct timespec time_spec;
   clock_gettime(CLOCK_MONOTONIC, &time_spec);
-  return (uint64_t)time_spec.tv_sec * 1000 + time_spec.tv_nsec / 1000000;
+  return (uint64_t)time_spec.tv_sec * TIME_MS_PER_SECOND + time_spec.tv_nsec / TIME_NS_PER_MS;
 }
 
 /**
@@ -54,8 +60,8 @@ uint64_t get_elapsed_time_us(uint64_t start_time, uint64_t end_time) {
  */
 void sleep_ms(uint32_t milliseconds) {
   struct timespec time_spec;
-  time_spec.tv_sec = (time_t)(milliseconds / 1000);
-  time_spec.tv_nsec = (long)((milliseconds % 1000) * 1000000);
+  time_spec.tv_sec = (time_t)(milliseconds / TIME_MS_PER_SECOND);
+  time_spec.tv_nsec = (long)((milliseconds % TIME_MS_PER_SECOND) * TIME_NS_PER_MS);
   nanosleep(&time_spec, NULL);
 }
 
@@ -65,7 +71,7 @@ void sleep_ms(uint32_t milliseconds) {
  */
 void sleep_us(uint32_t microseconds) {
   struct timespec time_spec;
-  time_spec.tv_sec = (time_t)(microseconds / 1000000);
-  time_spec.tv_nsec = (long)((microseconds % 1000000) * 1000);
+  time_spec.tv_sec = (time_t)(microseconds / TIME_US_PER_SECOND);
+  time_spec.tv_nsec = (long)((microseconds % TIME_US_PER_SECOND) * TIME_NS_PER_US);
   nanosleep(&time_spec, NULL);
 }

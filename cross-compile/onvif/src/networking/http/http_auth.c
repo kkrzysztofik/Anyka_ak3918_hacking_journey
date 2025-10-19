@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "core/config/config_runtime.h"
+#include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
@@ -26,7 +27,6 @@
 /* ==================== Constants ==================== */
 
 #define BASIC_AUTH_PREFIX_LEN      6
-#define HTTP_401_STATUS_CODE       401
 #define CONTENT_TYPE_BUFFER_SIZE   10
 #define RESPONSE_BODY_BUFFER_SIZE  512
 #define CHALLENGE_VALUE_EXTRA_SIZE 50
@@ -247,7 +247,7 @@ int http_auth_parse_basic_credentials(const char* auth_header, char* username, c
  * system (config_runtime). Legacy config-based authentication has been removed.
  */
 int http_auth_verify_credentials(const char* username, const char* password) {
-  int result;
+  int result = HTTP_AUTH_ERROR_INVALID;
 
   if (!username || !password) {
     platform_log_error("[HTTP_AUTH] NULL credentials provided\n");
@@ -289,7 +289,7 @@ int http_auth_verify_credentials(const char* username, const char* password) {
  */
 http_response_t http_auth_create_401_response(const struct http_auth_config* auth_config) {
   http_response_t response = {0};
-  response.status_code = HTTP_401_STATUS_CODE;
+  response.status_code = HTTP_STATUS_UNAUTHORIZED;
 
   // Allocate content_type dynamically to avoid segmentation fault in http_response_free
   response.content_type = malloc(CONTENT_TYPE_BUFFER_SIZE);

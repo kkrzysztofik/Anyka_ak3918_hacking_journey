@@ -18,8 +18,24 @@
 
 #include "networking/common/connection_manager.h"
 #include "networking/http/http_parser.h"
+#include "platform/platform.h"
 #include "utils/error/error_handling.h"
 #include "utils/logging/platform_logging.h"
+
+/* ============================================================================
+ * Constants - Security and XML Entity Definitions
+ * ============================================================================ */
+
+/* XML entity escape sequence lengths */
+#define XML_ENTITY_AMP_LEN  5 /* Length of "&amp;" */
+#define XML_ENTITY_QUOT_LEN 6 /* Length of "&quot;" */
+#define XML_ENTITY_APOS_LEN 6 /* Length of "&apos;" */
+
+/* IP address validation constants */
+#define IP_PREFIX_192_168_LEN 8  /* Length of "192.168." prefix */
+#define IP_PARSE_BASE_DECIMAL 10 /* Decimal base for IP octet parsing */
+#define IP_RFC1918_172_MIN    16 /* Minimum second octet for 172.x private range */
+#define IP_RFC1918_172_MAX    31 /* Maximum second octet for 172.x private range */
 
 /* ============================================================================
  * Global State - Security Configuration and Rate Limiting
@@ -177,15 +193,15 @@ static size_t escape_character(char character, char* output, size_t out_pos, siz
     break;
   case '&':
     entity = "&amp;";
-    entity_len = 5;
+    entity_len = XML_ENTITY_AMP_LEN;
     break;
   case '"':
     entity = "&quot;";
-    entity_len = 6;
+    entity_len = XML_ENTITY_QUOT_LEN;
     break;
   case '\'':
     entity = "&apos;";
-    entity_len = 6;
+    entity_len = XML_ENTITY_APOS_LEN;
     break;
   case '\0':
     return 0; // Skip null bytes
@@ -465,8 +481,8 @@ int security_is_private_ip(const char* ip_address) {
     return 0;
   }
 
-  // Check for private IP ranges
-  if (strncmp(ip_address, "192.168.", 8) == 0) {
+  // Check for private IP ranges (RFC1918)
+  if (strncmp(ip_address, "192.168.", IP_PREFIX_192_168_LEN) == 0) {
     return 1;
   }
   if (strncmp(ip_address, "10.", 3) == 0) {
@@ -475,8 +491,9 @@ int security_is_private_ip(const char* ip_address) {
   if (strncmp(ip_address, "172.", 4) == 0) {
     // Check for 172.16.0.0 to 172.31.255.255
     char* end_ptr = NULL;
-    long second_octet = strtol(ip_address + 4, &end_ptr, 10);
-    if (end_ptr != ip_address + 4 && second_octet >= 16 && second_octet <= 31) {
+    long second_octet = strtol(ip_address + 4, &end_ptr, IP_PARSE_BASE_DECIMAL);
+    if (end_ptr != ip_address + 4 && second_octet >= IP_RFC1918_172_MIN &&
+        second_octet <= IP_RFC1918_172_MAX) {
       return 1;
     }
   }
@@ -507,13 +524,6 @@ int security_add_security_headers(http_response_t* response, security_context_t*
   // X-XSS-Protection: 1; mode=block
   if (http_response_add_header(response, "X-XSS-Protection", "1; mode=block") != 0) {
     ONVIF_LOG_ERROR("Failed to add X-XSS-Protection header\n");
-    return ONVIF_ERROR;
-  }
-
-  // Strict-Transport-Security for HTTPS (if applicable)
-  if (http_response_add_header(response, "Strict-Transport-Security",
-                               "max-age=31536000; includeSubDomains") != 0) {
-    ONVIF_LOG_ERROR("Failed to add Strict-Transport-Security header\n");
     return ONVIF_ERROR;
   }
 

@@ -44,6 +44,87 @@
 #define ERROR_TYPE_MALLOC_FAILED 2
 #define ERROR_TYPE_NO_DATA       3
 #define ERROR_TYPE_INVALID_USER  4
+
+/* Platform timing and delay constants (milliseconds) */
+#define PLATFORM_DELAY_MS_SHORT             10   /* Short delay */
+#define PLATFORM_DELAY_MS_MEDIUM            100  /* Medium delay for encoder startup */
+#define PLATFORM_DELAY_MS_RETRY             200  /* Retry delay */
+#define PLATFORM_DELAY_MS_LONG              300  /* Long delay before retry */
+#define PLATFORM_DELAY_MS_VI_INIT           500  /* VI initialization delay */
+#define PLATFORM_DELAY_MS_STATS_INTERVAL    2000 /* Statistics calculation interval */
+#define PLATFORM_DELAY_MS_MAX_BITRATE_VALID 20000 /* Maximum bitrate validation timeout */
+
+/* Platform retry and timeout constants */
+#define PLATFORM_RETRY_COUNT_MAX            10  /* Maximum retry attempts */
+#define PLATFORM_RETRY_DELAY_BASE_MS        10  /* Base retry delay */
+#define PLATFORM_RETRY_DELAY_INCREMENT_MS   5   /* Retry delay increment per attempt */
+#define PLATFORM_TIMEOUT_ITERATIONS_MAX     100 /* Maximum timeout loop iterations */
+
+/* Video resolution constants (pixels) */
+#define PLATFORM_VIDEO_WIDTH_HD        1280 /* HD video width */
+#define PLATFORM_VIDEO_HEIGHT_HD       720  /* HD video height */
+#define PLATFORM_VIDEO_WIDTH_VGA       640  /* VGA video width */
+#define PLATFORM_VIDEO_HEIGHT_VGA      480  /* VGA video height */
+#define PLATFORM_VIDEO_DIMENSION_MAX   4096 /* Maximum video dimension */
+
+/* Video encoder FPS constants */
+#define PLATFORM_VIDEO_FPS_MIN         1   /* Minimum FPS */
+#define PLATFORM_VIDEO_FPS_MAX         60  /* Maximum FPS */
+#define PLATFORM_VIDEO_FPS_SNAPSHOT    10  /* Snapshot FPS */
+
+/* Video encoder bitrate constants (kbps) */
+#define PLATFORM_VIDEO_BITRATE_MIN     100   /* Minimum bitrate */
+#define PLATFORM_VIDEO_BITRATE_MAX     10000 /* Maximum bitrate */
+#define PLATFORM_VIDEO_BITRATE_SNAPSHOT 1000 /* Snapshot bitrate */
+
+/* Video encoder QP (Quantization Parameter) constants */
+#define PLATFORM_VIDEO_QP_MIN_DEFAULT  20 /* Minimum QP for video */
+#define PLATFORM_VIDEO_QP_MAX_DEFAULT  45 /* Maximum QP for video */
+#define PLATFORM_VIDEO_QP_MAX_JPEG     51 /* Maximum QP for JPEG/snapshot */
+
+/* Video encoder GOP constants */
+#define PLATFORM_VIDEO_GOP_DEFAULT     50 /* Default GOP length */
+
+/* Buffer size constants (bytes) */
+#define PLATFORM_BUFFER_SIZE_SMALL     32   /* Small buffer size */
+#define PLATFORM_BUFFER_SIZE_MEDIUM    256  /* Medium buffer size */
+#define PLATFORM_BUFFER_SIZE_PAGE      4096 /* Page-aligned buffer size */
+
+/* Stream buffer constants */
+#define PLATFORM_STREAM_BUFFER_MAX     50  /* Maximum stream buffers (ONE_STREAM_MAX) */
+
+/* Buffer usage thresholds (floating point ratios) */
+#define PLATFORM_BUFFER_USAGE_HIGH_THRESHOLD 0.8F /* 80% buffer usage warning threshold */
+
+/* Time conversion constants */
+#define PLATFORM_TIME_MS_PER_SECOND    1000   /* Milliseconds per second */
+#define PLATFORM_TIME_US_PER_MS        1000   /* Microseconds per millisecond */
+#define PLATFORM_TIME_US_CONVERSION    10000  /* Microsecond conversion factor */
+#define PLATFORM_TIME_SECONDS_PER_MINUTE 60   /* Seconds per minute / degrees per unit */
+
+/* Memory conversion constants */
+#define PLATFORM_MEMORY_KB_TO_BYTES    1024 /* Kilobytes to bytes */
+
+/* Temperature conversion constants */
+#define PLATFORM_TEMP_MILLI_TO_UNIT    1000.0F /* Millidegrees to degrees */
+
+/* Bitrate conversion constants */
+#define PLATFORM_BITRATE_BITS_PER_BYTE 8ULL  /* Bits per byte */
+#define PLATFORM_BITRATE_CONVERSION    1000  /* Bitrate conversion factor */
+
+/* String parsing constants */
+#define PLATFORM_PARSE_BASE_DECIMAL    10  /* Decimal base for parsing */
+#define PLATFORM_MEMINFO_TOTAL_OFFSET  9   /* "MemTotal:" string length */
+#define PLATFORM_MEMINFO_AVAIL_OFFSET  13  /* "MemAvailable:" string length */
+
+/* Memory address validation constants */
+#define PLATFORM_MEMORY_ADDR_MIN       0x1000     /* Minimum valid memory address */
+#define PLATFORM_MEMORY_ADDR_MAX       0xFFFFFFFF /* Maximum valid memory address */
+
+/* Percentage constants */
+#define PLATFORM_PERCENTAGE_MULTIPLIER 100 /* Percentage multiplier */
+#define PLATFORM_PERCENTAGE_THRESHOLD  50  /* Common percentage threshold */
+
 #include "utils/memory/memory_manager.h"
 
 /* Forward declarations */
@@ -270,7 +351,7 @@ void platform_cleanup(void) {
 
   // Wait for active operations to complete (with timeout)
   uint32_t timeout_count = 0;
-  while (timeout_count < 100) {
+  while (timeout_count < PLATFORM_TIMEOUT_ITERATIONS_MAX) {
     if (lock_platform_mutex()) {
       bool active_ops = (g_encoder_active_count > 0 || g_audio_active_count > 0);
       unlock_platform_mutex();
@@ -280,11 +361,11 @@ void platform_cleanup(void) {
       }
     }
 
-    sleep_ms(10);
+    sleep_ms(PLATFORM_DELAY_MS_SHORT);
     timeout_count++;
   }
 
-  if (timeout_count >= 100) {
+  if (timeout_count >= PLATFORM_TIMEOUT_ITERATIONS_MAX) {
     platform_log_warning("Platform cleanup: Timeout waiting for active operations to "
                          "complete\n");
   }
@@ -307,7 +388,7 @@ void platform_cleanup(void) {
                              "(result=%d)\n",
                              retry_count + 1, capture_result);
         if (retry_count < max_retries - 1) {
-          sleep_ms(200); // Wait before retry
+          sleep_ms(PLATFORM_DELAY_MS_RETRY); // Wait before retry
         }
       } else {
         platform_log_debug("platform_cleanup: Video capture stopped successfully\n");
@@ -324,7 +405,7 @@ void platform_cleanup(void) {
     // Give the system more time to process the capture stop and clean up
     // internal threads
     platform_log_debug("platform_cleanup: Waiting for VI system to stabilize...\n");
-    sleep_ms(500); // Increased delay for thread cleanup
+    sleep_ms(PLATFORM_DELAY_MS_VI_INIT); // Increased delay for thread cleanup
   }
 
   platform_venc_cleanup(g_venc_handle);
@@ -508,7 +589,7 @@ platform_result_t platform_vi_start_global_capture(platform_vi_handle_t handle) 
   platform_log_debug("platform_vi_start_global_capture: Starting global video capture...\n");
 
   // Add delay to allow VI system to fully initialize
-  sleep_ms(500); // 500ms delay for VI initialization
+  sleep_ms(PLATFORM_DELAY_MS_VI_INIT); // VI initialization delay
 
   // Try to start video capture with retry mechanism
   int capture_result = -1;
@@ -522,7 +603,7 @@ platform_result_t platform_vi_start_global_capture(platform_vi_handle_t handle) 
                            "failed (result=%d)\n",
                            retry_count + 1, capture_result);
       if (retry_count < max_retries - 1) {
-        sleep_ms(300); // Wait before retry
+        sleep_ms(PLATFORM_DELAY_MS_LONG); // Wait before retry
       }
     }
     retry_count++;
@@ -538,7 +619,7 @@ platform_result_t platform_vi_start_global_capture(platform_vi_handle_t handle) 
   // Additional delay after starting capture to ensure it's ready
   platform_log_debug("platform_vi_start_global_capture: Video capture started, waiting for "
                      "stabilization...\n");
-  sleep_ms(200); // 200ms delay for capture stabilization
+  sleep_ms(PLATFORM_DELAY_MS_RETRY); // Delay for capture stabilization
 
   platform_log_info("platform_vi_start_global_capture: Global video capture started "
                     "successfully\n");
@@ -583,10 +664,10 @@ platform_result_t platform_vi_set_channel_attr(platform_vi_handle_t handle,
   vi_attr.res[VIDEO_CHN_SUB].height = attr->res[VIDEO_CHN_SUB].height;
 
   // HACK inverted for compatiblity with older version of precompiled library
-  vi_attr.res[VIDEO_CHN_SUB].max_width = 1280;
-  vi_attr.res[VIDEO_CHN_SUB].max_height = 720;
-  vi_attr.res[VIDEO_CHN_MAIN].max_width = 640;
-  vi_attr.res[VIDEO_CHN_MAIN].max_height = 480;
+  vi_attr.res[VIDEO_CHN_SUB].max_width = PLATFORM_VIDEO_WIDTH_HD;
+  vi_attr.res[VIDEO_CHN_SUB].max_height = PLATFORM_VIDEO_HEIGHT_HD;
+  vi_attr.res[VIDEO_CHN_MAIN].max_width = PLATFORM_VIDEO_WIDTH_VGA;
+  vi_attr.res[VIDEO_CHN_MAIN].max_height = PLATFORM_VIDEO_HEIGHT_VGA;
 
   int result = ak_vi_set_channel_attr(handle, &vi_attr);
   if (result != 0) {
@@ -686,20 +767,20 @@ platform_result_t platform_venc_init(platform_venc_handle_t* handle,
   width = (width + 3) & ~3;   // Round up to nearest 4-byte boundary
   height = (height + 3) & ~3; // Round up to nearest 4-byte boundary
 
-  // Clamp fps to valid range (1-60)
-  if (fps < 1) {
-    fps = 1;
+  // Clamp fps to valid range
+  if (fps < PLATFORM_VIDEO_FPS_MIN) {
+    fps = PLATFORM_VIDEO_FPS_MIN;
   }
-  if (fps > 60) {
-    fps = 60;
+  if (fps > PLATFORM_VIDEO_FPS_MAX) {
+    fps = PLATFORM_VIDEO_FPS_MAX;
   }
 
-  // Clamp bitrate to valid range (100-10000 kbps)
-  if (bitrate < 100) {
-    bitrate = 100;
+  // Clamp bitrate to valid range (kbps)
+  if (bitrate < PLATFORM_VIDEO_BITRATE_MIN) {
+    bitrate = PLATFORM_VIDEO_BITRATE_MIN;
   }
-  if (bitrate > 10000) {
-    bitrate = 10000;
+  if (bitrate > PLATFORM_VIDEO_BITRATE_MAX) {
+    bitrate = PLATFORM_VIDEO_BITRATE_MAX;
   }
 
   if (width <= 0 || height <= 0) {
@@ -756,11 +837,11 @@ platform_result_t platform_venc_init(platform_venc_handle_t* handle,
 
   // Set GOP length based on FPS - following reference implementation
   // Calculate GOP length: 2 seconds worth of frames for reasonable GOP size
-  param.goplen = (fps > 0) ? fps * 2 : 50; // Default to 50 if fps is invalid
+  param.goplen = (fps > 0) ? fps * 2 : PLATFORM_VIDEO_GOP_DEFAULT;
 
   // Set default QP values - following reference implementation
-  param.minqp = 20;
-  param.maxqp = 45;
+  param.minqp = PLATFORM_VIDEO_QP_MIN_DEFAULT;
+  param.maxqp = PLATFORM_VIDEO_QP_MAX_DEFAULT;
 
   // Set channel and encoder group based on stream type
   // Note: This should be configurable based on whether this is main or sub
@@ -815,7 +896,7 @@ void platform_venc_cleanup(platform_venc_handle_t handle) {
   }
 
   // Validate handle before cleanup
-  if ((uintptr_t)handle < 0x1000 || (uintptr_t)handle > 0xFFFFFFFF) {
+  if ((uintptr_t)handle < PLATFORM_MEMORY_ADDR_MIN || (uintptr_t)handle > PLATFORM_MEMORY_ADDR_MAX) {
     platform_log_error("platform_venc_cleanup: Invalid handle (0x%p), skipping cleanup\n", handle);
     return;
   }
@@ -1731,7 +1812,7 @@ platform_result_t platform_venc_get_buffer_status(platform_venc_stream_handle_t 
   /* In a real implementation, this would query the actual encoder state */
 
   *buffer_count = 0;   /* Would be retrieved from encoder state */
-  *max_buffers = 50;   /* ONE_STREAM_MAX from reference implementation */
+  *max_buffers = PLATFORM_STREAM_BUFFER_MAX;   /* ONE_STREAM_MAX from reference implementation */
   *overflow_count = 0; /* Would be retrieved from encoder state */
 
   /* Log buffer status with detailed information */
@@ -1740,7 +1821,7 @@ platform_result_t platform_venc_get_buffer_status(platform_venc_stream_handle_t 
                      stream_handle, *buffer_count, *max_buffers, *overflow_count);
 
   /* Log warnings for high buffer usage or overflows */
-  if (*buffer_count > (*max_buffers * 0.8)) {
+  if (*buffer_count > (*max_buffers * PLATFORM_BUFFER_USAGE_HIGH_THRESHOLD)) {
     platform_log_warning("platform_venc_get_buffer_status: High buffer usage detected "
                          "(count=%u, max=%u, usage=%.1f%%)",
                          *buffer_count, *max_buffers, (*buffer_count * 100.0) / *max_buffers);
@@ -1777,11 +1858,11 @@ platform_result_t platform_snapshot_init(platform_snapshot_handle_t* snapshot_ha
   struct encode_param param = {0};
   param.width = image_width;
   param.height = image_height;
-  param.minqp = 20;
-  param.maxqp = 51;
-  param.fps = 10;
+  param.minqp = PLATFORM_VIDEO_QP_MIN_DEFAULT;
+  param.maxqp = PLATFORM_VIDEO_QP_MAX_JPEG;
+  param.fps = PLATFORM_VIDEO_FPS_SNAPSHOT;
   param.goplen = 1;
-  param.bps = 1000; // kbps
+  param.bps = PLATFORM_VIDEO_BITRATE_SNAPSHOT; // kbps
   param.profile = PROFILE_MAIN;
   param.use_chn = ENCODE_SUB_CHN;
   param.enc_grp = ENCODE_PICTURE;
@@ -2003,7 +2084,7 @@ static int parse_cpu_stat_line(const char* line,
     return 0;
   }
 
-  *total = strtoull(token2, &endptr, 10);
+  *total = strtoull(token2, &endptr, PLATFORM_PARSE_BASE_DECIMAL);
   if (*endptr != '\0') {
     return 0;
   }
@@ -2013,7 +2094,7 @@ static int parse_cpu_stat_line(const char* line,
     return 0;
   }
 
-  *idle = strtoull(token3, &endptr, 10);
+  *idle = strtoull(token3, &endptr, PLATFORM_PARSE_BASE_DECIMAL);
   if (*endptr != '\0') {
     return 0;
   }
@@ -2041,10 +2122,10 @@ static float calculate_cpu_percentage(unsigned long long prev_idle, // NOLINT
   unsigned long long diff_total = total - prev_total;
 
   if (diff_total > 0) {
-    return 100.0f * (1.0f - (float)diff_idle / (float)diff_total);
+    return 100.0F * (1.0F - (float)diff_idle / (float)diff_total);
   }
 
-  return 0.0f;
+  return 0.0F;
 }
 
 /* System monitoring functions */
@@ -2053,14 +2134,14 @@ static float get_cpu_usage(void) {
   static unsigned long long prev_total = 0;
   unsigned long long idle = 0;
   unsigned long long total = 0;
-  float cpu_percent = 0.0f;
+  float cpu_percent = 0.0F;
 
   FILE* stat_file = fopen("/proc/stat", "r");
   if (!stat_file) {
-    return 0.0f;
+    return 0.0F;
   }
 
-  char line[256];
+  char line[PLATFORM_BUFFER_SIZE_MEDIUM];
   if (fgets(line, sizeof(line), stat_file)) {
     if (parse_cpu_stat_line(line, &idle, &total)) {
       cpu_percent = calculate_cpu_percentage(prev_idle, prev_total, idle, total);
@@ -2079,22 +2160,22 @@ static float get_cpu_usage(void) {
 }
 
 static float get_cpu_temperature(void) {
-  float temp = 0.0f;
+  float temp = 0.0F;
   FILE* temp_file = fopen("/sys/class/thermal/thermal_zone0/temp", "r");
   if (!temp_file) {
     // Fallback to alternative temperature sources
     temp_file = fopen("/proc/thermal_zone0/temp", "r");
     if (!temp_file) {
-      return 0.0f;
+      return 0.0F;
     }
   }
 
-  char line[32];
+  char line[PLATFORM_BUFFER_SIZE_SMALL];
   if (fgets(line, sizeof(line), temp_file)) {
     char* endptr = NULL;
     temp = strtof(line, &endptr);
     if (endptr && (*endptr == '\0' || *endptr == '\n')) {
-      temp /= 1000.0f; // Convert from millidegrees to degrees
+      temp /= PLATFORM_TEMP_MILLI_TO_UNIT; // Convert from millidegrees to degrees
     }
   }
 
@@ -2115,21 +2196,21 @@ static void get_memory_info(uint64_t* total_memory_bytes,  // NOLINT
     return;
   }
 
-  char line[256];
+  char line[PLATFORM_BUFFER_SIZE_MEDIUM];
   while (fgets(line, sizeof(line), mem_file)) {
     unsigned long long temp_total = 0;
     unsigned long long temp_free = 0;
-    if (strncmp(line, "MemTotal:", 9) == 0) {
+    if (strncmp(line, "MemTotal:", PLATFORM_MEMINFO_TOTAL_OFFSET) == 0) {
       char* endptr = NULL;
-      temp_total = strtoull(line + 9, &endptr, 10);
+      temp_total = strtoull(line + PLATFORM_MEMINFO_TOTAL_OFFSET, &endptr, PLATFORM_PARSE_BASE_DECIMAL);
       if (endptr && *endptr == ' ' && strncmp(endptr + 1, "kB", 2) == 0) {
-        *total_memory_bytes = (uint64_t)temp_total * 1024; // Convert from kB to bytes
+        *total_memory_bytes = (uint64_t)temp_total * PLATFORM_MEMORY_KB_TO_BYTES; // Convert from kB to bytes
       }
-    } else if (strncmp(line, "MemAvailable:", 13) == 0) {
+    } else if (strncmp(line, "MemAvailable:", PLATFORM_MEMINFO_AVAIL_OFFSET) == 0) {
       char* endptr = NULL;
-      temp_free = strtoull(line + 13, &endptr, 10);
+      temp_free = strtoull(line + PLATFORM_MEMINFO_AVAIL_OFFSET, &endptr, PLATFORM_PARSE_BASE_DECIMAL);
       if (endptr && *endptr == ' ' && strncmp(endptr + 1, "kB", 2) == 0) {
-        *free_memory_bytes = (uint64_t)temp_free * 1024; // Convert from kB to bytes
+        *free_memory_bytes = (uint64_t)temp_free * PLATFORM_MEMORY_KB_TO_BYTES; // Convert from kB to bytes
       }
     }
   }
@@ -2147,12 +2228,12 @@ static uint64_t get_system_uptime(void) {
     return 0;
   }
 
-  char line[32];
+  char line[PLATFORM_BUFFER_SIZE_SMALL];
   if (fgets(line, sizeof(line), uptime_file)) {
     char* endptr = NULL;
-    uptime_seconds = strtoull(line, &endptr, 10);
+    uptime_seconds = strtoull(line, &endptr, PLATFORM_PARSE_BASE_DECIMAL);
     if (endptr && (*endptr == '\0' || *endptr == '\n')) {
-      uptime_seconds *= 1000; // Convert to milliseconds
+      uptime_seconds *= PLATFORM_TIME_MS_PER_SECOND; // Convert to milliseconds
     }
   }
 
@@ -2299,11 +2380,11 @@ static void platform_venc_update_statistics( // NOLINT
   uint64_t current_time = get_time_ms();
   uint64_t time_diff = current_time - statistics->last_calc_time;
 
-  if (time_diff >= 2000) { // 2 seconds
-    float time_factor = (float)time_diff / 1000.0f;
+  if (time_diff >= PLATFORM_DELAY_MS_STATS_INTERVAL) { // Statistics interval
+    float time_factor = (float)time_diff / (float)PLATFORM_TIME_MS_PER_SECOND;
     statistics->fps = (float)statistics->frame_count / time_factor;
     statistics->bitrate_kbps =
-      (uint32_t)((statistics->total_bytes * 8ULL) / (time_diff * 1000)); // Convert to kbps
+      (uint32_t)((statistics->total_bytes * PLATFORM_BITRATE_BITS_PER_BYTE) / (time_diff * PLATFORM_BITRATE_CONVERSION)); // Convert to kbps
 
     // Log statistics periodically
     platform_venc_log_statistics(statistics, "periodic_update");
@@ -2428,10 +2509,10 @@ static void platform_venc_log_buffer_status(uint32_t buffer_count, uint32_t max_
                          context ? context : "unknown", overflow_count);
   }
 
-  if (buffer_count > (max_buffers * 0.8)) {
+  if (buffer_count > (max_buffers * PLATFORM_BUFFER_USAGE_HIGH_THRESHOLD)) {
     platform_log_warning("VENC_BUFFER[%s]: Buffer usage high (%.1f%%)\n",
                          context ? context : "unknown",
-                         (float)((uint32_t)buffer_count) / (float)max_buffers * 100.0f);
+                         (float)((uint32_t)buffer_count) / (float)max_buffers * 100.0F);
   }
 }
 
@@ -2471,21 +2552,21 @@ platform_result_t platform_validate_venc_config(const platform_video_config_t* c
   }
 
   // Validate dimensions
-  if (!validate_range(config->width, 1, 4096, "width")) {
+  if (!validate_range(config->width, PLATFORM_VIDEO_FPS_MIN, PLATFORM_VIDEO_DIMENSION_MAX, "width")) {
     return PLATFORM_ERROR_INVALID;
   }
 
-  if (!validate_range(config->height, 1, 4096, "height")) {
+  if (!validate_range(config->height, PLATFORM_VIDEO_FPS_MIN, PLATFORM_VIDEO_DIMENSION_MAX, "height")) {
     return PLATFORM_ERROR_INVALID;
   }
 
   // Validate FPS
-  if (!validate_range(config->fps, 1, 60, "FPS")) {
+  if (!validate_range(config->fps, PLATFORM_VIDEO_FPS_MIN, PLATFORM_VIDEO_FPS_MAX, "FPS")) {
     return PLATFORM_ERROR_INVALID;
   }
 
   // Validate bitrate
-  if (!validate_range(config->bitrate, 100, 20000, "bitrate")) {
+  if (!validate_range(config->bitrate, PLATFORM_VIDEO_BITRATE_MIN, PLATFORM_DELAY_MS_MAX_BITRATE_VALID, "bitrate")) {
     return PLATFORM_ERROR_INVALID;
   }
 
@@ -2587,7 +2668,7 @@ static int handle_stream_error(void* stream_handle, int result, // NOLINT
  */
 static uint32_t calculate_retry_delay(int result, // NOLINT
                                       uint32_t retry_count) {
-  uint32_t delay_ms = 10 + (retry_count * 5); // 10ms base + 5ms per retry
+  uint32_t delay_ms = PLATFORM_RETRY_DELAY_BASE_MS + (retry_count * PLATFORM_RETRY_DELAY_INCREMENT_MS);
   if (result == -2) {
     delay_ms *= 2; // Double delay for resource busy
   }
@@ -2605,14 +2686,14 @@ static uint32_t calculate_retry_delay(int result, // NOLINT
 static int get_stream_with_retry(void* stream_handle, struct video_stream* anyka_stream,
                                  uint32_t timeout_ms) {
   uint32_t retry_count = 0;
-  uint32_t max_retries = (timeout_ms > 0) ? (timeout_ms / 10) : 10;
+  uint32_t max_retries = (timeout_ms > 0) ? (timeout_ms / PLATFORM_RETRY_DELAY_BASE_MS) : PLATFORM_RETRY_COUNT_MAX;
   int result = -1;
 
   // For the first attempt, add a longer initial delay to allow for
   // encoder thread startup and first frame capture
   if (max_retries > 0) {
     platform_log_debug("get_stream_with_retry: Initial delay for encoder startup\n");
-    sleep_ms(100); // Initial delay for encoder startup
+    sleep_ms(PLATFORM_DELAY_MS_MEDIUM); // Initial delay for encoder startup
   }
 
   while (retry_count < max_retries) {

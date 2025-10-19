@@ -7,6 +7,7 @@
 
 #include "onvif_device.h"
 
+#include <bits/pthreadtypes.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -15,8 +16,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
+#include "generated/soapH.h"
 #include "networking/common/buffer_pool.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
@@ -29,7 +32,6 @@
 #include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
 #include "utils/logging/service_logging.h"
-#include "utils/memory/memory_manager.h"
 #include "utils/memory/smart_response_builder.h"
 #include "utils/network/network_utils.h"
 
@@ -48,16 +50,19 @@
 #define DEVICE_SERIAL_DEFAULT       "AK3918-001"
 #define DEVICE_HARDWARE_ID_DEFAULT  "1.0"
 
-#define DEFAULT_HTTP_PORT      8080
 #define DEFAULT_MTU            1500
 #define MAX_NETWORK_INTERFACES 8
 #define MAX_NETWORK_PROTOCOLS  8
 #define MAX_DEVICE_SERVICES    8
 
-#define DEVICE_MANUFACTURER_LEN    64
-#define DEVICE_MODEL_LEN           64
-#define DEVICE_FIRMWARE_VER_LEN    32
-#define DEVICE_SERIAL_LEN          64
+#define DEVICE_MANUFACTURER_LEN 64
+#define DEVICE_MODEL_LEN        64
+#define DEVICE_FIRMWARE_VER_LEN 32
+#define DEVICE_SERIAL_LEN       64
+
+// Network configuration buffer sizes
+#define DEVICE_IP_BUFFER_SIZE      64  /* IP address buffer size */
+#define DEVICE_XADDR_BUFFER_SIZE   256 /* XAddr URL buffer size */
 #define DEVICE_HARDWARE_ID_LEN     32
 #define NETWORK_INTERFACE_NAME_LEN 32
 #define NETWORK_HW_ADDRESS_LEN     18
@@ -167,6 +172,7 @@ static int get_device_information_business_logic(const service_handler_config_t*
                                                  error_context_t* error_ctx, void* callback_data) {
   (void)config;
   (void)request;
+  (void)error_ctx;
   if (!callback_data) {
     return ONVIF_ERROR_INVALID;
   }
@@ -546,7 +552,7 @@ static int system_reboot_business_logic(const service_handler_config_t* config,
 
   // Launch background thread to defer reboot execution
   // This ensures response is fully transmitted before system reboots
-  pthread_t reboot_thread;
+  pthread_t reboot_thread = 0;
   int pthread_result = pthread_create(&reboot_thread, NULL, deferred_reboot_thread, NULL);
   if (pthread_result != 0) {
     platform_log_error("Failed to create deferred reboot thread (error: %d)\n", pthread_result);
@@ -643,11 +649,11 @@ static int handle_get_capabilities(const service_handler_config_t* config,
   // Get device IP address
   if (get_local_ip_address(callback_data.device_ip, sizeof(callback_data.device_ip)) != 0) {
     // Fallback to localhost if IP retrieval fails
-    snprintf(callback_data.device_ip, sizeof(callback_data.device_ip), "localhost");
+    (void)snprintf(callback_data.device_ip, sizeof(callback_data.device_ip), "localhost");
   }
 
   // Get HTTP port from runtime configuration with fallback to default
-  callback_data.http_port = DEFAULT_HTTP_PORT;
+  callback_data.http_port = HTTP_PORT_DEFAULT;
   config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &callback_data.http_port);
 
   // Use the enhanced callback-based handler
@@ -677,11 +683,11 @@ static int handle_get_services(const service_handler_config_t* config,
   // Get device IP address
   if (get_local_ip_address(callback_data.device_ip, sizeof(callback_data.device_ip)) != 0) {
     // Fallback to localhost if IP retrieval fails
-    snprintf(callback_data.device_ip, sizeof(callback_data.device_ip), "localhost");
+    (void)snprintf(callback_data.device_ip, sizeof(callback_data.device_ip), "localhost");
   }
 
   // Get HTTP port from runtime configuration with fallback to default
-  callback_data.http_port = DEFAULT_HTTP_PORT;
+  callback_data.http_port = HTTP_PORT_DEFAULT;
   config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &callback_data.http_port);
 
   // Use the enhanced callback-based handler
@@ -759,14 +765,14 @@ static int device_service_get_capabilities(struct soap* ctx, void** capabilities
   soap_default_tt__DeviceCapabilities(ctx, caps);
 
   // Get device IP and port from runtime config with defaults
-  char device_ip[64] = "192.168.1.100";
-  int http_port = 8080;
+  char device_ip[DEVICE_IP_BUFFER_SIZE] = "192.168.1.100";
+  int http_port = HTTP_PORT_DEFAULT;
   config_runtime_get_string(CONFIG_SECTION_NETWORK, "device_ip", device_ip, sizeof(device_ip));
   config_runtime_get_int(CONFIG_SECTION_NETWORK, "http_port", &http_port);
 
   // Build XAddr
-  char xaddr[256];
-  snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/device_service", device_ip, http_port);
+  char xaddr[DEVICE_XADDR_BUFFER_SIZE];
+  (void)snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/device_service", device_ip, http_port);
   caps->XAddr = soap_strdup(ctx, xaddr);
 
   // System Capabilities (required sub-structure)
@@ -789,26 +795,30 @@ static int device_service_get_capabilities(struct soap* ctx, void** capabilities
   if (!caps->System->SupportedVersions) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
-  caps->System->SupportedVersions[0].Major = 24;
-  caps->System->SupportedVersions[0].Minor = 12;
+  caps->System->SupportedVersions[0].Major = ONVIF_VERSION_MAJOR;
+  caps->System->SupportedVersions[0].Minor = ONVIF_VERSION_MINOR;
 
   // Network Capabilities (optional but recommended)
   caps->Network = soap_new_tt__NetworkCapabilities(ctx, 1);
   if (caps->Network) {
     soap_default_tt__NetworkCapabilities(ctx, caps->Network);
     caps->Network->IPFilter = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-    if (caps->Network->IPFilter)
+    if (caps->Network->IPFilter) {
       *caps->Network->IPFilter = xsd__boolean__false_;
+    }
     caps->Network->ZeroConfiguration =
       (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-    if (caps->Network->ZeroConfiguration)
+    if (caps->Network->ZeroConfiguration) {
       *caps->Network->ZeroConfiguration = xsd__boolean__false_;
+    }
     caps->Network->IPVersion6 = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-    if (caps->Network->IPVersion6)
+    if (caps->Network->IPVersion6) {
       *caps->Network->IPVersion6 = xsd__boolean__false_;
+    }
     caps->Network->DynDNS = (enum xsd__boolean*)soap_malloc(ctx, sizeof(enum xsd__boolean));
-    if (caps->Network->DynDNS)
+    if (caps->Network->DynDNS) {
       *caps->Network->DynDNS = xsd__boolean__false_;
+    }
   }
 
   *capabilities_ptr = (void*)caps;

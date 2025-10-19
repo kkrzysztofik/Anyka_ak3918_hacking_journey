@@ -20,6 +20,7 @@
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
 #include "generated/soapH.h"
+#include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
@@ -28,20 +29,20 @@
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
 
-// HTTP status code constants
-#define HTTP_STATUS_OK                    200
-#define HTTP_STATUS_BAD_REQUEST           400
-#define HTTP_STATUS_INTERNAL_SERVER_ERROR 500
-#define HTTP_STATUS_CLOCKS_PER_MS         1000
+// Clock conversion constant
+#define HTTP_STATUS_CLOCKS_PER_MS 1000
+
+// Buffer size constants
+#define CONFIG_STRING_BUFFER_SIZE 256 /* Default buffer for config strings */
+#define ERROR_MESSAGE_BUFFER_SIZE 256 /* Error message buffer size */
 
 /* ============================================================================
  * Service Handler Management
  * ============================================================================
  */
 
-int onvif_service_handler_init(onvif_service_handler_instance_t* handler,
-                               const service_handler_config_t* config,
-                               const service_action_def_t* actions, size_t action_count) {
+int onvif_service_handler_init(onvif_service_handler_instance_t* handler, const service_handler_config_t* config, const service_action_def_t* actions,
+                               size_t action_count) {
   if (!handler || !config || !actions || action_count == 0) {
     return ONVIF_ERROR_INVALID;
   }
@@ -77,8 +78,7 @@ int onvif_service_handler_init(onvif_service_handler_instance_t* handler,
   return ONVIF_SUCCESS;
 }
 
-int onvif_service_handler_handle_request(onvif_service_handler_instance_t* handler,
-                                         const char* action_name, const http_request_t* request,
+int onvif_service_handler_handle_request(onvif_service_handler_instance_t* handler, const char* action_name, const http_request_t* request,
                                          http_response_t* response) {
   if (!handler || !request || !response) {
     return ONVIF_ERROR_INVALID;
@@ -97,7 +97,12 @@ int onvif_service_handler_handle_request(onvif_service_handler_instance_t* handl
   }
 
   if (!action_def) {
-    return onvif_handle_unsupported_action(response);
+    // Set error response for unsupported action
+    response->status_code = HTTP_STATUS_BAD_REQUEST;
+    response->body = (char*)"Unsupported action";
+    response->body_length = strlen("Unsupported action");
+    response->content_type = "application/soap+xml";
+    return ONVIF_SUCCESS;
   }
 
   // Update statistics
@@ -114,8 +119,7 @@ int onvif_service_handler_handle_request(onvif_service_handler_instance_t* handl
   int result = action_def->handler(&handler->config, request, response, handler->gsoap_ctx);
   clock_t end_time = clock();
   platform_log_info("Service Handler: Action handler completed with result %d\n", result);
-  platform_log_info("Service Handler: Processing time: %ld ms\n",
-                    (end_time - start_time) / (CLOCKS_PER_SEC / HTTP_STATUS_CLOCKS_PER_MS));
+  platform_log_info("Service Handler: Processing time: %ld ms\n", (end_time - start_time) / (CLOCKS_PER_SEC / HTTP_STATUS_CLOCKS_PER_MS));
 
   // Set appropriate status code based on handler result and response
   if (result == ONVIF_SUCCESS) {
@@ -145,9 +149,7 @@ int onvif_service_handler_handle_request(onvif_service_handler_instance_t* handl
       // Update average response time
       double response_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
       handler->stats.action_stats[i].avg_response_time =
-        (handler->stats.action_stats[i].avg_response_time *
-           (handler->stats.action_stats[i].call_count - 1) +
-         response_time) /
+        (handler->stats.action_stats[i].avg_response_time * (handler->stats.action_stats[i].call_count - 1) + response_time) /
         handler->stats.action_stats[i].call_count;
       break;
     }
@@ -172,9 +174,8 @@ void onvif_service_handler_cleanup(onvif_service_handler_instance_t* handler) {
   }
 }
 
-int onvif_service_handler_validate_request(onvif_service_handler_instance_t* handler,
-                                           const http_request_t* request,
-                                           const char** required_params, size_t param_count) {
+int onvif_service_handler_validate_request(onvif_service_handler_instance_t* handler, const http_request_t* request, const char** required_params,
+                                           size_t param_count) {
   if (!handler || !request || !required_params) {
     return ONVIF_ERROR_INVALID;
   }
@@ -199,8 +200,7 @@ int onvif_service_handler_validate_request(onvif_service_handler_instance_t* han
   return ONVIF_SUCCESS;
 }
 
-int onvif_service_handler_generate_success(onvif_service_handler_instance_t* handler,
-                                           const char* action, const char* body_content,
+int onvif_service_handler_generate_success(onvif_service_handler_instance_t* handler, const char* action, const char* body_content,
                                            http_response_t* response) {
   if (!handler || !action || !body_content || !response) {
     return ONVIF_ERROR_INVALID;
@@ -208,7 +208,7 @@ int onvif_service_handler_generate_success(onvif_service_handler_instance_t* han
 
   // Set basic response data (specific gSOAP response generation is handled by
   // service handlers)
-  response->status_code = 200;
+  response->status_code = HTTP_STATUS_OK;
   response->body = (char*)body_content;
   response->body_length = strlen(body_content);
   response->content_type = "application/soap+xml";
@@ -221,15 +221,14 @@ int onvif_service_handler_generate_success(onvif_service_handler_instance_t* han
   return ONVIF_SUCCESS;
 }
 
-int onvif_service_handler_generate_error(onvif_service_handler_instance_t* handler,
-                                         const char* action_name, error_pattern_t error_pattern,
+int onvif_service_handler_generate_error(onvif_service_handler_instance_t* handler, const char* action_name, error_pattern_t error_pattern,
                                          const char* error_message, http_response_t* response) {
   if (!handler || !action_name || !error_message || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   // Set error response data
-  response->status_code = 500;
+  response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
   response->body = (char*)error_message;
   response->body_length = strlen(error_message);
   response->content_type = "application/soap+xml";
@@ -242,9 +241,8 @@ int onvif_service_handler_generate_error(onvif_service_handler_instance_t* handl
   return ONVIF_SUCCESS;
 }
 
-int onvif_service_handler_get_config_value(onvif_service_handler_instance_t* handler,
-                                           config_section_t section, const char* key,
-                                           void* value_ptr, config_value_type_t value_type) {
+int onvif_service_handler_get_config_value(onvif_service_handler_instance_t* handler, config_section_t section, const char* key, void* value_ptr,
+                                           config_value_type_t value_type) {
   if (!handler || !key || !value_ptr) {
     return ONVIF_ERROR_INVALID;
   }
@@ -261,16 +259,15 @@ int onvif_service_handler_get_config_value(onvif_service_handler_instance_t* han
     return config_runtime_get_float(section, key, (float*)value_ptr);
 
   case CONFIG_TYPE_STRING:
-    // String requires buffer size - use a reasonable default of 256 bytes
-    return config_runtime_get_string(section, key, (char*)value_ptr, 256);
+    // String requires buffer size - use a reasonable default
+    return config_runtime_get_string(section, key, (char*)value_ptr, CONFIG_STRING_BUFFER_SIZE);
 
   default:
     return ONVIF_ERROR_INVALID;
   }
 }
 
-int onvif_service_handler_set_config_value(onvif_service_handler_instance_t* handler,
-                                           config_section_t section, const char* key,
+int onvif_service_handler_set_config_value(onvif_service_handler_instance_t* handler, config_section_t section, const char* key,
                                            const void* value_ptr, config_value_type_t value_type) {
   if (!handler || !key || !value_ptr) {
     return ONVIF_ERROR_INVALID;
@@ -295,8 +292,7 @@ int onvif_service_handler_set_config_value(onvif_service_handler_instance_t* han
   }
 }
 
-void onvif_service_handler_log(onvif_service_handler_instance_t* handler, const char* action_name,
-                               const char* message, int level) {
+void onvif_service_handler_log(onvif_service_handler_instance_t* handler, const char* action_name, const char* message, int level) {
   if (!handler || !action_name || !message) {
     return;
   }
@@ -306,8 +302,7 @@ void onvif_service_handler_log(onvif_service_handler_instance_t* handler, const 
   platform_log_info("[%s] %s: %s", handler->config.service_name, action_name, message);
 }
 
-onvif_gsoap_context_t* onvif_service_handler_get_gsoap_context(
-  onvif_service_handler_instance_t* handler) {
+onvif_gsoap_context_t* onvif_service_handler_get_gsoap_context(onvif_service_handler_instance_t* handler) {
   if (handler) {
     return handler->gsoap_ctx;
   }
@@ -324,8 +319,7 @@ int onvif_service_handler_reset_xml_builder(onvif_service_handler_instance_t* ha
   return ONVIF_SUCCESS;
 }
 
-int onvif_service_handler_get_stats(onvif_service_handler_instance_t* handler,
-                                    service_stats_t* stats) {
+int onvif_service_handler_get_stats(onvif_service_handler_instance_t* handler, service_stats_t* stats) {
   if (!handler || !stats) {
     return ONVIF_ERROR_INVALID;
   }
@@ -334,8 +328,7 @@ int onvif_service_handler_get_stats(onvif_service_handler_instance_t* handler,
   return ONVIF_SUCCESS;
 }
 
-int onvif_service_handler_register_action(onvif_service_handler_instance_t* handler,
-                                          const service_action_def_t* action_def) {
+int onvif_service_handler_register_action(onvif_service_handler_instance_t* handler, const service_action_def_t* action_def) {
   if (!handler || !action_def) {
     return ONVIF_ERROR_INVALID;
   }
@@ -349,8 +342,7 @@ int onvif_service_handler_register_action(onvif_service_handler_instance_t* hand
 
   // Reallocate actions array
   size_t new_count = handler->action_count + 1;
-  service_action_def_t* new_actions =
-    ONVIF_REALLOC(handler->actions, new_count * sizeof(service_action_def_t));
+  service_action_def_t* new_actions = ONVIF_REALLOC(handler->actions, new_count * sizeof(service_action_def_t));
   if (!new_actions) {
     return ONVIF_ERROR;
   }
@@ -362,8 +354,7 @@ int onvif_service_handler_register_action(onvif_service_handler_instance_t* hand
   return ONVIF_SUCCESS;
 }
 
-int onvif_service_handler_unregister_action(onvif_service_handler_instance_t* handler,
-                                            const char* action_name) {
+int onvif_service_handler_unregister_action(onvif_service_handler_instance_t* handler, const char* action_name) {
   if (!handler) {
     return ONVIF_ERROR_INVALID;
   }
@@ -382,94 +373,4 @@ int onvif_service_handler_unregister_action(onvif_service_handler_instance_t* ha
   }
 
   return ONVIF_ERROR; // Action not found
-}
-
-/* ============================================================================
- * Legacy Service Handler Functions
- * ============================================================================
- */
-
-int onvif_handle_service_request(const char* action_name, const http_request_t* request,
-                                 http_response_t* response, onvif_service_handler_t handler) {
-  if (!request || !response || !handler) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Initialize response
-  if (onvif_init_service_response(response) != ONVIF_SUCCESS) {
-    return ONVIF_ERROR;
-  }
-
-  // Call service handler
-  int result = handler(action_name, request, response);
-
-  // Clean up on error
-  if (result < 0) {
-    // Clear response data on error
-    if (response) {
-      response->body = NULL;
-      response->body_length = 0;
-      response->status_code = 0;
-      response->content_type = NULL;
-    }
-  }
-
-  return result;
-}
-
-int onvif_init_service_response(http_response_t* response) {
-  if (!response) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Initialize response structure
-  response->status_code = 200;
-  response->content_type = "application/soap+xml";
-  response->body = NULL; // Will be allocated by smart response builder
-  response->body_length = 0;
-  return ONVIF_SUCCESS;
-}
-
-int onvif_handle_unsupported_action(http_response_t* response) {
-  if (!response) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Set error response for unsupported action
-  response->status_code = 400;
-  response->body = (char*)"Unsupported action";
-  response->body_length = strlen("Unsupported action");
-  response->content_type = "application/soap+xml";
-  return ONVIF_SUCCESS;
-}
-
-int onvif_handle_missing_parameter(http_response_t* response, const char* param_name) {
-  if (!response || !param_name) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  char error_message[256];
-  int ret =
-    snprintf(error_message, sizeof(error_message), "Missing required parameter: %s", param_name);
-  (void)ret; // Explicitly ignore return value to silence clang-tidy
-
-  // Set error response for missing parameter
-  response->status_code = 400;
-  response->body = error_message;
-  response->body_length = strlen(error_message);
-  response->content_type = "application/soap+xml";
-  return ONVIF_SUCCESS;
-}
-
-int onvif_handle_service_error(http_response_t* response, const char* error_message) {
-  if (!response || !error_message) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Set error response for service error
-  response->status_code = 500;
-  response->body = (char*)error_message;
-  response->body_length = strlen(error_message);
-  response->content_type = "application/soap+xml";
-  return ONVIF_SUCCESS;
 }

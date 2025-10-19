@@ -54,6 +54,10 @@
 
 /* SOAP Fault Codes - use constants from common/onvif_constants.h */
 
+/* Error message buffer sizes */
+#define ERROR_MESSAGE_MAX_SIZE  256  /* Maximum error message buffer size */
+#define ERROR_CONTEXT_MAX_SIZE  512  /* Maximum error context buffer size */
+
 /**
  * @brief Enhanced error context structure
  */
@@ -70,8 +74,8 @@ typedef struct {
 
   // Error details
   int error_code;
-  char message[256];
-  char context[512];
+  char message[ERROR_MESSAGE_MAX_SIZE];
+  char context[ERROR_CONTEXT_MAX_SIZE];
   int log_level;
 } error_context_t;
 

@@ -25,6 +25,9 @@
 #include "core/config/config.h"
 #include "services/common/onvif_types.h"
 
+/* Configuration string buffer sizes */
+#define CONFIG_KEY_MAX_SIZE    64   /* Maximum configuration key length */
+#define CONFIG_STRING_MAX_SIZE 256  /* Maximum configuration string value length */
 
 /**
  * @defgroup config_runtime Runtime Configuration Manager
@@ -64,12 +67,12 @@ typedef struct {
  */
 typedef struct {
   config_section_t section; /**< Configuration section */
-  char key[64];             /**< Configuration key */
+  char key[CONFIG_KEY_MAX_SIZE];             /**< Configuration key */
   config_value_type_t type; /**< Value type (from config.h) */
   union {
     int int_value;
     float float_value;
-    char string_value[256];
+    char string_value[CONFIG_STRING_MAX_SIZE];
   } value;            /**< Value union */
   uint64_t timestamp; /**< Queue timestamp */
 } persistence_queue_entry_t;
@@ -217,6 +220,17 @@ int config_runtime_set_float(config_section_t section, const char* key, float va
  * @return Pointer to current configuration, or NULL on error
  */
 const struct application_config* config_runtime_snapshot(void);
+
+/**
+ * @brief Get configuration schema entries
+ *
+ * Returns a read-only pointer to the configuration schema array.
+ * Used for iterating through all configuration parameters.
+ *
+ * @param[out] count Number of schema entries
+ * @return Pointer to schema array, or NULL on error
+ */
+const config_schema_entry_t* config_runtime_get_schema(size_t* count);
 
 /**
  * @brief Get current configuration generation counter

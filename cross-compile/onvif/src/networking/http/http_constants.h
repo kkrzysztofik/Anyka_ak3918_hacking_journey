@@ -79,6 +79,18 @@
 #define HTTP_STATUS_INTERNAL_SERVER_ERROR 500
 
 /* ============================================================================
+ * HTTP Status Code Ranges
+ * ============================================================================
+ */
+
+/** @brief HTTP status code range constants */
+#define HTTP_STATUS_SUCCESS_MIN      200
+#define HTTP_STATUS_SUCCESS_MAX      299
+#define HTTP_STATUS_CLIENT_ERROR_MIN 400
+#define HTTP_STATUS_CLIENT_ERROR_MAX 499
+#define HTTP_STATUS_SERVER_ERROR_MIN 500
+
+/* ============================================================================
  * SOAP/XML Parsing Constants
  * ============================================================================
  */

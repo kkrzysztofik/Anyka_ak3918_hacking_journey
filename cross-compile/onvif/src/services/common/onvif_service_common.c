@@ -8,15 +8,24 @@
 #include "onvif_service_common.h"
 
 #include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
+#include "generated/soapH.h"
+#include "networking/http/http_constants.h"
+#include "networking/http/http_parser.h"
+#include "onvif_types.h"
 #include "protocol/gsoap/onvif_gsoap_response.h"
+#include "protocol/response/onvif_service_handler.h"
+#include "utils/error/error_handling.h"
+#include "utils/logging/service_logging.h"
 #include "utils/memory/smart_response_builder.h"
+
+/* ============================================================================
+ * Constants
+ * ============================================================================
+ */
 
 /* ============================================================================
  * Common Utility Function Implementations
@@ -52,7 +61,7 @@ int onvif_util_standard_post_process(http_response_t* response, service_log_cont
 
   // Set default status code if not set
   if (response->status_code == 0) {
-    response->status_code = 200;
+    response->status_code = HTTP_STATUS_OK;
   }
 
   return ONVIF_SUCCESS;
@@ -122,12 +131,12 @@ int onvif_util_handle_service_request(const service_handler_config_t* config,
     if (soap_response) {
       // Use smart_response_build_with_dynamic_buffer to properly copy the response
       if (smart_response_build_with_dynamic_buffer(response, soap_response) == ONVIF_SUCCESS) {
-        response->status_code = 200;
+        response->status_code = HTTP_STATUS_OK;
       } else {
         // Fallback: assign pointer directly (may be temporary)
         response->body = soap_response;
         response->body_length = strlen(soap_response);
-        response->status_code = 200;
+        response->status_code = HTTP_STATUS_OK;
       }
     }
   }
@@ -151,7 +160,7 @@ int onvif_util_handle_service_request(const service_handler_config_t* config,
  * @brief Simplified configuration string getter with fallback
  */
 int config_get_string_or_default(config_section_t section, const char* key, char* value,
-                                  size_t value_size, const char* default_value) {
+                                 size_t value_size, const char* default_value) {
   if (!key || !value || !default_value) {
     return ONVIF_ERROR;
   }

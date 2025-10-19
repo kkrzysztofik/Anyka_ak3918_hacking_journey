@@ -20,10 +20,13 @@
 #include "networking/discovery/ws_discovery.h"
 #include "networking/http/http_server.h"
 #include "platform/platform.h"
-#include "services/snapshot/onvif_snapshot.h"
+#include "utils/error/error_handling.h"
 
 /* Global network services state - static variable with internal linkage only */
 static volatile bool g_network_services_initialized = false; // NOLINT
+
+/* WS-Discovery protocol constants */
+#define WS_DISCOVERY_PORT 3702 /* Standard WS-Discovery multicast port */
 
 /* ---------------------------- Public Interface ------------------------- */
 
@@ -53,8 +56,7 @@ int network_lifecycle_init(const struct application_config* cfg) {
   if (ws_discovery_start(cfg->onvif.http_port) != 0) {
     platform_log_warning("warning: WS-Discovery failed to start\n");
   } else {
-    platform_log_notice("WS-Discovery responder active (multicast %s:%d)\n", "239.255.255.250",
-                        3702);
+    platform_log_notice("WS-Discovery responder active (multicast %s:%d)\n", "239.255.255.250", WS_DISCOVERY_PORT);
   }
 
   g_network_services_initialized = true;
@@ -92,10 +94,4 @@ void network_lifecycle_cleanup(void) {
 
 bool network_lifecycle_initialized(void) {
   return g_network_services_initialized;
-}
-
-void network_lifecycle_start_optional_services(const struct application_config* cfg) {
-  // This function is kept for backward compatibility
-  // The actual initialization is now done in network_lifecycle_init()
-  platform_log_debug("Optional network services already initialized\n");
 }
