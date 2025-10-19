@@ -25,6 +25,7 @@ CHECK_ONLY=false
 FORMAT_CHECK=false
 SEVERITY_LEVEL="hint"
 CHANGED_FILES=false
+PR_DIFF=false
 
 # =============================================================================
 # Script-Specific Functions
@@ -43,6 +44,7 @@ OPTIONS:
   -f, --files FILE        Lint specific files (comma-separated)
   --file FILE             Lint a single file
   --changed               Lint only files modified/created since last git commit
+  --pr-diff               Lint only files modified in PR (uses GITHUB_BASE_REF env var)
   --format                Also check code formatting with clang-format
   --severity LEVEL        Fail on severity level: error, warn, info, hint (default: hint)
 
@@ -53,6 +55,7 @@ EXAMPLES:
   $0 --file src/unit/utils/test_memory_utils.c    # Lint a single test file
   $0 --files src/unit/utils/test_memory_utils.c,src/unit/services/ptz/test_ptz_service.c
   $0 --changed            # Lint only changed test files since last commit
+  $0 --pr-diff            # Lint only changed test files in the current PR
   $0 --format             # Also check code formatting
   $0 --severity error     # Only fail on errors
 EOF
@@ -236,6 +239,113 @@ find_changed_test_files() {
     printf '%s\n' "${changed_files[@]}"
 }
 
+find_pr_diff_test_files() {
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        log_error "Error: Not in a git repository"
+        log_info "Current working directory: $(pwd)"
+        log_info "Directory contents:"
+        ls -la . || true
+        log_info "Parent directory contents:"
+        ls -la .. || true
+        log_info "Checking for .git directory:"
+        find . -name ".git" -type d 2>/dev/null || log_info "No .git directory found"
+        return 1
+    fi
+
+    # Check for GITHUB_BASE_REF environment variable
+    if [[ -z "${GITHUB_BASE_REF:-}" ]]; then
+        log_error "Error: GITHUB_BASE_REF environment variable not set"
+        log_info "This flag is intended for use in GitHub Actions PR workflows"
+        return 1
+    fi
+
+    local pr_files=()
+    local git_root
+    git_root=$(git rev-parse --show-toplevel)
+
+    # Debug: Log environment and git information
+    log_info "=== PR DIFF DEBUG INFO ==="
+    log_info "GITHUB_BASE_REF: ${GITHUB_BASE_REF:-'not set'}"
+    log_info "GITHUB_HEAD_REF: ${GITHUB_HEAD_REF:-'not set'}"
+    log_info "GITHUB_REF: ${GITHUB_REF:-'not set'}"
+    log_info "Git root: $git_root"
+    log_info "Project root: $PROJECT_ROOT"
+    log_info "Current working directory: $(pwd)"
+    log_info "Git branch: $(git branch --show-current 2>/dev/null || echo 'detached HEAD')"
+    log_info "Git HEAD: $(git rev-parse HEAD 2>/dev/null || echo 'unknown')"
+
+    # Fetch the base branch to ensure we have it locally
+    log_info "Fetching base branch: origin/$GITHUB_BASE_REF"
+    if ! git fetch origin "$GITHUB_BASE_REF"; then
+        log_error "Error: Failed to fetch base branch origin/$GITHUB_BASE_REF"
+        return 1
+    fi
+
+    # Debug: Show all files changed in PR
+    log_info "All files changed in PR (origin/$GITHUB_BASE_REF...HEAD):"
+    local all_changed_files
+    all_changed_files=$(git diff --name-only "origin/$GITHUB_BASE_REF...HEAD" 2>/dev/null || echo "")
+    if [[ -n "$all_changed_files" ]]; then
+        echo "$all_changed_files" | while IFS= read -r file; do
+            log_info "  - $file"
+        done
+    else
+        log_warning "  No files found in git diff"
+    fi
+
+    # Get files changed in PR (base branch to HEAD)
+    local total_files=0
+    local c_files=0
+    local filtered_files=0
+
+    # Debug: Show the regex pattern being used
+    log_info "Using regex pattern for C/C++ test files: ^(cross-compile/onvif/)?tests/.*\\.(c|h|cpp|hpp|cc|hh)$"
+
+    while IFS= read -r file; do
+        total_files=$((total_files + 1))
+        log_info "Processing file $total_files: $file"
+
+        # Only include C/C++ test files in tests directory
+        if [[ "$file" =~ ^(cross-compile/onvif/)?tests/.*\.(c|h|cpp|hpp|cc|hh)$ ]]; then
+            c_files=$((c_files + 1))
+            log_info "  ✓ Matches C/C++ test file pattern"
+
+            # Convert to absolute path if relative
+            local abs_file="$file"
+            if [[ "$file" != /* ]]; then
+                if [[ "$file" =~ ^cross-compile/onvif/ ]]; then
+                    abs_file="$git_root/$file"
+                    log_info "  → Converted to absolute path: $abs_file"
+                else
+                    abs_file="$PROJECT_ROOT/$file"
+                    log_info "  → Converted to absolute path: $abs_file"
+                fi
+            fi
+
+            # Check if file exists after converting to absolute path
+            if [[ -f "$abs_file" ]]; then
+                filtered_files=$((filtered_files + 1))
+                pr_files+=("$abs_file")
+                log_info "  ✓ File exists, added to lint list"
+            else
+                log_warning "  ✗ File does not exist: $abs_file"
+            fi
+        else
+            log_info "  - Skipped (not a C/C++ test file)"
+        fi
+    done < <(git diff --name-only "origin/$GITHUB_BASE_REF...HEAD")
+
+    log_info "=== PR DIFF SUMMARY ==="
+    log_info "Total files changed: $total_files"
+    log_info "C/C++ test files: $c_files"
+    log_info "Files added to lint list: $filtered_files"
+    log_info "========================="
+
+    # Output the files (one per line)
+    printf '%s\n' "${pr_files[@]}"
+}
+
 # =============================================================================
 # Argument Parsing
 # =============================================================================
@@ -261,6 +371,10 @@ parse_arguments() {
                 ;;
             --changed)
                 CHANGED_FILES=true
+                shift
+                ;;
+            --pr-diff)
+                PR_DIFF=true
                 shift
                 ;;
             *)
@@ -329,6 +443,22 @@ main() {
             exit 0
         fi
         log_info "Found ${#files[@]} changed C test file(s) to lint"
+    elif [[ "$PR_DIFF" == "true" ]]; then
+        # Lint only files modified in PR
+        log_info "Finding C test source files modified in PR..."
+        mapfile -t files < <(find_pr_diff_test_files)
+        if [[ ${#files[@]} -eq 0 ]]; then
+            log_info "No C test source files have been modified in this PR"
+            exit 0
+        fi
+        log_info "Found ${#files[@]} PR-modified C test file(s) to lint"
+
+        log_info "Files to be linted:"
+        for file in "${files[@]}"; do
+            local relative_file
+            relative_file=$(get_relative_path "$file")
+            log_info "  - $relative_file"
+        done
     else
         # Find and lint all C test files
         log_info "Scanning for C test source files..."
