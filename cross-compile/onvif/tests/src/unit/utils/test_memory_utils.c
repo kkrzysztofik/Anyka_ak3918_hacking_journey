@@ -247,12 +247,9 @@ void test_unit_dynamic_buffer(void** state) {
  */
 const struct CMUnitTest* get_memory_utils_unit_tests(size_t* count) {
   static const struct CMUnitTest tests[] = {
-    cmocka_unit_test(test_unit_memory_manager_init),
-    cmocka_unit_test(test_unit_memory_manager_alloc),
-    cmocka_unit_test(test_unit_memory_manager_free),
-    cmocka_unit_test(test_unit_smart_response_builder),
-    cmocka_unit_test(test_unit_memory_manager_stats),
-    cmocka_unit_test(test_unit_memory_manager_stress),
+    cmocka_unit_test(test_unit_memory_manager_init),  cmocka_unit_test(test_unit_memory_manager_alloc),
+    cmocka_unit_test(test_unit_memory_manager_free),  cmocka_unit_test(test_unit_smart_response_builder),
+    cmocka_unit_test(test_unit_memory_manager_stats), cmocka_unit_test(test_unit_memory_manager_stress),
     cmocka_unit_test(test_unit_dynamic_buffer),
   };
   *count = sizeof(tests) / sizeof(tests[0]);

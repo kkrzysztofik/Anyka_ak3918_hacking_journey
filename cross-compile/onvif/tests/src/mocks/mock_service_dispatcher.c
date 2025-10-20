@@ -48,8 +48,7 @@ static char g_last_dispatch_operation[256] = {0};
 /**
  * @brief CMocka wrapped version of onvif_service_dispatcher_register_service
  */
-int __wrap_onvif_service_dispatcher_register_service(
-  const onvif_service_registration_t* registration) {
+int __wrap_onvif_service_dispatcher_register_service(const onvif_service_registration_t* registration) {
   if (g_use_real_functions) {
     return __real_onvif_service_dispatcher_register_service(registration);
   }
@@ -111,11 +110,9 @@ void __wrap_onvif_service_dispatcher_cleanup(void) {
 /**
  * @brief CMocka wrapped version of onvif_service_dispatcher_dispatch
  */
-int __wrap_onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name,
-                                             void* request, void* response) {
+int __wrap_onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name, void* request, void* response) {
   if (g_use_real_functions) {
-    return __real_onvif_service_dispatcher_dispatch(service_name, operation_name, request,
-                                                    response);
+    return __real_onvif_service_dispatcher_dispatch(service_name, operation_name, request, response);
   }
 
   check_expected_ptr(service_name);
@@ -223,4 +220,3 @@ const char* mock_service_dispatcher_get_last_dispatch_service(void) {
 const char* mock_service_dispatcher_get_last_dispatch_operation(void) {
   return g_last_dispatch_operation;
 }
-

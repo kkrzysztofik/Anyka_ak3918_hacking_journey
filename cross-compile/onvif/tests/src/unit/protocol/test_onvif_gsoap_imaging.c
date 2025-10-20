@@ -72,8 +72,7 @@ void test_unit_onvif_gsoap_parse_set_imaging_settings(void** state) {
 
   assert_non_null(request->ImagingSettings);
   if (request->ImagingSettings->Brightness) {
-    assert_true(*request->ImagingSettings->Brightness >= 45.0 &&
-                *request->ImagingSettings->Brightness <= 55.0);
+    assert_true(*request->ImagingSettings->Brightness >= 45.0 && *request->ImagingSettings->Brightness <= 55.0);
   }
 
   // Cleanup

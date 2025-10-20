@@ -13,7 +13,6 @@
 #include "cmocka_wrapper.h"
 #include "networking/common/buffer_pool.h"
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -84,16 +83,16 @@ void buffer_pool_mock_use_real_function(bool use_real);
 /**
  * @brief Set up expectations for successful buffer pool initialization
  */
-#define EXPECT_BUFFER_POOL_INIT_SUCCESS()                                                          \
-  expect_any(__wrap_buffer_pool_init, pool);                                                       \
+#define EXPECT_BUFFER_POOL_INIT_SUCCESS()                                                                                                            \
+  expect_any(__wrap_buffer_pool_init, pool);                                                                                                         \
   will_return(__wrap_buffer_pool_init, 0)
 
 /**
  * @brief Set up expectations for buffer pool initialization failure
  * @param error_code Error code to return
  */
-#define EXPECT_BUFFER_POOL_INIT_ERROR(error_code)                                                  \
-  expect_any(__wrap_buffer_pool_init, pool);                                                       \
+#define EXPECT_BUFFER_POOL_INIT_ERROR(error_code)                                                                                                    \
+  expect_any(__wrap_buffer_pool_init, pool);                                                                                                         \
   will_return(__wrap_buffer_pool_init, error_code)
 
 /**
@@ -105,37 +104,37 @@ void buffer_pool_mock_use_real_function(bool use_real);
  * @brief Set up expectations for successful buffer pool get
  * @param buffer_ptr Buffer pointer to return
  */
-#define EXPECT_BUFFER_POOL_GET_SUCCESS(buffer_ptr)                                                 \
-  expect_any(__wrap_buffer_pool_get, pool);                                                        \
+#define EXPECT_BUFFER_POOL_GET_SUCCESS(buffer_ptr)                                                                                                   \
+  expect_any(__wrap_buffer_pool_get, pool);                                                                                                          \
   will_return(__wrap_buffer_pool_get, buffer_ptr)
 
 /**
  * @brief Set up expectations for buffer pool get failure (NULL)
  */
-#define EXPECT_BUFFER_POOL_GET_NULL()                                                              \
-  expect_any(__wrap_buffer_pool_get, pool);                                                        \
+#define EXPECT_BUFFER_POOL_GET_NULL()                                                                                                                \
+  expect_any(__wrap_buffer_pool_get, pool);                                                                                                          \
   will_return(__wrap_buffer_pool_get, NULL)
 
 /**
  * @brief Set up expectations for buffer pool return
  */
-#define EXPECT_BUFFER_POOL_RETURN()                                                                \
-  expect_any(__wrap_buffer_pool_return, pool);                                                     \
+#define EXPECT_BUFFER_POOL_RETURN()                                                                                                                  \
+  expect_any(__wrap_buffer_pool_return, pool);                                                                                                       \
   expect_any(__wrap_buffer_pool_return, buffer)
 
 /**
  * @brief Set up expectations for successful buffer pool get stats
  */
-#define EXPECT_BUFFER_POOL_GET_STATS_SUCCESS()                                                     \
-  expect_any(__wrap_buffer_pool_get_stats, pool);                                                  \
-  expect_any(__wrap_buffer_pool_get_stats, stats);                                                 \
+#define EXPECT_BUFFER_POOL_GET_STATS_SUCCESS()                                                                                                       \
+  expect_any(__wrap_buffer_pool_get_stats, pool);                                                                                                    \
+  expect_any(__wrap_buffer_pool_get_stats, stats);                                                                                                   \
   will_return(__wrap_buffer_pool_get_stats, 0)
 
 /**
  * @brief Set up expectations for successful get buffer pool stats (global)
  */
-#define EXPECT_GET_BUFFER_POOL_STATS_SUCCESS()                                                     \
-  expect_any(__wrap_get_buffer_pool_stats, stats);                                                 \
+#define EXPECT_GET_BUFFER_POOL_STATS_SUCCESS()                                                                                                       \
+  expect_any(__wrap_get_buffer_pool_stats, stats);                                                                                                   \
   will_return(__wrap_get_buffer_pool_stats, 0)
 
 #ifdef __cplusplus

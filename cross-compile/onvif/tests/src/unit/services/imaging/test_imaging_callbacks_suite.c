@@ -23,16 +23,11 @@ void test_unit_imaging_callback_unregistration_not_initialized(void** state);
  */
 const struct CMUnitTest* get_imaging_callbacks_unit_tests(size_t* count) {
   static const struct CMUnitTest tests[] = {
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_success,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_duplicate,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_null_config,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_success,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_not_initialized,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_success, setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_duplicate, setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_null_config, setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_success, setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_not_initialized, setup_imaging_unit_tests, teardown_imaging_unit_tests),
   };
   *count = sizeof(tests) / sizeof(tests[0]);
   return tests;

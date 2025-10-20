@@ -7,14 +7,10 @@
 
 #include "platform_ptz_mock.h"
 
-#include <cmocka.h>
 #include <pthread.h>
-#include <setjmp.h>
-#include <stdarg.h>
 #include <stdbool.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <string.h>
+
+#include "cmocka_wrapper.h"
 
 /* ============================================================================
  * Static State Variables
@@ -64,8 +60,7 @@ bool platform_ptz_mock_should_bypass_expectations(void) {
 
   const int bypass = !pthread_equal(pthread_self(), owner_thread);
   if (bypass) {
-    printf("[MOCK][PTZ] bypassing expectations on thread %lu (owner=%lu)\n",
-           (unsigned long)pthread_self(), (unsigned long)owner_thread);
+    printf("[MOCK][PTZ] bypassing expectations on thread %lu (owner=%lu)\n", (unsigned long)pthread_self(), (unsigned long)owner_thread);
   }
   return bypass;
 }
@@ -191,8 +186,7 @@ void platform_ptz_mock_set_async_mode(bool enable) {
   g_ptz_async_mode_enabled = enable ? 1 : 0;
   if (enable) {
     g_ptz_async_main_thread = pthread_self();
-    printf("[MOCK][PTZ] async mode enabled (owner thread=%lu)\n",
-           (unsigned long)g_ptz_async_main_thread);
+    printf("[MOCK][PTZ] async mode enabled (owner thread=%lu)\n", (unsigned long)g_ptz_async_main_thread);
   } else {
     printf("[MOCK][PTZ] async mode disabled\n");
   }

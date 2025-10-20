@@ -26,9 +26,9 @@ typedef enum {
  * Describes a test suite with its name, category, tests, and optional setup/teardown functions.
  */
 typedef struct {
-  const char* name;         /**< Suite name (e.g., "ptz", "media", "networking") */
-  const char* full_name;    /**< Full descriptive name for display */
-  test_category_t category; /**< Test category (unit or integration) */
+  const char* name;                                     /**< Suite name (e.g., "ptz", "media", "networking") */
+  const char* full_name;                                /**< Full descriptive name for display */
+  test_category_t category;                             /**< Test category (unit or integration) */
   const struct CMUnitTest* (*get_tests)(size_t* count); /**< Function to retrieve test array */
   int (*setup)(void** state);                           /**< Optional suite setup function */
   int (*teardown)(void** state);                        /**< Optional suite teardown function */

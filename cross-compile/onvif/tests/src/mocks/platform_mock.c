@@ -106,8 +106,7 @@ platform_result_t __wrap_platform_vi_close(void* vi_handle) {
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_vi_get_sensor_resolution(
-  platform_video_resolution_t* resolution) {
+platform_result_t __wrap_platform_vi_get_sensor_resolution(platform_video_resolution_t* resolution) {
   check_expected_ptr(resolution);
   function_called();
   if (resolution) {
@@ -165,8 +164,7 @@ platform_result_t __wrap_platform_vi_get_fps(int* fps) {
  * Video Processing (VPSS) Functions
  * ============================================================================ */
 
-platform_result_t __wrap_platform_vpss_effect_set(platform_vi_handle_t handle,
-                                                  platform_vpss_effect_t effect, int value) {
+platform_result_t __wrap_platform_vpss_effect_set(platform_vi_handle_t handle, platform_vpss_effect_t effect, int value) {
   check_expected_ptr(handle);
   check_expected(effect);
   check_expected(value);
@@ -174,8 +172,7 @@ platform_result_t __wrap_platform_vpss_effect_set(platform_vi_handle_t handle,
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_vpss_effect_get(platform_vi_handle_t handle,
-                                                  platform_vpss_effect_t effect, int* value) {
+platform_result_t __wrap_platform_vpss_effect_get(platform_vi_handle_t handle, platform_vpss_effect_t effect, int* value) {
   check_expected_ptr(handle);
   check_expected(effect);
   check_expected_ptr(value);
@@ -226,8 +223,7 @@ platform_result_t __wrap_platform_venc_release_frame(void* venc_handle, void* fr
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_venc_get_stream(void* venc_handle,
-                                                  platform_venc_stream_t* stream) {
+platform_result_t __wrap_platform_venc_get_stream(void* venc_handle, platform_venc_stream_t* stream) {
   check_expected_ptr(venc_handle);
   check_expected_ptr(stream);
   function_called();
@@ -240,8 +236,7 @@ platform_result_t __wrap_platform_venc_get_stream(void* venc_handle,
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_venc_release_stream(void* venc_handle,
-                                                      platform_venc_stream_t* stream) {
+platform_result_t __wrap_platform_venc_release_stream(void* venc_handle, platform_venc_stream_t* stream) {
   check_expected_ptr(venc_handle);
   check_expected_ptr(stream);
   function_called();
@@ -264,8 +259,7 @@ platform_result_t __wrap_platform_venc_cancel_stream(void* stream_handle) {
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_venc_get_stream_by_handle(void* stream_handle,
-                                                            platform_venc_stream_t* stream) {
+platform_result_t __wrap_platform_venc_get_stream_by_handle(void* stream_handle, platform_venc_stream_t* stream) {
   check_expected_ptr(stream_handle);
   check_expected_ptr(stream);
   function_called();
@@ -278,16 +272,14 @@ platform_result_t __wrap_platform_venc_get_stream_by_handle(void* stream_handle,
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_venc_release_stream_by_handle(void* stream_handle,
-                                                                platform_venc_stream_t* stream) {
+platform_result_t __wrap_platform_venc_release_stream_by_handle(void* stream_handle, platform_venc_stream_t* stream) {
   check_expected_ptr(stream_handle);
   check_expected_ptr(stream);
   function_called();
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_venc_get_buffer_status(void* venc_handle, int* buffer_count,
-                                                         int* max_buffers, int* overflow_count) {
+platform_result_t __wrap_platform_venc_get_buffer_status(void* venc_handle, int* buffer_count, int* max_buffers, int* overflow_count) {
   check_expected_ptr(venc_handle);
   check_expected_ptr(buffer_count);
   check_expected_ptr(max_buffers);
@@ -358,8 +350,7 @@ platform_result_t __wrap_platform_aenc_release_frame(void* aenc_handle, void* fr
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_aenc_get_stream(void* aenc_handle,
-                                                  platform_aenc_stream_t* stream) {
+platform_result_t __wrap_platform_aenc_get_stream(void* aenc_handle, platform_aenc_stream_t* stream) {
   check_expected_ptr(aenc_handle);
   check_expected_ptr(stream);
   function_called();
@@ -371,8 +362,7 @@ platform_result_t __wrap_platform_aenc_get_stream(void* aenc_handle,
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_aenc_release_stream(void* aenc_handle,
-                                                      platform_aenc_stream_t* stream) {
+platform_result_t __wrap_platform_aenc_release_stream(void* aenc_handle, platform_aenc_stream_t* stream) {
   check_expected_ptr(aenc_handle);
   check_expected_ptr(stream);
   function_called();
@@ -442,8 +432,7 @@ int __wrap_platform_ptz_get_step_position(platform_ptz_axis_t axis) {
   return (int)mock();
 }
 
-platform_result_t __wrap_platform_ptz_get_status(platform_ptz_axis_t axis,
-                                                 platform_ptz_status_t* status) {
+platform_result_t __wrap_platform_ptz_get_status(platform_ptz_axis_t axis, platform_ptz_status_t* status) {
   check_expected(axis);
   check_expected_ptr(status);
   function_called();
@@ -527,8 +516,7 @@ platform_result_t __wrap_platform_snapshot_cleanup(void) {
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_snapshot_capture(platform_snapshot_handle_t handle,
-                                                   platform_snapshot_t* snapshot) {
+platform_result_t __wrap_platform_snapshot_capture(platform_snapshot_handle_t handle, platform_snapshot_t* snapshot) {
   check_expected(handle);
   check_expected_ptr(snapshot);
   function_called();
@@ -540,8 +528,7 @@ platform_result_t __wrap_platform_snapshot_capture(platform_snapshot_handle_t ha
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_snapshot_release(platform_snapshot_handle_t handle,
-                                                   platform_snapshot_t* snapshot) {
+platform_result_t __wrap_platform_snapshot_release(platform_snapshot_handle_t handle, platform_snapshot_t* snapshot) {
   check_expected(handle);
   check_expected_ptr(snapshot);
   function_called();

@@ -34,8 +34,8 @@ extern size_t g_config_security_test_count;
  * @return Pointer to array of CMUnitTest structures
  */
 const struct CMUnitTest* get_config_security_integration_tests(size_t* count) {
-    if (count) {
-        *count = g_config_security_test_count;
-    }
-    return g_config_security_tests;
+  if (count) {
+    *count = g_config_security_test_count;
+  }
+  return g_config_security_tests;
 }

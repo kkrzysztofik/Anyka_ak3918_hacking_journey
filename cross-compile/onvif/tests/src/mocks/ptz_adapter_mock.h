@@ -14,7 +14,6 @@
 #include "cmocka_wrapper.h"
 #include "platform/platform_common.h"
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -54,8 +53,7 @@ platform_result_t __wrap_ptz_adapter_get_status(struct ptz_device_status* status
  * @param move_speed Movement speed
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_ptz_adapter_absolute_move(int pan_degrees, int tilt_degrees,
-                                                   int move_speed);
+platform_result_t __wrap_ptz_adapter_absolute_move(int pan_degrees, int tilt_degrees, int move_speed);
 
 /**
  * @brief CMocka wrapped PTZ relative move
@@ -64,8 +62,7 @@ platform_result_t __wrap_ptz_adapter_absolute_move(int pan_degrees, int tilt_deg
  * @param move_speed Movement speed
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_ptz_adapter_relative_move(int pan_delta_degrees, int tilt_delta_degrees,
-                                                   int move_speed);
+platform_result_t __wrap_ptz_adapter_relative_move(int pan_delta_degrees, int tilt_delta_degrees, int move_speed);
 
 /**
  * @brief CMocka wrapped PTZ continuous move
@@ -74,8 +71,7 @@ platform_result_t __wrap_ptz_adapter_relative_move(int pan_delta_degrees, int ti
  * @param timeout_seconds Timeout in seconds
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_ptz_adapter_continuous_move(int pan_velocity, int tilt_velocity,
-                                                     int timeout_seconds);
+platform_result_t __wrap_ptz_adapter_continuous_move(int pan_velocity, int tilt_velocity, int timeout_seconds);
 
 /**
  * @brief CMocka wrapped PTZ stop
@@ -129,10 +125,10 @@ void ptz_adapter_mock_use_real_function(bool use_real);
  * @param tilt Tilt position in degrees
  * @param speed Movement speed
  */
-#define EXPECT_PTZ_ADAPTER_ABSOLUTE_MOVE(pan, tilt, speed)                                         \
-  expect_value(__wrap_ptz_adapter_absolute_move, pan_degrees, pan);                                \
-  expect_value(__wrap_ptz_adapter_absolute_move, tilt_degrees, tilt);                              \
-  expect_value(__wrap_ptz_adapter_absolute_move, move_speed, speed);                               \
+#define EXPECT_PTZ_ADAPTER_ABSOLUTE_MOVE(pan, tilt, speed)                                                                                           \
+  expect_value(__wrap_ptz_adapter_absolute_move, pan_degrees, pan);                                                                                  \
+  expect_value(__wrap_ptz_adapter_absolute_move, tilt_degrees, tilt);                                                                                \
+  expect_value(__wrap_ptz_adapter_absolute_move, move_speed, speed);                                                                                 \
   will_return(__wrap_ptz_adapter_absolute_move, PLATFORM_SUCCESS)
 
 /**
@@ -141,10 +137,10 @@ void ptz_adapter_mock_use_real_function(bool use_real);
  * @param tilt_delta Tilt delta in degrees
  * @param speed Movement speed
  */
-#define EXPECT_PTZ_ADAPTER_RELATIVE_MOVE(pan_delta, tilt_delta, speed)                             \
-  expect_value(__wrap_ptz_adapter_relative_move, pan_delta_degrees, pan_delta);                    \
-  expect_value(__wrap_ptz_adapter_relative_move, tilt_delta_degrees, tilt_delta);                  \
-  expect_value(__wrap_ptz_adapter_relative_move, move_speed, speed);                               \
+#define EXPECT_PTZ_ADAPTER_RELATIVE_MOVE(pan_delta, tilt_delta, speed)                                                                               \
+  expect_value(__wrap_ptz_adapter_relative_move, pan_delta_degrees, pan_delta);                                                                      \
+  expect_value(__wrap_ptz_adapter_relative_move, tilt_delta_degrees, tilt_delta);                                                                    \
+  expect_value(__wrap_ptz_adapter_relative_move, move_speed, speed);                                                                                 \
   will_return(__wrap_ptz_adapter_relative_move, PLATFORM_SUCCESS)
 
 /**
@@ -153,10 +149,10 @@ void ptz_adapter_mock_use_real_function(bool use_real);
  * @param tilt_vel Tilt velocity
  * @param timeout Timeout in seconds
  */
-#define EXPECT_PTZ_ADAPTER_CONTINUOUS_MOVE(pan_vel, tilt_vel, timeout)                             \
-  expect_value(__wrap_ptz_adapter_continuous_move, pan_velocity, pan_vel);                         \
-  expect_value(__wrap_ptz_adapter_continuous_move, tilt_velocity, tilt_vel);                       \
-  expect_value(__wrap_ptz_adapter_continuous_move, timeout_seconds, timeout);                      \
+#define EXPECT_PTZ_ADAPTER_CONTINUOUS_MOVE(pan_vel, tilt_vel, timeout)                                                                               \
+  expect_value(__wrap_ptz_adapter_continuous_move, pan_velocity, pan_vel);                                                                           \
+  expect_value(__wrap_ptz_adapter_continuous_move, tilt_velocity, tilt_vel);                                                                         \
+  expect_value(__wrap_ptz_adapter_continuous_move, timeout_seconds, timeout);                                                                        \
   will_return(__wrap_ptz_adapter_continuous_move, PLATFORM_SUCCESS)
 
 /**
@@ -169,17 +165,17 @@ void ptz_adapter_mock_use_real_function(bool use_real);
  * @param preset_name Preset name
  * @param id Preset ID
  */
-#define EXPECT_PTZ_ADAPTER_SET_PRESET(preset_name, id)                                             \
-  expect_string(__wrap_ptz_adapter_set_preset, name, preset_name);                                 \
-  expect_value(__wrap_ptz_adapter_set_preset, preset_id, id);                                      \
+#define EXPECT_PTZ_ADAPTER_SET_PRESET(preset_name, id)                                                                                               \
+  expect_string(__wrap_ptz_adapter_set_preset, name, preset_name);                                                                                   \
+  expect_value(__wrap_ptz_adapter_set_preset, preset_id, id);                                                                                        \
   will_return(__wrap_ptz_adapter_set_preset, PLATFORM_SUCCESS)
 
 /**
  * @brief Set up expectations for successful PTZ goto preset
  * @param id Preset ID
  */
-#define EXPECT_PTZ_ADAPTER_GOTO_PRESET(id)                                                         \
-  expect_value(__wrap_ptz_adapter_goto_preset, preset_id, id);                                     \
+#define EXPECT_PTZ_ADAPTER_GOTO_PRESET(id)                                                                                                           \
+  expect_value(__wrap_ptz_adapter_goto_preset, preset_id, id);                                                                                       \
   will_return(__wrap_ptz_adapter_goto_preset, PLATFORM_SUCCESS)
 
 /**
@@ -189,11 +185,11 @@ void ptz_adapter_mock_use_real_function(bool use_real);
  * @param h_spd Horizontal speed
  * @param v_spd Vertical speed
  */
-#define EXPECT_PTZ_ADAPTER_GET_STATUS(h_pos, v_pos, h_spd, v_spd)                                  \
-  will_return(__wrap_ptz_adapter_get_status, h_pos);                                               \
-  will_return(__wrap_ptz_adapter_get_status, v_pos);                                               \
-  will_return(__wrap_ptz_adapter_get_status, h_spd);                                               \
-  will_return(__wrap_ptz_adapter_get_status, v_spd);                                               \
+#define EXPECT_PTZ_ADAPTER_GET_STATUS(h_pos, v_pos, h_spd, v_spd)                                                                                    \
+  will_return(__wrap_ptz_adapter_get_status, h_pos);                                                                                                 \
+  will_return(__wrap_ptz_adapter_get_status, v_pos);                                                                                                 \
+  will_return(__wrap_ptz_adapter_get_status, h_spd);                                                                                                 \
+  will_return(__wrap_ptz_adapter_get_status, v_spd);                                                                                                 \
   will_return(__wrap_ptz_adapter_get_status, PLATFORM_SUCCESS)
 
 #ifdef __cplusplus

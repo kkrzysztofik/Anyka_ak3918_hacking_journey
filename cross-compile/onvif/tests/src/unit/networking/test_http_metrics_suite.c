@@ -29,20 +29,13 @@ int teardown_http_metrics_tests(void** state);
 const struct CMUnitTest* get_http_metrics_unit_tests(size_t* count) {
   static const struct CMUnitTest tests[] = {
     cmocka_unit_test(test_unit_http_metrics_init_cleanup),
-    cmocka_unit_test_setup_teardown(test_unit_http_metrics_recording_accuracy,
-                                     setup_http_metrics_tests, teardown_http_metrics_tests),
-    cmocka_unit_test_setup_teardown(test_unit_http_metrics_null_handling,
-                                     setup_http_metrics_tests, teardown_http_metrics_tests),
-    cmocka_unit_test_setup_teardown(test_unit_http_metrics_connection_updates,
-                                     setup_http_metrics_tests, teardown_http_metrics_tests),
-    cmocka_unit_test_setup_teardown(test_unit_http_metrics_concurrency,
-                                     setup_http_metrics_tests, teardown_http_metrics_tests),
-    cmocka_unit_test_setup_teardown(test_unit_http_metrics_cpu_overhead,
-                                     setup_http_metrics_tests, teardown_http_metrics_tests),
-    cmocka_unit_test_setup_teardown(test_unit_http_metrics_retrieval_performance,
-                                     setup_http_metrics_tests, teardown_http_metrics_tests),
-    cmocka_unit_test_setup_teardown(test_unit_http_metrics_realistic_patterns,
-                                     setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_recording_accuracy, setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_null_handling, setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_connection_updates, setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_concurrency, setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_cpu_overhead, setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_retrieval_performance, setup_http_metrics_tests, teardown_http_metrics_tests),
+    cmocka_unit_test_setup_teardown(test_unit_http_metrics_realistic_patterns, setup_http_metrics_tests, teardown_http_metrics_tests),
   };
   *count = sizeof(tests) / sizeof(tests[0]);
   return tests;

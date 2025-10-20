@@ -12,7 +12,6 @@
 
 #include "cmocka_wrapper.h"
 
-
 /**
  * @brief Get config_runtime unit tests
  * @param count Output parameter for test count

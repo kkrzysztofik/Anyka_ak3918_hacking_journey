@@ -65,14 +65,12 @@ void test_unit_http_verbose_redaction_comprehensive(void** state) {
 
   // Test Authorization header redaction
   char auth_header[128];
-  (void)snprintf(auth_header, sizeof(auth_header), "%s",
-                 "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9");
+  (void)snprintf(auth_header, sizeof(auth_header), "%s", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9");
   service_log_redact_header_value("Authorization", auth_header);
   assert_string_equal(auth_header, "<REDACTED>");
 
   // Test Digest authorization
-  (void)snprintf(auth_header, sizeof(auth_header), "%s",
-                 "Digest username=\"user\", realm=\"realm\", nonce=\"nonce\"");
+  (void)snprintf(auth_header, sizeof(auth_header), "%s", "Digest username=\"user\", realm=\"realm\", nonce=\"nonce\"");
   service_log_redact_header_value("Authorization", auth_header);
   assert_string_equal(auth_header, "<REDACTED>");
 

@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #include "cmocka_wrapper.h"
-
 #include "common/onvif_constants.h"
 #include "platform/platform_common.h"
 #include "utils/error/error_handling.h"
@@ -18,11 +17,11 @@
 #include "utils/validation/common_validation.h"
 #include "utils/validation/input_validation.h"
 
-#define TEST_HTTP_PORT_MIN            1
-#define TEST_HTTP_PORT_INVALID_HIGH   70000
-#define TEST_DECODE_BUFFER_SIZE       64U
-#define TEST_STRING_MIN_LENGTH        1U
-#define TEST_STRING_MAX_LENGTH        32U
+#define TEST_HTTP_PORT_MIN          1
+#define TEST_HTTP_PORT_INVALID_HIGH 70000
+#define TEST_DECODE_BUFFER_SIZE     64U
+#define TEST_STRING_MIN_LENGTH      1U
+#define TEST_STRING_MAX_LENGTH      32U
 
 /**
  * @brief Test common validation helper routines
@@ -31,8 +30,7 @@
 static void test_common_validation_case(void** state) {
   (void)state;
 
-  validation_result_t result =
-    validate_onvif_token("ValidToken_1", "token");
+  validation_result_t result = validate_onvif_token("ValidToken_1", "token");
   assert_true(validation_is_valid(&result));
 
   result = validate_onvif_token("invalid token!", "token");
@@ -44,23 +42,19 @@ static void test_common_validation_case(void** state) {
   result = validate_profile_token("Profile token with spaces", "profile");
   assert_false(validation_is_valid(&result));
 
-  result = validate_string("Manufacturer", "Anyka", TEST_STRING_MIN_LENGTH,
-                           TEST_STRING_MAX_LENGTH, 0);
+  result = validate_string("Manufacturer", "Anyka", TEST_STRING_MIN_LENGTH, TEST_STRING_MAX_LENGTH, 0);
   assert_true(validation_is_valid(&result));
 
-  result = validate_string("Manufacturer", "", TEST_STRING_MIN_LENGTH,
-                           TEST_STRING_MAX_LENGTH, 0);
+  result = validate_string("Manufacturer", "", TEST_STRING_MIN_LENGTH, TEST_STRING_MAX_LENGTH, 0);
   assert_false(validation_is_valid(&result));
 
-  result = validate_int("HTTP Port", ONVIF_HTTP_PORT_DEFAULT, TEST_HTTP_PORT_MIN,
-                        (int)UINT16_MAX);
+  result = validate_int("HTTP Port", ONVIF_HTTP_STANDARD_PORT, TEST_HTTP_PORT_MIN, (int)UINT16_MAX);
   assert_true(validation_is_valid(&result));
 
   result = validate_int("HTTP Port", -1, TEST_HTTP_PORT_MIN, (int)UINT16_MAX);
   assert_false(validation_is_valid(&result));
 
-  result = validate_int("HTTP Port", TEST_HTTP_PORT_INVALID_HIGH, TEST_HTTP_PORT_MIN,
-                        (int)UINT16_MAX);
+  result = validate_int("HTTP Port", TEST_HTTP_PORT_INVALID_HIGH, TEST_HTTP_PORT_MIN, (int)UINT16_MAX);
   assert_false(validation_is_valid(&result));
 }
 
@@ -83,8 +77,7 @@ static void test_input_validation_case(void** state) {
   status = validate_password_input("short");
   assert_int_equal(ONVIF_VALIDATION_FAILED, status);
 
-  status =
-    validate_auth_header_input("Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==");
+  status = validate_auth_header_input("Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==");
   assert_int_equal(ONVIF_VALIDATION_SUCCESS, status);
 
   status = validate_auth_header_input("Basic invalid!");
@@ -118,8 +111,7 @@ static void test_audio_validation_case(void** state) {
   assert_int_equal(0, audio_validation_validate_bits_per_sample(20));
 
   assert_int_equal(1, audio_validation_validate_codec(PLATFORM_AUDIO_CODEC_PCM));
-  assert_int_equal(0,
-                   audio_validation_validate_codec((platform_audio_codec_t)99));
+  assert_int_equal(0, audio_validation_validate_codec((platform_audio_codec_t)99));
 }
 
 /**

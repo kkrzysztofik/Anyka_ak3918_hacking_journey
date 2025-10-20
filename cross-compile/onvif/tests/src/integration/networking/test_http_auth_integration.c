@@ -11,21 +11,17 @@
  * - Security utilities (hash_utils.c)
  */
 
-#include <setjmp.h>
-#include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "cmocka_wrapper.h"
-#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
 #include "networking/http/http_auth.h"
 #include "networking/http/http_parser.h"
-#include "platform/platform.h"
 #include "utils/error/error_handling.h"
-#include "utils/security/hash_utils.h"
 
 /* Mock control headers for integration testing */
 #include "mocks/config_mock.h"
@@ -33,11 +29,11 @@
 #include "mocks/network_mock.h"
 
 /* Test constants */
-#define TEST_USERNAME "testuser"
-#define TEST_PASSWORD "testpass123"
-#define TEST_USERNAME_2 "admin"
-#define TEST_PASSWORD_2 "admin456"
-#define TEST_REALM "ONVIF Camera"
+#define TEST_USERNAME     "testuser"
+#define TEST_PASSWORD     "testpass123"
+#define TEST_USERNAME_2   "admin"
+#define TEST_PASSWORD_2   "admin456"
+#define TEST_REALM        "ONVIF Camera"
 #define TEST_INVALID_USER "nonexistent"
 #define TEST_INVALID_PASS "wrongpass"
 
@@ -52,10 +48,8 @@ struct http_auth_integration_state {
 /**
  * @brief Setup function for HTTP auth integration tests
  */
-static int http_auth_integration_setup(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      calloc(1, sizeof(struct http_auth_integration_state));
+static int http_auth_integration_setup(void** state) {
+  struct http_auth_integration_state* test_state = calloc(1, sizeof(struct http_auth_integration_state));
   if (!test_state) {
     return -1;
   }
@@ -96,10 +90,8 @@ static int http_auth_integration_setup(void** state)
 /**
  * @brief Teardown function for HTTP auth integration tests
  */
-static int http_auth_integration_teardown(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      (struct http_auth_integration_state*)*state;
+static int http_auth_integration_teardown(void** state) {
+  struct http_auth_integration_state* test_state = (struct http_auth_integration_state*)*state;
 
   if (test_state) {
     http_auth_cleanup(&test_state->auth_config);
@@ -118,10 +110,8 @@ static int http_auth_integration_teardown(void** state)
 /**
  * @brief Test successful authentication with runtime user
  */
-static void test_integration_http_auth_runtime_user_success(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      (struct http_auth_integration_state*)*state;
+static void test_integration_http_auth_runtime_user_success(void** state) {
+  struct http_auth_integration_state* test_state = (struct http_auth_integration_state*)*state;
   int result;
 
   /* Add user to runtime configuration */
@@ -140,10 +130,8 @@ static void test_integration_http_auth_runtime_user_success(void** state)
 /**
  * @brief Test failed authentication with incorrect password
  */
-static void test_integration_http_auth_runtime_user_wrong_password(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      (struct http_auth_integration_state*)*state;
+static void test_integration_http_auth_runtime_user_wrong_password(void** state) {
+  struct http_auth_integration_state* test_state = (struct http_auth_integration_state*)*state;
   int result;
 
   /* Add user to runtime configuration */
@@ -162,10 +150,8 @@ static void test_integration_http_auth_runtime_user_wrong_password(void** state)
 /**
  * @brief Test authentication with non-existent user
  */
-static void test_integration_http_auth_runtime_user_not_found(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      (struct http_auth_integration_state*)*state;
+static void test_integration_http_auth_runtime_user_not_found(void** state) {
+  struct http_auth_integration_state* test_state = (struct http_auth_integration_state*)*state;
   int result;
 
   /* Try to authenticate non-existent user */
@@ -176,10 +162,8 @@ static void test_integration_http_auth_runtime_user_not_found(void** state)
 /**
  * @brief Test authentication with multiple users
  */
-static void test_integration_http_auth_multiple_users(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      (struct http_auth_integration_state*)*state;
+static void test_integration_http_auth_multiple_users(void** state) {
+  struct http_auth_integration_state* test_state = (struct http_auth_integration_state*)*state;
   int result;
 
   /* Add first user */
@@ -212,10 +196,8 @@ static void test_integration_http_auth_multiple_users(void** state)
 /**
  * @brief Test user password update and authentication
  */
-static void test_integration_http_auth_password_update(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      (struct http_auth_integration_state*)*state;
+static void test_integration_http_auth_password_update(void** state) {
+  struct http_auth_integration_state* test_state = (struct http_auth_integration_state*)*state;
   int result;
   const char* new_password = "newpass789";
 
@@ -247,10 +229,8 @@ static void test_integration_http_auth_password_update(void** state)
 /**
  * @brief Test user removal invalidates authentication
  */
-static void test_integration_http_auth_user_removal(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      (struct http_auth_integration_state*)*state;
+static void test_integration_http_auth_user_removal(void** state) {
+  struct http_auth_integration_state* test_state = (struct http_auth_integration_state*)*state;
   int result;
 
   /* Add user */
@@ -273,10 +253,8 @@ static void test_integration_http_auth_user_removal(void** state)
 /**
  * @brief Test user enumeration integration
  */
-static void test_integration_http_auth_user_enumeration(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      (struct http_auth_integration_state*)*state;
+static void test_integration_http_auth_user_enumeration(void** state) {
+  struct http_auth_integration_state* test_state = (struct http_auth_integration_state*)*state;
   int result;
   char usernames[MAX_USERS][MAX_USERNAME_LENGTH + 1];
   int user_count = 0;
@@ -319,10 +297,8 @@ static void test_integration_http_auth_user_enumeration(void** state)
 /**
  * @brief Test null parameter handling
  */
-static void test_integration_http_auth_null_parameters(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      (struct http_auth_integration_state*)*state;
+static void test_integration_http_auth_null_parameters(void** state) {
+  struct http_auth_integration_state* test_state = (struct http_auth_integration_state*)*state;
   int result;
 
   /* Null username */
@@ -341,10 +317,8 @@ static void test_integration_http_auth_null_parameters(void** state)
 /**
  * @brief Test Basic auth header parsing and verification integration
  */
-static void test_integration_http_auth_basic_header_parsing(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      (struct http_auth_integration_state*)*state;
+static void test_integration_http_auth_basic_header_parsing(void** state) {
+  struct http_auth_integration_state* test_state = (struct http_auth_integration_state*)*state;
   int result;
   char username[HTTP_MAX_USERNAME_LEN] = {0};
   char password[HTTP_MAX_PASSWORD_LEN] = {0};
@@ -374,10 +348,8 @@ static void test_integration_http_auth_basic_header_parsing(void** state)
 /**
  * @brief Test 401 response generation
  */
-static void test_integration_http_auth_401_response(void** state)
-{
-  struct http_auth_integration_state* test_state =
-      (struct http_auth_integration_state*)*state;
+static void test_integration_http_auth_401_response(void** state) {
+  struct http_auth_integration_state* test_state = (struct http_auth_integration_state*)*state;
   http_response_t response;
 
   /* Generate 401 response */
@@ -409,34 +381,15 @@ static void test_integration_http_auth_401_response(void** state)
 
 /* Test suite */
 const struct CMUnitTest http_auth_integration_tests[] = {
-    cmocka_unit_test_setup_teardown(test_integration_http_auth_runtime_user_success,
-                                    http_auth_integration_setup,
-                                    http_auth_integration_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_http_auth_runtime_user_wrong_password,
-                                    http_auth_integration_setup,
-                                    http_auth_integration_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_http_auth_runtime_user_not_found,
-                                    http_auth_integration_setup,
-                                    http_auth_integration_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_http_auth_multiple_users,
-                                    http_auth_integration_setup,
-                                    http_auth_integration_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_http_auth_password_update,
-                                    http_auth_integration_setup,
-                                    http_auth_integration_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_http_auth_user_removal,
-                                    http_auth_integration_setup,
-                                    http_auth_integration_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_http_auth_user_enumeration,
-                                    http_auth_integration_setup,
-                                    http_auth_integration_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_http_auth_null_parameters,
-                                    http_auth_integration_setup,
-                                    http_auth_integration_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_http_auth_basic_header_parsing,
-                                    http_auth_integration_setup,
-                                    http_auth_integration_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_http_auth_401_response,
-                                    http_auth_integration_setup,
-                                    http_auth_integration_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_http_auth_runtime_user_success, http_auth_integration_setup, http_auth_integration_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_http_auth_runtime_user_wrong_password, http_auth_integration_setup,
+                                  http_auth_integration_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_http_auth_runtime_user_not_found, http_auth_integration_setup, http_auth_integration_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_http_auth_multiple_users, http_auth_integration_setup, http_auth_integration_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_http_auth_password_update, http_auth_integration_setup, http_auth_integration_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_http_auth_user_removal, http_auth_integration_setup, http_auth_integration_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_http_auth_user_enumeration, http_auth_integration_setup, http_auth_integration_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_http_auth_null_parameters, http_auth_integration_setup, http_auth_integration_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_http_auth_basic_header_parsing, http_auth_integration_setup, http_auth_integration_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_http_auth_401_response, http_auth_integration_setup, http_auth_integration_teardown),
 };

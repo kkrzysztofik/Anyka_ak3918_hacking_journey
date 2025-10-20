@@ -26,16 +26,11 @@ int network_service_teardown(void** state);
 const struct CMUnitTest* get_network_integration_tests(size_t* count) {
   static const struct CMUnitTest tests[] = {
     // T087: Network layer configuration integration tests
-    cmocka_unit_test_setup_teardown(test_integration_network_onvif_config, network_service_setup,
-                                    network_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_network_service_ports, network_service_setup,
-                                    network_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_network_http_server_config, network_service_setup,
-                                    network_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_network_logging_config, network_service_setup,
-                                    network_service_teardown),
-    cmocka_unit_test_setup_teardown(test_integration_network_runtime_updates, network_service_setup,
-                                    network_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_network_onvif_config, network_service_setup, network_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_network_service_ports, network_service_setup, network_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_network_http_server_config, network_service_setup, network_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_network_logging_config, network_service_setup, network_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_network_runtime_updates, network_service_setup, network_service_teardown),
   };
   *count = sizeof(tests) / sizeof(tests[0]);
   return tests;

@@ -15,8 +15,7 @@ extern const struct CMUnitTest http_auth_integration_tests[];
  * @param count Output parameter for test count
  * @return Array of CMUnitTest structures
  */
-const struct CMUnitTest* get_http_auth_integration_tests(size_t* count)
-{
+const struct CMUnitTest* get_http_auth_integration_tests(size_t* count) {
   *count = 10; /* Number of tests in http_auth_integration_tests[] (removed 2 legacy tests) */
   return http_auth_integration_tests;
 }

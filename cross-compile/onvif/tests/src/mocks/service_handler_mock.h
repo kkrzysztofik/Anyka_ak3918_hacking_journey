@@ -8,9 +8,9 @@
 #ifndef SERVICE_HANDLER_MOCK_H
 #define SERVICE_HANDLER_MOCK_H
 
-#include "protocol/response/onvif_service_handler.h"
 #include "networking/http/http_parser.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
+#include "protocol/response/onvif_service_handler.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,9 +31,7 @@ extern "C" {
  * @param gsoap_ctx gSOAP context
  * @return Configured mock result
  */
-int mock_action_handler(const service_handler_config_t* config,
-                        const http_request_t* request,
-                        http_response_t* response,
+int mock_action_handler(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
                         onvif_gsoap_context_t* gsoap_ctx);
 
 /**
@@ -47,9 +45,7 @@ int mock_action_handler(const service_handler_config_t* config,
  * @param gsoap_ctx gSOAP context
  * @return ONVIF_ERROR
  */
-int mock_action_handler_with_error_status(const service_handler_config_t* config,
-                                          const http_request_t* request,
-                                          http_response_t* response,
+int mock_action_handler_with_error_status(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
                                           onvif_gsoap_context_t* gsoap_ctx);
 
 /**
@@ -63,9 +59,7 @@ int mock_action_handler_with_error_status(const service_handler_config_t* config
  * @param gsoap_ctx gSOAP context
  * @return ONVIF_SUCCESS
  */
-int mock_action_handler_with_success_status(const service_handler_config_t* config,
-                                            const http_request_t* request,
-                                            http_response_t* response,
+int mock_action_handler_with_success_status(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
                                             onvif_gsoap_context_t* gsoap_ctx);
 
 /**
@@ -80,9 +74,7 @@ int mock_action_handler_with_success_status(const service_handler_config_t* conf
  * @param gsoap_ctx gSOAP context
  * @return ONVIF_ERROR
  */
-int mock_action_handler_fail_no_status(const service_handler_config_t* config,
-                                       const http_request_t* request,
-                                       http_response_t* response,
+int mock_action_handler_fail_no_status(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
                                        onvif_gsoap_context_t* gsoap_ctx);
 
 /* ============================================================================
@@ -130,5 +122,3 @@ int service_handler_mock_get_call_count(void);
 #endif
 
 #endif // SERVICE_HANDLER_MOCK_H
-
-

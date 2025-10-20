@@ -7,6 +7,8 @@
 
 #include "test_suites.h"
 
+#include <stddef.h>
+
 #include "unit/core/config/test_config_runtime.h"
 #include "unit/core/config/test_config_storage.h"
 #include "unit/networking/test_http_server_auth.h"

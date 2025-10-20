@@ -33,7 +33,6 @@ static http_performance_metrics_t g_test_metrics = {0};
 
 // Mock functions for testing
 
-
 /**
  * @brief Setup function for metrics tests
  * @param state Test state (unused)
@@ -53,7 +52,6 @@ int teardown_http_metrics_tests(void** state) {
   (void)state;
   return http_metrics_cleanup();
 }
-
 
 /**
  * @brief Test metrics initialization and cleanup
@@ -165,8 +163,7 @@ void test_unit_http_metrics_realistic_patterns(void** state) {
   assert_true(metrics.client_errors >= 10);          // Some client errors
   assert_true(metrics.total_response_bytes > 50000); // Reasonable response size
   // Calculate average latency
-  uint64_t avg_latency =
-    (metrics.total_requests > 0) ? (metrics.total_latency_ms / metrics.total_requests) : 0;
+  uint64_t avg_latency = (metrics.total_requests > 0) ? (metrics.total_latency_ms / metrics.total_requests) : 0;
   assert_true(avg_latency > 0); // Average latency calculated
 }
 

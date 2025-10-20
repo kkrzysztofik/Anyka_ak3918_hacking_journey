@@ -12,11 +12,10 @@
 
 #include "cmocka_wrapper.h"
 #include "core/config/config.h"
+#include "mocks/config_mock.h"
 #include "mocks/gsoap_mock.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
 #include "utils/error/error_handling.h"
-
-extern int __wrap_config_runtime_get_int(config_section_t section, const char* key, int* out_value); // NOLINT(cert-dcl37-c, cert-dcl51-cpp, bugprone-reserved-identifier)
 
 /**
  * @brief Setup mock expectation for config_runtime_get_int http_verbose call

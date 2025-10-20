@@ -39,12 +39,7 @@ struct test_device_info g_test_device_info = {.manufacturer = TEST_DEVICE_MANUFA
                                               .hardware_id = TEST_DEVICE_HARDWARE_ID};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-struct test_capabilities g_test_capabilities = {.has_analytics = 0,
-                                                .has_device = 1,
-                                                .has_events = 0,
-                                                .has_imaging = 1,
-                                                .has_media = 1,
-                                                .has_ptz = 1};
+struct test_capabilities g_test_capabilities = {.has_analytics = 0, .has_device = 1, .has_events = 0, .has_imaging = 1, .has_media = 1, .has_ptz = 1};
 
 // Global test state
 static int g_device_service_initialized = 0;   // NOLINT
@@ -324,8 +319,7 @@ void test_unit_device_handle_operation_get_device_information(void** state) {
   expect_function_call(__wrap_onvif_gsoap_generate_response_with_callback);
   will_return(__wrap_onvif_gsoap_generate_response_with_callback, 0);
   expect_function_call(__wrap_onvif_gsoap_get_response_data);
-  will_return(__wrap_onvif_gsoap_get_response_data,
-              "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
+  will_return(__wrap_onvif_gsoap_get_response_data, "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
 
   // Create test request and response
   http_request_t request = {0};
@@ -366,8 +360,7 @@ void test_unit_device_handle_operation_get_capabilities(void** state) {
   expect_function_call(__wrap_onvif_gsoap_generate_response_with_callback);
   will_return(__wrap_onvif_gsoap_generate_response_with_callback, 0);
   expect_function_call(__wrap_onvif_gsoap_get_response_data);
-  will_return(__wrap_onvif_gsoap_get_response_data,
-              "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
+  will_return(__wrap_onvif_gsoap_get_response_data, "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
 
   // Create test request and response
   http_request_t request = {0};
@@ -408,8 +401,7 @@ void test_unit_device_handle_operation_get_system_date_time(void** state) {
   expect_function_call(__wrap_onvif_gsoap_generate_response_with_callback);
   will_return(__wrap_onvif_gsoap_generate_response_with_callback, 0);
   expect_function_call(__wrap_onvif_gsoap_get_response_data);
-  will_return(__wrap_onvif_gsoap_get_response_data,
-              "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
+  will_return(__wrap_onvif_gsoap_get_response_data, "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
 
   // Create test request and response
   http_request_t request = {0};
@@ -450,8 +442,7 @@ void test_unit_device_handle_operation_get_services(void** state) {
   expect_function_call(__wrap_onvif_gsoap_generate_response_with_callback);
   will_return(__wrap_onvif_gsoap_generate_response_with_callback, 0);
   expect_function_call(__wrap_onvif_gsoap_get_response_data);
-  will_return(__wrap_onvif_gsoap_get_response_data,
-              "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
+  will_return(__wrap_onvif_gsoap_get_response_data, "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>");
 
   // Create test request and response
   http_request_t request = {0};
@@ -494,9 +485,8 @@ void test_unit_device_handle_operation_system_reboot(void** state) {
   expect_function_call(__wrap_onvif_gsoap_generate_response_with_callback);
   will_return(__wrap_onvif_gsoap_generate_response_with_callback, 0);
   expect_function_call(__wrap_onvif_gsoap_get_response_data);
-  will_return(
-    __wrap_onvif_gsoap_get_response_data,
-    "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>"); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
+  will_return(__wrap_onvif_gsoap_get_response_data,
+              "<?xml version=\"1.0\"?><soap:Envelope>...</soap:Envelope>"); // NOLINT(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
 
   // Create test request and response
   http_request_t request = {0};
@@ -675,8 +665,7 @@ void test_unit_device_capabilities_handler_success(void** state) {
   (void)state;
 
   // Test known capabilities
-  const char* known_capabilities[] = {"GetDeviceInformation", "GetCapabilities",
-                                      "GetSystemDateAndTime", "GetServices", "SystemReboot"};
+  const char* known_capabilities[] = {"GetDeviceInformation", "GetCapabilities", "GetSystemDateAndTime", "GetServices", "SystemReboot"};
 
   for (size_t i = 0; i < sizeof(known_capabilities) / sizeof(known_capabilities[0]); i++) {
     // This would need to be implemented as a public function or tested through

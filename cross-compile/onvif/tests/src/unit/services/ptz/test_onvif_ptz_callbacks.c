@@ -17,11 +17,11 @@
 #include "utils/error/error_handling.h"
 
 // Mock includes
-#include "../../../mocks/platform_mock.h"
-#include "../../../mocks/platform_ptz_mock.h"
-#include "../../../mocks/mock_service_dispatcher.h"
 #include "../../../mocks/buffer_pool_mock.h"
 #include "../../../mocks/gsoap_mock.h"
+#include "../../../mocks/mock_service_dispatcher.h"
+#include "../../../mocks/platform_mock.h"
+#include "../../../mocks/platform_ptz_mock.h"
 #include "../../../utils/test_gsoap_utils.h"
 #include "platform/adapters/ptz_adapter.h"
 
@@ -290,8 +290,7 @@ void test_unit_ptz_operation_handler_unknown_operation(void** state) {
   (void)state;
 
   setup_http_verbose_mock();
-  int result =
-    onvif_ptz_handle_operation(TEST_PTZ_UNKNOWN_OPERATION, &g_test_request, &g_test_response);
+  int result = onvif_ptz_handle_operation(TEST_PTZ_UNKNOWN_OPERATION, &g_test_request, &g_test_response);
 
   assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
 }
@@ -373,40 +372,26 @@ void test_unit_ptz_service_callback_logging_failure(void** state) {
 
 const struct CMUnitTest ptz_callback_tests[] = {
   // Service Registration Tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_registration_success,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_registration_duplicate,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_registration_invalid_params,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_registration_dispatcher_failure,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_unregistration_success,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_unregistration_not_found,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_service_registration_success, setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_service_registration_duplicate, setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_service_registration_invalid_params, setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_service_registration_dispatcher_failure, setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_service_unregistration_success, setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_service_unregistration_not_found, setup_ptz_callback_tests, teardown_ptz_callback_tests),
 
   // Operation Handler Tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_operation_handler_success, setup_ptz_callback_tests,
-                                  teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_operation_handler_null_operation,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_operation_handler_null_request,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_operation_handler_null_response,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_operation_handler_unknown_operation,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_operation_handler_success, setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_operation_handler_null_operation, setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_operation_handler_null_request, setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_operation_handler_null_response, setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_operation_handler_unknown_operation, setup_ptz_callback_tests, teardown_ptz_callback_tests),
 
   // Error Handling Tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_registration_failure_handling,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_unregistration_failure_handling,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_service_registration_failure_handling, setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_service_unregistration_failure_handling, setup_ptz_callback_tests, teardown_ptz_callback_tests),
 
   // Logging Tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_service_callback_logging_failure,
-                                  setup_ptz_callback_tests, teardown_ptz_callback_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_service_callback_logging_failure, setup_ptz_callback_tests, teardown_ptz_callback_tests),
 };
 
 /**

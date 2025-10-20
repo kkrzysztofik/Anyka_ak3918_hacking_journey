@@ -107,8 +107,7 @@ ssize_t __wrap_recv(int sockfd, void* buf, size_t len, int flags) {
   return (ssize_t)mock();
 }
 
-ssize_t __wrap_sendto(int sockfd, const void* buf, size_t len, int flags,
-                      const struct sockaddr* dest_addr, socklen_t addrlen) {
+ssize_t __wrap_sendto(int sockfd, const void* buf, size_t len, int flags, const struct sockaddr* dest_addr, socklen_t addrlen) {
   if (g_use_real_functions) {
     return __real_sendto(sockfd, buf, len, flags, dest_addr, addrlen);
   }
@@ -122,8 +121,7 @@ ssize_t __wrap_sendto(int sockfd, const void* buf, size_t len, int flags,
   return (ssize_t)mock();
 }
 
-ssize_t __wrap_recvfrom(int sockfd, void* buf, size_t len, int flags, struct sockaddr* src_addr,
-                        socklen_t* addrlen) {
+ssize_t __wrap_recvfrom(int sockfd, void* buf, size_t len, int flags, struct sockaddr* src_addr, socklen_t* addrlen) {
   if (g_use_real_functions) {
     return __real_recvfrom(sockfd, buf, len, flags, src_addr, addrlen);
   }

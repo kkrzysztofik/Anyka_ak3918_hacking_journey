@@ -85,9 +85,7 @@ size_t __wrap_onvif_gsoap_get_response_length(const onvif_gsoap_context_t* ctx);
  * @param user_data User data passed to callback (expected via expect_any)
  * @return Mock return value configured via will_return()
  */
-int __wrap_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
-                                                       onvif_response_callback_t callback,
-                                                       void* user_data);
+int __wrap_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx, onvif_response_callback_t callback, void* user_data);
 
 /**
  * @brief Wrapped onvif_gsoap_generate_fault_response function
@@ -100,10 +98,8 @@ int __wrap_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ct
  * @param buffer_size Size of output buffer
  * @return Mock return value configured via will_return()
  */
-int __wrap_onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code,
-                                               const char* fault_string, const char* fault_actor,
-                                               const char* fault_detail, char* output_buffer,
-                                               size_t buffer_size);
+int __wrap_onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code, const char* fault_string, const char* fault_actor,
+                                               const char* fault_detail, char* output_buffer, size_t buffer_size);
 
 /* ============================================================================
  * Conditional Mock/Real Function Control

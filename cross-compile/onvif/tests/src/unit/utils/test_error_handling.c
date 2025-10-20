@@ -331,10 +331,10 @@ static void test_error_macros(void** state) {
   int test_result = ONVIF_ERROR_INVALID;
 
 // This should return early due to the error
-#define TEST_FUNC_WITH_MACRO()                                                                     \
-  do {                                                                                             \
-    ONVIF_RETURN_IF_ERROR(test_result);                                                            \
-    assert_fail(); /* Should not reach here */                                                     \
+#define TEST_FUNC_WITH_MACRO()                                                                                                                       \
+  do {                                                                                                                                               \
+    ONVIF_RETURN_IF_ERROR(test_result);                                                                                                              \
+    assert_fail(); /* Should not reach here */                                                                                                       \
   } while (0)
 
   // For now, just verify the error codes are properly defined

@@ -19,8 +19,7 @@ long test_get_time_microseconds(void) {
 #if defined(CLOCK_MONOTONIC)
   struct timespec monotonic_time;
   if (clock_gettime(CLOCK_MONOTONIC, &monotonic_time) == 0) {
-    return (long)(monotonic_time.tv_sec * MICROS_PER_SECOND +
-                  monotonic_time.tv_nsec / NANOS_PER_MICROSECOND);
+    return (long)(monotonic_time.tv_sec * MICROS_PER_SECOND + monotonic_time.tv_nsec / NANOS_PER_MICROSECOND);
   }
 #endif
 

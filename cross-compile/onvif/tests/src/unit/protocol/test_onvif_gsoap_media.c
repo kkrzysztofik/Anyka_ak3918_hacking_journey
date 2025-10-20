@@ -43,19 +43,17 @@ void test_unit_onvif_gsoap_parse_get_profiles(void** state) {
     int error_code;
     const char* location;
     int soap_error;
-    const char* error_msg =
-      onvif_gsoap_get_detailed_error(&ctx, &error_code, &location, &soap_error);
+    const char* error_msg = onvif_gsoap_get_detailed_error(&ctx, &error_code, &location, &soap_error);
     printf("\nDEBUG: setup_parsing_test failed\n");
     printf("  Error code: %d\n", error_code);
     printf("  Location: %s\n", location ? location : "NULL");
     printf("  SOAP error: %d (%s)\n", soap_error, soap_error_to_string(soap_error));
     printf("  Message: %s\n", error_msg ? error_msg : "NULL");
     printf("  SOAP envelope length: %zu\n", strlen(SOAP_MEDIA_GET_PROFILES));
-    printf(
-      "DEBUG: setup_parsing_test failed - Error code: %d (%s), Location: %s, SOAP error: %d (%s), "
-      "Message: %s\n",
-      error_code, onvif_error_to_string(error_code), location ? location : "NULL", soap_error,
-      soap_error_to_string(soap_error), error_msg ? error_msg : "NULL");
+    printf("DEBUG: setup_parsing_test failed - Error code: %d (%s), Location: %s, SOAP error: %d (%s), "
+           "Message: %s\n",
+           error_code, onvif_error_to_string(error_code), location ? location : "NULL", soap_error, soap_error_to_string(soap_error),
+           error_msg ? error_msg : "NULL");
   }
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -65,8 +63,7 @@ void test_unit_onvif_gsoap_parse_get_profiles(void** state) {
     int error_code;
     const char* location;
     int soap_error;
-    const char* error_msg =
-      onvif_gsoap_get_detailed_error(&ctx, &error_code, &location, &soap_error);
+    const char* error_msg = onvif_gsoap_get_detailed_error(&ctx, &error_code, &location, &soap_error);
     printf("\nDEBUG: onvif_gsoap_parse_get_profiles failed\n");
     printf("  Error code: %d (%s)\n", error_code, onvif_error_to_string(error_code));
     printf("  Location: %s\n", location ? location : "NULL");
@@ -74,8 +71,8 @@ void test_unit_onvif_gsoap_parse_get_profiles(void** state) {
     printf("  Message: %s\n", error_msg ? error_msg : "NULL");
     printf("DEBUG: onvif_gsoap_parse_get_profiles failed - Error code: %d (%s), Location: %s, SOAP "
            "error: %d (%s), Message: %s\n",
-           error_code, onvif_error_to_string(error_code), location ? location : "NULL", soap_error,
-           soap_error_to_string(soap_error), error_msg ? error_msg : "NULL");
+           error_code, onvif_error_to_string(error_code), location ? location : "NULL", soap_error, soap_error_to_string(soap_error),
+           error_msg ? error_msg : "NULL");
   }
   assert_int_equal(result, ONVIF_SUCCESS);
   assert_non_null(request);

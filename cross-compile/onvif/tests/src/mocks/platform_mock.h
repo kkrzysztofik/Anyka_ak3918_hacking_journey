@@ -154,8 +154,7 @@ platform_result_t __wrap_platform_vi_get_fps(int* fps);
  * @param value Effect value
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_vpss_effect_set(platform_vi_handle_t handle,
-                                                   platform_vpss_effect_t effect, int value);
+platform_result_t __wrap_platform_vpss_effect_set(platform_vi_handle_t handle, platform_vpss_effect_t effect, int value);
 
 /**
  * @brief CMocka wrapped VPSS effect get
@@ -164,8 +163,7 @@ platform_result_t __wrap_platform_vpss_effect_set(platform_vi_handle_t handle,
  * @param value Output value pointer
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_vpss_effect_get(platform_vi_handle_t handle,
-                                                   platform_vpss_effect_t effect, int* value);
+platform_result_t __wrap_platform_vpss_effect_get(platform_vi_handle_t handle, platform_vpss_effect_t effect, int* value);
 
 /**
  * @brief CMocka wrapped video encoder initialization
@@ -211,8 +209,7 @@ platform_result_t __wrap_platform_venc_release_frame(void* venc_handle, void* fr
  * @param stream Output stream pointer
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_venc_get_stream(void* venc_handle,
-                                                  platform_venc_stream_t* stream);
+platform_result_t __wrap_platform_venc_get_stream(void* venc_handle, platform_venc_stream_t* stream);
 
 /**
  * @brief CMocka wrapped VENC release stream
@@ -220,8 +217,7 @@ platform_result_t __wrap_platform_venc_get_stream(void* venc_handle,
  * @param stream Stream to release
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_venc_release_stream(void* venc_handle,
-                                                      platform_venc_stream_t* stream);
+platform_result_t __wrap_platform_venc_release_stream(void* venc_handle, platform_venc_stream_t* stream);
 
 /**
  * @brief CMocka wrapped VENC request stream
@@ -244,8 +240,7 @@ platform_result_t __wrap_platform_venc_cancel_stream(void* stream_handle);
  * @param stream Output stream pointer
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_venc_get_stream_by_handle(void* stream_handle,
-                                                            platform_venc_stream_t* stream);
+platform_result_t __wrap_platform_venc_get_stream_by_handle(void* stream_handle, platform_venc_stream_t* stream);
 
 /**
  * @brief CMocka wrapped VENC release stream by handle
@@ -253,8 +248,7 @@ platform_result_t __wrap_platform_venc_get_stream_by_handle(void* stream_handle,
  * @param stream Stream to release
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_venc_release_stream_by_handle(void* stream_handle,
-                                                                platform_venc_stream_t* stream);
+platform_result_t __wrap_platform_venc_release_stream_by_handle(void* stream_handle, platform_venc_stream_t* stream);
 
 /**
  * @brief CMocka wrapped VENC get buffer status
@@ -264,8 +258,7 @@ platform_result_t __wrap_platform_venc_release_stream_by_handle(void* stream_han
  * @param overflow_count Output overflow count pointer
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_venc_get_buffer_status(void* venc_handle, int* buffer_count,
-                                                         int* max_buffers, int* overflow_count);
+platform_result_t __wrap_platform_venc_get_buffer_status(void* venc_handle, int* buffer_count, int* max_buffers, int* overflow_count);
 
 /**
  * @brief CMocka wrapped audio input open
@@ -318,8 +311,7 @@ platform_result_t __wrap_platform_aenc_release_frame(void* aenc_handle, void* fr
  * @param stream Output stream pointer
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_aenc_get_stream(void* aenc_handle,
-                                                  platform_aenc_stream_t* stream);
+platform_result_t __wrap_platform_aenc_get_stream(void* aenc_handle, platform_aenc_stream_t* stream);
 
 /**
  * @brief CMocka wrapped AENC release stream
@@ -327,8 +319,7 @@ platform_result_t __wrap_platform_aenc_get_stream(void* aenc_handle,
  * @param stream Stream to release
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_aenc_release_stream(void* aenc_handle,
-                                                      platform_aenc_stream_t* stream);
+platform_result_t __wrap_platform_aenc_release_stream(void* aenc_handle, platform_aenc_stream_t* stream);
 
 /**
  * @brief CMocka wrapped PTZ initialization
@@ -377,8 +368,7 @@ int __wrap_platform_ptz_get_step_position(platform_ptz_axis_t axis);
  * @param status Output status pointer
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_ptz_get_status(platform_ptz_axis_t axis,
-                                                 platform_ptz_status_t* status);
+platform_result_t __wrap_platform_ptz_get_status(platform_ptz_axis_t axis, platform_ptz_status_t* status);
 
 /**
  * @brief CMocka wrapped PTZ set speed
@@ -448,8 +438,7 @@ platform_result_t __wrap_platform_snapshot_cleanup(void);
  * @param snapshot Output snapshot pointer
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_snapshot_capture(platform_snapshot_handle_t handle,
-                                                   platform_snapshot_t* snapshot);
+platform_result_t __wrap_platform_snapshot_capture(platform_snapshot_handle_t handle, platform_snapshot_t* snapshot);
 
 /**
  * @brief CMocka wrapped snapshot release
@@ -457,8 +446,7 @@ platform_result_t __wrap_platform_snapshot_capture(platform_snapshot_handle_t ha
  * @param snapshot Snapshot to release
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_snapshot_release(platform_snapshot_handle_t handle,
-                                                   platform_snapshot_t* snapshot);
+platform_result_t __wrap_platform_snapshot_release(platform_snapshot_handle_t handle, platform_snapshot_t* snapshot);
 
 /**
  * @brief CMocka wrapped config load
@@ -523,32 +511,32 @@ void __wrap_platform_sleep_ms(unsigned int ms);
  * @brief Set up expectations for platform info log
  * @param msg Expected log message
  */
-#define EXPECT_PLATFORM_LOG_INFO(msg)                                                              \
-  expect_string(__wrap_platform_log_info, format, msg);                                            \
+#define EXPECT_PLATFORM_LOG_INFO(msg)                                                                                                                \
+  expect_string(__wrap_platform_log_info, format, msg);                                                                                              \
   will_return(__wrap_platform_log_info, 0)
 
 /**
  * @brief Set up expectations for platform error log
  * @param msg Expected error message
  */
-#define EXPECT_PLATFORM_LOG_ERROR(msg)                                                             \
-  expect_string(__wrap_platform_log_error, format, msg);                                           \
+#define EXPECT_PLATFORM_LOG_ERROR(msg)                                                                                                               \
+  expect_string(__wrap_platform_log_error, format, msg);                                                                                             \
   will_return(__wrap_platform_log_error, 0)
 
 /**
  * @brief Set up expectations for platform warning log
  * @param msg Expected warning message
  */
-#define EXPECT_PLATFORM_LOG_WARNING(msg)                                                           \
-  expect_string(__wrap_platform_log_warning, format, msg);                                         \
+#define EXPECT_PLATFORM_LOG_WARNING(msg)                                                                                                             \
+  expect_string(__wrap_platform_log_warning, format, msg);                                                                                           \
   will_return(__wrap_platform_log_warning, 0)
 
 /**
  * @brief Set up expectations for platform debug log
  * @param msg Expected debug message
  */
-#define EXPECT_PLATFORM_LOG_DEBUG(msg)                                                             \
-  expect_string(__wrap_platform_log_debug, format, msg);                                           \
+#define EXPECT_PLATFORM_LOG_DEBUG(msg)                                                                                                               \
+  expect_string(__wrap_platform_log_debug, format, msg);                                                                                             \
   will_return(__wrap_platform_log_debug, 0)
 
 /**

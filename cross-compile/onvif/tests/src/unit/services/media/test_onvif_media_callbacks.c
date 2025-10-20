@@ -9,23 +9,21 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "cmocka_wrapper.h"
-#include "services/common/service_dispatcher.h"
-#include "services/media/onvif_media.h"
-#include "utils/error/error_handling.h"
-
 #include "../../../mocks/buffer_pool_mock.h"
 #include "../../../mocks/gsoap_mock.h"
 #include "../../../mocks/mock_service_dispatcher.h"
 #include "../../../utils/test_gsoap_utils.h"
+#include "cmocka_wrapper.h"
+#include "services/common/service_dispatcher.h"
+#include "services/media/onvif_media.h"
+#include "utils/error/error_handling.h"
 
 #define TEST_MEDIA_SERVICE_NAME "Media"
 #define TEST_MEDIA_NAMESPACE    "http://www.onvif.org/ver10/media/wsdl"
 
 static config_manager_t g_mock_config;
 
-static int dummy_operation_handler(const char* operation_name, const http_request_t* request,
-                                   http_response_t* response);
+static int dummy_operation_handler(const char* operation_name, const http_request_t* request, http_response_t* response);
 
 static void media_dependencies_set_real(bool enable) {
   service_dispatcher_mock_use_real_function(enable);
@@ -39,19 +37,17 @@ static void media_reset_state(void) {
 }
 
 static void media_pre_register_service(void) {
-  onvif_service_registration_t registration = {
-    .service_name = TEST_MEDIA_SERVICE_NAME,
-    .namespace_uri = TEST_MEDIA_NAMESPACE,
-    .operation_handler = dummy_operation_handler,
-    .init_handler = NULL,
-    .cleanup_handler = NULL,
-    .capabilities_handler = NULL,
-    .reserved = {NULL, NULL, NULL, NULL}};
+  onvif_service_registration_t registration = {.service_name = TEST_MEDIA_SERVICE_NAME,
+                                               .namespace_uri = TEST_MEDIA_NAMESPACE,
+                                               .operation_handler = dummy_operation_handler,
+                                               .init_handler = NULL,
+                                               .cleanup_handler = NULL,
+                                               .capabilities_handler = NULL,
+                                               .reserved = {NULL, NULL, NULL, NULL}};
   assert_int_equal(ONVIF_SUCCESS, onvif_service_dispatcher_register_service(&registration));
 }
 
-static int dummy_operation_handler(const char* operation_name, const http_request_t* request,
-                                   http_response_t* response) {
+static int dummy_operation_handler(const char* operation_name, const http_request_t* request, http_response_t* response) {
   (void)operation_name;
   (void)request;
   (void)response;

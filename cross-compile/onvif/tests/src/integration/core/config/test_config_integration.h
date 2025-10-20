@@ -12,7 +12,6 @@
 
 #include "cmocka_wrapper.h"
 
-
 /**
  * @brief Get config integration tests
  * @param count Output parameter for test count

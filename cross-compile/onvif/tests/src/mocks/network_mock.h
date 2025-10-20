@@ -99,8 +99,7 @@ ssize_t __wrap_recv(int sockfd, void* buf, size_t len, int flags);
  * @param addrlen Address length
  * @return Number of bytes sent (configured via will_return)
  */
-ssize_t __wrap_sendto(int sockfd, const void* buf, size_t len, int flags,
-                      const struct sockaddr* dest_addr, socklen_t addrlen);
+ssize_t __wrap_sendto(int sockfd, const void* buf, size_t len, int flags, const struct sockaddr* dest_addr, socklen_t addrlen);
 
 /**
  * @brief CMocka wrapped socket recvfrom
@@ -112,8 +111,7 @@ ssize_t __wrap_sendto(int sockfd, const void* buf, size_t len, int flags,
  * @param addrlen Address length
  * @return Number of bytes received (configured via will_return)
  */
-ssize_t __wrap_recvfrom(int sockfd, void* buf, size_t len, int flags, struct sockaddr* src_addr,
-                        socklen_t* addrlen);
+ssize_t __wrap_recvfrom(int sockfd, void* buf, size_t len, int flags, struct sockaddr* src_addr, socklen_t* addrlen);
 
 /**
  * @brief CMocka wrapped socket close
@@ -165,10 +163,10 @@ void network_mock_use_real_function(bool use_real);
  * @param protocol Expected protocol
  * @param fd File descriptor to return
  */
-#define EXPECT_SOCKET_SUCCESS(domain, type, protocol, fd)                                          \
-  expect_value(__wrap_socket, domain, domain);                                                     \
-  expect_value(__wrap_socket, type, type);                                                         \
-  expect_value(__wrap_socket, protocol, protocol);                                                 \
+#define EXPECT_SOCKET_SUCCESS(domain, type, protocol, fd)                                                                                            \
+  expect_value(__wrap_socket, domain, domain);                                                                                                       \
+  expect_value(__wrap_socket, type, type);                                                                                                           \
+  expect_value(__wrap_socket, protocol, protocol);                                                                                                   \
   will_return(__wrap_socket, fd)
 
 /**
@@ -177,20 +175,20 @@ void network_mock_use_real_function(bool use_real);
  * @param type Expected type
  * @param protocol Expected protocol
  */
-#define EXPECT_SOCKET_FAIL(domain, type, protocol)                                                 \
-  expect_value(__wrap_socket, domain, domain);                                                     \
-  expect_value(__wrap_socket, type, type);                                                         \
-  expect_value(__wrap_socket, protocol, protocol);                                                 \
+#define EXPECT_SOCKET_FAIL(domain, type, protocol)                                                                                                   \
+  expect_value(__wrap_socket, domain, domain);                                                                                                       \
+  expect_value(__wrap_socket, type, type);                                                                                                           \
+  expect_value(__wrap_socket, protocol, protocol);                                                                                                   \
   will_return(__wrap_socket, -1)
 
 /**
  * @brief Set up expectations for successful bind
  * @param sockfd Expected socket fd
  */
-#define EXPECT_BIND_SUCCESS(sockfd)                                                                \
-  expect_value(__wrap_bind, sockfd, sockfd);                                                       \
-  expect_any(__wrap_bind, addr);                                                                   \
-  expect_any(__wrap_bind, addrlen);                                                                \
+#define EXPECT_BIND_SUCCESS(sockfd)                                                                                                                  \
+  expect_value(__wrap_bind, sockfd, sockfd);                                                                                                         \
+  expect_any(__wrap_bind, addr);                                                                                                                     \
+  expect_any(__wrap_bind, addrlen);                                                                                                                  \
   will_return(__wrap_bind, 0)
 
 /**
@@ -198,9 +196,9 @@ void network_mock_use_real_function(bool use_real);
  * @param sockfd Expected socket fd
  * @param backlog Expected backlog
  */
-#define EXPECT_LISTEN_SUCCESS(sockfd, backlog)                                                     \
-  expect_value(__wrap_listen, sockfd, sockfd);                                                     \
-  expect_value(__wrap_listen, backlog, backlog);                                                   \
+#define EXPECT_LISTEN_SUCCESS(sockfd, backlog)                                                                                                       \
+  expect_value(__wrap_listen, sockfd, sockfd);                                                                                                       \
+  expect_value(__wrap_listen, backlog, backlog);                                                                                                     \
   will_return(__wrap_listen, 0)
 
 /**
@@ -208,20 +206,20 @@ void network_mock_use_real_function(bool use_real);
  * @param sockfd Expected socket fd
  * @param new_fd New socket fd to return
  */
-#define EXPECT_ACCEPT_SUCCESS(sockfd, new_fd)                                                      \
-  expect_value(__wrap_accept, sockfd, sockfd);                                                     \
-  expect_any(__wrap_accept, addr);                                                                 \
-  expect_any(__wrap_accept, addrlen);                                                              \
+#define EXPECT_ACCEPT_SUCCESS(sockfd, new_fd)                                                                                                        \
+  expect_value(__wrap_accept, sockfd, sockfd);                                                                                                       \
+  expect_any(__wrap_accept, addr);                                                                                                                   \
+  expect_any(__wrap_accept, addrlen);                                                                                                                \
   will_return(__wrap_accept, new_fd)
 
 /**
  * @brief Set up expectations for successful connect
  * @param sockfd Expected socket fd
  */
-#define EXPECT_CONNECT_SUCCESS(sockfd)                                                             \
-  expect_value(__wrap_connect, sockfd, sockfd);                                                    \
-  expect_any(__wrap_connect, addr);                                                                \
-  expect_any(__wrap_connect, addrlen);                                                             \
+#define EXPECT_CONNECT_SUCCESS(sockfd)                                                                                                               \
+  expect_value(__wrap_connect, sockfd, sockfd);                                                                                                      \
+  expect_any(__wrap_connect, addr);                                                                                                                  \
+  expect_any(__wrap_connect, addrlen);                                                                                                               \
   will_return(__wrap_connect, 0)
 
 /**
@@ -229,11 +227,11 @@ void network_mock_use_real_function(bool use_real);
  * @param sockfd Expected socket fd
  * @param bytes Number of bytes to return as sent
  */
-#define EXPECT_SEND_SUCCESS(sockfd, bytes)                                                         \
-  expect_value(__wrap_send, sockfd, sockfd);                                                       \
-  expect_any(__wrap_send, buf);                                                                    \
-  expect_any(__wrap_send, len);                                                                    \
-  expect_any(__wrap_send, flags);                                                                  \
+#define EXPECT_SEND_SUCCESS(sockfd, bytes)                                                                                                           \
+  expect_value(__wrap_send, sockfd, sockfd);                                                                                                         \
+  expect_any(__wrap_send, buf);                                                                                                                      \
+  expect_any(__wrap_send, len);                                                                                                                      \
+  expect_any(__wrap_send, flags);                                                                                                                    \
   will_return(__wrap_send, bytes)
 
 /**
@@ -241,31 +239,31 @@ void network_mock_use_real_function(bool use_real);
  * @param sockfd Expected socket fd
  * @param bytes Number of bytes to return as received
  */
-#define EXPECT_RECV_SUCCESS(sockfd, bytes)                                                         \
-  expect_value(__wrap_recv, sockfd, sockfd);                                                       \
-  expect_any(__wrap_recv, buf);                                                                    \
-  expect_any(__wrap_recv, len);                                                                    \
-  expect_any(__wrap_recv, flags);                                                                  \
+#define EXPECT_RECV_SUCCESS(sockfd, bytes)                                                                                                           \
+  expect_value(__wrap_recv, sockfd, sockfd);                                                                                                         \
+  expect_any(__wrap_recv, buf);                                                                                                                      \
+  expect_any(__wrap_recv, len);                                                                                                                      \
+  expect_any(__wrap_recv, flags);                                                                                                                    \
   will_return(__wrap_recv, bytes)
 
 /**
  * @brief Set up expectations for successful close
  * @param fd Expected file descriptor
  */
-#define EXPECT_CLOSE_SUCCESS(fd)                                                                   \
-  expect_value(__wrap_close, fd, fd);                                                              \
+#define EXPECT_CLOSE_SUCCESS(fd)                                                                                                                     \
+  expect_value(__wrap_close, fd, fd);                                                                                                                \
   will_return(__wrap_close, 0)
 
 /**
  * @brief Set up expectations for successful setsockopt
  * @param sockfd Expected socket fd
  */
-#define EXPECT_SETSOCKOPT_SUCCESS(sockfd)                                                          \
-  expect_value(__wrap_setsockopt, sockfd, sockfd);                                                 \
-  expect_any(__wrap_setsockopt, level);                                                            \
-  expect_any(__wrap_setsockopt, optname);                                                          \
-  expect_any(__wrap_setsockopt, optval);                                                           \
-  expect_any(__wrap_setsockopt, optlen);                                                           \
+#define EXPECT_SETSOCKOPT_SUCCESS(sockfd)                                                                                                            \
+  expect_value(__wrap_setsockopt, sockfd, sockfd);                                                                                                   \
+  expect_any(__wrap_setsockopt, level);                                                                                                              \
+  expect_any(__wrap_setsockopt, optname);                                                                                                            \
+  expect_any(__wrap_setsockopt, optval);                                                                                                             \
+  expect_any(__wrap_setsockopt, optlen);                                                                                                             \
   will_return(__wrap_setsockopt, 0)
 
 #ifdef __cplusplus

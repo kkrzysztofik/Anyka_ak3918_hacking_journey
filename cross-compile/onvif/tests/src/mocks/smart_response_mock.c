@@ -32,8 +32,7 @@ void smart_response_mock_use_real_function(bool use_real) {
  * CMocka Wrapped Smart Response Functions
  * ============================================================================ */
 
-int __wrap_smart_response_build_with_dynamic_buffer(http_response_t* response,
-                                                    const char* soap_content) {
+int __wrap_smart_response_build_with_dynamic_buffer(http_response_t* response, const char* soap_content) {
   if (g_use_real_functions) {
     return __real_smart_response_build_with_dynamic_buffer(response, soap_content);
   }
@@ -43,9 +42,7 @@ int __wrap_smart_response_build_with_dynamic_buffer(http_response_t* response,
   return (int)mock();
 }
 
-int __wrap_smart_response_build_with_buffer_pool(http_response_t* response,
-                                                 const char* soap_content,
-                                                 buffer_pool_t* buffer_pool) {
+int __wrap_smart_response_build_with_buffer_pool(http_response_t* response, const char* soap_content, buffer_pool_t* buffer_pool) {
   if (g_use_real_functions) {
     return __real_smart_response_build_with_buffer_pool(response, soap_content, buffer_pool);
   }
@@ -56,8 +53,7 @@ int __wrap_smart_response_build_with_buffer_pool(http_response_t* response,
   return (int)mock();
 }
 
-int __wrap_smart_response_build(http_response_t* response, const char* soap_content,
-                                size_t estimated_size, buffer_pool_t* buffer_pool) {
+int __wrap_smart_response_build(http_response_t* response, const char* soap_content, size_t estimated_size, buffer_pool_t* buffer_pool) {
   if (g_use_real_functions) {
     return __real_smart_response_build(response, soap_content, estimated_size, buffer_pool);
   }

@@ -102,8 +102,7 @@ void test_integration_soap_error_invalid_xml(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request with invalid XML
-  http_request_t* request =
-    soap_test_create_request("GetProfiles", SOAP_INVALID_XML, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("GetProfiles", SOAP_INVALID_XML, "/onvif/media_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -149,8 +148,7 @@ void test_integration_soap_error_missing_param(void** state) {
 
   // Step 1: Create SOAP request with missing required parameter
   // GetStreamUri requires ProfileToken, but SOAP_MISSING_REQUIRED_PARAM omits it
-  http_request_t* request =
-    soap_test_create_request("GetStreamUri", SOAP_MISSING_REQUIRED_PARAM, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("GetStreamUri", SOAP_MISSING_REQUIRED_PARAM, "/onvif/media_service");
   assert_non_null(request);
 
   // Step 2: Validate request was created
@@ -198,8 +196,7 @@ void test_integration_soap_error_wrong_operation(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request with non-existent operation
-  http_request_t* request =
-    soap_test_create_request("NonExistentOperation", SOAP_WRONG_OPERATION, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("NonExistentOperation", SOAP_WRONG_OPERATION, "/onvif/media_service");
   assert_non_null(request);
 
   // Step 2: Validate request contains wrong operation
@@ -226,11 +223,8 @@ void test_integration_soap_error_wrong_operation(void** state) {
     // Step 6: Validate fault indicates unknown operation
     if (strlen(fault_string) > 0) {
       // Fault string should mention unknown/unsupported operation
-      assert_true(strstr(fault_string, "unknown") != NULL ||
-                  strstr(fault_string, "Unknown") != NULL ||
-                  strstr(fault_string, "unsupported") != NULL ||
-                  strstr(fault_string, "Unsupported") != NULL ||
-                  strstr(fault_string, "not found") != NULL);
+      assert_true(strstr(fault_string, "unknown") != NULL || strstr(fault_string, "Unknown") != NULL || strstr(fault_string, "unsupported") != NULL ||
+                  strstr(fault_string, "Unsupported") != NULL || strstr(fault_string, "not found") != NULL);
     }
   } else {
     // Error return code is acceptable
@@ -251,8 +245,7 @@ void test_integration_soap_error_malformed_envelope(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request with empty body
-  http_request_t* request =
-    soap_test_create_request("GetProfiles", SOAP_EMPTY_BODY, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("GetProfiles", SOAP_EMPTY_BODY, "/onvif/media_service");
   assert_non_null(request);
 
   // Step 2: Validate request has empty body

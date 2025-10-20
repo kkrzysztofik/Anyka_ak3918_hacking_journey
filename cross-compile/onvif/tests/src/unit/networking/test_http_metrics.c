@@ -130,8 +130,7 @@ static int teardown_http_metrics_tests(void** state) {
 static uint64_t get_current_time_ms(void) {
   struct timeval time_val;
   gettimeofday(&time_val, NULL);
-  return (uint64_t)(time_val.tv_sec * MILLISECONDS_PER_SECOND +
-                    time_val.tv_usec / MICROSECONDS_PER_MILLISECOND);
+  return (uint64_t)(time_val.tv_sec * MILLISECONDS_PER_SECOND + time_val.tv_usec / MICROSECONDS_PER_MILLISECOND);
 }
 
 /**
@@ -173,13 +172,10 @@ static void test_http_metrics_recording_accuracy(void** state) {
   http_performance_metrics_t metrics;
 
   // Record some test requests
-  http_metrics_record_request(TEST_LATENCY_MEDIUM_MS, TEST_RESPONSE_SIZE_MEDIUM,
-                              TEST_HTTP_STATUS_OK);
+  http_metrics_record_request(TEST_LATENCY_MEDIUM_MS, TEST_RESPONSE_SIZE_MEDIUM, TEST_HTTP_STATUS_OK);
   http_metrics_record_request(TEST_LATENCY_LONG_MS, TEST_RESPONSE_SIZE_LARGE, TEST_HTTP_STATUS_OK);
-  http_metrics_record_request(TEST_LATENCY_SHORT_MS, TEST_RESPONSE_SIZE_SMALL,
-                              TEST_HTTP_STATUS_BAD_REQUEST);
-  http_metrics_record_request(TEST_LATENCY_XLONG_MS, TEST_RESPONSE_SIZE_XLARGE,
-                              TEST_HTTP_STATUS_SERVER_ERROR);
+  http_metrics_record_request(TEST_LATENCY_SHORT_MS, TEST_RESPONSE_SIZE_SMALL, TEST_HTTP_STATUS_BAD_REQUEST);
+  http_metrics_record_request(TEST_LATENCY_XLONG_MS, TEST_RESPONSE_SIZE_XLARGE, TEST_HTTP_STATUS_SERVER_ERROR);
 
   // Get current metrics
   assert_int_equal(http_metrics_get_current(&metrics), ONVIF_SUCCESS);
@@ -190,10 +186,8 @@ static void test_http_metrics_recording_accuracy(void** state) {
   assert_int_equal(metrics.client_errors, 1);
   assert_int_equal(metrics.server_errors, 1);
   assert_int_equal(metrics.total_response_bytes,
-                   TEST_RESPONSE_SIZE_MEDIUM + TEST_RESPONSE_SIZE_LARGE + TEST_RESPONSE_SIZE_SMALL +
-                     TEST_RESPONSE_SIZE_XLARGE);
-  assert_int_equal(metrics.total_latency_ms, TEST_LATENCY_MEDIUM_MS + TEST_LATENCY_LONG_MS +
-                                               TEST_LATENCY_SHORT_MS + TEST_LATENCY_XLONG_MS);
+                   TEST_RESPONSE_SIZE_MEDIUM + TEST_RESPONSE_SIZE_LARGE + TEST_RESPONSE_SIZE_SMALL + TEST_RESPONSE_SIZE_XLARGE);
+  assert_int_equal(metrics.total_latency_ms, TEST_LATENCY_MEDIUM_MS + TEST_LATENCY_LONG_MS + TEST_LATENCY_SHORT_MS + TEST_LATENCY_XLONG_MS);
   assert_int_equal(metrics.min_latency_ms, TEST_LATENCY_SHORT_MS);
   assert_int_equal(metrics.max_latency_ms, TEST_LATENCY_XLONG_MS);
 }
@@ -276,8 +270,7 @@ static void test_http_metrics_concurrency(void** state) {
   assert_int_equal(http_metrics_get_current(&metrics_after), ONVIF_SUCCESS);
 
   // Verify thread safety - total requests should equal expected count
-  uint64_t expected_requests = metrics_before.total_requests +
-                               ((uint64_t)TEST_METRICS_THREAD_COUNT * TEST_METRICS_REQUEST_COUNT);
+  uint64_t expected_requests = metrics_before.total_requests + ((uint64_t)TEST_METRICS_THREAD_COUNT * TEST_METRICS_REQUEST_COUNT);
   assert_int_equal(metrics_after.total_requests, expected_requests);
 
   // Verify no data corruption (basic sanity checks)
@@ -285,7 +278,6 @@ static void test_http_metrics_concurrency(void** state) {
   assert_true(metrics_after.total_response_bytes >= metrics_before.total_response_bytes);
   assert_true(metrics_after.total_latency_ms >= metrics_before.total_latency_ms);
 }
-
 
 /**
  * @brief Test CPU overhead threshold compliance
@@ -300,8 +292,7 @@ static void test_http_metrics_cpu_overhead(void** state) {
   for (int i = 0; i < TEST_ITERATIONS_STRESS; i++) {
     uint64_t latency = (i % TEST_LATENCY_MEDIUM_MS) + TEST_LATENCY_MIN_MS;
     size_t response_size = (i % TEST_RESPONSE_SIZE_SMALL) + TEST_RESPONSE_SIZE_MIN;
-    int status_code =
-      (i % TEST_LATENCY_MEDIUM_MS == 0) ? TEST_HTTP_STATUS_BAD_REQUEST : TEST_HTTP_STATUS_OK;
+    int status_code = (i % TEST_LATENCY_MEDIUM_MS == 0) ? TEST_HTTP_STATUS_BAD_REQUEST : TEST_HTTP_STATUS_OK;
 
     http_metrics_record_request(latency, response_size, status_code);
   }
@@ -341,7 +332,6 @@ static void test_http_metrics_retrieval_performance(void** state) {
   assert_true(total_time_ms < TEST_RETRIEVAL_TIME_MS);
 }
 
-
 /**
  * @brief Test metrics with realistic HTTP request patterns
  */
@@ -353,14 +343,12 @@ static void test_http_metrics_realistic_patterns(void** state) {
   // Simulate realistic ONVIF request patterns
   // Device service requests (fast, small responses)
   for (int i = 0; i < TEST_ITERATIONS_PERFORMANCE; i++) {
-    http_metrics_record_request(TEST_LATENCY_SHORT_MS, TEST_RESPONSE_SIZE_SMALL,
-                                TEST_HTTP_STATUS_OK);
+    http_metrics_record_request(TEST_LATENCY_SHORT_MS, TEST_RESPONSE_SIZE_SMALL, TEST_HTTP_STATUS_OK);
   }
 
   // Media service requests (medium latency, larger responses)
   for (int i = 0; i < TEST_ITERATIONS_XLARGE; i++) {
-    http_metrics_record_request(TEST_LATENCY_XLONG_MS, TEST_RESPONSE_SIZE_LARGE,
-                                TEST_HTTP_STATUS_OK);
+    http_metrics_record_request(TEST_LATENCY_XLONG_MS, TEST_RESPONSE_SIZE_LARGE, TEST_HTTP_STATUS_OK);
   }
 
   // PTZ service requests (variable latency)
@@ -371,8 +359,7 @@ static void test_http_metrics_realistic_patterns(void** state) {
 
   // Some error cases
   for (int i = 0; i < TEST_LATENCY_MEDIUM_MS; i++) {
-    http_metrics_record_request(TEST_LATENCY_MEDIUM_MS, TEST_RESPONSE_SIZE_TINY,
-                                TEST_HTTP_STATUS_BAD_REQUEST);
+    http_metrics_record_request(TEST_LATENCY_MEDIUM_MS, TEST_RESPONSE_SIZE_TINY, TEST_HTTP_STATUS_BAD_REQUEST);
   }
 
   // Get final metrics
@@ -380,13 +367,10 @@ static void test_http_metrics_realistic_patterns(void** state) {
 
   // Verify realistic patterns
   assert_int_equal(metrics.total_requests, TEST_TOTAL_REQUESTS_EXPECTED);
-  assert_true(metrics.successful_requests >=
-              TEST_SUCCESSFUL_REQUESTS_MIN);                    // Most requests successful
-  assert_true(metrics.client_errors >= TEST_LATENCY_MEDIUM_MS); // Some client errors
-  assert_true(metrics.total_response_bytes >
-              TEST_RESPONSE_SIZE_THRESHOLD); // Reasonable response size
+  assert_true(metrics.successful_requests >= TEST_SUCCESSFUL_REQUESTS_MIN); // Most requests successful
+  assert_true(metrics.client_errors >= TEST_LATENCY_MEDIUM_MS);             // Some client errors
+  assert_true(metrics.total_response_bytes > TEST_RESPONSE_SIZE_THRESHOLD); // Reasonable response size
   // Calculate average latency
-  uint64_t avg_latency =
-    (metrics.total_requests > 0) ? (metrics.total_latency_ms / metrics.total_requests) : 0;
+  uint64_t avg_latency = (metrics.total_requests > 0) ? (metrics.total_latency_ms / metrics.total_requests) : 0;
   assert_true(avg_latency > 0); // Average latency calculated
 }

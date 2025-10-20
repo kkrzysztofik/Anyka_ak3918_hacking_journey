@@ -28,16 +28,9 @@ extern int __real_onvif_gsoap_has_error(const onvif_gsoap_context_t* ctx);
 extern const char* __real_onvif_gsoap_get_error(const onvif_gsoap_context_t* ctx);
 extern const char* __real_onvif_gsoap_get_response_data(const onvif_gsoap_context_t* ctx);
 extern size_t __real_onvif_gsoap_get_response_length(const onvif_gsoap_context_t* ctx);
-extern int __real_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
-                                                              onvif_response_callback_t callback,
-                                                              void* user_data);
-extern int __real_onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx,
-                                                      const char* fault_code,
-                                                      const char* fault_string,
-                                                      const char* fault_actor,
-                                                      const char* fault_detail,
-                                                      char* output_buffer,
-                                                      size_t buffer_size);
+extern int __real_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx, onvif_response_callback_t callback, void* user_data);
+extern int __real_onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code, const char* fault_string,
+                                                      const char* fault_actor, const char* fault_detail, char* output_buffer, size_t buffer_size);
 
 /* ============================================================================
  * Conditional Mock/Real Function Control
@@ -126,9 +119,7 @@ size_t __wrap_onvif_gsoap_get_response_length(const onvif_gsoap_context_t* ctx) 
  * gSOAP Response Generation Functions
  * ============================================================================ */
 
-int __wrap_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
-                                                       onvif_response_callback_t callback,
-                                                       void* user_data) {
+int __wrap_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx, onvif_response_callback_t callback, void* user_data) {
   if (g_use_real_functions) {
     return __real_onvif_gsoap_generate_response_with_callback(ctx, callback, user_data);
   }
@@ -139,13 +130,10 @@ int __wrap_onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ct
   return (int)mock();
 }
 
-int __wrap_onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code,
-                                               const char* fault_string, const char* fault_actor,
-                                               const char* fault_detail, char* output_buffer,
-                                               size_t buffer_size) {
+int __wrap_onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code, const char* fault_string, const char* fault_actor,
+                                               const char* fault_detail, char* output_buffer, size_t buffer_size) {
   if (g_use_real_functions) {
-    return __real_onvif_gsoap_generate_fault_response(ctx, fault_code, fault_string, fault_actor,
-                                                      fault_detail, output_buffer, buffer_size);
+    return __real_onvif_gsoap_generate_fault_response(ctx, fault_code, fault_string, fault_actor, fault_detail, output_buffer, buffer_size);
   }
 
   check_expected_ptr(fault_code);

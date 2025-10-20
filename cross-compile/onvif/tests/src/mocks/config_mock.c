@@ -51,8 +51,7 @@ config_validation_result_t __wrap_config_validate(const config_manager_t* config
   return (config_validation_result_t)mock();
 }
 
-int __wrap_config_get_value(const config_manager_t* config, config_section_t section,
-                            const char* key, void* value, size_t value_size) {
+int __wrap_config_get_value(const config_manager_t* config, config_section_t section, const char* key, void* value, size_t value_size) {
   // Note: config_get_value doesn't exist in main project, so we can't call real function
   check_expected_ptr(config);
   check_expected(section);
@@ -62,8 +61,7 @@ int __wrap_config_get_value(const config_manager_t* config, config_section_t sec
   return (int)mock();
 }
 
-int __wrap_config_set_value(config_manager_t* config, config_section_t section, const char* key,
-                            const void* value, size_t value_size) {
+int __wrap_config_set_value(config_manager_t* config, config_section_t section, const char* key, const void* value, size_t value_size) {
   // Note: config_set_value doesn't exist in main project, so we can't call real function
   check_expected_ptr(config);
   check_expected(section);
@@ -79,8 +77,7 @@ int __wrap_config_reset_to_defaults(config_manager_t* config) {
   return (int)mock();
 }
 
-const config_parameter_t* __wrap_config_get_parameter(const config_manager_t* config,
-                                                      config_section_t section, const char* key) {
+const config_parameter_t* __wrap_config_get_parameter(const config_manager_t* config, config_section_t section, const char* key) {
   // Note: config_get_parameter doesn't exist in main project, so we can't call real function
   check_expected_ptr(config);
   check_expected(section);
@@ -108,10 +105,8 @@ int __wrap_config_get_summary(const config_manager_t* config, char* buffer, size
 /* Declare real functions for runtime configuration */
 extern int __real_config_runtime_get_int(config_section_t section, const char* key, int* out_value);
 extern int __real_config_runtime_set_int(config_section_t section, const char* key, int value);
-extern int __real_config_runtime_get_string(config_section_t section, const char* key,
-                                            char* out_value, size_t buffer_size);
-extern int __real_config_runtime_set_string(config_section_t section, const char* key,
-                                            const char* value);
+extern int __real_config_runtime_get_string(config_section_t section, const char* key, char* out_value, size_t buffer_size);
+extern int __real_config_runtime_set_string(config_section_t section, const char* key, const char* value);
 
 int __wrap_config_runtime_get_int(config_section_t section, const char* key, int* out_value) {
   if (g_use_real_functions) {
@@ -135,8 +130,7 @@ int __wrap_config_runtime_set_int(config_section_t section, const char* key, int
   return (int)mock();
 }
 
-int __wrap_config_runtime_get_string(config_section_t section, const char* key, char* out_value,
-                                     size_t buffer_size) {
+int __wrap_config_runtime_get_string(config_section_t section, const char* key, char* out_value, size_t buffer_size) {
   if (g_use_real_functions) {
     return __real_config_runtime_get_string(section, key, out_value, buffer_size);
   }
@@ -160,11 +154,9 @@ int __wrap_config_runtime_set_string(config_section_t section, const char* key, 
 }
 
 /* Declare real functions for boolean and float configuration */
-extern int __real_config_runtime_get_bool(config_section_t section, const char* key,
-                                          int* out_value);
+extern int __real_config_runtime_get_bool(config_section_t section, const char* key, int* out_value);
 extern int __real_config_runtime_set_bool(config_section_t section, const char* key, int value);
-extern int __real_config_runtime_get_float(config_section_t section, const char* key,
-                                           float* out_value);
+extern int __real_config_runtime_get_float(config_section_t section, const char* key, float* out_value);
 extern int __real_config_runtime_set_float(config_section_t section, const char* key, float value);
 
 int __wrap_config_runtime_get_bool(config_section_t section, const char* key, int* out_value) {
@@ -278,14 +270,11 @@ uint32_t __wrap_config_runtime_get_generation(void) {
  * ============================================================================ */
 
 /* Declare real functions for persistence operations */
-extern int __real_config_runtime_queue_persistence_update(config_section_t section, const char* key,
-                                                          const void* value,
-                                                          config_value_type_t type);
+extern int __real_config_runtime_queue_persistence_update(config_section_t section, const char* key, const void* value, config_value_type_t type);
 extern int __real_config_runtime_process_persistence_queue(void);
 extern int __real_config_runtime_get_persistence_status(void);
 
-int __wrap_config_runtime_queue_persistence_update(config_section_t section, const char* key,
-                                                   const void* value, config_value_type_t type) {
+int __wrap_config_runtime_queue_persistence_update(config_section_t section, const char* key, const void* value, config_value_type_t type) {
   if (g_use_real_functions) {
     return __real_config_runtime_queue_persistence_update(section, key, value, type);
   }
@@ -319,8 +308,7 @@ int __wrap_config_runtime_get_persistence_status(void) {
 
 /* Declare real functions for stream profile operations */
 extern int __real_config_runtime_get_stream_profile(int profile_index, video_config_t* profile);
-extern int __real_config_runtime_set_stream_profile(int profile_index,
-                                                    const video_config_t* profile);
+extern int __real_config_runtime_set_stream_profile(int profile_index, const video_config_t* profile);
 extern int __real_config_runtime_validate_stream_profile(const video_config_t* profile);
 extern int __real_config_runtime_get_stream_profile_count(void);
 
@@ -366,10 +354,8 @@ int __wrap_config_runtime_get_stream_profile_count(void) {
  * ============================================================================ */
 
 /* Declare real functions for PTZ configuration */
-extern int __real_config_runtime_get_ptz_profile_presets(int profile_index,
-                                                         ptz_preset_list_t* presets);
-extern int __real_config_runtime_set_ptz_profile_presets(int profile_index,
-                                                         const ptz_preset_list_t* presets);
+extern int __real_config_runtime_get_ptz_profile_presets(int profile_index, ptz_preset_list_t* presets);
+extern int __real_config_runtime_set_ptz_profile_presets(int profile_index, const ptz_preset_list_t* presets);
 extern int __real_config_runtime_validate_ptz_profile_presets(const ptz_preset_list_t* presets);
 
 int __wrap_config_runtime_get_ptz_profile_presets(int profile_index, ptz_preset_list_t* presets) {
@@ -382,8 +368,7 @@ int __wrap_config_runtime_get_ptz_profile_presets(int profile_index, ptz_preset_
   return (int)mock();
 }
 
-int __wrap_config_runtime_set_ptz_profile_presets(int profile_index,
-                                                  const ptz_preset_list_t* presets) {
+int __wrap_config_runtime_set_ptz_profile_presets(int profile_index, const ptz_preset_list_t* presets) {
   if (g_use_real_functions) {
     return __real_config_runtime_set_ptz_profile_presets(profile_index, presets);
   }
@@ -407,19 +392,15 @@ int __wrap_config_runtime_validate_ptz_profile_presets(const ptz_preset_list_t* 
  * ============================================================================ */
 
 /* Declare real functions for user management */
-extern int __real_config_runtime_hash_password(const char* password, char* hash_output,
-                                               size_t output_size);
+extern int __real_config_runtime_hash_password(const char* password, char* hash_output, size_t output_size);
 extern int __real_config_runtime_verify_password(const char* password, const char* hash);
 extern int __real_config_runtime_add_user(const char* username, const char* password);
 extern int __real_config_runtime_remove_user(const char* username);
-extern int __real_config_runtime_update_user_password(const char* username,
-                                                      const char* new_password);
+extern int __real_config_runtime_update_user_password(const char* username, const char* new_password);
 extern int __real_config_runtime_authenticate_user(const char* username, const char* password);
-extern int __real_config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1],
-                                                 int max_users, int* user_count);
+extern int __real_config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users, int* user_count);
 
-int __wrap_config_runtime_hash_password(const char* password, char* hash_output,
-                                        size_t output_size) {
+int __wrap_config_runtime_hash_password(const char* password, char* hash_output, size_t output_size) {
   if (g_use_real_functions) {
     return __real_config_runtime_hash_password(password, hash_output, output_size);
   }
@@ -479,8 +460,7 @@ int __wrap_config_runtime_authenticate_user(const char* username, const char* pa
   return (int)mock();
 }
 
-int __wrap_config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users,
-                                          int* user_count) {
+int __wrap_config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users, int* user_count) {
   if (g_use_real_functions) {
     return __real_config_runtime_enumerate_users(usernames, max_users, user_count);
   }

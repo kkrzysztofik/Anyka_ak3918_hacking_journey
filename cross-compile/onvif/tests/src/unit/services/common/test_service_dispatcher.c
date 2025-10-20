@@ -70,9 +70,8 @@ void test_unit_service_dispatcher_cleanup(void** state) {
   onvif_service_dispatcher_init();
 
   // Register a service with cleanup handler
-  onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "test_service", "http://test.namespace.uri", test_service_mock_operation,
-    test_service_mock_init, test_service_mock_cleanup);
+  onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION("test_service", "http://test.namespace.uri", test_service_mock_operation,
+                                                                         test_service_mock_init, test_service_mock_cleanup);
 
   onvif_service_dispatcher_register_service(&registration);
 
@@ -96,8 +95,7 @@ void test_unit_service_dispatcher_register_service(void** state) {
 
   // Test basic service registration
   onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation,
-    test_service_mock_init, test_service_mock_cleanup);
+    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, test_service_mock_init, test_service_mock_cleanup);
 
   int result = onvif_service_dispatcher_register_service(&registration);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -135,36 +133,34 @@ void test_unit_service_dispatcher_register_service_invalid_params(void** state) 
   onvif_service_dispatcher_init();
 
   // Test empty service name
-  onvif_service_registration_t registration_empty_name = ONVIF_SERVICE_REGISTRATION(
-    "", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t registration_empty_name =
+    ONVIF_SERVICE_REGISTRATION("", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
 
   int result = onvif_service_dispatcher_register_service(&registration_empty_name);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
   // Test NULL service name
-  onvif_service_registration_t registration_null_name = ONVIF_SERVICE_REGISTRATION(
-    NULL, "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t registration_null_name =
+    ONVIF_SERVICE_REGISTRATION(NULL, "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
 
   result = onvif_service_dispatcher_register_service(&registration_null_name);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
   // Test empty namespace
-  onvif_service_registration_t registration_empty_ns =
-    ONVIF_SERVICE_REGISTRATION("device", "", test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t registration_empty_ns = ONVIF_SERVICE_REGISTRATION("device", "", test_service_mock_operation, NULL, NULL);
 
   result = onvif_service_dispatcher_register_service(&registration_empty_ns);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
   // Test NULL namespace
-  onvif_service_registration_t registration_null_ns =
-    ONVIF_SERVICE_REGISTRATION("device", NULL, test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t registration_null_ns = ONVIF_SERVICE_REGISTRATION("device", NULL, test_service_mock_operation, NULL, NULL);
 
   result = onvif_service_dispatcher_register_service(&registration_null_ns);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
   // Test NULL operation handler
-  onvif_service_registration_t registration_null_handler = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", NULL, NULL, NULL);
+  onvif_service_registration_t registration_null_handler =
+    ONVIF_SERVICE_REGISTRATION("device", "http://www.onvif.org/ver10/device/wsdl", NULL, NULL, NULL);
 
   result = onvif_service_dispatcher_register_service(&registration_null_handler);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -182,8 +178,8 @@ void test_unit_service_dispatcher_register_service_duplicate(void** state) {
   onvif_service_dispatcher_init();
 
   // Register first service
-  onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t registration =
+    ONVIF_SERVICE_REGISTRATION("device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
 
   int result = onvif_service_dispatcher_register_service(&registration);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -206,8 +202,7 @@ void test_unit_service_dispatcher_unregister_service(void** state) {
 
   // Register a service
   onvif_service_registration_t registration =
-    ONVIF_SERVICE_REGISTRATION("device", "http://www.onvif.org/ver10/device/wsdl",
-                               test_service_mock_operation, NULL, test_service_mock_cleanup);
+    ONVIF_SERVICE_REGISTRATION("device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, test_service_mock_cleanup);
 
   onvif_service_dispatcher_register_service(&registration);
   assert_int_equal(onvif_service_dispatcher_is_registered("device"), 1);
@@ -253,8 +248,8 @@ void test_unit_service_dispatcher_dispatch(void** state) {
   onvif_service_dispatcher_init();
 
   // Register a service
-  onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t registration =
+    ONVIF_SERVICE_REGISTRATION("device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
 
   onvif_service_dispatcher_register_service(&registration);
 
@@ -263,8 +258,7 @@ void test_unit_service_dispatcher_dispatch(void** state) {
   http_response_t response = {0};
 
   // Test dispatch
-  int result =
-    onvif_service_dispatcher_dispatch("device", "GetDeviceInformation", &request, &response);
+  int result = onvif_service_dispatcher_dispatch("device", "GetDeviceInformation", &request, &response);
   assert_int_equal(result, ONVIF_SUCCESS);
   assert_int_equal(g_test_service_mock_state.operation_call_count, 1);
   assert_string_equal(g_test_service_mock_state.last_operation, "GetDeviceInformation");
@@ -316,8 +310,7 @@ void test_unit_service_dispatcher_dispatch_service_not_found(void** state) {
   http_response_t response = {0};
 
   // Test dispatch to non-existent service
-  int result =
-    onvif_service_dispatcher_dispatch("nonexistent", "GetDeviceInformation", &request, &response);
+  int result = onvif_service_dispatcher_dispatch("nonexistent", "GetDeviceInformation", &request, &response);
   assert_int_equal(result, ONVIF_ERROR_NOT_FOUND);
 
   onvif_service_dispatcher_cleanup();
@@ -336,8 +329,8 @@ void test_unit_service_dispatcher_is_registered(void** state) {
   assert_int_equal(onvif_service_dispatcher_is_registered("device"), 0);
 
   // Register a service
-  onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t registration =
+    ONVIF_SERVICE_REGISTRATION("device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, NULL, NULL);
 
   onvif_service_dispatcher_register_service(&registration);
 
@@ -361,8 +354,7 @@ void test_unit_service_dispatcher_init_cleanup_handlers(void** state) {
 
   // Test with successful init handler
   onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation,
-    test_service_mock_init, test_service_mock_cleanup);
+    "device", "http://www.onvif.org/ver10/device/wsdl", test_service_mock_operation, test_service_mock_init, test_service_mock_cleanup);
 
   int result = onvif_service_dispatcher_register_service(&registration);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -374,8 +366,7 @@ void test_unit_service_dispatcher_init_cleanup_handlers(void** state) {
   g_test_service_mock_state.init_result = ONVIF_ERROR_INVALID;
 
   onvif_service_registration_t failing_registration = ONVIF_SERVICE_REGISTRATION(
-    "failing_service", "http://test.namespace.uri", test_service_mock_operation,
-    test_service_mock_init, test_service_mock_cleanup);
+    "failing_service", "http://test.namespace.uri", test_service_mock_operation, test_service_mock_init, test_service_mock_cleanup);
 
   result = onvif_service_dispatcher_register_service(&failing_registration);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
@@ -401,16 +392,16 @@ void test_unit_service_dispatcher_register_service_registry_full(void** state) {
   for (int i = 0; i < 16; i++) { // MAX_REGISTERED_SERVICES
     snprintf(service_names[i], sizeof(service_names[i]), "service_%d", i);
 
-    onvif_service_registration_t registration = ONVIF_SERVICE_REGISTRATION(
-      service_names[i], "http://test.namespace.uri", test_service_mock_operation, NULL, NULL);
+    onvif_service_registration_t registration =
+      ONVIF_SERVICE_REGISTRATION(service_names[i], "http://test.namespace.uri", test_service_mock_operation, NULL, NULL);
 
     int result = onvif_service_dispatcher_register_service(&registration);
     assert_int_equal(result, ONVIF_SUCCESS);
   }
 
   // Try to register one more service (should fail)
-  onvif_service_registration_t extra_registration = ONVIF_SERVICE_REGISTRATION(
-    "extra_service", "http://test.namespace.uri", test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t extra_registration =
+    ONVIF_SERVICE_REGISTRATION("extra_service", "http://test.namespace.uri", test_service_mock_operation, NULL, NULL);
 
   int result = onvif_service_dispatcher_register_service(&extra_registration);
   assert_int_equal(result, -41); // ONVIF_ERROR_RESOURCE_LIMIT
@@ -441,12 +432,10 @@ void test_unit_service_dispatcher_get_services(void** state) {
   static const char media_name[] = "media";
   static const char media_ns[] = "http://www.onvif.org/ver10/media/wsdl";
 
-  onvif_service_registration_t device_registration =
-    ONVIF_SERVICE_REGISTRATION(device_name, device_ns, test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t device_registration = ONVIF_SERVICE_REGISTRATION(device_name, device_ns, test_service_mock_operation, NULL, NULL);
   onvif_service_dispatcher_register_service(&device_registration);
 
-  onvif_service_registration_t media_registration =
-    ONVIF_SERVICE_REGISTRATION(media_name, media_ns, test_service_mock_operation, NULL, NULL);
+  onvif_service_registration_t media_registration = ONVIF_SERVICE_REGISTRATION(media_name, media_ns, test_service_mock_operation, NULL, NULL);
   onvif_service_dispatcher_register_service(&media_registration);
 
   // Get services list
@@ -488,8 +477,7 @@ void test_unit_service_dispatcher_dispatch_with_registered_service(void** state)
 
   // Register a test service
   onvif_service_registration_t test_registration =
-    ONVIF_SERVICE_REGISTRATION("test_service", "http://www.onvif.org/ver10/test/wsdl",
-                               test_service_mock_operation, NULL, NULL);
+    ONVIF_SERVICE_REGISTRATION("test_service", "http://www.onvif.org/ver10/test/wsdl", test_service_mock_operation, NULL, NULL);
 
   int result = onvif_service_dispatcher_register_service(&test_registration);
   assert_int_equal(ONVIF_SUCCESS, result);
@@ -523,8 +511,7 @@ void test_unit_service_dispatcher_dispatch_unknown_operation(void** state) {
 
   // Register a test service
   onvif_service_registration_t test_registration =
-    ONVIF_SERVICE_REGISTRATION("test_service", "http://www.onvif.org/ver10/test/wsdl",
-                               test_service_mock_operation, NULL, NULL);
+    ONVIF_SERVICE_REGISTRATION("test_service", "http://www.onvif.org/ver10/test/wsdl", test_service_mock_operation, NULL, NULL);
 
   int result = onvif_service_dispatcher_register_service(&test_registration);
   assert_int_equal(ONVIF_SUCCESS, result);
@@ -534,8 +521,7 @@ void test_unit_service_dispatcher_dispatch_unknown_operation(void** state) {
   http_response_t response = {0};
 
   // Test dispatch with unknown operation
-  result =
-    onvif_service_dispatcher_dispatch("test_service", "UnknownOperation", &request, &response);
+  result = onvif_service_dispatcher_dispatch("test_service", "UnknownOperation", &request, &response);
 
   // Should return error or success depending on mock implementation
   assert_true(result == ONVIF_SUCCESS || result == ONVIF_ERROR || result == ONVIF_ERROR_NOT_FOUND);
@@ -638,69 +624,42 @@ void test_unit_service_dispatcher_dispatch_null_response_param(void** state) {
  * ============================================================================ */
 
 const struct CMUnitTest service_dispatcher_tests[] = {
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_init, setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_init, setup_service_dispatcher_tests, teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_cleanup, setup_service_dispatcher_tests, teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service, setup_service_dispatcher_tests, teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_null_params, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_cleanup,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_invalid_params, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_duplicate, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_null_params,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_unregister_service, setup_service_dispatcher_tests, teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_unregister_service_not_found, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_invalid_params,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch, setup_service_dispatcher_tests, teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_invalid_params, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_duplicate,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_service_not_found, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_unregister_service,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_is_registered, setup_service_dispatcher_tests, teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_init_cleanup_handlers, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_unregister_service_not_found,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_registry_full, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch,
-                                  setup_service_dispatcher_tests,
-                                  teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_invalid_params,
-                                  setup_service_dispatcher_tests,
-                                  teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_service_not_found,
-                                  setup_service_dispatcher_tests,
-                                  teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_is_registered,
-                                  setup_service_dispatcher_tests,
-                                  teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_init_cleanup_handlers,
-                                  setup_service_dispatcher_tests,
-                                  teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_register_service_registry_full,
-                                  setup_service_dispatcher_tests,
-                                  teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_get_services,
-                                  setup_service_dispatcher_tests,
-                                  teardown_service_dispatcher_tests),
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_get_services, setup_service_dispatcher_tests, teardown_service_dispatcher_tests),
 
   // Service Dispatch with Multiple Services Tests (moved from service callbacks)
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_with_registered_service,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_with_registered_service, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_unknown_operation,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_unknown_operation, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_service_name,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_service_name, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_operation_name,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_operation_name, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_request_param,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_request_param, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
-  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_response_param,
-                                  setup_service_dispatcher_tests,
+  cmocka_unit_test_setup_teardown(test_unit_service_dispatcher_dispatch_null_response_param, setup_service_dispatcher_tests,
                                   teardown_service_dispatcher_tests),
 };
 

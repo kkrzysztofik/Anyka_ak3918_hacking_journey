@@ -76,8 +76,7 @@ platform_result_t __wrap_ptz_adapter_get_status(struct ptz_device_status* status
  * PTZ Adapter Movement Operations
  * ============================================================================ */
 
-platform_result_t __wrap_ptz_adapter_absolute_move(int pan_degrees, int tilt_degrees,
-                                                   int move_speed) {
+platform_result_t __wrap_ptz_adapter_absolute_move(int pan_degrees, int tilt_degrees, int move_speed) {
   if (g_use_real_functions) {
     return __real_ptz_adapter_absolute_move(pan_degrees, tilt_degrees, move_speed);
   }
@@ -89,8 +88,7 @@ platform_result_t __wrap_ptz_adapter_absolute_move(int pan_degrees, int tilt_deg
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_ptz_adapter_relative_move(int pan_delta_degrees, int tilt_delta_degrees,
-                                                   int move_speed) {
+platform_result_t __wrap_ptz_adapter_relative_move(int pan_delta_degrees, int tilt_delta_degrees, int move_speed) {
   if (g_use_real_functions) {
     return __real_ptz_adapter_relative_move(pan_delta_degrees, tilt_delta_degrees, move_speed);
   }
@@ -102,8 +100,7 @@ platform_result_t __wrap_ptz_adapter_relative_move(int pan_delta_degrees, int ti
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_ptz_adapter_continuous_move(int pan_velocity, int tilt_velocity,
-                                                     int timeout_seconds) {
+platform_result_t __wrap_ptz_adapter_continuous_move(int pan_velocity, int tilt_velocity, int timeout_seconds) {
   if (g_use_real_functions) {
     return __real_ptz_adapter_continuous_move(pan_velocity, tilt_velocity, timeout_seconds);
   }

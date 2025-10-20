@@ -8,12 +8,11 @@
 #include <string.h>
 
 #include "cmocka_wrapper.h"
-
 #include "utils/string/string_shims.h"
 
 #define TEST_SMALL_BUFFER_SIZE 8U
 #define TEST_LARGE_BUFFER_SIZE 64U
-#define TEST_BUILD_YEAR 2025
+#define TEST_BUILD_YEAR        2025
 
 static int call_memory_safe_vsnprintf(char* buffer, size_t buffer_size, const char* format, ...) {
   va_list args;
@@ -65,8 +64,7 @@ static void test_memory_safe_formatting(void** state) {
   assert_string_equal("Hello, World!", buffer);
 
   char small_buffer[TEST_SMALL_BUFFER_SIZE];
-  written =
-    call_memory_safe_vsnprintf(small_buffer, sizeof(small_buffer), "Serial:%s", "ABC12345");
+  written = call_memory_safe_vsnprintf(small_buffer, sizeof(small_buffer), "Serial:%s", "ABC12345");
   assert_int_equal(-1, written);
   assert_string_equal("Serial:", small_buffer);
 
@@ -114,4 +112,3 @@ void test_unit_string_formatting(void** state) {
   };
   cmocka_run_group_tests_name("string_formatting_helpers", tests, NULL, NULL);
 }
-

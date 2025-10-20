@@ -29,9 +29,7 @@ static const char* const TEST_NODE_TOKEN = "PTZNode0";
 static const char* const TEST_CONFIG_TOKEN = "PTZConfig0";
 
 static const struct ptz_vector TEST_POSITION = {
-  .pan_tilt = {.x = 0.5F, .y = 0.3F},
-  .zoom = 0.0F,
-  .space = "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace"};
+  .pan_tilt = {.x = 0.5F, .y = 0.3F}, .zoom = 0.0F, .space = "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace"};
 
 static const struct ptz_speed TEST_SPEED = {.pan_tilt = {.x = 0.5F, .y = 0.5F}, .zoom = 0.0F};
 
@@ -306,16 +304,13 @@ void test_ptz_set_preset_with_null(void** state, const null_param_test_t* test_c
     result = onvif_ptz_set_preset(NULL, "TestPreset", NULL, output_token, sizeof(output_token));
     break;
   case 1: // NULL preset_name parameter
-    result =
-      onvif_ptz_set_preset(TEST_PROFILE_TOKEN, NULL, NULL, output_token, sizeof(output_token));
+    result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, NULL, NULL, output_token, sizeof(output_token));
     break;
   case 2: // NULL output_preset_token parameter
-    result =
-      onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "TestPreset", NULL, NULL, sizeof(output_token));
+    result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "TestPreset", NULL, NULL, sizeof(output_token));
     break;
   case 3: // NULL input_preset_token parameter (should succeed)
-    result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "TestPreset", NULL, output_token,
-                                  sizeof(output_token));
+    result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "TestPreset", NULL, output_token, sizeof(output_token));
     break;
   default:
     fail_msg("Invalid parameter index: %d", test_config->param_index);
@@ -424,8 +419,7 @@ void test_unit_ptz_get_configuration_null_params(void** state) {
     test_helper_create_null_test("config parameter", 1, ONVIF_ERROR_NULL),
   };
 
-  test_helper_null_parameters(state, "onvif_ptz_get_configuration",
-                              test_ptz_get_configuration_with_null, tests, 2);
+  test_helper_null_parameters(state, "onvif_ptz_get_configuration", test_ptz_get_configuration_with_null, tests, 2);
 }
 
 /**
@@ -438,8 +432,7 @@ void test_unit_ptz_get_status_null_params(void** state) {
     test_helper_create_null_test("status parameter", 1, ONVIF_ERROR_NULL),
   };
 
-  test_helper_null_parameters(state, "onvif_ptz_get_status", test_ptz_get_status_with_null, tests,
-                              2);
+  test_helper_null_parameters(state, "onvif_ptz_get_status", test_ptz_get_status_with_null, tests, 2);
 }
 
 /**
@@ -453,8 +446,7 @@ void test_unit_ptz_absolute_move_null_params(void** state) {
     test_helper_create_null_test("speed parameter (uses default)", 2, ONVIF_SUCCESS),
   };
 
-  test_helper_null_parameters(state, "onvif_ptz_absolute_move", test_ptz_absolute_move_with_null,
-                              tests, 3);
+  test_helper_null_parameters(state, "onvif_ptz_absolute_move", test_ptz_absolute_move_with_null, tests, 3);
 }
 
 /**
@@ -468,8 +460,7 @@ void test_unit_ptz_get_presets_null_params(void** state) {
     test_helper_create_null_test("count parameter", 2, ONVIF_ERROR_NULL),
   };
 
-  test_helper_null_parameters(state, "onvif_ptz_get_presets", test_ptz_get_presets_with_null, tests,
-                              3);
+  test_helper_null_parameters(state, "onvif_ptz_get_presets", test_ptz_get_presets_with_null, tests, 3);
 }
 
 /**
@@ -484,8 +475,7 @@ void test_unit_ptz_set_preset_null_params(void** state) {
     test_helper_create_null_test("input_preset_token parameter (optional)", 3, ONVIF_SUCCESS),
   };
 
-  test_helper_null_parameters(state, "onvif_ptz_set_preset", test_ptz_set_preset_with_null, tests,
-                              4);
+  test_helper_null_parameters(state, "onvif_ptz_set_preset", test_ptz_set_preset_with_null, tests, 4);
 }
 
 /**
@@ -498,8 +488,7 @@ void test_unit_ptz_remove_preset_null_params(void** state) {
     test_helper_create_null_test("preset_token parameter", 1, ONVIF_ERROR_NULL),
   };
 
-  test_helper_null_parameters(state, "onvif_ptz_remove_preset", test_ptz_remove_preset_with_null,
-                              tests, 2);
+  test_helper_null_parameters(state, "onvif_ptz_remove_preset", test_ptz_remove_preset_with_null, tests, 2);
 }
 
 /**
@@ -514,8 +503,7 @@ void test_unit_ptz_goto_preset_null_params(void** state) {
                                  ONVIF_ERROR_NOT_FOUND), // Preset doesn't exist
   };
 
-  test_helper_null_parameters(state, "onvif_ptz_goto_preset", test_ptz_goto_preset_with_null, tests,
-                              3);
+  test_helper_null_parameters(state, "onvif_ptz_goto_preset", test_ptz_goto_preset_with_null, tests, 3);
 }
 
 /* ============================================================================
@@ -595,8 +583,7 @@ void test_unit_ptz_set_preset_success(void** state) {
   will_return(__wrap_ptz_adapter_set_preset, PLATFORM_SUCCESS);
 
   char output_token[TEST_PTZ_TOKEN_BUFFER_SIZE] = {0};
-  int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "TestPreset", NULL, output_token,
-                                    sizeof(output_token));
+  int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "TestPreset", NULL, output_token, sizeof(output_token));
 
   assert_int_equal(result, ONVIF_SUCCESS);
   assert_string_not_equal(output_token, ""); // Token should be populated
@@ -635,8 +622,7 @@ void test_unit_ptz_set_preset_with_input_token_new(void** state) {
   will_return(__wrap_ptz_adapter_set_preset, PLATFORM_SUCCESS);
 
   char output_token[TEST_PTZ_TOKEN_BUFFER_SIZE] = {0};
-  int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "TestPreset", "CustomToken123",
-                                    output_token, sizeof(output_token));
+  int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "TestPreset", "CustomToken123", output_token, sizeof(output_token));
 
   assert_int_equal(result, ONVIF_SUCCESS);
   assert_string_equal(output_token, "CustomToken123");
@@ -688,8 +674,7 @@ void test_unit_ptz_set_preset_invalid_profile(void** state) {
   (void)state;
 
   char output_token[TEST_PTZ_TOKEN_BUFFER_SIZE] = {0};
-  int result =
-    onvif_ptz_set_preset("InvalidProfile", "TestPreset", NULL, output_token, sizeof(output_token));
+  int result = onvif_ptz_set_preset("InvalidProfile", "TestPreset", NULL, output_token, sizeof(output_token));
 
   assert_int_equal(result, ONVIF_ERROR_INVALID_PARAMETER);
 }
@@ -730,46 +715,28 @@ void test_unit_ptz_goto_preset_not_found(void** state) {
 
 const struct CMUnitTest ptz_tests[] = {
   // NULL Parameter Tests (Refactored)
-  cmocka_unit_test_setup_teardown(test_unit_ptz_get_nodes_null_params, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_get_node_null_params, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_get_configuration_null_params, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_get_status_null_params, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_absolute_move_null_params, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_get_presets_null_params, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_set_preset_null_params, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_remove_preset_null_params, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_goto_preset_null_params, setup_ptz_tests,
-                                  teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_get_nodes_null_params, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_get_node_null_params, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_get_configuration_null_params, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_get_status_null_params, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_absolute_move_null_params, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_get_presets_null_params, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_set_preset_null_params, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_remove_preset_null_params, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_goto_preset_null_params, setup_ptz_tests, teardown_ptz_tests),
 
   // Success Case Tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_get_nodes_success, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_get_node_success, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_set_preset_success, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_set_preset_with_input_token_new, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_remove_preset_success, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_goto_preset_success, setup_ptz_tests,
-                                  teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_get_nodes_success, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_get_node_success, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_set_preset_success, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_set_preset_with_input_token_new, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_remove_preset_success, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_goto_preset_success, setup_ptz_tests, teardown_ptz_tests),
 
   // Error Condition Tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_set_preset_invalid_profile, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_remove_preset_not_found, setup_ptz_tests,
-                                  teardown_ptz_tests),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_goto_preset_not_found, setup_ptz_tests,
-                                  teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_set_preset_invalid_profile, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_remove_preset_not_found, setup_ptz_tests, teardown_ptz_tests),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_goto_preset_not_found, setup_ptz_tests, teardown_ptz_tests),
 };
 
 /**

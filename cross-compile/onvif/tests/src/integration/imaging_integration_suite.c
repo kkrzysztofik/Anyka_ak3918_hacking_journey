@@ -35,8 +35,7 @@ const struct CMUnitTest* get_imaging_integration_tests(size_t* count) {
     cmocka_unit_test(test_integration_imaging_performance_regression),
 
     // T085: Configuration integration test with setup/teardown
-    cmocka_unit_test_setup_teardown(test_integration_imaging_config_integration,
-                                    imaging_service_setup, imaging_service_teardown),
+    cmocka_unit_test_setup_teardown(test_integration_imaging_config_integration, imaging_service_setup, imaging_service_teardown),
   };
   *count = sizeof(tests) / sizeof(tests[0]);
   return tests;

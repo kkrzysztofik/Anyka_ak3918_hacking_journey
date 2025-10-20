@@ -17,7 +17,10 @@
  * use config_runtime APIs.
  */
 
+#include <stdbool.h>
+#ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include <pthread.h>
 #include <stdio.h>
@@ -27,18 +30,14 @@
 #include "cmocka_wrapper.h"
 
 // ONVIF project includes
+#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
-#include "networking/http/http_parser.h"
 #include "services/common/onvif_imaging_types.h"
-#include "services/common/service_dispatcher.h"
-#include "services/imaging/onvif_imaging.h"
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
 
 // SOAP test helpers
-#include "common/soap_test_helpers.h"
-#include "data/soap_test_envelopes.h"
 
 // Test mocks
 #include "mocks/buffer_pool_mock.h"
@@ -47,10 +46,7 @@
 #include "mocks/http_server_mock.h"
 #include "mocks/mock_service_dispatcher.h"
 #include "mocks/network_mock.h"
-#include "mocks/platform_mock.h"
 #include "mocks/smart_response_mock.h"
-#include "platform/platform_common.h"
-#include "protocol/gsoap/onvif_gsoap_core.h"
 
 // Test state structure
 typedef struct {
@@ -107,9 +103,9 @@ int imaging_service_setup(void** state) {
     test_state->app_config->imaging.hue = 0;
 
     test_state->app_config->auto_daynight.mode = DAY_NIGHT_AUTO;
-    test_state->app_config->auto_daynight.day_to_night_threshold = 30;
-    test_state->app_config->auto_daynight.night_to_day_threshold = 70;
-    test_state->app_config->auto_daynight.lock_time_seconds = 10;
+    test_state->app_config->auto_daynight.day_to_night_threshold = ONVIF_DAY_TO_NIGHT_THRESHOLD_DEFAULT;
+    test_state->app_config->auto_daynight.night_to_day_threshold = ONVIF_NIGHT_TO_DAY_THRESHOLD_DEFAULT;
+    test_state->app_config->auto_daynight.lock_time_seconds = ONVIF_DAYNIGHT_LOCK_TIME_DEFAULT;
     test_state->app_config->auto_daynight.ir_led_mode = IR_LED_AUTO;
     test_state->app_config->auto_daynight.ir_led_level = 1;
     test_state->app_config->auto_daynight.enable_auto_switching = 1;

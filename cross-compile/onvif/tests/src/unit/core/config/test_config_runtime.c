@@ -24,6 +24,7 @@
 
 // Test mocks
 #include "mocks/config_mock.h"
+#include "mocks/network_mock.h"
 
 #define TEST_TMP_PATH_PREFIX            "/tmp/"
 #define TEST_TMP_PATH_PREFIX_LENGTH     (sizeof(TEST_TMP_PATH_PREFIX) - 1U)
@@ -85,6 +86,9 @@ static int setup(void** state) {
   // Enable real config_runtime functions for these tests
   config_mock_use_real_function(true);
 
+  // Enable real network functions for integration testing
+  network_mock_use_real_function(true);
+
   *state = test_state;
   return 0;
 }
@@ -104,6 +108,7 @@ static int teardown(void** state) {
   }
 
   // Restore mock behavior for other test suites
+  network_mock_use_real_function(false);
   config_mock_use_real_function(false);
 
   return 0;

@@ -20,6 +20,7 @@
  * - connection_timeout (CONFIG_SECTION_SERVER) - Connection timeout (seconds)
  */
 
+#include <stdbool.h>
 #define _POSIX_C_SOURCE 200809L
 
 #include <pthread.h>
@@ -32,14 +33,8 @@
 // ONVIF project includes
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
-#include "networking/http/http_parser.h"
-#include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
-
-// SOAP test helpers
-#include "common/soap_test_helpers.h"
-#include "data/soap_test_envelopes.h"
 
 // Test mocks
 #include "mocks/buffer_pool_mock.h"
@@ -48,10 +43,7 @@
 #include "mocks/http_server_mock.h"
 #include "mocks/mock_service_dispatcher.h"
 #include "mocks/network_mock.h"
-#include "mocks/platform_mock.h"
 #include "mocks/smart_response_mock.h"
-#include "platform/platform_common.h"
-#include "protocol/gsoap/onvif_gsoap_core.h"
 
 // Configuration storage
 #include "core/config/config_storage.h"
