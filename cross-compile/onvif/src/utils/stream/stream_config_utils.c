@@ -11,10 +11,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "/home/kmk/anyka-dev/cross-compile/onvif/src/platform/platform_common.h"
-#include "/home/kmk/anyka-dev/cross-compile/onvif/src/services/common/video_config_types.h"
 #include "platform/platform.h"
+#include "platform/platform_common.h"
+#include "services/common/video_config_types.h"
 #include "utils/error/error_handling.h"
+
 
 // Default configuration values
 #define DEFAULT_MAIN_FPS      25
