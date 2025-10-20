@@ -22,7 +22,6 @@
 #include "core/config/config_storage.h"
 #include "platform/platform.h"
 #include "services/common/onvif_imaging_types.h"
-#include "services/common/video_config_types.h"
 #include "utils/error/error_handling.h"
 #include "utils/stream/stream_config_utils.h"
 
@@ -46,82 +45,12 @@ static volatile bool g_config_loaded = false; // NOLINT
  * ============================================================================ */
 
 int config_lifecycle_allocate_memory(struct application_config* cfg) {
-  platform_log_info("Allocating configuration memory...\n");
+  platform_log_info("Initializing configuration structures...\n");
 
-  /* Allocate memory for imaging and auto_daynight structures */
-  cfg->imaging = malloc(sizeof(struct imaging_settings));
-  if (!cfg->imaging) {
-    platform_log_error("Failed to allocate memory for imaging settings\n");
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-  memset(cfg->imaging, 0, sizeof(struct imaging_settings));
+  /* Initialize all struct fields to zero */
+  memset(cfg, 0, sizeof(struct application_config));
 
-  cfg->auto_daynight = malloc(sizeof(struct auto_daynight_config));
-  if (!cfg->auto_daynight) {
-    platform_log_error("Failed to allocate memory for auto day/night config\n");
-    free(cfg->imaging);
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-  memset(cfg->auto_daynight, 0, sizeof(struct auto_daynight_config));
-
-  /* Allocate memory for network and device structures */
-  cfg->network = malloc(sizeof(struct network_settings));
-  if (!cfg->network) {
-    platform_log_error("Failed to allocate memory for network settings\n");
-    free(cfg->imaging);
-    free(cfg->auto_daynight);
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-  memset(cfg->network, 0, sizeof(struct network_settings));
-
-  cfg->device = malloc(sizeof(struct device_info));
-  if (!cfg->device) {
-    platform_log_error("Failed to allocate memory for device info\n");
-    free(cfg->imaging);
-    free(cfg->auto_daynight);
-    free(cfg->network);
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-  memset(cfg->device, 0, sizeof(struct device_info));
-
-  cfg->logging = malloc(sizeof(struct logging_settings));
-  if (!cfg->logging) {
-    platform_log_error("Failed to allocate memory for logging settings\n");
-    free(cfg->imaging);
-    free(cfg->auto_daynight);
-    free(cfg->network);
-    free(cfg->device);
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-  memset(cfg->logging, 0, sizeof(struct logging_settings));
-
-  /* Allocate memory for stream configurations */
-  cfg->main_stream = malloc(sizeof(video_config_t));
-  if (!cfg->main_stream) {
-    platform_log_error("Failed to allocate memory for main stream config\n");
-    free(cfg->imaging);
-    free(cfg->auto_daynight);
-    free(cfg->network);
-    free(cfg->device);
-    free(cfg->logging);
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-  memset(cfg->main_stream, 0, sizeof(video_config_t));
-
-  cfg->sub_stream = malloc(sizeof(video_config_t));
-  if (!cfg->sub_stream) {
-    platform_log_error("Failed to allocate memory for sub stream config\n");
-    free(cfg->imaging);
-    free(cfg->auto_daynight);
-    free(cfg->network);
-    free(cfg->device);
-    free(cfg->logging);
-    free(cfg->main_stream);
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-  memset(cfg->sub_stream, 0, sizeof(video_config_t));
-
-  platform_log_info("Configuration memory allocated successfully\n");
+  platform_log_info("Configuration structures initialized successfully\n");
   return ONVIF_SUCCESS;
 }
 
@@ -157,15 +86,15 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
   config_runtime_get_int(CONFIG_SECTION_SUB_STREAM, "sub_kbps", &sub_kbps);
 
   // Initialize main stream configuration
-  if (stream_config_init_from_anyka(cfg->main_stream, true, (unsigned int)main_kbps, main_fps) != ONVIF_SUCCESS) {
+  if (stream_config_init_from_anyka(&cfg->main_stream, true, (unsigned int)main_kbps, main_fps) != ONVIF_SUCCESS) {
     platform_log_warning("warning: failed to initialize main stream config, using defaults\n");
-    stream_config_init_defaults(cfg->main_stream, true);
+    stream_config_init_defaults(&cfg->main_stream, true);
   }
 
   // Initialize sub stream configuration
-  if (stream_config_init_from_anyka(cfg->sub_stream, false, (unsigned int)sub_kbps, sub_fps) != ONVIF_SUCCESS) {
+  if (stream_config_init_from_anyka(&cfg->sub_stream, false, (unsigned int)sub_kbps, sub_fps) != ONVIF_SUCCESS) {
     platform_log_warning("warning: failed to initialize sub stream config, using defaults\n");
-    stream_config_init_defaults(cfg->sub_stream, false);
+    stream_config_init_defaults(&cfg->sub_stream, false);
   }
 
   /* Print loaded configuration for debugging and verification */
@@ -174,10 +103,8 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
     platform_log_notice("Loaded configuration:\n");
     platform_log_notice("ONVIF: enabled=%d, port=%d, auth_enabled=%d\n", snapshot->onvif.enabled, snapshot->onvif.http_port,
                         snapshot->onvif.auth_enabled);
-    if (snapshot->imaging) {
-      platform_log_notice("Imaging: brightness=%d, contrast=%d, saturation=%d\n", snapshot->imaging->brightness, snapshot->imaging->contrast,
-                          snapshot->imaging->saturation);
-    }
+    platform_log_notice("Imaging: brightness=%d, contrast=%d, saturation=%d\n", snapshot->imaging.brightness, snapshot->imaging.contrast,
+                        snapshot->imaging.saturation);
   } else {
     platform_log_warning("warning: failed to get configuration snapshot\n");
   }
@@ -192,42 +119,16 @@ int config_lifecycle_load_configuration(struct application_config* cfg) {
  * ============================================================================ */
 
 void config_lifecycle_free_memory(struct application_config* cfg) {
-  platform_log_info("Freeing configuration memory...\n");
+  platform_log_info("Cleaning up configuration...\n");
 
   /* T019: Shutdown runtime configuration system */
   config_runtime_cleanup();
 
-  if (cfg->imaging) {
-    free(cfg->imaging);
-    cfg->imaging = NULL;
-  }
-  if (cfg->auto_daynight) {
-    free(cfg->auto_daynight);
-    cfg->auto_daynight = NULL;
-  }
-  if (cfg->network) {
-    free(cfg->network);
-    cfg->network = NULL;
-  }
-  if (cfg->device) {
-    free(cfg->device);
-    cfg->device = NULL;
-  }
-  if (cfg->logging) {
-    free(cfg->logging);
-    cfg->logging = NULL;
-  }
-  if (cfg->main_stream) {
-    free(cfg->main_stream);
-    cfg->main_stream = NULL;
-  }
-  if (cfg->sub_stream) {
-    free(cfg->sub_stream);
-    cfg->sub_stream = NULL;
-  }
+  /* No memory to free since all fields are now direct struct members */
+  (void)cfg; /* Suppress unused parameter warning */
 
   g_config_loaded = false;
-  platform_log_info("Configuration memory freed\n");
+  platform_log_info("Configuration cleaned up\n");
 }
 
 bool config_lifecycle_loaded(void) {
@@ -248,14 +149,10 @@ int config_lifecycle_get_summary(char* summary, size_t size) {
                         "ONVIF: enabled=%d, port=%d, auth_enabled=%d\n"
                         "Imaging: brightness=%d, contrast=%d, saturation=%d, sharpness=%d, hue=%d\n"
                         "Auto Day/Night: enabled=%d, mode=%d, thresholds=%d/%d, lock_time=%ds",
-                        snapshot->onvif.enabled, snapshot->onvif.http_port, snapshot->onvif.auth_enabled,
-                        snapshot->imaging ? snapshot->imaging->brightness : 0, snapshot->imaging ? snapshot->imaging->contrast : 0,
-                        snapshot->imaging ? snapshot->imaging->saturation : 0, snapshot->imaging ? snapshot->imaging->sharpness : 0,
-                        snapshot->imaging ? snapshot->imaging->hue : 0, snapshot->auto_daynight ? snapshot->auto_daynight->enable_auto_switching : 0,
-                        snapshot->auto_daynight ? snapshot->auto_daynight->mode : 0,
-                        snapshot->auto_daynight ? snapshot->auto_daynight->day_to_night_threshold : 0,
-                        snapshot->auto_daynight ? snapshot->auto_daynight->night_to_day_threshold : 0,
-                        snapshot->auto_daynight ? snapshot->auto_daynight->lock_time_seconds : 0);
+                        snapshot->onvif.enabled, snapshot->onvif.http_port, snapshot->onvif.auth_enabled, snapshot->imaging.brightness,
+                        snapshot->imaging.contrast, snapshot->imaging.saturation, snapshot->imaging.sharpness, snapshot->imaging.hue,
+                        snapshot->auto_daynight.enable_auto_switching, snapshot->auto_daynight.mode, snapshot->auto_daynight.day_to_night_threshold,
+                        snapshot->auto_daynight.night_to_day_threshold, snapshot->auto_daynight.lock_time_seconds);
 
   if (result < 0 || (size_t)result >= size) {
     return ONVIF_ERROR_BUFFER_TOO_SMALL;

@@ -367,17 +367,17 @@ static int optimized_batch_param_update(const struct imaging_settings* settings)
   }
 
   // Check if config is available for comparison
-  if (!g_imaging_app_config || !g_imaging_app_config->imaging) {
+  if (!g_imaging_app_config) {
     // If config not available, apply all settings
     return apply_imaging_settings_to_vpss(settings);
   }
 
   // Check if any parameters actually changed to avoid unnecessary VPSS calls
-  int brightness_changed = (g_imaging_app_config->imaging->brightness != settings->brightness);
-  int contrast_changed = (g_imaging_app_config->imaging->contrast != settings->contrast);
-  int saturation_changed = (g_imaging_app_config->imaging->saturation != settings->saturation);
-  int sharpness_changed = (g_imaging_app_config->imaging->sharpness != settings->sharpness);
-  int hue_changed = (g_imaging_app_config->imaging->hue != settings->hue);
+  int brightness_changed = (g_imaging_app_config->imaging.brightness != settings->brightness);
+  int contrast_changed = (g_imaging_app_config->imaging.contrast != settings->contrast);
+  int saturation_changed = (g_imaging_app_config->imaging.saturation != settings->saturation);
+  int sharpness_changed = (g_imaging_app_config->imaging.sharpness != settings->sharpness);
+  int hue_changed = (g_imaging_app_config->imaging.hue != settings->hue);
 
   if (!brightness_changed && !contrast_changed && !saturation_changed && !sharpness_changed && !hue_changed) {
     // No changes needed
@@ -583,7 +583,7 @@ int onvif_imaging_init(void* vi_handle) {
   g_imaging_vi_handle = vi_handle;
 
   // Check that config system is available
-  if (!g_imaging_app_config || !g_imaging_app_config->imaging || !g_imaging_app_config->auto_daynight) {
+  if (!g_imaging_app_config) {
     platform_log_error("Configuration system not initialized or imaging config missing\n");
     pthread_mutex_unlock(&g_imaging_mutex);
     return ONVIF_ERROR_INVALID;
@@ -592,22 +592,22 @@ int onvif_imaging_init(void* vi_handle) {
   platform_log_notice("Imaging service initialized using unified configuration\n");
 
   // Initialize IR LED driver via HAL using config value
-  if (platform_irled_init(g_imaging_app_config->auto_daynight->ir_led_level) != 0) {
+  if (platform_irled_init(g_imaging_app_config->auto_daynight.ir_led_level) != 0) {
     platform_log_error("Failed to initialize IR LED driver\n");
   } else {
-    platform_log_notice("IR LED driver initialized with level %d\n", g_imaging_app_config->auto_daynight->ir_led_level);
+    platform_log_notice("IR LED driver initialized with level %d\n", g_imaging_app_config->auto_daynight.ir_led_level);
 
     // Set initial IR LED mode
-    if (g_imaging_app_config->auto_daynight->ir_led_mode == IR_LED_ON) {
+    if (g_imaging_app_config->auto_daynight.ir_led_mode == IR_LED_ON) {
       platform_irled_set_mode(1);
-    } else if (g_imaging_app_config->auto_daynight->ir_led_mode == IR_LED_OFF) {
+    } else if (g_imaging_app_config->auto_daynight.ir_led_mode == IR_LED_OFF) {
       platform_irled_set_mode(0);
     }
   }
 
   // Apply current imaging settings to VPSS using helper function
   if (g_imaging_vi_handle) {
-    if (apply_imaging_settings_to_vpss(g_imaging_app_config->imaging) == 0) {
+    if (apply_imaging_settings_to_vpss(&g_imaging_app_config->imaging) == 0) {
       platform_log_notice("Applied imaging settings to VPSS\n");
     } else {
       platform_log_error("Failed to apply imaging settings to VPSS\n");
@@ -615,9 +615,9 @@ int onvif_imaging_init(void* vi_handle) {
   }
 
   // Initialize auto day/night mode if enabled
-  if (g_imaging_app_config->auto_daynight->enable_auto_switching) {
-    platform_log_notice("Auto day/night mode enabled (thresholds: %d/%d)\n", g_imaging_app_config->auto_daynight->day_to_night_threshold,
-                        g_imaging_app_config->auto_daynight->night_to_day_threshold);
+  if (g_imaging_app_config->auto_daynight.enable_auto_switching) {
+    platform_log_notice("Auto day/night mode enabled (thresholds: %d/%d)\n", g_imaging_app_config->auto_daynight.day_to_night_threshold,
+                        g_imaging_app_config->auto_daynight.night_to_day_threshold);
   }
 
   g_imaging_initialized = 1;
@@ -648,14 +648,14 @@ int onvif_imaging_get_settings(struct imaging_settings* settings) {
     return ONVIF_ERROR;
   }
 
-  if (!g_imaging_app_config || !g_imaging_app_config->imaging) {
+  if (!g_imaging_app_config) {
     pthread_mutex_unlock(&g_imaging_mutex);
     platform_log_error("Configuration system not available\n");
     return ONVIF_ERROR;
   }
 
   // Get settings directly from unified config
-  *settings = *g_imaging_app_config->imaging;
+  *settings = g_imaging_app_config->imaging;
 
   pthread_mutex_unlock(&g_imaging_mutex);
   return ONVIF_SUCCESS;
@@ -674,7 +674,7 @@ int onvif_imaging_set_settings(const struct imaging_settings* settings) {
     return ONVIF_ERROR;
   }
 
-  if (!g_imaging_app_config || !g_imaging_app_config->imaging) {
+  if (!g_imaging_app_config) {
     pthread_mutex_unlock(&g_imaging_mutex);
     platform_log_error("Configuration system not available\n");
     return ONVIF_ERROR;
@@ -695,7 +695,7 @@ int onvif_imaging_set_settings(const struct imaging_settings* settings) {
     ret = -1;
   } else {
     // Update unified config only if VPSS application succeeded
-    *g_imaging_app_config->imaging = *settings;
+    g_imaging_app_config->imaging = *settings;
 
     // Persist changes to storage (if persistence is enabled)
     config_runtime_set_int(CONFIG_SECTION_IMAGING, "brightness", settings->brightness);
@@ -717,7 +717,7 @@ int onvif_imaging_set_day_night_mode(enum day_night_mode mode) {
     return ONVIF_ERROR;
   }
 
-  if (!g_imaging_app_config || !g_imaging_app_config->imaging) {
+  if (!g_imaging_app_config) {
     pthread_mutex_unlock(&g_imaging_mutex);
     platform_log_error("Configuration system not available\n");
     return ONVIF_ERROR;
@@ -746,7 +746,7 @@ int onvif_imaging_set_day_night_mode(enum day_night_mode mode) {
     ret = -1;
   } else {
     // Update unified config
-    g_imaging_app_config->imaging->daynight.mode = mode;
+    g_imaging_app_config->imaging.daynight.mode = mode;
 
     // Persist change to storage
     config_runtime_set_int(CONFIG_SECTION_AUTO_DAYNIGHT, "mode", (int)mode);
@@ -766,13 +766,13 @@ int onvif_imaging_get_day_night_mode(void) {
     return ONVIF_ERROR;
   }
 
-  if (!g_imaging_app_config || !g_imaging_app_config->imaging) {
+  if (!g_imaging_app_config) {
     pthread_mutex_unlock(&g_imaging_mutex);
     platform_log_error("Configuration system not available\n");
     return ONVIF_ERROR;
   }
 
-  enum day_night_mode mode = g_imaging_app_config->imaging->daynight.mode;
+  enum day_night_mode mode = g_imaging_app_config->imaging.daynight.mode;
   pthread_mutex_unlock(&g_imaging_mutex);
   return mode;
 }
@@ -785,7 +785,7 @@ int onvif_imaging_set_irled_mode(enum ir_led_mode mode) {
     return ONVIF_ERROR;
   }
 
-  if (!g_imaging_app_config || !g_imaging_app_config->auto_daynight) {
+  if (!g_imaging_app_config) {
     pthread_mutex_unlock(&g_imaging_mutex);
     platform_log_error("Configuration system not available\n");
     return ONVIF_ERROR;
@@ -808,7 +808,7 @@ int onvif_imaging_set_irled_mode(enum ir_led_mode mode) {
   }
 
   // Update unified config
-  g_imaging_app_config->auto_daynight->ir_led_mode = mode;
+  g_imaging_app_config->auto_daynight.ir_led_mode = mode;
 
   // Persist change to storage
   config_runtime_set_int(CONFIG_SECTION_AUTO_DAYNIGHT, "ir_led_mode", (int)mode);
@@ -860,15 +860,15 @@ int onvif_imaging_set_auto_config(const struct auto_daynight_config* config) {
     return ONVIF_ERROR;
   }
 
-  if (!g_imaging_app_config || !g_imaging_app_config->auto_daynight || !g_imaging_app_config->imaging) {
+  if (!g_imaging_app_config) {
     pthread_mutex_unlock(&g_imaging_mutex);
     platform_log_error("Configuration system not available\n");
     return ONVIF_ERROR;
   }
 
   // Update unified config structures
-  *g_imaging_app_config->auto_daynight = *config;
-  g_imaging_app_config->imaging->daynight = *config;
+  g_imaging_app_config->auto_daynight = *config;
+  g_imaging_app_config->imaging.daynight = *config;
 
   // Persist auto day/night configuration to storage
   config_runtime_set_int(CONFIG_SECTION_AUTO_DAYNIGHT, "mode", (int)config->mode);
@@ -898,14 +898,14 @@ int onvif_imaging_get_auto_config(struct auto_daynight_config* config) {
     return ONVIF_ERROR;
   }
 
-  if (!g_imaging_app_config || !g_imaging_app_config->auto_daynight) {
+  if (!g_imaging_app_config) {
     pthread_mutex_unlock(&g_imaging_mutex);
     platform_log_error("Configuration system not available\n");
     return ONVIF_ERROR;
   }
 
   // Get configuration directly from unified config
-  *config = *g_imaging_app_config->auto_daynight;
+  *config = g_imaging_app_config->auto_daynight;
 
   pthread_mutex_unlock(&g_imaging_mutex);
   return ONVIF_SUCCESS;

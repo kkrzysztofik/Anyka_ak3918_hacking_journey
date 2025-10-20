@@ -11,6 +11,7 @@
 
 #include <stddef.h>
 
+#include "services/common/onvif_imaging_types.h"
 #include "services/common/video_config_types.h"
 
 /* Common buffer size constants */
@@ -20,9 +21,7 @@
 /* Network port constants */
 #define HTTP_PORT_DEFAULT 8080 /* Default HTTP port for ONVIF services */
 
-/* Forward declarations for imaging structures */
-struct imaging_settings;
-struct auto_daynight_config;
+/* Forward declarations for structures */
 struct network_settings;
 struct device_info;
 struct ptz_preset_profile;
@@ -117,25 +116,25 @@ struct ptz_preset_profile {
 
 /* Full application configuration */
 struct application_config {
-  struct onvif_settings onvif;                     /* core ONVIF settings */
-  struct imaging_settings* imaging;                /* imaging tuning */
-  struct auto_daynight_config* auto_daynight;      /* day/night auto thresholds */
-  struct network_settings* network;                /* network service settings */
-  struct device_info* device;                      /* device identification info */
-  struct logging_settings* logging;                /* logging configuration */
-  struct server_settings* server;                  /* HTTP server configuration */
-  struct snapshot_settings* snapshot;              /* snapshot service configuration (T086) */
-  video_config_t* main_stream;                     /* main stream (vs0) configuration */
-  video_config_t* sub_stream;                      /* sub stream (vs1) configuration */
-  video_config_t* stream_profile_1;                /* stream profile 1 configuration (User Story 4) */
-  video_config_t* stream_profile_2;                /* stream profile 2 configuration (User Story 4) */
-  video_config_t* stream_profile_3;                /* stream profile 3 configuration (User Story 4) */
-  video_config_t* stream_profile_4;                /* stream profile 4 configuration (User Story 4) */
-  struct ptz_preset_profile* ptz_preset_profile_1; /* PTZ preset profile 1 storage */
-  struct ptz_preset_profile* ptz_preset_profile_2; /* PTZ preset profile 2 storage */
-  struct ptz_preset_profile* ptz_preset_profile_3; /* PTZ preset profile 3 storage */
-  struct ptz_preset_profile* ptz_preset_profile_4; /* PTZ preset profile 4 storage */
-  struct user_credential users[MAX_USERS];         /* user credentials array (User Story 5) */
+  struct onvif_settings onvif;                    /* core ONVIF settings */
+  struct imaging_settings imaging;                /* imaging tuning */
+  struct auto_daynight_config auto_daynight;      /* day/night auto thresholds */
+  struct network_settings network;                /* network service settings */
+  struct device_info device;                      /* device identification info */
+  struct logging_settings logging;                /* logging configuration */
+  struct server_settings server;                  /* HTTP server configuration */
+  struct snapshot_settings snapshot;              /* snapshot service configuration (T086) */
+  video_config_t main_stream;                     /* main stream (vs0) configuration */
+  video_config_t sub_stream;                      /* sub stream (vs1) configuration */
+  video_config_t stream_profile_1;                /* stream profile 1 configuration (User Story 4) */
+  video_config_t stream_profile_2;                /* stream profile 2 configuration (User Story 4) */
+  video_config_t stream_profile_3;                /* stream profile 3 configuration (User Story 4) */
+  video_config_t stream_profile_4;                /* stream profile 4 configuration (User Story 4) */
+  struct ptz_preset_profile ptz_preset_profile_1; /* PTZ preset profile 1 storage */
+  struct ptz_preset_profile ptz_preset_profile_2; /* PTZ preset profile 2 storage */
+  struct ptz_preset_profile ptz_preset_profile_3; /* PTZ preset profile 3 storage */
+  struct ptz_preset_profile ptz_preset_profile_4; /* PTZ preset profile 4 storage */
+  struct user_credential users[MAX_USERS];        /* user credentials array (User Story 5) */
 };
 
 /**

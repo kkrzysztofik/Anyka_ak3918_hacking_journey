@@ -68,14 +68,12 @@ int onvif_snapshot_init(void) {
   int snapshot_width = DEFAULT_SNAPSHOT_WIDTH;   // fallback default
   int snapshot_height = DEFAULT_SNAPSHOT_HEIGHT; // fallback default
 
-  if (config && config->snapshot) {
-    snapshot_width = config->snapshot->width;
-    snapshot_height = config->snapshot->height;
-    platform_log_info("Using snapshot resolution from config: %dx%d\n",
-                     snapshot_width, snapshot_height);
+  if (config) {
+    snapshot_width = config->snapshot.width;
+    snapshot_height = config->snapshot.height;
+    platform_log_info("Using snapshot resolution from config: %dx%d\n", snapshot_width, snapshot_height);
   } else {
-    platform_log_warning("No snapshot config available, using defaults: %dx%d\n",
-                        snapshot_width, snapshot_height);
+    platform_log_warning("No snapshot config available, using defaults: %dx%d\n", snapshot_width, snapshot_height);
   }
 
   // Open video input for snapshots
@@ -86,8 +84,7 @@ int onvif_snapshot_init(void) {
   }
 
   // Initialize snapshot capture with configured resolution
-  result = platform_snapshot_init(&g_snapshot_handle, g_vi_handle, snapshot_width,
-                                  snapshot_height);
+  result = platform_snapshot_init(&g_snapshot_handle, g_vi_handle, snapshot_width, snapshot_height);
   if (result != PLATFORM_SUCCESS) {
     platform_log_error("Failed to initialize snapshot capture\n");
     platform_vi_close(g_vi_handle);
@@ -96,8 +93,7 @@ int onvif_snapshot_init(void) {
   }
 
   g_snapshot_initialized = true;
-  platform_log_info("ONVIF Snapshot service initialized successfully with %dx%d\n",
-                   snapshot_width, snapshot_height);
+  platform_log_info("ONVIF Snapshot service initialized successfully with %dx%d\n", snapshot_width, snapshot_height);
   return ONVIF_SUCCESS;
 }
 
@@ -136,17 +132,14 @@ int onvif_snapshot_capture(const snapshot_dimensions_t* dimensions, uint8_t** da
 
   // Validate dimensions
   if (dimensions->width <= 0 || dimensions->height <= 0) {
-    platform_log_error("Invalid snapshot dimensions: %dx%d\n", dimensions->width,
-                       dimensions->height);
+    platform_log_error("Invalid snapshot dimensions: %dx%d\n", dimensions->width, dimensions->height);
     return ONVIF_ERROR_INVALID;
   }
 
   // Check if dimensions match the configured snapshot resolution
-  if (dimensions->width != DEFAULT_SNAPSHOT_WIDTH ||
-      dimensions->height != DEFAULT_SNAPSHOT_HEIGHT) {
-    platform_log_warning("Requested snapshot dimensions %dx%d differ from configured %dx%d\n",
-                         dimensions->width, dimensions->height, DEFAULT_SNAPSHOT_WIDTH,
-                         DEFAULT_SNAPSHOT_HEIGHT);
+  if (dimensions->width != DEFAULT_SNAPSHOT_WIDTH || dimensions->height != DEFAULT_SNAPSHOT_HEIGHT) {
+    platform_log_warning("Requested snapshot dimensions %dx%d differ from configured %dx%d\n", dimensions->width, dimensions->height,
+                         DEFAULT_SNAPSHOT_WIDTH, DEFAULT_SNAPSHOT_HEIGHT);
     // Note: For now, we capture at the configured resolution
     // TODO: Implement dynamic resolution reconfiguration if needed
   }
@@ -227,15 +220,14 @@ int onvif_snapshot_service_init(config_manager_t* config) {
     return ONVIF_SUCCESS;
   }
 
-  service_handler_config_t handler_config = {
-    .service_type = ONVIF_SERVICE_IMAGING, // Snapshot is part of Imaging service
-    .service_name = "Snapshot",
-    .config = config,
-    .enable_validation = 1,
-    .enable_logging = 1};
+  service_handler_config_t handler_config = {.service_type = ONVIF_SERVICE_IMAGING, // Snapshot is part of Imaging service
+                                             .service_name = "Snapshot",
+                                             .config = config,
+                                             .enable_validation = 1,
+                                             .enable_logging = 1};
 
-  int result = onvif_service_handler_init(&g_snapshot_handler, &handler_config, snapshot_actions,
-                                          sizeof(snapshot_actions) / sizeof(snapshot_actions[0]));
+  int result =
+    onvif_service_handler_init(&g_snapshot_handler, &handler_config, snapshot_actions, sizeof(snapshot_actions) / sizeof(snapshot_actions[0]));
 
   if (result == ONVIF_SUCCESS) {
     g_handler_initialized = 1;
@@ -254,8 +246,7 @@ void onvif_snapshot_service_cleanup(void) {
   }
 }
 
-int onvif_snapshot_handle_request(const char* action_name, const http_request_t* request,
-                                  http_response_t* response) {
+int onvif_snapshot_handle_request(const char* action_name, const http_request_t* request, http_response_t* response) {
   if (!g_handler_initialized) {
     return ONVIF_ERROR;
   }

@@ -36,14 +36,10 @@ static void print_endpoints(const struct application_config* cfg) {
 
   platform_log_notice("ONVIF daemon started successfully on port %d\n", cfg->onvif.http_port);
   platform_log_notice("Device services available at:\n");
-  platform_log_notice("  Device:  http://%s:%d/onvif/device_service\n", device_ip,
-                      cfg->onvif.http_port);
-  platform_log_notice("  Media:   http://%s:%d/onvif/media_service\n", device_ip,
-                      cfg->onvif.http_port);
-  platform_log_notice("  PTZ:     http://%s:%d/onvif/ptz_service\n", device_ip,
-                      cfg->onvif.http_port);
-  platform_log_notice("  Imaging: http://%s:%d/onvif/imaging_service\n", device_ip,
-                      cfg->onvif.http_port);
+  platform_log_notice("  Device:  http://%s:%d/onvif/device_service\n", device_ip, cfg->onvif.http_port);
+  platform_log_notice("  Media:   http://%s:%d/onvif/media_service\n", device_ip, cfg->onvif.http_port);
+  platform_log_notice("  PTZ:     http://%s:%d/onvif/ptz_service\n", device_ip, cfg->onvif.http_port);
+  platform_log_notice("  Imaging: http://%s:%d/onvif/imaging_service\n", device_ip, cfg->onvif.http_port);
 
   rtsp_multistream_server_t* rtsp_server = video_lifecycle_get_rtsp_server();
   if (rtsp_server) {
@@ -90,9 +86,7 @@ int main(int argc, char** argv) {
   }
 
   /* Apply logging configuration */
-  if (cfg.logging) {
-    platform_logging_apply_config(cfg.logging);
-  }
+  platform_logging_apply_config(&cfg.logging);
 
   if (!cfg.onvif.enabled) {
     platform_log_notice("ONVIF service is disabled in configuration\n");

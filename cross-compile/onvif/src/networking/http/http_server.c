@@ -131,10 +131,10 @@ static void http_server_log_init_context(service_log_context_t* context, const c
  * @brief Check if verbose HTTP logging is enabled in configuration
  */
 static int http_verbose_enabled(void) {
-  if (!g_http_app_config || !g_http_app_config->logging) {
+  if (!g_http_app_config) {
     return 0;
   }
-  return g_http_app_config->logging->http_verbose ? 1 : 0;
+  return g_http_app_config->logging.http_verbose ? 1 : 0;
 }
 
 /**

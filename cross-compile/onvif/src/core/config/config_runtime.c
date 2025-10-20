@@ -39,8 +39,9 @@
 #define CONFIG_PERSISTENCE_QUEUE_MAX   32
 #define CONFIG_DECIMAL_BASE            10 /* Base for decimal number parsing */
 
-/* Stringify macro for converting constants to strings */
-#define STRINGIFY(x) #x
+/* Stringify macros for converting expanded constants to strings */
+#define STRINGIFY_HELPER(x) #x
+#define STRINGIFY(x)        STRINGIFY_HELPER(x)
 
 /* Helper function to set output type and return field pointer */
 static void* config_runtime_set_field_ptr(config_value_type_t type, void* field_ptr, config_value_type_t* out_type) {
@@ -2132,39 +2133,39 @@ static void* config_runtime_get_section_ptr(config_section_t section) {
   case CONFIG_SECTION_ONVIF:
     return &g_config_runtime_app_config->onvif;
   case CONFIG_SECTION_NETWORK:
-    return g_config_runtime_app_config->network;
+    return &g_config_runtime_app_config->network;
   case CONFIG_SECTION_DEVICE:
-    return g_config_runtime_app_config->device;
+    return &g_config_runtime_app_config->device;
   case CONFIG_SECTION_LOGGING:
-    return g_config_runtime_app_config->logging;
+    return &g_config_runtime_app_config->logging;
   case CONFIG_SECTION_SERVER:
-    return g_config_runtime_app_config->server;
+    return &g_config_runtime_app_config->server;
   case CONFIG_SECTION_MAIN_STREAM:
-    return g_config_runtime_app_config->main_stream;
+    return &g_config_runtime_app_config->main_stream;
   case CONFIG_SECTION_SUB_STREAM:
-    return g_config_runtime_app_config->sub_stream;
+    return &g_config_runtime_app_config->sub_stream;
   case CONFIG_SECTION_STREAM_PROFILE_1:
-    return g_config_runtime_app_config->stream_profile_1;
+    return &g_config_runtime_app_config->stream_profile_1;
   case CONFIG_SECTION_STREAM_PROFILE_2:
-    return g_config_runtime_app_config->stream_profile_2;
+    return &g_config_runtime_app_config->stream_profile_2;
   case CONFIG_SECTION_STREAM_PROFILE_3:
-    return g_config_runtime_app_config->stream_profile_3;
+    return &g_config_runtime_app_config->stream_profile_3;
   case CONFIG_SECTION_STREAM_PROFILE_4:
-    return g_config_runtime_app_config->stream_profile_4;
+    return &g_config_runtime_app_config->stream_profile_4;
   case CONFIG_SECTION_IMAGING:
-    return g_config_runtime_app_config->imaging;
+    return &g_config_runtime_app_config->imaging;
   case CONFIG_SECTION_AUTO_DAYNIGHT:
-    return g_config_runtime_app_config->auto_daynight;
+    return &g_config_runtime_app_config->auto_daynight;
   case CONFIG_SECTION_SNAPSHOT:
-    return g_config_runtime_app_config->snapshot;
+    return &g_config_runtime_app_config->snapshot;
   case CONFIG_SECTION_PTZ_PRESET_PROFILE_1:
-    return g_config_runtime_app_config->ptz_preset_profile_1;
+    return &g_config_runtime_app_config->ptz_preset_profile_1;
   case CONFIG_SECTION_PTZ_PRESET_PROFILE_2:
-    return g_config_runtime_app_config->ptz_preset_profile_2;
+    return &g_config_runtime_app_config->ptz_preset_profile_2;
   case CONFIG_SECTION_PTZ_PRESET_PROFILE_3:
-    return g_config_runtime_app_config->ptz_preset_profile_3;
+    return &g_config_runtime_app_config->ptz_preset_profile_3;
   case CONFIG_SECTION_PTZ_PRESET_PROFILE_4:
-    return g_config_runtime_app_config->ptz_preset_profile_4;
+    return &g_config_runtime_app_config->ptz_preset_profile_4;
   default:
     return NULL;
   }

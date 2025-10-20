@@ -36,22 +36,22 @@
 #define VIDEO_RESOLUTION_HEIGHT_FHD 1080 /* Full HD height */
 
 /* Video frame rate constants (fps) */
-#define VIDEO_FPS_DEFAULT     15   /* Default fallback FPS */
-#define VIDEO_FPS_MIN         5    /* Minimum allowed FPS */
-#define VIDEO_GOP_DEFAULT     50   /* Default GOP size */
-#define VIDEO_GOP_MAX_SECONDS 10   /* Maximum GOP in seconds */
+#define VIDEO_FPS_DEFAULT     15 /* Default fallback FPS */
+#define VIDEO_FPS_MIN         5  /* Minimum allowed FPS */
+#define VIDEO_GOP_DEFAULT     50 /* Default GOP size */
+#define VIDEO_GOP_MAX_SECONDS 10 /* Maximum GOP in seconds */
 
 /* Video bitrate constants (kbps) */
 #define VIDEO_BITRATE_DEFAULT 2000 /* Default bitrate */
 
 /* Audio default constants */
-#define AUDIO_SAMPLE_RATE_DEFAULT    16000 /* Default sample rate (16 kHz) */
-#define AUDIO_CHANNELS_DEFAULT       1     /* Default channels (mono) */
-#define AUDIO_BITS_PER_SAMPLE_DEFAULT 16   /* Default bits per sample */
-#define AUDIO_BITRATE_DEFAULT        64000 /* Default AAC bitrate (64 kbps) */
+#define AUDIO_SAMPLE_RATE_DEFAULT     16000 /* Default sample rate (16 kHz) */
+#define AUDIO_CHANNELS_DEFAULT        1     /* Default channels (mono) */
+#define AUDIO_BITS_PER_SAMPLE_DEFAULT 16    /* Default bits per sample */
+#define AUDIO_BITRATE_DEFAULT         64000 /* Default AAC bitrate (64 kbps) */
 
 /* RTSP constants */
-#define RTSP_PORT_DEFAULT 554  /* Default RTSP port */
+#define RTSP_PORT_DEFAULT 554 /* Default RTSP port */
 
 /* Buffer size constants */
 #define BUFFER_SIZE_MEDIUM 256 /* Medium buffer size */
@@ -65,7 +65,7 @@ static volatile bool g_video_rtsp_server_initialized = false; // NOLINT
  * Global State
  * ============================================================================ */
 
-static volatile bool g_video_system_initialized = false;      // NOLINT
+static volatile bool g_video_system_initialized = false; // NOLINT
 
 /* ---------------------------- Video Initialization Helpers
  * ------------------------- */
@@ -125,8 +125,7 @@ static int initialize_video_input(platform_video_resolution_t* resolution, int* 
  * @param resolution Sensor resolution
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
-static int configure_video_channels(platform_vi_handle_t vi_handle,
-                                    const platform_video_resolution_t* resolution) {
+static int configure_video_channels(platform_vi_handle_t vi_handle, const platform_video_resolution_t* resolution) {
   platform_video_channel_attr_t channel_attr = {
     .crop = {.left = 0, .top = 0, .width = resolution->width, .height = resolution->height},
     .res = {[PLATFORM_VIDEO_CHN_MAIN] =
@@ -179,8 +178,7 @@ static void init_audio_config(audio_config_t* audio_config) {
  * @param video_config Output video configuration
  * @param resolution Sensor resolution
  */
-static void set_video_resolution(video_config_t* video_config,
-                                 const platform_video_resolution_t* resolution) {
+static void set_video_resolution(video_config_t* video_config, const platform_video_resolution_t* resolution) {
   video_config->width = (resolution->width > VIDEO_RESOLUTION_WIDTH_FHD) ? VIDEO_RESOLUTION_WIDTH_FHD : resolution->width;
   video_config->height = (resolution->height > VIDEO_RESOLUTION_HEIGHT_FHD) ? VIDEO_RESOLUTION_HEIGHT_FHD : resolution->height;
 }
@@ -191,15 +189,13 @@ static void set_video_resolution(video_config_t* video_config,
  * @param cfg Application configuration
  * @param sensor_fps Detected sensor frame rate
  */
-static void configure_frame_rate(video_config_t* video_config, const struct application_config* cfg,
-                                 int sensor_fps) {
-  if (cfg && cfg->main_stream && cfg->main_stream->fps > 0) {
+static void configure_frame_rate(video_config_t* video_config, const struct application_config* cfg, int sensor_fps) {
+  if (cfg && cfg->main_stream.fps > 0) {
     // Config specifies FPS, validate against sensor capabilities
-    if (cfg->main_stream->fps <= sensor_fps * 2 && cfg->main_stream->fps >= VIDEO_FPS_MIN) {
-      video_config->fps = cfg->main_stream->fps;
+    if (cfg->main_stream.fps <= sensor_fps * 2 && cfg->main_stream.fps >= VIDEO_FPS_MIN) {
+      video_config->fps = cfg->main_stream.fps;
     } else {
-      platform_log_warning("Config FPS %d outside valid range (5-%d), using sensor FPS %d\n",
-                           cfg->main_stream->fps, sensor_fps * 2, sensor_fps);
+      platform_log_warning("Config FPS %d outside valid range (5-%d), using sensor FPS %d\n", cfg->main_stream.fps, sensor_fps * 2, sensor_fps);
       video_config->fps = sensor_fps;
     }
   } else {
@@ -214,12 +210,12 @@ static void configure_frame_rate(video_config_t* video_config, const struct appl
  * @param cfg Application configuration
  */
 static void copy_config_values(video_config_t* video_config, const struct application_config* cfg) {
-  if (cfg && cfg->main_stream) {
-    video_config->bitrate = cfg->main_stream->bitrate;
-    video_config->gop_size = cfg->main_stream->gop_size;
-    video_config->profile = cfg->main_stream->profile;
-    video_config->codec_type = cfg->main_stream->codec_type;
-    video_config->br_mode = cfg->main_stream->br_mode;
+  if (cfg) {
+    video_config->bitrate = cfg->main_stream.bitrate;
+    video_config->gop_size = cfg->main_stream.gop_size;
+    video_config->profile = cfg->main_stream.profile;
+    video_config->codec_type = cfg->main_stream.codec_type;
+    video_config->br_mode = cfg->main_stream.br_mode;
   }
 }
 
@@ -235,8 +231,7 @@ static void set_default_video_config(video_config_t* video_config, int sensor_fp
   video_config->profile = PLATFORM_PROFILE_MAIN;
   video_config->codec_type = PLATFORM_H264_ENC_TYPE;
   video_config->br_mode = PLATFORM_BR_MODE_CBR;
-  platform_log_warning("warning: using default main stream configuration with sensor fps %d\n",
-                       sensor_fps);
+  platform_log_warning("warning: using default main stream configuration with sensor fps %d\n", sensor_fps);
 }
 
 /**
@@ -280,8 +275,7 @@ static void validate_codec_type(video_config_t* video_config) {
  * @param video_config Output video configuration
  * @param audio_config Output audio configuration
  */
-static void configure_main_stream(const struct application_config* cfg,
-                                  const platform_video_resolution_t* resolution, int sensor_fps,
+static void configure_main_stream(const struct application_config* cfg, const platform_video_resolution_t* resolution, int sensor_fps,
                                   video_config_t* video_config, audio_config_t* audio_config) {
   // Initialize audio configuration
   init_audio_config(audio_config);
@@ -292,24 +286,23 @@ static void configure_main_stream(const struct application_config* cfg,
   // Configure frame rate with sensor validation
   configure_frame_rate(video_config, cfg, sensor_fps);
 
-  if (cfg && cfg->main_stream) {
+  if (cfg) {
     // Copy configuration values
     copy_config_values(video_config, cfg);
 
     // Validate configuration before using
-    if (stream_config_validate(cfg->main_stream, true) != ONVIF_SUCCESS) {
+    if (stream_config_validate(&cfg->main_stream, true) != ONVIF_SUCCESS) {
       platform_log_warning("warning: main stream configuration validation failed, using "
                            "defaults\n");
-      stream_config_init_defaults(cfg->main_stream, true);
-      *video_config = *cfg->main_stream;
+      stream_config_init_defaults(&cfg->main_stream, true);
+      *video_config = cfg->main_stream;
       // Override FPS with sensor rate if validation failed
       video_config->fps = sensor_fps;
     }
 
     // Log configuration summary
     char config_summary[BUFFER_SIZE_MEDIUM];
-    if (stream_config_get_summary(cfg->main_stream, true, config_summary, sizeof(config_summary)) ==
-        ONVIF_SUCCESS) {
+    if (stream_config_get_summary(&cfg->main_stream, true, config_summary, sizeof(config_summary)) == ONVIF_SUCCESS) {
       platform_log_info("Main stream configuration: %s\n", config_summary);
     }
   } else {
@@ -328,8 +321,7 @@ static void configure_main_stream(const struct application_config* cfg,
  * @param audio_config Main stream audio configuration
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
-static int create_rtsp_server(const video_config_t* video_config,
-                              const audio_config_t* audio_config) {
+static int create_rtsp_server(const video_config_t* video_config, const audio_config_t* audio_config) {
   // Create multi-stream RTSP server (only if not already created)
   if (!g_video_rtsp_server_initialized) {
     g_video_rtsp_multistream_server = rtsp_multistream_server_create(RTSP_PORT_DEFAULT, g_video_vi_handle);
@@ -343,8 +335,7 @@ static int create_rtsp_server(const video_config_t* video_config,
 
   platform_log_info("Multi-stream RTSP server already initialized, skipping creation\n");
 
-  if (rtsp_multistream_server_add_stream(g_video_rtsp_multistream_server, "/vs0", "main",
-                                         video_config, audio_config, false) != 0) {
+  if (rtsp_multistream_server_add_stream(g_video_rtsp_multistream_server, "/vs0", "main", video_config, audio_config, false) != 0) {
     platform_log_error("Failed to add main stream to multi-stream server\n");
     rtsp_multistream_server_destroy(g_video_rtsp_multistream_server);
     g_video_rtsp_multistream_server = NULL;

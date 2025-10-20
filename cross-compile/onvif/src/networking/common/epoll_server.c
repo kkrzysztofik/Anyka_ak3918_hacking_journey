@@ -46,27 +46,25 @@ static void perform_periodic_cleanup(uint64_t* last_cleanup);
  * @param config Application configuration (can be NULL for defaults)
  */
 void epoll_server_set_config(const struct application_config* config) {
-  if (!config || !config->server) {
+  if (!config) {
     platform_log_debug("Using default epoll server configuration\n");
     return;
   }
 
   // Validate and set epoll timeout
-  if (config->server->epoll_timeout >= 100 && config->server->epoll_timeout <= 5000) {
-    g_epoll_timeout = config->server->epoll_timeout;
+  if (config->server.epoll_timeout >= 100 && config->server.epoll_timeout <= 5000) {
+    g_epoll_timeout = config->server.epoll_timeout;
     platform_log_debug("Epoll timeout set to %d ms\n", g_epoll_timeout);
   } else {
-    platform_log_warning("Invalid epoll timeout %d, using default 500 ms\n",
-                         config->server->epoll_timeout);
+    platform_log_warning("Invalid epoll timeout %d, using default 500 ms\n", config->server.epoll_timeout);
   }
 
   // Validate and set cleanup interval
-  if (config->server->cleanup_interval >= 1 && config->server->cleanup_interval <= 60) {
-    g_cleanup_interval = config->server->cleanup_interval * 1000; // Convert to ms
-    platform_log_debug("Cleanup interval set to %d seconds\n", config->server->cleanup_interval);
+  if (config->server.cleanup_interval >= 1 && config->server.cleanup_interval <= 60) {
+    g_cleanup_interval = config->server.cleanup_interval * 1000; // Convert to ms
+    platform_log_debug("Cleanup interval set to %d seconds\n", config->server.cleanup_interval);
   } else {
-    platform_log_warning("Invalid cleanup interval %d, using default 5 seconds\n",
-                         config->server->cleanup_interval);
+    platform_log_warning("Invalid cleanup interval %d, using default 5 seconds\n", config->server.cleanup_interval);
   }
 }
 
@@ -154,8 +152,7 @@ int epoll_server_remove_connection(int socket_fd) {
   }
 
   if (epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, socket_fd, NULL) < 0) {
-    platform_log_error("Failed to remove connection %d from epoll: %s\n", socket_fd,
-                       strerror(errno));
+    platform_log_error("Failed to remove connection %d from epoll: %s\n", socket_fd, strerror(errno));
     return -1;
   }
 
@@ -219,8 +216,7 @@ static int handle_new_connection(void) {
   // Update connection statistics
   g_http_server.connection_count++;
 
-  platform_log_info("New connection %d accepted (total: %llu)\n", client,
-                    (unsigned long long)g_http_server.connection_count);
+  platform_log_info("New connection %d accepted (total: %llu)\n", client, (unsigned long long)g_http_server.connection_count);
   platform_log_debug("Connection %d: buffer allocated, added to epoll\n", client);
   return 0;
 }
@@ -257,8 +253,7 @@ static void perform_periodic_cleanup(uint64_t* last_cleanup) {
     connection_cleanup_timed_out();
 
     // Log periodic statistics
-    platform_log_info("HTTP Server Stats: %llu connections, %llu requests processed\n",
-                      (unsigned long long)g_http_server.connection_count,
+    platform_log_info("HTTP Server Stats: %llu connections, %llu requests processed\n", (unsigned long long)g_http_server.connection_count,
                       (unsigned long long)g_http_server.request_count);
 
     *last_cleanup = now;
