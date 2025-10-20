@@ -23,11 +23,11 @@
 #include <stdint.h>
 
 #include "core/config/config.h"
-#include "services/common/onvif_types.h"
+#include "services/common/video_config_types.h"
 
 /* Configuration string buffer sizes */
-#define CONFIG_KEY_MAX_SIZE    64   /* Maximum configuration key length */
-#define CONFIG_STRING_MAX_SIZE 256  /* Maximum configuration string value length */
+#define CONFIG_KEY_MAX_SIZE    64  /* Maximum configuration key length */
+#define CONFIG_STRING_MAX_SIZE 256 /* Maximum configuration string value length */
 
 /**
  * @defgroup config_runtime Runtime Configuration Manager
@@ -66,9 +66,9 @@ typedef struct {
  * @brief Configuration persistence queue entry
  */
 typedef struct {
-  config_section_t section; /**< Configuration section */
-  char key[CONFIG_KEY_MAX_SIZE];             /**< Configuration key */
-  config_value_type_t type; /**< Value type (from config.h) */
+  config_section_t section;      /**< Configuration section */
+  char key[CONFIG_KEY_MAX_SIZE]; /**< Configuration key */
+  config_value_type_t type;      /**< Value type (from config.h) */
   union {
     int int_value;
     float float_value;
@@ -136,8 +136,7 @@ int config_runtime_get_int(config_section_t section, const char* key, int* out_v
  * @param[in] buffer_size Size of output buffer
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int config_runtime_get_string(config_section_t section, const char* key, char* out_value,
-                              size_t buffer_size);
+int config_runtime_get_string(config_section_t section, const char* key, char* out_value, size_t buffer_size);
 
 /**
  * @brief Get boolean configuration value with validation
@@ -255,8 +254,7 @@ uint32_t config_runtime_get_generation(void);
  * @param[in] type Value type
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int config_runtime_queue_persistence_update(config_section_t section, const char* key,
-                                            const void* value, config_value_type_t type);
+int config_runtime_queue_persistence_update(config_section_t section, const char* key, const void* value, config_value_type_t type);
 
 /**
  * @brief Process pending persistence queue entries
@@ -450,8 +448,7 @@ int config_runtime_authenticate_user(const char* username, const char* password)
  * @param[out] user_count Actual number of users returned
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users,
-                                   int* user_count);
+int config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users, int* user_count);
 
 /**
  * @}

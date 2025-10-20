@@ -59,21 +59,17 @@ typedef struct {
 } http_response_t;
 
 /* HTTP parsing functions */
-int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_request_t* request,
-                                     int* need_more_data);
+int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_request_t* request, int* need_more_data);
 int parse_http_request_line(const char* request, http_request_t* req);
-int parse_http_headers(const char* headers, size_t headers_size, http_header_t** parsed_headers,
-                       size_t* header_count);
-int find_header_value(const http_header_t* headers, size_t header_count, const char* header_name,
-                      char* value, size_t value_size);
+int parse_http_headers(const char* headers, size_t headers_size, http_header_t** parsed_headers, size_t* header_count);
+int find_header_value(const http_header_t* headers, size_t header_count, const char* header_name, char* value, size_t value_size);
 void free_http_headers(http_header_t* headers, size_t header_count);
 /* validate_content_length is now provided by
  * utils/validation/input_validation.h */
 
 /* HTTP response functions */
 int send_http_response(int client, const http_response_t* response);
-http_response_t create_http_200_response(const char* body, size_t body_length,
-                                         const char* content_type);
+http_response_t create_http_200_response(const char* body, size_t body_length, const char* content_type);
 http_response_t create_http_404_response(void);
 http_response_t create_http_400_response(void);
 int http_response_add_header(http_response_t* response, const char* name, const char* value);

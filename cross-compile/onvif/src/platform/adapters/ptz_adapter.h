@@ -82,8 +82,7 @@ platform_result_t ptz_adapter_absolute_move(int pan_degrees, int tilt_degrees, i
  * @note Updates internal position state on success
  * @note Thread-safe
  */
-platform_result_t ptz_adapter_relative_move(int pan_delta_degrees, int tilt_delta_degrees,
-                                            int move_speed);
+platform_result_t ptz_adapter_relative_move(int pan_delta_degrees, int tilt_delta_degrees, int move_speed);
 
 /**
  * @brief Start continuous PTZ movement
@@ -95,8 +94,7 @@ platform_result_t ptz_adapter_relative_move(int pan_delta_degrees, int tilt_delt
  * @note Creates timeout thread if timeout > 0
  * @note Thread-safe
  */
-platform_result_t ptz_adapter_continuous_move(int pan_velocity, int tilt_velocity,
-                                              int timeout_seconds);
+platform_result_t ptz_adapter_continuous_move(int pan_velocity, int tilt_velocity, int timeout_seconds);
 
 /**
  * @brief Stop all PTZ movement

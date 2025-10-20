@@ -111,8 +111,7 @@ int rtcp_send_sr(struct rtp_session* rtp_session) {
 
   // Send packet
   if (rtp_session->rtcp_sockfd >= 0) {
-    sendto(rtp_session->rtcp_sockfd, packet, pos, 0,
-           (struct sockaddr*)&rtp_session->client_rtcp_addr, sizeof(rtp_session->client_rtcp_addr));
+    sendto(rtp_session->rtcp_sockfd, packet, pos, 0, (struct sockaddr*)&rtp_session->client_rtcp_addr, sizeof(rtp_session->client_rtcp_addr));
   }
 
   rtp_session->last_rtcp_sent = time(NULL);
@@ -148,8 +147,7 @@ int rtcp_send_rr(struct rtp_session* rtp_session) {
 
   // Send packet
   if (rtp_session->rtcp_sockfd >= 0) {
-    sendto(rtp_session->rtcp_sockfd, packet, pos, 0,
-           (struct sockaddr*)&rtp_session->client_rtcp_addr, sizeof(rtp_session->client_rtcp_addr));
+    sendto(rtp_session->rtcp_sockfd, packet, pos, 0, (struct sockaddr*)&rtp_session->client_rtcp_addr, sizeof(rtp_session->client_rtcp_addr));
   }
 
   rtp_session->last_rtcp_sent = time(NULL);
@@ -241,8 +239,7 @@ void* rtcp_thread(void* arg) {
 
       int result = select(rtp_session->rtcp_sockfd + 1, &readfds, NULL, NULL, &timeout);
       if (result > 0 && FD_ISSET(rtp_session->rtcp_sockfd, &readfds)) {
-        ssize_t bytes = recvfrom(rtp_session->rtcp_sockfd, buffer, sizeof(buffer), 0,
-                                 (struct sockaddr*)&client_addr, &addr_len);
+        ssize_t bytes = recvfrom(rtp_session->rtcp_sockfd, buffer, sizeof(buffer), 0, (struct sockaddr*)&client_addr, &addr_len);
         if (bytes > 0) {
           rtcp_handle_packet(rtp_session, buffer, bytes);
         }

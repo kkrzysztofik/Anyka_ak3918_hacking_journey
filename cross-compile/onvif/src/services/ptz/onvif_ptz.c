@@ -39,8 +39,6 @@
 #endif
 
 /* Network configuration constants */
-#define PTZ_IP_BUFFER_SIZE    64  /* IP address buffer size */
-#define PTZ_XADDR_BUFFER_SIZE 256 /* XAddr URL buffer size */
 
 /* PTZ Movement Constants */
 #define PTZ_MOVEMENT_TIMEOUT_MS        5000
@@ -689,15 +687,15 @@ static int ptz_service_get_capabilities(struct soap* ctx, void** capabilities_pt
   soap_default_tt__PTZCapabilities(ctx, caps);
 
   // Get device IP and port from runtime config
-  char device_ip[PTZ_IP_BUFFER_SIZE] = "192.168.1.100"; // Default value
-  int http_port = HTTP_PORT_DEFAULT;                    // Default value
+  char device_ip[ONVIF_IP_BUFFER_SIZE] = "192.168.1.100"; // Default value
+  int http_port = HTTP_PORT_DEFAULT;                      // Default value
 
   // Try to get values from runtime config (ignore errors, use defaults)
   (void)config_runtime_get_string(CONFIG_SECTION_NETWORK, "device_ip", device_ip, sizeof(device_ip));
   (void)config_runtime_get_int(CONFIG_SECTION_NETWORK, "http_port", &http_port);
 
   // Build XAddr
-  char xaddr[PTZ_XADDR_BUFFER_SIZE];
+  char xaddr[ONVIF_XADDR_BUFFER_SIZE];
   (void)snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/ptz_service", device_ip, http_port);
   caps->XAddr = soap_strdup(ctx, xaddr);
 

@@ -19,9 +19,9 @@
 #define CONFIG_STORAGE_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "core/config/config.h"
-#include "core/config/config_runtime.h"
 
 /**
  * @defgroup config_storage Configuration Storage Layer

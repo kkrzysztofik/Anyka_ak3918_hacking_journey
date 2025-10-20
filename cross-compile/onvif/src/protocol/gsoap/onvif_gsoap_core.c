@@ -55,7 +55,7 @@ int onvif_gsoap_init(onvif_gsoap_context_t* ctx) {
 
   /* Enable gSOAP message logging based on configuration flag */
   {
-    int http_verbose = 1;  /* Default to enabled */
+    int http_verbose = 1; /* Default to enabled */
     int result = config_runtime_get_int(CONFIG_SECTION_LOGGING, "http_verbose", &http_verbose);
 
     /* If config lookup fails, use default (already set to 1) */
@@ -120,27 +120,21 @@ void onvif_gsoap_reset(onvif_gsoap_context_t* ctx) {
  * @param xml_size Size of the request XML in bytes
  * @return ONVIF_SUCCESS on success, error code otherwise
  */
-int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* request_xml,
-                                     size_t xml_size) {
+int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* request_xml, size_t xml_size) {
   platform_log_debug("onvif_gsoap_init_request_parsing: Starting with xml_size=%zu", xml_size);
 
   if (!ctx || !request_xml || xml_size == 0) {
-    platform_log_debug(
-      "onvif_gsoap_init_request_parsing: Invalid parameters - ctx=%p, request_xml=%p, xml_size=%zu",
-      ctx, request_xml, xml_size);
+    platform_log_debug("onvif_gsoap_init_request_parsing: Invalid parameters - ctx=%p, request_xml=%p, xml_size=%zu", ctx, request_xml, xml_size);
     if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                            "Invalid parameters: NULL context or request");
+      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Invalid parameters: NULL context or request");
     }
     return ONVIF_ERROR_INVALID;
   }
 
   /* Validate request size to prevent malloc corruption */
   if (xml_size > MAX_ONVIF_REQUEST_SIZE) {
-    platform_log_debug("onvif_gsoap_init_request_parsing: Request too large - xml_size=%zu, max=%d",
-                       xml_size, MAX_ONVIF_REQUEST_SIZE);
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__,
-                          "Request size exceeds maximum allowed size (1MB)");
+    platform_log_debug("onvif_gsoap_init_request_parsing: Request too large - xml_size=%zu, max=%d", xml_size, MAX_ONVIF_REQUEST_SIZE);
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, __func__, "Request size exceeds maximum allowed size (1MB)");
     return ONVIF_ERROR_INVALID;
   }
 
@@ -154,8 +148,7 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
   char* buffer = (char*)soap_malloc(&ctx->soap, xml_size + 1);
   if (!buffer) {
     platform_log_debug("onvif_gsoap_init_request_parsing: Failed to allocate buffer");
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
-                          "Failed to allocate buffer for request");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__, "Failed to allocate buffer for request");
     return ONVIF_ERROR_MEMORY;
   }
 
@@ -167,8 +160,7 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
   platform_log_debug("onvif_gsoap_init_request_parsing: Incoming SOAP request XML:");
   platform_log_debug("%s", buffer);
 
-  platform_log_debug(
-    "onvif_gsoap_init_request_parsing: Configuring gSOAP to read from in-memory buffer");
+  platform_log_debug("onvif_gsoap_init_request_parsing: Configuring gSOAP to read from in-memory buffer");
   /* Configure gSOAP to read directly from the in-memory buffer using
    * the Method 1 pattern (soap->is advanced by the runtime). */
   ctx->soap.is = buffer;
@@ -184,8 +176,7 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
   ctx->request_state.request_size = xml_size;
   ctx->request_state.parse_start_time = get_timestamp_us();
 
-  platform_log_debug(
-    "onvif_gsoap_init_request_parsing: Request parsing initialization completed successfully");
+  platform_log_debug("onvif_gsoap_init_request_parsing: Request parsing initialization completed successfully");
   return ONVIF_SUCCESS;
 }
 
@@ -196,8 +187,7 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
  * @param location Function name where error occurred (__func__)
  * @param message Detailed error message
  */
-void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const char* location,
-                           const char* message) {
+void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const char* location, const char* message) {
   if (!ctx) {
     return;
   }
@@ -207,8 +197,7 @@ void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const cha
   ctx->error_context.soap_error_code = ctx->soap.error;
 
   if (message) {
-    snprintf(ctx->error_context.error_message, sizeof(ctx->error_context.error_message), "%s",
-             message);
+    snprintf(ctx->error_context.error_message, sizeof(ctx->error_context.error_message), "%s", message);
   } else {
     ctx->error_context.error_message[0] = '\0';
   }
@@ -222,8 +211,7 @@ void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const cha
  * @param soap_error Output: gSOAP error code (can be NULL)
  * @return Error message string
  */
-const char* onvif_gsoap_get_detailed_error(onvif_gsoap_context_t* ctx, int* error_code,
-                                           const char** location, int* soap_error) {
+const char* onvif_gsoap_get_detailed_error(onvif_gsoap_context_t* ctx, int* error_code, const char** location, int* soap_error) {
   if (!ctx) {
     return "Invalid context";
   }
@@ -289,16 +277,14 @@ const char* onvif_gsoap_get_error(const onvif_gsoap_context_t* ctx) {
  * @param func_name Function name for error reporting (__func__)
  * @return ONVIF_SUCCESS on success, error code otherwise
  */
-int onvif_gsoap_validate_and_begin_parse(onvif_gsoap_context_t* ctx, void* out_ptr,
-                                         const char* operation_name, const char* func_name) {
+int onvif_gsoap_validate_and_begin_parse(onvif_gsoap_context_t* ctx, void* out_ptr, const char* operation_name, const char* func_name) {
   platform_log_debug("%s: Starting %s parsing", func_name, operation_name);
 
   /* 1. Validate parameters */
   if (!ctx || !out_ptr) {
     platform_log_debug("%s: Invalid parameters - ctx=%p, out=%p", func_name, ctx, out_ptr);
     if (ctx) {
-      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, func_name,
-                            "Invalid parameters: NULL context or output pointer");
+      onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID, func_name, "Invalid parameters: NULL context or output pointer");
     }
     return ONVIF_ERROR_INVALID;
   }
@@ -332,9 +318,8 @@ int onvif_gsoap_parse_soap_envelope(onvif_gsoap_context_t* ctx, const char* func
   }
 
   platform_log_debug("%s: Starting SOAP envelope parsing sequence", func_name);
-  platform_log_debug("%s: gSOAP context state - soap.is=%p, soap.bufidx=%lu, soap.buflen=%lu",
-                     func_name, ctx->soap.is, (unsigned long)ctx->soap.bufidx,
-                     (unsigned long)ctx->soap.buflen);
+  platform_log_debug("%s: gSOAP context state - soap.is=%p, soap.bufidx=%lu, soap.buflen=%lu", func_name, ctx->soap.is,
+                     (unsigned long)ctx->soap.bufidx, (unsigned long)ctx->soap.buflen);
 
   int soap_result = SOAP_OK;
 
@@ -352,8 +337,7 @@ int onvif_gsoap_parse_soap_envelope(onvif_gsoap_context_t* ctx, const char* func
   soap_result = soap_envelope_begin_in(&ctx->soap);
   if (soap_result != SOAP_OK) {
     platform_log_debug("%s: soap_envelope_begin_in failed: %d", func_name, soap_result);
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, func_name,
-                          "Failed to begin SOAP envelope parsing");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, func_name, "Failed to begin SOAP envelope parsing");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -362,8 +346,7 @@ int onvif_gsoap_parse_soap_envelope(onvif_gsoap_context_t* ctx, const char* func
   soap_result = soap_recv_header(&ctx->soap);
   if (soap_result != SOAP_OK) {
     platform_log_debug("%s: soap_recv_header failed: %d", func_name, soap_result);
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, func_name,
-                          "Failed to receive SOAP header");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, func_name, "Failed to receive SOAP header");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -372,8 +355,7 @@ int onvif_gsoap_parse_soap_envelope(onvif_gsoap_context_t* ctx, const char* func
   soap_result = soap_body_begin_in(&ctx->soap);
   if (soap_result != SOAP_OK) {
     platform_log_debug("%s: soap_body_begin_in failed: %d", func_name, soap_result);
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, func_name,
-                          "Failed to begin SOAP body parsing");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, func_name, "Failed to begin SOAP body parsing");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -396,24 +378,21 @@ int onvif_gsoap_finalize_parse(onvif_gsoap_context_t* ctx) {
   int soap_result = soap_body_end_in(&ctx->soap);
   if (soap_result != SOAP_OK) {
     platform_log_debug("onvif_gsoap_finalize_parse: soap_body_end_in failed: %d", soap_result);
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to finalize SOAP body parsing");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to finalize SOAP body parsing");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
   soap_result = soap_envelope_end_in(&ctx->soap);
   if (soap_result != SOAP_OK) {
     platform_log_debug("onvif_gsoap_finalize_parse: soap_envelope_end_in failed: %d", soap_result);
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to finalize SOAP envelope parsing");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to finalize SOAP envelope parsing");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
   soap_result = soap_end_recv(&ctx->soap);
   if (soap_result != SOAP_OK) {
     platform_log_debug("onvif_gsoap_finalize_parse: soap_end_recv failed: %d", soap_result);
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to finalize SOAP receive");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to finalize SOAP receive");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 

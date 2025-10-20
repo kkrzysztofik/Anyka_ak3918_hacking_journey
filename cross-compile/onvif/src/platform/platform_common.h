@@ -55,11 +55,7 @@ typedef enum {
 } platform_audio_codec_t;
 
 /* PTZ axis types */
-typedef enum {
-  PLATFORM_PTZ_AXIS_PAN = 0,
-  PLATFORM_PTZ_AXIS_TILT,
-  PLATFORM_PTZ_AXIS_ZOOM
-} platform_ptz_axis_t;
+typedef enum { PLATFORM_PTZ_AXIS_PAN = 0, PLATFORM_PTZ_AXIS_TILT, PLATFORM_PTZ_AXIS_ZOOM } platform_ptz_axis_t;
 
 /* PTZ direction types */
 typedef enum {
@@ -72,11 +68,7 @@ typedef enum {
 } platform_ptz_direction_t;
 
 /* PTZ status types */
-typedef enum {
-  PLATFORM_PTZ_STATUS_STOPPED = 0,
-  PLATFORM_PTZ_STATUS_MOVING,
-  PLATFORM_PTZ_STATUS_ERROR
-} platform_ptz_status_t;
+typedef enum { PLATFORM_PTZ_STATUS_STOPPED = 0, PLATFORM_PTZ_STATUS_MOVING, PLATFORM_PTZ_STATUS_ERROR } platform_ptz_status_t;
 
 /* VPSS effect types */
 typedef enum {
@@ -92,11 +84,7 @@ typedef enum {
 } platform_vpss_effect_t;
 
 /* IR LED mode types */
-typedef enum {
-  PLATFORM_IRLED_MODE_OFF = 0,
-  PLATFORM_IRLED_MODE_ON,
-  PLATFORM_IRLED_MODE_AUTO
-} platform_irled_mode_t;
+typedef enum { PLATFORM_IRLED_MODE_OFF = 0, PLATFORM_IRLED_MODE_ON, PLATFORM_IRLED_MODE_AUTO } platform_irled_mode_t;
 
 /* Video channel types */
 typedef enum {

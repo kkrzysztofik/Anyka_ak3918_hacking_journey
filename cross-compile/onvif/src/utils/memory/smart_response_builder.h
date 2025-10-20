@@ -39,8 +39,7 @@ int smart_response_build_with_dynamic_buffer(http_response_t* response, const ch
  * @return 0 on success, -1 on error
  * @note Uses existing buffer_pool utilities per AGENTS.md standards
  */
-int smart_response_build_with_buffer_pool(http_response_t* response, const char* soap_content,
-                                          buffer_pool_t* buffer_pool);
+int smart_response_build_with_buffer_pool(http_response_t* response, const char* soap_content, buffer_pool_t* buffer_pool);
 
 /**
  * @brief Smart response builder with dynamic allocation strategy selection
@@ -51,8 +50,7 @@ int smart_response_build_with_buffer_pool(http_response_t* response, const char*
  * @return 0 on success, -1 on error
  * @note Automatically selects optimal allocation strategy based on size
  */
-int smart_response_build(http_response_t* response, const char* soap_content, size_t estimated_size,
-                         buffer_pool_t* buffer_pool);
+int smart_response_build(http_response_t* response, const char* soap_content, size_t estimated_size, buffer_pool_t* buffer_pool);
 
 /**
  * @brief Estimate response size for strategy selection

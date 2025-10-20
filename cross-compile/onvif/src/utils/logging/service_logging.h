@@ -15,12 +15,7 @@
 /**
  * @brief Service logging levels
  */
-typedef enum {
-  SERVICE_LOG_ERROR = 0,
-  SERVICE_LOG_WARNING = 1,
-  SERVICE_LOG_INFO = 2,
-  SERVICE_LOG_DEBUG = 3
-} service_log_level_t;
+typedef enum { SERVICE_LOG_ERROR = 0, SERVICE_LOG_WARNING = 1, SERVICE_LOG_INFO = 2, SERVICE_LOG_DEBUG = 3 } service_log_level_t;
 
 /**
  * @brief Service logging context
@@ -38,8 +33,7 @@ typedef struct {
  * @param action_name Name of the action (can be NULL)
  * @param level Log level
  */
-void service_log_init_context(service_log_context_t* context, const char* service_name,
-                              const char* action_name, service_log_level_t level);
+void service_log_init_context(service_log_context_t* context, const char* service_name, const char* action_name, service_log_level_t level);
 
 /**
  * @brief Log service operation success
@@ -55,8 +49,7 @@ void service_log_operation_success(const service_log_context_t* context, const c
  * @param error_code Error code
  * @param error_message Error message
  */
-void service_log_operation_failure(const service_log_context_t* context, const char* operation,
-                                   int error_code, const char* error_message);
+void service_log_operation_failure(const service_log_context_t* context, const char* operation, int error_code, const char* error_message);
 
 /**
  * @brief Log service validation error
@@ -64,8 +57,7 @@ void service_log_operation_failure(const service_log_context_t* context, const c
  * @param field_name Name of the field that failed validation
  * @param value Value that failed validation
  */
-void service_log_validation_error(const service_log_context_t* context, const char* field_name,
-                                  const char* value);
+void service_log_validation_error(const service_log_context_t* context, const char* field_name, const char* value);
 
 /**
  * @brief Log service configuration error
@@ -73,8 +65,7 @@ void service_log_validation_error(const service_log_context_t* context, const ch
  * @param config_key Configuration key
  * @param error_message Error message
  */
-void service_log_config_error(const service_log_context_t* context, const char* config_key,
-                              const char* error_message);
+void service_log_config_error(const service_log_context_t* context, const char* config_key, const char* error_message);
 
 /**
  * @brief Log service platform operation failure
@@ -82,8 +73,7 @@ void service_log_config_error(const service_log_context_t* context, const char* 
  * @param platform_operation Platform operation that failed
  * @param error_code Platform error code
  */
-void service_log_platform_error(const service_log_context_t* context,
-                                const char* platform_operation, int error_code);
+void service_log_platform_error(const service_log_context_t* context, const char* platform_operation, int error_code);
 
 /**
  * @brief Log service not implemented
@@ -98,8 +88,7 @@ void service_log_not_implemented(const service_log_context_t* context, const cha
  * @param operation Operation that timed out
  * @param timeout_ms Timeout in milliseconds
  */
-void service_log_timeout(const service_log_context_t* context, const char* operation,
-                         int timeout_ms);
+void service_log_timeout(const service_log_context_t* context, const char* operation, int timeout_ms);
 
 /**
  * @brief Log service warning

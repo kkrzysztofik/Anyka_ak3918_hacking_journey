@@ -114,8 +114,7 @@ void onvif_gsoap_reset(onvif_gsoap_context_t* ctx);
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Sets up soap input stream and marks request_state as initialized
  */
-int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* request_xml,
-                                     size_t xml_size);
+int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* request_xml, size_t xml_size);
 
 /* ============================================================================
  * Request Parsing Helper Functions
@@ -131,8 +130,7 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Combines parameter validation, request state check, and timing start
  */
-int onvif_gsoap_validate_and_begin_parse(onvif_gsoap_context_t* ctx, void* out_ptr,
-                                         const char* operation_name, const char* func_name);
+int onvif_gsoap_validate_and_begin_parse(onvif_gsoap_context_t* ctx, void* out_ptr, const char* operation_name, const char* func_name);
 
 /**
  * @brief Parse SOAP envelope structure
@@ -162,8 +160,7 @@ int onvif_gsoap_finalize_parse(onvif_gsoap_context_t* ctx);
  * @param location Function name where error occurred (__func__)
  * @param message Detailed error message
  */
-void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const char* location,
-                           const char* message);
+void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const char* location, const char* message);
 
 /**
  * @brief Get detailed error information
@@ -173,8 +170,7 @@ void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const cha
  * @param soap_error Output: gSOAP error code (can be NULL)
  * @return Error message string
  */
-const char* onvif_gsoap_get_detailed_error(onvif_gsoap_context_t* ctx, int* error_code,
-                                           const char** location, int* soap_error);
+const char* onvif_gsoap_get_detailed_error(onvif_gsoap_context_t* ctx, int* error_code, const char** location, int* soap_error);
 
 /**
  * @brief Check if context has error

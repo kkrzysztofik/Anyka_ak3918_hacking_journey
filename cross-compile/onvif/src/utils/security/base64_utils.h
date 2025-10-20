@@ -34,7 +34,6 @@ int onvif_util_base64_decode(const char* input, char* output, size_t output_size
  * @return ONVIF_SUCCESS on success, ONVIF error code on failure
  * @note Output buffer must be large enough for encoded data
  */
-int onvif_util_base64_encode(const unsigned char* input, size_t input_size, char* output,
-                             size_t output_size);
+int onvif_util_base64_encode(const unsigned char* input, size_t input_size, char* output, size_t output_size);
 
 #endif /* BASE64_UTILS_H */

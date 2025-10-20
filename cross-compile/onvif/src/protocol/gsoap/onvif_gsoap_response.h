@@ -58,9 +58,7 @@ int onvif_gsoap_finalize_response(onvif_gsoap_context_t* ctx);
  * @return 0 on success, error code on failure
  * @note Handles complete SOAP envelope generation with proper error handling
  */
-int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
-                                                onvif_response_callback_t callback,
-                                                void* user_data);
+int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx, onvif_response_callback_t callback, void* user_data);
 
 /**
  * @brief Validates generated response
@@ -79,8 +77,7 @@ int onvif_gsoap_validate_response(const onvif_gsoap_context_t* ctx);
  * @return ONVIF_XML_SUCCESS on success, error code on failure
  * @note Parses SOAP envelope to extract operation element name
  */
-int onvif_gsoap_extract_operation_name(const char* request_data, size_t request_size,
-                                       char* operation_name, size_t operation_name_size);
+int onvif_gsoap_extract_operation_name(const char* request_data, size_t request_size, char* operation_name, size_t operation_name_size);
 
 /**
  * @brief Generates SOAP fault response
@@ -94,10 +91,8 @@ int onvif_gsoap_extract_operation_name(const char* request_data, size_t request_
  * @return Length of generated response on success, error code on failure
  * @note If ctx is NULL, creates and cleans up temporary context
  */
-int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code,
-                                        const char* fault_string, const char* fault_actor,
-                                        const char* fault_detail, char* output_buffer,
-                                        size_t buffer_size);
+int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code, const char* fault_string, const char* fault_actor,
+                                        const char* fault_detail, char* output_buffer, size_t buffer_size);
 
 #endif // ONVIF_GSOAP_RESPONSE_H
 

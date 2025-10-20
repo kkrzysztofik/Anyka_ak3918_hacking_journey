@@ -44,8 +44,6 @@
  * ============================================================================ */
 
 /* Network configuration buffer sizes and defaults */
-#define NETWORK_IP_BUFFER_SIZE    64  /* Buffer size for IP address strings */
-#define NETWORK_XADDR_BUFFER_SIZE 256 /* Buffer size for XAddr URL strings */
 
 /* Imaging settings default values (neutral/middle values in 0-100 range) */
 #define IMAGING_DEFAULT_BRIGHTNESS 50 /* Default brightness setting */
@@ -478,7 +476,7 @@ static int imaging_service_get_capabilities(struct soap* ctx, void** capabilitie
   soap_default_tt__ImagingCapabilities(ctx, caps);
 
   // Get device IP and port from runtime config (with fallback defaults)
-  char device_ip[NETWORK_IP_BUFFER_SIZE] = "192.168.1.100";
+  char device_ip[ONVIF_IP_BUFFER_SIZE] = "192.168.1.100";
   int http_port = HTTP_PORT_DEFAULT;
 
   // Try to get from runtime config, use defaults if not available
@@ -486,7 +484,7 @@ static int imaging_service_get_capabilities(struct soap* ctx, void** capabilitie
   config_runtime_get_int(CONFIG_SECTION_NETWORK, "http_port", &http_port);
 
   // Build XAddr
-  char xaddr[NETWORK_XADDR_BUFFER_SIZE];
+  char xaddr[ONVIF_XADDR_BUFFER_SIZE];
   snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/imaging_service", device_ip, http_port);
   caps->XAddr = soap_strdup(ctx, xaddr);
 

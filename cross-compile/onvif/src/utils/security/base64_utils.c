@@ -50,8 +50,7 @@ int onvif_util_base64_decode(const char* input, char* output, size_t output_size
   return ONVIF_ERROR_MEMORY; // Output buffer too small
 }
 
-int onvif_util_base64_encode(const unsigned char* input, size_t input_size, char* output,
-                             size_t output_size) {
+int onvif_util_base64_encode(const unsigned char* input, size_t input_size, char* output, size_t output_size) {
   if (!input || !output || output_size == 0) {
     return ONVIF_ERROR_INVALID_PARAMETER;
   }

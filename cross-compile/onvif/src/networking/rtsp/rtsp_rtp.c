@@ -26,6 +26,8 @@
 #include "rtsp_rtcp.h"
 #include "rtsp_session.h"
 #include "rtsp_types.h"
+#include "utils/error/error_handling.h"
+#include "utils/security/hash_utils.h"
 
 /* ==================== RTP Functions ==================== */
 
@@ -51,8 +53,7 @@ int rtsp_setup_encoder(rtsp_server_t* server) {
 
   // Request stream binding between VI and VENC (video capture already started
   // globally)
-  if (platform_venc_request_stream(server->vi_handle, server->venc_handle,
-                                   &server->venc_stream_handle) != PLATFORM_SUCCESS) {
+  if (platform_venc_request_stream(server->vi_handle, server->venc_handle, &server->venc_stream_handle) != PLATFORM_SUCCESS) {
     platform_log_error("Failed to request video stream\n");
     platform_venc_cleanup(server->venc_handle);
     server->venc_handle = NULL;
@@ -60,8 +61,8 @@ int rtsp_setup_encoder(rtsp_server_t* server) {
   }
 
   server->encoder_initialized = true;
-  platform_log_notice("Video encoder created and stream started: %dx%d@%dfps, %dkbps\n",
-                      venc_config.width, venc_config.height, venc_config.fps, venc_config.bitrate);
+  platform_log_notice("Video encoder created and stream started: %dx%d@%dfps, %dkbps\n", venc_config.width, venc_config.height, venc_config.fps,
+                      venc_config.bitrate);
   return 0;
 }
 
@@ -108,8 +109,7 @@ int rtsp_setup_audio_encoder(rtsp_server_t* server) {
   // Create audio input using platform abstraction with proper error handling
   platform_result_t ai_result = platform_ai_open(&server->ai_handle);
   if (ai_result != PLATFORM_SUCCESS) {
-    platform_log_warning("Failed to create audio input (error: %d) - continuing without audio\n",
-                         ai_result);
+    platform_log_warning("Failed to create audio input (error: %d) - continuing without audio\n", ai_result);
     server->config.audio_enabled = false; // Disable audio for this server
     return 0;                             // Return success but without audio
   }
@@ -118,7 +118,7 @@ int rtsp_setup_audio_encoder(rtsp_server_t* server) {
 
   // Create audio encoder using platform abstraction
   platform_audio_config_t aenc_config;
-  aenc_config.sample_rate = 16000;
+  aenc_config.sample_rate = AUDIO_SAMPLE_RATE_16KHZ;
   aenc_config.channels = 1;
   aenc_config.bits_per_sample = 16;
   aenc_config.codec = PLATFORM_AUDIO_CODEC_AAC;
@@ -135,8 +135,8 @@ int rtsp_setup_audio_encoder(rtsp_server_t* server) {
   }
 
   server->audio_encoder_initialized = true;
-  platform_log_info("Audio encoder created successfully: %dHz, %d channels, %d bits\n",
-                    aenc_config.sample_rate, aenc_config.channels, aenc_config.bits_per_sample);
+  platform_log_info("Audio encoder created successfully: %dHz, %d channels, %d bits\n", aenc_config.sample_rate, aenc_config.channels,
+                    aenc_config.bits_per_sample);
   return 0;
 }
 
@@ -167,9 +167,13 @@ int rtsp_init_rtp_session(rtsp_session_t* session) {
   if (!session)
     return -1;
 
-  // Generate random SSRC
-  srand((unsigned int)time(NULL));
-  session->rtp_session.ssrc = rand();
+  // Generate cryptographically secure random SSRC
+  uint32_t ssrc;
+  if (onvif_generate_random_bytes((uint8_t*)&ssrc, sizeof(ssrc)) != ONVIF_SUCCESS) {
+    platform_log_error("Failed to generate secure random SSRC\n");
+    return -1;
+  }
+  session->rtp_session.ssrc = ssrc;
   session->rtp_session.sequence = 0;
   session->rtp_session.seq_num = 0;
   session->rtp_session.timestamp = 0;
@@ -239,8 +243,7 @@ int rtsp_init_rtp_session(rtsp_session_t* session) {
 
   // Start RTCP thread for UDP transport
   if (session->rtp_session.transport == RTP_TRANSPORT_UDP) {
-    if (pthread_create(&session->rtp_session.rtcp_thread, NULL, rtcp_thread,
-                       &session->rtp_session) != 0) {
+    if (pthread_create(&session->rtp_session.rtcp_thread, NULL, rtcp_thread, &session->rtp_session) != 0) {
       platform_log_error("Failed to create RTCP thread: %s\n", strerror(errno));
       rtcp_cleanup_session(&session->rtp_session);
       close(session->rtp_session.rtp_sockfd);
@@ -251,8 +254,7 @@ int rtsp_init_rtp_session(rtsp_session_t* session) {
     }
   }
 
-  platform_log_notice("RTP session initialized: RTP port %d, RTCP port %d, SSRC %u\n",
-                      session->rtp_session.rtp_port, session->rtp_session.rtcp_port,
+  platform_log_notice("RTP session initialized: RTP port %d, RTCP port %d, SSRC %u\n", session->rtp_session.rtp_port, session->rtp_session.rtcp_port,
                       session->rtp_session.ssrc);
   return 0;
 }
@@ -285,9 +287,13 @@ int rtsp_init_audio_rtp_session(rtsp_session_t* session) {
   if (!session || !session->audio_enabled)
     return 0;
 
-  // Generate random SSRC for audio
-  srand((unsigned int)time(NULL));
-  session->audio_rtp_session.ssrc = rand();
+  // Generate cryptographically secure random SSRC for audio
+  uint32_t ssrc;
+  if (onvif_generate_random_bytes((uint8_t*)&ssrc, sizeof(ssrc)) != ONVIF_SUCCESS) {
+    platform_log_error("Failed to generate secure random SSRC for audio\n");
+    return -1;
+  }
+  session->audio_rtp_session.ssrc = ssrc;
   session->audio_rtp_session.sequence = 0;
   session->audio_rtp_session.timestamp = 0;
 
@@ -314,8 +320,7 @@ int rtsp_init_audio_rtp_session(rtsp_session_t* session) {
   rtp_addr.sin_addr.s_addr = INADDR_ANY;
   rtp_addr.sin_port = 0; // Let system choose port
 
-  if (bind(session->audio_rtp_session.rtp_sockfd, (struct sockaddr*)&rtp_addr, sizeof(rtp_addr)) <
-      0) {
+  if (bind(session->audio_rtp_session.rtp_sockfd, (struct sockaddr*)&rtp_addr, sizeof(rtp_addr)) < 0) {
     platform_log_error("Failed to bind audio RTP socket: %s\n", strerror(errno));
     close(session->audio_rtp_session.rtp_sockfd);
     close(session->audio_rtp_session.rtcp_sockfd);
@@ -332,8 +337,7 @@ int rtsp_init_audio_rtp_session(rtsp_session_t* session) {
 
   // Bind audio RTCP socket
   rtp_addr.sin_port = htons(session->audio_rtp_session.rtcp_port);
-  if (bind(session->audio_rtp_session.rtcp_sockfd, (struct sockaddr*)&rtp_addr, sizeof(rtp_addr)) <
-      0) {
+  if (bind(session->audio_rtp_session.rtcp_sockfd, (struct sockaddr*)&rtp_addr, sizeof(rtp_addr)) < 0) {
     platform_log_error("Failed to bind audio RTCP socket: %s\n", strerror(errno));
     close(session->audio_rtp_session.rtp_sockfd);
     close(session->audio_rtp_session.rtcp_sockfd);
@@ -356,9 +360,8 @@ int rtsp_init_audio_rtp_session(rtsp_session_t* session) {
     return -1;
   }
 
-  platform_log_notice("Audio RTP session initialized: RTP port %d, RTCP port %d, SSRC %u\n",
-                      session->audio_rtp_session.rtp_port, session->audio_rtp_session.rtcp_port,
-                      session->audio_rtp_session.ssrc);
+  platform_log_notice("Audio RTP session initialized: RTP port %d, RTCP port %d, SSRC %u\n", session->audio_rtp_session.rtp_port,
+                      session->audio_rtp_session.rtcp_port, session->audio_rtp_session.ssrc);
   return 0;
 }
 
@@ -386,8 +389,7 @@ void rtsp_cleanup_audio_rtp_session(rtsp_session_t* session) {
 /**
  * Send RTP packet
  */
-int rtsp_send_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t len,
-                         uint32_t timestamp) {
+int rtsp_send_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t len, uint32_t timestamp) {
   if (!session || !data || len == 0)
     return -1;
 
@@ -403,27 +405,26 @@ int rtsp_send_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t le
 /**
  * Send RTP packet via UDP
  */
-int rtsp_send_rtp_packet_udp(rtsp_session_t* session, const uint8_t* data, size_t len,
-                             uint32_t timestamp) {
+int rtsp_send_rtp_packet_udp(rtsp_session_t* session, const uint8_t* data, size_t len, uint32_t timestamp) {
   if (!session || !data || len == 0)
     return -1;
 
-  uint8_t rtp_packet[1500];
+  uint8_t rtp_packet[RTP_MAX_PACKET_SIZE];
   int pos = 0;
 
   // RTP header
-  rtp_packet[pos++] = 0x80;        // Version (2), Padding (0), Extension (0), CC (0)
-  rtp_packet[pos++] = RTP_PT_H264; // Payload type
-  rtp_packet[pos++] = (session->rtp_session.seq_num >> 8) & 0xFF; // Sequence number
-  rtp_packet[pos++] = session->rtp_session.seq_num & 0xFF;
-  rtp_packet[pos++] = (timestamp >> 24) & 0xFF; // Timestamp
-  rtp_packet[pos++] = (timestamp >> 16) & 0xFF;
-  rtp_packet[pos++] = (timestamp >> 8) & 0xFF;
-  rtp_packet[pos++] = timestamp & 0xFF;
-  rtp_packet[pos++] = (session->rtp_session.ssrc >> 24) & 0xFF; // SSRC
-  rtp_packet[pos++] = (session->rtp_session.ssrc >> 16) & 0xFF;
-  rtp_packet[pos++] = (session->rtp_session.ssrc >> 8) & 0xFF;
-  rtp_packet[pos++] = session->rtp_session.ssrc & 0xFF;
+  rtp_packet[pos++] = RTP_MARKER_BIT;                                                 // Version (2), Padding (0), Extension (0), CC (0)
+  rtp_packet[pos++] = RTP_PT_H264;                                                    // Payload type
+  rtp_packet[pos++] = (session->rtp_session.seq_num >> SHIFT_8_BITS) & RTP_BYTE_MASK; // Sequence number
+  rtp_packet[pos++] = session->rtp_session.seq_num & RTP_BYTE_MASK;
+  rtp_packet[pos++] = (timestamp >> SHIFT_24_BITS) & RTP_BYTE_MASK; // Timestamp
+  rtp_packet[pos++] = (timestamp >> SHIFT_16_BITS) & RTP_BYTE_MASK;
+  rtp_packet[pos++] = (timestamp >> SHIFT_8_BITS) & RTP_BYTE_MASK;
+  rtp_packet[pos++] = timestamp & RTP_BYTE_MASK;
+  rtp_packet[pos++] = (session->rtp_session.ssrc >> SHIFT_24_BITS) & RTP_BYTE_MASK; // SSRC
+  rtp_packet[pos++] = (session->rtp_session.ssrc >> SHIFT_16_BITS) & RTP_BYTE_MASK;
+  rtp_packet[pos++] = (session->rtp_session.ssrc >> SHIFT_8_BITS) & RTP_BYTE_MASK;
+  rtp_packet[pos++] = session->rtp_session.ssrc & RTP_BYTE_MASK;
 
   // Copy payload
   size_t payload_len = len;
@@ -434,8 +435,7 @@ int rtsp_send_rtp_packet_udp(rtsp_session_t* session, const uint8_t* data, size_
   pos += payload_len;
 
   // Send packet
-  ssize_t sent = sendto(session->rtp_session.rtp_sockfd, rtp_packet, pos, 0,
-                        (struct sockaddr*)&session->rtp_session.client_addr,
+  ssize_t sent = sendto(session->rtp_session.rtp_sockfd, rtp_packet, pos, 0, (struct sockaddr*)&session->rtp_session.client_addr,
                         sizeof(session->rtp_session.client_addr));
 
   if (sent != pos) {
@@ -454,27 +454,26 @@ int rtsp_send_rtp_packet_udp(rtsp_session_t* session, const uint8_t* data, size_
 /**
  * Send RTP packet via TCP
  */
-int rtsp_send_rtp_packet_tcp(rtsp_session_t* session, const uint8_t* data, size_t len,
-                             uint32_t timestamp) {
+int rtsp_send_rtp_packet_tcp(rtsp_session_t* session, const uint8_t* data, size_t len, uint32_t timestamp) {
   if (!session || !data || len == 0)
     return -1;
 
-  uint8_t rtp_packet[1500];
+  uint8_t rtp_packet[RTP_MAX_PACKET_SIZE];
   int pos = 0;
 
   // RTP header
-  rtp_packet[pos++] = 0x80;        // Version (2), Padding (0), Extension (0), CC (0)
-  rtp_packet[pos++] = RTP_PT_H264; // Payload type
-  rtp_packet[pos++] = (session->rtp_session.seq_num >> 8) & 0xFF; // Sequence number
-  rtp_packet[pos++] = session->rtp_session.seq_num & 0xFF;
-  rtp_packet[pos++] = (timestamp >> 24) & 0xFF; // Timestamp
-  rtp_packet[pos++] = (timestamp >> 16) & 0xFF;
-  rtp_packet[pos++] = (timestamp >> 8) & 0xFF;
-  rtp_packet[pos++] = timestamp & 0xFF;
-  rtp_packet[pos++] = (session->rtp_session.ssrc >> 24) & 0xFF; // SSRC
-  rtp_packet[pos++] = (session->rtp_session.ssrc >> 16) & 0xFF;
-  rtp_packet[pos++] = (session->rtp_session.ssrc >> 8) & 0xFF;
-  rtp_packet[pos++] = session->rtp_session.ssrc & 0xFF;
+  rtp_packet[pos++] = RTP_MARKER_BIT;                                                 // Version (2), Padding (0), Extension (0), CC (0)
+  rtp_packet[pos++] = RTP_PT_H264;                                                    // Payload type
+  rtp_packet[pos++] = (session->rtp_session.seq_num >> SHIFT_8_BITS) & RTP_BYTE_MASK; // Sequence number
+  rtp_packet[pos++] = session->rtp_session.seq_num & RTP_BYTE_MASK;
+  rtp_packet[pos++] = (timestamp >> SHIFT_24_BITS) & RTP_BYTE_MASK; // Timestamp
+  rtp_packet[pos++] = (timestamp >> SHIFT_16_BITS) & RTP_BYTE_MASK;
+  rtp_packet[pos++] = (timestamp >> SHIFT_8_BITS) & RTP_BYTE_MASK;
+  rtp_packet[pos++] = timestamp & RTP_BYTE_MASK;
+  rtp_packet[pos++] = (session->rtp_session.ssrc >> SHIFT_24_BITS) & RTP_BYTE_MASK; // SSRC
+  rtp_packet[pos++] = (session->rtp_session.ssrc >> SHIFT_16_BITS) & RTP_BYTE_MASK;
+  rtp_packet[pos++] = (session->rtp_session.ssrc >> SHIFT_8_BITS) & RTP_BYTE_MASK;
+  rtp_packet[pos++] = session->rtp_session.ssrc & RTP_BYTE_MASK;
 
   // Copy payload
   size_t payload_len = len;
@@ -485,7 +484,7 @@ int rtsp_send_rtp_packet_tcp(rtsp_session_t* session, const uint8_t* data, size_
   pos += payload_len;
 
   // Send via TCP interleaved
-  uint8_t tcp_packet[1504];
+  uint8_t tcp_packet[RTP_TCP_MAX_PACKET_SIZE];
   tcp_packet[0] = '$';
   tcp_packet[1] = session->rtp_session.tcp_channel_rtp;
   tcp_packet[2] = (pos >> 8) & 0xFF;
@@ -509,17 +508,16 @@ int rtsp_send_rtp_packet_tcp(rtsp_session_t* session, const uint8_t* data, size_
 /**
  * Send audio RTP packet
  */
-int rtsp_send_audio_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t len,
-                               uint32_t timestamp) {
+int rtsp_send_audio_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t len, uint32_t timestamp) {
   if (!session || !data || len == 0 || !session->audio_enabled)
     return -1;
 
-  uint8_t rtp_packet[1500];
+  uint8_t rtp_packet[RTP_MAX_PACKET_SIZE];
   int pos = 0;
 
   // RTP header
-  rtp_packet[pos++] = 0x80;       // Version (2), Padding (0), Extension (0), CC (0)
-  rtp_packet[pos++] = RTP_PT_AAC; // Payload type
+  rtp_packet[pos++] = 0x80;                                              // Version (2), Padding (0), Extension (0), CC (0)
+  rtp_packet[pos++] = RTP_PT_AAC;                                        // Payload type
   rtp_packet[pos++] = (session->audio_rtp_session.sequence >> 8) & 0xFF; // Sequence number
   rtp_packet[pos++] = session->audio_rtp_session.sequence & 0xFF;
   rtp_packet[pos++] = (timestamp >> 24) & 0xFF; // Timestamp
@@ -540,8 +538,7 @@ int rtsp_send_audio_rtp_packet(rtsp_session_t* session, const uint8_t* data, siz
   pos += payload_len;
 
   // Send packet
-  ssize_t sent = sendto(session->audio_rtp_session.rtp_sockfd, rtp_packet, pos, 0,
-                        (struct sockaddr*)&session->audio_rtp_session.client_addr,
+  ssize_t sent = sendto(session->audio_rtp_session.rtp_sockfd, rtp_packet, pos, 0, (struct sockaddr*)&session->audio_rtp_session.client_addr,
                         sizeof(session->audio_rtp_session.client_addr));
 
   if (sent != pos) {

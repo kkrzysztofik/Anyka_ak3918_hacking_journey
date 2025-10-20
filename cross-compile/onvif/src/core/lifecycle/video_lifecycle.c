@@ -126,6 +126,7 @@ static int initialize_video_input(platform_video_resolution_t* resolution, int* 
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
 static int configure_video_channels(platform_vi_handle_t vi_handle, const platform_video_resolution_t* resolution) {
+  (void)vi_handle; // Reserved for future use
   platform_video_channel_attr_t channel_attr = {
     .crop = {.left = 0, .top = 0, .width = resolution->width, .height = resolution->height},
     .res = {[PLATFORM_VIDEO_CHN_MAIN] =
@@ -294,8 +295,8 @@ static void configure_main_stream(const struct application_config* cfg, const pl
     if (stream_config_validate(&cfg->main_stream, true) != ONVIF_SUCCESS) {
       platform_log_warning("warning: main stream configuration validation failed, using "
                            "defaults\n");
-      stream_config_init_defaults(&cfg->main_stream, true);
-      *video_config = cfg->main_stream;
+      // Initialize defaults directly into output config (cfg is const)
+      stream_config_init_defaults(video_config, true);
       // Override FPS with sensor rate if validation failed
       video_config->fps = sensor_fps;
     }

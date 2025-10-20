@@ -139,8 +139,7 @@ int connection_is_timed_out(connection_t* conn) {
   }
 
   uint64_t now = get_time_ms();
-  uint64_t timeout =
-    (conn->state == CONN_STATE_KEEPALIVE) ? KEEPALIVE_TIMEOUT_MS : CONNECTION_TIMEOUT_MS;
+  uint64_t timeout = (conn->state == CONN_STATE_KEEPALIVE) ? KEEPALIVE_TIMEOUT_MS : CONNECTION_TIMEOUT_MS;
 
   return (now - conn->last_activity) > timeout;
 }

@@ -34,8 +34,7 @@ void rtsp_auth_cleanup(struct rtsp_auth_config* auth_config);
  * @param password Password for the user
  * @return 0 on success, -1 on error
  */
-int rtsp_auth_add_user(struct rtsp_auth_config* auth_config, const char* username,
-                       const char* password);
+int rtsp_auth_add_user(struct rtsp_auth_config* auth_config, const char* username, const char* password);
 
 /**
  * @brief Remove a user from the authentication system
@@ -61,8 +60,7 @@ int rtsp_auth_validate_basic(rtsp_session_t* session, const char* auth_header);
  * @param uri Request URI
  * @return 0 on success, -1 on error
  */
-int rtsp_auth_validate_digest(rtsp_session_t* session, const char* auth_header, const char* method,
-                              const char* uri);
+int rtsp_auth_validate_digest(rtsp_session_t* session, const char* auth_header, const char* method, const char* uri);
 
 /**
  * @brief Check if authentication is required for the session
@@ -88,8 +86,7 @@ void rtsp_auth_generate_nonce(char* nonce, size_t nonce_size);
  * @param response Buffer to store response
  * @return 0 on success, -1 on error
  */
-int rtsp_auth_parse_credentials(const char* auth_header, char* username, char* password,
-                                char* realm, char* nonce, char* response);
+int rtsp_auth_parse_credentials(const char* auth_header, char* username, char* password, char* realm, char* nonce, char* response);
 
 /**
  * @brief Verify Digest authentication response
@@ -102,8 +99,7 @@ int rtsp_auth_parse_credentials(const char* auth_header, char* username, char* p
  * @param response Response to verify
  * @return 0 on success, -1 on error
  */
-int rtsp_auth_verify_digest(const char* username, const char* password, const char* realm,
-                            const char* nonce, const char* method, const char* uri,
+int rtsp_auth_verify_digest(const char* username, const char* password, const char* realm, const char* nonce, const char* method, const char* uri,
                             const char* response);
 
 #endif /* RTSP_AUTH_H */

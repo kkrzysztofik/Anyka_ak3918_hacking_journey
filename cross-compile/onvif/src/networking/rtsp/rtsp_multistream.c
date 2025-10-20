@@ -39,27 +39,18 @@ static void* rtsp_multistream_encoder_thread(void* arg);
 static void* rtsp_multistream_audio_thread(void* arg);
 static void* rtsp_multistream_timeout_thread(void* arg);
 static int rtsp_multistream_handle_request(rtsp_session_t* session, const char* request);
-static int rtsp_multistream_send_response(rtsp_session_t* session, int code, const char* headers,
-                                          const char* body);
+static int rtsp_multistream_send_response(rtsp_session_t* session, int code, const char* headers, const char* body);
 static int rtsp_multistream_parse_method(const char* line);
-static void rtsp_multistream_h264_extract_sps_pps(rtsp_stream_info_t* stream, const uint8_t* buf,
-                                                  size_t len);
-static void rtsp_multistream_base64_encode(const uint8_t* input, size_t input_len, char* output,
-                                           size_t output_len);
+static void rtsp_multistream_h264_extract_sps_pps(rtsp_stream_info_t* stream, const uint8_t* buf, size_t len);
+static void rtsp_multistream_base64_encode(const uint8_t* input, size_t input_len, char* output, size_t output_len);
 static void rtsp_multistream_get_local_ip_address(char* ip_str, size_t ip_str_size);
-static void rtsp_multistream_cleanup_video_encoder(rtsp_stream_info_t* stream,
-                                                   platform_vi_handle_t vi_handle);
+static void rtsp_multistream_cleanup_video_encoder(rtsp_stream_info_t* stream, platform_vi_handle_t vi_handle);
 static void rtsp_multistream_cleanup_audio_encoder(rtsp_stream_info_t* stream);
-static int rtsp_multistream_process_video_stream(rtsp_multistream_server_t* server,
-                                                 rtsp_stream_info_t* stream, int stream_index);
-static int rtsp_multistream_get_video_stream_with_retry(rtsp_multistream_server_t* server,
-                                                        rtsp_stream_info_t* stream,
+static int rtsp_multistream_process_video_stream(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream, int stream_index);
+static int rtsp_multistream_get_video_stream_with_retry(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream,
                                                         platform_venc_stream_t* venc_stream);
-static void rtsp_multistream_send_to_sessions(rtsp_multistream_server_t* server,
-                                              rtsp_stream_info_t* stream,
-                                              platform_venc_stream_t* venc_stream);
-static int rtsp_multistream_process_audio_stream(rtsp_multistream_server_t* server,
-                                                 rtsp_stream_info_t* stream);
+static void rtsp_multistream_send_to_sessions(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream, platform_venc_stream_t* venc_stream);
+static int rtsp_multistream_process_audio_stream(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream);
 
 /* Global session counter for unique session IDs */
 static uint32_t g_rtsp_session_counter = 1;           // NOLINT
@@ -69,8 +60,7 @@ static pthread_mutex_t g_rtsp_session_counter_mutex = // NOLINT
 /**
  * Create multi-stream RTSP server
  */
-rtsp_multistream_server_t* rtsp_multistream_server_create(int port,
-                                                          platform_vi_handle_t vi_handle) {
+rtsp_multistream_server_t* rtsp_multistream_server_create(int port, platform_vi_handle_t vi_handle) {
   rtsp_multistream_server_t* server = calloc(1, sizeof(rtsp_multistream_server_t));
   if (!server) {
     platform_log_error("Failed to allocate multi-stream server memory\n");
@@ -112,8 +102,7 @@ rtsp_multistream_server_t* rtsp_multistream_server_create(int port,
 /**
  * Add a stream to the multi-stream server
  */
-int rtsp_multistream_server_add_stream(rtsp_multistream_server_t* server, const char* path,
-                                       const char* name, const video_config_t* video_config,
+int rtsp_multistream_server_add_stream(rtsp_multistream_server_t* server, const char* path, const char* name, const video_config_t* video_config,
                                        const audio_config_t* audio_config, bool audio_enabled) {
   if (!server || !path || !name || !video_config) {
     platform_log_error("Invalid parameters for stream addition\n");
@@ -198,8 +187,7 @@ int rtsp_multistream_server_add_stream(rtsp_multistream_server_t* server, const 
 
   platform_log_debug("rtsp_multistream_server_add_stream: Creating encoder for stream %s "
                      "(%dx%d@%dfps, %dkbps, codec=%d, br_mode=%d, profile=%d)\n",
-                     path, venc_config.width, venc_config.height, venc_config.fps,
-                     venc_config.bitrate, venc_config.codec, venc_config.br_mode,
+                     path, venc_config.width, venc_config.height, venc_config.fps, venc_config.bitrate, venc_config.codec, venc_config.br_mode,
                      venc_config.profile);
 
   if (platform_venc_init(&stream->venc_handle, &venc_config) != PLATFORM_SUCCESS) {
@@ -220,8 +208,7 @@ int rtsp_multistream_server_add_stream(rtsp_multistream_server_t* server, const 
   }
 
   // Request stream binding between VI and VENC
-  if (platform_venc_request_stream(server->vi_handle, stream->venc_handle,
-                                   &stream->venc_stream_handle) != PLATFORM_SUCCESS) {
+  if (platform_venc_request_stream(server->vi_handle, stream->venc_handle, &stream->venc_stream_handle) != PLATFORM_SUCCESS) {
     platform_log_error("Failed to request video stream for stream %s\n", path);
     platform_venc_cleanup(stream->venc_handle);
     stream->venc_handle = NULL;
@@ -307,9 +294,8 @@ int rtsp_multistream_server_add_stream(rtsp_multistream_server_t* server, const 
 
   pthread_mutex_unlock(&server->streams_mutex);
 
-  platform_log_notice("Stream %s (%s) added: %dx%d@%dfps, %dkbps (Audio: disabled)\n", path, name,
-                      video_config->width, video_config->height, video_config->fps,
-                      video_config->bitrate);
+  platform_log_notice("Stream %s (%s) added: %dx%d@%dfps, %dkbps (Audio: disabled)\n", path, name, video_config->width, video_config->height,
+                      video_config->fps, video_config->bitrate);
 
   return 0;
 }
@@ -517,8 +503,7 @@ int rtsp_multistream_server_stop(rtsp_multistream_server_t* server) {
 /**
  * Cleanup video encoder for a stream
  */
-static void rtsp_multistream_cleanup_video_encoder(rtsp_stream_info_t* stream,
-                                                   platform_vi_handle_t vi_handle) {
+static void rtsp_multistream_cleanup_video_encoder(rtsp_stream_info_t* stream, platform_vi_handle_t vi_handle) {
   if (!stream || !stream->encoder_initialized) {
     return;
   }
@@ -569,8 +554,7 @@ static void rtsp_multistream_cleanup_audio_encoder(rtsp_stream_info_t* stream) {
 /**
  * Get video stream with retry mechanism
  */
-static int rtsp_multistream_get_video_stream_with_retry(rtsp_multistream_server_t* server,
-                                                        rtsp_stream_info_t* stream,
+static int rtsp_multistream_get_video_stream_with_retry(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream,
                                                         platform_venc_stream_t* venc_stream) {
   platform_result_t stream_result = PLATFORM_ERROR;
   int retry_count = 0;
@@ -584,8 +568,7 @@ static int rtsp_multistream_get_video_stream_with_retry(rtsp_multistream_server_
       timeout_ms = 10; // Shorter timeout during shutdown
     }
 
-    stream_result =
-      platform_venc_get_stream_by_handle(stream->venc_stream_handle, venc_stream, timeout_ms);
+    stream_result = platform_venc_get_stream_by_handle(stream->venc_stream_handle, venc_stream, timeout_ms);
 
     if (stream_result == PLATFORM_SUCCESS) {
       break; // Success
@@ -612,9 +595,7 @@ static int rtsp_multistream_get_video_stream_with_retry(rtsp_multistream_server_
 /**
  * Send video stream to active sessions
  */
-static void rtsp_multistream_send_to_sessions(rtsp_multistream_server_t* server,
-                                              rtsp_stream_info_t* stream,
-                                              platform_venc_stream_t* venc_stream) {
+static void rtsp_multistream_send_to_sessions(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream, platform_venc_stream_t* venc_stream) {
   // Send to all active sessions for this stream with safe mutex handling
   if (pthread_mutex_lock(&server->sessions_mutex) == 0) {
     rtsp_session_t* session = server->sessions;
@@ -622,8 +603,7 @@ static void rtsp_multistream_send_to_sessions(rtsp_multistream_server_t* server,
       if (session->active && session->state == RTSP_STATE_PLAYING) {
         // Check if this session is for this stream
         if (strstr(session->uri, stream->path)) {
-          rtsp_send_rtp_packet(session, venc_stream->data, venc_stream->len,
-                               venc_stream->timestamp);
+          rtsp_send_rtp_packet(session, venc_stream->data, venc_stream->len, venc_stream->timestamp);
         }
       }
       session = session->next;
@@ -638,8 +618,7 @@ static void rtsp_multistream_send_to_sessions(rtsp_multistream_server_t* server,
 /**
  * Process a single video stream
  */
-static int rtsp_multistream_process_video_stream(rtsp_multistream_server_t* server,
-                                                 rtsp_stream_info_t* stream, int stream_index) {
+static int rtsp_multistream_process_video_stream(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream, int stream_index) {
   if (!stream->enabled || !stream->encoder_initialized) {
     return 0;
   }
@@ -695,8 +674,7 @@ static int rtsp_multistream_process_video_stream(rtsp_multistream_server_t* serv
 /**
  * Process a single audio stream
  */
-static int rtsp_multistream_process_audio_stream(rtsp_multistream_server_t* server,
-                                                 rtsp_stream_info_t* stream) {
+static int rtsp_multistream_process_audio_stream(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream) {
   if (!stream->enabled || !stream->audio_enabled || !stream->audio_encoder_initialized) {
     return 0;
   }
@@ -714,8 +692,7 @@ static int rtsp_multistream_process_audio_stream(rtsp_multistream_server_t* serv
     if (session->active && session->state == RTSP_STATE_PLAYING && session->audio_enabled) {
       // Check if this session is for this stream
       if (strstr(session->uri, stream->path)) {
-        rtsp_send_audio_rtp_packet(session, aenc_stream.data, aenc_stream.len,
-                                   aenc_stream.timestamp);
+        rtsp_send_audio_rtp_packet(session, aenc_stream.data, aenc_stream.len, aenc_stream.timestamp);
       }
     }
     session = session->next;
@@ -773,8 +750,7 @@ int rtsp_multistream_server_destroy(rtsp_multistream_server_t* server) {
 /**
  * Get stream by path
  */
-rtsp_stream_info_t* rtsp_multistream_get_stream(rtsp_multistream_server_t* server,
-                                                const char* path) {
+rtsp_stream_info_t* rtsp_multistream_get_stream(rtsp_multistream_server_t* server, const char* path) {
   if (!server || !path) {
     return NULL;
   }
@@ -811,8 +787,7 @@ int rtsp_multistream_get_stream_count(rtsp_multistream_server_t* server) {
 /**
  * Get stream statistics
  */
-int rtsp_multistream_get_stats(rtsp_multistream_server_t* server, const char* path,
-                               rtsp_stream_stats_t* stats) {
+int rtsp_multistream_get_stats(rtsp_multistream_server_t* server, const char* path, rtsp_stream_stats_t* stats) {
   if (!server || !path || !stats) {
     return -1;
   }
@@ -935,8 +910,7 @@ static void* rtsp_multistream_accept_thread(void* arg) {
 
     char client_ip[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-    platform_log_notice("New RTSP connection from %s:%d (Session: %s)\n", client_ip,
-                        ntohs(client_addr.sin_port), session->session_id);
+    platform_log_notice("New RTSP connection from %s:%d (Session: %s)\n", client_ip, ntohs(client_addr.sin_port), session->session_id);
   }
 
   platform_log_notice("Multi-stream RTSP accept thread finished\n");
@@ -1204,8 +1178,7 @@ int rtsp_parse_headers_enhanced(const char* request, struct rtsp_header** header
 /**
  * Send RTSP error response
  */
-int rtsp_send_error_response(rtsp_session_t* session, enum rtsp_error_code code,
-                             const char* reason) {
+int rtsp_send_error_response(rtsp_session_t* session, enum rtsp_error_code code, const char* reason) {
   if (!session || !reason) {
     return -1;
   }
@@ -1285,28 +1258,23 @@ void rtsp_cleanup_session(rtsp_session_t* session) {
 /**
  * Extract H.264 SPS/PPS from stream
  */
-static void rtsp_multistream_h264_extract_sps_pps(rtsp_stream_info_t* stream, const uint8_t* buf,
-                                                  size_t len) {
+static void rtsp_multistream_h264_extract_sps_pps(rtsp_stream_info_t* stream, const uint8_t* buf, size_t len) {
   for (size_t buf_index = 0; buf_index < len - 4; buf_index++) {
-    if (buf[buf_index] == 0x00 && buf[buf_index + 1] == 0x00 && buf[buf_index + 2] == 0x00 &&
-        buf[buf_index + 3] == 0x01) {
+    if (buf[buf_index] == 0x00 && buf[buf_index + 1] == 0x00 && buf[buf_index + 2] == 0x00 && buf[buf_index + 3] == 0x01) {
       uint8_t nal_type = buf[buf_index + 4] & 0x1F;
       size_t nal_start = buf_index + 4;
       size_t search_index = buf_index + 4;
       while (search_index < len - 4) {
-        if (buf[search_index] == 0x00 && buf[search_index + 1] == 0x00 &&
-            buf[search_index + 2] == 0x00 && buf[search_index + 3] == 0x01) {
+        if (buf[search_index] == 0x00 && buf[search_index + 1] == 0x00 && buf[search_index + 2] == 0x00 && buf[search_index + 3] == 0x01) {
           break;
         }
         search_index++;
       }
       size_t nal_end = search_index;
       if (nal_type == 7 && stream->h264_sps_b64[0] == '\0') {
-        rtsp_multistream_base64_encode(buf + nal_start, nal_end - nal_start, stream->h264_sps_b64,
-                                       sizeof(stream->h264_sps_b64));
+        rtsp_multistream_base64_encode(buf + nal_start, nal_end - nal_start, stream->h264_sps_b64, sizeof(stream->h264_sps_b64));
       } else if (nal_type == 8 && stream->h264_pps_b64[0] == '\0') {
-        rtsp_multistream_base64_encode(buf + nal_start, nal_end - nal_start, stream->h264_pps_b64,
-                                       sizeof(stream->h264_pps_b64));
+        rtsp_multistream_base64_encode(buf + nal_start, nal_end - nal_start, stream->h264_pps_b64, sizeof(stream->h264_pps_b64));
       }
       if (stream->h264_sps_b64[0] && stream->h264_pps_b64[0]) {
         return;
@@ -1319,8 +1287,7 @@ static void rtsp_multistream_h264_extract_sps_pps(rtsp_stream_info_t* stream, co
 /**
  * Base64 encode
  */
-static void rtsp_multistream_base64_encode(const uint8_t* input, size_t input_len, char* output,
-                                           size_t output_len) {
+static void rtsp_multistream_base64_encode(const uint8_t* input, size_t input_len, char* output, size_t output_len) {
   const char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   size_t input_index = 0;
   size_t output_index = 0;

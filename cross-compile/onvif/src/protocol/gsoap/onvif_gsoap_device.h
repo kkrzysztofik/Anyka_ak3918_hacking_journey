@@ -13,6 +13,7 @@
 #ifndef ONVIF_GSOAP_DEVICE_H
 #define ONVIF_GSOAP_DEVICE_H
 
+#include "common/onvif_constants.h"
 #include "generated/soapH.h"    //NOLINT
 #include "generated/soapStub.h" //NOLINT
 #include "protocol/gsoap/onvif_gsoap_core.h"
@@ -27,8 +28,7 @@
  * @note Response contains Manufacturer, Model, FirmwareVersion, SerialNumber, HardwareId
  * @note Output structure is allocated with soap_new__tds__GetDeviceInformation()
  */
-int onvif_gsoap_parse_get_device_information(onvif_gsoap_context_t* ctx,
-                                             struct _tds__GetDeviceInformation** out);
+int onvif_gsoap_parse_get_device_information(onvif_gsoap_context_t* ctx, struct _tds__GetDeviceInformation** out);
 
 /**
  * @brief Parse GetCapabilities ONVIF Device service request
@@ -40,8 +40,7 @@ int onvif_gsoap_parse_get_device_information(onvif_gsoap_context_t* ctx,
  * @note If Category is NULL, all capabilities are returned
  * @note Output structure is allocated with soap_new__tds__GetCapabilities()
  */
-int onvif_gsoap_parse_get_capabilities(onvif_gsoap_context_t* ctx,
-                                       struct _tds__GetCapabilities** out);
+int onvif_gsoap_parse_get_capabilities(onvif_gsoap_context_t* ctx, struct _tds__GetCapabilities** out);
 
 /**
  * @brief Parse GetSystemDateAndTime ONVIF Device service request
@@ -52,8 +51,7 @@ int onvif_gsoap_parse_get_capabilities(onvif_gsoap_context_t* ctx,
  * @note Response contains DateTimeType, DaylightSavings, TimeZone, and UTC/Local DateTime
  * @note Output structure is allocated with soap_new__tds__GetSystemDateAndTime()
  */
-int onvif_gsoap_parse_get_system_date_and_time(onvif_gsoap_context_t* ctx,
-                                               struct _tds__GetSystemDateAndTime** out);
+int onvif_gsoap_parse_get_system_date_and_time(onvif_gsoap_context_t* ctx, struct _tds__GetSystemDateAndTime** out);
 
 /**
  * @brief Parse SystemReboot ONVIF Device service request
@@ -94,7 +92,7 @@ typedef struct {
 typedef struct {
   const void* capabilities;
   int http_port;
-  char device_ip[64];
+  char device_ip[ONVIF_IP_BUFFER_SIZE];
 } capabilities_callback_data_t;
 
 /**
@@ -110,7 +108,7 @@ typedef struct {
 typedef struct {
   int include_capability;
   int http_port;
-  char device_ip[64];
+  char device_ip[ONVIF_IP_BUFFER_SIZE];
 } services_callback_data_t;
 
 /**
@@ -171,8 +169,7 @@ int system_reboot_response_callback(struct soap* soap, void* user_data);
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Generates Device service GetDeviceInformation response containing device identity
  */
-int onvif_gsoap_generate_device_info_response(onvif_gsoap_context_t* ctx, const char* manufacturer,
-                                              const char* model, const char* firmware_version,
+int onvif_gsoap_generate_device_info_response(onvif_gsoap_context_t* ctx, const char* manufacturer, const char* model, const char* firmware_version,
                                               const char* serial_number, const char* hardware_id);
 
 /**
@@ -185,10 +182,8 @@ int onvif_gsoap_generate_device_info_response(onvif_gsoap_context_t* ctx, const 
  * @note Generates Device service GetCapabilities response containing service capabilities
  * @note If capabilities is NULL, creates default capabilities with Device, Media, and PTZ services
  */
-int onvif_gsoap_generate_capabilities_response(onvif_gsoap_context_t* ctx,
-                                                const struct tt__Capabilities* capabilities,
-                                                const char* device_ip,
-                                                int http_port);
+int onvif_gsoap_generate_capabilities_response(onvif_gsoap_context_t* ctx, const struct tt__Capabilities* capabilities, const char* device_ip,
+                                               int http_port);
 
 /**
  * @brief Generate GetSystemDateAndTime response
@@ -198,8 +193,7 @@ int onvif_gsoap_generate_capabilities_response(onvif_gsoap_context_t* ctx,
  * @note Generates Device service GetSystemDateAndTime response containing system date/time
  * @note If utc_time is NULL, uses current system time
  */
-int onvif_gsoap_generate_system_date_time_response(onvif_gsoap_context_t* ctx,
-                                                     const struct tm* utc_time);
+int onvif_gsoap_generate_system_date_time_response(onvif_gsoap_context_t* ctx, const struct tm* utc_time);
 
 /**
  * @brief Generate GetServices response
@@ -210,7 +204,6 @@ int onvif_gsoap_generate_system_date_time_response(onvif_gsoap_context_t* ctx,
  * @return ONVIF_SUCCESS on success, error code otherwise
  * @note Generates Device service GetServices response containing available services
  */
-int onvif_gsoap_generate_services_response(onvif_gsoap_context_t* ctx, int include_capability,
-                                            const char* device_ip, int http_port);
+int onvif_gsoap_generate_services_response(onvif_gsoap_context_t* ctx, int include_capability, const char* device_ip, int http_port);
 
 #endif /* ONVIF_GSOAP_DEVICE_H */

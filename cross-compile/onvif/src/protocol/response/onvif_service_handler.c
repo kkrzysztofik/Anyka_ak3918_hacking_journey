@@ -223,6 +223,7 @@ int onvif_service_handler_generate_success(onvif_service_handler_instance_t* han
 
 int onvif_service_handler_generate_error(onvif_service_handler_instance_t* handler, const char* action_name, error_pattern_t error_pattern,
                                          const char* error_message, http_response_t* response) {
+  (void)error_pattern; // Reserved for future error pattern handling
   if (!handler || !action_name || !error_message || !response) {
     return ONVIF_ERROR_INVALID;
   }

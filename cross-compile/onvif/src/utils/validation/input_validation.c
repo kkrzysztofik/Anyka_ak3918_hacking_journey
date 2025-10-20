@@ -34,24 +34,24 @@
 #define HTTP_MAX_AUTH_HEADER_LEN 1024
 
 /* Path and SOAP validation constants */
-#define VALIDATION_MAX_PATH_LEN     1024 /* Maximum path length for validation */
-#define ONVIF_PATH_PREFIX_LEN       7    /* Length of "/onvif/" prefix */
-#define VALIDATION_MAX_SOAP_ACTION  64   /* Maximum SOAP action length */
+#define VALIDATION_MAX_PATH_LEN    1024 /* Maximum path length for validation */
+#define ONVIF_PATH_PREFIX_LEN      7    /* Length of "/onvif/" prefix */
+#define VALIDATION_MAX_SOAP_ACTION 64   /* Maximum SOAP action length */
 
 /* XML entity escape lengths */
-#define XML_ENTITY_LT_LEN    4  /* "&lt;" */
-#define XML_ENTITY_GT_LEN    4  /* "&gt;" */
-#define XML_ENTITY_AMP_LEN   5  /* "&amp;" */
-#define XML_ENTITY_QUOT_LEN  6  /* "&quot;" */
-#define XML_ENTITY_APOS_LEN  6  /* "&apos;" */
+#define XML_ENTITY_LT_LEN   4 /* "&lt;" */
+#define XML_ENTITY_GT_LEN   4 /* "&gt;" */
+#define XML_ENTITY_AMP_LEN  5 /* "&amp;" */
+#define XML_ENTITY_QUOT_LEN 6 /* "&quot;" */
+#define XML_ENTITY_APOS_LEN 6 /* "&apos;" */
 
 /* HTTP Basic auth constants */
-#define HTTP_BASIC_PREFIX_LEN     6  /* "Basic " */
-#define HTTP_BASIC_PREFIX_BUF_LEN 7  /* "Basic " + null */
+#define HTTP_BASIC_PREFIX_LEN     6 /* "Basic " */
+#define HTTP_BASIC_PREFIX_BUF_LEN 7 /* "Basic " + null */
 
 /* ASCII printable character range */
-#define ASCII_PRINTABLE_MIN 32   /* Space */
-#define ASCII_PRINTABLE_MAX 126  /* Tilde */
+#define ASCII_PRINTABLE_MIN 32  /* Space */
+#define ASCII_PRINTABLE_MAX 126 /* Tilde */
 
 /* ============================================================================
  * Validation Data - Centralized Single Source of Truth
@@ -62,9 +62,8 @@ static const char* const valid_http_methods[] = {"GET", "POST", "HEAD", "OPTIONS
 
 static const char* const valid_http_versions[] = {"HTTP/1.0", "HTTP/1.1", NULL};
 
-static const char* const valid_onvif_paths[] = {"/onvif/device_service", "/onvif/media_service",
-                                                "/onvif/ptz_service",    "/onvif/imaging_service",
-                                                "/onvif/snapshot.jpeg",  NULL};
+static const char* const valid_onvif_paths[] = {"/onvif/device_service",  "/onvif/media_service", "/onvif/ptz_service",
+                                                "/onvif/imaging_service", "/onvif/snapshot.jpeg", NULL};
 
 static const char* const valid_soap_actions[] = {"GetCapabilities",
                                                  "GetDeviceInformation",
@@ -213,27 +212,27 @@ int validate_http_path(const char* path) {
 
   // Check for path traversal attempts
   if (strstr(path, "..") != NULL) {
-    ONVIF_LOG_ERROR("Path traversal attempt detected: %s\n", path);
+    platform_log_error("Path traversal attempt detected: %s\n", path);
     return ONVIF_VALIDATION_FAILED;
   }
   if (strstr(path, "//") != NULL) {
-    ONVIF_LOG_ERROR("Double slash in path detected: %s\n", path);
+    platform_log_error("Double slash in path detected: %s\n", path);
     return ONVIF_VALIDATION_FAILED;
   }
   if (strstr(path, "\\") != NULL) {
-    ONVIF_LOG_ERROR("Backslash in path detected: %s\n", path);
+    platform_log_error("Backslash in path detected: %s\n", path);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Check for null bytes
   if (strlen(path) != strnlen(path, VALIDATION_MAX_PATH_LEN)) {
-    ONVIF_LOG_ERROR("Null byte in path detected: %s\n", path);
+    platform_log_error("Null byte in path detected: %s\n", path);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Check for valid ONVIF paths only
   if (strncmp(path, "/onvif/", ONVIF_PATH_PREFIX_LEN) != 0) {
-    ONVIF_LOG_ERROR("Invalid ONVIF path: %s\n", path);
+    platform_log_error("Invalid ONVIF path: %s\n", path);
     return ONVIF_VALIDATION_FAILED;
   }
 
@@ -261,13 +260,12 @@ int validate_content_length(size_t content_length) {
   const size_t MIN_CONTENT_LENGTH = 0;
 
   if (content_length < MIN_CONTENT_LENGTH) {
-    ONVIF_LOG_ERROR("Content length too small: %zu\n", content_length);
+    platform_log_error("Content length too small: %zu\n", content_length);
     return ONVIF_VALIDATION_FAILED;
   }
 
   if (content_length > MAX_CONTENT_LENGTH) {
-    ONVIF_LOG_ERROR("Content length too large: %zu (max: %zu)\n", content_length,
-                    MAX_CONTENT_LENGTH);
+    platform_log_error("Content length too large: %zu (max: %zu)\n", content_length, MAX_CONTENT_LENGTH);
     return ONVIF_VALIDATION_FAILED;
   }
 
@@ -285,20 +283,19 @@ int validate_soap_action(const char* action) {
   // Check length
   size_t len = strlen(action);
   if (len == 0) {
-    ONVIF_LOG_ERROR("SOAP action is empty\n");
+    platform_log_error("SOAP action is empty\n");
     return ONVIF_VALIDATION_FAILED;
   }
   if (len > VALIDATION_MAX_SOAP_ACTION) {
-    ONVIF_LOG_ERROR("SOAP action too long: %zu (max: %d)\n", len, VALIDATION_MAX_SOAP_ACTION);
+    platform_log_error("SOAP action too long: %zu (max: %d)\n", len, VALIDATION_MAX_SOAP_ACTION);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Check for valid characters (alphanumeric and common XML characters)
   for (size_t i = 0; i < len; i++) {
     char character = action[i];
-    if (!isalnum((unsigned char)character) && character != '_' && character != '-' &&
-        character != '.') {
-      ONVIF_LOG_ERROR("Invalid character in SOAP action: '%c' at position %zu\n", character, i);
+    if (!isalnum((unsigned char)character) && character != '_' && character != '-' && character != '.') {
+      platform_log_error("Invalid character in SOAP action: '%c' at position %zu\n", character, i);
       return ONVIF_VALIDATION_FAILED;
     }
   }
@@ -318,32 +315,30 @@ int validate_xml_content(const char* xml, size_t max_length) {
 
   size_t len = strlen(xml);
   if (len > max_length) {
-    ONVIF_LOG_ERROR("XML content too long: %zu (max: %zu)\n", len, max_length);
+    platform_log_error("XML content too long: %zu (max: %zu)\n", len, max_length);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Check for null bytes
   if (len != strnlen(xml, max_length)) {
-    ONVIF_LOG_ERROR("Null byte detected in XML content\n");
+    platform_log_error("Null byte detected in XML content\n");
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Check for basic XML structure
   // Accept XML declaration or SOAP envelope with various namespace prefixes
-  if (strstr(xml, "<?xml") == NULL && strstr(xml, "<soap:") == NULL &&
-      strstr(xml, "<s:Envelope") == NULL && strstr(xml, "<soapenv:") == NULL) {
-    ONVIF_LOG_ERROR("Invalid XML structure: missing XML declaration or SOAP envelope\n");
+  if (strstr(xml, "<?xml") == NULL && strstr(xml, "<soap:") == NULL && strstr(xml, "<s:Envelope") == NULL && strstr(xml, "<soapenv:") == NULL) {
+    platform_log_error("Invalid XML structure: missing XML declaration or SOAP envelope\n");
     platform_log_debug("Invalid XML content (length=%zu): %.*s\n", len, (int)MIN(len, 200), xml);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Check for dangerous patterns
-  const char* dangerous_patterns[] = {"<script",  "javascript:", "vbscript:", "onload=", "onerror=",
-                                      "onclick=", "eval(",       "exec(",     "system(", NULL};
+  const char* dangerous_patterns[] = {"<script", "javascript:", "vbscript:", "onload=", "onerror=", "onclick=", "eval(", "exec(", "system(", NULL};
 
   for (int i = 0; dangerous_patterns[i] != NULL; i++) {
     if (strcasestr(xml, dangerous_patterns[i]) != NULL) {
-      ONVIF_LOG_ERROR("Dangerous pattern detected in XML: %s\n", dangerous_patterns[i]);
+      platform_log_error("Dangerous pattern detected in XML: %s\n", dangerous_patterns[i]);
       return ONVIF_VALIDATION_FAILED;
     }
   }
@@ -438,8 +433,7 @@ int validate_username_input(const char* username) {
   }
 
   // Use common validation utilities
-  validation_result_t result =
-    validate_string("username", username, 1, HTTP_MAX_USERNAME_LEN - 1, 0);
+  validation_result_t result = validate_string("username", username, 1, HTTP_MAX_USERNAME_LEN - 1, 0);
   if (!validation_is_valid(&result)) {
     platform_log_warning("Invalid username: %s", validation_get_error_message(&result));
     return ONVIF_VALIDATION_FAILED;
@@ -473,8 +467,7 @@ int validate_password_input(const char* password) {
   }
 
   // Use common validation utilities
-  validation_result_t result =
-    validate_string("password", password, 1, HTTP_MAX_PASSWORD_LEN - 1, 0);
+  validation_result_t result = validate_string("password", password, 1, HTTP_MAX_PASSWORD_LEN - 1, 0);
   if (!validation_is_valid(&result)) {
     platform_log_warning("Invalid password: %s", validation_get_error_message(&result));
     return ONVIF_VALIDATION_FAILED;
@@ -508,8 +501,7 @@ int validate_auth_header_input(const char* auth_header) {
   }
 
   // Use common validation utilities
-  validation_result_t result =
-    validate_string("auth_header", auth_header, HTTP_BASIC_PREFIX_LEN, HTTP_MAX_AUTH_HEADER_LEN - 1, 0);
+  validation_result_t result = validate_string("auth_header", auth_header, HTTP_BASIC_PREFIX_LEN, HTTP_MAX_AUTH_HEADER_LEN - 1, 0);
   if (!validation_is_valid(&result)) {
     platform_log_warning("Invalid Authorization header: %s", validation_get_error_message(&result));
     return ONVIF_VALIDATION_FAILED;
@@ -629,35 +621,34 @@ int validate_http_request(const http_request_t* request) {
 
   // Validate method
   if (validate_http_method(request->method) != ONVIF_VALIDATION_SUCCESS) {
-    ONVIF_LOG_ERROR("Invalid HTTP method: %s\n", request->method);
+    platform_log_error("Invalid HTTP method: %s\n", request->method);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Validate path
   if (validate_http_path(request->path) != ONVIF_VALIDATION_SUCCESS) {
-    ONVIF_LOG_ERROR("Invalid HTTP path: %s\n", request->path);
+    platform_log_error("Invalid HTTP path: %s\n", request->path);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Validate version
   if (validate_http_version(request->version) != ONVIF_VALIDATION_SUCCESS) {
-    ONVIF_LOG_ERROR("Invalid HTTP version: %s\n", request->version);
+    platform_log_error("Invalid HTTP version: %s\n", request->version);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Validate content length
   if (validate_content_length(request->content_length) != ONVIF_VALIDATION_SUCCESS) {
-    ONVIF_LOG_ERROR("Invalid content length: %zu\n", request->content_length);
+    platform_log_error("Invalid content length: %zu\n", request->content_length);
     return ONVIF_VALIDATION_FAILED;
   }
 
   // Validate body if present
   if (request->body && request->body_length > 0) {
     if (validate_xml_content(request->body, request->body_length) != ONVIF_VALIDATION_SUCCESS) {
-      ONVIF_LOG_ERROR("Invalid XML content in request body\n");
+      platform_log_error("Invalid XML content in request body\n");
 
-      platform_log_debug("Full request body content (length=%zu): %.*s\n", request->body_length,
-                         (int)request->body_length, request->body);
+      platform_log_debug("Full request body content (length=%zu): %.*s\n", request->body_length, (int)request->body_length, request->body);
       return ONVIF_VALIDATION_FAILED;
     }
   }

@@ -157,53 +157,33 @@ struct media_profile {
   } ptz;
 };
 
-int onvif_media_get_profiles(struct media_profile** profile_list,
-                             int* count); /**< Enumerate media profiles. */
-int onvif_media_get_profile(const char* profile_token,
-                            struct media_profile* profile); /**< Get single profile. */
-int onvif_media_get_video_sources(struct video_source** sources,
-                                  int* count); /**< Enumerate video sources. */
-int onvif_media_get_audio_sources(struct audio_source** sources,
-                                  int* count); /**< Enumerate audio sources. */
-int onvif_media_get_video_source_configurations(struct video_source_configuration** configs,
-                                                int* count); /**< Get video source configs. */
-int onvif_media_get_video_encoder_configurations(struct video_encoder_configuration** configs,
-                                                 int* count); /**< Video encoder configs. */
-int onvif_media_get_audio_source_configurations(struct audio_source_configuration** configs,
-                                                int* count); /**< Audio source configs. */
-int onvif_media_get_audio_encoder_configurations(struct audio_encoder_configuration** configs,
-                                                 int* count); /**< Audio encoder configs. */
-int onvif_media_get_stream_uri(const char* profile_token, const char* protocol,
-                               struct stream_uri* uri); /**< Build stream URI. */
-int onvif_media_get_snapshot_uri(const char* profile_token,
-                                 struct stream_uri* uri); /**< Build snapshot URI. */
-int onvif_media_create_profile(const char* name, const char* token,
-                               struct media_profile* profile); /**< Create a new media profile. */
-int onvif_media_delete_profile(const char* profile_token);     /**< Delete a media profile. */
-int onvif_media_set_video_source_configuration(
-  const char* configuration_token,
-  const struct video_source_configuration* config); /**< Set video source configuration. */
-int onvif_media_set_video_encoder_configuration(
-  const char* configuration_token,
-  const struct video_encoder_configuration* config); /**< Set video encoder configuration. */
-int onvif_media_set_audio_source_configuration(
-  const char* configuration_token,
-  const struct audio_source_configuration* config); /**< Set audio source configuration. */
-int onvif_media_set_audio_encoder_configuration(
-  const char* configuration_token,
-  const struct audio_encoder_configuration* config); /**< Set audio encoder configuration. */
-int onvif_media_start_multicast_streaming(
-  const char* profile_token); /**< Start multicast streaming. */
-int onvif_media_stop_multicast_streaming(
-  const char* profile_token); /**< Stop multicast streaming. */
-int onvif_media_get_metadata_configurations(struct metadata_configuration** configs,
-                                            int* count); /**< Get metadata configurations. */
-int onvif_media_set_metadata_configuration(
-  const char* configuration_token,
-  const struct metadata_configuration* config); /**< Set metadata configuration. */
-int onvif_media_handle_request(
-  const char* action_name, const http_request_t* request,
-  http_response_t* response); /**< Handle ONVIF media service requests. */
+int onvif_media_get_profiles(struct media_profile** profile_list, int* count);                              /**< Enumerate media profiles. */
+int onvif_media_get_profile(const char* profile_token, struct media_profile* profile);                      /**< Get single profile. */
+int onvif_media_get_video_sources(struct video_source** sources, int* count);                               /**< Enumerate video sources. */
+int onvif_media_get_audio_sources(struct audio_source** sources, int* count);                               /**< Enumerate audio sources. */
+int onvif_media_get_video_source_configurations(struct video_source_configuration** configs, int* count);   /**< Get video source configs. */
+int onvif_media_get_video_encoder_configurations(struct video_encoder_configuration** configs, int* count); /**< Video encoder configs. */
+int onvif_media_get_audio_source_configurations(struct audio_source_configuration** configs, int* count);   /**< Audio source configs. */
+int onvif_media_get_audio_encoder_configurations(struct audio_encoder_configuration** configs, int* count); /**< Audio encoder configs. */
+int onvif_media_get_stream_uri(const char* profile_token, const char* protocol, struct stream_uri* uri);    /**< Build stream URI. */
+int onvif_media_get_snapshot_uri(const char* profile_token, struct stream_uri* uri);                        /**< Build snapshot URI. */
+int onvif_media_create_profile(const char* name, const char* token, struct media_profile* profile);         /**< Create a new media profile. */
+int onvif_media_delete_profile(const char* profile_token);                                                  /**< Delete a media profile. */
+int onvif_media_set_video_source_configuration(const char* configuration_token,
+                                               const struct video_source_configuration* config); /**< Set video source configuration. */
+int onvif_media_set_video_encoder_configuration(const char* configuration_token,
+                                                const struct video_encoder_configuration* config); /**< Set video encoder configuration. */
+int onvif_media_set_audio_source_configuration(const char* configuration_token,
+                                               const struct audio_source_configuration* config); /**< Set audio source configuration. */
+int onvif_media_set_audio_encoder_configuration(const char* configuration_token,
+                                                const struct audio_encoder_configuration* config); /**< Set audio encoder configuration. */
+int onvif_media_start_multicast_streaming(const char* profile_token);                              /**< Start multicast streaming. */
+int onvif_media_stop_multicast_streaming(const char* profile_token);                               /**< Stop multicast streaming. */
+int onvif_media_get_metadata_configurations(struct metadata_configuration** configs, int* count);  /**< Get metadata configurations. */
+int onvif_media_set_metadata_configuration(const char* configuration_token,
+                                           const struct metadata_configuration* config); /**< Set metadata configuration. */
+int onvif_media_handle_request(const char* action_name, const http_request_t* request,
+                               http_response_t* response); /**< Handle ONVIF media service requests. */
 
 /* Media service functions */
 

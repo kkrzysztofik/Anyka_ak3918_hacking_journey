@@ -17,6 +17,7 @@
 
 #include "core/config/config.h"
 #include "networking/rtsp/rtsp_multistream.h"
+#include "platform/platform_common.h"
 
 /**
  * @brief Initialize video input and RTSP streaming system

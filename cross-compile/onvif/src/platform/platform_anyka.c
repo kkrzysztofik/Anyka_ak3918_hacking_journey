@@ -46,80 +46,80 @@
 #define ERROR_TYPE_INVALID_USER  4
 
 /* Platform timing and delay constants (milliseconds) */
-#define PLATFORM_DELAY_MS_SHORT             10   /* Short delay */
-#define PLATFORM_DELAY_MS_MEDIUM            100  /* Medium delay for encoder startup */
-#define PLATFORM_DELAY_MS_RETRY             200  /* Retry delay */
-#define PLATFORM_DELAY_MS_LONG              300  /* Long delay before retry */
-#define PLATFORM_DELAY_MS_VI_INIT           500  /* VI initialization delay */
-#define PLATFORM_DELAY_MS_STATS_INTERVAL    2000 /* Statistics calculation interval */
+#define PLATFORM_DELAY_MS_SHORT             10    /* Short delay */
+#define PLATFORM_DELAY_MS_MEDIUM            100   /* Medium delay for encoder startup */
+#define PLATFORM_DELAY_MS_RETRY             200   /* Retry delay */
+#define PLATFORM_DELAY_MS_LONG              300   /* Long delay before retry */
+#define PLATFORM_DELAY_MS_VI_INIT           500   /* VI initialization delay */
+#define PLATFORM_DELAY_MS_STATS_INTERVAL    2000  /* Statistics calculation interval */
 #define PLATFORM_DELAY_MS_MAX_BITRATE_VALID 20000 /* Maximum bitrate validation timeout */
 
 /* Platform retry and timeout constants */
-#define PLATFORM_RETRY_COUNT_MAX            10  /* Maximum retry attempts */
-#define PLATFORM_RETRY_DELAY_BASE_MS        10  /* Base retry delay */
-#define PLATFORM_RETRY_DELAY_INCREMENT_MS   5   /* Retry delay increment per attempt */
-#define PLATFORM_TIMEOUT_ITERATIONS_MAX     100 /* Maximum timeout loop iterations */
+#define PLATFORM_RETRY_COUNT_MAX          10  /* Maximum retry attempts */
+#define PLATFORM_RETRY_DELAY_BASE_MS      10  /* Base retry delay */
+#define PLATFORM_RETRY_DELAY_INCREMENT_MS 5   /* Retry delay increment per attempt */
+#define PLATFORM_TIMEOUT_ITERATIONS_MAX   100 /* Maximum timeout loop iterations */
 
 /* Video resolution constants (pixels) */
-#define PLATFORM_VIDEO_WIDTH_HD        1280 /* HD video width */
-#define PLATFORM_VIDEO_HEIGHT_HD       720  /* HD video height */
-#define PLATFORM_VIDEO_WIDTH_VGA       640  /* VGA video width */
-#define PLATFORM_VIDEO_HEIGHT_VGA      480  /* VGA video height */
-#define PLATFORM_VIDEO_DIMENSION_MAX   4096 /* Maximum video dimension */
+#define PLATFORM_VIDEO_WIDTH_HD      1280 /* HD video width */
+#define PLATFORM_VIDEO_HEIGHT_HD     720  /* HD video height */
+#define PLATFORM_VIDEO_WIDTH_VGA     640  /* VGA video width */
+#define PLATFORM_VIDEO_HEIGHT_VGA    480  /* VGA video height */
+#define PLATFORM_VIDEO_DIMENSION_MAX 4096 /* Maximum video dimension */
 
 /* Video encoder FPS constants */
-#define PLATFORM_VIDEO_FPS_MIN         1   /* Minimum FPS */
-#define PLATFORM_VIDEO_FPS_MAX         60  /* Maximum FPS */
-#define PLATFORM_VIDEO_FPS_SNAPSHOT    10  /* Snapshot FPS */
+#define PLATFORM_VIDEO_FPS_MIN      1  /* Minimum FPS */
+#define PLATFORM_VIDEO_FPS_MAX      60 /* Maximum FPS */
+#define PLATFORM_VIDEO_FPS_SNAPSHOT 10 /* Snapshot FPS */
 
 /* Video encoder bitrate constants (kbps) */
-#define PLATFORM_VIDEO_BITRATE_MIN     100   /* Minimum bitrate */
-#define PLATFORM_VIDEO_BITRATE_MAX     10000 /* Maximum bitrate */
-#define PLATFORM_VIDEO_BITRATE_SNAPSHOT 1000 /* Snapshot bitrate */
+#define PLATFORM_VIDEO_BITRATE_MIN      100   /* Minimum bitrate */
+#define PLATFORM_VIDEO_BITRATE_MAX      10000 /* Maximum bitrate */
+#define PLATFORM_VIDEO_BITRATE_SNAPSHOT 1000  /* Snapshot bitrate */
 
 /* Video encoder QP (Quantization Parameter) constants */
-#define PLATFORM_VIDEO_QP_MIN_DEFAULT  20 /* Minimum QP for video */
-#define PLATFORM_VIDEO_QP_MAX_DEFAULT  45 /* Maximum QP for video */
-#define PLATFORM_VIDEO_QP_MAX_JPEG     51 /* Maximum QP for JPEG/snapshot */
+#define PLATFORM_VIDEO_QP_MIN_DEFAULT 20 /* Minimum QP for video */
+#define PLATFORM_VIDEO_QP_MAX_DEFAULT 45 /* Maximum QP for video */
+#define PLATFORM_VIDEO_QP_MAX_JPEG    51 /* Maximum QP for JPEG/snapshot */
 
 /* Video encoder GOP constants */
-#define PLATFORM_VIDEO_GOP_DEFAULT     50 /* Default GOP length */
+#define PLATFORM_VIDEO_GOP_DEFAULT 50 /* Default GOP length */
 
 /* Buffer size constants (bytes) */
-#define PLATFORM_BUFFER_SIZE_SMALL     32   /* Small buffer size */
-#define PLATFORM_BUFFER_SIZE_MEDIUM    256  /* Medium buffer size */
-#define PLATFORM_BUFFER_SIZE_PAGE      4096 /* Page-aligned buffer size */
+#define PLATFORM_BUFFER_SIZE_SMALL  32   /* Small buffer size */
+#define PLATFORM_BUFFER_SIZE_MEDIUM 256  /* Medium buffer size */
+#define PLATFORM_BUFFER_SIZE_PAGE   4096 /* Page-aligned buffer size */
 
 /* Stream buffer constants */
-#define PLATFORM_STREAM_BUFFER_MAX     50  /* Maximum stream buffers (ONE_STREAM_MAX) */
+#define PLATFORM_STREAM_BUFFER_MAX 50 /* Maximum stream buffers (ONE_STREAM_MAX) */
 
 /* Buffer usage thresholds (floating point ratios) */
 #define PLATFORM_BUFFER_USAGE_HIGH_THRESHOLD 0.8F /* 80% buffer usage warning threshold */
 
 /* Time conversion constants */
-#define PLATFORM_TIME_MS_PER_SECOND    1000   /* Milliseconds per second */
-#define PLATFORM_TIME_US_PER_MS        1000   /* Microseconds per millisecond */
-#define PLATFORM_TIME_US_CONVERSION    10000  /* Microsecond conversion factor */
-#define PLATFORM_TIME_SECONDS_PER_MINUTE 60   /* Seconds per minute / degrees per unit */
+#define PLATFORM_TIME_MS_PER_SECOND      1000  /* Milliseconds per second */
+#define PLATFORM_TIME_US_PER_MS          1000  /* Microseconds per millisecond */
+#define PLATFORM_TIME_US_CONVERSION      10000 /* Microsecond conversion factor */
+#define PLATFORM_TIME_SECONDS_PER_MINUTE 60    /* Seconds per minute / degrees per unit */
 
 /* Memory conversion constants */
-#define PLATFORM_MEMORY_KB_TO_BYTES    1024 /* Kilobytes to bytes */
+#define PLATFORM_MEMORY_KB_TO_BYTES 1024 /* Kilobytes to bytes */
 
 /* Temperature conversion constants */
-#define PLATFORM_TEMP_MILLI_TO_UNIT    1000.0F /* Millidegrees to degrees */
+#define PLATFORM_TEMP_MILLI_TO_UNIT 1000.0F /* Millidegrees to degrees */
 
 /* Bitrate conversion constants */
-#define PLATFORM_BITRATE_BITS_PER_BYTE 8ULL  /* Bits per byte */
-#define PLATFORM_BITRATE_CONVERSION    1000  /* Bitrate conversion factor */
+#define PLATFORM_BITRATE_BITS_PER_BYTE 8ULL /* Bits per byte */
+#define PLATFORM_BITRATE_CONVERSION    1000 /* Bitrate conversion factor */
 
 /* String parsing constants */
-#define PLATFORM_PARSE_BASE_DECIMAL    10  /* Decimal base for parsing */
-#define PLATFORM_MEMINFO_TOTAL_OFFSET  9   /* "MemTotal:" string length */
-#define PLATFORM_MEMINFO_AVAIL_OFFSET  13  /* "MemAvailable:" string length */
+#define PLATFORM_PARSE_BASE_DECIMAL   10 /* Decimal base for parsing */
+#define PLATFORM_MEMINFO_TOTAL_OFFSET 9  /* "MemTotal:" string length */
+#define PLATFORM_MEMINFO_AVAIL_OFFSET 13 /* "MemAvailable:" string length */
 
 /* Memory address validation constants */
-#define PLATFORM_MEMORY_ADDR_MIN       0x1000     /* Minimum valid memory address */
-#define PLATFORM_MEMORY_ADDR_MAX       0xFFFFFFFF /* Maximum valid memory address */
+#define PLATFORM_MEMORY_ADDR_MIN 0x1000     /* Minimum valid memory address */
+#define PLATFORM_MEMORY_ADDR_MAX 0xFFFFFFFF /* Maximum valid memory address */
 
 /* Percentage constants */
 #define PLATFORM_PERCENTAGE_MULTIPLIER 100 /* Percentage multiplier */
@@ -128,15 +128,12 @@
 #include "utils/memory/memory_manager.h"
 
 /* Forward declarations */
-static int get_stream_with_retry(void* stream_handle, struct video_stream* anyka_stream,
-                                 uint32_t timeout_ms);
+static int get_stream_with_retry(void* stream_handle, struct video_stream* anyka_stream, uint32_t timeout_ms);
 static bool lock_platform_mutex(void);
 static void unlock_platform_mutex(void);
 
 /* Stream utility functions - consolidate common stream operations */
-static platform_result_t get_video_stream_internal(void* stream_handle,
-                                                   platform_venc_stream_t* stream,
-                                                   uint32_t timeout_ms, bool is_stream_handle);
+static platform_result_t get_video_stream_internal(void* stream_handle, platform_venc_stream_t* stream, uint32_t timeout_ms, bool is_stream_handle);
 static void release_video_stream_internal(void* stream_handle, platform_venc_stream_t* stream);
 /* Ensure even dimensions for VI constraints */
 static inline int make_even_int(int value) {
@@ -155,7 +152,7 @@ static uint32_t g_encoder_active_count = 0;     // NOLINT
 static uint32_t g_audio_active_count = 0;       // NOLINT
 static bool g_cleanup_in_progress = false;      // NOLINT
 static pthread_mutex_t g_platform_state_mutex = // NOLINT
-  PTHREAD_MUTEX_INITIALIZER; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)LIT
+  PTHREAD_MUTEX_INITIALIZER;                    // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)LIT
 /* Enhanced video encoder statistics and monitoring - following ak_venc.c
  * reference */
 typedef struct {
@@ -196,8 +193,7 @@ typedef struct {
 /* Global video encoder statistics and performance monitoring */
 static platform_venc_statistics_t g_venc_stats = {0}; // NOLINT
 static platform_venc_performance_t g_venc_perf = {0}; // NOLINT
-static pthread_mutex_t
-  g_venc_stats_mutex = // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static pthread_mutex_t g_venc_stats_mutex =           // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
   PTHREAD_MUTEX_INITIALIZER;
 
 /* Audio stream context structure for proper lifecycle management */
@@ -219,22 +215,16 @@ struct snapshot_context {
 /* Internal helper functions - forward declarations */
 
 /* Enhanced video encoder logging and statistics functions */
-static void platform_venc_log_statistics(const platform_venc_statistics_t* stats,
-                                         const char* context);
-static void platform_venc_log_performance(const platform_venc_performance_t* perf,
-                                          const char* context);
-static void platform_venc_update_statistics(platform_venc_statistics_t* statistics,
-                                            uint32_t frame_size_bytes, uint32_t frame_type_code,
+static void platform_venc_log_statistics(const platform_venc_statistics_t* stats, const char* context);
+static void platform_venc_log_performance(const platform_venc_performance_t* perf, const char* context);
+static void platform_venc_update_statistics(platform_venc_statistics_t* statistics, uint32_t frame_size_bytes, uint32_t frame_type_code,
                                             uint64_t timestamp_ms);
-static void platform_venc_log_encoder_parameters(const struct encode_param* param,
-                                                 const char* context);
+static void platform_venc_log_encoder_parameters(const struct encode_param* param, const char* context);
 static void platform_venc_log_stream_info(const struct video_stream* stream, const char* context);
 static void platform_venc_log_error_context(int error_code, const char* operation, void* handle);
-static void platform_venc_log_buffer_status(uint32_t buffer_count, uint32_t max_buffers,
-                                            uint32_t overflow_count, const char* context);
+static void platform_venc_log_buffer_status(uint32_t buffer_count, uint32_t max_buffers, uint32_t overflow_count, const char* context);
 static void platform_venc_log_fps_switch(uint32_t old_fps, uint32_t new_fps, const char* context);
-static void platform_venc_log_frame_timing(uint64_t capture_time, uint64_t encode_time,
-                                           uint64_t total_time, const char* context);
+static void platform_venc_log_frame_timing(uint64_t capture_time, uint64_t encode_time, uint64_t total_time, const char* context);
 
 static int map_video_codec(platform_video_codec_t codec) {
   switch (codec) {
@@ -519,8 +509,7 @@ void platform_vi_close(platform_vi_handle_t handle) {
   }
 }
 
-platform_result_t platform_vi_get_sensor_resolution(platform_vi_handle_t handle,
-                                                    platform_video_resolution_t* resolution) {
+platform_result_t platform_vi_get_sensor_resolution(platform_vi_handle_t handle, platform_video_resolution_t* resolution) {
   if (!handle || !resolution) {
     return PLATFORM_ERROR_NULL;
   }
@@ -535,8 +524,7 @@ platform_result_t platform_vi_get_sensor_resolution(platform_vi_handle_t handle,
   return PLATFORM_SUCCESS;
 }
 
-platform_result_t platform_vi_switch_day_night(platform_vi_handle_t handle,
-                                               platform_daynight_mode_t mode) {
+platform_result_t platform_vi_switch_day_night(platform_vi_handle_t handle, platform_daynight_mode_t mode) {
   if (!handle) {
     return PLATFORM_ERROR_NULL;
   }
@@ -641,8 +629,7 @@ platform_result_t platform_vi_capture_off(platform_vi_handle_t handle) {
   return PLATFORM_SUCCESS;
 }
 
-platform_result_t platform_vi_set_channel_attr(platform_vi_handle_t handle,
-                                               const platform_video_channel_attr_t* attr) {
+platform_result_t platform_vi_set_channel_attr(platform_vi_handle_t handle, const platform_video_channel_attr_t* attr) {
   if (!handle || !attr) {
     return PLATFORM_ERROR_NULL;
   }
@@ -683,8 +670,7 @@ platform_result_t platform_vi_set_channel_attr(platform_vi_handle_t handle,
 
 platform_result_t platform_vi_get_fps(platform_vi_handle_t handle, int* fps) {
   if (!handle || !fps) {
-    platform_log_error("platform_vi_get_fps: Invalid parameters (handle=%p, fps=%p)\n", handle,
-                       fps);
+    platform_log_error("platform_vi_get_fps: Invalid parameters (handle=%p, fps=%p)\n", handle, fps);
     return PLATFORM_ERROR_NULL;
   }
 
@@ -723,8 +709,7 @@ platform_result_t platform_vpss_effect_set( // NOLINT
   return PLATFORM_SUCCESS;
 }
 
-platform_result_t platform_vpss_effect_get(platform_vi_handle_t handle,
-                                           platform_vpss_effect_t effect, int* value) {
+platform_result_t platform_vpss_effect_get(platform_vi_handle_t handle, platform_vpss_effect_t effect, int* value) {
   if (!handle || !value) {
     return PLATFORM_ERROR_NULL;
   }
@@ -742,11 +727,9 @@ platform_result_t platform_vpss_effect_get(platform_vi_handle_t handle,
 }
 
 /* Video Encoder functions */
-platform_result_t platform_venc_init(platform_venc_handle_t* handle,
-                                     const platform_video_config_t* config) {
+platform_result_t platform_venc_init(platform_venc_handle_t* handle, const platform_video_config_t* config) {
   if (!handle || !config) {
-    platform_log_error("platform_venc_init: Invalid parameters (handle=%p, config=%p)\n", handle,
-                       config);
+    platform_log_error("platform_venc_init: Invalid parameters (handle=%p, config=%p)\n", handle, config);
     return PLATFORM_ERROR_NULL;
   }
 
@@ -792,8 +775,7 @@ platform_result_t platform_venc_init(platform_venc_handle_t* handle,
 
   platform_log_debug("platform_venc_init: Video config validated and clamped (w=%d->%d, "
                      "h=%d->%d, fps=%d->%d, bitrate=%d->%d)\n",
-                     config->width, width, config->height, height, config->fps, fps,
-                     config->bitrate, bitrate);
+                     config->width, width, config->height, height, config->fps, fps, config->bitrate, bitrate);
 
   // Map codec type
   int enc_out_type = map_video_codec(config->codec);
@@ -806,8 +788,7 @@ platform_result_t platform_venc_init(platform_venc_handle_t* handle,
   if (config->br_mode >= 0) {
     br_mode = map_platform_br_mode(config->br_mode);
     if (br_mode < 0) {
-      platform_log_warning("platform_venc_init: Invalid bitrate mode %d, defaulting to CBR\n",
-                           config->br_mode);
+      platform_log_warning("platform_venc_init: Invalid bitrate mode %d, defaulting to CBR\n", config->br_mode);
       br_mode = BR_MODE_CBR;
     }
   }
@@ -817,8 +798,7 @@ platform_result_t platform_venc_init(platform_venc_handle_t* handle,
   if (config->profile >= 0) {
     profile = map_platform_profile(config->profile);
     if (profile < 0) {
-      platform_log_warning("platform_venc_init: Invalid profile %d, defaulting to MAIN\n",
-                           config->profile);
+      platform_log_warning("platform_venc_init: Invalid profile %d, defaulting to MAIN\n", config->profile);
       profile = PROFILE_MAIN;
     }
   }
@@ -935,8 +915,7 @@ void platform_venc_cleanup(platform_venc_handle_t handle) {
   }
 }
 
-platform_result_t platform_venc_get_frame(platform_venc_handle_t handle, uint8_t** data,
-                                          uint32_t* size) {
+platform_result_t platform_venc_get_frame(platform_venc_handle_t handle, uint8_t** data, uint32_t* size) {
   if (!handle || !data || !size) {
     platform_log_error("platform_venc_get_frame: Invalid parameters (handle=%p, data=%p, "
                        "size=%p)\n",
@@ -952,8 +931,7 @@ platform_result_t platform_venc_get_frame(platform_venc_handle_t handle, uint8_t
   uint32_t buffer_count = 0;
   uint32_t max_buffers = 0;
   uint32_t overflow_count = 0;
-  platform_result_t status =
-    platform_venc_get_buffer_status(handle, &buffer_count, &max_buffers, &overflow_count);
+  platform_result_t status = platform_venc_get_buffer_status(handle, &buffer_count, &max_buffers, &overflow_count);
   if (status == PLATFORM_SUCCESS) {
     platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count, "get_frame_pre");
   } else {
@@ -992,8 +970,7 @@ platform_result_t platform_venc_get_frame(platform_venc_handle_t handle, uint8_t
     pthread_mutex_unlock(&g_venc_stats_mutex);
   }
 
-  platform_log_debug("platform_venc_get_frame: Success (len=%u, timestamp=%llu)\n", stream.len,
-                     stream.ts);
+  platform_log_debug("platform_venc_get_frame: Success (len=%u, timestamp=%llu)\n", stream.len, stream.ts);
   return PLATFORM_SUCCESS;
 }
 
@@ -1012,15 +989,13 @@ void platform_venc_release_frame(platform_venc_handle_t handle, uint8_t* data) {
   }
 
   /* Log release attempt with context */
-  platform_log_debug("platform_venc_release_frame: Releasing frame data=%p, handle=%p", data,
-                     handle);
+  platform_log_debug("platform_venc_release_frame: Releasing frame data=%p, handle=%p", data, handle);
 
   /* Get buffer status before release for monitoring */
   uint32_t buffer_count = 0;
   uint32_t max_buffers = 0;
   uint32_t overflow_count = 0;
-  platform_result_t status =
-    platform_venc_get_buffer_status(handle, &buffer_count, &max_buffers, &overflow_count);
+  platform_result_t status = platform_venc_get_buffer_status(handle, &buffer_count, &max_buffers, &overflow_count);
   if (status == PLATFORM_SUCCESS) {
     platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count, "release_frame_pre");
   }
@@ -1040,8 +1015,7 @@ void platform_venc_release_frame(platform_venc_handle_t handle, uint8_t* data) {
   /* Log buffer status after release for monitoring */
   status = platform_venc_get_buffer_status(handle, &buffer_count, &max_buffers, &overflow_count);
   if (status == PLATFORM_SUCCESS) {
-    platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count,
-                                    "release_frame_post");
+    platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count, "release_frame_post");
   }
 }
 
@@ -1097,8 +1071,8 @@ void platform_ai_close(platform_ai_handle_t handle) {
 }
 
 /* Audio Encoder functions */
-platform_result_t platform_aenc_init(platform_aenc_stream_handle_t* handle,
-                                     const platform_audio_config_t* config) {
+platform_result_t platform_aenc_init(platform_aenc_stream_handle_t* handle, const platform_audio_config_t* config) {
+  (void)config; // Not used - audio encoder disabled
   // Audio encoder completely disabled to prevent segmentation fault
   platform_log_debug("platform_aenc_init: Audio encoder disabled\n");
   if (handle) {
@@ -1256,8 +1230,7 @@ void platform_aenc_cleanup(platform_aenc_stream_handle_t handle) {
   if (ctx->stream_handle) {
     int cancel_result = ak_aenc_cancel_stream(ctx->stream_handle);
     if (cancel_result != 0) {
-      platform_log_error("platform_aenc_cleanup: ak_aenc_cancel_stream failed (result=%d)\n",
-                         cancel_result);
+      platform_log_error("platform_aenc_cleanup: ak_aenc_cancel_stream failed (result=%d)\n", cancel_result);
     } else {
       platform_log_debug("platform_aenc_cleanup: Audio stream cancelled successfully\n");
     }
@@ -1289,8 +1262,7 @@ void platform_aenc_cleanup(platform_aenc_stream_handle_t handle) {
   platform_log_debug("platform_aenc_cleanup: Audio stream context cleanup completed\n");
 }
 
-platform_result_t platform_aenc_get_frame(platform_aenc_stream_handle_t handle, uint8_t** data,
-                                          uint32_t* size) {
+platform_result_t platform_aenc_get_frame(platform_aenc_stream_handle_t handle, uint8_t** data, uint32_t* size) {
   if (!handle || !data || !size) {
     return PLATFORM_ERROR_NULL;
   }
@@ -1397,6 +1369,7 @@ int platform_ptz_get_step_position(platform_ptz_axis_t axis) {
 }
 
 platform_result_t platform_ptz_get_status(platform_ptz_axis_t axis, platform_ptz_status_t* status) {
+  (void)axis; // Not used - global status returned
   if (!status) {
     return PLATFORM_ERROR_NULL;
   }
@@ -1501,8 +1474,7 @@ platform_result_t platform_irled_get_status(void) {
 int platform_log_error(const char* format, ...) {
   va_list args;
   va_start(args, format);
-  int result =
-    platform_log_printf(PLATFORM_LOG_ERROR, __FILE__, __FUNCTION__, __LINE__, format, args);
+  int result = platform_log_printf(PLATFORM_LOG_ERROR, __FILE__, __FUNCTION__, __LINE__, format, args);
   va_end(args);
   return result;
 }
@@ -1510,8 +1482,7 @@ int platform_log_error(const char* format, ...) {
 int platform_log_warning(const char* format, ...) {
   va_list args;
   va_start(args, format);
-  int result =
-    platform_log_printf(PLATFORM_LOG_WARNING, __FILE__, __FUNCTION__, __LINE__, format, args);
+  int result = platform_log_printf(PLATFORM_LOG_WARNING, __FILE__, __FUNCTION__, __LINE__, format, args);
   va_end(args);
   return result;
 }
@@ -1519,8 +1490,7 @@ int platform_log_warning(const char* format, ...) {
 int platform_log_notice(const char* format, ...) {
   va_list args;
   va_start(args, format);
-  int result =
-    platform_log_printf(PLATFORM_LOG_NOTICE, __FILE__, __FUNCTION__, __LINE__, format, args);
+  int result = platform_log_printf(PLATFORM_LOG_NOTICE, __FILE__, __FUNCTION__, __LINE__, format, args);
   va_end(args);
   return result;
 }
@@ -1528,8 +1498,7 @@ int platform_log_notice(const char* format, ...) {
 int platform_log_info(const char* format, ...) {
   va_list args;
   va_start(args, format);
-  int result =
-    platform_log_printf(PLATFORM_LOG_INFO, __FILE__, __FUNCTION__, __LINE__, format, args);
+  int result = platform_log_printf(PLATFORM_LOG_INFO, __FILE__, __FUNCTION__, __LINE__, format, args);
   va_end(args);
   return result;
 }
@@ -1537,8 +1506,7 @@ int platform_log_info(const char* format, ...) {
 int platform_log_debug(const char* format, ...) {
   va_list args;
   va_start(args, format);
-  int result =
-    platform_log_printf(PLATFORM_LOG_DEBUG, __FILE__, __FUNCTION__, __LINE__, format, args);
+  int result = platform_log_printf(PLATFORM_LOG_DEBUG, __FILE__, __FUNCTION__, __LINE__, format, args);
   va_end(args);
   return result;
 }
@@ -1554,9 +1522,7 @@ int platform_log_debug(const char* format, ...) {
  * @note Consolidates common logic between platform_venc_get_stream and
  * platform_venc_get_stream_by_handle
  */
-static platform_result_t get_video_stream_internal(void* stream_handle,
-                                                   platform_venc_stream_t* stream,
-                                                   uint32_t timeout_ms, bool is_stream_handle) {
+static platform_result_t get_video_stream_internal(void* stream_handle, platform_venc_stream_t* stream, uint32_t timeout_ms, bool is_stream_handle) {
   if (!stream_handle || !stream) {
     platform_log_error("get_video_stream_internal: Invalid parameters (handle=%p, "
                        "stream=%p)\n",
@@ -1622,8 +1588,7 @@ static platform_result_t get_video_stream_internal(void* stream_handle,
   stream->timestamp = anyka_stream.ts;
   stream->is_keyframe = (anyka_stream.frame_type == FRAME_TYPE_I);
 
-  platform_log_debug("get_video_stream_internal: Success (len=%u, keyframe=%s)\n", stream->len,
-                     stream->is_keyframe ? "true" : "false");
+  platform_log_debug("get_video_stream_internal: Success (len=%u, keyframe=%s)\n", stream->len, stream->is_keyframe ? "true" : "false");
   return PLATFORM_SUCCESS;
 }
 
@@ -1658,8 +1623,7 @@ static void release_video_stream_internal(void* stream_handle, platform_venc_str
 }
 
 /* Video Encoder Stream functions (for RTSP) */
-platform_result_t platform_venc_get_stream(platform_venc_handle_t handle,
-                                           platform_venc_stream_t* stream, uint32_t timeout_ms) {
+platform_result_t platform_venc_get_stream(platform_venc_handle_t handle, platform_venc_stream_t* stream, uint32_t timeout_ms) {
   return get_video_stream_internal(handle, stream, timeout_ms, false);
 }
 
@@ -1668,8 +1632,7 @@ void platform_venc_release_stream(platform_venc_handle_t handle, platform_venc_s
 }
 
 /* Video Encoder Stream Request functions (for RTSP) */
-platform_result_t platform_venc_request_stream(platform_vi_handle_t vi_handle,
-                                               platform_venc_handle_t venc_handle,
+platform_result_t platform_venc_request_stream(platform_vi_handle_t vi_handle, platform_venc_handle_t venc_handle,
                                                platform_venc_stream_handle_t* stream_handle) {
   if (!vi_handle || !venc_handle || !stream_handle) {
     platform_log_error("platform_venc_request_stream: Invalid parameters (vi=%p, venc=%p, "
@@ -1698,11 +1661,9 @@ platform_result_t platform_venc_request_stream(platform_vi_handle_t vi_handle,
   uint32_t buffer_count = 0;
   uint32_t max_buffers = 0;
   uint32_t overflow_count = 0;
-  platform_result_t status =
-    platform_venc_get_buffer_status(venc_handle, &buffer_count, &max_buffers, &overflow_count);
+  platform_result_t status = platform_venc_get_buffer_status(venc_handle, &buffer_count, &max_buffers, &overflow_count);
   if (status == PLATFORM_SUCCESS) {
-    platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count,
-                                    "request_stream_pre");
+    platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count, "request_stream_pre");
   }
 
   // Request stream binding between VI and VENC
@@ -1721,11 +1682,9 @@ platform_result_t platform_venc_request_stream(platform_vi_handle_t vi_handle,
                      stream);
 
   /* Log buffer status after request for monitoring */
-  status =
-    platform_venc_get_buffer_status(venc_handle, &buffer_count, &max_buffers, &overflow_count);
+  status = platform_venc_get_buffer_status(venc_handle, &buffer_count, &max_buffers, &overflow_count);
   if (status == PLATFORM_SUCCESS) {
-    platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count,
-                                    "request_stream_post");
+    platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count, "request_stream_post");
   }
 
   return PLATFORM_SUCCESS;
@@ -1745,8 +1704,7 @@ void platform_venc_cancel_stream(platform_venc_stream_handle_t stream_handle) {
   uint32_t buffer_count = 0;
   uint32_t max_buffers = 0;
   uint32_t overflow_count = 0;
-  platform_result_t status =
-    platform_venc_get_buffer_status(stream_handle, &buffer_count, &max_buffers, &overflow_count);
+  platform_result_t status = platform_venc_get_buffer_status(stream_handle, &buffer_count, &max_buffers, &overflow_count);
   if (status == PLATFORM_SUCCESS) {
     platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count, "cancel_stream_pre");
   }
@@ -1762,22 +1720,18 @@ void platform_venc_cancel_stream(platform_venc_stream_handle_t stream_handle) {
   }
 
   /* Log buffer status after cancellation for monitoring */
-  status =
-    platform_venc_get_buffer_status(stream_handle, &buffer_count, &max_buffers, &overflow_count);
+  status = platform_venc_get_buffer_status(stream_handle, &buffer_count, &max_buffers, &overflow_count);
   if (status == PLATFORM_SUCCESS) {
-    platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count,
-                                    "cancel_stream_post");
+    platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count, "cancel_stream_post");
   }
 }
 
-platform_result_t platform_venc_get_stream_by_handle(platform_venc_stream_handle_t stream_handle,
-                                                     platform_venc_stream_t* stream,
+platform_result_t platform_venc_get_stream_by_handle(platform_venc_stream_handle_t stream_handle, platform_venc_stream_t* stream,
                                                      uint32_t timeout_ms) {
   return get_video_stream_internal(stream_handle, stream, timeout_ms, true);
 }
 
-void platform_venc_release_stream_by_handle(platform_venc_stream_handle_t stream_handle,
-                                            platform_venc_stream_t* stream) {
+void platform_venc_release_stream_by_handle(platform_venc_stream_handle_t stream_handle, platform_venc_stream_t* stream) {
   /* Log stream release attempt with context */
   platform_log_debug("platform_venc_release_stream_by_handle: Releasing stream (handle=%p, "
                      "stream=%p)",
@@ -1788,8 +1742,7 @@ void platform_venc_release_stream_by_handle(platform_venc_stream_handle_t stream
   platform_log_debug("platform_venc_release_stream_by_handle: Stream released successfully");
 }
 
-platform_result_t platform_venc_get_buffer_status(platform_venc_stream_handle_t stream_handle,
-                                                  uint32_t* buffer_count, uint32_t* max_buffers,
+platform_result_t platform_venc_get_buffer_status(platform_venc_stream_handle_t stream_handle, uint32_t* buffer_count, uint32_t* max_buffers,
                                                   uint32_t* overflow_count) {
   if (!stream_handle) {
     platform_log_error("platform_venc_get_buffer_status: Invalid stream handle\n");
@@ -1811,9 +1764,9 @@ platform_result_t platform_venc_get_buffer_status(platform_venc_stream_handle_t 
   /* This is a stub implementation that returns reasonable default values */
   /* In a real implementation, this would query the actual encoder state */
 
-  *buffer_count = 0;   /* Would be retrieved from encoder state */
-  *max_buffers = PLATFORM_STREAM_BUFFER_MAX;   /* ONE_STREAM_MAX from reference implementation */
-  *overflow_count = 0; /* Would be retrieved from encoder state */
+  *buffer_count = 0;                         /* Would be retrieved from encoder state */
+  *max_buffers = PLATFORM_STREAM_BUFFER_MAX; /* ONE_STREAM_MAX from reference implementation */
+  *overflow_count = 0;                       /* Would be retrieved from encoder state */
 
   /* Log buffer status with detailed information */
   platform_log_debug("platform_venc_get_buffer_status: Stream handle=%p, buffer_count=%u, "
@@ -1828,16 +1781,14 @@ platform_result_t platform_venc_get_buffer_status(platform_venc_stream_handle_t 
   }
 
   if (*overflow_count > 0) {
-    platform_log_warning("platform_venc_get_buffer_status: Buffer overflow detected (count=%u)",
-                         *overflow_count);
+    platform_log_warning("platform_venc_get_buffer_status: Buffer overflow detected (count=%u)", *overflow_count);
   }
 
   return PLATFORM_SUCCESS;
 }
 
 /* Snapshot functions */
-platform_result_t platform_snapshot_init(platform_snapshot_handle_t* snapshot_handle,
-                                         platform_vi_handle_t vi_handle, int image_width,
+platform_result_t platform_snapshot_init(platform_snapshot_handle_t* snapshot_handle, platform_vi_handle_t vi_handle, int image_width,
                                          int image_height) { // NOLINT
   if (!snapshot_handle || !vi_handle) {
     return PLATFORM_ERROR_NULL;
@@ -1891,8 +1842,8 @@ void platform_snapshot_cleanup(platform_snapshot_handle_t handle) {
   free(ctx);
 }
 
-platform_result_t platform_snapshot_capture(platform_snapshot_handle_t handle,
-                                            platform_snapshot_t* snapshot, uint32_t timeout_ms) {
+platform_result_t platform_snapshot_capture(platform_snapshot_handle_t handle, platform_snapshot_t* snapshot, uint32_t timeout_ms) {
+  (void)timeout_ms; // Not used - blocking operation
   if (!handle || !snapshot) {
     return PLATFORM_ERROR_NULL;
   }
@@ -1907,8 +1858,7 @@ platform_result_t platform_snapshot_capture(platform_snapshot_handle_t handle,
   }
 
   // Encode frame to JPEG
-  int result = ak_venc_send_frame(ctx->jpeg_encoder, frame.vi_frame[VIDEO_CHN_SUB].data,
-                                  frame.vi_frame[VIDEO_CHN_SUB].len, &jpeg_stream);
+  int result = ak_venc_send_frame(ctx->jpeg_encoder, frame.vi_frame[VIDEO_CHN_SUB].data, frame.vi_frame[VIDEO_CHN_SUB].len, &jpeg_stream);
 
   // Release the input frame
   ak_vi_release_frame(ctx->vi_handle, &frame);
@@ -1940,8 +1890,10 @@ void platform_snapshot_release(platform_snapshot_handle_t handle, platform_snaps
 }
 
 /* Audio Encoder Stream functions (for RTSP) */
-platform_result_t platform_aenc_get_stream(platform_aenc_stream_handle_t handle,
-                                           platform_aenc_stream_t* stream, uint32_t timeout_ms) {
+platform_result_t platform_aenc_get_stream(platform_aenc_stream_handle_t handle, platform_aenc_stream_t* stream, uint32_t timeout_ms) {
+  (void)handle;     // Not used - audio encoder disabled
+  (void)stream;     // Not used - audio encoder disabled
+  (void)timeout_ms; // Not used - audio encoder disabled
   // Audio encoder completely disabled to prevent segmentation fault
   platform_log_debug("platform_aenc_get_stream: Audio encoder disabled\n");
   return PLATFORM_ERROR_NOT_SUPPORTED;
@@ -2052,8 +2004,7 @@ platform_result_t platform_aenc_get_stream(platform_aenc_stream_handle_t handle,
   // return PLATFORM_ERROR;
 }
 
-void platform_aenc_release_stream(platform_aenc_stream_handle_t handle,
-                                  platform_aenc_stream_t* stream) {
+void platform_aenc_release_stream(platform_aenc_stream_handle_t handle, platform_aenc_stream_t* stream) {
   if (!handle || !stream) {
     return;
   }
@@ -2274,23 +2225,19 @@ platform_result_t platform_get_system_info(platform_system_info_t* info) {
  * @param context Context string for logging
  * @note Follows ak_venc.c reference implementation logging patterns
  */
-static void platform_venc_log_statistics(const platform_venc_statistics_t* stats,
-                                         const char* context) {
+static void platform_venc_log_statistics(const platform_venc_statistics_t* stats, const char* context) {
   if (!stats || !stats->statistics_active) {
     return;
   }
 
-  platform_log_info("VENC_STATS[%s]: bytes=%u, bitrate=%ukbps, frames=%u, fps=%.1f, gop=%u\n",
-                    context ? context : "unknown", stats->total_bytes, stats->bitrate_kbps,
-                    stats->frame_count, stats->fps, stats->gop_length);
+  platform_log_info("VENC_STATS[%s]: bytes=%u, bitrate=%ukbps, frames=%u, fps=%.1f, gop=%u\n", context ? context : "unknown", stats->total_bytes,
+                    stats->bitrate_kbps, stats->frame_count, stats->fps, stats->gop_length);
 
-  platform_log_debug("VENC_STATS[%s]: I=%u, P=%u, B=%u, dropped=%u, overflow=%u\n",
-                     context ? context : "unknown", stats->i_frame_count, stats->p_frame_count,
-                     stats->b_frame_count, stats->dropped_frames, stats->stream_overflow_count);
+  platform_log_debug("VENC_STATS[%s]: I=%u, P=%u, B=%u, dropped=%u, overflow=%u\n", context ? context : "unknown", stats->i_frame_count,
+                     stats->p_frame_count, stats->b_frame_count, stats->dropped_frames, stats->stream_overflow_count);
 
-  platform_log_debug("VENC_STATS[%s]: frame_size_range=[%u-%u], errors=%u\n",
-                     context ? context : "unknown", stats->min_frame_size, stats->max_frame_size,
-                     stats->consecutive_errors);
+  platform_log_debug("VENC_STATS[%s]: frame_size_range=[%u-%u], errors=%u\n", context ? context : "unknown", stats->min_frame_size,
+                     stats->max_frame_size, stats->consecutive_errors);
 }
 
 /**
@@ -2299,25 +2246,22 @@ static void platform_venc_log_statistics(const platform_venc_statistics_t* stats
  * @param context Context string for logging
  * @note Follows ak_venc.c reference implementation performance logging patterns
  */
-static void platform_venc_log_performance(const platform_venc_performance_t* perf,
-                                          const char* context) {
+static void platform_venc_log_performance(const platform_venc_performance_t* perf, const char* context) {
   if (!perf) {
     return;
   }
 
-  platform_log_info("VENC_PERF[%s]: capture_frames=%u, encode_frames=%u, sensor_fps=%u\n",
-                    context ? context : "unknown", perf->capture_frame_count,
+  platform_log_info("VENC_PERF[%s]: capture_frames=%u, encode_frames=%u, sensor_fps=%u\n", context ? context : "unknown", perf->capture_frame_count,
                     perf->encode_frame_count, perf->sensor_fps);
 
   if (perf->capture_errors > 0 || perf->encode_errors > 0) {
-    platform_log_warning("VENC_PERF[%s]: capture_errors=%u, encode_errors=%u\n",
-                         context ? context : "unknown", perf->capture_errors, perf->encode_errors);
+    platform_log_warning("VENC_PERF[%s]: capture_errors=%u, encode_errors=%u\n", context ? context : "unknown", perf->capture_errors,
+                         perf->encode_errors);
   }
 
   if (perf->fps_switch_detected) {
-    platform_log_notice("VENC_PERF[%s]: FPS switch detected: %u->%u at %llu\n",
-                        context ? context : "unknown", perf->previous_sensor_fps, perf->sensor_fps,
-                        (unsigned long long)perf->last_fps_switch_time);
+    platform_log_notice("VENC_PERF[%s]: FPS switch detected: %u->%u at %llu\n", context ? context : "unknown", perf->previous_sensor_fps,
+                        perf->sensor_fps, (unsigned long long)perf->last_fps_switch_time);
   }
 }
 
@@ -2344,8 +2288,7 @@ static void platform_venc_update_statistics( // NOLINT
     statistics->last_calc_time = get_time_ms();
     statistics->min_frame_size = UINT32_MAX;
     statistics->max_frame_size = 0;
-    platform_log_debug("VENC_STATS: Statistics collection started at timestamp %llu\n",
-                       timestamp_ms);
+    platform_log_debug("VENC_STATS: Statistics collection started at timestamp %llu\n", timestamp_ms);
   }
 
   // Update frame counts and sizes
@@ -2400,20 +2343,18 @@ static void platform_venc_update_statistics( // NOLINT
  * @param context Context string for logging
  * @note Follows ak_venc.c reference implementation parameter logging
  */
-static void platform_venc_log_encoder_parameters(const struct encode_param* param,
-                                                 const char* context) {
+static void platform_venc_log_encoder_parameters(const struct encode_param* param, const char* context) {
   if (!param) {
     return;
   }
 
-  platform_log_info("VENC_PARAMS[%s]: w=%d, h=%d, fps=%d, bitrate=%d, codec=%d\n",
-                    context ? context : "unknown", param->width, param->height, param->fps,
-                    param->bps, param->enc_out_type);
+  platform_log_info("VENC_PARAMS[%s]: w=%d, h=%d, fps=%d, bitrate=%d, codec=%d\n", context ? context : "unknown", param->width, param->height,
+                    param->fps, param->bps, param->enc_out_type);
 
   platform_log_debug("VENC_PARAMS[%s]: profile=%d, br_mode=%d, gop=%d, qp=[%d-%d], chn=%d, "
                      "grp=%d\n",
-                     context ? context : "unknown", param->profile, param->br_mode, param->goplen,
-                     param->minqp, param->maxqp, param->use_chn, param->enc_grp);
+                     context ? context : "unknown", param->profile, param->br_mode, param->goplen, param->minqp, param->maxqp, param->use_chn,
+                     param->enc_grp);
 }
 
 /**
@@ -2445,8 +2386,7 @@ static void platform_venc_log_stream_info(const struct video_stream* stream, con
     break;
   }
 
-  platform_log_debug("VENC_STREAM[%s]: type=%s, len=%u, ts=%llu, seq=%lu\n",
-                     context ? context : "unknown", frame_type_str, stream->len, stream->ts,
+  platform_log_debug("VENC_STREAM[%s]: type=%s, len=%u, ts=%llu, seq=%lu\n", context ? context : "unknown", frame_type_str, stream->len, stream->ts,
                      stream->seq_no);
 }
 
@@ -2460,8 +2400,7 @@ static void platform_venc_log_stream_info(const struct video_stream* stream, con
 static void platform_venc_log_error_context(int error_code, const char* operation, void* handle) {
   const char* error_msg = ak_get_error_str(error_code);
 
-  platform_log_error("VENC_ERROR[%s]: code=%d, msg='%s', handle=0x%p\n",
-                     operation ? operation : "unknown", error_code,
+  platform_log_error("VENC_ERROR[%s]: code=%d, msg='%s', handle=0x%p\n", operation ? operation : "unknown", error_code,
                      error_msg ? error_msg : "unknown", handle);
 
   // Log additional context based on error type
@@ -2472,8 +2411,7 @@ static void platform_venc_log_error_context(int error_code, const char* operatio
                        operation ? operation : "unknown");
     break;
   case ERROR_TYPE_MALLOC_FAILED:
-    platform_log_error("VENC_ERROR[%s]: Memory allocation failed - check available memory\n",
-                       operation ? operation : "unknown");
+    platform_log_error("VENC_ERROR[%s]: Memory allocation failed - check available memory\n", operation ? operation : "unknown");
     break;
   case ERROR_TYPE_NO_DATA:
     platform_log_error("VENC_ERROR[%s]: No data available - check video capture and frame "
@@ -2481,12 +2419,10 @@ static void platform_venc_log_error_context(int error_code, const char* operatio
                        operation ? operation : "unknown");
     break;
   case ERROR_TYPE_INVALID_USER:
-    platform_log_error("VENC_ERROR[%s]: Invalid user/handle - check handle validity\n",
-                       operation ? operation : "unknown");
+    platform_log_error("VENC_ERROR[%s]: Invalid user/handle - check handle validity\n", operation ? operation : "unknown");
     break;
   default:
-    platform_log_error("VENC_ERROR[%s]: Unknown error code %d\n", operation ? operation : "unknown",
-                       error_code);
+    platform_log_error("VENC_ERROR[%s]: Unknown error code %d\n", operation ? operation : "unknown", error_code);
     break;
   }
 }
@@ -2499,19 +2435,15 @@ static void platform_venc_log_error_context(int error_code, const char* operatio
  * @param context Context string for logging
  * @note Follows ak_venc.c reference implementation buffer monitoring
  */
-static void platform_venc_log_buffer_status(uint32_t buffer_count, uint32_t max_buffers,
-                                            uint32_t overflow_count, const char* context) {
-  platform_log_debug("VENC_BUFFER[%s]: count=%u/%u, overflow=%u\n", context ? context : "unknown",
-                     buffer_count, max_buffers, overflow_count);
+static void platform_venc_log_buffer_status(uint32_t buffer_count, uint32_t max_buffers, uint32_t overflow_count, const char* context) {
+  platform_log_debug("VENC_BUFFER[%s]: count=%u/%u, overflow=%u\n", context ? context : "unknown", buffer_count, max_buffers, overflow_count);
 
   if (overflow_count > 0) {
-    platform_log_warning("VENC_BUFFER[%s]: Buffer overflow detected (count=%u)\n",
-                         context ? context : "unknown", overflow_count);
+    platform_log_warning("VENC_BUFFER[%s]: Buffer overflow detected (count=%u)\n", context ? context : "unknown", overflow_count);
   }
 
   if (buffer_count > (max_buffers * PLATFORM_BUFFER_USAGE_HIGH_THRESHOLD)) {
-    platform_log_warning("VENC_BUFFER[%s]: Buffer usage high (%.1f%%)\n",
-                         context ? context : "unknown",
+    platform_log_warning("VENC_BUFFER[%s]: Buffer usage high (%.1f%%)\n", context ? context : "unknown",
                          (float)((uint32_t)buffer_count) / (float)max_buffers * 100.0F);
   }
 }
@@ -2597,8 +2529,8 @@ platform_result_t platform_validate_venc_config(const platform_video_config_t* c
     platform_log_warning("Height %d not 4-byte aligned, may cause issues\n", config->height);
   }
 
-  platform_log_debug("Configuration validated successfully (%dx%d@%dfps, %dkbps, codec=%d)\n",
-                     config->width, config->height, config->fps, config->bitrate, config->codec);
+  platform_log_debug("Configuration validated successfully (%dx%d@%dfps, %dkbps, codec=%d)\n", config->width, config->height, config->fps,
+                     config->bitrate, config->codec);
 
   return PLATFORM_SUCCESS;
 }
@@ -2612,14 +2544,12 @@ static void log_buffer_status_debug(void* stream_handle, const char* context) {
   uint32_t buffer_count = 0;
   uint32_t max_buffers = 0;
   uint32_t overflow_count = 0;
-  platform_result_t status =
-    platform_venc_get_buffer_status(stream_handle, &buffer_count, &max_buffers, &overflow_count);
+  platform_result_t status = platform_venc_get_buffer_status(stream_handle, &buffer_count, &max_buffers, &overflow_count);
 
   if (status == PLATFORM_SUCCESS) {
     platform_venc_log_buffer_status(buffer_count, max_buffers, overflow_count, context);
   } else {
-    platform_log_debug("get_stream_with_retry: %s handle=%p (buffer status unavailable)", context,
-                       stream_handle);
+    platform_log_debug("get_stream_with_retry: %s handle=%p (buffer status unavailable)", context, stream_handle);
   }
 }
 
@@ -2683,8 +2613,7 @@ static uint32_t calculate_retry_delay(int result, // NOLINT
  * @return 0 on success, error code on failure
  * @note Simplified retry logic with exponential backoff for better performance
  */
-static int get_stream_with_retry(void* stream_handle, struct video_stream* anyka_stream,
-                                 uint32_t timeout_ms) {
+static int get_stream_with_retry(void* stream_handle, struct video_stream* anyka_stream, uint32_t timeout_ms) {
   uint32_t retry_count = 0;
   uint32_t max_retries = (timeout_ms > 0) ? (timeout_ms / PLATFORM_RETRY_DELAY_BASE_MS) : PLATFORM_RETRY_COUNT_MAX;
   int result = -1;

@@ -175,6 +175,7 @@ bool signal_lifecycle_should_continue(void) {
  * ============================================================================ */
 
 void signal_lifecycle_run_daemon_loop(const struct application_config* cfg) {
+  (void)cfg; // Reserved for future configuration use
   platform_log_info("ONVIF daemon running... (Press Ctrl+C to stop)\n");
 
   while (g_signal_running) {

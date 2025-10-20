@@ -65,8 +65,7 @@ void http_auth_cleanup(struct http_auth_config* auth_config);
  * @param auth_config Authentication configuration
  * @return HTTP_AUTH_SUCCESS on success, error code on failure
  */
-int http_auth_validate_basic(const http_request_t* request,
-                             const struct http_auth_config* auth_config);
+int http_auth_validate_basic(const http_request_t* request, const struct http_auth_config* auth_config);
 
 /**
  * @brief Generate WWW-Authenticate challenge header
@@ -75,8 +74,7 @@ int http_auth_validate_basic(const http_request_t* request,
  * @param challenge_size Size of the challenge buffer
  * @return 0 on success, -1 on error
  */
-int http_auth_generate_challenge(const struct http_auth_config* auth_config, char* challenge,
-                                 size_t challenge_size);
+int http_auth_generate_challenge(const struct http_auth_config* auth_config, char* challenge, size_t challenge_size);
 
 /**
  * @brief Parse Basic authentication credentials from Authorization header

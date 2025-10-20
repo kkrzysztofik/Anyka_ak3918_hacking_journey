@@ -33,8 +33,8 @@ static int g_server_socket = -1; // NOLINT
 static int g_running = 0;        // NOLINT
 
 /* Global configuration */
-static int g_epoll_timeout = 500;     // NOLINT - Default 500ms
-static int g_cleanup_interval = 5000; // NOLINT - Default 5 seconds
+static int g_epoll_timeout = 500;          // NOLINT - Default 500ms
+static uint64_t g_cleanup_interval = 5000; // NOLINT - Default 5 seconds
 
 /* Forward declarations for helper functions */
 static int handle_new_connection(void);

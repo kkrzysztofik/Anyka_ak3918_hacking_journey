@@ -15,21 +15,21 @@
 #include "utils/error/error_handling.h"
 
 /* Audio sample rate constants (Hz) */
-#define AUDIO_SAMPLE_RATE_8K    8000   /* 8 kHz sample rate */
-#define AUDIO_SAMPLE_RATE_16K   16000  /* 16 kHz sample rate */
-#define AUDIO_SAMPLE_RATE_22K   22050  /* 22.05 kHz sample rate */
-#define AUDIO_SAMPLE_RATE_44K   44100  /* 44.1 kHz sample rate */
-#define AUDIO_SAMPLE_RATE_48K   48000  /* 48 kHz sample rate */
+#define AUDIO_SAMPLE_RATE_8K  8000  /* 8 kHz sample rate */
+#define AUDIO_SAMPLE_RATE_16K 16000 /* 16 kHz sample rate */
+#define AUDIO_SAMPLE_RATE_22K 22050 /* 22.05 kHz sample rate */
+#define AUDIO_SAMPLE_RATE_44K 44100 /* 44.1 kHz sample rate */
+#define AUDIO_SAMPLE_RATE_48K 48000 /* 48 kHz sample rate */
 
 /* Audio bits per sample constants */
-#define AUDIO_BITS_PER_SAMPLE_8   8   /* 8-bit samples */
-#define AUDIO_BITS_PER_SAMPLE_16  16  /* 16-bit samples */
-#define AUDIO_BITS_PER_SAMPLE_24  24  /* 24-bit samples */
-#define AUDIO_BITS_PER_SAMPLE_32  32  /* 32-bit samples */
+#define AUDIO_BITS_PER_SAMPLE_8  8  /* 8-bit samples */
+#define AUDIO_BITS_PER_SAMPLE_16 16 /* 16-bit samples */
+#define AUDIO_BITS_PER_SAMPLE_24 24 /* 24-bit samples */
+#define AUDIO_BITS_PER_SAMPLE_32 32 /* 32-bit samples */
 
 /* Audio channel constants */
-#define AUDIO_CHANNELS_MONO   1  /* Mono audio */
-#define AUDIO_CHANNELS_STEREO 2  /* Stereo audio */
+#define AUDIO_CHANNELS_MONO   1 /* Mono audio */
+#define AUDIO_CHANNELS_STEREO 2 /* Stereo audio */
 
 /* Audio bitrate constants (bps) */
 #define AUDIO_BITRATE_AAC_MIN     8000   /* Minimum AAC bitrate (8 kbps) */
@@ -152,11 +152,11 @@ int audio_validation_get_default_config(platform_audio_config_t* config) {
 
   // Set safe defaults based on ai_demo and akipc reference implementations
   // Enhanced for AAC codec support
-  config->sample_rate = AUDIO_SAMPLE_RATE_16K;   // 16kHz for better AAC quality
-  config->channels = AUDIO_CHANNELS_MONO;        // Mono channel
-  config->bits_per_sample = AUDIO_BITS_PER_SAMPLE_16;  // 16-bit samples
-  config->codec = PLATFORM_AUDIO_CODEC_AAC;      // AAC as default for better compression
-  config->bitrate = AUDIO_BITRATE_AAC_DEFAULT;   // 64 kbps default bitrate for AAC
+  config->sample_rate = AUDIO_SAMPLE_RATE_16K;        // 16kHz for better AAC quality
+  config->channels = AUDIO_CHANNELS_MONO;             // Mono channel
+  config->bits_per_sample = AUDIO_BITS_PER_SAMPLE_16; // 16-bit samples
+  config->codec = PLATFORM_AUDIO_CODEC_AAC;           // AAC as default for better compression
+  config->bitrate = AUDIO_BITRATE_AAC_DEFAULT;        // 64 kbps default bitrate for AAC
 
   return ONVIF_SUCCESS;
 }
@@ -181,9 +181,8 @@ int audio_validation_is_supported(const platform_audio_config_t* config) {
   // From ai_demo and akipc analysis, enhanced for AAC support:
 
   // Sample rate limitations - enhanced for AAC
-  if (config->sample_rate != AUDIO_SAMPLE_RATE_8K && config->sample_rate != AUDIO_SAMPLE_RATE_16K &&
-      config->sample_rate != AUDIO_SAMPLE_RATE_22K && config->sample_rate != AUDIO_SAMPLE_RATE_44K &&
-      config->sample_rate != AUDIO_SAMPLE_RATE_48K) {
+  if (config->sample_rate != AUDIO_SAMPLE_RATE_8K && config->sample_rate != AUDIO_SAMPLE_RATE_16K && config->sample_rate != AUDIO_SAMPLE_RATE_22K &&
+      config->sample_rate != AUDIO_SAMPLE_RATE_44K && config->sample_rate != AUDIO_SAMPLE_RATE_48K) {
     // Support common sample rates for AAC
     return 0;
   }
@@ -211,9 +210,8 @@ int audio_validation_is_supported(const platform_audio_config_t* config) {
     }
 
     // AAC sample rate validation (8kHz, 16kHz, 22.05kHz, 44.1kHz, 48kHz)
-    if (config->sample_rate != AUDIO_SAMPLE_RATE_8K && config->sample_rate != AUDIO_SAMPLE_RATE_16K &&
-        config->sample_rate != AUDIO_SAMPLE_RATE_22K && config->sample_rate != AUDIO_SAMPLE_RATE_44K &&
-        config->sample_rate != AUDIO_SAMPLE_RATE_48K) {
+    if (config->sample_rate != AUDIO_SAMPLE_RATE_8K && config->sample_rate != AUDIO_SAMPLE_RATE_16K && config->sample_rate != AUDIO_SAMPLE_RATE_22K &&
+        config->sample_rate != AUDIO_SAMPLE_RATE_44K && config->sample_rate != AUDIO_SAMPLE_RATE_48K) {
       return 0;
     }
   }

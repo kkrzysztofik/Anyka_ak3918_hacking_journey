@@ -7,6 +7,7 @@
 
 #include <string.h>
 
+#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "core/lifecycle/config_lifecycle.h"
 #include "core/lifecycle/network_lifecycle.h"
@@ -25,7 +26,7 @@
  * @param cfg Application configuration
  */
 static void print_endpoints(const struct application_config* cfg) {
-  char device_ip[64];
+  char device_ip[ONVIF_IP_BUFFER_SIZE];
 
   // Get the real device IP address
   if (get_local_ip_address(device_ip, sizeof(device_ip)) != 0) {
@@ -56,6 +57,8 @@ static void print_endpoints(const struct application_config* cfg) {
 /* ---------------------------- Main Function ------------------------- */
 
 int main(int argc, char** argv) {
+  (void)argc; // Reserved for future command-line argument handling
+  (void)argv; // Reserved for future command-line argument handling
   struct application_config cfg;
 
   /* Initialize configuration structure to prevent garbage data */

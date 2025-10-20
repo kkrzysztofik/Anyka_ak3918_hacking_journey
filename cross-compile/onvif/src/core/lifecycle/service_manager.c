@@ -8,10 +8,7 @@
 #include "service_manager.h"
 
 #include <stdbool.h>
-#include <string.h>
 
-#include "core/config/config.h"
-#include "utils/error/error_handling.h"
 #include "platform/adapters/ptz_adapter.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
@@ -19,7 +16,7 @@
 #include "services/device/onvif_device.h"
 #include "services/imaging/onvif_imaging.h"
 #include "services/media/onvif_media.h"
-#include "services/ptz/onvif_ptz.h"
+#include "utils/error/error_handling.h"
 
 /* ============================================================================
  * Global State

@@ -94,22 +94,19 @@ typedef struct {
 
 /* Multi-stream server functions */
 rtsp_multistream_server_t* rtsp_multistream_server_create(int port, platform_vi_handle_t vi_handle);
-int rtsp_multistream_server_add_stream(rtsp_multistream_server_t* server, const char* path,
-                                       const char* name, const video_config_t* video_config,
+int rtsp_multistream_server_add_stream(rtsp_multistream_server_t* server, const char* path, const char* name, const video_config_t* video_config,
                                        const audio_config_t* audio_config, bool audio_enabled);
 int rtsp_multistream_server_start(rtsp_multistream_server_t* server);
 int rtsp_multistream_server_stop(rtsp_multistream_server_t* server);
 int rtsp_multistream_server_destroy(rtsp_multistream_server_t* server);
 
 /* Stream management functions */
-rtsp_stream_info_t* rtsp_multistream_get_stream(rtsp_multistream_server_t* server,
-                                                const char* path);
+rtsp_stream_info_t* rtsp_multistream_get_stream(rtsp_multistream_server_t* server, const char* path);
 int rtsp_multistream_remove_stream(rtsp_multistream_server_t* server, const char* path);
 int rtsp_multistream_get_stream_count(rtsp_multistream_server_t* server);
 
 /* Statistics functions */
-int rtsp_multistream_get_stats(rtsp_multistream_server_t* server, const char* path,
-                               rtsp_stream_stats_t* stats);
+int rtsp_multistream_get_stats(rtsp_multistream_server_t* server, const char* path, rtsp_stream_stats_t* stats);
 int rtsp_multistream_get_total_stats(rtsp_multistream_server_t* server, rtsp_total_stats_t* stats);
 
 #endif /* RTSP_MULTISTREAM_H */

@@ -150,8 +150,7 @@ void onvif_service_dispatcher_cleanup(void) {
   for (size_t i = 0; i < MAX_REGISTERED_SERVICES; i++) {
     if (g_service_registry[i].active) {
       if (g_service_registry[i].registration.cleanup_handler) {
-        platform_log_debug("Calling cleanup handler for service: %s",
-                           g_service_registry[i].registration.service_name);
+        platform_log_debug("Calling cleanup handler for service: %s", g_service_registry[i].registration.service_name);
         g_service_registry[i].registration.cleanup_handler();
       }
       g_service_registry[i].active = 0;
@@ -212,8 +211,7 @@ int onvif_service_dispatcher_register_service(const onvif_service_registration_t
     }
   }
 
-  platform_log_info("Service registered successfully: %s (namespace: %s)",
-                    registration->service_name, registration->namespace_uri);
+  platform_log_info("Service registered successfully: %s (namespace: %s)", registration->service_name, registration->namespace_uri);
 
   pthread_mutex_unlock(&g_dispatcher_mutex);
   return ONVIF_SUCCESS;
@@ -247,8 +245,7 @@ int onvif_service_dispatcher_unregister_service(const char* service_name) {
     platform_log_debug("Calling cleanup handler for service: %s", service_name);
     entry->registration.cleanup_handler();
   } else if (g_cleanup_in_progress) {
-    platform_log_debug("Skipping cleanup handler for service: %s (already in global cleanup)",
-                       service_name);
+    platform_log_debug("Skipping cleanup handler for service: %s (already in global cleanup)", service_name);
   }
 
   entry->active = 0;
@@ -258,8 +255,8 @@ int onvif_service_dispatcher_unregister_service(const char* service_name) {
   return ONVIF_SUCCESS;
 }
 
-int onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name,
-                                      const http_request_t* request, http_response_t* response) {
+int onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name, const http_request_t* request,
+                                      http_response_t* response) {
   pthread_mutex_lock(&g_dispatcher_mutex);
 
   if (!g_dispatcher_initialized) {
@@ -293,11 +290,9 @@ int onvif_service_dispatcher_dispatch(const char* service_name, const char* oper
   int result = handler(operation_name, request, response);
 
   if (result == ONVIF_SUCCESS) {
-    platform_log_debug("Service operation completed successfully: %s:%s", service_name,
-                       operation_name);
+    platform_log_debug("Service operation completed successfully: %s:%s", service_name, operation_name);
   } else {
-    platform_log_error("Service operation failed: %s:%s (result: %d)", service_name, operation_name,
-                       result);
+    platform_log_error("Service operation failed: %s:%s (result: %d)", service_name, operation_name, result);
   }
 
   return result;
@@ -341,8 +336,7 @@ int onvif_service_dispatcher_get_services(const char** services, size_t max_serv
   return (int)count;
 }
 
-int onvif_service_dispatcher_get_capabilities(const char* service_name, struct soap* ctx,
-                                              void** capabilities_ptr) {
+int onvif_service_dispatcher_get_capabilities(const char* service_name, struct soap* ctx, void** capabilities_ptr) {
   pthread_mutex_lock(&g_dispatcher_mutex);
 
   if (!g_dispatcher_initialized) {
@@ -383,8 +377,7 @@ int onvif_service_dispatcher_get_capabilities(const char* service_name, struct s
   if (result == ONVIF_SUCCESS) {
     platform_log_debug("Service capability structure retrieved successfully: %s", service_name);
   } else {
-    platform_log_error("Failed to retrieve capability structure for service: %s (result: %d)",
-                       service_name, result);
+    platform_log_error("Failed to retrieve capability structure for service: %s (result: %d)", service_name, result);
   }
 
   return result;

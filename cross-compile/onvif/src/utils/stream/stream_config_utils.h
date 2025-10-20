@@ -11,7 +11,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "platform/platform.h"
+#include "platform/platform_common.h"
 #include "services/common/video_config_types.h"
 
 /* Forward declarations */
@@ -35,8 +35,7 @@ int stream_config_init_defaults(video_config_t* stream_config, bool is_main_stre
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_INVALID on failure
  * @note Converts anyka_cfg.ini parameters to internal stream configuration
  */
-int stream_config_init_from_anyka(video_config_t* stream_config, bool is_main_stream,
-                                  unsigned int bitrate_kbps, int fps);
+int stream_config_init_from_anyka(video_config_t* stream_config, bool is_main_stream, unsigned int bitrate_kbps, int fps);
 
 /**
  * @brief Validate video stream configuration parameters
@@ -55,8 +54,7 @@ int stream_config_validate(const video_config_t* stream_config, bool is_main_str
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_INVALID on failure
  * @note Converts internal stream config to platform-specific video config
  */
-int stream_config_to_platform(const video_config_t* stream_config,
-                              platform_video_config_t* platform_config, bool is_main_stream);
+int stream_config_to_platform(const video_config_t* stream_config, platform_video_config_t* platform_config, bool is_main_stream);
 
 /**
  * @brief Get stream configuration summary for logging
@@ -67,8 +65,7 @@ int stream_config_to_platform(const video_config_t* stream_config,
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_INVALID on failure
  * @note Generates human-readable summary of stream configuration
  */
-int stream_config_get_summary(const video_config_t* stream_config, bool is_main_stream,
-                              char* summary, size_t summary_size);
+int stream_config_get_summary(const video_config_t* stream_config, bool is_main_stream, char* summary, size_t summary_size);
 
 /**
  * @brief Apply stream configuration to RTSP stream config
@@ -79,8 +76,7 @@ int stream_config_get_summary(const video_config_t* stream_config, bool is_main_
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_INVALID on failure
  * @note Applies stream configuration to RTSP stream configuration structure
  */
-int stream_config_apply_to_rtsp(const video_config_t* stream_config, void* rtsp_config,
-                                bool is_main_stream, platform_vi_handle_t vi_handle);
+int stream_config_apply_to_rtsp(const video_config_t* stream_config, void* rtsp_config, bool is_main_stream, platform_vi_handle_t vi_handle);
 
 /**
  * @brief Clean up stream configuration resources

@@ -31,9 +31,7 @@ struct soap;
  * @param response HTTP response to populate with SOAP envelope
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-typedef int (*onvif_service_operation_handler_t)(const char* operation_name,
-                                                 const http_request_t* request,
-                                                 http_response_t* response);
+typedef int (*onvif_service_operation_handler_t)(const char* operation_name, const http_request_t* request, http_response_t* response);
 
 /**
  * @brief Get service capability structure callback
@@ -117,8 +115,7 @@ int onvif_service_dispatcher_unregister_service(const char* service_name);
  * @param response HTTP response
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name,
-                                      const http_request_t* request, http_response_t* response);
+int onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name, const http_request_t* request, http_response_t* response);
 
 /**
  * @brief Check if service is registered
@@ -151,8 +148,7 @@ int onvif_service_dispatcher_get_services(const char** services, size_t max_serv
  *         ONVIF_ERROR_NOT_SUPPORTED if service doesn't provide capabilities,
  *         other error code on failure
  */
-int onvif_service_dispatcher_get_capabilities(const char* service_name, struct soap* ctx,
-                                              void** capabilities_ptr);
+int onvif_service_dispatcher_get_capabilities(const char* service_name, struct soap* ctx, void** capabilities_ptr);
 
 /**
  * @brief Initialize service dispatcher
@@ -195,12 +191,14 @@ extern int g_cleanup_in_progress;
  * @param init_fn Initialization function (NULL if not needed)
  * @param cleanup_fn Cleanup function (NULL if not needed)
  */
-#define ONVIF_SERVICE_REGISTRATION(name, ns, handler, init_fn, cleanup_fn)                         \
-  {                                                                                                \
-    .service_name = (name), .namespace_uri = (ns), .operation_handler = (handler),                 \
-    .init_handler = (init_fn), .cleanup_handler = (cleanup_fn), .capabilities_handler = NULL,      \
-    .get_capabilities = NULL,                                                                      \
-    .reserved = {NULL, NULL, NULL}                                                                 \
+#define ONVIF_SERVICE_REGISTRATION(name, ns, handler, init_fn, cleanup_fn)                                                                           \
+  {                                                                                                                                                  \
+    .service_name = (name), .namespace_uri = (ns), .operation_handler = (handler), .init_handler = (init_fn), .cleanup_handler = (cleanup_fn),       \
+    .capabilities_handler = NULL, .get_capabilities = NULL, .reserved = {                                                                            \
+      NULL,                                                                                                                                          \
+      NULL,                                                                                                                                          \
+      NULL                                                                                                                                           \
+    }                                                                                                                                                \
   }
 
 /**
@@ -209,8 +207,7 @@ extern int g_cleanup_in_progress;
  * Convenience macro for simple service registration with just
  * name, namespace, and handler.
  */
-#define ONVIF_REGISTER_SERVICE(name, ns, handler)                                                  \
-  onvif_service_dispatcher_register_service(                                                       \
-    &(onvif_service_registration_t)ONVIF_SERVICE_REGISTRATION(name, ns, handler, NULL, NULL))
+#define ONVIF_REGISTER_SERVICE(name, ns, handler)                                                                                                    \
+  onvif_service_dispatcher_register_service(&(onvif_service_registration_t)ONVIF_SERVICE_REGISTRATION(name, ns, handler, NULL, NULL))
 
 #endif /* ONVIF_SERVICE_DISPATCHER_H */

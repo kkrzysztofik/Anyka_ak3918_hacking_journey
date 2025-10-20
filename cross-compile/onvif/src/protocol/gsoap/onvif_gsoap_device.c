@@ -39,7 +39,6 @@
  */
 
 /* URL buffer sizes */
-#define DEVICE_XADDR_BUFFER_SIZE 256 /* XAddr URL buffer size for service endpoints */
 
 /* Time constants */
 #define UNIX_EPOCH_YEAR_BASE 1900 /* Unix epoch year base (struct tm.tm_year offset) */
@@ -118,7 +117,7 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     }
     soap_default_tt__DeviceCapabilities(soap, response->Capabilities->Device);
 
-    char device_xaddr[DEVICE_XADDR_BUFFER_SIZE];
+    char device_xaddr[ONVIF_XADDR_BUFFER_SIZE];
     (void)snprintf(device_xaddr, sizeof(device_xaddr), "http://%s:%d/onvif/device_service", data->device_ip, data->http_port);
     response->Capabilities->Device->XAddr = soap_strdup(soap, device_xaddr);
 
@@ -129,7 +128,7 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     }
     soap_default_tt__MediaCapabilities(soap, response->Capabilities->Media);
 
-    char media_xaddr[DEVICE_XADDR_BUFFER_SIZE];
+    char media_xaddr[ONVIF_XADDR_BUFFER_SIZE];
     (void)snprintf(media_xaddr, sizeof(media_xaddr), "http://%s:%d/onvif/media_service", data->device_ip, data->http_port);
     response->Capabilities->Media->XAddr = soap_strdup(soap, media_xaddr);
 
@@ -140,7 +139,7 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     }
     soap_default_tt__PTZCapabilities(soap, response->Capabilities->PTZ);
 
-    char ptz_xaddr[DEVICE_XADDR_BUFFER_SIZE];
+    char ptz_xaddr[ONVIF_XADDR_BUFFER_SIZE];
     (void)snprintf(ptz_xaddr, sizeof(ptz_xaddr), "http://%s:%d/onvif/ptz_service", data->device_ip, data->http_port);
     response->Capabilities->PTZ->XAddr = soap_strdup(soap, ptz_xaddr);
   }
@@ -244,7 +243,7 @@ int services_response_callback(struct soap* soap, void* user_data) {
   }
 
   /* Build device service URL using configured device IP and port */
-  char device_service_xaddr[DEVICE_XADDR_BUFFER_SIZE];
+  char device_service_xaddr[ONVIF_XADDR_BUFFER_SIZE];
   (void)snprintf(device_service_xaddr, sizeof(device_service_xaddr), "http://%s:%d/onvif/device_service", data->device_ip, data->http_port);
 
   /* Set device service information */

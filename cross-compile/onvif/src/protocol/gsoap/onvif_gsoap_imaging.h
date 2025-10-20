@@ -27,8 +27,7 @@
  * @note Response contains ImagingSettings with Brightness, Contrast, Saturation, Sharpness, etc.
  * @note Output structure is allocated with soap_new__timg__GetImagingSettings()
  */
-int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
-                                           struct _timg__GetImagingSettings** out);
+int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx, struct _timg__GetImagingSettings** out);
 
 /**
  * @brief Parse SetImagingSettings ONVIF Imaging service request
@@ -41,8 +40,7 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx,
  * @note ForcePersistence flag indicates whether settings should persist across reboots
  * @note Output structure is allocated with soap_new__timg__SetImagingSettings()
  */
-int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx,
-                                           struct _timg__SetImagingSettings** out);
+int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx, struct _timg__SetImagingSettings** out);
 
 /* ============================================================================
  * Imaging Service Response Callback Data Structures

@@ -58,8 +58,7 @@ int smart_response_build_with_dynamic_buffer(http_response_t* response, const ch
   response->body[response_length] = '\0';
   response->body_length = response_length;
 
-  platform_log_debug("Response allocated: %zu bytes (saved %zu bytes)", response_length,
-                     ONVIF_RESPONSE_BUFFER_SIZE - response_length);
+  platform_log_debug("Response allocated: %zu bytes (saved %zu bytes)", response_length, ONVIF_RESPONSE_BUFFER_SIZE - response_length);
   return ONVIF_SUCCESS;
 }
 
@@ -72,8 +71,7 @@ int smart_response_build_with_dynamic_buffer(http_response_t* response, const ch
  * @note Uses existing buffer_pool utilities per AGENTS.md standards
  * @note soap_content should already contain complete SOAP envelope from gSOAP
  */
-int smart_response_build_with_buffer_pool(http_response_t* response, const char* soap_content,
-                                          buffer_pool_t* buffer_pool) {
+int smart_response_build_with_buffer_pool(http_response_t* response, const char* soap_content, buffer_pool_t* buffer_pool) {
   if (!response || !soap_content || !buffer_pool) {
     return -1; // Input validation per AGENTS.md
   }
@@ -108,8 +106,7 @@ int smart_response_build_with_buffer_pool(http_response_t* response, const char*
         // Return buffer to pool
         buffer_pool_return(buffer_pool, pool_buffer);
 
-        platform_log_debug("Pool response: %zu bytes (saved %zu bytes)", content_length,
-                           ONVIF_RESPONSE_BUFFER_SIZE - content_length);
+        platform_log_debug("Pool response: %zu bytes (saved %zu bytes)", content_length, ONVIF_RESPONSE_BUFFER_SIZE - content_length);
         return ONVIF_SUCCESS;
       }
       // Pool exhausted - fall back to direct allocation
@@ -151,8 +148,7 @@ int smart_response_build_with_buffer_pool(http_response_t* response, const char*
  * @note Automatically selects optimal allocation strategy based on size
  * @note soap_content should already contain complete SOAP envelope from gSOAP
  */
-int smart_response_build(http_response_t* response, const char* soap_content, size_t estimated_size,
-                         buffer_pool_t* buffer_pool) {
+int smart_response_build(http_response_t* response, const char* soap_content, size_t estimated_size, buffer_pool_t* buffer_pool) {
   if (!response || !soap_content || !buffer_pool) {
     return -1; // Input validation per AGENTS.md
   }
@@ -167,8 +163,7 @@ int smart_response_build(http_response_t* response, const char* soap_content, si
   }
 
   // Large response (>32KB) - use direct allocation with tracking
-  platform_log_debug("Using direct allocation for large response: %zu bytes (>32KB)",
-                     estimated_size);
+  platform_log_debug("Using direct allocation for large response: %zu bytes (>32KB)", estimated_size);
 
   // gSOAP already provides complete SOAP response, no need to wrap
   size_t content_length = strlen(soap_content);

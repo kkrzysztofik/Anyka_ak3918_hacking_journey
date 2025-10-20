@@ -41,23 +41,73 @@
 #define RTP_TRANSPORT_UDP 0
 #define RTP_TRANSPORT_TCP 1
 
+/* RTP/RTCP protocol constants */
+#define RTP_VERSION             2
+#define RTP_HEADER_SIZE         12
+#define RTP_MAX_PACKET_SIZE     1500 // Standard MTU
+#define RTP_TCP_OVERHEAD        4    // TCP interleaving header
+#define RTP_TCP_MAX_PACKET_SIZE (RTP_MAX_PACKET_SIZE + RTP_TCP_OVERHEAD)
+#define RTP_MARKER_BIT          0x80
+#define RTP_PAYLOAD_TYPE_MASK   0x7F
+
+/* RTP header bit masks and shifts */
+#define RTP_VERSION_MASK   0xC0
+#define RTP_VERSION_SHIFT  6
+#define RTP_PADDING_MASK   0x20
+#define RTP_EXTENSION_MASK 0x10
+#define RTP_CSRC_MASK      0x0F
+#define RTP_MARKER_MASK    0x80
+#define RTP_PT_MASK        0x7F
+#define RTP_BYTE_MASK      0xFF
+
+/* Bit shift values for multi-byte fields */
+#define SHIFT_8_BITS  8
+#define SHIFT_16_BITS 16
+#define SHIFT_24_BITS 24
+
+/* RTCP constants */
+#define RTCP_HEADER_SIZE       8
+#define RTCP_VERSION           2
+#define RTCP_PT_SR             200 // Sender Report
+#define RTCP_PT_RR             201 // Receiver Report
+#define RTCP_PT_SDES           202 // Source Description
+#define RTCP_PT_BYE            203 // Goodbye
+#define RTCP_PT_APP            204 // Application-defined
+#define RTCP_SR_PACKET_SIZE    28  // Sender Report packet size
+#define RTCP_REPORT_COUNT_MASK 0x1F
+#define RTCP_PT_MASK           0x7F
+
+/* NTP constants */
+#define NTP_FRAC_SHIFT_56 56
+#define NTP_FRAC_SHIFT_48 48
+#define NTP_FRAC_SHIFT_40 40
+#define NTP_FRAC_SHIFT_32 32
+
+/* Audio sample rates */
+#define AUDIO_SAMPLE_RATE_8KHZ    8000
+#define AUDIO_SAMPLE_RATE_16KHZ   16000
+#define AUDIO_SAMPLE_RATE_44_1KHZ 44100
+#define AUDIO_SAMPLE_RATE_48KHZ   48000
+
+/* Audio frame sizes */
+#define AUDIO_FRAME_SIZE_G711 160 // 20ms at 8kHz
+#define AUDIO_FRAME_SIZE_AAC  1024
+
+/* Time conversion constants */
+#define MS_TO_US               1000         // Milliseconds to microseconds
+#define S_TO_MS                1000         // Seconds to milliseconds
+#define S_TO_US                1000000      // Seconds to microseconds
+#define RTP_TIMESTAMP_HZ_VIDEO 90000        // 90 kHz for video
+#define NTP_OFFSET             2208988800UL // NTP epoch offset (1900 to 1970)
+
 /* Authentication types */
 typedef enum { RTSP_AUTH_NONE = 0, RTSP_AUTH_BASIC = 1, RTSP_AUTH_DIGEST = 2 } rtsp_auth_type_t;
 
 /* SDP media types */
-typedef enum {
-  SDP_MEDIA_VIDEO = 0,
-  SDP_MEDIA_AUDIO = 1,
-  SDP_MEDIA_APPLICATION = 2
-} sdp_media_type_t;
+typedef enum { SDP_MEDIA_VIDEO = 0, SDP_MEDIA_AUDIO = 1, SDP_MEDIA_APPLICATION = 2 } sdp_media_type_t;
 
 /* SDP direction types */
-typedef enum {
-  SDP_DIR_SENDRECV = 0,
-  SDP_DIR_SENDONLY = 1,
-  SDP_DIR_RECVONLY = 2,
-  SDP_DIR_INACTIVE = 3
-} sdp_direction_t;
+typedef enum { SDP_DIR_SENDRECV = 0, SDP_DIR_SENDONLY = 1, SDP_DIR_RECVONLY = 2, SDP_DIR_INACTIVE = 3 } sdp_direction_t;
 
 /* Audio RTP payload types */
 #define RTP_PT_PCMU 0  /* G.711 μ-law */
@@ -139,13 +189,7 @@ enum rtsp_error_code {
 };
 
 /* RTSP session states */
-enum rtsp_session_state {
-  RTSP_STATE_INVALID = -1,
-  RTSP_STATE_INIT = 0,
-  RTSP_STATE_READY = 1,
-  RTSP_STATE_PLAYING = 2,
-  RTSP_STATE_RECORDING = 3
-};
+enum rtsp_session_state { RTSP_STATE_INVALID = -1, RTSP_STATE_INIT = 0, RTSP_STATE_READY = 1, RTSP_STATE_PLAYING = 2, RTSP_STATE_RECORDING = 3 };
 
 struct rtsp_video_resolution {
   int width;

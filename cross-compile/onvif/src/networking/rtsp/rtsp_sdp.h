@@ -42,8 +42,8 @@ void sdp_cleanup_session(struct sdp_session* sdp);
  * @param channels Number of channels (for audio)
  * @return 0 on success, -1 on error
  */
-int sdp_add_media(struct sdp_session* sdp, sdp_media_type_t type, int port, const char* protocol,
-                  int payload_type, const char* encoding, int clock_rate, int channels);
+int sdp_add_media(struct sdp_session* sdp, sdp_media_type_t type, int port, const char* protocol, int payload_type, const char* encoding,
+                  int clock_rate, int channels);
 
 /**
  * @brief Set media direction
@@ -52,8 +52,7 @@ int sdp_add_media(struct sdp_session* sdp, sdp_media_type_t type, int port, cons
  * @param direction Direction (sendrecv, sendonly, recvonly, inactive)
  * @return 0 on success, -1 on error
  */
-int sdp_set_media_direction(struct sdp_session* sdp, sdp_media_type_t type,
-                            sdp_direction_t direction);
+int sdp_set_media_direction(struct sdp_session* sdp, sdp_media_type_t type, sdp_direction_t direction);
 
 /**
  * @brief Set media control URL

@@ -12,13 +12,13 @@
 #include "services/common/onvif_types.h"
 
 /* Network and device information buffer sizes */
-#define DEVICE_SEARCH_DOMAIN_SIZE  256  /* DNS search domain buffer size */
-#define DEVICE_INTERFACE_NAME_SIZE  32  /* Network interface name size */
-#define DEVICE_HW_ADDRESS_SIZE      18  /* Hardware/MAC address size (XX:XX:XX:XX:XX:XX + null) */
-#define DEVICE_PROTOCOL_NAME_SIZE   16  /* Network protocol name size */
-#define DEVICE_MAX_PORTS             8  /* Maximum number of ports per protocol */
-#define DEVICE_NAMESPACE_SIZE      128  /* Service namespace buffer size */
-#define DEVICE_XADDR_SIZE          256  /* Service XAddr URL buffer size */
+#define DEVICE_SEARCH_DOMAIN_SIZE  256 /* DNS search domain buffer size */
+#define DEVICE_INTERFACE_NAME_SIZE 32  /* Network interface name size */
+#define DEVICE_HW_ADDRESS_SIZE     18  /* Hardware/MAC address size (XX:XX:XX:XX:XX:XX + null) */
+#define DEVICE_PROTOCOL_NAME_SIZE  16  /* Network protocol name size */
+#define DEVICE_MAX_PORTS           8   /* Maximum number of ports per protocol */
+#define DEVICE_NAMESPACE_SIZE      128 /* Service namespace buffer size */
+#define DEVICE_XADDR_SIZE          256 /* Service XAddr URL buffer size */
 
 /**
  * @brief Device identification information - defined in config.h
@@ -107,8 +107,7 @@ int onvif_device_init(void);
  * @param response Response structure
  * @return 0 on success, negative error code on failure
  */
-int onvif_device_handle_operation(const char* operation_name, const http_request_t* request,
-                                  http_response_t* response);
+int onvif_device_handle_operation(const char* operation_name, const http_request_t* request, http_response_t* response);
 
 /**
  * @brief Clean up device service

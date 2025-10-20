@@ -94,8 +94,7 @@ int rtsp_validate_request(const char* request, size_t len);
  * @param reason Error reason
  * @return 0 on success, -1 on error
  */
-int rtsp_send_error_response(rtsp_session_t* session, enum rtsp_error_code code,
-                             const char* reason);
+int rtsp_send_error_response(rtsp_session_t* session, enum rtsp_error_code code, const char* reason);
 
 /**
  * @brief Check if session has timed out
@@ -132,8 +131,7 @@ int rtsp_handle_auth_required(rtsp_session_t* session);
  * @param header_size Size of header buffer
  * @return 0 on success, -1 on error
  */
-int rtsp_generate_www_authenticate_header(rtsp_session_t* session, char* header,
-                                          size_t header_size);
+int rtsp_generate_www_authenticate_header(rtsp_session_t* session, char* header, size_t header_size);
 
 /* Session management functions */
 /**

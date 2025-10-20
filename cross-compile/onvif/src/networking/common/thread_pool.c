@@ -6,6 +6,8 @@
  */
 
 #define _GNU_SOURCE
+#include "thread_pool.h"
+
 #include <bits/pthreadtypes.h>
 #include <errno.h>
 #include <pthread.h>
@@ -17,7 +19,6 @@
 #include "core/lifecycle/signal_lifecycle.h"
 #include "networking/common/connection_manager.h"
 #include "platform/platform.h"
-#include "thread_pool.h"
 #include "utils/common/time_utils.h"
 #include "utils/memory/memory_manager.h"
 
@@ -180,6 +181,59 @@ void thread_pool_add_work(thread_pool_t* pool, connection_t* conn) {
 }
 
 /**
+ * @brief Check if pool should shutdown
+ */
+static bool should_shutdown(thread_pool_t* pool) {
+  return pool->shutdown || !signal_lifecycle_should_continue();
+}
+
+/**
+ * @brief Wait for work to become available in queue
+ * @return true if work is available, false if should shutdown
+ */
+static bool wait_for_work(thread_pool_t* pool) {
+  while (pool->work_queue == NULL && !should_shutdown(pool)) {
+    struct timespec timeout;
+    clock_gettime(CLOCK_REALTIME, &timeout);
+    timeout.tv_sec += 1; // 1 second timeout for responsive shutdown
+
+    int wait_result = pthread_cond_timedwait(&pool->queue_cond, &pool->queue_mutex, &timeout);
+
+    if (wait_result == ETIMEDOUT) {
+      if (should_shutdown(pool)) {
+        return false;
+      }
+      continue;
+    }
+
+    if (wait_result != 0) {
+      platform_log_warning("Worker thread cond_wait failed: %s\n", strerror(wait_result));
+      return false;
+    }
+  }
+
+  return !should_shutdown(pool);
+}
+
+/**
+ * @brief Dequeue connection from work queue
+ */
+static connection_t* dequeue_work(thread_pool_t* pool) {
+  connection_t* conn = pool->work_queue;
+  if (!conn) {
+    return NULL;
+  }
+
+  pool->work_queue = conn->next;
+  if (pool->work_queue) {
+    pool->work_queue->prev = NULL;
+  }
+
+  pool->active_threads++;
+  return conn;
+}
+
+/**
  * @brief Worker thread function
  * @param arg Thread pool pointer
  * @return NULL
@@ -190,59 +244,28 @@ void* thread_pool_worker(void* arg) {
   platform_log_debug("Worker thread started\n");
 
   while (1) {
-    connection_t* conn = NULL;
-
     pthread_mutex_lock(&pool->queue_mutex);
 
-    // Wait for work or shutdown with shorter timeout for more responsive
-    // shutdown
-    while (pool->work_queue == NULL && !pool->shutdown && signal_lifecycle_should_continue()) {
-      struct timespec timeout;
-      clock_gettime(CLOCK_REALTIME, &timeout);
-      timeout.tv_sec += 1; // 1 second timeout
-
-      int wait_result = pthread_cond_timedwait(&pool->queue_cond, &pool->queue_mutex, &timeout);
-      if (wait_result == ETIMEDOUT) {
-        // Check for shutdown signal on timeout
-        if (pool->shutdown || !signal_lifecycle_should_continue()) {
-          break;
-        }
-        continue;
-      }
-      if (wait_result != 0) {
-        platform_log_warning("Worker thread cond_wait failed: %s\n", strerror(wait_result));
-        break;
-      }
-    }
-
-    // Double-check shutdown conditions after releasing mutex
-    if (pool->shutdown || !signal_lifecycle_should_continue()) {
+    // Wait for work or shutdown
+    if (!wait_for_work(pool)) {
       pthread_mutex_unlock(&pool->queue_mutex);
       break;
     }
 
-    // Get work from queue
-    conn = pool->work_queue;
-    if (conn) {
-      pool->work_queue = conn->next;
-      if (pool->work_queue) {
-        pool->work_queue->prev = NULL;
-      }
-    }
-
-    pool->active_threads++;
+    // Dequeue work
+    connection_t* conn = dequeue_work(pool);
     pthread_mutex_unlock(&pool->queue_mutex);
 
+    // Process connection if we got one
     if (conn) {
-      // Process the connection
       process_connection(conn);
+
+      pthread_mutex_lock(&pool->queue_mutex);
+      pool->active_threads--;
+      pthread_mutex_unlock(&pool->queue_mutex);
     }
 
-    pthread_mutex_lock(&pool->queue_mutex);
-    pool->active_threads--;
-    pthread_mutex_unlock(&pool->queue_mutex);
-
-    // Check for shutdown signal after processing each connection
+    // Check for shutdown signal after processing
     if (!signal_lifecycle_should_continue()) {
       platform_log_debug("Worker thread received shutdown signal, exiting\n");
       break;

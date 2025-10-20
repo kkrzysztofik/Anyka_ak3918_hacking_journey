@@ -23,8 +23,8 @@
  * ============================================================================ */
 
 /* Timestamp buffer size and conversion constants */
-#define LOG_TIMESTAMP_BUFFER_SIZE  32   /* Buffer size for formatted timestamp */
-#define LOG_US_TO_MS_DIVISOR       1000 /* Microseconds to milliseconds conversion */
+#define LOG_TIMESTAMP_BUFFER_SIZE 32   /* Buffer size for formatted timestamp */
+#define LOG_US_TO_MS_DIVISOR      1000 /* Microseconds to milliseconds conversion */
 
 /* Log level strings */
 /* ============================================================================
@@ -110,8 +110,7 @@ static bool should_log(platform_log_level_t level) {
  * @param args Variable arguments
  * @return Number of characters printed
  */
-int platform_log_printf(platform_log_level_t level, const char* file, const char* function,
-                        int line, const char* format, va_list args) {
+int platform_log_printf(platform_log_level_t level, const char* file, const char* function, int line, const char* format, va_list args) {
   if (!should_log(level)) {
     return 0;
   }
@@ -135,8 +134,7 @@ int platform_log_printf(platform_log_level_t level, const char* file, const char
 
   /* Add log level with color if enabled */
   if (g_log_config.use_colors) {
-    chars_written +=
-      printf("%s[%s]%s ", LOG_LEVEL_COLORS[level], LOG_LEVEL_STRINGS[level], COLOR_RESET);
+    chars_written += printf("%s[%s]%s ", LOG_LEVEL_COLORS[level], LOG_LEVEL_STRINGS[level], COLOR_RESET);
   } else {
     chars_written += printf("[%s] ", LOG_LEVEL_STRINGS[level]);
   }

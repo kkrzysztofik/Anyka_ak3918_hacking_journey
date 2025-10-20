@@ -51,8 +51,7 @@ int rtsp_server_destroy(rtsp_server_t* server);
  * @param sessions_count Number of active sessions
  * @return 0 on success, -1 on error
  */
-int rtsp_server_get_stats(rtsp_server_t* server, uint64_t* bytes_sent, uint32_t* frames_sent,
-                          uint32_t* sessions_count);
+int rtsp_server_get_stats(rtsp_server_t* server, uint64_t* bytes_sent, uint32_t* frames_sent, uint32_t* sessions_count);
 
 /**
  * @brief Get stream URL

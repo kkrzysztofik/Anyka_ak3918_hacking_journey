@@ -12,10 +12,10 @@
 #include <time.h>
 
 /* Time conversion constants */
-#define TIME_MS_PER_SECOND  1000      /* Milliseconds per second */
-#define TIME_US_PER_SECOND  1000000ULL /* Microseconds per second */
-#define TIME_NS_PER_MS      1000000   /* Nanoseconds per millisecond */
-#define TIME_NS_PER_US      1000      /* Nanoseconds per microsecond */
+#define TIME_MS_PER_SECOND 1000       /* Milliseconds per second */
+#define TIME_US_PER_SECOND 1000000ULL /* Microseconds per second */
+#define TIME_NS_PER_MS     1000000    /* Nanoseconds per millisecond */
+#define TIME_NS_PER_US     1000       /* Nanoseconds per microsecond */
 
 /* ============================================================================
  * PUBLIC API - Time Utility Functions

@@ -41,17 +41,12 @@ typedef struct {
 static const error_pattern_def_t error_patterns[] = {
   {ERROR_PATTERN_VALIDATION_FAILED, "Validation failed", SOAP_FAULT_SENDER, "Validation failed"},
   {ERROR_PATTERN_NOT_FOUND, "Resource not found", SOAP_FAULT_SENDER, "Resource not found"},
-  {ERROR_PATTERN_NOT_SUPPORTED, "Operation not supported", SOAP_FAULT_SENDER,
-   "Operation not supported"},
-  {ERROR_PATTERN_INTERNAL_ERROR, "Internal server error", SOAP_FAULT_RECEIVER,
-   "Internal server error"},
+  {ERROR_PATTERN_NOT_SUPPORTED, "Operation not supported", SOAP_FAULT_SENDER, "Operation not supported"},
+  {ERROR_PATTERN_INTERNAL_ERROR, "Internal server error", SOAP_FAULT_RECEIVER, "Internal server error"},
   {ERROR_PATTERN_INVALID_PARAMETER, "Invalid parameter", SOAP_FAULT_SENDER, "Invalid parameter"},
-  {ERROR_PATTERN_MISSING_PARAMETER, "Missing required parameter", SOAP_FAULT_SENDER,
-   "Missing required parameter"},
-  {ERROR_PATTERN_AUTHENTICATION_FAILED, "Authentication failed", SOAP_FAULT_SENDER,
-   "Authentication failed"},
-  {ERROR_PATTERN_AUTHORIZATION_FAILED, "Authorization failed", SOAP_FAULT_SENDER,
-   "Authorization failed"}};
+  {ERROR_PATTERN_MISSING_PARAMETER, "Missing required parameter", SOAP_FAULT_SENDER, "Missing required parameter"},
+  {ERROR_PATTERN_AUTHENTICATION_FAILED, "Authentication failed", SOAP_FAULT_SENDER, "Authentication failed"},
+  {ERROR_PATTERN_AUTHORIZATION_FAILED, "Authorization failed", SOAP_FAULT_SENDER, "Authorization failed"}};
 
 /* ============================================================================
  * INTERNAL HELPERS - Error Pattern Lookup
@@ -87,8 +82,7 @@ int error_context_init(error_context_t* context,
   return ONVIF_SUCCESS;
 }
 
-int error_create_result_from_pattern(error_pattern_t pattern, const char* custom_message,
-                                     error_result_t* result) {
+int error_create_result_from_pattern(error_pattern_t pattern, const char* custom_message, error_result_t* result) {
   if (!result) {
     return ONVIF_ERROR_INVALID;
   }
@@ -111,8 +105,7 @@ int error_create_result_from_pattern(error_pattern_t pattern, const char* custom
  * PUBLIC API - Error Handling Functions
  * ============================================================================ */
 
-int error_handle_pattern(const error_context_t* context, error_pattern_t pattern,
-                         const char* custom_message, http_response_t* response) {
+int error_handle_pattern(const error_context_t* context, error_pattern_t pattern, const char* custom_message, http_response_t* response) {
   if (!context || !response) {
     return ONVIF_ERROR_INVALID;
   }
@@ -136,14 +129,13 @@ int error_handle_pattern(const error_context_t* context, error_pattern_t pattern
   // Use custom message if provided, otherwise use default fault string
   const char* fault_message = custom_message ? custom_message : result.soap_fault_string;
 
-  int xml_length = onvif_gsoap_generate_fault_response(
-    NULL,                   // ctx - will create temporary context
-    result.soap_fault_code, // fault_code (e.g., "soap:Sender" or "soap:Receiver")
-    fault_message,          // fault_string (descriptive error message)
-    NULL,                   // fault_actor (optional)
-    NULL,                   // fault_detail (optional)
-    soap_fault_xml,         // output_buffer
-    soap_buffer_size        // buffer_size
+  int xml_length = onvif_gsoap_generate_fault_response(NULL,                   // ctx - will create temporary context
+                                                       result.soap_fault_code, // fault_code (e.g., "soap:Sender" or "soap:Receiver")
+                                                       fault_message,          // fault_string (descriptive error message)
+                                                       NULL,                   // fault_actor (optional)
+                                                       NULL,                   // fault_detail (optional)
+                                                       soap_fault_xml,         // output_buffer
+                                                       soap_buffer_size        // buffer_size
   );
 
   if (xml_length < 0) {
@@ -162,29 +154,25 @@ int error_handle_pattern(const error_context_t* context, error_pattern_t pattern
   return ONVIF_ERROR_SOAP_FAULT;
 }
 
-int error_handle_validation(const error_context_t* context, int validation_result,
-                            const char* field_name, http_response_t* response) {
+int error_handle_validation(const error_context_t* context, int validation_result, const char* field_name, http_response_t* response) {
   if (!context || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   char custom_message[ERROR_MESSAGE_BUFFER_SIZE];
-  (void)snprintf(custom_message, sizeof(custom_message),
-                 "Validation failed for field '%s' (code: %d)", field_name ? field_name : "unknown",
+  (void)snprintf(custom_message, sizeof(custom_message), "Validation failed for field '%s' (code: %d)", field_name ? field_name : "unknown",
                  validation_result);
 
   return error_handle_pattern(context, ERROR_PATTERN_VALIDATION_FAILED, custom_message, response);
 }
 
-int error_handle_parameter(const error_context_t* context, const char* parameter_name,
-                           const char* error_type, http_response_t* response) {
+int error_handle_parameter(const error_context_t* context, const char* parameter_name, const char* error_type, http_response_t* response) {
   if (!context || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   char custom_message[ERROR_MESSAGE_BUFFER_SIZE];
-  (void)snprintf(custom_message, sizeof(custom_message), "Parameter error: %s for parameter '%s'",
-                 error_type ? error_type : "unknown error",
+  (void)snprintf(custom_message, sizeof(custom_message), "Parameter error: %s for parameter '%s'", error_type ? error_type : "unknown error",
                  parameter_name ? parameter_name : "unknown");
 
   error_pattern_t pattern = ERROR_PATTERN_INVALID_PARAMETER;
@@ -195,21 +183,18 @@ int error_handle_parameter(const error_context_t* context, const char* parameter
   return error_handle_pattern(context, pattern, custom_message, response);
 }
 
-int error_handle_service(const error_context_t* context, int error_code, const char* error_message,
-                         http_response_t* response) {
+int error_handle_service(const error_context_t* context, int error_code, const char* error_message, http_response_t* response) {
   if (!context || !response) {
     return ONVIF_ERROR_INVALID;
   }
 
   char custom_message[ERROR_MESSAGE_BUFFER_SIZE];
-  (void)snprintf(custom_message, sizeof(custom_message), "Service error %d: %s", error_code,
-                 error_message ? error_message : "Unknown service error");
+  (void)snprintf(custom_message, sizeof(custom_message), "Service error %d: %s", error_code, error_message ? error_message : "Unknown service error");
 
   return error_handle_pattern(context, ERROR_PATTERN_INTERNAL_ERROR, custom_message, response);
 }
 
-int error_handle_system(const error_context_t* context, int error_code, const char* operation,
-                        http_response_t* response) {
+int error_handle_system(const error_context_t* context, int error_code, const char* operation, http_response_t* response) {
   if (!context || !response) {
     return ONVIF_ERROR_INVALID;
   }
@@ -243,8 +228,7 @@ int error_handle_system(const error_context_t* context, int error_code, const ch
 
   char custom_message[ERROR_MESSAGE_BUFFER_SIZE];
   if (operation) {
-    (void)snprintf(custom_message, sizeof(custom_message), "%s during %s", error_description,
-                   operation);
+    (void)snprintf(custom_message, sizeof(custom_message), "%s during %s", error_description, operation);
   } else {
     (void)snprintf(custom_message, sizeof(custom_message), "%s", error_description);
   }
@@ -261,8 +245,7 @@ void onvif_log_error_context(const error_context_t* ctx) {
     return;
   }
 
-  (void)platform_log_error("ERROR [%d] in %s() at %s:%d\n", ctx->error_code, ctx->function,
-                           ctx->file, ctx->line);
+  (void)platform_log_error("ERROR [%d] in %s() at %s:%d\n", ctx->error_code, ctx->function, ctx->file, ctx->line);
 
   if (ctx->message[0] != '\0') {
     (void)platform_log_error("  Message: %s\n", ctx->message);
@@ -315,8 +298,7 @@ int onvif_get_error_context_string(const error_context_t* ctx, char* buffer, siz
     return -1;
   }
 
-  int len = snprintf(buffer, buffer_size, "ERROR [%d] in %s() at %s:%d", ctx->error_code,
-                     ctx->function, ctx->file, ctx->line);
+  int len = snprintf(buffer, buffer_size, "ERROR [%d] in %s() at %s:%d", ctx->error_code, ctx->function, ctx->file, ctx->line);
 
   if (len < 0 || (size_t)len >= buffer_size) {
     return -1;
@@ -350,27 +332,22 @@ int error_should_log(const error_context_t* context, const error_result_t* resul
   return 1;
 }
 
-int error_create_summary(const error_context_t* context, const error_result_t* result,
-                         char* summary, size_t summary_size) {
+int error_create_summary(const error_context_t* context, const error_result_t* result, char* summary, size_t summary_size) {
   if (!context || !result || !summary) {
     return ONVIF_ERROR_INVALID;
   }
 
-  int ret = snprintf(summary, summary_size, "[%s::%s] %s (Code: %d, SOAP: %s)",
-                     context->service_name ? context->service_name : "Unknown",
-                     context->action_name ? context->action_name : "Unknown", result->error_message,
-                     result->error_code, result->soap_fault_code);
+  int ret = snprintf(summary, summary_size, "[%s::%s] %s (Code: %d, SOAP: %s)", context->service_name ? context->service_name : "Unknown",
+                     context->action_name ? context->action_name : "Unknown", result->error_message, result->error_code, result->soap_fault_code);
 
   if (context->error_context) {
-    (void)snprintf(summary + strlen(summary), summary_size - strlen(summary), " [Context: %s]",
-                   context->error_context);
+    (void)snprintf(summary + strlen(summary), summary_size - strlen(summary), " [Context: %s]", context->error_context);
   }
 
   return (ret < 0 || (size_t)ret >= summary_size) ? ONVIF_ERROR : ONVIF_SUCCESS;
 }
 
-void error_log_with_context(const error_context_t* context, const error_result_t* result,
-                            const char* additional_info) {
+void error_log_with_context(const error_context_t* context, const error_result_t* result, const char* additional_info) {
   if (!context || !result) {
     return;
   }
@@ -388,39 +365,35 @@ void error_log_with_context(const error_context_t* context, const error_result_t
  * PUBLIC API - Standardized Error Handling
  * ============================================================================ */
 
-int onvif_standardized_validation(const char* field_name, int validation_result,
-                                  const char* error_context) {
+int onvif_standardized_validation(const char* field_name, int validation_result, const char* error_context) {
   if (validation_result == ONVIF_VALIDATION_SUCCESS) {
     return ONVIF_VALIDATION_SUCCESS;
   }
 
   if (error_context) {
-    ONVIF_LOG_ERROR("Validation failed for field '%s': %s\n", field_name, error_context);
+    platform_log_error("Validation failed for field '%s': %s\n", field_name, error_context);
   } else {
-    ONVIF_LOG_ERROR("Validation failed for field '%s'\n", field_name);
+    platform_log_error("Validation failed for field '%s'\n", field_name);
   }
 
   return ONVIF_VALIDATION_FAILED;
 }
 
-int onvif_standardized_operation(const char* operation_name, int operation_result,
-                                 const char* error_context) {
+int onvif_standardized_operation(const char* operation_name, int operation_result, const char* error_context) {
   if (operation_result == ONVIF_SUCCESS) {
     return ONVIF_SUCCESS;
   }
 
   if (error_context) {
-    ONVIF_LOG_ERROR("Operation failed: %s - %s (error code: %d)\n", operation_name, error_context,
-                    operation_result);
+    platform_log_error("Operation failed: %s - %s (error code: %d)\n", operation_name, error_context, operation_result);
   } else {
-    ONVIF_LOG_ERROR("Operation failed: %s (error code: %d)\n", operation_name, operation_result);
+    platform_log_error("Operation failed: %s (error code: %d)\n", operation_name, operation_result);
   }
 
   return ONVIF_ERROR;
 }
 
-void onvif_standardized_log_error(const char* function, const char* file, int line,
-                                  const char* message, ...) {
+void onvif_standardized_log_error(const char* function, const char* file, int line, const char* message, ...) {
   if (!function || !file || !message) {
     return;
   }
