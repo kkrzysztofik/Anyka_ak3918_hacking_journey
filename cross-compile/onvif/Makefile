@@ -134,8 +134,8 @@ OBJS := $(SRCS:src/%.c=$(OUT_DIR)/%.o)
 # Documentation directory
 DOCS_DIR = docs
 
-# Limit parallel jobs to prevent memory issues
-MAKEFLAGS += -j1
+# Enable parallel compilation with 4 jobs by default
+MAKEFLAGS += -j4
 
 # Main targets
 all: $(OUT_DIR)/onvifd

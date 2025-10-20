@@ -94,7 +94,7 @@ format_regular_file() {
     if clang-format "$file" > "$temp_file"; then
         if ! cmp -s "$file" "$temp_file"; then
             mv "$temp_file" "$file"
-            log_success "✓ $relative_file (formatted)"
+            log_error "✓ $relative_file (formatted)"
             rm -f "$temp_file"
             return 1  # Changed
         else
