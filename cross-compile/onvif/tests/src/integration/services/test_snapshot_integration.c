@@ -76,8 +76,7 @@ int snapshot_service_setup(void** state) {
   assert_non_null(test_state->app_config);
 
   // Heap-allocate snapshot settings structure
-  test_state->app_config->snapshot = calloc(1, sizeof(struct snapshot_settings));
-  assert_non_null(test_state->app_config->snapshot);
+  memset(&test_state->app_config->snapshot, 0, sizeof(struct snapshot_settings));
 
   // Enable real functions for integration testing BEFORE config loading
   // This allows config_storage_load to call config_runtime_set_int without mock issues
@@ -95,8 +94,7 @@ int snapshot_service_setup(void** state) {
   if (config_result == ONVIF_ERROR_ALREADY_EXISTS) {
     // Configuration system already initialized by another test - this is OK
     // We need to load config from INI file
-    printf(
-      "Configuration system already initialized by another test - loading from INI file\n");
+    printf("Configuration system already initialized by another test - loading from INI file\n");
     test_state->config_initialized_by_this_test = 0; // We didn't initialize it
     config_result = config_storage_load("configs/snapshot_test_config.ini", test_state->config);
     assert_int_equal(ONVIF_SUCCESS, config_result);
@@ -147,10 +145,7 @@ int snapshot_service_teardown(void** state) {
 
   // Free snapshot settings structure BEFORE freeing app_config
   if (test_state && test_state->app_config) {
-    if (test_state->app_config->snapshot) {
-      free(test_state->app_config->snapshot);
-      test_state->app_config->snapshot = NULL;
-    }
+    // All struct members are direct, no free needed
     free(test_state->app_config);
     test_state->app_config = NULL;
   }
@@ -271,4 +266,3 @@ void test_integration_snapshot_format_parameter(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_string_equal("jpeg", format2);
 }
-

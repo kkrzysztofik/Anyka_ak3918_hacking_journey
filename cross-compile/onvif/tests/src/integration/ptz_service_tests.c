@@ -171,23 +171,15 @@ int ptz_service_setup(void** state) {
   struct application_config* app_config = calloc(1, sizeof(struct application_config));
   assert_non_null(app_config);
 
-  // Allocate pointer members for application_config (required for config_storage_load)
-  app_config->network = calloc(1, sizeof(struct network_settings));
-  app_config->device = calloc(1, sizeof(struct device_info));
-  app_config->logging = calloc(1, sizeof(struct logging_settings));
-  app_config->server = calloc(1, sizeof(struct server_settings));
-  app_config->ptz_preset_profile_1 = calloc(1, sizeof(struct ptz_preset_profile));
-  app_config->ptz_preset_profile_2 = calloc(1, sizeof(struct ptz_preset_profile));
-  app_config->ptz_preset_profile_3 = calloc(1, sizeof(struct ptz_preset_profile));
-  app_config->ptz_preset_profile_4 = calloc(1, sizeof(struct ptz_preset_profile));
-  assert_non_null(app_config->network);
-  assert_non_null(app_config->device);
-  assert_non_null(app_config->logging);
-  assert_non_null(app_config->server);
-  assert_non_null(app_config->ptz_preset_profile_1);
-  assert_non_null(app_config->ptz_preset_profile_2);
-  assert_non_null(app_config->ptz_preset_profile_3);
-  assert_non_null(app_config->ptz_preset_profile_4);
+  // Initialize direct struct members (no allocation needed)
+  memset(&app_config->network, 0, sizeof(struct network_settings));
+  memset(&app_config->device, 0, sizeof(struct device_info));
+  memset(&app_config->logging, 0, sizeof(struct logging_settings));
+  memset(&app_config->server, 0, sizeof(struct server_settings));
+  memset(&app_config->ptz_preset_profile_1, 0, sizeof(struct ptz_preset_profile));
+  memset(&app_config->ptz_preset_profile_2, 0, sizeof(struct ptz_preset_profile));
+  memset(&app_config->ptz_preset_profile_3, 0, sizeof(struct ptz_preset_profile));
+  memset(&app_config->ptz_preset_profile_4, 0, sizeof(struct ptz_preset_profile));
 
   // Initialize runtime configuration system
   result = config_runtime_init(app_config);
@@ -296,14 +288,7 @@ int ptz_service_teardown(void** state) {
 
   // Free application_config members first
   if (app_config) {
-    free(app_config->network);
-    free(app_config->device);
-    free(app_config->logging);
-    free(app_config->server);
-    free(app_config->ptz_preset_profile_1);
-    free(app_config->ptz_preset_profile_2);
-    free(app_config->ptz_preset_profile_3);
-    free(app_config->ptz_preset_profile_4);
+    // All struct members are direct, no free needed
     free(app_config);
   }
 
@@ -365,8 +350,7 @@ void test_integration_ptz_relative_move_functionality(void** state) {
 
   struct ptz_vector translation;
   struct ptz_speed speed;
-  test_helper_ptz_create_test_position(&translation, TEST_TRANSLATION_PAN, TEST_TRANSLATION_TILT,
-                                       TEST_POSITION_ZOOM);
+  test_helper_ptz_create_test_position(&translation, TEST_TRANSLATION_PAN, TEST_TRANSLATION_TILT, TEST_POSITION_ZOOM);
   test_helper_ptz_create_test_speed(&speed, TEST_SPEED_PAN_TILT_MEDIUM, TEST_SPEED_ZOOM);
 
   int result = onvif_ptz_relative_move(TEST_PROFILE_TOKEN, &translation, &speed);
@@ -559,8 +543,7 @@ void test_integration_ptz_continuous_move_timeout_cleanup(void** state) {
 
   // Test multiple rapid continuous moves with timeouts
   // This stresses the thread join logic
-  printf(
-    "  [TEST CASE] Multiple rapid continuous moves with partial timeout (thread join stress)\n");
+  printf("  [TEST CASE] Multiple rapid continuous moves with partial timeout (thread join stress)\n");
   for (int i = 0; i < TEST_LOOP_COUNT_3; i++) {
     // Set up expectations for continuous move (pan + tilt)
     expect_value(__wrap_platform_ptz_turn, direction, PLATFORM_PTZ_DIRECTION_RIGHT);
@@ -777,8 +760,7 @@ void test_integration_ptz_preset_memory_optimization(void** state) {
     char preset_name[TEST_PRESET_NAME_BUFFER_SIZE];
     (void)snprintf(preset_name, sizeof(preset_name), "Preset%d", i + 1);
 
-    int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_tokens[i],
-                                      sizeof(output_tokens[i]));
+    int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_tokens[i], sizeof(output_tokens[i]));
     assert_int_equal(result, ONVIF_SUCCESS);
   }
 
@@ -823,8 +805,7 @@ void test_integration_ptz_string_operations_optimization(void** state) {
   long_preset_name[sizeof(long_preset_name) - 1] = '\0';
 
   char output_token[TEST_PRESET_TOKEN_SIZE] = {0};
-  int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, long_preset_name, NULL, output_token,
-                                    sizeof(output_token));
+  int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, long_preset_name, NULL, output_token, sizeof(output_token));
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Clean up: Remove the preset to avoid interfering with subsequent tests
@@ -835,8 +816,7 @@ void test_integration_ptz_string_operations_optimization(void** state) {
   printf("  [TEST CASE] Empty string preset name\n");
 
   // Empty string test - should fail validation before calling buffer_pool_get
-  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME_EMPTY, "empty_preset",
-                                output_token, sizeof(output_token));
+  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME_EMPTY, "empty_preset", output_token, sizeof(output_token));
   assert_int_equal(result, ONVIF_ERROR_INVALID_PARAMETER); // Empty name should be rejected
 
   // Reset state to ensure clean start for next test (to avoid preset storage corruption)
@@ -845,8 +825,7 @@ void test_integration_ptz_string_operations_optimization(void** state) {
   // Test with special characters
   printf("  [TEST CASE] Special characters in preset name\n");
 
-  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME_SPECIAL, NULL, output_token,
-                                sizeof(output_token));
+  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_NAME_SPECIAL, NULL, output_token, sizeof(output_token));
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Clean up: Remove the preset to avoid interfering with subsequent tests
@@ -868,8 +847,7 @@ void test_integration_ptz_error_handling_robustness(void** state) {
   // Test with extreme values
   printf("  [TEST CASE] Extreme position values (clamping test)\n");
   struct ptz_vector extreme_position;
-  test_helper_ptz_create_test_position(&extreme_position, TEST_POSITION_PAN_EXTREME,
-                                       TEST_POSITION_TILT_EXTREME, TEST_POSITION_ZOOM);
+  test_helper_ptz_create_test_position(&extreme_position, TEST_POSITION_PAN_EXTREME, TEST_POSITION_TILT_EXTREME, TEST_POSITION_ZOOM);
 
   // Permissive mode handles mock expectations automatically
   int result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &extreme_position, NULL);
@@ -886,16 +864,14 @@ void test_integration_ptz_error_handling_robustness(void** state) {
     char preset_name[TEST_PRESET_NAME_BUFFER_SIZE];
     (void)snprintf(preset_name, sizeof(preset_name), "MaxPreset%d", i);
 
-    result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_token,
-                                  sizeof(output_token));
+    result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_token, sizeof(output_token));
     assert_int_equal(result, ONVIF_SUCCESS);
   }
 
   // Test adding one more preset (should fail)
   printf("  [TEST CASE] Preset overflow (exceeding max count)\n");
   char output_token[TEST_PRESET_TOKEN_SIZE] = {0};
-  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_OVERFLOW, NULL, output_token,
-                                sizeof(output_token));
+  result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, TEST_PRESET_OVERFLOW, NULL, output_token, sizeof(output_token));
   assert_int_equal(result, ONVIF_ERROR); // Should fail due to max presets reached
 
   printf("✅ PTZ error handling robustness tests passed\n");
@@ -918,16 +894,14 @@ void test_integration_ptz_stress_testing(void** state) {
     char preset_name[TEST_PRESET_NAME_BUFFER_SIZE];
     (void)snprintf(preset_name, sizeof(preset_name), "StressPreset%d", i);
 
-    int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_token,
-                                      sizeof(output_token));
+    int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, preset_name, NULL, output_token, sizeof(output_token));
     if (i < TEST_PRESET_MAX_COUNT) { // Only first TEST_PRESET_MAX_COUNT should succeed
       assert_int_equal(result, ONVIF_SUCCESS);
     }
 
     // Move to position
     struct ptz_vector position;
-    test_helper_ptz_create_test_position(&position, (float)(i % 2),
-                                         (float)(i % 3) * TEST_MULTIPLIER_0_5F, TEST_POSITION_ZOOM);
+    test_helper_ptz_create_test_position(&position, (float)(i % 2), (float)(i % 3) * TEST_MULTIPLIER_0_5F, TEST_POSITION_ZOOM);
 
     result = onvif_ptz_absolute_move(TEST_PROFILE_TOKEN, &position, NULL);
     assert_int_equal(result, ONVIF_SUCCESS);
@@ -952,8 +926,7 @@ void test_integration_ptz_get_nodes_soap(void** state) {
   // PTZ init is idempotent, so calling it multiple times is safe
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request =
-    soap_test_create_request("GetNodes", SOAP_PTZ_GET_NODES, "/onvif/ptz_service");
+  http_request_t* request = soap_test_create_request("GetNodes", SOAP_PTZ_GET_NODES, "/onvif/ptz_service");
   assert_non_null(request);
 
   // Step 3: Validate request structure
@@ -1010,8 +983,7 @@ void test_integration_ptz_absolute_move_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request =
-    soap_test_create_request("AbsoluteMove", SOAP_PTZ_ABSOLUTE_MOVE, "/onvif/ptz_service");
+  http_request_t* request = soap_test_create_request("AbsoluteMove", SOAP_PTZ_ABSOLUTE_MOVE, "/onvif/ptz_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -1056,8 +1028,7 @@ void test_integration_ptz_get_presets_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request =
-    soap_test_create_request("GetPresets", SOAP_PTZ_GET_PRESETS, "/onvif/ptz_service");
+  http_request_t* request = soap_test_create_request("GetPresets", SOAP_PTZ_GET_PRESETS, "/onvif/ptz_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -1108,8 +1079,7 @@ void test_integration_ptz_set_preset_soap(void** state) {
   ptz_service_reset(NULL);
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request =
-    soap_test_create_request("SetPreset", SOAP_PTZ_SET_PRESET, "/onvif/ptz_service");
+  http_request_t* request = soap_test_create_request("SetPreset", SOAP_PTZ_SET_PRESET, "/onvif/ptz_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -1161,8 +1131,7 @@ void test_integration_ptz_goto_preset_soap(void** state) {
   // Step 1: Create a preset with the EXACT token that SOAP envelope expects
   // SOAP_PTZ_GOTO_PRESET uses hardcoded token 'preset_1'
   char output_token[TEST_PRESET_TOKEN_SIZE] = {0};
-  int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "HomePosition", "preset_1", output_token,
-                                    sizeof(output_token));
+  int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "HomePosition", "preset_1", output_token, sizeof(output_token));
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Verify the preset was created with the correct token
@@ -1174,8 +1143,7 @@ void test_integration_ptz_goto_preset_soap(void** state) {
   assert_string_equal("preset_1", preset_list[0].token);
 
   // Step 2: Create SOAP request envelope (contains token 'preset_1')
-  http_request_t* request =
-    soap_test_create_request("GotoPreset", SOAP_PTZ_GOTO_PRESET, "/onvif/ptz_service");
+  http_request_t* request = soap_test_create_request("GotoPreset", SOAP_PTZ_GOTO_PRESET, "/onvif/ptz_service");
   assert_non_null(request);
 
   // Step 3: Prepare response structure
@@ -1225,8 +1193,7 @@ void test_integration_ptz_remove_preset_soap(void** state) {
   // Step 1: Create a preset with the EXACT token that SOAP envelope expects
   // SOAP_PTZ_REMOVE_PRESET uses hardcoded token 'preset_to_delete'
   char output_token[TEST_PRESET_TOKEN_SIZE] = {0};
-  int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "PresetToDelete", "preset_to_delete",
-                                    output_token, sizeof(output_token));
+  int result = onvif_ptz_set_preset(TEST_PROFILE_TOKEN, "PresetToDelete", "preset_to_delete", output_token, sizeof(output_token));
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Verify the preset was created with the correct token
@@ -1238,8 +1205,7 @@ void test_integration_ptz_remove_preset_soap(void** state) {
   assert_string_equal("preset_to_delete", preset_list[0].token);
 
   // Step 2: Create SOAP request envelope (contains token 'preset_to_delete')
-  http_request_t* request =
-    soap_test_create_request("RemovePreset", SOAP_PTZ_REMOVE_PRESET, "/onvif/ptz_service");
+  http_request_t* request = soap_test_create_request("RemovePreset", SOAP_PTZ_REMOVE_PRESET, "/onvif/ptz_service");
   assert_non_null(request);
 
   // Step 3: Prepare response structure
@@ -1289,8 +1255,7 @@ void test_integration_ptz_get_node_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request =
-    soap_test_create_request("GetNode", SOAP_PTZ_GET_NODE, "/onvif/ptz_service");
+  http_request_t* request = soap_test_create_request("GetNode", SOAP_PTZ_GET_NODE, "/onvif/ptz_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure

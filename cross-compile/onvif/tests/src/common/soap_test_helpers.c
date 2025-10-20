@@ -16,6 +16,10 @@
 #include "generated/soapH.h"
 #include "utils/error/error_handling.h"
 
+#define SOAP_TEST_HEADER_BUFFER_SIZE 256U
+#define SOAP_TEST_FAULT_TEXT_BUFFER_SIZE 512U
+#define SOAP_TEST_TAG_BUFFER_SIZE 128U
+
 /* ============================================================================
  * SOAP Response Parsing Support
  * ============================================================================ */
@@ -104,7 +108,7 @@ http_request_t* soap_test_create_request(const char* action_name, const char* so
 
   // SOAPAction header
   request->headers[1].name = strdup("SOAPAction");
-  char action_header[256];
+  char action_header[SOAP_TEST_HEADER_BUFFER_SIZE];
   snprintf(action_header, sizeof(action_header), "\"%s\"", action_name);
   request->headers[1].value = strdup(action_header);
   if (!request->headers[1].name || !request->headers[1].value) {
@@ -1301,18 +1305,18 @@ int soap_test_check_soap_fault(const http_response_t* response, char* fault_code
     // Extract fault code if buffer provided
     if (fault_code) {
       // Try SOAP 1.2 format first (SOAP-ENV:Code/SOAP-ENV:Value)
-      if (!soap_test_extract_element_text(response->body, "SOAP-ENV:Value", fault_code, 256)) {
+      if (!soap_test_extract_element_text(response->body, "SOAP-ENV:Value", fault_code, SOAP_TEST_HEADER_BUFFER_SIZE)) {
         // Fallback to SOAP 1.1 format (faultcode)
-        soap_test_extract_element_text(response->body, "faultcode", fault_code, 256);
+        (void)soap_test_extract_element_text(response->body, "faultcode", fault_code, SOAP_TEST_HEADER_BUFFER_SIZE);
       }
     }
 
     // Extract fault string if buffer provided
     if (fault_string) {
       // Try SOAP 1.2 format first (SOAP-ENV:Reason/SOAP-ENV:Text)
-      if (!soap_test_extract_element_text(response->body, "SOAP-ENV:Text", fault_string, 512)) {
+      if (!soap_test_extract_element_text(response->body, "SOAP-ENV:Text", fault_string, SOAP_TEST_FAULT_TEXT_BUFFER_SIZE)) {
         // Fallback to SOAP 1.1 format (faultstring)
-        soap_test_extract_element_text(response->body, "faultstring", fault_string, 512);
+        (void)soap_test_extract_element_text(response->body, "faultstring", fault_string, SOAP_TEST_FAULT_TEXT_BUFFER_SIZE);
       }
     }
 
@@ -1333,12 +1337,18 @@ int soap_test_extract_element_text(const char* xml, const char* element_name, ch
   }
 
   // Build element pattern (element may have attributes)
-  char element_pattern[128];
-  snprintf(element_pattern, sizeof(element_pattern), "<%s", element_name);
+  char element_pattern[SOAP_TEST_TAG_BUFFER_SIZE];
+  int pattern_len = snprintf(element_pattern, sizeof(element_pattern), "<%s", element_name);
+  if (pattern_len < 0 || pattern_len >= (int)sizeof(element_pattern)) {
+    return ONVIF_ERROR_INVALID;
+  }
 
   // Build closing tag
-  char close_tag[128];
-  snprintf(close_tag, sizeof(close_tag), "</%s>", element_name);
+  char close_tag[SOAP_TEST_TAG_BUFFER_SIZE];
+  int close_tag_len = snprintf(close_tag, sizeof(close_tag), "</%s>", element_name);
+  if (close_tag_len < 0 || close_tag_len >= (int)sizeof(close_tag)) {
+    return ONVIF_ERROR_INVALID;
+  }
 
   // Find opening tag
   const char* element_start = strstr(xml, element_pattern);
@@ -1378,8 +1388,11 @@ int soap_test_extract_attribute(const char* xml, const char* element_name,
   }
 
   // Build element pattern
-  char pattern[128];
-  snprintf(pattern, sizeof(pattern), "<%s ", element_name);
+  char pattern[SOAP_TEST_TAG_BUFFER_SIZE];
+  int pattern_len = snprintf(pattern, sizeof(pattern), "<%s ", element_name);
+  if (pattern_len < 0 || pattern_len >= (int)sizeof(pattern)) {
+    return ONVIF_ERROR_INVALID;
+  }
 
   // Find element
   const char* element_start = strstr(xml, pattern);
@@ -1394,7 +1407,7 @@ int soap_test_extract_attribute(const char* xml, const char* element_name,
   }
 
   // Build attribute pattern
-  char attr_pattern[128];
+  char attr_pattern[SOAP_TEST_TAG_BUFFER_SIZE];
   snprintf(attr_pattern, sizeof(attr_pattern), "%s=\"", attribute_name);
 
   // Find attribute

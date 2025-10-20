@@ -136,22 +136,6 @@ const char* mock_service_dispatcher_get_last_dispatch_service(void);
  */
 const char* mock_service_dispatcher_get_last_dispatch_operation(void);
 
-/* ============================================================================
- * Legacy Helper Functions (for backward compatibility)
- * ============================================================================ */
-
-/**
- * @brief Set the last registration data for verification
- * @note Legacy function - now handled automatically in __wrap function
- */
-void mock_service_dispatcher_set_last_registration(
-  const onvif_service_registration_t* registration);
-
-/**
- * @brief Set the last unregister service name for verification
- * @note Legacy function - now handled automatically in __wrap function
- */
-void mock_service_dispatcher_set_last_unregister_service(const char* service_name);
 
 /* ============================================================================
  * CMocka Helper Macros

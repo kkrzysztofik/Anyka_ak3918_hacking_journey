@@ -5,6 +5,7 @@
  * @date 2025-10-11
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -15,12 +16,43 @@
 #include "cmocka_wrapper.h"
 
 // Module under test
+#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
+#include "services/common/video_config_types.h"
 #include "utils/error/error_handling.h"
 
 // Test mocks
 #include "mocks/config_mock.h"
+
+#define TEST_TMP_PATH_PREFIX            "/tmp/"
+#define TEST_TMP_PATH_PREFIX_LENGTH     (sizeof(TEST_TMP_PATH_PREFIX) - 1U)
+#define TEST_HTTP_PORT_INVALID_HIGH     ((int)UINT16_MAX + 1)
+#define TEST_STRING_BUFFER_LENGTH       CONFIG_STRING_MEDIUM_LEN
+#define TEST_USERNAME_OVERFLOW_LENGTH   (MAX_USERNAME_LENGTH + 2)
+#define TEST_HASH_BUFFER_LENGTH         (MAX_PASSWORD_HASH_LENGTH + 1)
+#define TEST_HASH_INVALID_BUFFER_LENGTH 64U
+#define TEST_INVALID_FPS_HIGH           200
+#define TEST_INVALID_BITRATE_LOW        10
+#define TEST_INVALID_BITRATE_HIGH       100000
+#define TEST_INVALID_WIDTH_HIGH         10000
+#define TEST_INVALID_HEIGHT_HIGH        10000
+#define TEST_STREAM_WIDTH_MAIN_DEFAULT  1280
+#define TEST_STREAM_WIDTH_SUB_DEFAULT   640
+#define TEST_STREAM_WIDTH_TERTIARY      320
+#define TEST_STREAM_DIMENSION_MIN       10
+#define TEST_STREAM_WIDTH_1080P         1920
+#define TEST_STREAM_HEIGHT_1080P        1080
+#define TEST_STREAM_FPS_STANDARD        30
+#define TEST_STREAM_BITRATE_MAIN_KBPS   4000
+#define TEST_HTTP_PORT_IMMEDIATE        9090
+#define TEST_HTTP_PORT_QUEUE_INITIAL    9091
+#define TEST_HTTP_PORT_QUEUE_FIRST      8001
+#define TEST_HTTP_PORT_QUEUE_SECOND     8002
+#define TEST_HTTP_PORT_QUEUE_THIRD      8003
+#define TEST_SERVER_ITERATION_COUNT     10
+#define TEST_INVALID_KEY_VALUE          12345
+#define TEST_OVERSIZED_STRING_LENGTH    256U
 
 /* ============================================================================
  * Test Fixtures and Setup
@@ -39,8 +71,7 @@ struct test_config_runtime_state {
  * @brief Setup function called before each test
  */
 static int setup(void** state) {
-  struct test_config_runtime_state* test_state =
-    calloc(1, sizeof(struct test_config_runtime_state));
+  struct test_config_runtime_state* test_state = calloc(1, sizeof(struct test_config_runtime_state));
 
   if (test_state == NULL) {
     return -1;
@@ -48,33 +79,6 @@ static int setup(void** state) {
 
   // Initialize test configuration with default values
   memset(&test_state->test_config, 0, sizeof(struct application_config));
-
-  // Allocate pointer members
-  test_state->test_config.network = calloc(1, sizeof(struct network_settings));
-  test_state->test_config.device = calloc(1, sizeof(struct device_info));
-  test_state->test_config.logging = calloc(1, sizeof(struct logging_settings));
-  test_state->test_config.server = calloc(1, sizeof(struct server_settings));
-  test_state->test_config.stream_profile_1 = calloc(1, sizeof(video_config_t));
-  test_state->test_config.stream_profile_2 = calloc(1, sizeof(video_config_t));
-  test_state->test_config.stream_profile_3 = calloc(1, sizeof(video_config_t));
-  test_state->test_config.stream_profile_4 = calloc(1, sizeof(video_config_t));
-
-  if (!test_state->test_config.network || !test_state->test_config.device ||
-      !test_state->test_config.logging || !test_state->test_config.server ||
-      !test_state->test_config.stream_profile_1 || !test_state->test_config.stream_profile_2 ||
-      !test_state->test_config.stream_profile_3 || !test_state->test_config.stream_profile_4) {
-    // Clean up on allocation failure
-    free(test_state->test_config.network);
-    free(test_state->test_config.device);
-    free(test_state->test_config.logging);
-    free(test_state->test_config.server);
-    free(test_state->test_config.stream_profile_1);
-    free(test_state->test_config.stream_profile_2);
-    free(test_state->test_config.stream_profile_3);
-    free(test_state->test_config.stream_profile_4);
-    free(test_state);
-    return -1;
-  }
 
   test_state->initialized = 0;
 
@@ -95,15 +99,7 @@ static int teardown(void** state) {
     if (test_state->initialized) {
       config_runtime_cleanup();
     }
-    // Free allocated pointer members
-    free(test_state->test_config.network);
-    free(test_state->test_config.device);
-    free(test_state->test_config.logging);
-    free(test_state->test_config.server);
-    free(test_state->test_config.stream_profile_1);
-    free(test_state->test_config.stream_profile_2);
-    free(test_state->test_config.stream_profile_3);
-    free(test_state->test_config.stream_profile_4);
+    // No memory to free since all fields are now direct struct members
     free(test_state);
   }
 
@@ -344,7 +340,7 @@ static void test_unit_config_runtime_get_string_null_output(void** state) {
   test_state->initialized = 1;
 
   // Try to get with NULL output
-  result = config_runtime_get_string(CONFIG_SECTION_DEVICE, "manufacturer", NULL, 64);
+  result = config_runtime_get_string(CONFIG_SECTION_DEVICE, "manufacturer", NULL, TEST_STRING_BUFFER_LENGTH);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 }
 
@@ -353,7 +349,7 @@ static void test_unit_config_runtime_get_string_null_output(void** state) {
  */
 static void test_unit_config_runtime_get_string_zero_buffer(void** state) {
   struct test_config_runtime_state* test_state = (struct test_config_runtime_state*)*state;
-  char out_value[64] = {0};
+  char out_value[TEST_STRING_BUFFER_LENGTH] = {0};
 
   // Initialize first
   int result = config_runtime_init(&test_state->test_config);
@@ -370,10 +366,9 @@ static void test_unit_config_runtime_get_string_zero_buffer(void** state) {
  */
 static void test_unit_config_runtime_get_string_not_initialized(void** state) {
   (void)state;
-  char out_value[64] = {0};
+  char out_value[TEST_STRING_BUFFER_LENGTH] = {0};
 
-  int result =
-    config_runtime_get_string(CONFIG_SECTION_DEVICE, "manufacturer", out_value, sizeof(out_value));
+  int result = config_runtime_get_string(CONFIG_SECTION_DEVICE, "manufacturer", out_value, sizeof(out_value));
   assert_int_equal(ONVIF_ERROR_NOT_INITIALIZED, result);
 }
 
@@ -540,8 +535,8 @@ static void test_unit_config_runtime_validation_bounds_integer_too_high(void** s
   assert_int_equal(ONVIF_SUCCESS, result);
   test_state->initialized = 1;
 
-  // Attempt to set HTTP port to 70000 (above maximum of 65535)
-  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 70000);
+  // Attempt to set HTTP port above maximum of 65535
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", TEST_HTTP_PORT_INVALID_HIGH);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 }
 
@@ -558,7 +553,7 @@ static void test_unit_config_runtime_validation_bounds_string_too_long(void** st
   test_state->initialized = 1;
 
   // Create a string that exceeds maximum length (assume 64 chars for manufacturer)
-  char too_long_string[256];
+  char too_long_string[TEST_OVERSIZED_STRING_LENGTH];
   memset(too_long_string, 'A', sizeof(too_long_string) - 1);
   too_long_string[sizeof(too_long_string) - 1] = '\0';
 
@@ -598,7 +593,7 @@ static void test_unit_config_runtime_validation_missing_required_key_set(void** 
   test_state->initialized = 1;
 
   // Attempt to set non-existent key
-  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "nonexistent_key", 12345);
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "nonexistent_key", TEST_INVALID_KEY_VALUE);
   assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
 }
 
@@ -615,14 +610,14 @@ static void test_unit_config_runtime_set_int_valid(void** state) {
   test_state->initialized = 1;
 
   // Set valid HTTP port value
-  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8080);
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", HTTP_PORT_DEFAULT);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Verify the value was set correctly
   int out_value = 0;
   result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &out_value);
   assert_int_equal(ONVIF_SUCCESS, result);
-  assert_int_equal(8080, out_value);
+  assert_int_equal(HTTP_PORT_DEFAULT, out_value);
 
   // Verify generation counter incremented
   uint32_t generation = config_runtime_get_generation();
@@ -647,9 +642,8 @@ static void test_unit_config_runtime_set_string_valid(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Verify the value was set correctly
-  char out_value[64] = {0};
-  result =
-    config_runtime_get_string(CONFIG_SECTION_DEVICE, "manufacturer", out_value, sizeof(out_value));
+  char out_value[TEST_STRING_BUFFER_LENGTH] = {0};
+  result = config_runtime_get_string(CONFIG_SECTION_DEVICE, "manufacturer", out_value, sizeof(out_value));
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_string_equal(expected_value, out_value);
 }
@@ -695,14 +689,14 @@ static void test_unit_config_runtime_set_int_immediate_update(void** state) {
   test_state->initialized = 1;
 
   // Set value and verify immediate availability
-  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 9090);
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", TEST_HTTP_PORT_IMMEDIATE);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Read back immediately - should reflect new value
   int out_value = 0;
   result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &out_value);
   assert_int_equal(ONVIF_SUCCESS, result);
-  assert_int_equal(9090, out_value);
+  assert_int_equal(TEST_HTTP_PORT_IMMEDIATE, out_value);
 }
 
 /**
@@ -722,7 +716,7 @@ static void test_unit_config_runtime_persistence_queue_populated(void** state) {
   assert_int_equal(0, queue_status);
 
   // Perform config update
-  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 9091);
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", TEST_HTTP_PORT_QUEUE_INITIAL);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Verify queue now has 1 pending operation
@@ -743,13 +737,13 @@ static void test_unit_config_runtime_persistence_queue_coalescing(void** state) 
   test_state->initialized = 1;
 
   // Perform multiple rapid updates to same key
-  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8001);
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", TEST_HTTP_PORT_QUEUE_FIRST);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8002);
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", TEST_HTTP_PORT_QUEUE_SECOND);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8003);
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", TEST_HTTP_PORT_QUEUE_THIRD);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Queue should have only 1 entry (coalesced)
@@ -760,7 +754,7 @@ static void test_unit_config_runtime_persistence_queue_coalescing(void** state) 
   int out_value = 0;
   result = config_runtime_get_int(CONFIG_SECTION_ONVIF, "http_port", &out_value);
   assert_int_equal(ONVIF_SUCCESS, result);
-  assert_int_equal(8003, out_value);
+  assert_int_equal(TEST_HTTP_PORT_QUEUE_THIRD, out_value);
 }
 
 /**
@@ -776,7 +770,7 @@ static void test_unit_config_runtime_persistence_queue_process(void** state) {
   test_state->initialized = 1;
 
   // Add updates to queue
-  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8080);
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", HTTP_PORT_DEFAULT);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   result = config_runtime_set_string(CONFIG_SECTION_DEVICE, "manufacturer", "Anyka");
@@ -808,7 +802,7 @@ static void test_unit_config_runtime_persistence_queue_thread_safe(void** state)
   test_state->initialized = 1;
 
   // Multiple sequential operations (simulating concurrent access)
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < TEST_SERVER_ITERATION_COUNT; i++) {
     result = config_runtime_set_int(CONFIG_SECTION_SERVER, "worker_threads", i + 1);
     assert_int_equal(ONVIF_SUCCESS, result);
   }
@@ -837,7 +831,7 @@ static void test_unit_config_runtime_persistence_queue_mixed_types(void** state)
   test_state->initialized = 1;
 
   // Update different types
-  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", 8080);
+  result = config_runtime_set_int(CONFIG_SECTION_ONVIF, "http_port", HTTP_PORT_DEFAULT);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   result = config_runtime_set_string(CONFIG_SECTION_DEVICE, "manufacturer", "Test");
@@ -877,16 +871,16 @@ static void test_unit_config_runtime_stream_profile_validation_valid(void** stat
   test_state->initialized = 1;
 
   // Set valid stream profile parameters for profile 1
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", 1920);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", TEST_STREAM_WIDTH_1080P);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "height", 1080);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "height", TEST_STREAM_HEIGHT_1080P);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "fps", 30);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "fps", TEST_STREAM_FPS_STANDARD);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "bitrate", 4000);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "bitrate", TEST_STREAM_BITRATE_MAIN_KBPS);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Verify values were set correctly
@@ -909,16 +903,16 @@ static void test_unit_config_runtime_stream_profile_limit_enforcement(void** sta
   test_state->initialized = 1;
 
   // Configure all 4 valid profiles
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", 1920);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", TEST_STREAM_WIDTH_1080P);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_2, "width", 1280);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_2, "width", TEST_STREAM_WIDTH_MAIN_DEFAULT);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_3, "width", 640);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_3, "width", TEST_STREAM_WIDTH_SUB_DEFAULT);
   assert_int_equal(ONVIF_SUCCESS, result);
 
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_4, "width", 320);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_4, "width", TEST_STREAM_WIDTH_TERTIARY);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // All 4 profiles should be configurable
@@ -941,11 +935,11 @@ static void test_unit_config_runtime_stream_profile_invalid_width(void** state) 
   test_state->initialized = 1;
 
   // Try to set invalid width (too small)
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", 10);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", TEST_STREAM_DIMENSION_MIN);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 
   // Try to set invalid width (too large)
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", 10000);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "width", TEST_INVALID_WIDTH_HIGH);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 }
 
@@ -962,11 +956,11 @@ static void test_unit_config_runtime_stream_profile_invalid_height(void** state)
   test_state->initialized = 1;
 
   // Try to set invalid height (too small)
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "height", 10);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "height", TEST_STREAM_DIMENSION_MIN);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 
   // Try to set invalid height (too large)
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "height", 10000);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "height", TEST_INVALID_HEIGHT_HIGH);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 }
 
@@ -987,7 +981,7 @@ static void test_unit_config_runtime_stream_profile_invalid_fps(void** state) {
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 
   // Try to set invalid FPS (too high)
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "fps", 200);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "fps", TEST_INVALID_FPS_HIGH);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 }
 
@@ -1004,11 +998,11 @@ static void test_unit_config_runtime_stream_profile_invalid_bitrate(void** state
   test_state->initialized = 1;
 
   // Try to set invalid bitrate (too low)
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "bitrate", 10);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "bitrate", TEST_INVALID_BITRATE_LOW);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 
   // Try to set invalid bitrate (too high)
-  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "bitrate", 100000);
+  result = config_runtime_set_int(CONFIG_SECTION_STREAM_PROFILE_1, "bitrate", TEST_INVALID_BITRATE_HIGH);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 }
 
@@ -1067,9 +1061,9 @@ static void test_unit_config_runtime_user_validation_username_too_long(void** st
   test_state->initialized = 1;
 
   // Try to add user with username too long (more than 32 chars)
-  char long_username[64];
-  memset(long_username, 'a', 33);
-  long_username[33] = '\0';
+  char long_username[TEST_USERNAME_OVERFLOW_LENGTH];
+  memset(long_username, 'a', MAX_USERNAME_LENGTH + 1);
+  long_username[MAX_USERNAME_LENGTH + 1] = '\0';
 
   result = config_runtime_add_user(long_username, "password123");
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
@@ -1144,7 +1138,7 @@ static void test_unit_config_runtime_user_limit_enforcement(void** state) {
 static void test_unit_config_runtime_hash_password_success(void** state) {
   (void)state;
 
-  char hash_output[129] = {0};
+  char hash_output[TEST_HASH_BUFFER_LENGTH] = {0};
   int result = config_runtime_hash_password("testpassword", hash_output, sizeof(hash_output));
   assert_int_equal(ONVIF_SUCCESS, result);
 
@@ -1166,16 +1160,14 @@ static void test_unit_config_runtime_hash_password_success(void** state) {
 
   // Verify salt contains only hex digits
   for (size_t i = 0; i < salt_len; i++) {
-    assert_true((hash_output[i] >= '0' && hash_output[i] <= '9') ||
-                (hash_output[i] >= 'a' && hash_output[i] <= 'f') ||
+    assert_true((hash_output[i] >= '0' && hash_output[i] <= '9') || (hash_output[i] >= 'a' && hash_output[i] <= 'f') ||
                 (hash_output[i] >= 'A' && hash_output[i] <= 'F'));
   }
 
   // Verify hash part contains only hex digits
   const char* hash_part = separator + 1;
   for (size_t i = 0; i < hash_part_len; i++) {
-    assert_true((hash_part[i] >= '0' && hash_part[i] <= '9') ||
-                (hash_part[i] >= 'a' && hash_part[i] <= 'f') ||
+    assert_true((hash_part[i] >= '0' && hash_part[i] <= '9') || (hash_part[i] >= 'a' && hash_part[i] <= 'f') ||
                 (hash_part[i] >= 'A' && hash_part[i] <= 'F'));
   }
 }
@@ -1186,18 +1178,18 @@ static void test_unit_config_runtime_hash_password_success(void** state) {
 static void test_unit_config_runtime_hash_password_null_params(void** state) {
   (void)state;
 
-  char hash_output[129] = {0};
+  char hash_output[TEST_HASH_BUFFER_LENGTH] = {0};
 
   // NULL password
   int result = config_runtime_hash_password(NULL, hash_output, sizeof(hash_output));
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 
   // NULL output buffer
-  result = config_runtime_hash_password("password", NULL, 129);
+  result = config_runtime_hash_password("password", NULL, TEST_HASH_BUFFER_LENGTH);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 
   // Output buffer too small (less than ONVIF_PASSWORD_HASH_SIZE = 128)
-  result = config_runtime_hash_password("password", hash_output, 64);
+  result = config_runtime_hash_password("password", hash_output, TEST_HASH_INVALID_BUFFER_LENGTH);
   assert_int_equal(ONVIF_ERROR_INVALID_PARAMETER, result);
 }
 
@@ -1208,8 +1200,8 @@ static void test_unit_config_runtime_hash_password_null_params(void** state) {
 static void test_unit_config_runtime_hash_password_consistency(void** state) {
   (void)state;
 
-  char hash1[129] = {0};
-  char hash2[129] = {0};
+  char hash1[TEST_HASH_BUFFER_LENGTH] = {0};
+  char hash2[TEST_HASH_BUFFER_LENGTH] = {0};
 
   int result = config_runtime_hash_password("testpassword", hash1, sizeof(hash1));
   assert_int_equal(ONVIF_SUCCESS, result);
@@ -1240,7 +1232,7 @@ static void test_unit_config_runtime_verify_password_success(void** state) {
   (void)state;
 
   // Hash a password with salt
-  char hash[129] = {0};
+  char hash[TEST_HASH_BUFFER_LENGTH] = {0};
   int result = config_runtime_hash_password("mypassword", hash, sizeof(hash));
   assert_int_equal(ONVIF_SUCCESS, result);
 
@@ -1256,7 +1248,7 @@ static void test_unit_config_runtime_verify_password_failure(void** state) {
   (void)state;
 
   // Hash a password with salt
-  char hash[129] = {0};
+  char hash[TEST_HASH_BUFFER_LENGTH] = {0};
   int result = config_runtime_hash_password("mypassword", hash, sizeof(hash));
   assert_int_equal(ONVIF_SUCCESS, result);
 
@@ -1271,7 +1263,7 @@ static void test_unit_config_runtime_verify_password_failure(void** state) {
 static void test_unit_config_runtime_verify_password_null_params(void** state) {
   (void)state;
 
-  char hash[129] = {0};
+  char hash[TEST_HASH_BUFFER_LENGTH] = {0};
   config_runtime_hash_password("password", hash, sizeof(hash));
 
   // NULL password
@@ -1380,113 +1372,69 @@ const struct CMUnitTest* get_config_runtime_unit_tests(size_t* count) {
   static const struct CMUnitTest tests[] = {
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_init_success, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_init_null_param, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_init_already_initialized, setup,
-                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_init_already_initialized, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_is_initialized_false, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_is_initialized_true, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_is_initialized_after_cleanup, setup,
-                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_is_initialized_after_cleanup, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_cleanup_success, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_cleanup_not_initialized, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_apply_defaults_success, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_apply_defaults_not_initialized, setup,
-                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_cleanup_not_initialized, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_apply_defaults_success, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_apply_defaults_not_initialized, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_int_null_output, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_int_null_key, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_int_not_initialized, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_string_null_output, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_string_zero_buffer, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_string_not_initialized, setup,
-                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_int_not_initialized, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_string_null_output, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_string_zero_buffer, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_string_not_initialized, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_bool_null_output, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_bool_not_initialized, setup,
-                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_get_bool_not_initialized, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_snapshot_success, setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_snapshot_not_initialized, setup,
-                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_snapshot_not_initialized, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_generation_increment, setup, teardown),
 
     /* Schema Validation Tests (User Story 2) */
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_type_mismatch_string_to_int,
-                                    setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_type_mismatch_int_to_string,
-                                    setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_bounds_integer_too_low,
-                                    setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_bounds_integer_too_high,
-                                    setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_bounds_string_too_long,
-                                    setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_missing_required_key_get,
-                                    setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_missing_required_key_set,
-                                    setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_type_mismatch_string_to_int, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_type_mismatch_int_to_string, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_bounds_integer_too_low, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_bounds_integer_too_high, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_bounds_string_too_long, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_missing_required_key_get, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_validation_missing_required_key_set, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_int_valid, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_string_valid, setup, teardown),
     cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_bool_valid, setup, teardown),
 
     /* Async Persistence Queue Tests (User Story 3) */
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_int_immediate_update, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_populated, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_coalescing, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_process, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_thread_safe, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_mixed_types, setup,
-                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_set_int_immediate_update, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_populated, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_coalescing, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_process, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_thread_safe, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_persistence_queue_mixed_types, setup, teardown),
 
     /* Stream Profile Configuration Tests (User Story 4) */
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_validation_valid, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_limit_enforcement,
-                                    setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_width, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_height, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_fps, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_bitrate, setup,
-                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_validation_valid, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_limit_enforcement, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_width, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_height, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_fps, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_stream_profile_invalid_bitrate, setup, teardown),
 
     /* User Credential Management Tests (User Story 5) */
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_valid_username, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_too_short,
-                                    setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_too_long,
-                                    setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_invalid_chars,
-                                    setup, teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_limit_enforcement, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_success, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_null_params, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_consistency, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_success, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_failure, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_null_params, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_management_add_remove, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_management_update_password, setup,
-                                    teardown),
-    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_management_null_params, setup,
-                                    teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_valid_username, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_too_short, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_too_long, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_validation_username_invalid_chars, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_limit_enforcement, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_success, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_null_params, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_hash_password_consistency, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_success, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_failure, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_verify_password_null_params, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_management_add_remove, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_management_update_password, setup, teardown),
+    cmocka_unit_test_setup_teardown(test_unit_config_runtime_user_management_null_params, setup, teardown),
   };
 
   *count = sizeof(tests) / sizeof(tests[0]);

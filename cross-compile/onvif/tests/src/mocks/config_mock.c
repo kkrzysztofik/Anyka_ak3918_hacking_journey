@@ -8,9 +8,11 @@
 #include "config_mock.h"
 
 #include <stdbool.h>
+#include <string.h>
 
 #include "cmocka_wrapper.h"
 #include "services/ptz/onvif_ptz.h"
+#include "utils/error/error_handling.h"
 
 /* ============================================================================
  * Conditional Mock/Real Function Control
@@ -487,4 +489,51 @@ int __wrap_config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH +
   check_expected(max_users);
   check_expected_ptr(user_count);
   return (int)mock();
+}
+
+/* ============================================================================
+ * CMocka Wrapped Storage Functions
+ * ============================================================================ */
+
+/**
+ * @brief Real config_storage_save() declaration for forwarding
+ */
+extern int __real_config_storage_save(const char* path, const void* manager); // NOLINT(cert-dcl37-c, bugprone-reserved-identifier, cert-dcl51-cpp)
+
+/**
+ * @brief Conditional mock/real function control for config_storage_save
+ */
+static bool g_config_storage_use_real = false;
+
+/**
+ * @brief Control whether config_storage_save uses real function
+ * @param use_real true to use real function, false for mock
+ */
+void config_mock_storage_use_real_function(bool use_real) {
+  g_config_storage_use_real = use_real;
+}
+
+/**
+ * @brief Mock for config_storage_save() to avoid file I/O in runtime tests
+ *
+ * This mock allows testing the persistence queue logic without requiring
+ * writable /etc/jffs2/ directory.
+ *
+ * By default, returns ONVIF_SUCCESS for all paths. Tests that need the real
+ * implementation can call config_mock_storage_use_real_function(true).
+ *
+ * @param path Path to save configuration file
+ * @param manager Configuration manager pointer
+ * @return ONVIF_SUCCESS on success (mock), or result from real function
+ */
+int __wrap_config_storage_save(const char* path, const void* manager) { // NOLINT(cert-dcl37-c, bugprone-reserved-identifier, cert-dcl51-cpp)
+  /* Use real function if configured */
+  if (g_config_storage_use_real) {
+    return __real_config_storage_save(path, manager);
+  }
+
+  /* Mock implementation - avoid file I/O */
+  (void)path;
+  (void)manager;
+  return ONVIF_SUCCESS;
 }

@@ -10,6 +10,7 @@
 
 #include "cmocka_wrapper.h"
 #include "common/test_helpers.h"
+#include "mocks/mock_service_dispatcher.h"
 #include "networking/http/http_auth.h"
 #include "utils/error/error_handling.h"
 
@@ -113,8 +114,7 @@ void test_unit_http_auth_validate_basic_null_params(void** state) {
     test_helper_create_null_test("config parameter", 1, HTTP_AUTH_ERROR_NULL),
   };
 
-  test_helper_null_parameters(state, "http_auth_validate_basic",
-                              test_http_auth_validate_basic_with_null, tests, 2);
+  test_helper_null_parameters(state, "http_auth_validate_basic", test_http_auth_validate_basic_with_null, tests, 2);
 }
 
 /**
@@ -177,8 +177,7 @@ void test_unit_http_auth_basic_header_building(void** state) {
   char header_value[256];
 
   // Test helper function for Basic Auth header
-  int result = test_helper_http_build_basic_auth_header("admin", "password", header_value,
-                                                        sizeof(header_value));
+  int result = test_helper_http_build_basic_auth_header("admin", "password", header_value, sizeof(header_value));
   assert_int_equal(result, 0);
 
   // Verify header format
@@ -582,28 +581,19 @@ void test_unit_http_auth_create_401_response_invalid_realm(void** state) {
 
 const struct CMUnitTest http_auth_tests[] = {
   // NULL Parameter Tests (Refactored)
-  cmocka_unit_test_setup_teardown(test_unit_http_auth_validate_basic_null_params,
-                                  setup_http_auth_tests, teardown_http_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_auth_init_null_params, setup_http_auth_tests,
-                                  teardown_http_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_auth_validate_basic_null_params, setup_http_auth_tests, teardown_http_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_auth_init_null_params, setup_http_auth_tests, teardown_http_auth_tests),
 
   // Success Case Tests Using Helper Functions
-  cmocka_unit_test_setup_teardown(test_unit_http_auth_init_success, setup_http_auth_tests,
-                                  teardown_http_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_auth_config_setup, setup_http_auth_tests,
-                                  teardown_http_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_auth_basic_header_building, setup_http_auth_tests,
-                                  teardown_http_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_request_creation, setup_http_auth_tests,
-                                  teardown_http_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_response_creation, setup_http_auth_tests,
-                                  teardown_http_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_auth_init_success, setup_http_auth_tests, teardown_http_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_auth_config_setup, setup_http_auth_tests, teardown_http_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_auth_basic_header_building, setup_http_auth_tests, teardown_http_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_request_creation, setup_http_auth_tests, teardown_http_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_response_creation, setup_http_auth_tests, teardown_http_auth_tests),
 
   // Integration Tests Using Mock Framework
-  cmocka_unit_test_setup_teardown(test_unit_http_auth_with_mocks, setup_http_auth_tests,
-                                  teardown_http_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_auth_mock_init_failure, setup_http_auth_tests,
-                                  teardown_http_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_auth_with_mocks, setup_http_auth_tests, teardown_http_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_auth_mock_init_failure, setup_http_auth_tests, teardown_http_auth_tests),
 };
 
 /**

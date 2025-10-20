@@ -7,6 +7,10 @@
 
 #include "cmocka_wrapper.h"
 
+#include <stddef.h>
+#include <string.h>
+
+#include "services/common/video_config_types.h"
 // Include the actual source files we're testing
 #include "utils/stream/stream_config_utils.h"
 

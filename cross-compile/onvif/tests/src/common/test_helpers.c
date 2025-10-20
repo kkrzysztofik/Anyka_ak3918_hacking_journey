@@ -5,12 +5,12 @@
  * @date 2025
  */
 
-#include "test_helpers.h"
-
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "test_helpers.h"
 
 // Mock includes
 #include "mocks/mock_service_dispatcher.h"

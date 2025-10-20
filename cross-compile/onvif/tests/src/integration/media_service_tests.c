@@ -114,15 +114,11 @@ int media_service_setup(void** state) {
   test_state->app_config = calloc(1, sizeof(struct application_config));
   assert_non_null(test_state->app_config);
 
-  // Allocate stream profiles (required for media service)
-  test_state->app_config->stream_profile_1 = calloc(1, sizeof(video_config_t));
-  test_state->app_config->stream_profile_2 = calloc(1, sizeof(video_config_t));
-  test_state->app_config->stream_profile_3 = calloc(1, sizeof(video_config_t));
-  test_state->app_config->stream_profile_4 = calloc(1, sizeof(video_config_t));
-  assert_non_null(test_state->app_config->stream_profile_1);
-  assert_non_null(test_state->app_config->stream_profile_2);
-  assert_non_null(test_state->app_config->stream_profile_3);
-  assert_non_null(test_state->app_config->stream_profile_4);
+  // Initialize stream profiles (no allocation needed for direct struct members)
+  memset(&test_state->app_config->stream_profile_1, 0, sizeof(video_config_t));
+  memset(&test_state->app_config->stream_profile_2, 0, sizeof(video_config_t));
+  memset(&test_state->app_config->stream_profile_3, 0, sizeof(video_config_t));
+  memset(&test_state->app_config->stream_profile_4, 0, sizeof(video_config_t));
 
   // Initialize runtime configuration manager
   result = config_runtime_init(test_state->app_config);
@@ -155,11 +151,7 @@ int media_service_teardown(void** state) {
   // Cleanup config runtime
   config_runtime_cleanup();
 
-  // Free allocated stream profiles
-  free(test_state->app_config->stream_profile_1);
-  free(test_state->app_config->stream_profile_2);
-  free(test_state->app_config->stream_profile_3);
-  free(test_state->app_config->stream_profile_4);
+  // Stream profiles are direct struct members, no free needed
 
   // Free config structures
   free(test_state->app_config);
@@ -205,8 +197,7 @@ void test_integration_media_performance_suite(void** state) {
   long end = test_get_time_microseconds();
   long avg = (end - start) / TEST_ITERATIONS_PERFORMANCE;
   printf("  Avg time: %ld μs\n", avg);
-  printf("  Ops/sec: %.2f\n",
-         (double)TEST_ITERATIONS_PERFORMANCE / ((double)(end - start) / MICROSECONDS_PER_SECOND));
+  printf("  Ops/sec: %.2f\n", (double)TEST_ITERATIONS_PERFORMANCE / ((double)(end - start) / MICROSECONDS_PER_SECOND));
   assert_true(avg < BENCHMARK_THRESHOLD_US);
 
   // Test 2: URI Caching
@@ -427,8 +418,7 @@ void test_integration_media_get_profiles_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request =
-    soap_test_create_request("GetProfiles", SOAP_MEDIA_GET_PROFILES, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("GetProfiles", SOAP_MEDIA_GET_PROFILES, "/onvif/media_service");
   assert_non_null(request);
 
   // Step 3: Validate request structure
@@ -485,8 +475,7 @@ void test_integration_media_get_stream_uri_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request =
-    soap_test_create_request("GetStreamUri", SOAP_MEDIA_GET_STREAM_URI, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("GetStreamUri", SOAP_MEDIA_GET_STREAM_URI, "/onvif/media_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -543,8 +532,7 @@ void test_integration_media_delete_profile_positive_soap(void** state) {
   // This test demonstrates proper handling when a deletable profile exists
 
   // First try to create a profile to delete
-  http_request_t* create_request =
-    soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
+  http_request_t* create_request = soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
   assert_non_null(create_request);
 
   http_response_t create_response;
@@ -570,8 +558,7 @@ void test_integration_media_delete_profile_positive_soap(void** state) {
       struct _trt__CreateProfileResponse* profile_response = NULL;
       result = soap_test_parse_create_profile_response(&create_ctx, &profile_response);
 
-      if (result == ONVIF_SUCCESS && profile_response && profile_response->Profile &&
-          profile_response->Profile->token) {
+      if (result == ONVIF_SUCCESS && profile_response && profile_response->Profile && profile_response->Profile->token) {
         strncpy(created_token, profile_response->Profile->token, sizeof(created_token) - 1);
         can_delete = 1;
       }
@@ -592,8 +579,7 @@ void test_integration_media_delete_profile_positive_soap(void** state) {
   // Now delete the created profile
   // Update the SOAP envelope with the created token (or use SOAP_MEDIA_DELETE_PROFILE with the
   // token)
-  http_request_t* request =
-    soap_test_create_request("DeleteProfile", SOAP_MEDIA_DELETE_PROFILE, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("DeleteProfile", SOAP_MEDIA_DELETE_PROFILE, "/onvif/media_service");
   assert_non_null(request);
 
   http_response_t response;
@@ -640,8 +626,7 @@ void test_integration_media_delete_profile_negative_soap(void** state) {
   // Try to delete a non-existent profile
   // This test validates error handling for invalid profile deletion
 
-  http_request_t* request =
-    soap_test_create_request("DeleteProfile", SOAP_MEDIA_DELETE_PROFILE, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("DeleteProfile", SOAP_MEDIA_DELETE_PROFILE, "/onvif/media_service");
   assert_non_null(request);
 
   http_response_t response;
@@ -673,8 +658,7 @@ void test_integration_media_set_video_encoder_config_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request(
-    "SetVideoEncoderConfiguration", SOAP_MEDIA_SET_VIDEO_ENCODER_CONFIG, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("SetVideoEncoderConfiguration", SOAP_MEDIA_SET_VIDEO_ENCODER_CONFIG, "/onvif/media_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -719,8 +703,7 @@ void test_integration_media_get_metadata_configs_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request(
-    "GetMetadataConfigurations", SOAP_MEDIA_GET_METADATA_CONFIGURATIONS, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("GetMetadataConfigurations", SOAP_MEDIA_GET_METADATA_CONFIGURATIONS, "/onvif/media_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -769,15 +752,13 @@ void test_integration_media_create_profile_positive_soap(void** state) {
 
   // First, try to create a temporary profile that we can delete to make space
   // This ensures we test the actual creation behavior, not just error handling
-  http_request_t* temp_create_request =
-    soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
+  http_request_t* temp_create_request = soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
   assert_non_null(temp_create_request);
 
   http_response_t temp_create_response;
   memset(&temp_create_response, 0, sizeof(http_response_t));
 
-  int result =
-    onvif_media_handle_request("CreateProfile", temp_create_request, &temp_create_response);
+  int result = onvif_media_handle_request("CreateProfile", temp_create_request, &temp_create_response);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   char temp_token[TEST_PROFILE_TOKEN_BUFFER_SIZE] = {0};
@@ -797,13 +778,11 @@ void test_integration_media_create_profile_positive_soap(void** state) {
       struct _trt__CreateProfileResponse* temp_response = NULL;
       result = soap_test_parse_create_profile_response(&temp_ctx, &temp_response);
 
-      if (result == ONVIF_SUCCESS && temp_response && temp_response->Profile &&
-          temp_response->Profile->token) {
+      if (result == ONVIF_SUCCESS && temp_response && temp_response->Profile && temp_response->Profile->token) {
         strncpy(temp_token, temp_response->Profile->token, sizeof(temp_token) - 1);
 
         // Now delete this temporary profile to make space for the actual test
-        http_request_t* delete_request = soap_test_create_request(
-          "DeleteProfile", SOAP_MEDIA_DELETE_PROFILE, "/onvif/media_service");
+        http_request_t* delete_request = soap_test_create_request("DeleteProfile", SOAP_MEDIA_DELETE_PROFILE, "/onvif/media_service");
 
         http_response_t delete_response;
         memset(&delete_response, 0, sizeof(http_response_t));
@@ -833,8 +812,7 @@ void test_integration_media_create_profile_positive_soap(void** state) {
   }
 
   // Now perform the actual test - create a profile with space available
-  http_request_t* request =
-    soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
   assert_non_null(request);
 
   http_response_t response;
@@ -885,8 +863,7 @@ void test_integration_media_create_profile_negative_soap(void** state) {
 
   // Try to fill up to max profiles
   for (int i = 0; i < 4; i++) {
-    http_request_t* fill_request =
-      soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
+    http_request_t* fill_request = soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
     http_response_t fill_response;
     memset(&fill_response, 0, sizeof(http_response_t));
 
@@ -906,8 +883,7 @@ void test_integration_media_create_profile_negative_soap(void** state) {
   }
 
   // Now try to create one more profile - this MUST fail with max profiles error
-  http_request_t* request =
-    soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
+  http_request_t* request = soap_test_create_request("CreateProfile", SOAP_MEDIA_CREATE_PROFILE, "/onvif/media_service");
   assert_non_null(request);
 
   http_response_t response;
@@ -979,40 +955,26 @@ void test_integration_media_concurrent_profile_operations(void** state) {
 
 const struct CMUnitTest media_service_optimization_tests[] = {
   // Platform integration test
-  cmocka_unit_test_setup_teardown(test_integration_media_platform_integration, media_service_setup,
-                                  media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_platform_integration, media_service_setup, media_service_teardown),
   // Request/response validation
-  cmocka_unit_test_setup_teardown(test_integration_media_request_response_validation,
-                                  media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_request_response_validation, media_service_setup, media_service_teardown),
   // Error handling
-  cmocka_unit_test_setup_teardown(test_integration_media_error_invalid_profile_token,
-                                  media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_error_invalid_profile_token, media_service_setup, media_service_teardown),
   // Concurrent stream URI access
-  cmocka_unit_test_setup_teardown(test_integration_concurrent_stream_uri_access,
-                                  media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_concurrent_stream_uri_access, media_service_setup, media_service_teardown),
   // SOAP integration tests (full HTTP/SOAP layer validation)
-  cmocka_unit_test_setup_teardown(test_integration_media_get_profiles_soap, media_service_setup,
-                                  media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_get_stream_uri_soap, media_service_setup,
-                                  media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_create_profile_positive_soap,
-                                  media_service_setup, media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_create_profile_negative_soap,
-                                  media_service_setup, media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_delete_profile_positive_soap,
-                                  media_service_setup, media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_delete_profile_negative_soap,
-                                  media_service_setup, media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_set_video_encoder_config_soap,
-                                  media_service_setup, media_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_media_get_metadata_configs_soap,
-                                  media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_get_profiles_soap, media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_get_stream_uri_soap, media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_create_profile_positive_soap, media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_create_profile_negative_soap, media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_delete_profile_positive_soap, media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_delete_profile_negative_soap, media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_set_video_encoder_config_soap, media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_get_metadata_configs_soap, media_service_setup, media_service_teardown),
   // Performance suite (consolidated)
-  cmocka_unit_test_setup_teardown(test_integration_media_performance_suite, media_service_setup,
-                                  media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_performance_suite, media_service_setup, media_service_teardown),
   // Concurrent tests (moved to end to avoid affecting other tests)
-  cmocka_unit_test_setup_teardown(test_integration_media_concurrent_profile_operations,
-                                  media_service_setup, media_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_media_concurrent_profile_operations, media_service_setup, media_service_teardown),
 };
 
 // Main function removed - tests are now integrated into main test runner

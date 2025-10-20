@@ -163,6 +163,7 @@ WRAP_FUNCTIONS := \
 	platform_config_get_string \
 	platform_config_get_int \
 	platform_get_system_info \
+	config_storage_save \
 	config_runtime_get_int \
 	config_runtime_set_int \
 	config_runtime_get_string \
@@ -342,6 +343,7 @@ MOCK_SRCS := \
 	src/mocks/gsoap_mock.c \
 	src/mocks/media_mock.c \
 	src/mocks/http_server_mock.c \
+	src/mocks/service_handler_mock.c \
 
 # Mock source files for integration tests (exclude buffer_pool_mock - use real implementation)
 MOCK_SRCS_INTEGRATION := \
@@ -355,6 +357,7 @@ MOCK_SRCS_INTEGRATION := \
 	src/mocks/gsoap_mock.c \
 	src/mocks/media_mock.c \
 	src/mocks/http_server_mock.c \
+	src/mocks/service_handler_mock.c \
 
 # Source files from main project (for testing - exclude platform_anyka.c - use platform mocks)
 MAIN_SRCS := \

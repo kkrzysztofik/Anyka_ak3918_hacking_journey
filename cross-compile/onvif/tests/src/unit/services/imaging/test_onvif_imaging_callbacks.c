@@ -43,8 +43,7 @@ typedef struct {
   struct application_config* app_config;
 } imaging_test_state_t;
 
-static int dummy_operation_handler(const char* operation_name, const http_request_t* request,
-                                   http_response_t* response) {
+static int dummy_operation_handler(const char* operation_name, const http_request_t* request, http_response_t* response) {
   (void)operation_name;
   (void)request;
   (void)response;
@@ -74,18 +73,12 @@ int setup_imaging_unit_tests(void** state) {
   assert_non_null(app_config);
 
   // Allocate pointer members for application_config
-  app_config->imaging = calloc(1, sizeof(struct imaging_settings));
-  app_config->auto_daynight = calloc(1, sizeof(struct auto_daynight_config));
-  app_config->network = calloc(1, sizeof(struct network_settings));
-  app_config->device = calloc(1, sizeof(struct device_info));
-  app_config->logging = calloc(1, sizeof(struct logging_settings));
-  app_config->server = calloc(1, sizeof(struct server_settings));
-  assert_non_null(app_config->imaging);
-  assert_non_null(app_config->auto_daynight);
-  assert_non_null(app_config->network);
-  assert_non_null(app_config->device);
-  assert_non_null(app_config->logging);
-  assert_non_null(app_config->server);
+  memset(&app_config->imaging, 0, sizeof(struct imaging_settings));
+  memset(&app_config->auto_daynight, 0, sizeof(struct auto_daynight_config));
+  memset(&app_config->network, 0, sizeof(struct network_settings));
+  memset(&app_config->device, 0, sizeof(struct device_info));
+  memset(&app_config->logging, 0, sizeof(struct logging_settings));
+  memset(&app_config->server, 0, sizeof(struct server_settings));
 
   // Initialize runtime configuration system
   result = config_runtime_init(app_config);
@@ -121,12 +114,7 @@ int teardown_imaging_unit_tests(void** state) {
 
   // Free application_config members first
   if (app_config) {
-    free(app_config->imaging);
-    free(app_config->auto_daynight);
-    free(app_config->network);
-    free(app_config->device);
-    free(app_config->logging);
-    free(app_config->server);
+    // All struct members are direct, no free needed
     free(app_config);
   }
 
@@ -197,7 +185,6 @@ void test_unit_imaging_callback_registration_null_config(void** state) {
   assert_int_equal(0, onvif_service_dispatcher_is_registered(TEST_IMAGING_SERVICE_NAME));
 }
 
-
 /* ============================================================================
  * Imaging Service Unregistration Tests (CMOCKA PATTERNS)
  * ============================================================================ */
@@ -254,16 +241,11 @@ void test_unit_imaging_callback_unregistration_not_initialized(void** state) {
  */
 const struct CMUnitTest* get_imaging_callbacks_unit_tests(size_t* count) {
   static const struct CMUnitTest tests[] = {
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_success,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_duplicate,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_null_config,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_success,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_not_initialized,
-                                    setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_success, setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_duplicate, setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_registration_null_config, setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_success, setup_imaging_unit_tests, teardown_imaging_unit_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_callback_unregistration_not_initialized, setup_imaging_unit_tests, teardown_imaging_unit_tests),
   };
   *count = sizeof(tests) / sizeof(tests[0]);
   return tests;

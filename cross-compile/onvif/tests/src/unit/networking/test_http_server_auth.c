@@ -145,8 +145,8 @@ static struct application_config* create_test_app_config(int auth_enabled) {
   app_config->onvif.enabled = 1;
   app_config->onvif.http_port = 8080;
   app_config->onvif.auth_enabled = auth_enabled;
-  strcpy(app_config->onvif.username, "admin");
-  strcpy(app_config->onvif.password, "admin");
+  // Note: username/password fields removed from onvif_settings struct
+  // Authentication is now handled through separate auth system
 
   return app_config;
 }

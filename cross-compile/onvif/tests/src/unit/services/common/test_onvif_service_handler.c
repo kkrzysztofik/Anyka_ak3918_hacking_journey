@@ -10,34 +10,13 @@
 
 #include "cmocka_wrapper.h"
 #include "common/test_helpers.h"
+#include "mocks/service_handler_mock.h"
 #include "networking/http/http_parser.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
-
-/* ============================================================================
- * Test Mock Action Handlers
- * ============================================================================ */
-
-static int g_mock_action_call_count = 0;
-static int g_mock_action_result = ONVIF_SUCCESS;
-
-/**
- * @brief Mock action handler for testing
- */
-static int mock_action_handler(const service_handler_config_t* config,
-                               const http_request_t* request, http_response_t* response,
-                               onvif_gsoap_context_t* gsoap_ctx) {
-  (void)config;
-  (void)request;
-  (void)response;
-  (void)gsoap_ctx;
-
-  g_mock_action_call_count++;
-  return g_mock_action_result;
-}
 
 /* ============================================================================
  * Test Setup/Teardown
@@ -47,8 +26,7 @@ static int setup_service_handler_tests(void** state) {
   (void)state;
 
   // Reset mock state
-  g_mock_action_call_count = 0;
-  g_mock_action_result = ONVIF_SUCCESS;
+  service_handler_mock_reset();
 
   return 0;
 }
@@ -57,8 +35,7 @@ static int teardown_service_handler_tests(void** state) {
   (void)state;
 
   // Reset mock state
-  g_mock_action_call_count = 0;
-  g_mock_action_result = ONVIF_SUCCESS;
+  service_handler_mock_reset();
 
   return 0;
 }
@@ -507,7 +484,7 @@ void test_unit_service_handler_handle_request_success(void** state) {
   int result_handle =
     onvif_service_handler_handle_request(&handler, "GetDeviceInformation", &request, &response);
   assert_int_equal(result_handle, ONVIF_SUCCESS);
-  assert_int_equal(g_mock_action_call_count, 1);
+  assert_int_equal(service_handler_mock_get_call_count(), 1);
 
   // Cleanup
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -591,7 +568,7 @@ void test_unit_service_handler_handle_request_unknown_action(void** state) {
   int result_handle =
     onvif_service_handler_handle_request(&handler, "UnknownAction", &request, &response);
   assert_int_equal(result_handle, ONVIF_SUCCESS);
-  assert_int_equal(g_mock_action_call_count, 0); // Action should not be called
+  assert_int_equal(service_handler_mock_get_call_count(), 0); // Action should not be called
 
   // Cleanup
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -624,7 +601,7 @@ void test_unit_service_handler_handle_request_action_handler_error(void** state)
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Set mock to return error
-  g_mock_action_result = ONVIF_ERROR;
+  service_handler_mock_set_result(ONVIF_ERROR);
 
   // Test request handling with action error
   http_request_t request = {0};
@@ -636,7 +613,7 @@ void test_unit_service_handler_handle_request_action_handler_error(void** state)
   int result_handle =
     onvif_service_handler_handle_request(&handler, "GetDeviceInformation", &request, &response);
   assert_int_equal(result_handle, ONVIF_ERROR);
-  assert_int_equal(g_mock_action_call_count, 1);
+  assert_int_equal(service_handler_mock_get_call_count(), 1);
 
   // Cleanup
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -1096,67 +1073,6 @@ void test_unit_service_handler_unregister_action_success(void** state) {
  * Status Code Bug Fix Tests
  * ============================================================================ */
 
-/**
- * @brief Mock action handler that sets specific error status code
- */
-static int mock_action_handler_with_error_status(const service_handler_config_t* config,
-                                                 const http_request_t* request,
-                                                 http_response_t* response,
-                                                 onvif_gsoap_context_t* gsoap_ctx) {
-  (void)config;
-  (void)request;
-  (void)gsoap_ctx;
-
-  g_mock_action_call_count++;
-
-  // Set specific error status code (e.g., 400 Bad Request)
-  response->status_code = 400;
-  response->body = (char*)"Bad Request";
-  response->body_length = strlen("Bad Request");
-  response->content_type = "application/soap+xml";
-
-  return ONVIF_ERROR; // Handler fails but sets specific error code
-}
-
-/**
- * @brief Mock action handler that sets specific success status code
- */
-static int mock_action_handler_with_success_status(const service_handler_config_t* config,
-                                                   const http_request_t* request,
-                                                   http_response_t* response,
-                                                   onvif_gsoap_context_t* gsoap_ctx) {
-  (void)config;
-  (void)request;
-  (void)gsoap_ctx;
-
-  g_mock_action_call_count++;
-
-  // Set specific success status code (e.g., 201 Created)
-  response->status_code = 201;
-  response->body = (char*)"Created";
-  response->body_length = strlen("Created");
-  response->content_type = "application/soap+xml";
-
-  return ONVIF_SUCCESS;
-}
-
-/**
- * @brief Mock action handler that fails without setting status code
- */
-static int mock_action_handler_fail_no_status(const service_handler_config_t* config,
-                                              const http_request_t* request,
-                                              http_response_t* response,
-                                              onvif_gsoap_context_t* gsoap_ctx) {
-  (void)config;
-  (void)request;
-  (void)response;
-  (void)gsoap_ctx;
-
-  g_mock_action_call_count++;
-
-  // Handler fails but doesn't set status code - should default to 500
-  return ONVIF_ERROR;
-}
 
 /**
  * @brief Test that handler-set error status codes are respected
@@ -1197,7 +1113,7 @@ void test_unit_service_handler_status_code_respects_handler_error(void** state) 
   assert_int_equal(result_handle, ONVIF_ERROR);
   assert_int_equal(response.status_code, 400); // Handler-set error code should be preserved
   assert_string_equal(response.body, "Bad Request");
-  assert_int_equal(g_mock_action_call_count, 1);
+  assert_int_equal(service_handler_mock_get_call_count(), 1);
 
   // Cleanup
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -1243,7 +1159,7 @@ void test_unit_service_handler_status_code_respects_handler_success(void** state
   assert_int_equal(result_handle, ONVIF_SUCCESS);
   assert_int_equal(response.status_code, 201); // Handler-set success code should be preserved
   assert_string_equal(response.body, "Created");
-  assert_int_equal(g_mock_action_call_count, 1);
+  assert_int_equal(service_handler_mock_get_call_count(), 1);
 
   // Cleanup
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -1289,7 +1205,7 @@ void test_unit_service_handler_status_code_defaults_to_500_on_failure(void** sta
   assert_int_equal(result_handle, ONVIF_ERROR);
   assert_int_equal(response.status_code,
                    500); // Should default to 500 when handler doesn't set status
-  assert_int_equal(g_mock_action_call_count, 1);
+  assert_int_equal(service_handler_mock_get_call_count(), 1);
 
   // Cleanup
   expect_function_call(__wrap_onvif_gsoap_cleanup);
@@ -1334,7 +1250,7 @@ void test_unit_service_handler_status_code_defaults_to_200_on_success(void** sta
   assert_int_equal(result_handle, ONVIF_SUCCESS);
   assert_int_equal(response.status_code,
                    200); // Should default to 200 when handler succeeds without setting status
-  assert_int_equal(g_mock_action_call_count, 1);
+  assert_int_equal(service_handler_mock_get_call_count(), 1);
 
   // Cleanup
   expect_function_call(__wrap_onvif_gsoap_cleanup);

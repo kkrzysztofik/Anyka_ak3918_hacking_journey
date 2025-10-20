@@ -56,8 +56,7 @@ config_validation_result_t __wrap_config_validate(const config_manager_t* config
  * @param value_size Size of value buffer
  * @return Result code (configured via will_return)
  */
-int __wrap_config_get_value(const config_manager_t* config, config_section_t section,
-                            const char* key, void* value, size_t value_size);
+int __wrap_config_get_value(const config_manager_t* config, config_section_t section, const char* key, void* value, size_t value_size);
 
 /**
  * @brief CMocka wrapped configuration set value
@@ -68,8 +67,7 @@ int __wrap_config_get_value(const config_manager_t* config, config_section_t sec
  * @param value_size Size of value
  * @return Result code (configured via will_return)
  */
-int __wrap_config_set_value(config_manager_t* config, config_section_t section, const char* key,
-                            const void* value, size_t value_size);
+int __wrap_config_set_value(config_manager_t* config, config_section_t section, const char* key, const void* value, size_t value_size);
 
 /**
  * @brief CMocka wrapped configuration reset to defaults
@@ -85,8 +83,7 @@ int __wrap_config_reset_to_defaults(config_manager_t* config);
  * @param key Configuration key
  * @return Parameter pointer (configured via will_return)
  */
-const config_parameter_t* __wrap_config_get_parameter(const config_manager_t* config,
-                                                      config_section_t section, const char* key);
+const config_parameter_t* __wrap_config_get_parameter(const config_manager_t* config, config_section_t section, const char* key);
 
 /**
  * @brief CMocka wrapped configuration cleanup
@@ -133,8 +130,7 @@ int __wrap_config_runtime_set_int(config_section_t section, const char* key, int
  * @param buffer_size Size of output buffer
  * @return Result code (configured via will_return)
  */
-int __wrap_config_runtime_get_string(config_section_t section, const char* key, char* out_value,
-                                     size_t buffer_size);
+int __wrap_config_runtime_get_string(config_section_t section, const char* key, char* out_value, size_t buffer_size);
 
 /**
  * @brief CMocka wrapped config_runtime_set_string
@@ -234,8 +230,7 @@ uint32_t __wrap_config_runtime_get_generation(void);
  * @param type Value type
  * @return Result code (configured via will_return)
  */
-int __wrap_config_runtime_queue_persistence_update(config_section_t section, const char* key,
-                                                   const void* value, config_value_type_t type);
+int __wrap_config_runtime_queue_persistence_update(config_section_t section, const char* key, const void* value, config_value_type_t type);
 
 /**
  * @brief CMocka wrapped config_runtime_process_persistence_queue
@@ -300,8 +295,7 @@ int __wrap_config_runtime_get_ptz_profile_presets(int profile_index, ptz_preset_
  * @param presets Preset list to set
  * @return Result code (configured via will_return)
  */
-int __wrap_config_runtime_set_ptz_profile_presets(int profile_index,
-                                                  const ptz_preset_list_t* presets);
+int __wrap_config_runtime_set_ptz_profile_presets(int profile_index, const ptz_preset_list_t* presets);
 
 /**
  * @brief CMocka wrapped config_runtime_validate_ptz_profile_presets
@@ -321,8 +315,7 @@ int __wrap_config_runtime_validate_ptz_profile_presets(const ptz_preset_list_t* 
  * @param output_size Size of output buffer
  * @return Result code (configured via will_return)
  */
-int __wrap_config_runtime_hash_password(const char* password, char* hash_output,
-                                        size_t output_size);
+int __wrap_config_runtime_hash_password(const char* password, char* hash_output, size_t output_size);
 
 /**
  * @brief CMocka wrapped config_runtime_verify_password
@@ -370,8 +363,24 @@ int __wrap_config_runtime_authenticate_user(const char* username, const char* pa
  * @param user_count Output user count
  * @return Result code (configured via will_return)
  */
-int __wrap_config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users,
-                                          int* user_count);
+int __wrap_config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users, int* user_count);
+
+/* ============================================================================
+ * CMocka Wrapped Storage Functions
+ * ============================================================================ */
+
+/**
+ * @brief CMocka wrapped config_storage_save
+ *
+ * Mock for config_storage_save() to avoid file I/O in runtime tests.
+ * Forwards to real implementation for NULL paths and /tmp/ paths,
+ * returns success for production paths.
+ *
+ * @param path Path to save configuration file
+ * @param manager Configuration manager pointer
+ * @return Result code (ONVIF_SUCCESS or error code)
+ */
+int __wrap_config_storage_save(const char* path, const void* manager);
 
 /* ============================================================================
  * Conditional Mock/Real Function Control
@@ -383,6 +392,12 @@ int __wrap_config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH +
  */
 void config_mock_use_real_function(bool use_real);
 
+/**
+ * @brief Control whether config_storage_save uses real function or mock
+ * @param use_real true to use real function, false for mock
+ */
+void config_mock_storage_use_real_function(bool use_real);
+
 /* ============================================================================
  * CMocka Test Helper Macros
  * ============================================================================ */
@@ -390,40 +405,40 @@ void config_mock_use_real_function(bool use_real);
 /**
  * @brief Set up expectations for successful configuration initialization
  */
-#define EXPECT_CONFIG_INIT_SUCCESS()                                                               \
-  expect_any(__wrap_config_init, config);                                                          \
-  expect_any(__wrap_config_init, config_file);                                                     \
+#define EXPECT_CONFIG_INIT_SUCCESS()                                                                                                                 \
+  expect_any(__wrap_config_init, config);                                                                                                            \
+  expect_any(__wrap_config_init, config_file);                                                                                                       \
   will_return(__wrap_config_init, 0)
 
 /**
  * @brief Set up expectations for configuration initialization failure
  * @param error_code Error code to return
  */
-#define EXPECT_CONFIG_INIT_ERROR(error_code)                                                       \
-  expect_any(__wrap_config_init, config);                                                          \
-  expect_any(__wrap_config_init, config_file);                                                     \
+#define EXPECT_CONFIG_INIT_ERROR(error_code)                                                                                                         \
+  expect_any(__wrap_config_init, config);                                                                                                            \
+  expect_any(__wrap_config_init, config_file);                                                                                                       \
   will_return(__wrap_config_init, error_code)
 
 /**
  * @brief Set up expectations for successful configuration load
  */
-#define EXPECT_CONFIG_LOAD_SUCCESS()                                                               \
-  expect_any(__wrap_config_load, config);                                                          \
+#define EXPECT_CONFIG_LOAD_SUCCESS()                                                                                                                 \
+  expect_any(__wrap_config_load, config);                                                                                                            \
   will_return(__wrap_config_load, 0)
 
 /**
  * @brief Set up expectations for successful configuration validation
  */
-#define EXPECT_CONFIG_VALIDATE_SUCCESS()                                                           \
-  expect_any(__wrap_config_validate, config);                                                      \
+#define EXPECT_CONFIG_VALIDATE_SUCCESS()                                                                                                             \
+  expect_any(__wrap_config_validate, config);                                                                                                        \
   will_return(__wrap_config_validate, CONFIG_VALIDATION_OK)
 
 /**
  * @brief Set up expectations for configuration validation failure
  * @param result Validation result to return
  */
-#define EXPECT_CONFIG_VALIDATE_ERROR(result)                                                       \
-  expect_any(__wrap_config_validate, config);                                                      \
+#define EXPECT_CONFIG_VALIDATE_ERROR(result)                                                                                                         \
+  expect_any(__wrap_config_validate, config);                                                                                                        \
   will_return(__wrap_config_validate, result)
 
 /**
@@ -431,12 +446,12 @@ void config_mock_use_real_function(bool use_real);
  * @param sect Configuration section
  * @param k Configuration key
  */
-#define EXPECT_CONFIG_GET_VALUE_SUCCESS(sect, k)                                                   \
-  expect_any(__wrap_config_get_value, config);                                                     \
-  expect_value(__wrap_config_get_value, section, sect);                                            \
-  expect_string(__wrap_config_get_value, key, k);                                                  \
-  expect_any(__wrap_config_get_value, value);                                                      \
-  expect_any(__wrap_config_get_value, value_size);                                                 \
+#define EXPECT_CONFIG_GET_VALUE_SUCCESS(sect, k)                                                                                                     \
+  expect_any(__wrap_config_get_value, config);                                                                                                       \
+  expect_value(__wrap_config_get_value, section, sect);                                                                                              \
+  expect_string(__wrap_config_get_value, key, k);                                                                                                    \
+  expect_any(__wrap_config_get_value, value);                                                                                                        \
+  expect_any(__wrap_config_get_value, value_size);                                                                                                   \
   will_return(__wrap_config_get_value, 0)
 
 /**
@@ -444,12 +459,12 @@ void config_mock_use_real_function(bool use_real);
  * @param sect Configuration section
  * @param k Configuration key
  */
-#define EXPECT_CONFIG_SET_VALUE_SUCCESS(sect, k)                                                   \
-  expect_any(__wrap_config_set_value, config);                                                     \
-  expect_value(__wrap_config_set_value, section, sect);                                            \
-  expect_string(__wrap_config_set_value, key, k);                                                  \
-  expect_any(__wrap_config_set_value, value);                                                      \
-  expect_any(__wrap_config_set_value, value_size);                                                 \
+#define EXPECT_CONFIG_SET_VALUE_SUCCESS(sect, k)                                                                                                     \
+  expect_any(__wrap_config_set_value, config);                                                                                                       \
+  expect_value(__wrap_config_set_value, section, sect);                                                                                              \
+  expect_string(__wrap_config_set_value, key, k);                                                                                                    \
+  expect_any(__wrap_config_set_value, value);                                                                                                        \
+  expect_any(__wrap_config_set_value, value_size);                                                                                                   \
   will_return(__wrap_config_set_value, 0)
 
 /**

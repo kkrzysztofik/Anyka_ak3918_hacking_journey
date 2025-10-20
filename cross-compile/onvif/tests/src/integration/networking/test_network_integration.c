@@ -80,17 +80,10 @@ int network_service_setup(void** state) {
   test_state->app_config = calloc(1, sizeof(struct application_config));
   assert_non_null(test_state->app_config);
 
-  // Heap-allocate network settings structure
-  test_state->app_config->network = calloc(1, sizeof(struct network_settings));
-  assert_non_null(test_state->app_config->network);
-
-  // Heap-allocate logging settings structure (needed for http_verbose flag)
-  test_state->app_config->logging = calloc(1, sizeof(struct logging_settings));
-  assert_non_null(test_state->app_config->logging);
-
-  // Heap-allocate server settings structure
-  test_state->app_config->server = calloc(1, sizeof(struct server_settings));
-  assert_non_null(test_state->app_config->server);
+  // Initialize direct struct members (no allocation needed)
+  memset(&test_state->app_config->network, 0, sizeof(struct network_settings));
+  memset(&test_state->app_config->logging, 0, sizeof(struct logging_settings));
+  memset(&test_state->app_config->server, 0, sizeof(struct server_settings));
 
   // Enable real functions for integration testing BEFORE config loading
   // This allows config_storage_load to call config_runtime_set_int without mock issues
@@ -108,8 +101,7 @@ int network_service_setup(void** state) {
   if (config_result == ONVIF_ERROR_ALREADY_EXISTS) {
     // Configuration system already initialized by another test - this is OK
     // We need to load config from INI file
-    printf(
-      "Configuration system already initialized by another test - loading from INI file\n");
+    printf("Configuration system already initialized by another test - loading from INI file\n");
     test_state->config_initialized_by_this_test = 0; // We didn't initialize it
     config_result = config_storage_load("configs/network_test_config.ini", test_state->config);
     assert_int_equal(ONVIF_SUCCESS, config_result);
@@ -159,18 +151,7 @@ int network_service_teardown(void** state) {
 
   // Free network settings BEFORE freeing app_config
   if (test_state && test_state->app_config) {
-    if (test_state->app_config->network) {
-      free(test_state->app_config->network);
-      test_state->app_config->network = NULL;
-    }
-    if (test_state->app_config->logging) {
-      free(test_state->app_config->logging);
-      test_state->app_config->logging = NULL;
-    }
-    if (test_state->app_config->server) {
-      free(test_state->app_config->server);
-      test_state->app_config->server = NULL;
-    }
+    // All struct members are direct, no free needed
 
     // Free heap-allocated app_config
     free(test_state->app_config);
@@ -334,18 +315,13 @@ void test_integration_network_runtime_updates(void** state) {
 // Test suite definition
 const struct CMUnitTest network_integration_tests[] = {
   // ONVIF service configuration test
-  cmocka_unit_test_setup_teardown(test_integration_network_onvif_config, network_service_setup,
-                                  network_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_network_onvif_config, network_service_setup, network_service_teardown),
   // Network service ports test
-  cmocka_unit_test_setup_teardown(test_integration_network_service_ports, network_service_setup,
-                                  network_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_network_service_ports, network_service_setup, network_service_teardown),
   // HTTP server configuration test
-  cmocka_unit_test_setup_teardown(test_integration_network_http_server_config, network_service_setup,
-                                  network_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_network_http_server_config, network_service_setup, network_service_teardown),
   // HTTP logging configuration test
-  cmocka_unit_test_setup_teardown(test_integration_network_logging_config, network_service_setup,
-                                  network_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_network_logging_config, network_service_setup, network_service_teardown),
   // Runtime updates test
-  cmocka_unit_test_setup_teardown(test_integration_network_runtime_updates, network_service_setup,
-                                  network_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_network_runtime_updates, network_service_setup, network_service_teardown),
 };

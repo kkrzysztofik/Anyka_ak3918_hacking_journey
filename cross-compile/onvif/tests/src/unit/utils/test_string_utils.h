@@ -8,8 +8,9 @@
 #ifndef TEST_STRING_UTILS_H
 #define TEST_STRING_UTILS_H
 
-#include <cmocka.h>
 #include <stddef.h>
+
+#include "cmocka_wrapper.h"
 
 /**
  * @brief Test string shim functions

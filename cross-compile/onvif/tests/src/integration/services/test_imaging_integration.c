@@ -77,10 +77,8 @@ int imaging_service_setup(void** state) {
   assert_non_null(test_state->app_config);
 
   // Allocate imaging and auto_daynight structures (required for config_runtime_init)
-  test_state->app_config->imaging = calloc(1, sizeof(struct imaging_settings));
-  assert_non_null(test_state->app_config->imaging);
-  test_state->app_config->auto_daynight = calloc(1, sizeof(struct auto_daynight_config));
-  assert_non_null(test_state->app_config->auto_daynight);
+  memset(&test_state->app_config->imaging, 0, sizeof(struct imaging_settings));
+  memset(&test_state->app_config->auto_daynight, 0, sizeof(struct auto_daynight_config));
 
   // Enable real functions for integration testing BEFORE calling config_runtime_init
   service_dispatcher_mock_use_real_function(true);
@@ -97,29 +95,24 @@ int imaging_service_setup(void** state) {
   if (config_result == ONVIF_ERROR_ALREADY_EXISTS) {
     // Configuration system already initialized by another test - this is OK
     // We just need to ensure our app_config is properly set up
-    printf(
-      "Configuration system already initialized by another test - setting defaults manually\n");
+    printf("Configuration system already initialized by another test - setting defaults manually\n");
     test_state->config_initialized_by_this_test = 0; // We didn't initialize it
 
     // Manually set default values since config_runtime_apply_defaults() won't work
     // on our local structure when the global system is already initialized
-    if (test_state->app_config->imaging) {
-      test_state->app_config->imaging->brightness = 0;
-      test_state->app_config->imaging->contrast = 0;
-      test_state->app_config->imaging->saturation = 0;
-      test_state->app_config->imaging->sharpness = 0;
-      test_state->app_config->imaging->hue = 0;
-    }
+    test_state->app_config->imaging.brightness = 0;
+    test_state->app_config->imaging.contrast = 0;
+    test_state->app_config->imaging.saturation = 0;
+    test_state->app_config->imaging.sharpness = 0;
+    test_state->app_config->imaging.hue = 0;
 
-    if (test_state->app_config->auto_daynight) {
-      test_state->app_config->auto_daynight->mode = DAY_NIGHT_AUTO;
-      test_state->app_config->auto_daynight->day_to_night_threshold = 30;
-      test_state->app_config->auto_daynight->night_to_day_threshold = 70;
-      test_state->app_config->auto_daynight->lock_time_seconds = 10;
-      test_state->app_config->auto_daynight->ir_led_mode = IR_LED_AUTO;
-      test_state->app_config->auto_daynight->ir_led_level = 1;
-      test_state->app_config->auto_daynight->enable_auto_switching = 1;
-    }
+    test_state->app_config->auto_daynight.mode = DAY_NIGHT_AUTO;
+    test_state->app_config->auto_daynight.day_to_night_threshold = 30;
+    test_state->app_config->auto_daynight.night_to_day_threshold = 70;
+    test_state->app_config->auto_daynight.lock_time_seconds = 10;
+    test_state->app_config->auto_daynight.ir_led_mode = IR_LED_AUTO;
+    test_state->app_config->auto_daynight.ir_led_level = 1;
+    test_state->app_config->auto_daynight.enable_auto_switching = 1;
   } else {
     assert_int_equal(ONVIF_SUCCESS, config_result);
     test_state->config_initialized_by_this_test = 1; // We did initialize it
@@ -163,14 +156,7 @@ int imaging_service_teardown(void** state) {
 
   // Free imaging and auto_daynight structures BEFORE freeing app_config
   if (test_state && test_state->app_config) {
-    if (test_state->app_config->imaging) {
-      free(test_state->app_config->imaging);
-      test_state->app_config->imaging = NULL;
-    }
-    if (test_state->app_config->auto_daynight) {
-      free(test_state->app_config->auto_daynight);
-      test_state->app_config->auto_daynight = NULL;
-    }
+    // All struct members are direct, no free needed
 
     // Free heap-allocated app_config AFTER freeing its members
     free(test_state->app_config);
@@ -198,29 +184,25 @@ void test_integration_imaging_config_integration(void** state) {
   assert_non_null(test_state);
   assert_non_null(test_state->config);
   assert_non_null(test_state->app_config);
-  assert_non_null(test_state->app_config->imaging);
-  assert_non_null(test_state->app_config->auto_daynight);
-
   // Verify imaging configuration defaults were applied
-  assert_int_equal(0, test_state->app_config->imaging->brightness);
-  assert_int_equal(0, test_state->app_config->imaging->contrast);
-  assert_int_equal(0, test_state->app_config->imaging->saturation);
-  assert_int_equal(0, test_state->app_config->imaging->sharpness);
-  assert_int_equal(0, test_state->app_config->imaging->hue);
+  assert_int_equal(0, test_state->app_config->imaging.brightness);
+  assert_int_equal(0, test_state->app_config->imaging.contrast);
+  assert_int_equal(0, test_state->app_config->imaging.saturation);
+  assert_int_equal(0, test_state->app_config->imaging.sharpness);
+  assert_int_equal(0, test_state->app_config->imaging.hue);
 
   // Verify auto_daynight configuration defaults were applied
-  assert_int_equal(DAY_NIGHT_AUTO, test_state->app_config->auto_daynight->mode);
-  assert_int_equal(30, test_state->app_config->auto_daynight->day_to_night_threshold);
-  assert_int_equal(70, test_state->app_config->auto_daynight->night_to_day_threshold);
-  assert_int_equal(10, test_state->app_config->auto_daynight->lock_time_seconds);
-  assert_int_equal(IR_LED_AUTO, test_state->app_config->auto_daynight->ir_led_mode);
-  assert_int_equal(1, test_state->app_config->auto_daynight->ir_led_level);
-  assert_int_equal(1, test_state->app_config->auto_daynight->enable_auto_switching);
+  assert_int_equal(DAY_NIGHT_AUTO, test_state->app_config->auto_daynight.mode);
+  assert_int_equal(30, test_state->app_config->auto_daynight.day_to_night_threshold);
+  assert_int_equal(70, test_state->app_config->auto_daynight.night_to_day_threshold);
+  assert_int_equal(10, test_state->app_config->auto_daynight.lock_time_seconds);
+  assert_int_equal(IR_LED_AUTO, test_state->app_config->auto_daynight.ir_led_mode);
+  assert_int_equal(1, test_state->app_config->auto_daynight.ir_led_level);
+  assert_int_equal(1, test_state->app_config->auto_daynight.enable_auto_switching);
 }
 
 // Test suite definition
 const struct CMUnitTest imaging_integration_tests[] = {
   // Configuration integration test
-  cmocka_unit_test_setup_teardown(test_integration_imaging_config_integration,
-                                  imaging_service_setup, imaging_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_config_integration, imaging_service_setup, imaging_service_teardown),
 };

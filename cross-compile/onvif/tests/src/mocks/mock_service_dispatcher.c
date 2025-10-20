@@ -224,28 +224,3 @@ const char* mock_service_dispatcher_get_last_dispatch_operation(void) {
   return g_last_dispatch_operation;
 }
 
-/* ============================================================================
- * Legacy Helper Functions (for backward compatibility)
- * ============================================================================ */
-
-/**
- * @brief Set the last registration data for verification (legacy)
- * @note Now handled automatically in __wrap function
- */
-void mock_service_dispatcher_set_last_registration(
-  const onvif_service_registration_t* registration) {
-  if (registration) {
-    g_last_registration = *registration;
-  }
-}
-
-/**
- * @brief Set the last unregister service name for verification (legacy)
- * @note Now handled automatically in __wrap function
- */
-void mock_service_dispatcher_set_last_unregister_service(const char* service_name) {
-  if (service_name) {
-    strncpy(g_last_unregister_service, service_name, sizeof(g_last_unregister_service) - 1);
-    g_last_unregister_service[sizeof(g_last_unregister_service) - 1] = '\0';
-  }
-}

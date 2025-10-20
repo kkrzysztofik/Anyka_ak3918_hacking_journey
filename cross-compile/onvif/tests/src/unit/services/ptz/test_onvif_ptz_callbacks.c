@@ -19,6 +19,9 @@
 // Mock includes
 #include "../../../mocks/platform_mock.h"
 #include "../../../mocks/platform_ptz_mock.h"
+#include "../../../mocks/mock_service_dispatcher.h"
+#include "../../../mocks/buffer_pool_mock.h"
+#include "../../../mocks/gsoap_mock.h"
 #include "../../../utils/test_gsoap_utils.h"
 #include "platform/adapters/ptz_adapter.h"
 

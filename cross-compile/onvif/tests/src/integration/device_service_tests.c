@@ -24,9 +24,9 @@
 #include "networking/http/http_parser.h"
 #include "services/common/service_dispatcher.h"
 #include "services/device/onvif_device.h"
+#include "services/imaging/onvif_imaging.h"
 #include "services/media/onvif_media.h"
 #include "services/ptz/onvif_ptz.h"
-#include "services/imaging/onvif_imaging.h"
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
 
@@ -35,11 +35,11 @@
 #include "data/soap_test_envelopes.h"
 
 // Test mocks
+#include "generated/soapStub.h" // For gSOAP generated types and enums
 #include "mocks/platform_mock.h"
 #include "mocks/smart_response_mock.h"
 #include "platform/platform_common.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
-#include "generated/soapStub.h"  // For gSOAP generated types and enums
 
 // Test mocks
 #include "mocks/buffer_pool_mock.h"
@@ -95,39 +95,23 @@ int device_service_setup(void** state) {
   test_state->app_config = calloc(1, sizeof(struct application_config));
   assert_non_null(test_state->app_config);
 
-  // Allocate pointer members for application_config (required for config_storage_load)
-  test_state->app_config->network = calloc(1, sizeof(struct network_settings));
-  assert_non_null(test_state->app_config->network);
-  test_state->app_config->imaging = calloc(1, sizeof(struct imaging_settings));
-  assert_non_null(test_state->app_config->imaging);
-  test_state->app_config->auto_daynight = calloc(1, sizeof(struct auto_daynight_config));
-  assert_non_null(test_state->app_config->auto_daynight);
-  test_state->app_config->device = calloc(1, sizeof(struct device_info));
-  assert_non_null(test_state->app_config->device);
-  test_state->app_config->logging = calloc(1, sizeof(struct logging_settings));
-  assert_non_null(test_state->app_config->logging);
-  test_state->app_config->server = calloc(1, sizeof(struct server_settings));
-  assert_non_null(test_state->app_config->server);
-  test_state->app_config->main_stream = calloc(1, sizeof(video_config_t));
-  assert_non_null(test_state->app_config->main_stream);
-  test_state->app_config->sub_stream = calloc(1, sizeof(video_config_t));
-  assert_non_null(test_state->app_config->sub_stream);
-  test_state->app_config->stream_profile_1 = calloc(1, sizeof(video_config_t));
-  assert_non_null(test_state->app_config->stream_profile_1);
-  test_state->app_config->stream_profile_2 = calloc(1, sizeof(video_config_t));
-  assert_non_null(test_state->app_config->stream_profile_2);
-  test_state->app_config->stream_profile_3 = calloc(1, sizeof(video_config_t));
-  assert_non_null(test_state->app_config->stream_profile_3);
-  test_state->app_config->stream_profile_4 = calloc(1, sizeof(video_config_t));
-  assert_non_null(test_state->app_config->stream_profile_4);
-  test_state->app_config->ptz_preset_profile_1 = calloc(1, sizeof(struct ptz_preset_profile));
-  assert_non_null(test_state->app_config->ptz_preset_profile_1);
-  test_state->app_config->ptz_preset_profile_2 = calloc(1, sizeof(struct ptz_preset_profile));
-  assert_non_null(test_state->app_config->ptz_preset_profile_2);
-  test_state->app_config->ptz_preset_profile_3 = calloc(1, sizeof(struct ptz_preset_profile));
-  assert_non_null(test_state->app_config->ptz_preset_profile_3);
-  test_state->app_config->ptz_preset_profile_4 = calloc(1, sizeof(struct ptz_preset_profile));
-  assert_non_null(test_state->app_config->ptz_preset_profile_4);
+  // Initialize direct struct members (no allocation needed)
+  memset(&test_state->app_config->network, 0, sizeof(struct network_settings));
+  memset(&test_state->app_config->imaging, 0, sizeof(struct imaging_settings));
+  memset(&test_state->app_config->auto_daynight, 0, sizeof(struct auto_daynight_config));
+  memset(&test_state->app_config->device, 0, sizeof(struct device_info));
+  memset(&test_state->app_config->logging, 0, sizeof(struct logging_settings));
+  memset(&test_state->app_config->server, 0, sizeof(struct server_settings));
+  memset(&test_state->app_config->main_stream, 0, sizeof(video_config_t));
+  memset(&test_state->app_config->sub_stream, 0, sizeof(video_config_t));
+  memset(&test_state->app_config->stream_profile_1, 0, sizeof(video_config_t));
+  memset(&test_state->app_config->stream_profile_2, 0, sizeof(video_config_t));
+  memset(&test_state->app_config->stream_profile_3, 0, sizeof(video_config_t));
+  memset(&test_state->app_config->stream_profile_4, 0, sizeof(video_config_t));
+  memset(&test_state->app_config->ptz_preset_profile_1, 0, sizeof(struct ptz_preset_profile));
+  memset(&test_state->app_config->ptz_preset_profile_2, 0, sizeof(struct ptz_preset_profile));
+  memset(&test_state->app_config->ptz_preset_profile_3, 0, sizeof(struct ptz_preset_profile));
+  memset(&test_state->app_config->ptz_preset_profile_4, 0, sizeof(struct ptz_preset_profile));
 
   // Enable real functions for integration testing (not platform layer)
   // CRITICAL: Must enable config mock real functions BEFORE calling config_storage_load()
@@ -171,27 +155,27 @@ int device_service_setup(void** state) {
   expect_any(__wrap_platform_vpss_effect_set, handle);
   expect_any(__wrap_platform_vpss_effect_set, effect);
   expect_any(__wrap_platform_vpss_effect_set, value);
-  will_return(__wrap_platform_vpss_effect_set, 0);  // brightness
+  will_return(__wrap_platform_vpss_effect_set, 0); // brightness
   expect_function_call(__wrap_platform_vpss_effect_set);
   expect_any(__wrap_platform_vpss_effect_set, handle);
   expect_any(__wrap_platform_vpss_effect_set, effect);
   expect_any(__wrap_platform_vpss_effect_set, value);
-  will_return(__wrap_platform_vpss_effect_set, 0);  // contrast
+  will_return(__wrap_platform_vpss_effect_set, 0); // contrast
   expect_function_call(__wrap_platform_vpss_effect_set);
   expect_any(__wrap_platform_vpss_effect_set, handle);
   expect_any(__wrap_platform_vpss_effect_set, effect);
   expect_any(__wrap_platform_vpss_effect_set, value);
-  will_return(__wrap_platform_vpss_effect_set, 0);  // saturation
+  will_return(__wrap_platform_vpss_effect_set, 0); // saturation
   expect_function_call(__wrap_platform_vpss_effect_set);
   expect_any(__wrap_platform_vpss_effect_set, handle);
   expect_any(__wrap_platform_vpss_effect_set, effect);
   expect_any(__wrap_platform_vpss_effect_set, value);
-  will_return(__wrap_platform_vpss_effect_set, 0);  // sharpness
+  will_return(__wrap_platform_vpss_effect_set, 0); // sharpness
   expect_function_call(__wrap_platform_vpss_effect_set);
   expect_any(__wrap_platform_vpss_effect_set, handle);
   expect_any(__wrap_platform_vpss_effect_set, effect);
   expect_any(__wrap_platform_vpss_effect_set, value);
-  will_return(__wrap_platform_vpss_effect_set, 0);  // hue
+  will_return(__wrap_platform_vpss_effect_set, 0); // hue
 
   // Initialize service dispatcher
   int result = onvif_service_dispatcher_init();
@@ -262,25 +246,7 @@ int device_service_teardown(void** state) {
   // Cleanup runtime configuration system
   config_runtime_cleanup();
 
-  // Free all pointer members of app_config (in reverse order of allocation)
-  if (test_state && test_state->app_config) {
-    free(test_state->app_config->ptz_preset_profile_4);
-    free(test_state->app_config->ptz_preset_profile_3);
-    free(test_state->app_config->ptz_preset_profile_2);
-    free(test_state->app_config->ptz_preset_profile_1);
-    free(test_state->app_config->stream_profile_4);
-    free(test_state->app_config->stream_profile_3);
-    free(test_state->app_config->stream_profile_2);
-    free(test_state->app_config->stream_profile_1);
-    free(test_state->app_config->sub_stream);
-    free(test_state->app_config->main_stream);
-    free(test_state->app_config->server);
-    free(test_state->app_config->logging);
-    free(test_state->app_config->device);
-    free(test_state->app_config->auto_daynight);
-    free(test_state->app_config->imaging);
-    free(test_state->app_config->network);
-  }
+  // All struct members are direct, no free needed
 
   // CRITICAL: Free heap-allocated app_config AFTER config_runtime_cleanup()
   // config_runtime_cleanup() sets the global pointer to NULL, so we can safely free now
@@ -313,8 +279,7 @@ void test_integration_device_get_device_information_fields_validation(void** sta
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request(
-    "GetDeviceInformation", SOAP_DEVICE_GET_DEVICE_INFORMATION, "/onvif/device_service");
+  http_request_t* request = soap_test_create_request("GetDeviceInformation", SOAP_DEVICE_GET_DEVICE_INFORMATION, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -375,8 +340,7 @@ void test_integration_device_get_capabilities_specific_category(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request(
-    "GetCapabilities", SOAP_DEVICE_GET_CAPABILITIES, "/onvif/device_service");
+  http_request_t* request = soap_test_create_request("GetCapabilities", SOAP_DEVICE_GET_CAPABILITIES, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -430,8 +394,7 @@ void test_integration_device_get_capabilities_multiple_categories(void** state) 
   (void)state;
 
   // Step 1: Create SOAP request envelope for multiple categories
-  http_request_t* request = soap_test_create_request(
-    "GetCapabilities", SOAP_DEVICE_GET_CAPABILITIES_MULTI, "/onvif/device_service");
+  http_request_t* request = soap_test_create_request("GetCapabilities", SOAP_DEVICE_GET_CAPABILITIES_MULTI, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -494,8 +457,7 @@ void test_integration_device_get_system_date_time_timezone(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request(
-    "GetSystemDateAndTime", SOAP_DEVICE_GET_SYSTEM_DATE_AND_TIME, "/onvif/device_service");
+  http_request_t* request = soap_test_create_request("GetSystemDateAndTime", SOAP_DEVICE_GET_SYSTEM_DATE_AND_TIME, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -548,8 +510,7 @@ void test_integration_device_get_system_date_time_dst(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request(
-    "GetSystemDateAndTime", SOAP_DEVICE_GET_SYSTEM_DATE_AND_TIME, "/onvif/device_service");
+  http_request_t* request = soap_test_create_request("GetSystemDateAndTime", SOAP_DEVICE_GET_SYSTEM_DATE_AND_TIME, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -602,8 +563,7 @@ void test_integration_device_get_services_namespaces(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request =
-    soap_test_create_request("GetServices", SOAP_DEVICE_GET_SERVICES, "/onvif/device_service");
+  http_request_t* request = soap_test_create_request("GetServices", SOAP_DEVICE_GET_SERVICES, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -731,8 +691,7 @@ void test_integration_device_handle_operation_uninitialized(void** state) {
   response.body = response_buffer;
 
   // Try to handle operation without initialization
-  int result =
-    onvif_device_handle_operation(TEST_OPERATION_GET_DEVICE_INFORMATION, &request, &response);
+  int result = onvif_device_handle_operation(TEST_OPERATION_GET_DEVICE_INFORMATION, &request, &response);
   assert_int_not_equal(ONVIF_SUCCESS, result);
 
   memory_manager_cleanup();
@@ -752,8 +711,7 @@ static void* concurrent_get_device_information_thread(void* arg) {
   // DON'T pre-allocate response.body - service will allocate it
 
   // Execute GetDeviceInformation
-  int result =
-    onvif_device_handle_operation(TEST_OPERATION_GET_DEVICE_INFORMATION, &request, &response);
+  int result = onvif_device_handle_operation(TEST_OPERATION_GET_DEVICE_INFORMATION, &request, &response);
 
   // Free the response body allocated by the service
   if (response.body) {
@@ -859,8 +817,7 @@ static void* concurrent_mixed_operations_thread(void* arg) {
   memset(&response, 0, sizeof(http_response_t));
   // DON'T pre-allocate response.body - service will allocate it
 
-  const char* operations[] = {TEST_OPERATION_GET_DEVICE_INFORMATION,
-                              TEST_OPERATION_GET_CAPABILITIES, TEST_OPERATION_GET_SYSTEM_DATE_TIME,
+  const char* operations[] = {TEST_OPERATION_GET_DEVICE_INFORMATION, TEST_OPERATION_GET_CAPABILITIES, TEST_OPERATION_GET_SYSTEM_DATE_TIME,
                               TEST_OPERATION_GET_SERVICES};
 
   const char* operation = operations[operation_index % 4];
@@ -892,8 +849,7 @@ void test_integration_device_concurrent_mixed_operations(void** state) {
   // Launch concurrent mixed operations
   for (i = 0; i < TEST_CONCURRENT_OPS; i++) {
     thread_args[i] = i;
-    int result =
-      pthread_create(&threads[i], NULL, concurrent_mixed_operations_thread, &thread_args[i]);
+    int result = pthread_create(&threads[i], NULL, concurrent_mixed_operations_thread, &thread_args[i]);
     assert_int_equal(0, result);
   }
 
@@ -932,15 +888,13 @@ void test_integration_device_get_device_info_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request(
-    "GetDeviceInformation", SOAP_DEVICE_GET_DEVICE_INFORMATION, "/onvif/device_service");
+  http_request_t* request = soap_test_create_request("GetDeviceInformation", SOAP_DEVICE_GET_DEVICE_INFORMATION, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Validate request structure
   assert_non_null(request->body);
   assert_true(strstr(request->body, "GetDeviceInformation") != NULL);
-  assert_true(strstr(request->body, "soap:Envelope") != NULL ||
-              strstr(request->body, "Envelope") != NULL);
+  assert_true(strstr(request->body, "soap:Envelope") != NULL || strstr(request->body, "Envelope") != NULL);
 
   // Step 3: Prepare response structure
   http_response_t response;
@@ -1006,8 +960,7 @@ void test_integration_device_get_capabilities_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request(
-    "GetCapabilities", SOAP_DEVICE_GET_CAPABILITIES, "/onvif/device_service");
+  http_request_t* request = soap_test_create_request("GetCapabilities", SOAP_DEVICE_GET_CAPABILITIES, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -1071,8 +1024,7 @@ void test_integration_device_get_system_date_time_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request(
-    "GetSystemDateAndTime", SOAP_DEVICE_GET_SYSTEM_DATE_AND_TIME, "/onvif/device_service");
+  http_request_t* request = soap_test_create_request("GetSystemDateAndTime", SOAP_DEVICE_GET_SYSTEM_DATE_AND_TIME, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -1139,8 +1091,7 @@ void test_integration_device_get_services_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request =
-    soap_test_create_request("GetServices", SOAP_DEVICE_GET_SERVICES, "/onvif/device_service");
+  http_request_t* request = soap_test_create_request("GetServices", SOAP_DEVICE_GET_SERVICES, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -1202,8 +1153,7 @@ void test_integration_device_system_reboot_soap(void** state) {
   (void)state;
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request =
-    soap_test_create_request("SystemReboot", SOAP_DEVICE_SYSTEM_REBOOT, "/onvif/device_service");
+  http_request_t* request = soap_test_create_request("SystemReboot", SOAP_DEVICE_SYSTEM_REBOOT, "/onvif/device_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -1238,8 +1188,7 @@ void test_integration_device_system_reboot_soap(void** state) {
   assert_true(strlen(reboot_response->Message) > 0);
 
   // Validate the message contains expected content
-  assert_true(strstr(reboot_response->Message, "Rebooting") != NULL ||
-              strstr(reboot_response->Message, "reboot") != NULL ||
+  assert_true(strstr(reboot_response->Message, "Rebooting") != NULL || strstr(reboot_response->Message, "reboot") != NULL ||
               strstr(reboot_response->Message, "System") != NULL);
 
   // Step 8: Cleanup
@@ -1253,55 +1202,38 @@ void test_integration_device_system_reboot_soap(void** state) {
 // Test suite definition
 const struct CMUnitTest device_service_tests[] = {
   // GetDeviceInformation tests
-  cmocka_unit_test_setup_teardown(test_integration_device_get_device_information_fields_validation,
-                                  device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_device_information_fields_validation, device_service_setup, device_service_teardown),
 
   // GetCapabilities tests
-  cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_specific_category,
-                                  device_service_setup, device_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_multiple_categories,
-                                  device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_specific_category, device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_multiple_categories, device_service_setup, device_service_teardown),
 
   // GetSystemDateAndTime tests
-  cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_timezone,
-                                  device_service_setup, device_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_dst,
-                                  device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_timezone, device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_dst, device_service_setup, device_service_teardown),
 
   // GetServices tests
-  cmocka_unit_test_setup_teardown(test_integration_device_get_services_namespaces,
-                                  device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_services_namespaces, device_service_setup, device_service_teardown),
 
   // SystemReboot test
 
   // Error handling tests
-  cmocka_unit_test_setup_teardown(test_integration_device_handle_operation_null_params,
-                                  device_service_setup, device_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_device_handle_operation_invalid_operation,
-                                  device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_handle_operation_null_params, device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_handle_operation_invalid_operation, device_service_setup, device_service_teardown),
   cmocka_unit_test(test_integration_device_handle_operation_uninitialized),
 
   // Configuration integration test
-  cmocka_unit_test_setup_teardown(test_integration_device_config_integration, device_service_setup,
-                                  device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_config_integration, device_service_setup, device_service_teardown),
 
   // SOAP integration tests (full HTTP/SOAP layer validation)
-  cmocka_unit_test_setup_teardown(test_integration_device_get_device_info_soap,
-                                  device_service_setup, device_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_soap,
-                                  device_service_setup, device_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_soap,
-                                  device_service_setup, device_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_device_get_services_soap, device_service_setup,
-                                  device_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_device_system_reboot_soap, device_service_setup,
-                                  device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_device_info_soap, device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_capabilities_soap, device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_system_date_time_soap, device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_get_services_soap, device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_system_reboot_soap, device_service_setup, device_service_teardown),
 
   // Concurrent operations tests (may hang - placed at end)
-  cmocka_unit_test_setup_teardown(test_integration_device_concurrent_get_device_information,
-                                  device_service_setup, device_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_device_concurrent_get_capabilities,
-                                  device_service_setup, device_service_teardown),
-  cmocka_unit_test_setup_teardown(test_integration_device_concurrent_mixed_operations,
-                                  device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_concurrent_get_device_information, device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_concurrent_get_capabilities, device_service_setup, device_service_teardown),
+  cmocka_unit_test_setup_teardown(test_integration_device_concurrent_mixed_operations, device_service_setup, device_service_teardown),
 };

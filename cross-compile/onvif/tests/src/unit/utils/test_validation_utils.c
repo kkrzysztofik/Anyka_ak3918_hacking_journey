@@ -5,90 +5,161 @@
  * @date 2025
  */
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "cmocka_wrapper.h"
 
-// Include the actual source files we're testing
+#include "common/onvif_constants.h"
+#include "platform/platform_common.h"
+#include "utils/error/error_handling.h"
+#include "utils/security/security_hardening.h"
 #include "utils/validation/audio_validation.h"
 #include "utils/validation/common_validation.h"
 #include "utils/validation/input_validation.h"
 
+#define TEST_HTTP_PORT_MIN            1
+#define TEST_HTTP_PORT_INVALID_HIGH   70000
+#define TEST_DECODE_BUFFER_SIZE       64U
+#define TEST_STRING_MIN_LENGTH        1U
+#define TEST_STRING_MAX_LENGTH        32U
+
 /**
- * @brief Test common validation functions
+ * @brief Test common validation helper routines
  * @param state Test state (unused)
  */
-static void test_common_validation(void** state) {
+static void test_common_validation_case(void** state) {
   (void)state;
 
-  // Test token validation
-  assert_true(onvif_util_validate_token("valid_token"));
-  assert_true(onvif_util_validate_token("abc123"));
-  assert_false(onvif_util_validate_token(""));
-  assert_false(onvif_util_validate_token(NULL));
-  assert_false(onvif_util_validate_token("token_with_invalid_chars!"));
+  validation_result_t result =
+    validate_onvif_token("ValidToken_1", "token");
+  assert_true(validation_is_valid(&result));
 
-  // Test profile token validation
-  assert_true(onvif_util_validate_profile_token("Profile_1"));
-  assert_false(onvif_util_validate_profile_token(""));
-  assert_false(onvif_util_validate_profile_token(NULL));
+  result = validate_onvif_token("invalid token!", "token");
+  assert_false(validation_is_valid(&result));
 
-  // Test encoder token validation
-  assert_true(onvif_util_validate_encoder_token("Encoder_1"));
-  assert_false(onvif_util_validate_encoder_token(""));
-  assert_false(onvif_util_validate_encoder_token(NULL));
+  result = validate_profile_token("Profile_1", "profile");
+  assert_true(validation_is_valid(&result));
+
+  result = validate_profile_token("Profile token with spaces", "profile");
+  assert_false(validation_is_valid(&result));
+
+  result = validate_string("Manufacturer", "Anyka", TEST_STRING_MIN_LENGTH,
+                           TEST_STRING_MAX_LENGTH, 0);
+  assert_true(validation_is_valid(&result));
+
+  result = validate_string("Manufacturer", "", TEST_STRING_MIN_LENGTH,
+                           TEST_STRING_MAX_LENGTH, 0);
+  assert_false(validation_is_valid(&result));
+
+  result = validate_int("HTTP Port", ONVIF_HTTP_PORT_DEFAULT, TEST_HTTP_PORT_MIN,
+                        (int)UINT16_MAX);
+  assert_true(validation_is_valid(&result));
+
+  result = validate_int("HTTP Port", -1, TEST_HTTP_PORT_MIN, (int)UINT16_MAX);
+  assert_false(validation_is_valid(&result));
+
+  result = validate_int("HTTP Port", TEST_HTTP_PORT_INVALID_HIGH, TEST_HTTP_PORT_MIN,
+                        (int)UINT16_MAX);
+  assert_false(validation_is_valid(&result));
 }
 
 /**
- * @brief Test input validation functions
+ * @brief Test input validation APIs
  * @param state Test state (unused)
  */
-static void test_input_validation(void** state) {
+static void test_input_validation_case(void** state) {
   (void)state;
 
-  // Test string input validation
-  assert_true(onvif_util_validate_string_input("valid_string"));
-  assert_false(onvif_util_validate_string_input(""));
-  assert_false(onvif_util_validate_string_input(NULL));
+  int status = validate_username_input("ValidUser1");
+  assert_int_equal(ONVIF_VALIDATION_SUCCESS, status);
 
-  // Test numeric input validation
-  assert_true(onvif_util_validate_numeric_input(0, 0, 100));
-  assert_true(onvif_util_validate_numeric_input(50, 0, 100));
-  assert_true(onvif_util_validate_numeric_input(100, 0, 100));
-  assert_false(onvif_util_validate_numeric_input(-1, 0, 100));
-  assert_false(onvif_util_validate_numeric_input(101, 0, 100));
+  status = validate_username_input("!");
+  assert_int_equal(ONVIF_VALIDATION_FAILED, status);
 
-  // Test IP address validation
-  assert_true(onvif_util_validate_ip_address("192.168.1.1"));
-  assert_true(onvif_util_validate_ip_address("127.0.0.1"));
-  assert_false(onvif_util_validate_ip_address("256.256.256.256"));
-  assert_false(onvif_util_validate_ip_address("192.168.1"));
-  assert_false(onvif_util_validate_ip_address(""));
-  assert_false(onvif_util_validate_ip_address(NULL));
+  status = validate_password_input("Password123!");
+  assert_int_equal(ONVIF_VALIDATION_SUCCESS, status);
+
+  status = validate_password_input("short");
+  assert_int_equal(ONVIF_VALIDATION_FAILED, status);
+
+  status =
+    validate_auth_header_input("Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==");
+  assert_int_equal(ONVIF_VALIDATION_SUCCESS, status);
+
+  status = validate_auth_header_input("Basic invalid!");
+  assert_int_equal(ONVIF_VALIDATION_FAILED, status);
+
+  char decoded[TEST_DECODE_BUFFER_SIZE];
+  status = validate_and_decode_base64("QWxhZGRpbjpvcGVuIHNlc2FtZQ==", decoded, sizeof(decoded));
+  assert_int_equal(ONVIF_VALIDATION_SUCCESS, status);
+
+  status = validate_and_decode_base64("not_base64", decoded, sizeof(decoded));
+  assert_int_equal(ONVIF_VALIDATION_FAILED, status);
+
+  assert_int_equal(1, security_is_valid_ip("192.168.1.1"));
+  assert_int_equal(0, security_is_valid_ip("256.256.256.256"));
 }
 
 /**
- * @brief Test audio validation functions
+ * @brief Test audio validation entry points
  * @param state Test state (unused)
  */
-static void test_audio_validation(void** state) {
+static void test_audio_validation_case(void** state) {
   (void)state;
 
-  // Test audio encoding validation
-  assert_true(onvif_util_validate_audio_encoding("G711"));
-  assert_true(onvif_util_validate_audio_encoding("AAC"));
-  assert_false(onvif_util_validate_audio_encoding("INVALID"));
-  assert_false(onvif_util_validate_audio_encoding(""));
-  assert_false(onvif_util_validate_audio_encoding(NULL));
+  assert_int_equal(1, audio_validation_validate_sample_rate(16000));
+  assert_int_equal(0, audio_validation_validate_sample_rate(12345));
 
-  // Test sample rate validation
-  assert_true(onvif_util_validate_sample_rate(8000));
-  assert_true(onvif_util_validate_sample_rate(16000));
-  assert_true(onvif_util_validate_sample_rate(44100));
-  assert_false(onvif_util_validate_sample_rate(0));
-  assert_false(onvif_util_validate_sample_rate(-1));
+  assert_int_equal(1, audio_validation_validate_channels(2));
+  assert_int_equal(0, audio_validation_validate_channels(3));
 
-  // Test bitrate validation
-  assert_true(onvif_util_validate_bitrate(64000));
-  assert_true(onvif_util_validate_bitrate(128000));
-  assert_false(onvif_util_validate_bitrate(0));
-  assert_false(onvif_util_validate_bitrate(-1));
+  assert_int_equal(1, audio_validation_validate_bits_per_sample(16));
+  assert_int_equal(0, audio_validation_validate_bits_per_sample(20));
+
+  assert_int_equal(1, audio_validation_validate_codec(PLATFORM_AUDIO_CODEC_PCM));
+  assert_int_equal(0,
+                   audio_validation_validate_codec((platform_audio_codec_t)99));
+}
+
+/**
+ * @brief Register validation utility unit tests
+ * @param state CMocka state (unused)
+ */
+void test_unit_common_validation(void** state) {
+  (void)state;
+
+  const struct CMUnitTest tests[] = {
+    cmocka_unit_test(test_common_validation_case),
+  };
+
+  cmocka_run_group_tests_name("common_validation_utils", tests, NULL, NULL);
+}
+
+/**
+ * @brief Register input validation tests
+ * @param state CMocka state (unused)
+ */
+void test_input_validation(void** state) {
+  (void)state;
+
+  const struct CMUnitTest tests[] = {
+    cmocka_unit_test(test_input_validation_case),
+  };
+
+  cmocka_run_group_tests_name("input_validation_utils", tests, NULL, NULL);
+}
+
+/**
+ * @brief Register audio validation tests
+ * @param state CMocka state (unused)
+ */
+void test_unit_audio_validation(void** state) {
+  (void)state;
+
+  const struct CMUnitTest tests[] = {
+    cmocka_unit_test(test_audio_validation_case),
+  };
+
+  cmocka_run_group_tests_name("audio_validation_utils", tests, NULL, NULL);
 }
