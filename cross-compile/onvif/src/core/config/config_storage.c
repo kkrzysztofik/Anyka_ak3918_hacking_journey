@@ -22,6 +22,7 @@
 #include "core/config/config_runtime.h"
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 
 /* Constants */
 #define CONFIG_MAX_FILE_SIZE    (16 * 1024) /**< Maximum config file size: 16KB */
@@ -532,13 +533,13 @@ static int config_storage_parse_key_value(const char* trimmed, const char* secti
     /* Valid integer */
     result = config_runtime_set_int(current_section, key, (int)int_value);
     if (result != ONVIF_SUCCESS && result != ONVIF_ERROR_NOT_FOUND) {
-      platform_log_error("[CONFIG_STORAGE] Failed to set int %s.%s=%ld (error: %d) at line %d\n", section_name, key, int_value, result, line_number);
+      platform_log_error("[CONFIG_STORAGE] Failed to set int %s.%s=%ld (error: %d (%s)) at line %d\n", section_name, key, int_value, result, onvif_error_to_string(result), line_number);
     }
   } else {
     /* Try as string */
     result = config_runtime_set_string(current_section, key, value);
     if (result != ONVIF_SUCCESS && result != ONVIF_ERROR_NOT_FOUND) {
-      platform_log_error("[CONFIG_STORAGE] Failed to set string %s.%s=%s (error: %d) at line %d\n", section_name, key, value, result, line_number);
+      platform_log_error("[CONFIG_STORAGE] Failed to set string %s.%s=%s (error: %d (%s)) at line %d\n", section_name, key, value, result, onvif_error_to_string(result), line_number);
     }
   }
 
@@ -606,7 +607,7 @@ static int config_storage_serialize_entry(const config_schema_entry_t* entry, ch
     if (result == ONVIF_SUCCESS) {
       result = config_storage_append_key_value_int(buffer, buffer_size, offset, entry->key, value);
     } else {
-      platform_log_error("[CONFIG_STORAGE] Failed to get int value for %s.%s (error: %d)\n", entry->section_name, entry->key, result);
+      platform_log_error("[CONFIG_STORAGE] Failed to get int value for %s.%s (error: %d (%s))\n", entry->section_name, entry->key, result, onvif_error_to_string(result));
     }
     break;
   }
@@ -616,7 +617,7 @@ static int config_storage_serialize_entry(const config_schema_entry_t* entry, ch
     if (result == ONVIF_SUCCESS) {
       result = config_storage_append_key_value_float(buffer, buffer_size, offset, entry->key, value);
     } else {
-      platform_log_error("[CONFIG_STORAGE] Failed to get float value for %s.%s (error: %d)\n", entry->section_name, entry->key, result);
+      platform_log_error("[CONFIG_STORAGE] Failed to get float value for %s.%s (error: %d (%s))\n", entry->section_name, entry->key, result, onvif_error_to_string(result));
     }
     break;
   }
@@ -626,7 +627,7 @@ static int config_storage_serialize_entry(const config_schema_entry_t* entry, ch
     if (result == ONVIF_SUCCESS) {
       result = config_storage_append_key_value_string(buffer, buffer_size, offset, entry->key, value);
     } else {
-      platform_log_error("[CONFIG_STORAGE] Failed to get string value for %s.%s (error: %d)\n", entry->section_name, entry->key, result);
+      platform_log_error("[CONFIG_STORAGE] Failed to get string value for %s.%s (error: %d (%s))\n", entry->section_name, entry->key, result, onvif_error_to_string(result));
     }
     break;
   }
@@ -637,7 +638,7 @@ static int config_storage_serialize_entry(const config_schema_entry_t* entry, ch
     if (result == ONVIF_SUCCESS) {
       result = config_storage_append_key_value_int(buffer, buffer_size, offset, entry->key, value);
     } else {
-      platform_log_error("[CONFIG_STORAGE] Failed to get bool value for %s.%s (error: %d)\n", entry->section_name, entry->key, result);
+      platform_log_error("[CONFIG_STORAGE] Failed to get bool value for %s.%s (error: %d (%s))\n", entry->section_name, entry->key, result, onvif_error_to_string(result));
     }
     break;
   }

@@ -29,10 +29,13 @@
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_imaging_types.h"
 #include "services/common/onvif_service_common.h"
-#include "services/common/onvif_service_test_helpers.h"
 #include "services/common/onvif_types.h"
 #include "services/common/service_dispatcher.h"
+#ifdef UNIT_TESTING
+#include "services/common/onvif_service_test_helpers.h"
+#endif
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 #include "utils/logging/logging_utils.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
@@ -84,93 +87,6 @@ typedef struct {
 static imaging_param_cache_entry_t g_imaging_param_cache[IMAGING_PARAM_CACHE_SIZE]; // NOLINT
 static pthread_mutex_t g_imaging_param_cache_mutex = PTHREAD_MUTEX_INITIALIZER;     // NOLINT
 static int g_imaging_param_cache_initialized = 0;                                   // NOLINT
-
-/**
- * @brief Initialize imaging parameter cache
- */
-static void init_imaging_param_cache(void) {
-  pthread_mutex_lock(&g_imaging_param_cache_mutex);
-  if (!g_imaging_param_cache_initialized) {
-    memset(g_imaging_param_cache, 0, sizeof(g_imaging_param_cache));
-    g_imaging_param_cache_initialized = 1;
-  }
-  pthread_mutex_unlock(&g_imaging_param_cache_mutex);
-}
-
-/**
- * @brief Get cached parameter value
- * @param param_name Parameter name to lookup
- * @param cached_value Output for cached value
- * @return ONVIF_SUCCESS if found in cache, ONVIF_ERROR otherwise
- */
-static int get_cached_imaging_param(const char* param_name, int* cached_value) {
-  if (!param_name || !cached_value) {
-    return ONVIF_ERROR;
-  }
-
-  pthread_mutex_lock(&g_imaging_param_cache_mutex);
-  for (int i = 0; i < IMAGING_PARAM_CACHE_SIZE; i++) {
-    if (g_imaging_param_cache[i].is_valid && strcmp(g_imaging_param_cache[i].param_name, param_name) == 0) {
-      *cached_value = g_imaging_param_cache[i].cached_value;
-      pthread_mutex_unlock(&g_imaging_param_cache_mutex);
-      return ONVIF_SUCCESS;
-    }
-  }
-  pthread_mutex_unlock(&g_imaging_param_cache_mutex);
-  return ONVIF_ERROR;
-}
-
-/**
- * @brief Cache parameter value
- * @param param_name Parameter name
- * @param value Value to cache
- */
-static void cache_imaging_param(const char* param_name, int value) {
-  if (!param_name) {
-    return;
-  }
-
-  pthread_mutex_lock(&g_imaging_param_cache_mutex);
-
-  // Find existing entry or use oldest slot
-  int target_slot = -1;
-  time_t oldest_time = time(NULL);
-
-  for (int i = 0; i < IMAGING_PARAM_CACHE_SIZE; i++) {
-    if (!g_imaging_param_cache[i].is_valid || strcmp(g_imaging_param_cache[i].param_name, param_name) == 0) {
-      target_slot = i;
-      break;
-    }
-    if (g_imaging_param_cache[i].cache_timestamp < oldest_time) {
-      oldest_time = g_imaging_param_cache[i].cache_timestamp;
-      target_slot = i;
-    }
-  }
-
-  if (target_slot >= 0) {
-    strncpy(g_imaging_param_cache[target_slot].param_name, param_name, sizeof(g_imaging_param_cache[target_slot].param_name) - 1);
-    g_imaging_param_cache[target_slot].param_name[IMAGING_PARAM_NAME_SAFE_LENGTH] = '\0';
-    g_imaging_param_cache[target_slot].cached_value = value;
-    g_imaging_param_cache[target_slot].cache_timestamp = time(NULL);
-    g_imaging_param_cache[target_slot].is_valid = 1;
-  }
-
-  pthread_mutex_unlock(&g_imaging_param_cache_mutex);
-}
-
-/**
- * @brief Bulk update imaging parameters with validation caching
- * @param settings Imaging settings to apply
- * @return ONVIF_SUCCESS on success, error code on failure
- */
-// Function will be moved to after helper functions
-
-/**
- * @brief Optimized batch parameter update
- * @param settings Settings to apply
- * @return ONVIF_SUCCESS on success, error code on failure
- */
-// Function will be moved to after helper functions
 
 /* ============================================================================
  * Constants and Definitions
@@ -485,7 +401,7 @@ static int imaging_service_get_capabilities(struct soap* ctx, void** capabilitie
 
   // Build XAddr
   char xaddr[ONVIF_XADDR_BUFFER_SIZE];
-  snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/imaging_service", device_ip, http_port);
+  (void)snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/imaging_service", device_ip, http_port);
   caps->XAddr = soap_strdup(ctx, xaddr);
 
   *capabilities_ptr = (void*)caps;
@@ -548,7 +464,7 @@ int onvif_imaging_handle_operation(const char* operation_name, const http_reques
   onvif_gsoap_context_t gsoap_ctx;
   int init_result = onvif_gsoap_init(&gsoap_ctx);
   if (init_result != ONVIF_SUCCESS) {
-    platform_log_error("Failed to initialize gSOAP context for Imaging request (error: %d)\n", init_result);
+    platform_log_error("Failed to initialize gSOAP context for Imaging request (error: %d (%s))\n", init_result, onvif_error_to_string(init_result));
     return ONVIF_ERROR_MEMORY;
   }
 

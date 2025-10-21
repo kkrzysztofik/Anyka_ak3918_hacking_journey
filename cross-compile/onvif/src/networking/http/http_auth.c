@@ -21,6 +21,7 @@
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 #include "utils/string/string_shims.h"
 #include "utils/validation/input_validation.h"
 
@@ -268,7 +269,7 @@ int http_auth_verify_credentials(const char* username, const char* password) {
   }
 
   /* System error */
-  platform_log_error("[HTTP_AUTH] System error during authentication for user: %s (error: %d)\n", username, result);
+  platform_log_error("[HTTP_AUTH] System error during authentication for user: %s (error: %d (%s))\n", username, result, onvif_error_to_string(result));
   return HTTP_AUTH_ERROR_INVALID;
 }
 

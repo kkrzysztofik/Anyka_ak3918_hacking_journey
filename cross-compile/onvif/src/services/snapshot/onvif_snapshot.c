@@ -21,7 +21,6 @@
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
-#include "protocol/gsoap/onvif_gsoap_core.h"
 #include "protocol/gsoap/onvif_gsoap_response.h"
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_types.h"

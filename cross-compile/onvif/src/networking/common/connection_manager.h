@@ -17,6 +17,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* HTTP field buffer sizes */
+#define CONN_MGR_HTTP_METHOD_SIZE  16  /* HTTP method buffer size (GET, POST, etc.) */
+#define CONN_MGR_HTTP_PATH_SIZE    256 /* HTTP path buffer size */
+#define CONN_MGR_HTTP_VERSION_SIZE 16  /* HTTP version buffer size (HTTP/1.1) */
+
 /* Connection states */
 typedef enum {
   CONN_STATE_READING_HEADERS = 0,
@@ -38,9 +43,9 @@ typedef struct connection {
   size_t header_length;
   uint64_t last_activity;
   int keepalive_count;
-  char method[16];
-  char path[256];
-  char version[16];
+  char method[CONN_MGR_HTTP_METHOD_SIZE];
+  char path[CONN_MGR_HTTP_PATH_SIZE];
+  char version[CONN_MGR_HTTP_VERSION_SIZE];
   char client_ip[INET_ADDRSTRLEN]; /* Client IP address */
   char* request_buffer;            /* Persistent 32KB buffer for HTTP request processing */
   struct connection* next;

@@ -15,6 +15,9 @@
 /* Forward declaration */
 struct logging_settings;
 
+/* Buffer size constants */
+#define PLATFORM_LOG_TAG_SIZE 32 /* Maximum length of log tag identifier */
+
 /**
  * @brief Log levels in order of verbosity (0=most verbose, 4=least verbose)
  */
@@ -30,11 +33,11 @@ typedef enum {
  * @brief Logging configuration structure
  */
 typedef struct {
-  bool enabled;                   /**< Enable/disable logging */
-  bool use_colors;                /**< Enable/disable color output */
-  bool use_timestamps;            /**< Enable/disable timestamps */
-  platform_log_level_t min_level; /**< Minimum log level to print */
-  char tag[32];                   /**< Log tag identifier */
+  bool enabled;                          /**< Enable/disable logging */
+  bool use_colors;                       /**< Enable/disable color output */
+  bool use_timestamps;                   /**< Enable/disable timestamps */
+  platform_log_level_t min_level;        /**< Minimum log level to print */
+  char tag[PLATFORM_LOG_TAG_SIZE];       /**< Log tag identifier */
 } platform_logging_config_t;
 
 /**

@@ -5,6 +5,8 @@
  * @date 2025
  */
 
+// NOLINTBEGIN - Fallback implementations for missing standard library functions
+
 #include "string_shims.h"
 
 #include <ctype.h>
@@ -153,3 +155,5 @@ int memory_safe_vsnprintf(char* str, size_t size, const char* format, va_list ar
   // (excluding the null terminator)
   return result;
 }
+
+// NOLINTEND

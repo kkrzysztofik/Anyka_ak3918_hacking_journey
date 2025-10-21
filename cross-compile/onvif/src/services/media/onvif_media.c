@@ -7,6 +7,8 @@
 
 #include "onvif_media.h"
 
+#include <bits/types.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +16,7 @@
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
+#include "generated/soapH.h"
 #include "networking/common/buffer_pool.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
@@ -24,6 +27,7 @@
 #include "services/common/onvif_service_common.h"
 #include "services/common/onvif_types.h"
 #include "services/common/service_dispatcher.h"
+#include "services/common/video_config_types.h"
 #include "utils/error/error_handling.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
@@ -123,8 +127,6 @@
  * ============================================================================ */
 
 /* Helper functions */
-static int parse_profile_token(onvif_gsoap_context_t* gsoap_ctx, char* token, size_t token_size);
-static int parse_protocol(onvif_gsoap_context_t* gsoap_ctx, char* protocol, size_t protocol_size);
 static int validate_profile_token(const char* token);
 static int validate_protocol(const char* protocol);
 static int build_media_profile_from_config(int profile_index, struct media_profile* profile);
@@ -168,13 +170,13 @@ static int build_media_profile_from_config(int profile_index, struct media_profi
   memset(profile, 0, sizeof(struct media_profile));
 
   /* Set profile token (Profile1, Profile2, etc.) */
-  snprintf(profile->token, sizeof(profile->token), "%s%d", MEDIA_PROFILE_TOKEN_PREFIX, profile_index + 1);
+  (void)snprintf(profile->token, sizeof(profile->token), "%s%d", MEDIA_PROFILE_TOKEN_PREFIX, profile_index + 1);
 
   /* Set profile name from configuration, fallback to auto-generated if not set */
   if (video_config.name[0] != '\0') {
-    snprintf(profile->name, sizeof(profile->name), "%s", video_config.name);
+    (void)snprintf(profile->name, sizeof(profile->name), "%s", video_config.name);
   } else {
-    snprintf(profile->name, sizeof(profile->name), "Video Profile %d", profile_index + 1);
+    (void)snprintf(profile->name, sizeof(profile->name), "Video Profile %d", profile_index + 1);
   }
 
   /* All profiles are fixed (cannot be deleted) */
@@ -188,7 +190,7 @@ static int build_media_profile_from_config(int profile_index, struct media_profi
   profile->video_source.bounds.y = 0;
 
   /* Configure video encoder */
-  snprintf(profile->video_encoder.token, sizeof(profile->video_encoder.token), "VideoEncoder%d", profile_index);
+  (void)snprintf(profile->video_encoder.token, sizeof(profile->video_encoder.token), "VideoEncoder%d", profile_index);
 
   /* Map codec_type to encoding string */
   const char* encoding = "H264"; /* Default */
@@ -213,7 +215,7 @@ static int build_media_profile_from_config(int profile_index, struct media_profi
   strncpy(profile->audio_source.source_token, "AudioSource0", sizeof(profile->audio_source.source_token) - 1);
 
   /* Configure audio encoder */
-  snprintf(profile->audio_encoder.token, sizeof(profile->audio_encoder.token), "AudioEncoder%d", profile_index);
+  (void)snprintf(profile->audio_encoder.token, sizeof(profile->audio_encoder.token), "AudioEncoder%d", profile_index);
   strncpy(profile->audio_encoder.encoding, "AAC", sizeof(profile->audio_encoder.encoding) - 1);
   profile->audio_encoder.bitrate = MEDIA_AUDIO_BITRATE_DEFAULT;
   profile->audio_encoder.sample_rate = AUDIO_SAMPLE_RATE_16KHZ;
@@ -327,8 +329,11 @@ static struct media_profile* find_profile_optimized(const char* profile_token) {
 
   /* Extract profile number from token (Profile1 -> 0, Profile2 -> 1, etc.) */
   if (strncmp(profile_token, MEDIA_PROFILE_TOKEN_PREFIX, strlen(MEDIA_PROFILE_TOKEN_PREFIX)) == 0) {
-    int profile_num = atoi(profile_token + strlen(MEDIA_PROFILE_TOKEN_PREFIX));
-    if (profile_num >= 1 && profile_num <= get_active_profile_count()) {
+    char* endptr;
+    long profile_num_long = strtol(profile_token + strlen(MEDIA_PROFILE_TOKEN_PREFIX), &endptr, 10);
+    if (endptr != profile_token + strlen(MEDIA_PROFILE_TOKEN_PREFIX) && *endptr == '\0' && profile_num_long >= 1 &&
+        profile_num_long <= get_active_profile_count()) {
+      int profile_num = (int)profile_num_long;
       return &g_media_profiles[profile_num - 1];
     }
   }
@@ -392,7 +397,9 @@ int onvif_media_get_profile(const char* profile_token, struct media_profile* pro
   return ONVIF_ERROR_NOT_FOUND;
 }
 
-int onvif_media_create_profile(const char* name, const char* token, struct media_profile* profile) {
+int onvif_media_create_profile(
+  const char* name, const char* token,
+  struct media_profile* profile) { // NOLINT(bugprone-easily-swappable-parameters) - name and token are semantically different profile attributes
   ONVIF_CHECK_NULL(name);
   ONVIF_CHECK_NULL(token);
   ONVIF_CHECK_NULL(profile);
@@ -838,32 +845,6 @@ int onvif_media_stop_multicast_streaming(const char* profile_token) {
   return ONVIF_SUCCESS;
 }
 
-/* SOAP XML generation helpers - now using common utilities */
-
-/* XML parsing helpers - now using xml_utils module */
-
-/* Helper Functions */
-
-static int parse_profile_token(onvif_gsoap_context_t* gsoap_ctx, char* token, size_t token_size) {
-  if (!gsoap_ctx || !token || token_size == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-  // Stub: Return default profile token
-  strncpy(token, "Profile0", token_size - 1);
-  token[token_size - 1] = '\0';
-  return ONVIF_SUCCESS;
-}
-
-static int parse_protocol(onvif_gsoap_context_t* gsoap_ctx, char* protocol, size_t protocol_size) {
-  if (!gsoap_ctx || !protocol || protocol_size == 0) {
-    return ONVIF_ERROR_INVALID;
-  }
-  // Stub: Return default protocol
-  strncpy(protocol, "RTSP", protocol_size - 1);
-  protocol[protocol_size - 1] = '\0';
-  return ONVIF_SUCCESS;
-}
-
 // Helper function to parse value from request body
 static int parse_value_from_request(const char* request_body, onvif_gsoap_context_t* gsoap_ctx, const char* xpath, char* value, size_t value_size) {
   if (!request_body || !gsoap_ctx || !xpath || !value || value_size == 0) {
@@ -1264,10 +1245,8 @@ static int get_stream_uri_business_logic(const service_handler_config_t* config,
     protocol = "HTTP";
     break;
   case tt__TransportProtocol__RTSP:
-    protocol = "RTSP";
-    break;
   default:
-    protocol = "RTSP"; // Default to RTSP
+    protocol = "RTSP"; // RTSP or default to RTSP
     break;
   }
 
@@ -1517,7 +1496,11 @@ static int set_video_encoder_configuration_business_logic(const service_handler_
   // Map encoder token to profile index (VideoEncoder0 -> 0, VideoEncoder1 -> 1, etc.)
   int profile_index = -1;
   if (strncmp(config_token, "VideoEncoder", MEDIA_VIDEO_ENCODER_PREFIX_LEN) == 0) {
-    profile_index = atoi(config_token + MEDIA_VIDEO_ENCODER_PREFIX_LEN);
+    char* endptr;
+    long profile_index_long = strtol(config_token + MEDIA_VIDEO_ENCODER_PREFIX_LEN, &endptr, 10);
+    if (endptr != config_token + MEDIA_VIDEO_ENCODER_PREFIX_LEN && *endptr == '\0' && profile_index_long >= 0 && profile_index_long < INT_MAX) {
+      profile_index = (int)profile_index_long;
+    }
   }
 
   if (profile_index < 0 || profile_index >= get_active_profile_count()) {
@@ -1566,13 +1549,9 @@ static int set_video_encoder_configuration_business_logic(const service_handler_
     video_config.codec_type = 2; // MJPEG
     break;
   case tt__VideoEncoding__MPEG4:
-    video_config.codec_type = 0; // Treat as H.264
-    break;
   case tt__VideoEncoding__H264:
-    video_config.codec_type = 0; // H.264
-    break;
   default:
-    video_config.codec_type = 0; // Default to H.264
+    video_config.codec_type = 0; // H.264, MPEG4 (treated as H.264), or default to H.264
     break;
   }
 
@@ -1776,7 +1755,7 @@ static int media_service_get_capabilities(struct soap* ctx, void** capabilities_
 
   // Build XAddr
   char xaddr[ONVIF_XADDR_BUFFER_SIZE];
-  snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/media_service", device_ip, http_port);
+  (void)snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/media_service", device_ip, http_port);
   caps->XAddr = soap_strdup(ctx, xaddr);
 
   // StreamingCapabilities (REQUIRED for Media)

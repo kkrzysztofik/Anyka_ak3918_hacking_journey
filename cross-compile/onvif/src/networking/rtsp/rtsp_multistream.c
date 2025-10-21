@@ -219,7 +219,7 @@ int rtsp_multistream_server_add_stream(rtsp_multistream_server_t* server, const 
 
   // Wait for first frame to be captured and encoded
   platform_log_debug("Waiting for first frame encoding for stream %s\n", path);
-  sleep_ms(200); // Allow time for first frame
+  sleep_ms(RTSP_FRAME_ENCODING_WAIT_MS);
 
   stream->encoder_initialized = true;
 
@@ -345,7 +345,7 @@ int rtsp_multistream_server_start(rtsp_multistream_server_t* server) {
   }
 
   // Listen for connections
-  if (listen(server->listen_sockfd, 10) < 0) {
+  if (listen(server->listen_sockfd, RTSP_LISTEN_BACKLOG) < 0) {
     platform_log_error("Failed to listen on socket: %s\n", strerror(errno));
     close(server->listen_sockfd);
     server->listen_sockfd = -1;
@@ -563,9 +563,9 @@ static int rtsp_multistream_get_video_stream_with_retry(rtsp_multistream_server_
   // Retry mechanism for getting video stream
   while (retry_count < max_retries && stream_result != PLATFORM_SUCCESS) {
     // Use shorter timeout if server is shutting down
-    int timeout_ms = 100; // Default timeout
+    int timeout_ms = RTSP_MAX_RETRY_DELAY_MS;
     if (server && !server->running) {
-      timeout_ms = 10; // Shorter timeout during shutdown
+      timeout_ms = RTSP_SHUTDOWN_TIMEOUT_MS;
     }
 
     stream_result = platform_venc_get_stream_by_handle(stream->venc_stream_handle, venc_stream, timeout_ms);
@@ -581,7 +581,7 @@ static int rtsp_multistream_get_video_stream_with_retry(rtsp_multistream_server_
 
       if (retry_count < max_retries - 1) {
         // Use shorter delay during shutdown
-        int delay_ms = (server && !server->running) ? 5 : 20;
+        int delay_ms = (server && !server->running) ? RTSP_RETRY_DELAY_SHUTDOWN_MS : RTSP_RETRY_DELAY_NORMAL_MS;
         sleep_ms(delay_ms);
       }
     }
@@ -681,7 +681,7 @@ static int rtsp_multistream_process_audio_stream(rtsp_multistream_server_t* serv
 
   // Get audio stream using platform abstraction
   platform_aenc_stream_t aenc_stream;
-  if (platform_aenc_get_stream(stream->aenc_handle, &aenc_stream, 100) != PLATFORM_SUCCESS) {
+  if (platform_aenc_get_stream(stream->aenc_handle, &aenc_stream, RTSP_AUDIO_STREAM_TIMEOUT_MS) != PLATFORM_SUCCESS) {
     return -1;
   }
 
@@ -934,7 +934,7 @@ static void* rtsp_multistream_encoder_thread(void* arg) {
     // Use safe mutex lock with timeout and corruption recovery
     if (pthread_mutex_lock(&server->streams_mutex) != 0) {
       // Mutex lock failed, wait and continue
-      sleep_ms(10);
+      sleep_ms(RTSP_THREAD_MUTEX_RETRY_MS);
       continue;
     }
 
@@ -958,8 +958,8 @@ static void* rtsp_multistream_encoder_thread(void* arg) {
     }
 
     // Use shorter sleep and check shutdown more frequently
-    for (int i = 0; i < 10 && server->running; i++) {
-      sleep_ms(1); // 1ms sleep, check 10 times
+    for (int i = 0; i < RTSP_THREAD_POLL_ITERATIONS && server->running; i++) {
+      sleep_ms(RTSP_THREAD_POLL_DELAY_1MS);
     }
   }
 
@@ -987,7 +987,7 @@ static void* rtsp_multistream_audio_thread(void* arg) {
     pthread_mutex_unlock(&server->streams_mutex);
 
     // Small delay to prevent busy waiting
-    sleep_ms(10); // 10ms
+    sleep_ms(RTSP_THREAD_POLL_DELAY_MS);
   }
 
   platform_log_notice("Multi-stream RTSP audio thread finished\n");
@@ -1057,7 +1057,7 @@ static void* rtsp_multistream_timeout_thread(void* arg) {
       break;
     }
 
-    sleep_ms(10000);
+    sleep_ms(RTSP_STATS_UPDATE_INTERVAL_MS);
   }
 
   platform_log_notice("Multi-stream RTSP timeout thread finished\n");
@@ -1075,7 +1075,7 @@ int rtsp_validate_request(const char* request, size_t request_len) {
   }
 
   // Check for basic RTSP request format
-  if (strncmp(request, "RTSP/", 5) == 0) {
+  if (strncmp(request, "RTSP/", RTSP_PREFIX_LEN) == 0) {
     // Response format
     return 0;
   }
@@ -1091,7 +1091,7 @@ int rtsp_validate_request(const char* request, size_t request_len) {
     return -1;
   }
 
-  if (strncmp(space2 + 1, "RTSP/1.0", 8) != 0) {
+  if (strncmp(space2 + 1, "RTSP/1.0", RTSP_VERSION_1_0_LEN) != 0) {
     return -1;
   }
 
@@ -1261,7 +1261,7 @@ void rtsp_cleanup_session(rtsp_session_t* session) {
 static void rtsp_multistream_h264_extract_sps_pps(rtsp_stream_info_t* stream, const uint8_t* buf, size_t len) {
   for (size_t buf_index = 0; buf_index < len - 4; buf_index++) {
     if (buf[buf_index] == 0x00 && buf[buf_index + 1] == 0x00 && buf[buf_index + 2] == 0x00 && buf[buf_index + 3] == 0x01) {
-      uint8_t nal_type = buf[buf_index + 4] & 0x1F;
+      uint8_t nal_type = buf[buf_index + 4] & H264_NAL_TYPE_MASK;
       size_t nal_start = buf_index + 4;
       size_t search_index = buf_index + 4;
       while (search_index < len - 4) {
@@ -1271,9 +1271,9 @@ static void rtsp_multistream_h264_extract_sps_pps(rtsp_stream_info_t* stream, co
         search_index++;
       }
       size_t nal_end = search_index;
-      if (nal_type == 7 && stream->h264_sps_b64[0] == '\0') {
+      if (nal_type == H264_NAL_SPS && stream->h264_sps_b64[0] == '\0') {
         rtsp_multistream_base64_encode(buf + nal_start, nal_end - nal_start, stream->h264_sps_b64, sizeof(stream->h264_sps_b64));
-      } else if (nal_type == 8 && stream->h264_pps_b64[0] == '\0') {
+      } else if (nal_type == H264_NAL_PPS && stream->h264_pps_b64[0] == '\0') {
         rtsp_multistream_base64_encode(buf + nal_start, nal_end - nal_start, stream->h264_pps_b64, sizeof(stream->h264_pps_b64));
       }
       if (stream->h264_sps_b64[0] && stream->h264_pps_b64[0]) {
@@ -1297,19 +1297,19 @@ static void rtsp_multistream_base64_encode(const uint8_t* input, size_t input_le
     uint32_t byte_b = input_index < input_len ? input[input_index++] : 0;
     uint32_t byte_c = input_index < input_len ? input[input_index++] : 0;
 
-    uint32_t triple = (byte_a << 16) | (byte_b << 8) | byte_c;
+    uint32_t triple = (byte_a << SHIFT_16_BITS) | (byte_b << SHIFT_8_BITS) | byte_c;
 
     if (output_index < output_len - 1) {
-      output[output_index++] = base64_chars[(triple >> 18) & 0x3F];
+      output[output_index++] = base64_chars[(triple >> BASE64_TRIPLE_SHIFT_HIGH) & BASE64_CHAR_MASK];
     }
     if (output_index < output_len - 1) {
-      output[output_index++] = base64_chars[(triple >> 12) & 0x3F];
+      output[output_index++] = base64_chars[(triple >> BASE64_TRIPLE_SHIFT_MID_HIGH) & BASE64_CHAR_MASK];
     }
     if (output_index < output_len - 1) {
-      output[output_index++] = base64_chars[(triple >> 6) & 0x3F];
+      output[output_index++] = base64_chars[(triple >> BASE64_BITS_PER_CHAR) & BASE64_CHAR_MASK];
     }
     if (output_index < output_len - 1) {
-      output[output_index++] = base64_chars[triple & 0x3F];
+      output[output_index++] = base64_chars[triple & BASE64_CHAR_MASK];
     }
   }
 

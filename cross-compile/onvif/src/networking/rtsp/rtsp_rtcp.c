@@ -28,8 +28,9 @@
  * Initialize RTCP session
  */
 int rtcp_init_session(struct rtp_session* rtp_session) {
-  if (!rtp_session)
+  if (!rtp_session) {
     return -1;
+  }
 
   // Initialize statistics
   memset(&rtp_session->stats, 0, sizeof(struct rtcp_stats));
@@ -44,8 +45,9 @@ int rtcp_init_session(struct rtp_session* rtp_session) {
  * Cleanup RTCP session
  */
 void rtcp_cleanup_session(struct rtp_session* rtp_session) {
-  if (!rtp_session)
+  if (!rtp_session) {
     return;
+  }
 
   rtp_session->rtcp_enabled = false;
 
@@ -61,53 +63,54 @@ void rtcp_cleanup_session(struct rtp_session* rtp_session) {
  * Send RTCP Sender Report (SR)
  */
 int rtcp_send_sr(struct rtp_session* rtp_session) {
-  if (!rtp_session || !rtp_session->rtcp_enabled)
+  if (!rtp_session || !rtp_session->rtcp_enabled) {
     return -1;
+  }
 
-  uint8_t packet[28]; // Minimum SR packet size
+  uint8_t packet[RTCP_SR_PACKET_SIZE];
   int pos = 0;
 
   // Version (2), Padding (0), RC (0), PT (200 = SR)
-  packet[pos++] = 0x80 | 0x00 | 0x00 | 0x00;
+  packet[pos++] = RTCP_VERSION_BYTE;
 
   // Length (6 words = 24 bytes)
   packet[pos++] = 0x00;
-  packet[pos++] = 0x06;
+  packet[pos++] = RTCP_SR_LENGTH_WORDS;
 
   // SSRC
-  packet[pos++] = (rtp_session->ssrc >> 24) & 0xFF;
-  packet[pos++] = (rtp_session->ssrc >> 16) & 0xFF;
-  packet[pos++] = (rtp_session->ssrc >> 8) & 0xFF;
-  packet[pos++] = rtp_session->ssrc & 0xFF;
+  packet[pos++] = (rtp_session->ssrc >> SHIFT_24_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (rtp_session->ssrc >> SHIFT_16_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (rtp_session->ssrc >> SHIFT_8_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = rtp_session->ssrc & RTP_BYTE_MASK;
 
   // NTP timestamp (simplified - use current time)
-  uint64_t ntp_time = time(NULL) + 2208988800ULL; // Convert to NTP epoch
-  packet[pos++] = (ntp_time >> 56) & 0xFF;
-  packet[pos++] = (ntp_time >> 48) & 0xFF;
-  packet[pos++] = (ntp_time >> 40) & 0xFF;
-  packet[pos++] = (ntp_time >> 32) & 0xFF;
-  packet[pos++] = (ntp_time >> 24) & 0xFF;
-  packet[pos++] = (ntp_time >> 16) & 0xFF;
-  packet[pos++] = (ntp_time >> 8) & 0xFF;
-  packet[pos++] = ntp_time & 0xFF;
+  uint64_t ntp_time = time(NULL) + NTP_OFFSET;
+  packet[pos++] = (ntp_time >> NTP_FRAC_SHIFT_56) & RTP_BYTE_MASK;
+  packet[pos++] = (ntp_time >> NTP_FRAC_SHIFT_48) & RTP_BYTE_MASK;
+  packet[pos++] = (ntp_time >> NTP_FRAC_SHIFT_40) & RTP_BYTE_MASK;
+  packet[pos++] = (ntp_time >> NTP_FRAC_SHIFT_32) & RTP_BYTE_MASK;
+  packet[pos++] = (ntp_time >> SHIFT_24_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (ntp_time >> SHIFT_16_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (ntp_time >> SHIFT_8_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = ntp_time & RTP_BYTE_MASK;
 
   // RTP timestamp
-  packet[pos++] = (rtp_session->timestamp >> 24) & 0xFF;
-  packet[pos++] = (rtp_session->timestamp >> 16) & 0xFF;
-  packet[pos++] = (rtp_session->timestamp >> 8) & 0xFF;
-  packet[pos++] = rtp_session->timestamp & 0xFF;
+  packet[pos++] = (rtp_session->timestamp >> SHIFT_24_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (rtp_session->timestamp >> SHIFT_16_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (rtp_session->timestamp >> SHIFT_8_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = rtp_session->timestamp & RTP_BYTE_MASK;
 
   // Sender's packet count
-  packet[pos++] = (rtp_session->stats.packets_sent >> 24) & 0xFF;
-  packet[pos++] = (rtp_session->stats.packets_sent >> 16) & 0xFF;
-  packet[pos++] = (rtp_session->stats.packets_sent >> 8) & 0xFF;
-  packet[pos++] = rtp_session->stats.packets_sent & 0xFF;
+  packet[pos++] = (rtp_session->stats.packets_sent >> SHIFT_24_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (rtp_session->stats.packets_sent >> SHIFT_16_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (rtp_session->stats.packets_sent >> SHIFT_8_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = rtp_session->stats.packets_sent & RTP_BYTE_MASK;
 
   // Sender's octet count
-  packet[pos++] = (rtp_session->stats.octets_sent >> 24) & 0xFF;
-  packet[pos++] = (rtp_session->stats.octets_sent >> 16) & 0xFF;
-  packet[pos++] = (rtp_session->stats.octets_sent >> 8) & 0xFF;
-  packet[pos++] = rtp_session->stats.octets_sent & 0xFF;
+  packet[pos++] = (rtp_session->stats.octets_sent >> SHIFT_24_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (rtp_session->stats.octets_sent >> SHIFT_16_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (rtp_session->stats.octets_sent >> SHIFT_8_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = rtp_session->stats.octets_sent & RTP_BYTE_MASK;
 
   // Send packet
   if (rtp_session->rtcp_sockfd >= 0) {
@@ -122,28 +125,29 @@ int rtcp_send_sr(struct rtp_session* rtp_session) {
  * Send RTCP Receiver Report (RR)
  */
 int rtcp_send_rr(struct rtp_session* rtp_session) {
-  if (!rtp_session || !rtp_session->rtcp_enabled)
+  if (!rtp_session || !rtp_session->rtcp_enabled) {
     return -1;
+  }
 
-  uint8_t packet[32]; // Minimum RR packet size
+  uint8_t packet[RTCP_RR_PACKET_SIZE];
   int pos = 0;
 
   // Version (2), Padding (0), RC (1), PT (201 = RR)
-  packet[pos++] = 0x80 | 0x00 | 0x01 | 0x00;
+  packet[pos++] = RTCP_RR_VERSION_RC1;
 
   // Length (7 words = 28 bytes)
   packet[pos++] = 0x00;
-  packet[pos++] = 0x07;
+  packet[pos++] = RTCP_RR_LENGTH_WORDS;
 
   // SSRC
-  packet[pos++] = (rtp_session->ssrc >> 24) & 0xFF;
-  packet[pos++] = (rtp_session->ssrc >> 16) & 0xFF;
-  packet[pos++] = (rtp_session->ssrc >> 8) & 0xFF;
-  packet[pos++] = rtp_session->ssrc & 0xFF;
+  packet[pos++] = (rtp_session->ssrc >> SHIFT_24_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (rtp_session->ssrc >> SHIFT_16_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = (rtp_session->ssrc >> SHIFT_8_BITS) & RTP_BYTE_MASK;
+  packet[pos++] = rtp_session->ssrc & RTP_BYTE_MASK;
 
   // Report block (simplified - all zeros for now)
-  memset(packet + pos, 0, 24);
-  pos += 24;
+  memset(packet + pos, 0, RTCP_REPORT_BLOCK_SIZE);
+  pos += RTCP_REPORT_BLOCK_SIZE;
 
   // Send packet
   if (rtp_session->rtcp_sockfd >= 0) {
@@ -158,15 +162,17 @@ int rtcp_send_rr(struct rtp_session* rtp_session) {
  * Handle incoming RTCP packet
  */
 int rtcp_handle_packet(struct rtp_session* rtp_session, const uint8_t* data, size_t len) {
-  if (!rtp_session || !data || len < 4)
+  if (!rtp_session || !data || len < 4) {
     return -1;
+  }
 
   // Parse RTCP header
-  uint8_t version = (data[0] >> 6) & 0x03;
-  uint8_t pt = data[1];
+  uint8_t version = (data[0] >> RTP_VERSION_SHIFT) & RTP_VERSION_BITS_MASK;
+  uint8_t pt = data[1];  // NOLINT(readability-identifier-length) - standard RTCP payload type abbreviation
 
-  if (version != 2)
+  if (version != RTCP_VERSION) {
     return -1; // Invalid version
+  }
 
   rtp_session->last_rtcp_received = time(NULL);
 
@@ -210,12 +216,13 @@ int rtcp_handle_packet(struct rtp_session* rtp_session, const uint8_t* data, siz
  */
 void* rtcp_thread(void* arg) {
   struct rtp_session* rtp_session = (struct rtp_session*)arg;
-  if (!rtp_session)
+  if (!rtp_session) {
     return NULL;
+  }
 
   platform_log_notice("RTCP thread started\n");
 
-  uint8_t buffer[1500];
+  uint8_t buffer[RTP_MAX_PACKET_SIZE];
   struct sockaddr_in client_addr;
   socklen_t addr_len = sizeof(client_addr);
 
@@ -247,7 +254,7 @@ void* rtcp_thread(void* arg) {
     }
 
     // Small delay to prevent busy waiting
-    sleep_ms(100); // 100ms
+    sleep_ms(RTCP_THREAD_POLL_DELAY_MS);
   }
 
   platform_log_notice("RTCP thread finished\n");

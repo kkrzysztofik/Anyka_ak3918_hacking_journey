@@ -41,6 +41,7 @@
 #include "services/snapshot/onvif_snapshot.h"
 #include "utils/common/time_utils.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
 #include "utils/security/security_hardening.h"
@@ -336,7 +337,7 @@ static const char* extract_operation_name(const char* body) {
 
   service_log_context_t log_ctx;
   http_log_init_context(&log_ctx, NULL, "gsoap_extract", SERVICE_LOG_WARNING);
-  service_log_warning(&log_ctx, "gSOAP failed to extract operation name, error: %d", result);
+  service_log_warning(&log_ctx, "gSOAP failed to extract operation name, error: %d (%s)", result, soap_error_to_string(result));
   return NULL;
 }
 

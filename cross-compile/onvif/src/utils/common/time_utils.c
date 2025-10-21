@@ -8,6 +8,7 @@
 #include "utils/common/time_utils.h"
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -26,7 +27,7 @@
  * @return Timestamp in microseconds since epoch
  */
 uint64_t get_timestamp_us(void) {
-  struct timeval tv;
+  struct timeval tv; // NOLINT(readability-identifier-length) - standard POSIX timeval name
   gettimeofday(&tv, NULL);
   return (uint64_t)tv.tv_sec * TIME_US_PER_SECOND + (uint64_t)tv.tv_usec;
 }

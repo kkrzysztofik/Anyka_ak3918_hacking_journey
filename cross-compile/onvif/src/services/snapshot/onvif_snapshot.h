@@ -12,7 +12,6 @@
 
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
-#include "services/common/onvif_types.h"
 #include "services/media/onvif_media.h"
 
 #ifdef __cplusplus

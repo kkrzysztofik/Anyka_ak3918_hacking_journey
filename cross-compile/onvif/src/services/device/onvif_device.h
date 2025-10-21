@@ -7,7 +7,6 @@
 #ifndef ONVIF_DEVICE_H
 #define ONVIF_DEVICE_H
 
-#include "core/config/config.h"
 #include "networking/http/http_parser.h"
 #include "services/common/onvif_types.h"
 

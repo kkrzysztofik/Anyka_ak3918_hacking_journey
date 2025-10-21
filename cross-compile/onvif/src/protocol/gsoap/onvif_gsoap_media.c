@@ -25,8 +25,9 @@
 #include <string.h>
 
 #include "generated/soapH.h"
+#include "onvif_gsoap_core.h"
 #include "platform/platform.h"
-#include "utils/common/time_utils.h"
+#include "services/media/onvif_media.h"
 #include "utils/error/error_handling.h"
 #include "utils/error/error_translation.h"
 
@@ -67,7 +68,7 @@ int onvif_gsoap_parse_get_profiles(onvif_gsoap_context_t* ctx, struct _trt__GetP
   struct _trt__GetProfiles* result_ptr = soap_get__trt__GetProfiles(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
     int soap_result = ctx->soap.error;
-    platform_log_debug("onvif_gsoap_parse_get_profiles: soap_get___trt__GetProfiles failed: %d", soap_result);
+    platform_log_debug("onvif_gsoap_parse_get_profiles: soap_get___trt__GetProfiles failed: %d (%s)", soap_result, soap_error_to_string(soap_result));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse GetProfiles structure");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -118,6 +119,8 @@ int onvif_gsoap_parse_get_stream_uri(onvif_gsoap_context_t* ctx, struct _trt__Ge
   /* 4. Parse the actual GetStreamUri structure */
   struct _trt__GetStreamUri* result_ptr = soap_get__trt__GetStreamUri(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_get_stream_uri: soap_get__trt__GetStreamUri failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse GetStreamUri structure");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -165,6 +168,8 @@ int onvif_gsoap_parse_create_profile(onvif_gsoap_context_t* ctx, struct _trt__Cr
   /* 4. Parse the actual CreateProfile structure */
   struct _trt__CreateProfile* result_ptr = soap_get__trt__CreateProfile(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_create_profile: soap_get__trt__CreateProfile failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse CreateProfile structure");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -212,6 +217,8 @@ int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx, struct _trt__De
   /* 4. Parse the actual DeleteProfile structure */
   struct _trt__DeleteProfile* result_ptr = soap_get__trt__DeleteProfile(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_delete_profile: soap_get__trt__DeleteProfile failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse DeleteProfile structure");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -259,6 +266,8 @@ int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx, struct
   /* 4. Parse the actual SetVideoSourceConfiguration structure */
   struct _trt__SetVideoSourceConfiguration* result_ptr = soap_get__trt__SetVideoSourceConfiguration(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_set_video_source_configuration: soap_get__trt__SetVideoSourceConfiguration failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse SetVideoSourceConfiguration structure");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -307,6 +316,8 @@ int onvif_gsoap_parse_set_video_encoder_config(onvif_gsoap_context_t* ctx, struc
   /* 4. Parse the actual SetVideoEncoderConfiguration structure */
   struct _trt__SetVideoEncoderConfiguration* result_ptr = soap_get__trt__SetVideoEncoderConfiguration(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_set_video_encoder_configuration: soap_get__trt__SetVideoEncoderConfiguration failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse SetVideoEncoderConfiguration structure");
     return ONVIF_ERROR_PARSE_FAILED;

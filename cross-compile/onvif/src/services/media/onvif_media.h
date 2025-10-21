@@ -7,7 +7,6 @@
 #ifndef ONVIF_MEDIA_H
 #define ONVIF_MEDIA_H
 
-#include "core/config/config.h"
 #include "networking/http/http_parser.h"
 
 // Buffer size constants

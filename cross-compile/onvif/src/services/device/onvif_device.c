@@ -28,6 +28,7 @@
 #include "protocol/gsoap/onvif_gsoap_response.h"
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_service_common.h"
+#include "utils/error/error_translation.h"
 #include "services/common/onvif_types.h"
 #include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
@@ -890,7 +891,7 @@ int onvif_device_handle_operation(const char* operation_name, const http_request
   onvif_gsoap_context_t gsoap_ctx;
   int init_result = onvif_gsoap_init(&gsoap_ctx);
   if (init_result != ONVIF_SUCCESS) {
-    platform_log_error("Failed to initialize gSOAP context for request (error: %d)\n", init_result);
+    platform_log_error("Failed to initialize gSOAP context for request (error: %d (%s))\n", init_result, onvif_error_to_string(init_result));
     return ONVIF_ERROR_MEMORY;
   }
 

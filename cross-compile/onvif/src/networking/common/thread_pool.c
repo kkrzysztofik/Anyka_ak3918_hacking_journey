@@ -42,8 +42,8 @@ int thread_pool_init(thread_pool_t* pool, int thread_count) {
     return -1;
   }
 
-  if (thread_count > 32) {
-    platform_log_error("Thread count exceeds maximum (32), got %d\n", thread_count);
+  if (thread_count > THREAD_POOL_MAX_THREADS) {
+    platform_log_error("Thread count exceeds maximum (%d), got %d\n", THREAD_POOL_MAX_THREADS, thread_count);
     return -1;
   }
 
@@ -116,7 +116,7 @@ void thread_pool_cleanup(thread_pool_t* pool) {
 
   // Give threads a moment to process the shutdown signal
   platform_log_debug("Waiting for threads to process shutdown signal...\n");
-  sleep_ms(200); // 200ms
+  sleep_ms(THREAD_POOL_SHUTDOWN_DELAY_MS);
   platform_log_debug("Starting thread join process...\n");
 
   // Wait for all threads to finish with timeout

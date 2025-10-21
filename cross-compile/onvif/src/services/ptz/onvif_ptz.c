@@ -16,6 +16,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
 #include "generated/soapH.h"
@@ -31,6 +32,7 @@
 #include "services/common/onvif_types.h"
 #include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
 
@@ -551,7 +553,7 @@ int onvif_ptz_goto_preset(const char* profile_token, // NOLINT
   // Ensure presets are loaded from configuration
   int result = load_ptz_presets_from_config();
   if (result != ONVIF_SUCCESS) {
-    platform_log_error("[PTZ] Failed to load presets from config (result=%d)\n", result);
+    platform_log_error("[PTZ] Failed to load presets from config (result=%d (%s))\n", result, onvif_error_to_string(result));
     return result;
   }
 
@@ -1148,7 +1150,7 @@ int onvif_ptz_handle_operation(const char* operation_name, const http_request_t*
   onvif_gsoap_context_t gsoap_ctx;
   int init_result = onvif_gsoap_init(&gsoap_ctx);
   if (init_result != ONVIF_SUCCESS) {
-    platform_log_error("Failed to initialize gSOAP context for PTZ request (error: %d)\n", init_result);
+    platform_log_error("Failed to initialize gSOAP context for PTZ request (error: %d (%s))\n", init_result, onvif_error_to_string(init_result));
     return ONVIF_ERROR_MEMORY;
   }
 
@@ -1157,7 +1159,7 @@ int onvif_ptz_handle_operation(const char* operation_name, const http_request_t*
   if (request->body && request->body_length > 0) {
     int parse_init = onvif_gsoap_init_request_parsing(&gsoap_ctx, request->body, request->body_length);
     if (parse_init != ONVIF_SUCCESS) {
-      platform_log_error("Failed to initialize SOAP request parsing (error: %d)\n", parse_init);
+      platform_log_error("Failed to initialize SOAP request parsing (error: %d (%s))\n", parse_init, onvif_error_to_string(parse_init));
       onvif_gsoap_cleanup(&gsoap_ctx);
       return ONVIF_ERROR_PARSE_FAILED;
     }
@@ -1298,7 +1300,8 @@ static int load_ptz_presets_from_config(void) {
       continue;
     }
     if (result != ONVIF_SUCCESS) {
-      platform_log_error("[PTZ] Failed to load presets for profile %d from configuration (error=%d)\n", i + 1, result);
+      platform_log_error("[PTZ] Failed to load presets for profile %d from configuration (error=%d (%s))\n", i + 1, result,
+                         onvif_error_to_string(result));
       return result;
     }
 

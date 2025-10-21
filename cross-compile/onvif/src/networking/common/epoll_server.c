@@ -52,7 +52,7 @@ void epoll_server_set_config(const struct application_config* config) {
   }
 
   // Validate and set epoll timeout
-  if (config->server.epoll_timeout >= 100 && config->server.epoll_timeout <= 5000) {
+  if (config->server.epoll_timeout >= EPOLL_TIMEOUT_MIN_MS && config->server.epoll_timeout <= EPOLL_TIMEOUT_MAX_MS) {
     g_epoll_timeout = config->server.epoll_timeout;
     platform_log_debug("Epoll timeout set to %d ms\n", g_epoll_timeout);
   } else {
@@ -60,8 +60,8 @@ void epoll_server_set_config(const struct application_config* config) {
   }
 
   // Validate and set cleanup interval
-  if (config->server.cleanup_interval >= 1 && config->server.cleanup_interval <= 60) {
-    g_cleanup_interval = config->server.cleanup_interval * 1000; // Convert to ms
+  if (config->server.cleanup_interval >= 1 && config->server.cleanup_interval <= CLEANUP_INTERVAL_MAX_SEC) {
+    g_cleanup_interval = config->server.cleanup_interval * MS_PER_SECOND; // Convert to ms
     platform_log_debug("Cleanup interval set to %d seconds\n", config->server.cleanup_interval);
   } else {
     platform_log_warning("Invalid cleanup interval %d, using default 5 seconds\n", config->server.cleanup_interval);
@@ -112,7 +112,7 @@ void epoll_server_cleanup(void) {
   }
 
   // Give the epoll loop a moment to detect the shutdown signal
-  sleep_ms(100); // 100ms
+  sleep_ms(EPOLL_SHUTDOWN_DELAY_MS);
 
   platform_log_info("Epoll server cleaned up\n");
 }

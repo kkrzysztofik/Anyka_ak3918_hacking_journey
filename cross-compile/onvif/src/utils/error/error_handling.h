@@ -8,7 +8,6 @@
 #ifndef ONVIF_ERROR_HANDLING_H
 #define ONVIF_ERROR_HANDLING_H
 
-#include <stdarg.h>
 #include <stddef.h>
 
 #include "networking/http/http_parser.h"
@@ -120,19 +119,19 @@ typedef enum {
 
 #define ERROR_CONTEXT_SET_MESSAGE(ctx, fmt, ...)                                                                                                     \
   do {                                                                                                                                               \
-    snprintf((ctx)->message, sizeof((ctx)->message), (fmt), ##__VA_ARGS__);                                                                          \
+    (void)snprintf((ctx)->message, sizeof((ctx)->message), (fmt), ##__VA_ARGS__);                                                                    \
   } while (0)
 
 #define ERROR_CONTEXT_SET_CONTEXT(ctx, fmt, ...)                                                                                                     \
   do {                                                                                                                                               \
-    snprintf((ctx)->context, sizeof((ctx)->context), (fmt), ##__VA_ARGS__);                                                                          \
+    (void)snprintf((ctx)->context, sizeof((ctx)->context), (fmt), ##__VA_ARGS__);                                                                    \
   } while (0)
 
 /* Essential error checking macros */
 #define ONVIF_CHECK_NULL(ptr)                                                                                                                        \
   do {                                                                                                                                               \
     if ((ptr) == NULL) {                                                                                                                             \
-      platform_log_error("Null pointer error at %s:%d\n", __FILE__, __LINE__);                                                                       \
+      platform_log_error("Null pointer error at %s:%d (ONVIF_ERROR_NULL)\n", __FILE__, __LINE__);                                                    \
       return ONVIF_ERROR_NULL;                                                                                                                       \
     }                                                                                                                                                \
   } while (0)
@@ -157,11 +156,11 @@ typedef enum {
 
 #define ONVIF_VALIDATE_STRING(str, field_name, min_len, max_len)                                                                                     \
   do {                                                                                                                                               \
-    if (!str) {                                                                                                                                      \
+    if (!(str)) {                                                                                                                                    \
       platform_log_error("Validation failed: %s is NULL at %s:%d\n", (field_name), __FILE__, __LINE__);                                              \
       return ONVIF_VALIDATION_FAILED;                                                                                                                \
     }                                                                                                                                                \
-    size_t len = strlen(str);                                                                                                                        \
+    size_t len = strlen((str));                                                                                                                      \
     if (len < (min_len) || len > (max_len)) {                                                                                                        \
       platform_log_error("Validation failed: %s length %zu not in range [%zu, %zu] at "                                                              \
                          "%s:%d\n",                                                                                                                  \

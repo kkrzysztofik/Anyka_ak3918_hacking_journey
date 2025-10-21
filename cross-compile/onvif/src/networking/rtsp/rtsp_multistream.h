@@ -24,8 +24,8 @@
 
 /* Stream information structure */
 typedef struct {
-  char path[64];                                    /* Stream path (e.g., "/vs0") */
-  char name[64];                                    /* Stream name (e.g., "main") */
+  char path[RTSP_STREAM_PATH_SIZE];                /* Stream path (e.g., "/vs0") */
+  char name[RTSP_STREAM_NAME_SIZE];                /* Stream name (e.g., "main") */
   bool enabled;                                     /* Whether this stream is enabled */
   platform_venc_handle_t venc_handle;               /* Video encoder handle */
   platform_venc_stream_handle_t venc_stream_handle; /* Video stream handle for get/release */
@@ -38,8 +38,8 @@ typedef struct {
   bool audio_encoder_initialized;                   /* Whether audio encoder is initialized */
 
   /* H.264 parameter sets for this stream */
-  char h264_sps_b64[256];
-  char h264_pps_b64[256];
+  char h264_sps_b64[RTSP_H264_PARAM_B64_SIZE];
+  char h264_pps_b64[RTSP_H264_PARAM_B64_SIZE];
 
   /* Statistics for this stream */
   uint64_t bytes_sent;

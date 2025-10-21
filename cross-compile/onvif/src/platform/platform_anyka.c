@@ -1774,10 +1774,10 @@ platform_result_t platform_venc_get_buffer_status(platform_venc_stream_handle_t 
                      stream_handle, *buffer_count, *max_buffers, *overflow_count);
 
   /* Log warnings for high buffer usage or overflows */
-  if (*buffer_count > (*max_buffers * PLATFORM_BUFFER_USAGE_HIGH_THRESHOLD)) {
+  if (*buffer_count > (uint32_t)((float)(*max_buffers) * PLATFORM_BUFFER_USAGE_HIGH_THRESHOLD)) {
     platform_log_warning("platform_venc_get_buffer_status: High buffer usage detected "
                          "(count=%u, max=%u, usage=%.1f%%)",
-                         *buffer_count, *max_buffers, (*buffer_count * 100.0) / *max_buffers);
+                         *buffer_count, *max_buffers, ((float)(*buffer_count) * 100.0F) / (float)(*max_buffers));
   }
 
   if (*overflow_count > 0) {
@@ -1788,8 +1788,9 @@ platform_result_t platform_venc_get_buffer_status(platform_venc_stream_handle_t 
 }
 
 /* Snapshot functions */
+// NOLINT(bugprone-easily-swappable-parameters) - width/height is universal convention
 platform_result_t platform_snapshot_init(platform_snapshot_handle_t* snapshot_handle, platform_vi_handle_t vi_handle, int image_width,
-                                         int image_height) { // NOLINT
+                                         int image_height) {
   if (!snapshot_handle || !vi_handle) {
     return PLATFORM_ERROR_NULL;
   }
@@ -2442,9 +2443,9 @@ static void platform_venc_log_buffer_status(uint32_t buffer_count, uint32_t max_
     platform_log_warning("VENC_BUFFER[%s]: Buffer overflow detected (count=%u)\n", context ? context : "unknown", overflow_count);
   }
 
-  if (buffer_count > (max_buffers * PLATFORM_BUFFER_USAGE_HIGH_THRESHOLD)) {
+  if (buffer_count > (uint32_t)((float)max_buffers * PLATFORM_BUFFER_USAGE_HIGH_THRESHOLD)) {
     platform_log_warning("VENC_BUFFER[%s]: Buffer usage high (%.1f%%)\n", context ? context : "unknown",
-                         (float)((uint32_t)buffer_count) / (float)max_buffers * 100.0F);
+                         ((float)buffer_count / (float)max_buffers) * 100.0F);
   }
 }
 

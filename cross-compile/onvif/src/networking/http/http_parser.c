@@ -21,7 +21,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "common/onvif_constants.h"
 #include "networking/http/http_constants.h"
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"

@@ -10,7 +10,6 @@
 #include "networking/common/buffer_pool.h"
 #include "networking/common/thread_pool.h"
 #include "networking/http/http_parser.h"
-#include "utils/error/error_handling.h"
 #include "utils/security/security_hardening.h"
 
 /* Forward declaration */

@@ -16,16 +16,13 @@
 #include <string.h>
 #include <time.h>
 
-#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
-#include "generated/soapH.h"
 #include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
 #include "protocol/gsoap/onvif_gsoap_response.h"
-#include "services/common/onvif_types.h"
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
 

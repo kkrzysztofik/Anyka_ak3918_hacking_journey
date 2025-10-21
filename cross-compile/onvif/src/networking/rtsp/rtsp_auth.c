@@ -127,7 +127,7 @@ int rtsp_auth_remove_user(struct rtsp_auth_config* auth_config, const char* user
  * Generate random nonce for digest authentication
  */
 void rtsp_auth_generate_nonce(char* nonce, size_t nonce_size) {
-  if (!nonce || nonce_size < 16) {
+  if (!nonce || nonce_size < MD5_HASH_SIZE) {
     return;
   }
 
@@ -148,8 +148,8 @@ void rtsp_auth_generate_nonce(char* nonce, size_t nonce_size) {
   /* Convert bytes to hex string */
   const char hex_chars[] = "0123456789abcdef";
   for (size_t i = 0; i < byte_count && (i * 2 + 1) < nonce_size; i++) {
-    nonce[i * 2] = hex_chars[(random_bytes[i] >> 4) & 0x0F];
-    nonce[i * 2 + 1] = hex_chars[random_bytes[i] & 0x0F];
+    nonce[i * 2] = hex_chars[(random_bytes[i] >> HEX_DIGIT_SHIFT) & HEX_DIGIT_MASK];
+    nonce[i * 2 + 1] = hex_chars[random_bytes[i] & HEX_DIGIT_MASK];
   }
   nonce[byte_count * 2] = '\0';
 
@@ -189,20 +189,20 @@ static int parse_basic_credentials(const char* credentials, char* username, char
   for (size_t i = 0; i < len; i += 4) {
     if (i + 3 < len) {
       // Simple base64 decode implementation
-      char c1 = credentials[i];
-      char c2 = credentials[i + 1];
-      char c3 = credentials[i + 2];
-      char c4 = credentials[i + 3];
+      char c1 = credentials[i];        // NOLINT(readability-identifier-length) - standard base64 variable
+      char c2 = credentials[i + 1];    // NOLINT(readability-identifier-length) - standard base64 variable
+      char c3 = credentials[i + 2];    // NOLINT(readability-identifier-length) - standard base64 variable
+      char c4 = credentials[i + 3];    // NOLINT(readability-identifier-length) - standard base64 variable
 
       // Convert base64 to binary (simplified)
       if (c1 != '=' && c2 != '=') {
         decoded[decoded_len++] = ((c1 - 'A') << 2) | ((c2 - 'A') >> 4);
       }
       if (c2 != '=' && c3 != '=') {
-        decoded[decoded_len++] = ((c2 - 'A') << 4) | ((c3 - 'A') >> 2);
+        decoded[decoded_len++] = ((c2 - 'A') << HEX_DIGIT_SHIFT) | ((c3 - 'A') >> 2);
       }
       if (c3 != '=' && c4 != '=') {
-        decoded[decoded_len++] = ((c3 - 'A') << 6) | (c4 - 'A');
+        decoded[decoded_len++] = ((c3 - 'A') << BASE64_BITS_PER_CHAR) | (c4 - 'A');
       }
     }
   }
@@ -227,18 +227,18 @@ static int parse_basic_credentials(const char* credentials, char* username, char
  * Extracts parameter value based on prefix match
  */
 static void parse_digest_parameter(const char* token, char* username, char* realm, char* nonce, char* response) {
-  if (strncmp(token, "username=", 9) == 0) {
-    char* value = extract_quoted_value((char*)(token + 9));
+  if (strncmp(token, "username=", AUTH_USERNAME_KEY_LEN) == 0) {
+    char* value = extract_quoted_value((char*)(token + AUTH_USERNAME_KEY_LEN));
     strncpy(username, value, RTSP_MAX_USERNAME_LEN - 1);
     username[RTSP_MAX_USERNAME_LEN - 1] = '\0';
-  } else if (strncmp(token, "realm=", 6) == 0 && realm) {
-    char* value = extract_quoted_value((char*)(token + 6));
+  } else if (strncmp(token, "realm=", AUTH_REALM_KEY_LEN) == 0 && realm) {
+    char* value = extract_quoted_value((char*)(token + AUTH_REALM_KEY_LEN));
     strncpy(realm, value, RTSP_MAX_REALM_LEN - 1);
-  } else if (strncmp(token, "nonce=", 6) == 0 && nonce) {
-    char* value = extract_quoted_value((char*)(token + 6));
+  } else if (strncmp(token, "nonce=", AUTH_NONCE_KEY_LEN) == 0 && nonce) {
+    char* value = extract_quoted_value((char*)(token + AUTH_NONCE_KEY_LEN));
     strncpy(nonce, value, RTSP_MAX_NONCE_LEN - 1);
-  } else if (strncmp(token, "response=", 9) == 0 && response) {
-    char* value = extract_quoted_value((char*)(token + 9));
+  } else if (strncmp(token, "response=", AUTH_RESPONSE_KEY_LEN) == 0 && response) {
+    char* value = extract_quoted_value((char*)(token + AUTH_RESPONSE_KEY_LEN));
     strncpy(response, value, RTSP_MAX_RESPONSE_LEN - 1);
   }
 }
@@ -274,16 +274,17 @@ static int parse_digest_credentials(const char* credentials, char* username, cha
 /**
  * Parse authentication credentials from header
  */
+// NOLINT(bugprone-easily-swappable-parameters) - standard authentication parameter order
 int rtsp_auth_parse_credentials(const char* auth_header, char* username, char* password, char* realm, char* nonce, char* response) {
   if (!auth_header || !username || !password) {
     return -1;
   }
 
   // Determine authentication type and parse accordingly
-  if (strncmp(auth_header, "Basic ", 6) == 0) {
-    return parse_basic_credentials(auth_header + 6, username, password);
-  } else if (strncmp(auth_header, "Digest ", 7) == 0) {
-    return parse_digest_credentials(auth_header + 7, username, realm, nonce, response);
+  if (strncmp(auth_header, "Basic ", AUTH_BASIC_PREFIX_LEN) == 0) {
+    return parse_basic_credentials(auth_header + AUTH_BASIC_PREFIX_LEN, username, password);
+  } else if (strncmp(auth_header, "Digest ", AUTH_DIGEST_PREFIX_LEN) == 0) {
+    return parse_digest_credentials(auth_header + AUTH_DIGEST_PREFIX_LEN, username, realm, nonce, response);
   }
 
   return -1;
@@ -329,18 +330,18 @@ int rtsp_auth_verify_digest(const char* username, const char* password, const ch
   }
 
   // Generate expected response
-  char ha1_input[512];
-  char ha2_input[512];
-  char response_input[512];
+  char ha1_input[DIGEST_AUTH_BUFFER_SIZE];
+  char ha2_input[DIGEST_AUTH_BUFFER_SIZE];
+  char response_input[DIGEST_AUTH_BUFFER_SIZE];
 
   // HA1 = MD5(username:realm:password)
-  snprintf(ha1_input, sizeof(ha1_input), "%s:%s:%s", username, realm, password);
+  (void)snprintf(ha1_input, sizeof(ha1_input), "%s:%s:%s", username, realm, password);
 
   // HA2 = MD5(method:uri)
-  snprintf(ha2_input, sizeof(ha2_input), "%s:%s", method, uri);
+  (void)snprintf(ha2_input, sizeof(ha2_input), "%s:%s", method, uri);
 
   // Response = MD5(HA1:nonce:HA2)
-  snprintf(response_input, sizeof(response_input), "%s:%s:%s", ha1_input, nonce, ha2_input);
+  (void)snprintf(response_input, sizeof(response_input), "%s:%s:%s", ha1_input, nonce, ha2_input);
 
   // Simple MD5 comparison (in production, use proper MD5 library)
   // For now, just do string comparison as placeholder
@@ -415,7 +416,7 @@ int rtsp_handle_auth_required(rtsp_session_t* session) {
     return -1;
   }
 
-  char www_auth_header[512];
+  char www_auth_header[WWW_AUTH_HEADER_SIZE];
   if (rtsp_generate_www_authenticate_header(session, www_auth_header, sizeof(www_auth_header)) < 0) {
     return -1;
   }
@@ -427,22 +428,22 @@ int rtsp_handle_auth_required(rtsp_session_t* session) {
  * Generate WWW-Authenticate header
  */
 int rtsp_generate_www_authenticate_header(rtsp_session_t* session, char* header, size_t header_size) {
-  if (!session || !header || header_size < 64) {
+  if (!session || !header || header_size < WWW_AUTH_MIN_SIZE) {
     return -1;
   }
 
   if (session->server->auth_config.auth_type == RTSP_AUTH_BASIC) {
-    snprintf(header, header_size, "WWW-Authenticate: Basic realm=\"%s\"\r\n", session->server->auth_config.realm);
+    (void)snprintf(header, header_size, "WWW-Authenticate: Basic realm=\"%s\"\r\n", session->server->auth_config.realm);
   } else if (session->server->auth_config.auth_type == RTSP_AUTH_DIGEST) {
     // Generate new nonce
     rtsp_auth_generate_nonce(session->server->auth_config.nonce, sizeof(session->server->auth_config.nonce));
     strncpy(session->auth_nonce, session->server->auth_config.nonce, sizeof(session->auth_nonce) - 1);
     session->auth_nonce[sizeof(session->auth_nonce) - 1] = '\0';
 
-    snprintf(header, header_size,
-             "WWW-Authenticate: Digest realm=\"%s\", nonce=\"%s\", "
-             "algorithm=MD5\r\n",
-             session->server->auth_config.realm, session->server->auth_config.nonce);
+    (void)snprintf(header, header_size,
+                   "WWW-Authenticate: Digest realm=\"%s\", nonce=\"%s\", "
+                   "algorithm=MD5\r\n",
+                   session->server->auth_config.realm, session->server->auth_config.nonce);
   } else {
     return -1;
   }

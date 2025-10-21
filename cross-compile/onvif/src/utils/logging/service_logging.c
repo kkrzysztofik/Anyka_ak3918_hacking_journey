@@ -122,7 +122,7 @@ void service_log_not_implemented(const service_log_context_t* context, const cha
     return;
   }
 
-  char message[512];
+  char message[SERVICE_LOG_MESSAGE_BUF_SIZE];
   if (context->action_name) {
     (void)snprintf(message, sizeof(message), "[%s:%s] Feature '%s' not implemented", context->service_name, context->action_name, feature);
   } else {
@@ -137,7 +137,7 @@ void service_log_timeout(const service_log_context_t* context, const char* opera
     return;
   }
 
-  char message[512];
+  char message[SERVICE_LOG_MESSAGE_BUF_SIZE];
   if (context->action_name) {
     memory_safe_snprintf(message, sizeof(message), "[%s:%s] %s timed out after %dms", context->service_name, context->action_name, operation,
                          timeout_ms);

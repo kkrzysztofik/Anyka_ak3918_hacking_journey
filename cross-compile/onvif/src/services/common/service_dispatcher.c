@@ -16,6 +16,7 @@
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 
 /* ============================================================================
  * Private Types and Constants
@@ -292,7 +293,7 @@ int onvif_service_dispatcher_dispatch(const char* service_name, const char* oper
   if (result == ONVIF_SUCCESS) {
     platform_log_debug("Service operation completed successfully: %s:%s", service_name, operation_name);
   } else {
-    platform_log_error("Service operation failed: %s:%s (result: %d)", service_name, operation_name, result);
+    platform_log_error("Service operation failed: %s:%s (result: %d (%s))", service_name, operation_name, result, onvif_error_to_string(result));
   }
 
   return result;
@@ -377,7 +378,8 @@ int onvif_service_dispatcher_get_capabilities(const char* service_name, struct s
   if (result == ONVIF_SUCCESS) {
     platform_log_debug("Service capability structure retrieved successfully: %s", service_name);
   } else {
-    platform_log_error("Failed to retrieve capability structure for service: %s (result: %d)", service_name, result);
+    platform_log_error("Failed to retrieve capability structure for service: %s (result: %d (%s))", service_name, result,
+                       onvif_error_to_string(result));
   }
 
   return result;

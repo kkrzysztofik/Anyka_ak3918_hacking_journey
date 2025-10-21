@@ -13,6 +13,8 @@
 #ifndef ONVIF_GSOAP_DEVICE_H
 #define ONVIF_GSOAP_DEVICE_H
 
+#include <time.h>
+
 #include "common/onvif_constants.h"
 #include "generated/soapH.h"    //NOLINT
 #include "generated/soapStub.h" //NOLINT
@@ -137,11 +139,6 @@ int system_datetime_response_callback(struct soap* soap, void* user_data);
  * @brief Capabilities response callback function
  */
 int capabilities_response_callback(struct soap* soap, void* user_data);
-
-/**
- * @brief System datetime response callback function
- */
-int system_datetime_response_callback(struct soap* soap, void* user_data);
 
 /**
  * @brief Services response callback function

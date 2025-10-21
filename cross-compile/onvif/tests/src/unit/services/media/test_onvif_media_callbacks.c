@@ -14,14 +14,13 @@
 #include "../../../mocks/mock_service_dispatcher.h"
 #include "../../../utils/test_gsoap_utils.h"
 #include "cmocka_wrapper.h"
+#include "networking/http/http_parser.h"
 #include "services/common/service_dispatcher.h"
 #include "services/media/onvif_media.h"
 #include "utils/error/error_handling.h"
 
 #define TEST_MEDIA_SERVICE_NAME "Media"
 #define TEST_MEDIA_NAMESPACE    "http://www.onvif.org/ver10/media/wsdl"
-
-static config_manager_t g_mock_config;
 
 static int dummy_operation_handler(const char* operation_name, const http_request_t* request, http_response_t* response);
 
@@ -33,7 +32,6 @@ static void media_dependencies_set_real(bool enable) {
 
 static void media_reset_state(void) {
   onvif_media_cleanup();
-  memset(&g_mock_config, 0, sizeof(g_mock_config));
 }
 
 static void media_pre_register_service(void) {
@@ -43,7 +41,7 @@ static void media_pre_register_service(void) {
                                                .init_handler = NULL,
                                                .cleanup_handler = NULL,
                                                .capabilities_handler = NULL,
-                                               .reserved = {NULL, NULL, NULL, NULL}};
+                                               .reserved = {NULL, NULL, NULL}};
   assert_int_equal(ONVIF_SUCCESS, onvif_service_dispatcher_register_service(&registration));
 }
 

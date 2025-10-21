@@ -27,7 +27,7 @@
 #include "generated/soapH.h"
 #include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
-#include "utils/common/time_utils.h"
+#include "services/ptz/onvif_ptz.h"
 #include "utils/error/error_handling.h"
 #include "utils/error/error_translation.h"
 
@@ -64,6 +64,8 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _tptz__GetNod
   /* 4. Parse the actual GetNodes structure */
   struct _tptz__GetNodes* result_ptr = soap_get__tptz__GetNodes(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_get_nodes: soap_get__tptz__GetNodes failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse GetNodes structure");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -111,6 +113,8 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx, struct _tptz__Ab
   /* 4. Parse the actual AbsoluteMove structure */
   struct _tptz__AbsoluteMove* result_ptr = soap_get__tptz__AbsoluteMove(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_absolute_move: soap_get__tptz__AbsoluteMove failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse AbsoluteMove structure");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -158,6 +162,8 @@ int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _tptz__GetP
   /* 4. Parse the actual GetPresets structure */
   struct _tptz__GetPresets* result_ptr = soap_get__tptz__GetPresets(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_get_presets: soap_get__tptz__GetPresets failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse GetPresets structure");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -206,6 +212,8 @@ int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _tptz__SetPr
   /* 4. Parse the actual SetPreset structure */
   struct _tptz__SetPreset* result_ptr = soap_get__tptz__SetPreset(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_set_preset: soap_get__tptz__SetPreset failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse SetPreset structure");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -254,6 +262,8 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _tptz__Goto
   /* 4. Parse the actual GotoPreset structure */
   struct _tptz__GotoPreset* result_ptr = soap_get__tptz__GotoPreset(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_goto_preset: soap_get__tptz__GotoPreset failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse GotoPreset structure");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -302,6 +312,8 @@ int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx, struct _tptz__Re
   /* 4. Parse the actual RemovePreset structure */
   struct _tptz__RemovePreset* result_ptr = soap_get__tptz__RemovePreset(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_remove_preset: soap_get__tptz__RemovePreset failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse RemovePreset structure");
     return ONVIF_ERROR_PARSE_FAILED;

@@ -442,6 +442,7 @@ static int create_temp_context_if_needed(onvif_gsoap_context_t** ctx, bool* is_t
 /**
  * @brief Setup fault callback data structure
  */
+// NOLINT(bugprone-easily-swappable-parameters) - SOAP fault field order matches specification
 static void setup_fault_callback_data(fault_callback_data_t* data, const char* fault_code, const char* fault_string, const char* fault_actor,
                                       const char* fault_detail) {
   memset(data, 0, sizeof(fault_callback_data_t));

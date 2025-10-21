@@ -31,9 +31,10 @@
  * Global State
  * ============================================================================ */
 
-static const char* LOG_LEVEL_STRINGS[] = {"DEBUG", "INFO ", "NOTICE", "WARN ", "ERROR"};
+static const char* LOG_LEVEL_STRINGS[] = {"DEBUG", "INFO ", "NOTICE", "WARN ", "ERROR"}; // NOLINT
 
 /* Log level colors for terminal output */
+// NOLINTBEGIN
 static const char* LOG_LEVEL_COLORS[] = {
   "\033[1;37m", /* DEBUG - White */
   "\033[1;32m", /* INFO  - Green */
@@ -41,11 +42,12 @@ static const char* LOG_LEVEL_COLORS[] = {
   "\033[1;33m", /* WARN  - Yellow */
   "\033[1;31m"  /* ERROR - Red */
 };
+// NOLINTEND
 
-static const char* COLOR_RESET = "\033[0m";
+static const char* COLOR_RESET = "\033[0m"; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables) - read-only color reset string
 
 /* Global logging configuration */
-static platform_logging_config_t g_log_config = { // NOLINT
+static platform_logging_config_t g_log_config = { // NOLINT(cppcoreguidelines-avoid-non-const-global-variables) - runtime-configurable logging state
   .enabled = true,
   .use_colors = true,
   .use_timestamps = true,
@@ -67,7 +69,7 @@ static int get_timestamp(char* buffer, size_t size) {
     return -1;
   }
 
-  struct timeval tv;
+  struct timeval tv; // NOLINT(readability-identifier-length) - standard POSIX timeval name
   struct tm* tm_info = NULL;
 
   if (gettimeofday(&tv, NULL) != 0) {
@@ -86,7 +88,7 @@ static int get_timestamp(char* buffer, size_t size) {
   }
 
   /* Add milliseconds */
-  snprintf(buffer + written, size - written, ".%03ld", tv.tv_usec / LOG_US_TO_MS_DIVISOR);
+  (void)snprintf(buffer + written, size - written, ".%03ld", tv.tv_usec / LOG_US_TO_MS_DIVISOR);
 
   return ONVIF_SUCCESS;
 }
@@ -110,7 +112,9 @@ static bool should_log(platform_log_level_t level) {
  * @param args Variable arguments
  * @return Number of characters printed
  */
-int platform_log_printf(platform_log_level_t level, const char* file, const char* function, int line, const char* format, va_list args) {
+int platform_log_printf(
+  platform_log_level_t level, const char* file, const char* function, int line, const char* format, // NOLINT
+  va_list args) { // NOLINT(bugprone-easily-swappable-parameters) - file and function are semantically different source location attributes
   if (!should_log(level)) {
     return 0;
   }
@@ -157,7 +161,7 @@ int platform_log_printf(platform_log_level_t level, const char* file, const char
     chars_written += printf("\n");
   }
 
-  fflush(stdout);
+  (void)fflush(stdout);
   return chars_written;
 }
 

@@ -14,7 +14,6 @@
 #include <stdbool.h>
 
 #include "http_parser.h"
-#include "utils/security/security_hardening.h"
 
 /* HTTP Authentication constants */
 #define HTTP_MAX_USERNAME_LEN    64

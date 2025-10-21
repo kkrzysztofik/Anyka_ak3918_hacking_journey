@@ -27,6 +27,7 @@
 #include "services/common/video_config_types.h"
 #include "services/ptz/onvif_ptz.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 #include "utils/security/hash_utils.h"
 #include "utils/validation/common_validation.h"
 
@@ -1244,7 +1245,7 @@ int config_runtime_process_persistence_queue(void) {
   result = config_storage_save(ONVIF_CONFIG_FILE, NULL);
 
   if (result != ONVIF_SUCCESS) {
-    platform_log_error("[CONFIG] Failed to persist %zu configuration updates to %s (error=%d)\n", queue_count, ONVIF_CONFIG_FILE, result);
+    platform_log_error("[CONFIG] Failed to persist %zu configuration updates to %s (error=%d (%s))\n", queue_count, ONVIF_CONFIG_FILE, result, onvif_error_to_string(result));
     /* Don't clear queue on failure - allow retry */
     return result;
   }
