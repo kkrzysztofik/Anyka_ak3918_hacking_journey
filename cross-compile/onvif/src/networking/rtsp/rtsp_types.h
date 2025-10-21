@@ -36,6 +36,7 @@
 #define RTSP_MAX_REALM_LEN       128
 #define RTSP_MAX_NONCE_LEN       32
 #define RTSP_MAX_RESPONSE_LEN    64
+#define RTSP_SESSION_ID_SIZE     64  /* Maximum size for RTSP session identifier */
 
 /* RTSP header field sizes */
 #define RTSP_HEADER_NAME_SIZE    64  /* Maximum size for RTSP header field name */

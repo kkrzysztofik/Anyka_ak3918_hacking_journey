@@ -14,7 +14,6 @@
 #include <string.h>
 
 #include "common/onvif_constants.h"
-#include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap_response.h"
@@ -246,7 +245,8 @@ void onvif_log_error_context(const error_context_t* ctx) {
     return;
   }
 
-  (void)platform_log_error("ERROR [%d (%s)] in %s() at %s:%d\n", ctx->error_code, onvif_error_to_string(ctx->error_code), ctx->function, ctx->file, ctx->line);
+  (void)platform_log_error("ERROR [%d (%s)] in %s() at %s:%d\n", ctx->error_code, onvif_error_to_string(ctx->error_code), ctx->function, ctx->file,
+                           ctx->line);
 
   if (ctx->message[0] != '\0') {
     (void)platform_log_error("  Message: %s\n", ctx->message);
@@ -299,7 +299,8 @@ int onvif_get_error_context_string(const error_context_t* ctx, char* buffer, siz
     return -1;
   }
 
-  int len = snprintf(buffer, buffer_size, "ERROR [%d (%s)] in %s() at %s:%d", ctx->error_code, onvif_error_to_string(ctx->error_code), ctx->function, ctx->file, ctx->line);
+  int len = snprintf(buffer, buffer_size, "ERROR [%d (%s)] in %s() at %s:%d", ctx->error_code, onvif_error_to_string(ctx->error_code), ctx->function,
+                     ctx->file, ctx->line);
 
   if (len < 0 || (size_t)len >= buffer_size) {
     return -1;
@@ -339,7 +340,8 @@ int error_create_summary(const error_context_t* context, const error_result_t* r
   }
 
   int ret = snprintf(summary, summary_size, "[%s::%s] %s (Code: %d (%s), SOAP: %s)", context->service_name ? context->service_name : "Unknown",
-                     context->action_name ? context->action_name : "Unknown", result->error_message, result->error_code, onvif_error_to_string(result->error_code), result->soap_fault_code);
+                     context->action_name ? context->action_name : "Unknown", result->error_message, result->error_code,
+                     onvif_error_to_string(result->error_code), result->soap_fault_code);
 
   if (context->error_context) {
     (void)snprintf(summary + strlen(summary), summary_size - strlen(summary), " [Context: %s]", context->error_context);
@@ -386,7 +388,8 @@ int onvif_standardized_operation(const char* operation_name, int operation_resul
   }
 
   if (error_context) {
-    platform_log_error("Operation failed: %s - %s (error code: %d (%s))\n", operation_name, error_context, operation_result, onvif_error_to_string(operation_result));
+    platform_log_error("Operation failed: %s - %s (error code: %d (%s))\n", operation_name, error_context, operation_result,
+                       onvif_error_to_string(operation_result));
   } else {
     platform_log_error("Operation failed: %s (error code: %d (%s))\n", operation_name, operation_result, onvif_error_to_string(operation_result));
   }

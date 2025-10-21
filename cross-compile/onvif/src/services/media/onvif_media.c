@@ -329,8 +329,8 @@ static struct media_profile* find_profile_optimized(const char* profile_token) {
 
   /* Extract profile number from token (Profile1 -> 0, Profile2 -> 1, etc.) */
   if (strncmp(profile_token, MEDIA_PROFILE_TOKEN_PREFIX, strlen(MEDIA_PROFILE_TOKEN_PREFIX)) == 0) {
-    char* endptr;
-    long profile_num_long = strtol(profile_token + strlen(MEDIA_PROFILE_TOKEN_PREFIX), &endptr, 10);
+    char* endptr = NULL;
+    long profile_num_long = strtol(profile_token + strlen(MEDIA_PROFILE_TOKEN_PREFIX), &endptr, DECIMAL_BASE);
     if (endptr != profile_token + strlen(MEDIA_PROFILE_TOKEN_PREFIX) && *endptr == '\0' && profile_num_long >= 1 &&
         profile_num_long <= get_active_profile_count()) {
       int profile_num = (int)profile_num_long;
@@ -398,8 +398,8 @@ int onvif_media_get_profile(const char* profile_token, struct media_profile* pro
 }
 
 int onvif_media_create_profile(
-  const char* name, const char* token,
-  struct media_profile* profile) { // NOLINT(bugprone-easily-swappable-parameters) - name and token are semantically different profile attributes
+  const char* name, const char* token, // NOLINT(bugprone-easily-swappable-parameters) - name and token are semantically different profile attributes
+  struct media_profile* profile) {
   ONVIF_CHECK_NULL(name);
   ONVIF_CHECK_NULL(token);
   ONVIF_CHECK_NULL(profile);
@@ -1326,7 +1326,7 @@ static int create_profile_business_logic(const service_handler_config_t* config,
 
   // Extract profile name and token from parsed structure
   const char* profile_name = create_profile_req->Name ? create_profile_req->Name : "Custom Profile";
-  const char* profile_token = create_profile_req->Token ? *create_profile_req->Token : "CustomProfile";
+  const char* profile_token = create_profile_req->Token ? create_profile_req->Token : "CustomProfile";
 
   // Check current profile count before attempting creation
   int profile_count = get_active_profile_count();
@@ -1496,8 +1496,8 @@ static int set_video_encoder_configuration_business_logic(const service_handler_
   // Map encoder token to profile index (VideoEncoder0 -> 0, VideoEncoder1 -> 1, etc.)
   int profile_index = -1;
   if (strncmp(config_token, "VideoEncoder", MEDIA_VIDEO_ENCODER_PREFIX_LEN) == 0) {
-    char* endptr;
-    long profile_index_long = strtol(config_token + MEDIA_VIDEO_ENCODER_PREFIX_LEN, &endptr, 10);
+    char* endptr = NULL;
+    long profile_index_long = strtol(config_token + MEDIA_VIDEO_ENCODER_PREFIX_LEN, &endptr, DECIMAL_BASE);
     if (endptr != config_token + MEDIA_VIDEO_ENCODER_PREFIX_LEN && *endptr == '\0' && profile_index_long >= 0 && profile_index_long < INT_MAX) {
       profile_index = (int)profile_index_long;
     }

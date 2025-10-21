@@ -10,11 +10,17 @@
 
 #include "rtsp_rtcp.h"
 
+#include <bits/types.h>
+#include <netinet/in.h>
 #include <pthread.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -168,7 +174,7 @@ int rtcp_handle_packet(struct rtp_session* rtp_session, const uint8_t* data, siz
 
   // Parse RTCP header
   uint8_t version = (data[0] >> RTP_VERSION_SHIFT) & RTP_VERSION_BITS_MASK;
-  uint8_t pt = data[1];  // NOLINT(readability-identifier-length) - standard RTCP payload type abbreviation
+  uint8_t pt = data[1]; // NOLINT(readability-identifier-length) - standard RTCP payload type abbreviation
 
   if (version != RTCP_VERSION) {
     return -1; // Invalid version

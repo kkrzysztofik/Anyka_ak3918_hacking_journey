@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "common/onvif_constants.h"
 #include "generated/soapH.h"    //NOLINT
 #include "generated/soapStub.h" //NOLINT
 
@@ -70,7 +71,7 @@ typedef struct onvif_gsoap_context_s {
   /* Enhanced error context for debugging */
   struct {
     int last_error_code;        /* Last error code from error_handling.h */
-    char error_message[256];    /* Detailed error message */
+    char error_message[ERROR_MESSAGE_SIZE];    /* Detailed error message */
     const char* error_location; /* Function where error occurred */
     int soap_error_code;        /* gSOAP-specific error code */
   } error_context;

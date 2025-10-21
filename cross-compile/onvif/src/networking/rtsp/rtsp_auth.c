@@ -10,6 +10,8 @@
 
 #include "rtsp_auth.h"
 
+#include <bits/types.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -189,10 +191,10 @@ static int parse_basic_credentials(const char* credentials, char* username, char
   for (size_t i = 0; i < len; i += 4) {
     if (i + 3 < len) {
       // Simple base64 decode implementation
-      char c1 = credentials[i];        // NOLINT(readability-identifier-length) - standard base64 variable
-      char c2 = credentials[i + 1];    // NOLINT(readability-identifier-length) - standard base64 variable
-      char c3 = credentials[i + 2];    // NOLINT(readability-identifier-length) - standard base64 variable
-      char c4 = credentials[i + 3];    // NOLINT(readability-identifier-length) - standard base64 variable
+      char c1 = credentials[i];     // NOLINT(readability-identifier-length) - standard base64 variable
+      char c2 = credentials[i + 1]; // NOLINT(readability-identifier-length) - standard base64 variable
+      char c3 = credentials[i + 2]; // NOLINT(readability-identifier-length) - standard base64 variable
+      char c4 = credentials[i + 3]; // NOLINT(readability-identifier-length) - standard base64 variable
 
       // Convert base64 to binary (simplified)
       if (c1 != '=' && c2 != '=') {
@@ -274,7 +276,7 @@ static int parse_digest_credentials(const char* credentials, char* username, cha
 /**
  * Parse authentication credentials from header
  */
-// NOLINT(bugprone-easily-swappable-parameters) - standard authentication parameter order
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) - standard authentication parameter order
 int rtsp_auth_parse_credentials(const char* auth_header, char* username, char* password, char* realm, char* nonce, char* response) {
   if (!auth_header || !username || !password) {
     return -1;
@@ -283,7 +285,8 @@ int rtsp_auth_parse_credentials(const char* auth_header, char* username, char* p
   // Determine authentication type and parse accordingly
   if (strncmp(auth_header, "Basic ", AUTH_BASIC_PREFIX_LEN) == 0) {
     return parse_basic_credentials(auth_header + AUTH_BASIC_PREFIX_LEN, username, password);
-  } else if (strncmp(auth_header, "Digest ", AUTH_DIGEST_PREFIX_LEN) == 0) {
+  }
+  if (strncmp(auth_header, "Digest ", AUTH_DIGEST_PREFIX_LEN) == 0) {
     return parse_digest_credentials(auth_header + AUTH_DIGEST_PREFIX_LEN, username, realm, nonce, response);
   }
 

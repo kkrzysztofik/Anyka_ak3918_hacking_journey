@@ -10,6 +10,9 @@
 
 #include "rtsp_sdp.h"
 
+#include <bits/types.h>
+#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,9 +71,13 @@ void sdp_cleanup_session(struct sdp_session* sdp) {
 /**
  * Add media to SDP session
  */
-// NOLINT(bugprone-easily-swappable-parameters) - SDP protocol-defined parameter order
-int sdp_add_media(struct sdp_session* sdp, sdp_media_type_t type, int port, const char* protocol, int payload_type, const char* encoding,
-                  int clock_rate, int channels) {
+int sdp_add_media(struct sdp_session* sdp,
+                  sdp_media_type_t type,          // NOLINT(bugprone-easily-swappable-parameters) - SDP protocol-defined parameter order
+                  int port,                       // NOLINT(bugprone-easily-swappable-parameters) - SDP protocol-defined parameter order
+                  const char* protocol,           // NOLINT(bugprone-easily-swappable-parameters) - SDP protocol-defined parameter order
+                  int payload_type,               // NOLINT(bugprone-easily-swappable-parameters) - SDP protocol-defined parameter order
+                  const char* encoding,           // NOLINT(bugprone-easily-swappable-parameters) - SDP protocol-defined parameter order
+                  int clock_rate, int channels) { // NOLINT(bugprone-easily-swappable-parameters) - SDP protocol-defined parameter order
   if (!sdp) {
     return -1;
   }
@@ -304,8 +311,9 @@ static const char* get_direction_string(sdp_direction_t direction) {
 /**
  * @brief Write media description to buffer
  */
-// NOLINT(bugprone-easily-swappable-parameters) - SDP protocol-defined parameter order
-static int write_media_description(struct sdp_media* media, char* buffer, size_t buffer_size, int offset) {
+static int write_media_description(struct sdp_media* media, char* buffer,
+                                   size_t buffer_size, // NOLINT(bugprone-easily-swappable-parameters) - SDP protocol-defined parameter order
+                                   int offset) {       // NOLINT(bugprone-easily-swappable-parameters) - SDP protocol-defined parameter order
   int len = offset;
 
   // Media line
@@ -352,7 +360,7 @@ static int write_media_description(struct sdp_media* media, char* buffer, size_t
  * Generate SDP content
  */
 int sdp_generate(struct sdp_session* sdp, char* buffer, size_t buffer_size) {
-  if (!sdp || !buffer || buffer_size < 256) {
+  if (!sdp || !buffer || buffer_size < SDP_MIN_BUFFER_SIZE) {
     return -1;
   }
 
@@ -401,19 +409,76 @@ static void copy_sdp_field(char* dest, size_t dest_size, const char* src) {
  * @brief Parse media line from SDP
  */
 static void parse_media_line(struct sdp_session* sdp, const char* line_value) {
-  char media_type[16], protocol[16];
+  char media_type[SDP_MEDIA_TYPE_SIZE];
+  char protocol[SDP_PROTOCOL_SIZE];
   int port = 0;
   int payload_type = 0;
 
-  if (sscanf(line_value, "%15s %d %15s %d", media_type, &port, protocol, &payload_type) == 4) {  // NOLINT(cert-err34-c) - sscanf return value is checked (== 4) for proper parsing validation
-    sdp_media_type_t type = SDP_MEDIA_VIDEO;
-    if (strcmp(media_type, "audio") == 0) {
-      type = SDP_MEDIA_AUDIO;
-    } else if (strcmp(media_type, "application") == 0) {
-      type = SDP_MEDIA_APPLICATION;
-    }
-    sdp_add_media(sdp, type, port, protocol, payload_type, NULL, 0, 0);
+  // Parse media line using strtol for proper error handling
+  char* endptr = NULL;
+  const char* current = line_value;
+
+  // Parse media type (first word)
+  int media_len = 0;
+  while (current[media_len] && current[media_len] != ' ' && media_len < SDP_MEDIA_TYPE_SIZE - 1) {
+    media_type[media_len] = current[media_len];
+    media_len++;
   }
+  media_type[media_len] = '\0';
+
+  if (media_len == 0) {
+    return; // Invalid format
+  }
+
+  // Skip whitespace and parse port
+  current += media_len;
+  while (*current == ' ') {
+    current++;
+  }
+
+  long port_long = strtol(current, &endptr, SDP_DECIMAL_BASE);
+  if (endptr == current || port_long < 0 || port_long > INT_MAX) {
+    return; // Invalid port
+  }
+  port = (int)port_long;
+
+  // Skip whitespace and parse protocol
+  current = endptr;
+  while (*current == ' ') {
+    current++;
+  }
+
+  int protocol_len = 0;
+  while (current[protocol_len] && current[protocol_len] != ' ' && protocol_len < SDP_PROTOCOL_SIZE - 1) {
+    protocol[protocol_len] = current[protocol_len];
+    protocol_len++;
+  }
+  protocol[protocol_len] = '\0';
+
+  if (protocol_len == 0) {
+    return; // Invalid format
+  }
+
+  // Skip whitespace and parse payload type
+  current += protocol_len;
+  while (*current == ' ') {
+    current++;
+  }
+
+  long payload_long = strtol(current, &endptr, SDP_DECIMAL_BASE);
+  if (endptr == current || payload_long < 0 || payload_long > INT_MAX) {
+    return; // Invalid payload type
+  }
+  payload_type = (int)payload_long;
+
+  // All parsing successful, add media
+  sdp_media_type_t type = SDP_MEDIA_VIDEO;
+  if (strcmp(media_type, "audio") == 0) {
+    type = SDP_MEDIA_AUDIO;
+  } else if (strcmp(media_type, "application") == 0) {
+    type = SDP_MEDIA_APPLICATION;
+  }
+  sdp_add_media(sdp, type, port, protocol, payload_type, NULL, 0, 0);
 }
 
 /**
@@ -427,8 +492,8 @@ static void parse_sdp_line(struct sdp_session* sdp, const char* line) {
   const char* value = line + 2;
   switch (line[0]) {
   case 'v': {
-    char* endptr;
-    long version_long = strtol(value, &endptr, 10);
+    char* endptr = NULL;
+    long version_long = strtol(value, &endptr, SDP_DECIMAL_BASE);
     if (endptr != value && version_long >= 0 && version_long <= INT_MAX) {
       sdp->version = (int)version_long;
     }
@@ -514,7 +579,7 @@ int sdp_parse(struct sdp_session* sdp, const char* sdp_text) {
   sdp_init_session(sdp, NULL, NULL);
 
   const char* line_start = sdp_text;
-  char line[512];
+  char line[SDP_LINE_BUFFER_SIZE];
 
   while (*line_start) {
     line_start = extract_sdp_line(line_start, line, sizeof(line));

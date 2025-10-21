@@ -11,6 +11,7 @@
 #ifndef THREAD_POOL_H
 #define THREAD_POOL_H
 
+#include <bits/pthreadtypes.h>
 #include <pthread.h>
 
 /* Thread pool configuration */

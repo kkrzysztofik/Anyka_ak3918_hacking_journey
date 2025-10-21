@@ -40,7 +40,7 @@ static bool rtsp_session_pointer_is_valid(rtsp_session_t* session) {
   }
 
   // Check for obviously invalid pointers (below typical user space)
-  if ((uintptr_t)session < 0x1000) {
+  if ((uintptr_t)session < RTSP_MIN_USERSPACE_ADDRESS) {
     platform_log_error("rtsp_session_pointer_is_valid: Invalid session pointer (0x%p)\n", session);
     return false;
   }
@@ -376,7 +376,7 @@ bool rtsp_session_is_valid(rtsp_session_t* session) {
  * Get session info string
  */
 int rtsp_session_get_info(rtsp_session_t* session, char* buffer, size_t buffer_size) {
-  if (!session || !buffer || buffer_size < 64) {
+  if (!session || !buffer || buffer_size < RTSP_MIN_BUFFER_SIZE) {
     return -1;
   }
 

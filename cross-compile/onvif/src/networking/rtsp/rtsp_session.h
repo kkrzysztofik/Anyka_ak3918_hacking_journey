@@ -12,7 +12,17 @@
 #ifndef RTSP_SESSION_H
 #define RTSP_SESSION_H
 
+#include <bits/pthreadtypes.h>
+#include <bits/types.h>
+#include <netinet/in.h>
+#include <stdbool.h>
+#include <time.h>
+
 #include "rtsp_types.h"
+
+/* RTSP Session Constants */
+#define RTSP_MIN_USERSPACE_ADDRESS 0x1000 /**< Minimum valid userspace memory address */
+#define RTSP_MIN_BUFFER_SIZE       64     /**< Minimum buffer size for session info */
 
 /* RTSP session structure definition */
 struct rtsp_session {
@@ -21,9 +31,9 @@ struct rtsp_session {
   enum rtsp_session_state state;
   bool active;
   pthread_t thread;
-  char session_id[64];
-  int cseq;      /* RTSP sequence number */
-  char uri[256]; /* Request URI */
+  char session_id[RTSP_SESSION_ID_SIZE];
+  int cseq;                   /* RTSP sequence number */
+  char uri[RTSP_MAX_URI_LEN]; /* Request URI */
 
   /* Session timeout */
   time_t last_activity;

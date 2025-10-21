@@ -8,6 +8,7 @@
 #include "onvif_device.h"
 
 #include <bits/pthreadtypes.h>
+#include <bits/types.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -28,10 +29,10 @@
 #include "protocol/gsoap/onvif_gsoap_response.h"
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_service_common.h"
-#include "utils/error/error_translation.h"
 #include "services/common/onvif_types.h"
 #include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/smart_response_builder.h"
 #include "utils/network/network_utils.h"

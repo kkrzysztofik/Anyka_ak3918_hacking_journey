@@ -10,7 +10,6 @@
 
 #include <stddef.h>
 
-#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
@@ -180,7 +179,7 @@ int onvif_service_handler_set_config_value(onvif_service_handler_instance_t* han
  * @param message Log message
  * @param level Log level
  */
-void onvif_service_handler_log(onvif_service_handler_instance_t* handler, const char* action_name, const char* message, int level);
+void onvif_service_handler_log(onvif_service_handler_instance_t* handler, const char* action_name, const char* message);
 
 /**
  * @brief Get gSOAP context for service

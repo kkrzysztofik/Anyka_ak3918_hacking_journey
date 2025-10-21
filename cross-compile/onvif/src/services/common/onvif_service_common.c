@@ -10,8 +10,8 @@
 #include <errno.h>
 #include <string.h>
 
+#include "common/onvif_constants.h"
 #include "generated/soapH.h"
-#include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
 #include "onvif_types.h"
 #include "protocol/gsoap/onvif_gsoap_response.h"

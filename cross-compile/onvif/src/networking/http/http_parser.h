@@ -17,6 +17,8 @@
 #include <stddef.h>
 #include <sys/types.h>
 
+#include "http_constants.h"
+
 /* HTTP parsing states */
 typedef enum {
   HTTP_STATE_METHOD = 0,
@@ -35,9 +37,9 @@ typedef struct {
 
 /* HTTP Request Structure */
 typedef struct {
-  char method[16];
-  char path[256];
-  char version[16];
+  char method[HTTP_METHOD_SIZE];
+  char path[HTTP_PATH_SIZE];
+  char version[HTTP_VERSION_SIZE];
   char client_ip[INET_ADDRSTRLEN]; /* Client IP address for security and logging
                                     */
   http_header_t* headers;

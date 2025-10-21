@@ -93,11 +93,7 @@ static int g_imaging_param_cache_initialized = 0;                               
  * ============================================================================ */
 
 /* Imaging Constants */
-#define IMAGING_DEFAULT_BRIGHTNESS 0
-#define IMAGING_DEFAULT_CONTRAST   0
-#define IMAGING_DEFAULT_SATURATION 0
-#define IMAGING_DEFAULT_SHARPNESS  0
-#define IMAGING_DEFAULT_HUE        0
+#define IMAGING_DEFAULT_HUE 0
 
 /* Day/Night Constants */
 #define IMAGING_DAY_TO_NIGHT_LUM_DEFAULT 30
@@ -147,31 +143,6 @@ static int convert_onvif_to_vpss_sharpness(int onvif_value) {
 
 static int convert_onvif_to_vpss_hue(int onvif_value) {
   return (onvif_value * IMAGING_VPSS_HUE_MULTIPLIER) / IMAGING_VPSS_HUE_DIVISOR;
-}
-
-static void init_default_imaging_settings(struct imaging_settings* settings) {
-  if (!settings) {
-    return;
-  }
-
-  settings->brightness = IMAGING_DEFAULT_BRIGHTNESS;
-  settings->contrast = IMAGING_DEFAULT_CONTRAST;
-  settings->saturation = IMAGING_DEFAULT_SATURATION;
-  settings->sharpness = IMAGING_DEFAULT_SHARPNESS;
-  settings->hue = IMAGING_DEFAULT_HUE;
-}
-
-static void init_default_auto_config(struct auto_daynight_config* config) {
-  if (!config) {
-    return;
-  }
-
-  config->day_to_night_threshold = IMAGING_DAY_TO_NIGHT_LUM_DEFAULT;
-  config->night_to_day_threshold = IMAGING_NIGHT_TO_DAY_LUM_DEFAULT;
-  config->lock_time_seconds = IMAGING_LOCK_TIME_DEFAULT;
-  config->ir_led_level = IMAGING_IRLED_LEVEL_DEFAULT;
-  config->ir_led_mode = IR_LED_AUTO;
-  config->enable_auto_switching = 1;
 }
 
 static int apply_imaging_settings_to_vpss(const struct imaging_settings* settings) {

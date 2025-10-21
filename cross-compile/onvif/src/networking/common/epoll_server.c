@@ -61,7 +61,7 @@ void epoll_server_set_config(const struct application_config* config) {
 
   // Validate and set cleanup interval
   if (config->server.cleanup_interval >= 1 && config->server.cleanup_interval <= CLEANUP_INTERVAL_MAX_SEC) {
-    g_cleanup_interval = config->server.cleanup_interval * MS_PER_SECOND; // Convert to ms
+    g_cleanup_interval = (uint64_t)config->server.cleanup_interval * MS_PER_SECOND; // Convert to ms
     platform_log_debug("Cleanup interval set to %d seconds\n", config->server.cleanup_interval);
   } else {
     platform_log_warning("Invalid cleanup interval %d, using default 5 seconds\n", config->server.cleanup_interval);

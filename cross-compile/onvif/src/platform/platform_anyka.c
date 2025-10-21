@@ -135,10 +135,6 @@ static void unlock_platform_mutex(void);
 /* Stream utility functions - consolidate common stream operations */
 static platform_result_t get_video_stream_internal(void* stream_handle, platform_venc_stream_t* stream, uint32_t timeout_ms, bool is_stream_handle);
 static void release_video_stream_internal(void* stream_handle, platform_venc_stream_t* stream);
-/* Ensure even dimensions for VI constraints */
-static inline int make_even_int(int value) {
-  return (value & 1) ? (value - 1) : value;
-}
 
 /* Platform state with mutex protection for thread safety */
 static bool g_platform_initialized = false;         // NOLINT
@@ -223,8 +219,6 @@ static void platform_venc_log_encoder_parameters(const struct encode_param* para
 static void platform_venc_log_stream_info(const struct video_stream* stream, const char* context);
 static void platform_venc_log_error_context(int error_code, const char* operation, void* handle);
 static void platform_venc_log_buffer_status(uint32_t buffer_count, uint32_t max_buffers, uint32_t overflow_count, const char* context);
-static void platform_venc_log_fps_switch(uint32_t old_fps, uint32_t new_fps, const char* context);
-static void platform_venc_log_frame_timing(uint64_t capture_time, uint64_t encode_time, uint64_t total_time, const char* context);
 
 static int map_video_codec(platform_video_codec_t codec) {
   switch (codec) {
@@ -1788,8 +1782,8 @@ platform_result_t platform_venc_get_buffer_status(platform_venc_stream_handle_t 
 }
 
 /* Snapshot functions */
-// NOLINT(bugprone-easily-swappable-parameters) - width/height is universal convention
-platform_result_t platform_snapshot_init(platform_snapshot_handle_t* snapshot_handle, platform_vi_handle_t vi_handle, int image_width,
+platform_result_t platform_snapshot_init(platform_snapshot_handle_t* snapshot_handle, platform_vi_handle_t vi_handle,
+                                         int image_width, // NOLINT(bugprone-easily-swappable-parameters) - width/height is universal convention
                                          int image_height) {
   if (!snapshot_handle || !vi_handle) {
     return PLATFORM_ERROR_NULL;

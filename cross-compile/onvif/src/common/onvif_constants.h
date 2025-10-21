@@ -67,6 +67,12 @@
 /* Time and Date Constants */
 #define TM_YEAR_OFFSET 1900
 
+/* Numeric Constants */
+#define DECIMAL_BASE 10 /* Decimal number base for string conversions (strtol, etc.) */
+
+/* Error Message Buffer Sizes */
+#define ERROR_MESSAGE_SIZE 256 /* Error message buffer size for detailed error strings */
+
 /* ONVIF Version Constants */
 #define ONVIF_VERSION_MAJOR 24 /* ONVIF specification version (December 2024) */
 #define ONVIF_VERSION_MINOR 12 /* ONVIF specification version (December 2024) */

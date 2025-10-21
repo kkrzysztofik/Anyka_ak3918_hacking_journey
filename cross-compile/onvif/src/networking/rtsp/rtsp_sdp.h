@@ -12,7 +12,17 @@
 #ifndef RTSP_SDP_H
 #define RTSP_SDP_H
 
+#include <bits/types.h>
+
 #include "rtsp_types.h"
+
+/* SDP Constants */
+#define SDP_MIN_BUFFER_SIZE    256               /**< Minimum buffer size for SDP generation */
+#define SDP_MEDIA_TYPE_SIZE    16                /**< Size for media type strings */
+#define SDP_PROTOCOL_SIZE      16                /**< Size for protocol strings */
+#define SDP_DECIMAL_BASE       10                /**< Base for decimal number conversion */
+#define SDP_LINE_BUFFER_SIZE   512               /**< Size for SDP line parsing buffer */
+#define SDP_MEDIA_SCANF_FORMAT "%15s %d %15s %d" /**< Format string for media line parsing */
 
 /* SDP functions */
 /**

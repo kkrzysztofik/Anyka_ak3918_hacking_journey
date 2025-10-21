@@ -11,6 +11,7 @@
 #ifndef HTTP_AUTH_H
 #define HTTP_AUTH_H
 
+#include <bits/types.h>
 #include <stdbool.h>
 
 #include "http_parser.h"

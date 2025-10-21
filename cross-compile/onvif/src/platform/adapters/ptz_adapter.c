@@ -11,6 +11,7 @@
 
 #include "platform/adapters/ptz_adapter.h"
 
+#include <bits/pthreadtypes.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>

@@ -12,18 +12,25 @@
 #include "rtsp_rtp.h"
 
 #include <arpa/inet.h>
+#include <bits/types.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "platform/platform.h"
+#include "platform/platform_common.h"
 #include "rtsp_rtcp.h"
+// Required for struct rtsp_session member access (session->rtp_session.*, session->audio_rtp_session.*)
+// NOLINTNEXTLINE(misc-include-cleaner)
 #include "rtsp_session.h"
 #include "rtsp_types.h"
 #include "utils/error/error_handling.h"
@@ -172,7 +179,7 @@ int rtsp_init_rtp_session(rtsp_session_t* session) {
   }
 
   // Generate cryptographically secure random SSRC
-  uint32_t ssrc;
+  uint32_t ssrc = 0;
   if (onvif_generate_random_bytes((uint8_t*)&ssrc, sizeof(ssrc)) != ONVIF_SUCCESS) {
     platform_log_error("Failed to generate secure random SSRC\n");
     return -1;
@@ -294,7 +301,7 @@ int rtsp_init_audio_rtp_session(rtsp_session_t* session) {
   }
 
   // Generate cryptographically secure random SSRC for audio
-  uint32_t ssrc;
+  uint32_t ssrc = 0;
   if (onvif_generate_random_bytes((uint8_t*)&ssrc, sizeof(ssrc)) != ONVIF_SUCCESS) {
     platform_log_error("Failed to generate secure random SSRC for audio\n");
     return -1;
@@ -403,7 +410,8 @@ int rtsp_send_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t le
 
   if (session->rtp_session.transport == RTP_TRANSPORT_UDP) {
     return rtsp_send_rtp_packet_udp(session, data, len, timestamp);
-  } else if (session->rtp_session.transport == RTP_TRANSPORT_TCP) {
+  }
+  if (session->rtp_session.transport == RTP_TRANSPORT_TCP) {
     return rtsp_send_rtp_packet_tcp(session, data, len, timestamp);
   }
 
@@ -413,8 +421,10 @@ int rtsp_send_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t le
 /**
  * Send RTP packet via UDP
  */
-// NOLINT(bugprone-easily-swappable-parameters) - RTP protocol-defined parameter order
-int rtsp_send_rtp_packet_udp(rtsp_session_t* session, const uint8_t* data, size_t len, uint32_t timestamp) {
+
+int rtsp_send_rtp_packet_udp(rtsp_session_t* session, const uint8_t* data,
+                             size_t len,           // NOLINT(bugprone-easily-swappable-parameters) - RTP protocol-defined parameter order
+                             uint32_t timestamp) { // NOLINT(bugprone-easily-swappable-parameters) - RTP protocol-defined parameter order
   if (!session || !data || len == 0) {
     return -1;
   }
@@ -458,14 +468,15 @@ int rtsp_send_rtp_packet_udp(rtsp_session_t* session, const uint8_t* data, size_
   session->rtp_session.stats.packets_sent++;
   session->rtp_session.stats.octets_sent += (uint32_t)payload_len;
 
-  return payload_len;
+  return (int)payload_len;
 }
 
 /**
  * Send RTP packet via TCP
  */
-// NOLINT(bugprone-easily-swappable-parameters) - RTP protocol-defined parameter order
-int rtsp_send_rtp_packet_tcp(rtsp_session_t* session, const uint8_t* data, size_t len, uint32_t timestamp) {
+int rtsp_send_rtp_packet_tcp(rtsp_session_t* session, const uint8_t* data,
+                             size_t len,           // NOLINT(bugprone-easily-swappable-parameters) - RTP protocol-defined parameter order
+                             uint32_t timestamp) { // NOLINT(bugprone-easily-swappable-parameters) - RTP protocol-defined parameter order
   if (!session || !data || len == 0) {
     return -1;
   }
@@ -514,14 +525,15 @@ int rtsp_send_rtp_packet_tcp(rtsp_session_t* session, const uint8_t* data, size_
   session->rtp_session.stats.packets_sent++;
   session->rtp_session.stats.octets_sent += (uint32_t)payload_len;
 
-  return payload_len;
+  return (int)payload_len;
 }
 
 /**
  * Send audio RTP packet
  */
-// NOLINT(bugprone-easily-swappable-parameters) - RTP protocol-defined parameter order
-int rtsp_send_audio_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t len, uint32_t timestamp) {
+int rtsp_send_audio_rtp_packet(rtsp_session_t* session, const uint8_t* data,
+                               size_t len,           // NOLINT(bugprone-easily-swappable-parameters) - RTP protocol-defined parameter order
+                               uint32_t timestamp) { // NOLINT(bugprone-easily-swappable-parameters) - RTP protocol-defined parameter order
   if (!session || !data || len == 0 || !session->audio_enabled) {
     return -1;
   }
@@ -530,8 +542,8 @@ int rtsp_send_audio_rtp_packet(rtsp_session_t* session, const uint8_t* data, siz
   int pos = 0;
 
   // RTP header
-  rtp_packet[pos++] = RTP_VERSION_FLAGS;                                              // Version (2), Padding (0), Extension (0), CC (0)
-  rtp_packet[pos++] = RTP_PT_AAC;                                        // Payload type
+  rtp_packet[pos++] = RTP_VERSION_FLAGS;                                                     // Version (2), Padding (0), Extension (0), CC (0)
+  rtp_packet[pos++] = RTP_PT_AAC;                                                            // Payload type
   rtp_packet[pos++] = (session->audio_rtp_session.sequence >> SHIFT_8_BITS) & RTP_BYTE_MASK; // Sequence number
   rtp_packet[pos++] = session->audio_rtp_session.sequence & RTP_BYTE_MASK;
   rtp_packet[pos++] = (timestamp >> SHIFT_24_BITS) & RTP_BYTE_MASK; // Timestamp
@@ -565,5 +577,5 @@ int rtsp_send_audio_rtp_packet(rtsp_session_t* session, const uint8_t* data, siz
   session->audio_rtp_session.stats.packets_sent++;
   session->audio_rtp_session.stats.octets_sent += (uint32_t)payload_len;
 
-  return payload_len;
+  return (int)payload_len;
 }

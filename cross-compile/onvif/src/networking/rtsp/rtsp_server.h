@@ -11,6 +11,9 @@
 #ifndef RTSP_SERVER_H
 #define RTSP_SERVER_H
 
+#include <bits/types.h>
+#include <stdint.h>
+
 #include "rtsp_types.h"
 
 /* RTSP server functions */

@@ -16,7 +16,7 @@
 #include "generated/soapH.h"    //NOLINT
 #include "generated/soapStub.h" //NOLINT
 #include "protocol/gsoap/onvif_gsoap_core.h"
-#include "services/imaging/onvif_imaging.h"
+#include "services/common/onvif_imaging_types.h"
 
 /**
  * @brief Parse GetImagingSettings ONVIF Imaging service request

@@ -16,6 +16,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
 #include "networking/http/http_constants.h"
@@ -212,7 +213,7 @@ int onvif_service_handler_generate_success(onvif_service_handler_instance_t* han
 
   // Log success
   if (handler->config.enable_logging) {
-    onvif_service_handler_log(handler, action, "Request processed successfully", 0);
+    onvif_service_handler_log(handler, action, "Request processed successfully");
   }
 
   return ONVIF_SUCCESS;
@@ -233,7 +234,7 @@ int onvif_service_handler_generate_error(onvif_service_handler_instance_t* handl
 
   // Log error
   if (handler->config.enable_logging) {
-    onvif_service_handler_log(handler, action_name, error_message, 1);
+    onvif_service_handler_log(handler, action_name, error_message);
   }
 
   return ONVIF_SUCCESS;
@@ -290,13 +291,12 @@ int onvif_service_handler_set_config_value(onvif_service_handler_instance_t* han
   }
 }
 
-void onvif_service_handler_log(onvif_service_handler_instance_t* handler, const char* action_name, const char* message, int level) {
+void onvif_service_handler_log(onvif_service_handler_instance_t* handler, const char* action_name, const char* message) {
   if (!handler || !action_name || !message) {
     return;
   }
 
   // Log using platform logging
-  const char* level_str = (level == 0) ? "INFO" : "ERROR";
   platform_log_info("[%s] %s: %s", handler->config.service_name, action_name, message);
 }
 

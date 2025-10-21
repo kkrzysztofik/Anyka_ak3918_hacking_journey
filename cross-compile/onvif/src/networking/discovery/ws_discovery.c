@@ -31,9 +31,11 @@
 
 /* WS-Discovery algorithm constants */
 #define MAC_ADDRESS_SIZE          6           /* Standard MAC address size in bytes */
+#define MAC_ADDRESS_LAST_INDEX    5           /* Last valid index in MAC address array (SIZE - 1) */
 #define DJB2_HASH_INIT            5381        /* DJB2 hash algorithm initial value */
 #define DJB2_HASH_SHIFT           5           /* DJB2 hash left shift amount */
 #define MAC_LOCAL_ADMIN_FLAG      0x02        /* Locally administered MAC address flag */
+#define WSD_MESSAGE_ID_SIZE       64          /* WS-Discovery message ID buffer size */
 #define LCG_MULTIPLIER            1103515245U /* Linear Congruential Generator multiplier (glibc) */
 #define LCG_INCREMENT             12345U      /* Linear Congruential Generator increment (glibc) */
 #define LCG_RAND_SHIFT            16          /* Bit shift to extract random value from LCG seed */
@@ -94,7 +96,7 @@ static void derive_pseudo_mac(unsigned char mac[MAC_ADDRESS_SIZE]) {
   mac[2] = (hash >> SHIFT_16_BITS) & BYTE_MASK;
   mac[3] = (hash >> SHIFT_8_BITS) & BYTE_MASK;
   mac[4] = hash & BYTE_MASK;
-  mac[5] = (hash >> DJB2_HASH_SHIFT) & BYTE_MASK;
+  mac[MAC_ADDRESS_LAST_INDEX] = (hash >> DJB2_HASH_SHIFT) & BYTE_MASK;
 }
 
 static void build_endpoint_uuid(void) {
@@ -105,7 +107,7 @@ static void build_endpoint_uuid(void) {
     snprintf(g_endpoint_uuid, sizeof(g_endpoint_uuid),
              "urn:uuid:%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%"
              "02x%02x%02x",
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], mac[0], mac[1], mac[2], mac[3]);
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[MAC_ADDRESS_LAST_INDEX], mac[0], mac[1], mac[2], mac[3], mac[4], mac[MAC_ADDRESS_LAST_INDEX], mac[0], mac[1], mac[2], mac[3]);
   (void)result; // Suppress unused variable warning
 }
 
@@ -161,7 +163,7 @@ static void send_multicast(const char* payload) {
 
 static void send_hello(void) {
   char ip_address[ONVIF_IP_BUFFER_SIZE];
-  char msg_id[64];
+  char msg_id[WSD_MESSAGE_ID_SIZE];
   get_ip(ip_address, sizeof(ip_address));
   gen_msg_uuid(msg_id, sizeof(msg_id));
   char xml[ONVIF_XML_BUFFER_SIZE];
@@ -172,7 +174,7 @@ static void send_hello(void) {
 
 static void send_bye(void) {
   char ip_address[ONVIF_IP_BUFFER_SIZE];
-  char msg_id[64];
+  char msg_id[WSD_MESSAGE_ID_SIZE];
   get_ip(ip_address, sizeof(ip_address));
   gen_msg_uuid(msg_id, sizeof(msg_id));
   char xml[ONVIF_XML_BUFFER_SIZE];
@@ -232,9 +234,9 @@ static void* discovery_loop(void* arg) {
     }
     buf[bytes_received] = '\0';
     if (strstr(buf, "Probe")) {
-      char msg_id[64];
+      char msg_id[WSD_MESSAGE_ID_SIZE];
       gen_msg_uuid(msg_id, sizeof(msg_id));
-      char ip_address[64];
+      char ip_address[ONVIF_IP_BUFFER_SIZE];
       get_ip(ip_address, sizeof(ip_address));
       char response[ONVIF_RESPONSE_BUFFER_SIZE];
       int snprintf_result = snprintf(response, sizeof(response), WSD_PROBE_MATCH_TEMPLATE, msg_id, g_endpoint_uuid, ip_address, g_http_port);

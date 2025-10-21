@@ -173,7 +173,7 @@ void onvif_service_dispatcher_cleanup(void);
  * This flag is used by service modules to prevent recursive cleanup calls
  * during service dispatcher shutdown.
  */
-extern int g_cleanup_in_progress;
+extern int g_cleanup_in_progress; // NOLINT
 
 /* ============================================================================
  * Convenience Macros for Service Registration

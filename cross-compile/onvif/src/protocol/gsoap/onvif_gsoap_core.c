@@ -10,6 +10,7 @@
 
 #include "protocol/gsoap/onvif_gsoap_core.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -187,8 +188,10 @@ int onvif_gsoap_init_request_parsing(onvif_gsoap_context_t* ctx, const char* req
  * @param location Function name where error occurred (__func__)
  * @param message Detailed error message
  */
-// NOLINT(bugprone-easily-swappable-parameters) - error_code distinguishes location/message parameters
-void onvif_gsoap_set_error(onvif_gsoap_context_t* ctx, int error_code, const char* location, const char* message) {
+void onvif_gsoap_set_error(
+  onvif_gsoap_context_t* ctx, int error_code,
+  const char* location,  // NOLINT(bugprone-easily-swappable-parameters) - error_code distinguishes location/message parameters
+  const char* message) { // NOLINT(bugprone-easily-swappable-parameters) - error_code distinguishes location/message parameters
   if (!ctx) {
     return;
   }

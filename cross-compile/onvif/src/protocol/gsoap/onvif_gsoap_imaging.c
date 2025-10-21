@@ -28,8 +28,8 @@
 #include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
 #include "services/common/onvif_imaging_types.h"
-#include "utils/error/error_translation.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 
 /**
  * @brief Parse GetImagingSettings ONVIF Imaging service request
@@ -65,7 +65,8 @@ int onvif_gsoap_parse_get_imaging_settings(onvif_gsoap_context_t* ctx, struct _t
   struct _timg__GetImagingSettings* result_ptr = soap_get__timg__GetImagingSettings(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
     int soap_err = ctx->soap.error;
-    platform_log_debug("onvif_gsoap_parse_get_imaging_settings: soap_get__timg__GetImagingSettings failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
+    platform_log_debug("onvif_gsoap_parse_get_imaging_settings: soap_get__timg__GetImagingSettings failed: %d (%s)", soap_err,
+                       soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse GetImagingSettings structure");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -116,7 +117,8 @@ int onvif_gsoap_parse_set_imaging_settings(onvif_gsoap_context_t* ctx, struct _t
   struct _timg__SetImagingSettings* result_ptr = soap_get__timg__SetImagingSettings(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
     int soap_err = ctx->soap.error;
-    platform_log_debug("onvif_gsoap_parse_set_imaging_settings: soap_get__timg__SetImagingSettings failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
+    platform_log_debug("onvif_gsoap_parse_set_imaging_settings: soap_get__timg__SetImagingSettings failed: %d (%s)", soap_err,
+                       soap_error_to_string(soap_err));
     *out = NULL;
     onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse SetImagingSettings structure");
     return ONVIF_ERROR_PARSE_FAILED;

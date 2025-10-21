@@ -11,6 +11,8 @@
 #ifndef RTSP_AUTH_H
 #define RTSP_AUTH_H
 
+#include <bits/types.h>
+
 #include "rtsp_types.h"
 
 /* Authentication functions */

@@ -36,21 +36,15 @@
 /* Forward declarations */
 static void* rtsp_multistream_accept_thread(void* arg);
 static void* rtsp_multistream_encoder_thread(void* arg);
-static void* rtsp_multistream_audio_thread(void* arg);
 static void* rtsp_multistream_timeout_thread(void* arg);
-static int rtsp_multistream_handle_request(rtsp_session_t* session, const char* request);
-static int rtsp_multistream_send_response(rtsp_session_t* session, int code, const char* headers, const char* body);
-static int rtsp_multistream_parse_method(const char* line);
 static void rtsp_multistream_h264_extract_sps_pps(rtsp_stream_info_t* stream, const uint8_t* buf, size_t len);
 static void rtsp_multistream_base64_encode(const uint8_t* input, size_t input_len, char* output, size_t output_len);
-static void rtsp_multistream_get_local_ip_address(char* ip_str, size_t ip_str_size);
 static void rtsp_multistream_cleanup_video_encoder(rtsp_stream_info_t* stream, platform_vi_handle_t vi_handle);
 static void rtsp_multistream_cleanup_audio_encoder(rtsp_stream_info_t* stream);
 static int rtsp_multistream_process_video_stream(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream, int stream_index);
 static int rtsp_multistream_get_video_stream_with_retry(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream,
                                                         platform_venc_stream_t* venc_stream);
 static void rtsp_multistream_send_to_sessions(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream, platform_venc_stream_t* venc_stream);
-static int rtsp_multistream_process_audio_stream(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream);
 
 /* Global session counter for unique session IDs */
 static uint32_t g_rtsp_session_counter = 1;           // NOLINT
@@ -672,43 +666,6 @@ static int rtsp_multistream_process_video_stream(rtsp_multistream_server_t* serv
 }
 
 /**
- * Process a single audio stream
- */
-static int rtsp_multistream_process_audio_stream(rtsp_multistream_server_t* server, rtsp_stream_info_t* stream) {
-  if (!stream->enabled || !stream->audio_enabled || !stream->audio_encoder_initialized) {
-    return 0;
-  }
-
-  // Get audio stream using platform abstraction
-  platform_aenc_stream_t aenc_stream;
-  if (platform_aenc_get_stream(stream->aenc_handle, &aenc_stream, RTSP_AUDIO_STREAM_TIMEOUT_MS) != PLATFORM_SUCCESS) {
-    return -1;
-  }
-
-  // Send to all active sessions for this stream
-  pthread_mutex_lock(&server->sessions_mutex);
-  rtsp_session_t* session = server->sessions;
-  while (session) {
-    if (session->active && session->state == RTSP_STATE_PLAYING && session->audio_enabled) {
-      // Check if this session is for this stream
-      if (strstr(session->uri, stream->path)) {
-        rtsp_send_audio_rtp_packet(session, aenc_stream.data, aenc_stream.len, aenc_stream.timestamp);
-      }
-    }
-    session = session->next;
-  }
-  pthread_mutex_unlock(&server->sessions_mutex);
-
-  // Update statistics
-  stream->audio_frames_sent++;
-
-  // Release stream using platform abstraction
-  platform_aenc_release_stream(stream->aenc_handle, &aenc_stream);
-
-  return 0;
-}
-
-/**
  * Destroy multi-stream RTSP server
  */
 int rtsp_multistream_server_destroy(rtsp_multistream_server_t* server) {
@@ -964,33 +921,6 @@ static void* rtsp_multistream_encoder_thread(void* arg) {
   }
 
   platform_log_notice("Multi-stream RTSP encoder thread finished\n");
-  return NULL;
-}
-
-/**
- * Audio thread - handles audio encoding and RTP transmission
- */
-static void* rtsp_multistream_audio_thread(void* arg) {
-  rtsp_multistream_server_t* server = (rtsp_multistream_server_t*)arg;
-
-  platform_log_notice("Multi-stream RTSP audio thread started\n");
-
-  while (server->running) {
-    pthread_mutex_lock(&server->streams_mutex);
-
-    // Process each enabled stream with audio
-    for (int stream_index = 0; stream_index < RTSP_MAX_STREAMS; stream_index++) {
-      rtsp_stream_info_t* stream = &server->streams[stream_index];
-      rtsp_multistream_process_audio_stream(server, stream);
-    }
-
-    pthread_mutex_unlock(&server->streams_mutex);
-
-    // Small delay to prevent busy waiting
-    sleep_ms(RTSP_THREAD_POLL_DELAY_MS);
-  }
-
-  platform_log_notice("Multi-stream RTSP audio thread finished\n");
   return NULL;
 }
 
@@ -1319,30 +1249,4 @@ static void rtsp_multistream_base64_encode(const uint8_t* input, size_t input_le
   }
 
   output[output_index] = '\0';
-}
-
-/**
- * Get local IP address
- */
-static void rtsp_multistream_get_local_ip_address(char* ip_str, size_t ip_str_size) {
-  int sock = socket(AF_INET, SOCK_DGRAM, 0);
-  if (sock < 0) {
-    (void)strcpy(ip_str, "127.0.0.1");
-    return;
-  }
-
-  struct sockaddr_in addr;
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = inet_addr("8.8.8.8");
-  addr.sin_port = htons(80);
-
-  if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
-    socklen_t len = sizeof(addr);
-    getsockname(sock, (struct sockaddr*)&addr, &len);
-    inet_ntop(AF_INET, &addr.sin_addr, ip_str, ip_str_size);
-  } else {
-    (void)strcpy(ip_str, "127.0.0.1");
-  }
-
-  close(sock);
 }

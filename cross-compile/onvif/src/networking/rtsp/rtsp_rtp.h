@@ -12,6 +12,9 @@
 #ifndef RTSP_RTP_H
 #define RTSP_RTP_H
 
+#include <bits/types.h>
+#include <stdint.h>
+
 #include "rtsp_types.h"
 
 /* RTP functions */
