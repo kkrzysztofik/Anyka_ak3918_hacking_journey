@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y \
   libstdc++6:i386 \
   zlib1g:i386 \
   build-essential \
+  gdb \
+  libcmocka-dev \
   gcc-multilib \
   g++-multilib \
   doxygen \
@@ -25,12 +27,21 @@ RUN apt-get update && apt-get install -y \
   clangd \
   cppcheck \
   curl \
+  lcov \
+  sudo \
   unzip \
   python3 \
   python3-pip \
   bc \
+  pkg-config \
   ccache \
   bear \
+  && rm -rf /var/lib/apt/lists/*
+
+# Pre-install ONVIF test dependencies and native libraries
+COPY cross-compile/onvif/tests /opt/onvif/tests
+RUN bash /opt/onvif/tests/scripts/install_dependencies.sh \
+  && rm -rf /opt/onvif/tests/build_native \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy and extract local Anyka toolchain
