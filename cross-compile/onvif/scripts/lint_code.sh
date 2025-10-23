@@ -111,6 +111,48 @@ check_compile_commands() {
     return 0
 }
 
+setup_ci_clangd_config() {
+    # Check if running in CI environment
+    if [[ -n "${GITHUB_ACTIONS:-}" ]] || [[ -n "${CI:-}" ]]; then
+        log_info "CI environment detected, using CI-specific clangd configuration"
+
+        # Check if CI config exists
+        if [[ ! -f "$PROJECT_ROOT/.clangd.ci" ]]; then
+            log_warning "Warning: .clangd.ci not found, using default configuration"
+            return 0
+        fi
+
+        # Backup existing .clangd if it exists
+        if [[ -f "$PROJECT_ROOT/.clangd" ]]; then
+            log_info "Backing up existing .clangd to .clangd.backup"
+            cp "$PROJECT_ROOT/.clangd" "$PROJECT_ROOT/.clangd.backup"
+        fi
+
+        # Copy CI config
+        log_info "Using .clangd.ci configuration for CI environment"
+        cp "$PROJECT_ROOT/.clangd.ci" "$PROJECT_ROOT/.clangd"
+
+        # Set flag to restore later
+        export CLANGD_CI_BACKUP="true"
+    fi
+    return 0
+}
+
+restore_clangd_config() {
+    # Only restore if we created a backup
+    if [[ "${CLANGD_CI_BACKUP:-}" == "true" ]]; then
+        log_info "Restoring original clangd configuration"
+
+        # Restore backup if it exists
+        if [[ -f "$PROJECT_ROOT/.clangd.backup" ]]; then
+            mv "$PROJECT_ROOT/.clangd.backup" "$PROJECT_ROOT/.clangd"
+        else
+            # If no backup, remove the CI config we copied
+            rm -f "$PROJECT_ROOT/.clangd"
+        fi
+    fi
+}
+
 build_clangd_tidy_command() {
     local files=("$@")
     local cmd="clangd-tidy"
@@ -403,9 +445,15 @@ parse_arguments() {
 # =============================================================================
 
 main() {
+    # Set up trap to restore clangd config on exit
+    trap restore_clangd_config EXIT INT TERM
+
     # Check prerequisites
     check_clangd_tidy
     check_compile_commands
+
+    # Setup CI-specific clangd configuration if in CI environment
+    setup_ci_clangd_config
 
     # Determine which files to lint
     local files=()

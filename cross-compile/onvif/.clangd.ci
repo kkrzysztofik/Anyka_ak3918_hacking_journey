@@ -1,0 +1,105 @@
+# CI clangd configuration for Anyka ONVIF project
+# Optimized for GitHub Actions Docker container environment
+
+If:
+  PathExclude: .*/tests/.*
+
+CompileFlags:
+  # Specify the C compiler explicitly
+  Compiler: arm-anykav200-linux-uclibcgnueabi-gcc
+  Add:
+    # Use the actual ARM target from your toolchain
+    - --target=armv7a-unknown-linux-gnueabi
+    - --sysroot=/opt/arm-anykav200-crosstool/usr/arm-anykav200-linux-uclibcgnueabi/sysroot
+    - --gcc-toolchain=/opt/arm-anykav200-crosstool/usr
+
+    # Force C language mode for all files (prevents Objective-C++ detection)
+    - -x
+    - c
+
+    # C standard and basic definitions
+    - -std=c99
+    - -D_POSIX_C_SOURCE=199309L
+    - -DANYKA_PLATFORM=1
+
+    # C-specific flags to ensure proper C language mode
+    - -fno-builtin
+    - -fno-stack-protector
+
+    # ARM architecture definitions
+    - -D__ARM_ARCH_7A__=1
+    - -D__ARM_NEON__=1
+    - -march=armv7-a
+    - -mfpu=neon
+    - -mfloat-abi=softfp
+
+    # Linux definitions
+    - -D__linux__=1
+    - -D__unix__=1
+
+    # Include paths - ONVIF project (relative to project root)
+    - -Isrc
+    - -Iinclude
+
+    # Toolchain system headers (Docker container paths)
+    - -isystem
+    - /opt/arm-anykav200-crosstool/usr/lib/gcc/arm-anykav200-linux-uclibcgnueabi/4.8.5/include
+    - -isystem
+    - /opt/arm-anykav200-crosstool/usr/lib/gcc/arm-anykav200-linux-uclibcgnueabi/4.8.5/include-fixed
+    - -isystem
+    - /opt/arm-anykav200-crosstool/usr/arm-anykav200-linux-uclibcgnueabi/sysroot/usr/include
+
+# Diagnostic configuration - OPTIMIZED FOR CI
+Diagnostics:
+  ClangTidy:
+    Add:
+      - readability-*
+      - performance-*
+      - modernize-*
+      - bugprone-*
+      - cert-*
+      - cppcoreguidelines-*
+      - clang-analyzer-*
+      - security-*
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+
+---
+# Disable diagnostics for generated files
+If:
+  PathMatch: .*/src/generated/.*
+
+Diagnostics:
+  Suppress: "*"
+  ClangTidy:
+    Remove: "*"
+---
+
+# Index configuration
+Index:
+  Background: Build
+  StandardLibrary: No
+
+# Completion
+Completion:
+  AllScopes: Yes
+
+# Inlay hints for better code understanding
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+  Designators: Yes
+
+# Hover information
+Hover:
+  ShowAKA: Yes
+
+# Clang-format integration via compile flags
+CompileFlags:
+  Add:
+    # Enable clang-format diagnostics
+    - -Wclang-format-violations
+    # Additional formatting-related warnings
+    - -Wformat
+    - -Wformat-security
