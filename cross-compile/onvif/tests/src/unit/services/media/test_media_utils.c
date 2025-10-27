@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "cmocka_wrapper.h"
+#include "common/test_helpers.h"
 #include "core/config/config_runtime.h"
 #include "core/config/config_storage.h"
 #include "mocks/config_mock.h"
@@ -55,7 +56,10 @@ static int media_tests_setup(void** state) {
   g_media_test_state.runtime_initialized = 1;
 
   /* Load test configuration from INI file */
-  result = config_storage_load("configs/media_test_config.ini", NULL);
+  char config_path[256];
+  result = test_helper_get_test_resource_path("configs/media_test_config.ini", config_path, sizeof(config_path));
+  assert_int_equal(0, result);
+  result = config_storage_load(config_path, NULL);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   return 0;

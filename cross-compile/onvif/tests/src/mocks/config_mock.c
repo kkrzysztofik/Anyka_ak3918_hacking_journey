@@ -107,6 +107,7 @@ extern int __real_config_runtime_get_int(config_section_t section, const char* k
 extern int __real_config_runtime_set_int(config_section_t section, const char* key, int value);
 extern int __real_config_runtime_get_string(config_section_t section, const char* key, char* out_value, size_t buffer_size);
 extern int __real_config_runtime_set_string(config_section_t section, const char* key, const char* value);
+extern int __real_config_runtime_is_initialized(void);
 
 int __wrap_config_runtime_get_int(config_section_t section, const char* key, int* out_value) {
   if (g_use_real_functions) {
@@ -234,8 +235,7 @@ int __wrap_config_runtime_cleanup(void) {
 
 int __wrap_config_runtime_is_initialized(void) {
   if (g_use_real_functions) {
-    // For unit tests, we can't call the real function, so return a default value
-    return 1; // Assume initialized for real function mode
+    return __real_config_runtime_is_initialized();
   }
   function_called();
   return (int)mock();

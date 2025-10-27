@@ -590,6 +590,17 @@ platform_result_t __wrap_platform_get_system_info(platform_system_info_t* info) 
   return (platform_result_t)mock();
 }
 
+/**
+ * @brief Mock implementation of platform_system
+ * @param command Command string to execute
+ * @return Mocked return value
+ */
+int __wrap_platform_system(const char* command) {
+  check_expected_ptr(command);
+  function_called();
+  return (int)mock();
+}
+
 /* ============================================================================
  * Platform Utility Functions
  * ============================================================================ */

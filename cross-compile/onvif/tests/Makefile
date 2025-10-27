@@ -18,8 +18,14 @@
 
 # Native compilation for unit tests (development machine)
 # Use native GCC with ccache for faster incremental builds
-CC := ccache gcc
-CPP := ccache g++
+NATIVE_CC ?= gcc
+NATIVE_CPP ?= g++
+CCACHE_WRAPPER ?= ccache
+
+COVERAGE_BUILD ?= 0
+
+CC = $(if $(filter 1,$(COVERAGE_BUILD)),$(NATIVE_CC),$(CCACHE_WRAPPER) $(NATIVE_CC))
+CPP = $(if $(filter 1,$(COVERAGE_BUILD)),$(NATIVE_CPP),$(CCACHE_WRAPPER) $(NATIVE_CPP))
 
 # Build configuration
 BUILD_TYPE ?= debug
@@ -41,8 +47,8 @@ else
 endif
 
 # Coverage flags
-COVERAGE_CFLAGS=-fprofile-arcs -ftest-coverage
-COVERAGE_LDFLAGS=-lgcov
+COVERAGE_CFLAGS=--coverage -DENABLE_GCOV_FLUSH
+COVERAGE_LDFLAGS=--coverage
 
 # Coverage tools
 LCOV=lcov
@@ -163,6 +169,7 @@ WRAP_FUNCTIONS := \
 	platform_config_get_string \
 	platform_config_get_int \
 	platform_get_system_info \
+	platform_system \
 	config_storage_save \
 	config_runtime_get_int \
 	config_runtime_set_int \
@@ -174,6 +181,7 @@ WRAP_FUNCTIONS := \
 	config_runtime_set_float \
 	config_runtime_init \
 	config_runtime_cleanup \
+	config_runtime_is_initialized \
 	config_runtime_apply_defaults \
 	config_runtime_snapshot \
 	config_runtime_get_generation \
@@ -217,6 +225,8 @@ WRAP_FUNCTIONS := \
 	smart_response_build_with_buffer_pool \
 	smart_response_build \
 	smart_response_estimate_size \
+	pthread_create \
+	pthread_detach \
 	onvif_service_dispatcher_dispatch \
 	socket \
 	bind \
@@ -304,7 +314,9 @@ MEDIA_TEST_SRCS := \
 	src/unit/services/media/test_media_callbacks_suite.c
 
 IMAGING_TEST_SRCS := \
-	src/unit/services/imaging/test_onvif_imaging_callbacks.c
+	src/unit/services/imaging/test_onvif_imaging_callbacks.c \
+	src/unit/services/imaging/test_imaging_service.c \
+	src/unit/services/imaging/test_imaging_unit_suite.c
 
 INTEGRATION_TEST_SRCS := \
 	src/integration/ptz_service_tests.c \
@@ -344,6 +356,7 @@ MOCK_SRCS := \
 	src/mocks/media_mock.c \
 	src/mocks/http_server_mock.c \
 	src/mocks/service_handler_mock.c \
+	src/mocks/thread_mock.c \
 
 # Mock source files for integration tests (exclude buffer_pool_mock - use real implementation)
 MOCK_SRCS_INTEGRATION := \
@@ -438,9 +451,25 @@ ALL_DEPS := $(TEST_DEPS) $(MOCK_DEPS) $(MAIN_DEPS) $(TEST_HELPER_DEPS) $(RUNNER_
 
 # Single executable target (no shared libraries)
 TEST_RUNNER = $(OUT_DIR)/test_runner
+TEST_TARGET ?= $(TEST_RUNNER)
+
+COVERAGE_TYPE ?= all
+ifdef TYPE
+override COVERAGE_TYPE := $(TYPE)
+endif
+
+COVERAGE_TEST_ARGS :=
+ifneq ($(COVERAGE_TYPE),all)
+COVERAGE_TEST_ARGS += --type=$(COVERAGE_TYPE)
+endif
+ifdef SUITE
+COVERAGE_TEST_ARGS += --suite=$(SUITE)
+endif
+
+COVERAGE_LCOV_FLAGS ?= --ignore-errors empty --ignore-errors unused
 
 .PHONY: all clean clean-deps test test-unit test-integration test-list \
-        coverage coverage-html coverage-report coverage-clean debug release \
+        coverage coverage-build coverage-html coverage-report coverage-clean debug release \
         compile-native-libs compile-commands help
 
 # Default target - build single executable test runner
@@ -459,39 +488,51 @@ release:
 	@$(MAKE) clean BUILD_TYPE=release
 	@$(MAKE) all BUILD_TYPE=release
 
+# Coverage build helper
+coverage-build: COVERAGE_BUILD=1
+coverage-build: CFLAGS += $(COVERAGE_CFLAGS)
+coverage-build: CMOCKA_LIBS += $(COVERAGE_LDFLAGS)
+coverage-build: all
+
 # Coverage build
-coverage: CFLAGS += $(COVERAGE_CFLAGS)
-coverage: CMOCKA_LIBS += $(COVERAGE_LDFLAGS)
-coverage: all
+coverage:
+	@$(MAKE) clean
+	@$(MAKE) coverage-build
 	@echo "Coverage build completed"
 
 # Generate HTML coverage report
 coverage-html: coverage
 	@echo "Running tests to generate coverage data..."
-	@if [ -f $(TEST_TARGET) ]; then \
-		echo "Running $(TEST_TARGET)..."; \
-		$(TEST_TARGET); \
+	@if [ ! -f "$(TEST_TARGET)" ]; then \
+		echo "❌ Test runner $(TEST_TARGET) not found"; \
+		exit 1; \
 	fi
+	@$(LCOV) --zerocounters --directory $(OUT_DIR) $(COVERAGE_LCOV_FLAGS)
+	@echo "Running $(TEST_TARGET) $(COVERAGE_TEST_ARGS)"
+	@$(TEST_TARGET) $(COVERAGE_TEST_ARGS)
 	@echo "Generating HTML coverage report..."
 	@mkdir -p $(COVERAGE_DIR)
-	@$(LCOV) --capture --directory $(OUT_DIR) --output-file $(COVERAGE_INFO)
-	@$(LCOV) --remove $(COVERAGE_INFO) '*/tests/*' --output-file $(COVERAGE_INFO)
-	@$(LCOV) --remove $(COVERAGE_INFO) '*/generated/*' --output-file $(COVERAGE_INFO)
+	@$(LCOV) --capture --directory $(OUT_DIR) --output-file $(COVERAGE_INFO) $(COVERAGE_LCOV_FLAGS)
+	@$(LCOV) --remove $(COVERAGE_INFO) '*/tests/*' --output-file $(COVERAGE_INFO) $(COVERAGE_LCOV_FLAGS)
+	@$(LCOV) --remove $(COVERAGE_INFO) '*/generated/*' --output-file $(COVERAGE_INFO) $(COVERAGE_LCOV_FLAGS)
 	@$(GENHTML) $(COVERAGE_INFO) --output-directory $(COVERAGE_HTML)
 	@echo "HTML coverage report generated in $(COVERAGE_HTML)/index.html"
 
 # Generate coverage summary report
 coverage-report: coverage
 	@echo "Running tests to generate coverage data..."
-	@if [ -f $(TEST_TARGET) ]; then \
-		echo "Running $(TEST_TARGET)..."; \
-		$(TEST_TARGET); \
+	@if [ ! -f "$(TEST_TARGET)" ]; then \
+		echo "❌ Test runner $(TEST_TARGET) not found"; \
+		exit 1; \
 	fi
+	@$(LCOV) --zerocounters --directory $(OUT_DIR) $(COVERAGE_LCOV_FLAGS)
+	@echo "Running $(TEST_TARGET) $(COVERAGE_TEST_ARGS)"
+	@$(TEST_TARGET) $(COVERAGE_TEST_ARGS)
 	@echo "Generating coverage summary..."
 	@mkdir -p $(COVERAGE_DIR)
-	@$(LCOV) --capture --directory $(OUT_DIR) --output-file $(COVERAGE_INFO)
-	@$(LCOV) --remove $(COVERAGE_INFO) '*/tests/*' --output-file $(COVERAGE_INFO)
-	@$(LCOV) --remove $(COVERAGE_INFO) '*/generated/*' --output-file $(COVERAGE_INFO)
+	@$(LCOV) --capture --directory $(OUT_DIR) --output-file $(COVERAGE_INFO) $(COVERAGE_LCOV_FLAGS)
+	@$(LCOV) --remove $(COVERAGE_INFO) '*/tests/*' --output-file $(COVERAGE_INFO) $(COVERAGE_LCOV_FLAGS)
+	@$(LCOV) --remove $(COVERAGE_INFO) '*/generated/*' --output-file $(COVERAGE_INFO) $(COVERAGE_LCOV_FLAGS)
 	@echo "Coverage Summary:"
 	@$(LCOV) --summary $(COVERAGE_INFO)
 

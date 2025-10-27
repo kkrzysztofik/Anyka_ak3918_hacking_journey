@@ -488,6 +488,13 @@ int __wrap_platform_config_get_int(const char* section, const char* key, int def
 platform_result_t __wrap_platform_get_system_info(platform_system_info_t* info);
 
 /**
+ * @brief CMocka wrapped platform system command execution
+ * @param command Command string to execute
+ * @return Command exit status (configured via will_return)
+ */
+int __wrap_platform_system(const char* command);
+
+/**
  * @brief CMocka wrapped platform sleep milliseconds
  * @param ms Milliseconds to sleep
  */

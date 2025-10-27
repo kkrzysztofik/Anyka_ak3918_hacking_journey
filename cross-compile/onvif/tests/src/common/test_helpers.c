@@ -7,10 +7,12 @@
 
 #include "test_helpers.h"
 
+#include <limits.h>
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 // Mock includes
 #include "mocks/mock_service_dispatcher.h"
@@ -1087,5 +1089,48 @@ size_t test_helper_get_memory_usage(void) {
 }
 
 /* ============================================================================
- * Generic Mock Framework Helpers
+ * Path Resolution Helpers
  * ============================================================================ */
+
+/**
+ * @brief Get the absolute path of a test resource file
+ * @param relative_path Relative path from tests directory (e.g., "configs/test.ini")
+ * @param output_buffer Buffer to store the absolute path
+ * @param buffer_size Size of the output buffer
+ * @return 0 on success, -1 on failure
+ *
+ * This function resolves relative paths to absolute paths based on the test
+ * executable's location, making tests location-independent.
+ */
+int test_helper_get_test_resource_path(const char* relative_path, char* output_buffer, size_t buffer_size) {
+  if (!relative_path || !output_buffer || buffer_size == 0) {
+    return -1;
+  }
+
+  // Get the directory of the test executable using /proc/self/exe
+  char exe_path[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+
+  if (len == -1) {
+    // Fallback: use __FILE__ macro to get current source location
+    // Note: This is a fallback and may not work in all cases
+    strncpy(output_buffer, relative_path, buffer_size - 1);
+    output_buffer[buffer_size - 1] = '\0';
+    return 0;
+  }
+
+  exe_path[len] = '\0';
+
+  // Extract directory from full path
+  char* last_slash = strrchr(exe_path, '/');
+  if (last_slash) {
+    *last_slash = '\0';
+  }
+
+  // Construct the full path to the test resource
+  if (snprintf(output_buffer, buffer_size, "%s/../%s", exe_path, relative_path) >= (int)buffer_size) {
+    return -1;
+  }
+
+  return 0;
+}

@@ -410,6 +410,15 @@ void test_helper_service_callback_logging_success(void** state, const service_te
                                                   http_response_t* response);
 void test_helper_service_callback_logging_failure(void** state, const service_test_config_t* config);
 
+/**
+ * @brief Get the absolute path of a test resource file
+ * @param relative_path Relative path from tests directory (e.g., "configs/test.ini")
+ * @param output_buffer Buffer to store the absolute path
+ * @param buffer_size Size of the output buffer
+ * @return 0 on success, -1 on failure
+ */
+int test_helper_get_test_resource_path(const char* relative_path, char* output_buffer, size_t buffer_size);
+
 /* ============================================================================
  * Generic Mock Framework Helpers
  * ============================================================================ */

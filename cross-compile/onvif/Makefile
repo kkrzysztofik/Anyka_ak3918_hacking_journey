@@ -312,16 +312,16 @@ test-list:
 
 test-coverage:
 	@echo "Running tests with coverage analysis..."
-	@$(MAKE) -C tests coverage
+	@$(MAKE) -C tests coverage $(if $(TYPE),TYPE=$(TYPE)) $(if $(SUITE),SUITE=$(SUITE))
 
 
 test-coverage-html:
 	@echo "Generating HTML coverage report..."
-	@$(MAKE) -C tests coverage-html
+	@$(MAKE) -C tests coverage-html $(if $(TYPE),TYPE=$(TYPE)) $(if $(SUITE),SUITE=$(SUITE))
 
 test-coverage-report:
 	@echo "Generating coverage summary..."
-	@$(MAKE) -C tests coverage-report
+	@$(MAKE) -C tests coverage-report $(if $(TYPE),TYPE=$(TYPE)) $(if $(SUITE),SUITE=$(SUITE))
 
 test-coverage-clean:
 	@echo "Cleaning coverage files..."

@@ -53,6 +53,7 @@ int __wrap_onvif_service_dispatcher_register_service(const onvif_service_registr
     return __real_onvif_service_dispatcher_register_service(registration);
   }
 
+  function_called();
   check_expected_ptr(registration);
 
   // Track call and store registration data
@@ -72,6 +73,7 @@ int __wrap_onvif_service_dispatcher_unregister_service(const char* service_name)
     return __real_onvif_service_dispatcher_unregister_service(service_name);
   }
 
+  function_called();
   check_expected_ptr(service_name);
 
   // Track call and store service name
@@ -92,6 +94,7 @@ int __wrap_onvif_service_dispatcher_init(void) {
     return __real_onvif_service_dispatcher_init();
   }
 
+  function_called();
   return (int)mock();
 }
 
@@ -104,6 +107,7 @@ void __wrap_onvif_service_dispatcher_cleanup(void) {
     return;
   }
 
+  function_called();
   // No mock return needed for void function
 }
 
@@ -115,6 +119,7 @@ int __wrap_onvif_service_dispatcher_dispatch(const char* service_name, const cha
     return __real_onvif_service_dispatcher_dispatch(service_name, operation_name, request, response);
   }
 
+  function_called();
   check_expected_ptr(service_name);
   check_expected_ptr(operation_name);
   check_expected_ptr(request);

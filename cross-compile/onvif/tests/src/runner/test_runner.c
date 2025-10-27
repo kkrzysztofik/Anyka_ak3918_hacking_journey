@@ -20,6 +20,10 @@
 #include "cmocka_wrapper.h"
 #include "common/test_suites.h"
 
+#ifdef ENABLE_GCOV_FLUSH
+#include <gcov.h>
+#endif
+
 #define MAX_SUITE_FILTERS 32
 #define OUTPUT_LOG_FILE   "OUT.log"
 #define BUFFER_SIZE       4096
@@ -381,6 +385,10 @@ int main(int argc, char* argv[]) {
   // Force exit immediately after tests complete to avoid CMocka exit(255)
   fflush(stdout);
   fflush(stderr);
+
+#ifdef ENABLE_GCOV_FLUSH
+  __gcov_dump();
+#endif
 
   if (total_failures == 0) {
     _exit(0);

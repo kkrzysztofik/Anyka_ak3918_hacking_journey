@@ -67,6 +67,7 @@ const struct CMUnitTest* get_ptz_unit_tests(size_t* count);
 const struct CMUnitTest* get_media_utils_unit_tests(size_t* count);
 const struct CMUnitTest* get_media_callbacks_unit_tests(size_t* count);
 const struct CMUnitTest* get_imaging_callbacks_unit_tests(size_t* count);
+const struct CMUnitTest* get_imaging_service_unit_tests(size_t* count);
 
 // Integration test suite exports
 const struct CMUnitTest* get_ptz_integration_tests(size_t* count);

@@ -186,7 +186,10 @@ int ptz_service_setup(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Load configuration from test INI file (replaces manual defaults initialization)
-  result = config_storage_load(TEST_CONFIG_PATH, NULL);
+  char config_path[256];
+  result = test_helper_get_test_resource_path("configs/ptz_test_config.ini", config_path, sizeof(config_path));
+  assert_int_equal(0, result);
+  result = config_storage_load(config_path, NULL);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Initialize PTZ service with mock config

@@ -17,6 +17,7 @@
 
 // TESTS
 #include "cmocka_wrapper.h"
+#include "common/test_helpers.h"
 #include "common/time_utils.h"
 #include "core/config/config.h"
 
@@ -125,7 +126,10 @@ int media_service_setup(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Load test configuration from INI file
-  result = config_storage_load("configs/media_test_config.ini", NULL);
+  char config_path[256];
+  result = test_helper_get_test_resource_path("configs/media_test_config.ini", config_path, sizeof(config_path));
+  assert_int_equal(0, result);
+  result = config_storage_load(config_path, NULL);
   assert_int_equal(ONVIF_SUCCESS, result);
 
   // Initialize media service

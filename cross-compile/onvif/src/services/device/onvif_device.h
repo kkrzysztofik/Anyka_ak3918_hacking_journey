@@ -114,6 +114,15 @@ int onvif_device_handle_operation(const char* operation_name, const http_request
  */
 void onvif_device_cleanup(void);
 
+#ifdef UNIT_TESTING
+/**
+ * @brief Test-only function to reset device service internal state
+ * @note This function forcibly resets initialization flag for test isolation
+ * @warning Should only be called from test teardown functions
+ */
+void onvif_device_test_reset(void);
+#endif
+
 /* Utility functions */
 const char* onvif_service_type_to_string(onvif_service_type_t service);
 /* onvif_action_type_to_string removed - using string names directly */

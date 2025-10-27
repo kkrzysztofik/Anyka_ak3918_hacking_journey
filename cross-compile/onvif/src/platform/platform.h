@@ -393,6 +393,15 @@ typedef struct {
  */
 platform_result_t platform_get_system_info(platform_system_info_t* info);
 
+/**
+ * @brief Execute a system command
+ * @param command Command string to execute
+ * @return Command exit status on success, -1 on failure
+ * @note This is a thin wrapper around system() for testability
+ * @warning Use with caution - validates command is not NULL but does not sanitize input
+ */
+int platform_system(const char* command);
+
 /** @} */
 
 #endif /* ONVIF_PLATFORM_H */

@@ -29,6 +29,7 @@
 #include <string.h>
 
 #include "cmocka_wrapper.h"
+#include "common/test_helpers.h"
 
 // ONVIF project includes
 #include "core/config/config.h"
@@ -95,7 +96,10 @@ int network_service_setup(void** state) {
     // We need to load config from INI file
     printf("Configuration system already initialized by another test - loading from INI file\n");
     test_state->config_initialized_by_this_test = 0; // We didn't initialize it
-    config_result = config_storage_load("configs/network_test_config.ini", test_state->config);
+    char config_path[256];
+    config_result = test_helper_get_test_resource_path("configs/network_test_config.ini", config_path, sizeof(config_path));
+    assert_int_equal(0, config_result);
+    config_result = config_storage_load(config_path, test_state->config);
     assert_int_equal(ONVIF_SUCCESS, config_result);
   } else {
     assert_int_equal(ONVIF_SUCCESS, config_result);
@@ -106,7 +110,10 @@ int network_service_setup(void** state) {
     assert_int_equal(ONVIF_SUCCESS, config_result);
 
     // Load configuration from INI file
-    config_result = config_storage_load("configs/network_test_config.ini", test_state->config);
+    char config_path[256];
+    config_result = test_helper_get_test_resource_path("configs/network_test_config.ini", config_path, sizeof(config_path));
+    assert_int_equal(0, config_result);
+    config_result = config_storage_load(config_path, test_state->config);
     assert_int_equal(ONVIF_SUCCESS, config_result);
   }
 

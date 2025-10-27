@@ -35,6 +35,7 @@ int __wrap_buffer_pool_init(buffer_pool_t* pool) {
     return __real_buffer_pool_init(pool);
   }
 
+  function_called();
   check_expected_ptr(pool);
   return (int)mock();
 }
@@ -45,6 +46,7 @@ void __wrap_buffer_pool_cleanup(buffer_pool_t* pool) {
     return;
   }
 
+  function_called();
   check_expected_ptr(pool);
 }
 
@@ -53,6 +55,7 @@ void* __wrap_buffer_pool_get(buffer_pool_t* pool) {
     return __real_buffer_pool_get(pool);
   }
 
+  function_called();
   check_expected_ptr(pool);
   return (void*)mock();
 }
@@ -63,6 +66,7 @@ void __wrap_buffer_pool_return(buffer_pool_t* pool, void* buffer) {
     return;
   }
 
+  function_called();
   check_expected_ptr(pool);
   check_expected_ptr(buffer);
 }
@@ -72,6 +76,7 @@ int __wrap_buffer_pool_get_stats(buffer_pool_t* pool, buffer_pool_stats_t* stats
     return __real_buffer_pool_get_stats(pool, stats);
   }
 
+  function_called();
   check_expected_ptr(pool);
   check_expected_ptr(stats);
   return (int)mock();
@@ -82,6 +87,7 @@ int __wrap_get_buffer_pool_stats(buffer_pool_stats_t* stats) {
     return __real_get_buffer_pool_stats(stats);
   }
 
+  function_called();
   check_expected_ptr(stats);
   return (int)mock();
 }

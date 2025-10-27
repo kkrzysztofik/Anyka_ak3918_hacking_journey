@@ -2212,6 +2212,26 @@ platform_result_t platform_get_system_info(platform_system_info_t* info) {
   return PLATFORM_SUCCESS;
 }
 
+/**
+ * @brief Execute a system command
+ * @param command Command string to execute
+ * @return Command exit status on success, -1 on failure
+ * @note This is a thin wrapper around system() for testability
+ * @warning Use with caution - validates command is not NULL but does not sanitize input
+ */
+int platform_system(const char* command) {
+  if (!command) {
+    platform_log_error("platform_system: NULL command\n");
+    return -1;
+  }
+
+  // Execute the command using standard C library system()
+  // Note: system() return value is platform-specific
+  // NOLINTNEXTLINE(cert-env33-c) - Acceptable: Only used with hardcoded commands (e.g., "reboot"), no user input
+  int result = system(command);
+  return result;
+}
+
 /* Enhanced video encoder logging and statistics functions implementation */
 
 /**

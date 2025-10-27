@@ -96,9 +96,9 @@ int onvif_device_system_reboot(void) {
 
   int result = -1;
 
-  // Note: system() call is acceptable here for reboot functionality
+  // Note: platform_system() call is acceptable here for reboot functionality
   // as it's a controlled command with no user input
-  result = system("reboot"); // NOLINT
+  result = platform_system("reboot");
   if (result == 0) {
     platform_log_info("System reboot initiated via 'reboot' command\n");
     return ONVIF_SUCCESS;
@@ -804,6 +804,7 @@ int onvif_device_init(void) {
 #ifdef UNIT_TESTING
   int result = onvif_service_unit_register(&g_device_service_registration, &g_handler_initialized, onvif_device_cleanup, "Device");
   if (result != ONVIF_SUCCESS) {
+    onvif_device_cleanup();  // Clean up buffer pool and reset flag on registration failure
     return result;
   }
   return ONVIF_SUCCESS;
@@ -845,6 +846,21 @@ void onvif_device_cleanup(void) {
   // Reset initialization flag (enables re-initialization)
   g_handler_initialized = 0;
 }
+
+#ifdef UNIT_TESTING
+/**
+ * @brief Test-only function to reset device service internal state
+ *
+ * This function forcibly resets the initialization flag without performing
+ * full cleanup. Used by unit tests to ensure clean state between test cases.
+ *
+ * @note This function is only available when UNIT_TESTING is defined
+ * @warning Should only be called from test teardown functions
+ */
+void onvif_device_test_reset(void) {
+  g_handler_initialized = 0;
+}
+#endif
 
 /* ============================================================================
  * Operation Dispatch Table

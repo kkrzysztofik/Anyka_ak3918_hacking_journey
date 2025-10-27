@@ -126,6 +126,13 @@ const test_suite_t g_test_suites[] = {
    .setup = NULL,
    .teardown = NULL},
 
+  {.name = "device-service",
+   .full_name = "Device Service Unit Tests",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_device_service_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
   // PTZ unit tests (unified: service + callbacks + adapter)
   {.name = "ptz-unit",
    .full_name = "PTZ Unit Tests",
@@ -154,6 +161,13 @@ const test_suite_t g_test_suites[] = {
    .full_name = "Imaging Callbacks",
    .category = TEST_CATEGORY_UNIT,
    .get_tests = get_imaging_callbacks_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  {.name = "imaging-service",
+   .full_name = "Imaging Service Operations",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_imaging_service_unit_tests,
    .setup = NULL,
    .teardown = NULL},
 
