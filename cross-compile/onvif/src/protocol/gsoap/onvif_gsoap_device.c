@@ -110,7 +110,9 @@ int capabilities_response_callback(struct soap* soap, void* user_data) {
     if (!response->Capabilities) {
       return ONVIF_ERROR_MEMORY_ALLOCATION;
     }
-    soap_default_tt__Capabilities(soap, response->Capabilities);
+    /* Avoid using soap_default_tt__Capabilities here as it can overwrite fields later set
+       for service XAddr URLs; perform a safe zero-initialization instead. */
+    memset(response->Capabilities, 0, sizeof(struct tt__Capabilities));
 
     /* Device capabilities */
     response->Capabilities->Device = soap_new_tt__DeviceCapabilities(soap, 1);

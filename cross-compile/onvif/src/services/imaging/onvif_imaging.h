@@ -41,4 +41,13 @@ int onvif_imaging_service_init(config_manager_t* config);
  */
 void onvif_imaging_service_cleanup(void);
 
+#ifdef UNIT_TESTING
+/**
+ * @brief Test-only function to reset imaging service global state without locking mutexes
+ * @note This function is ONLY for use in unit tests to reset state between tests.
+ *       It does NOT lock mutexes and should NEVER be called in production code.
+ */
+void onvif_imaging_test_reset_state(void);
+#endif
+
 #endif

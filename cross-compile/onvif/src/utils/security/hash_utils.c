@@ -56,13 +56,12 @@ int onvif_sha256_to_hex(const uint8_t digest[ONVIF_SHA256_DIGEST_SIZE], char* he
     return ONVIF_ERROR_BUFFER_TOO_SMALL;
   }
 
+  static const char hex_chars[] = "0123456789abcdef";
   /* Convert each byte to 2 hex characters */
   for (size_t i = 0; i < ONVIF_SHA256_DIGEST_SIZE; i++) {
-    int result = snprintf(&hex_output[i * 2], 3, "%02x", digest[i]);
-    if (result >= 3) {
-      // String was truncated, ensure null termination
-      hex_output[i * 2 + 2] = '\0';
-    }
+    uint8_t b = digest[i];
+    hex_output[i * 2] = hex_chars[(b >> 4) & 0xF];
+    hex_output[i * 2 + 1] = hex_chars[b & 0xF];
   }
   hex_output[ONVIF_SHA256_DIGEST_SIZE * 2] = '\0';
 
@@ -135,24 +134,20 @@ static int generate_salt(uint8_t salt[SALT_SIZE]) {
  * @return ONVIF_SUCCESS on success, error code on failure
  */
 static int salt_to_hex(const uint8_t salt[SALT_SIZE], char hex_output[SALT_HEX_SIZE]) {
+  static const char hex_chars[] = "0123456789abcdef";
   for (int i = 0; i < SALT_SIZE; i++) {
-    int result = snprintf(&hex_output[i * 2], 3, "%02x", salt[i]);
-    if (result >= 3) {
-      // String was truncated, ensure null termination
-      hex_output[i * 2 + 2] = '\0';
-    }
+    uint8_t b = salt[i];
+    hex_output[i * 2] = hex_chars[(b >> 4) & 0xF];
+    hex_output[i * 2 + 1] = hex_chars[b & 0xF];
   }
   hex_output[SALT_SIZE * 2] = '\0';
   return ONVIF_SUCCESS;
 }
 
-/**
- * @brief Convert hexadecimal string to salt bytes
- * @param hex_input Input hex string (32 chars)
- * @param salt Output buffer for salt bytes (SALT_SIZE bytes)
- * @return ONVIF_SUCCESS on success, error code on failure
- */
 static int hex_to_salt(const char* hex_input, uint8_t salt[SALT_SIZE]) {
+  if (!hex_input) {
+    return ONVIF_ERROR_INVALID;
+  }
   if (strlen(hex_input) < SALT_SIZE * 2) {
     return ONVIF_ERROR_INVALID;
   }
@@ -167,18 +162,9 @@ static int hex_to_salt(const char* hex_input, uint8_t salt[SALT_SIZE]) {
     }
     salt[i] = (uint8_t)byte;
   }
-
   return ONVIF_SUCCESS;
 }
 
-/**
- * @brief Hash password with salt
- * @param password Plain text password
- * @param salt Salt bytes (SALT_SIZE bytes)
- * @param hash_output Output buffer for hash hex string
- * @param output_size Size of output buffer
- * @return ONVIF_SUCCESS on success, error code on failure
- */
 static int hash_password_with_salt(const char* password, const uint8_t salt[SALT_SIZE], char* hash_output, size_t output_size) {
   if (output_size < ONVIF_SHA256_HEX_SIZE) {
     return ONVIF_ERROR_BUFFER_TOO_SMALL;
@@ -195,7 +181,7 @@ static int hash_password_with_salt(const char* password, const uint8_t salt[SALT
 
   memcpy(combined, password, pwd_len); // NOLINT(bugprone-not-null-terminated-result)
   memcpy(combined + pwd_len, salt, SALT_SIZE);
-  // Note: combined buffer is not null-terminated by design (binary data)
+  /* Note: combined buffer is not null-terminated by design (binary data) */
 
   /* Compute SHA256 hash */
   uint8_t digest[ONVIF_SHA256_DIGEST_SIZE];
@@ -256,7 +242,7 @@ int onvif_hash_password(const char* password, char* hash, size_t hash_size) {
   /* Combine salt and hash: "salt$hash" */
   int snprintf_result = snprintf(hash, hash_size, "%s$%s", salt_hex, hash_hex);
   if (snprintf_result >= (int)hash_size) {
-    // String was truncated, ensure null termination
+    /* String was truncated, ensure null termination */
     hash[hash_size - 1] = '\0';
   }
 

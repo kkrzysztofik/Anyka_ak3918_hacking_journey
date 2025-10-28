@@ -619,9 +619,9 @@ int onvif_imaging_set_day_night_mode(enum day_night_mode mode) {
     vi_mode = PLATFORM_DAYNIGHT_NIGHT;
     break;
   case DAY_NIGHT_AUTO:
+    vi_mode = PLATFORM_DAYNIGHT_AUTO;
+    break;
   default:
-    // For auto mode, we'll use day mode by default and let the auto switching
-    // handle it
     vi_mode = PLATFORM_DAYNIGHT_DAY;
     break;
   }
@@ -1017,3 +1017,23 @@ static int handle_set_imaging_settings(const service_handler_config_t* config, c
   service_log_info(&log_ctx, "Successfully updated imaging settings\n");
   return ONVIF_SUCCESS;
 }
+
+#ifdef UNIT_TESTING
+/**
+ * @brief Test-only function to reset imaging service global state without locking mutexes
+ * @note This function is ONLY for use in unit tests to reset state between tests.
+ *       It does NOT lock mutexes and should NEVER be called in production code.
+ *       It reinitializes the mutex to ensure it's in a consistent state.
+ */
+void onvif_imaging_test_reset_state(void) {
+  /* Destroy and reinitialize the mutex to ensure it's in a consistent state */
+  pthread_mutex_destroy(&g_imaging_mutex);
+  pthread_mutex_init(&g_imaging_mutex, NULL);
+
+  /* Reset global state variables */
+  g_imaging_initialized = 0;
+  g_handler_initialized = 0;
+  g_imaging_app_config = NULL;
+  g_imaging_vi_handle = NULL;
+}
+#endif
