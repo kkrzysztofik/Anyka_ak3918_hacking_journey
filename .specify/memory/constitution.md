@@ -184,9 +184,11 @@ Every code change MUST pass these validation steps before commit:
    - Integration tests for service-level functionality
 
 5. **Documentation**:
+
    ```bash
    make -C cross-compile/onvif docs
    ```
+
    - All public APIs must have complete Doxygen documentation
    - Update documentation for all changed APIs
 
