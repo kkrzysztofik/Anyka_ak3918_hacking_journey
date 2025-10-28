@@ -39,8 +39,8 @@ jobs:
           git log --oneline -5
           ./scripts/lint_code.sh --check --pr-diff
 
-  unit-test:
-    name: Unit Tests
+  unit-coverage:
+    name: Unit Tests & Coverage
     needs: lint
     runs-on: ubuntu-latest
     container:
@@ -55,25 +55,33 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      - name: Run Unit Tests
+      - name: Run Unit Tests with Coverage
         run: |
-          cd cross-compile/onvif
-          make test-unit
+          cd cross-compile/onvif/tests
+          # Capture test output
+          make coverage-html TYPE=unit 2>&1 | tee test-output.log
 
-      - name: Generate Coverage Report
+      - name: Extract Unit Test Metrics
         run: |
-          cd cross-compile/onvif
-          make test-coverage-html TYPE=unit
+          cd cross-compile/onvif/tests
+          chmod +x scripts/extract_test_metrics.sh
+          ./scripts/extract_test_metrics.sh \
+            --type=unit \
+            --test-output=test-output.log \
+            --coverage-info=coverage/coverage.info \
+            --output=metrics-unit.json
 
-      - name: Upload Unit Test Coverage
+      - name: Upload Unit Test Coverage and Metrics
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-coverage
-          path: cross-compile/onvif/tests/coverage/
+          path: |
+            cross-compile/onvif/tests/coverage/
+            cross-compile/onvif/tests/metrics-unit.json
           retention-days: 7
 
-  integration-test:
-    name: Integration Tests
+  integration-coverage:
+    name: Integration Tests & Coverage
     needs: lint
     runs-on: ubuntu-latest
     container:
@@ -88,39 +96,47 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      - name: Run Integration Tests
+      - name: Run Integration Tests with Coverage
         run: |
-          cd cross-compile/onvif
-          make test-integration
+          cd cross-compile/onvif/tests
+          # Capture test output
+          make coverage-html TYPE=integration 2>&1 | tee test-output.log
 
-      - name: Generate Coverage Report
+      - name: Extract Integration Test Metrics
         run: |
-          cd cross-compile/onvif
-          make test-coverage-html TYPE=integration
+          cd cross-compile/onvif/tests
+          chmod +x scripts/extract_test_metrics.sh
+          ./scripts/extract_test_metrics.sh \
+            --type=integration \
+            --test-output=test-output.log \
+            --coverage-info=coverage/coverage.info \
+            --output=metrics-integration.json
 
-      - name: Upload Integration Test Coverage
+      - name: Upload Integration Test Coverage and Metrics
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-coverage
-          path: cross-compile/onvif/tests/coverage/
+          path: |
+            cross-compile/onvif/tests/coverage/
+            cross-compile/onvif/tests/metrics-integration.json
           retention-days: 7
 
   status-comment:
     name: Post Status Comment
-    needs: [lint, unit-test, integration-test]
+    needs: [lint, unit-coverage, integration-coverage]
     runs-on: ubuntu-latest
     if: success()
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Download Unit Test Coverage
+      - name: Download Unit Test Coverage and Metrics
         uses: actions/download-artifact@v4
         with:
           name: unit-test-coverage
           path: ./coverage-reports/unit
 
-      - name: Download Integration Test Coverage
+      - name: Download Integration Test Coverage and Metrics
         uses: actions/download-artifact@v4
         with:
           name: integration-test-coverage
@@ -134,37 +150,75 @@ jobs:
             const fs = require('fs');
             const path = require('path');
 
+            // Helper function to parse JSON safely
+            function loadMetrics(filePath) {
+              try {
+                const data = fs.readFileSync(filePath, 'utf8');
+                return JSON.parse(data);
+              } catch (e) {
+                console.log(`Could not load metrics from ${filePath}: ${e.message}`);
+                return null;
+              }
+            }
+
+            // Load metrics
+            const unitMetrics = loadMetrics('./coverage-reports/unit/metrics-unit.json');
+            const integrationMetrics = loadMetrics('./coverage-reports/integration/metrics-integration.json');
+
             // Check if coverage reports exist
             const unitCoverageExists = fs.existsSync('./coverage-reports/unit');
-            const integrationCoverageExists = fs.existsSync(
-              './coverage-reports/integration'
-            );
+            const integrationCoverageExists = fs.existsSync('./coverage-reports/integration');
 
             let comment = '## ✅ Pull Request Checks Passed\n\n';
             comment += 'All automated checks have completed successfully:\n\n';
-            comment += '- ✅ **Code Linting**: Passed (PR-modified files only)\n';
-            comment += '- ✅ **Unit Tests**: Passed with coverage\n';
-            comment += '- ✅ **Integration Tests**: Passed with coverage\n\n';
 
+            // Unit Tests section
+            comment += '### 🧪 Unit Tests\n';
+            if (unitMetrics) {
+              const { tests_total, tests_passed, tests_failed } = unitMetrics;
+              const { lines, functions } = unitMetrics.coverage || {};
+              comment += `- **Tests**: ${tests_passed} passed, ${tests_failed} failed (${tests_total} total)\n`;
+              if (lines && functions) {
+                comment += `- **Coverage**: Lines: ${lines}% | Functions: ${functions}%\n`;
+              }
+            } else {
+              comment += '- ✅ Tests passed with coverage\n';
+            }
+            comment += '\n';
+
+            // Integration Tests section
+            comment += '### 🔗 Integration Tests\n';
+            if (integrationMetrics) {
+              const { tests_total, tests_passed, tests_failed } = integrationMetrics;
+              const { lines, functions } = integrationMetrics.coverage || {};
+              comment += `- **Tests**: ${tests_passed} passed, ${tests_failed} failed (${tests_total} total)\n`;
+              if (lines && functions) {
+                comment += `- **Coverage**: Lines: ${lines}% | Functions: ${functions}%\n`;
+              }
+            } else {
+              comment += '- ✅ Tests passed with coverage\n';
+            }
+            comment += '\n';
+
+            // Coverage reports section
             if (unitCoverageExists || integrationCoverageExists) {
               comment += '### 📊 Coverage Reports\n\n';
-              comment += 'Coverage reports are available as workflow artifacts:\n\n';
+              comment += 'Detailed HTML coverage reports are available as workflow artifacts:\n\n';
 
               if (unitCoverageExists) {
                 const unitUrl = './actions/runs/${{ github.run_id }}/artifacts';
-                comment += `- [Unit Test Coverage](${unitUrl}) `;
-                comment += '(unit-test-coverage)\n';
+                comment += `- [Unit Test Coverage](${unitUrl}) (unit-test-coverage)\n`;
               }
 
               if (integrationCoverageExists) {
                 const intUrl = './actions/runs/${{ github.run_id }}/artifacts';
-                comment += `- [Integration Test Coverage](${intUrl}) `;
-                comment += '(integration-test-coverage)\n';
+                comment += `- [Integration Test Coverage](${intUrl}) (integration-test-coverage)\n`;
               }
 
               comment += '\n';
             }
 
+            // Workflow details section
             comment += '### 🔗 Workflow Details\n';
             const runUrl = './actions/runs/${{ github.run_id }}';
             comment += `- **Workflow Run**: [#${{ github.run_number }}](${runUrl})\n`;
