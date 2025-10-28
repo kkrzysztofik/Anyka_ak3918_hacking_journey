@@ -101,18 +101,20 @@ platform_result_t __wrap_platform_vi_get_sensor_resolution(platform_video_resolu
 
 /**
  * @brief CMocka wrapped day/night mode switch
+ * @param handle Video input handle
  * @param mode Day/night mode
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_vi_switch_day_night(platform_daynight_mode_t mode);
+platform_result_t __wrap_platform_vi_switch_day_night(platform_vi_handle_t handle, platform_daynight_mode_t mode);
 
 /**
  * @brief CMocka wrapped flip/mirror setting
+ * @param handle Video input handle
  * @param flip Flip enable flag
  * @param mirror Mirror enable flag
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_vi_set_flip_mirror(int flip, int mirror);
+platform_result_t __wrap_platform_vi_set_flip_mirror(platform_vi_handle_t handle, bool flip, bool mirror);
 
 /**
  * @brief CMocka wrapped capture on
@@ -415,10 +417,9 @@ platform_result_t __wrap_platform_irled_set_mode(int mode);
 
 /**
  * @brief CMocka wrapped IR LED get status
- * @param status Output status pointer
  * @return Platform result code (configured via will_return)
  */
-platform_result_t __wrap_platform_irled_get_status(int* status);
+platform_result_t __wrap_platform_irled_get_status(void);
 
 /**
  * @brief CMocka wrapped snapshot initialization

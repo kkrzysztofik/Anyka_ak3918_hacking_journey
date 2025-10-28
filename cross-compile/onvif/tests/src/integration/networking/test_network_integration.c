@@ -78,6 +78,11 @@ int network_service_setup(void** state) {
   memset(&test_state->app_config->logging, 0, sizeof(struct logging_settings));
   memset(&test_state->app_config->server, 0, sizeof(struct server_settings));
 
+  // Allocate config manager used by config_storage_load early so it is valid
+  // when config_runtime_init/config_storage_load call into it.
+  test_state->config = calloc(1, sizeof(config_manager_t));
+  assert_non_null(test_state->config);
+
   // Enable real functions for integration testing BEFORE config loading
   // This allows config_storage_load to call config_runtime_set_int without mock issues
   service_dispatcher_mock_use_real_function(true);
@@ -116,11 +121,6 @@ int network_service_setup(void** state) {
     config_result = config_storage_load(config_path, test_state->config);
     assert_int_equal(ONVIF_SUCCESS, config_result);
   }
-
-  // Initialize config manager
-  test_state->config = malloc(sizeof(config_manager_t));
-  assert_non_null(test_state->config);
-  memset(test_state->config, 0, sizeof(config_manager_t));
 
   *state = test_state;
   return 0;
@@ -200,7 +200,6 @@ void test_integration_network_onvif_config(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_int_equal(0, auth_enabled); // Default: auth disabled
 }
-
 /**
  * @brief Test network service ports configuration
  *
@@ -228,7 +227,6 @@ void test_integration_network_service_ports(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_int_equal(3702, ws_discovery_port); // Default WS-Discovery port
 }
-
 /**
  * @brief Test HTTP server configuration
  *
@@ -256,7 +254,6 @@ void test_integration_network_http_server_config(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_int_equal(30, connection_timeout); // Default connection timeout
 }
-
 /**
  * @brief Test HTTP logging configuration
  *
@@ -272,7 +269,6 @@ void test_integration_network_logging_config(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_int_equal(0, http_verbose); // Default: HTTP verbose logging disabled
 }
-
 /**
  * @brief Test network configuration runtime updates
  *

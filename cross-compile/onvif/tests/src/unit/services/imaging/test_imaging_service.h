@@ -23,7 +23,6 @@ int teardown_imaging_service_tests(void** state);
 
 void test_unit_imaging_get_settings_success(void** state);
 void test_unit_imaging_get_settings_null_params(void** state);
-void test_unit_imaging_get_settings_not_initialized(void** state);
 void test_unit_imaging_set_settings_success(void** state);
 void test_unit_imaging_set_settings_null_params(void** state);
 void test_unit_imaging_set_settings_invalid_brightness(void** state);

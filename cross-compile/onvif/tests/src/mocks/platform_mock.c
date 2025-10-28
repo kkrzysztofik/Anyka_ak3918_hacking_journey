@@ -8,9 +8,13 @@
 #include "platform_mock.h"
 
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
+#include "platform/platform.h"
+#include "platform/platform_common.h"
 #include "platform_ptz_mock.h"
 
 /* ============================================================================
@@ -116,13 +120,15 @@ platform_result_t __wrap_platform_vi_get_sensor_resolution(platform_video_resolu
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_vi_switch_day_night(platform_daynight_mode_t mode) {
+platform_result_t __wrap_platform_vi_switch_day_night(platform_vi_handle_t handle, platform_daynight_mode_t mode) {
+  check_expected_ptr(handle);
   check_expected(mode);
   function_called();
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_vi_set_flip_mirror(int flip, int mirror) {
+platform_result_t __wrap_platform_vi_set_flip_mirror(platform_vi_handle_t handle, bool flip, bool mirror) {
+  check_expected_ptr(handle);
   check_expected(flip);
   check_expected(mirror);
   function_called();
@@ -493,12 +499,8 @@ platform_result_t __wrap_platform_irled_set_mode(int mode) {
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_irled_get_status(int* status) {
-  check_expected_ptr(status);
+platform_result_t __wrap_platform_irled_get_status(void) {
   function_called();
-  if (status) {
-    *status = (int)mock();
-  }
   return (platform_result_t)mock();
 }
 
@@ -565,7 +567,7 @@ platform_result_t __wrap_platform_config_get_string(const char* key, char* value
   }
   return (platform_result_t)mock();
 }
-
+//NOLINTNEXTLINE
 int __wrap_platform_config_get_int(const char* section, const char* key, int default_value) {
   check_expected_ptr(section);
   check_expected_ptr(key);

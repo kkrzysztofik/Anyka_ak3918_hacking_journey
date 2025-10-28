@@ -42,6 +42,10 @@ static void free_test_app_config(struct application_config* app_config);
 // Test-specific state structure
 struct http_server_auth_test_state {
   struct application_config* runtime_config;
+  /* runtime_initialized == 1 means this setup call performed a config_runtime_init()
+     and therefore teardown must call config_runtime_cleanup(). If 0, the runtime was
+     already initialized by another test and teardown must not cleanup it. */
+  int runtime_initialized;
 };
 
 static int setup_http_server_auth_tests(void** state) {
@@ -53,6 +57,7 @@ static int setup_http_server_auth_tests(void** state) {
   if (!test_state) {
     return -1;
   }
+  test_state->runtime_initialized = 0;
 
   // Create application config for runtime init
   test_state->runtime_config = create_test_app_config(1);
@@ -69,7 +74,11 @@ static int setup_http_server_auth_tests(void** state) {
 
   // Initialize runtime config system for authentication tests
   int result = config_runtime_init(test_state->runtime_config);
-  if (result != ONVIF_SUCCESS && result != ONVIF_ERROR_ALREADY_EXISTS) {
+  if (result == ONVIF_SUCCESS) {
+    test_state->runtime_initialized = 1;
+  } else if (result == ONVIF_ERROR_ALREADY_EXISTS) {
+    test_state->runtime_initialized = 0;
+  } else {
     free_test_app_config(test_state->runtime_config);
     test_free(test_state);
     return -1;
@@ -78,7 +87,10 @@ static int setup_http_server_auth_tests(void** state) {
   // Add test user for authentication validation
   result = config_runtime_add_user("admin", "admin");
   if (result != ONVIF_SUCCESS && result != ONVIF_ERROR_ALREADY_EXISTS) {
-    config_runtime_cleanup();
+    // Only cleanup if this setup actually initialized the runtime
+    if (test_state->runtime_initialized) {
+      config_runtime_cleanup();
+    }
     free_test_app_config(test_state->runtime_config);
     test_free(test_state);
     return -1;
@@ -110,9 +122,11 @@ static int teardown_http_server_auth_tests(void** state) {
   // Cleanup service dispatcher mock (pure CMocka pattern)
   mock_service_dispatcher_cleanup();
 
-  // Cleanup runtime config system (while real functions are still enabled)
+  // Cleanup runtime config system only if this setup initialized it
   if (test_state) {
-    config_runtime_cleanup();
+    if (test_state->runtime_initialized) {
+      config_runtime_cleanup();
+    }
     if (test_state->runtime_config) {
       free_test_app_config(test_state->runtime_config);
     }

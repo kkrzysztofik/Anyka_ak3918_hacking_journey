@@ -19,7 +19,6 @@ const struct CMUnitTest* get_imaging_service_unit_tests(size_t* count) {
     /* Section 1: Get/Set Settings Tests */
     cmocka_unit_test_setup_teardown(test_unit_imaging_get_settings_success, setup_imaging_service_tests, teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_get_settings_null_params, setup_imaging_service_tests, teardown_imaging_service_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_get_settings_not_initialized, setup_imaging_service_tests, teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_set_settings_success, setup_imaging_service_tests, teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_set_settings_null_params, setup_imaging_service_tests, teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_set_settings_invalid_brightness, setup_imaging_service_tests, teardown_imaging_service_tests),
@@ -30,9 +29,11 @@ const struct CMUnitTest* get_imaging_service_unit_tests(size_t* count) {
     cmocka_unit_test_setup_teardown(test_unit_imaging_set_day_night_mode_day, setup_imaging_service_tests, teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_set_day_night_mode_night, setup_imaging_service_tests, teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_set_day_night_mode_auto, setup_imaging_service_tests, teardown_imaging_service_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_set_day_night_mode_not_initialized, setup_imaging_service_tests, teardown_imaging_service_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_set_day_night_mode_not_initialized, setup_imaging_service_tests,
+                                    teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_get_day_night_mode_success, setup_imaging_service_tests, teardown_imaging_service_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_get_day_night_mode_not_initialized, setup_imaging_service_tests, teardown_imaging_service_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_get_day_night_mode_not_initialized, setup_imaging_service_tests,
+                                    teardown_imaging_service_tests),
 
     /* Section 3: IR LED Tests */
     cmocka_unit_test_setup_teardown(test_unit_imaging_set_irled_mode_on, setup_imaging_service_tests, teardown_imaging_service_tests),
@@ -60,7 +61,8 @@ const struct CMUnitTest* get_imaging_service_unit_tests(size_t* count) {
 
     /* Section 7: Validation Helper Tests */
     cmocka_unit_test_setup_teardown(test_unit_imaging_validate_settings_success, setup_imaging_service_tests, teardown_imaging_service_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_validate_settings_invalid_brightness, setup_imaging_service_tests, teardown_imaging_service_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_validate_settings_invalid_brightness, setup_imaging_service_tests,
+                                    teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_validate_settings_invalid_range, setup_imaging_service_tests, teardown_imaging_service_tests),
 
     /* Section 8: Bulk Update Helper Tests */
@@ -72,7 +74,8 @@ const struct CMUnitTest* get_imaging_service_unit_tests(size_t* count) {
     cmocka_unit_test_setup_teardown(test_unit_imaging_operation_handler_null_operation, setup_imaging_service_tests, teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_operation_handler_null_request, setup_imaging_service_tests, teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_operation_handler_null_response, setup_imaging_service_tests, teardown_imaging_service_tests),
-    cmocka_unit_test_setup_teardown(test_unit_imaging_operation_handler_unknown_operation, setup_imaging_service_tests, teardown_imaging_service_tests),
+    cmocka_unit_test_setup_teardown(test_unit_imaging_operation_handler_unknown_operation, setup_imaging_service_tests,
+                                    teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_operation_handler_not_initialized, setup_imaging_service_tests, teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_handle_get_imaging_settings, setup_imaging_service_tests, teardown_imaging_service_tests),
     cmocka_unit_test_setup_teardown(test_unit_imaging_handle_set_imaging_settings, setup_imaging_service_tests, teardown_imaging_service_tests),

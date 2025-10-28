@@ -79,6 +79,10 @@ int snapshot_service_setup(void** state) {
   // Heap-allocate snapshot settings structure
   memset(&test_state->app_config->snapshot, 0, sizeof(struct snapshot_settings));
 
+  // Allocate config manager before any config storage operations
+  test_state->config = calloc(1, sizeof(config_manager_t));
+  assert_non_null(test_state->config);
+
   // Enable real functions for integration testing BEFORE config loading
   // This allows config_storage_load to call config_runtime_set_int without mock issues
   service_dispatcher_mock_use_real_function(true);
@@ -117,11 +121,6 @@ int snapshot_service_setup(void** state) {
     config_result = config_storage_load(config_path, test_state->config);
     assert_int_equal(ONVIF_SUCCESS, config_result);
   }
-
-  // Initialize config manager for snapshot service
-  test_state->config = malloc(sizeof(config_manager_t));
-  assert_non_null(test_state->config);
-  memset(test_state->config, 0, sizeof(config_manager_t));
 
   *state = test_state;
   return 0;
