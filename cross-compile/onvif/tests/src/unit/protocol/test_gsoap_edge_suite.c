@@ -47,28 +47,28 @@ extern void test_unit_gsoap_edge_rapid_state_transitions(void** state);
  */
 const struct CMUnitTest* get_gsoap_edge_unit_tests(size_t* count) {
   static const struct CMUnitTest tests[] = {
-      /* Memory allocation edge cases */
-      cmocka_unit_test(test_unit_gsoap_edge_init_zero_context),
-      cmocka_unit_test(test_unit_gsoap_edge_repeated_alloc_dealloc),
-      cmocka_unit_test(test_unit_gsoap_edge_zero_size_allocation),
-      cmocka_unit_test(test_unit_gsoap_edge_multiple_reset_cycles),
+    /* Memory allocation edge cases */
+    cmocka_unit_test(test_unit_gsoap_edge_init_zero_context),
+    cmocka_unit_test(test_unit_gsoap_edge_repeated_alloc_dealloc),
+    cmocka_unit_test(test_unit_gsoap_edge_zero_size_allocation),
+    cmocka_unit_test(test_unit_gsoap_edge_multiple_reset_cycles),
 
-      /* Invalid XML edge cases - only safe wrapper validation tests */
-      cmocka_unit_test(test_unit_gsoap_edge_empty_xml),
+    /* Invalid XML edge cases - only safe wrapper validation tests */
+    cmocka_unit_test(test_unit_gsoap_edge_empty_xml),
 
-      /* Parameter validation edge cases */
-      cmocka_unit_test(test_unit_gsoap_edge_null_context_all_functions),
-      cmocka_unit_test(test_unit_gsoap_edge_null_output_pointers),
-      cmocka_unit_test(test_unit_gsoap_edge_empty_operation_name),
-      cmocka_unit_test(test_unit_gsoap_edge_invalid_request_size),
+    /* Parameter validation edge cases */
+    cmocka_unit_test(test_unit_gsoap_edge_null_context_all_functions),
+    cmocka_unit_test(test_unit_gsoap_edge_null_output_pointers),
+    cmocka_unit_test(test_unit_gsoap_edge_empty_operation_name),
+    cmocka_unit_test(test_unit_gsoap_edge_invalid_request_size),
 
-      /* State transition edge cases */
-      cmocka_unit_test(test_unit_gsoap_edge_double_init),
-      cmocka_unit_test(test_unit_gsoap_edge_parse_before_init),
-      cmocka_unit_test(test_unit_gsoap_edge_cleanup_without_init),
-      cmocka_unit_test(test_unit_gsoap_edge_interleaved_operations),
-      cmocka_unit_test(test_unit_gsoap_edge_error_recovery),
-      cmocka_unit_test(test_unit_gsoap_edge_rapid_state_transitions),
+    /* State transition edge cases */
+    cmocka_unit_test(test_unit_gsoap_edge_double_init),
+    cmocka_unit_test(test_unit_gsoap_edge_parse_before_init),
+    cmocka_unit_test(test_unit_gsoap_edge_cleanup_without_init),
+    cmocka_unit_test(test_unit_gsoap_edge_interleaved_operations),
+    cmocka_unit_test(test_unit_gsoap_edge_error_recovery),
+    cmocka_unit_test(test_unit_gsoap_edge_rapid_state_transitions),
   };
 
   *count = 16;

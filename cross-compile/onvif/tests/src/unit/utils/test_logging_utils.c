@@ -205,10 +205,9 @@ void test_unit_redact_header_null_params(void** state) {
 void test_unit_redact_wsse_password_no_password(void** state) {
   (void)state;
   char xml[TEST_XML_SIZE];
-  (void)snprintf(
-    xml, sizeof(xml), "%s",
-    "<s:Envelope><s:Header><wsse:Security>"
-    "<wsse:UsernameToken></wsse:UsernameToken></wsse:Security></s:Header><s:Body/></s:Envelope>");
+  (void)snprintf(xml, sizeof(xml), "%s",
+                 "<s:Envelope><s:Header><wsse:Security>"
+                 "<wsse:UsernameToken></wsse:UsernameToken></wsse:Security></s:Header><s:Body/></s:Envelope>");
   service_log_redact_wsse_password(xml);
   // Should not crash and XML should remain unchanged
   assert_non_null(strstr(xml, "<wsse:UsernameToken></wsse:UsernameToken>"));

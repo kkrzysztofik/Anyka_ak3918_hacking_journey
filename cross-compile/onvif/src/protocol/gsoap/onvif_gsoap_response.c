@@ -60,7 +60,7 @@ typedef struct {
  * ============================================================================
  */
 
-static char g_onvif_gsoap_error_msg[ONVIF_GSOAP_ERROR_MSG_SIZE] = {0};
+static char g_onvif_gsoap_error_msg[ONVIF_GSOAP_ERROR_MSG_SIZE] = {0}; // NOLINT
 
 /* ============================================================================
  * Internal Helper Functions
@@ -74,8 +74,7 @@ static char g_onvif_gsoap_error_msg[ONVIF_GSOAP_ERROR_MSG_SIZE] = {0};
 static uint64_t get_timestamp_us(void) {
   struct timespec timespec_val;
   clock_gettime(CLOCK_MONOTONIC, &timespec_val);
-  return (uint64_t)timespec_val.tv_sec * SECONDS_TO_MICROSECONDS +
-         timespec_val.tv_nsec / NANOSECONDS_TO_MICROSECONDS;
+  return (uint64_t)timespec_val.tv_sec * SECONDS_TO_MICROSECONDS + timespec_val.tv_nsec / NANOSECONDS_TO_MICROSECONDS;
 }
 
 /**
@@ -209,16 +208,12 @@ int onvif_gsoap_finalize_response(onvif_gsoap_context_t* ctx) {
   ctx->response_state.generation_end_time = get_timestamp_us();
   ctx->response_state.total_bytes_written = ctx->soap.length;
 
-  platform_log_debug("ONVIF gSOAP: Finalized response (%zu bytes, %llu us)",
-                     ctx->response_state.total_bytes_written,
-                     (unsigned long long)(ctx->response_state.generation_end_time -
-                                          ctx->response_state.generation_start_time));
+  platform_log_debug("ONVIF gSOAP: Finalized response (%zu bytes, %llu us)", ctx->response_state.total_bytes_written,
+                     (unsigned long long)(ctx->response_state.generation_end_time - ctx->response_state.generation_start_time));
   return ONVIF_SUCCESS;
 }
 
-int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
-                                                onvif_response_callback_t callback,
-                                                void* user_data) {
+int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx, onvif_response_callback_t callback, void* user_data) {
   if (!ctx || !callback) {
     if (ctx) {
       set_soap_error(&ctx->soap, "Invalid parameters for response generation");
@@ -289,8 +284,7 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
   // Copy the generated string to our buffer
   if (output_string) {
     size_t response_len = strlen(output_string);
-    platform_log_debug("ONVIF gSOAP: output_string length=%zu, content=%s", response_len,
-                       output_string);
+    platform_log_debug("ONVIF gSOAP: output_string length=%zu, content=%s", response_len, output_string);
     if (response_len < sizeof(ctx->soap.buf)) {
       strncpy(ctx->soap.buf, output_string, sizeof(ctx->soap.buf) - 1);
       ctx->soap.buf[sizeof(ctx->soap.buf) - 1] = '\0';
@@ -307,8 +301,7 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx,
   }
 
   // Debug: Check buffer after generation
-  platform_log_debug("ONVIF gSOAP: Buffer after generation: ptr=%p, length=%zu", ctx->soap.buf,
-                     ctx->soap.length);
+  platform_log_debug("ONVIF gSOAP: Buffer after generation: ptr=%p, length=%zu", ctx->soap.buf, ctx->soap.length);
 
   platform_log_debug("ONVIF gSOAP: Generated response with callback");
   return ONVIF_SUCCESS;
@@ -331,169 +324,210 @@ int onvif_gsoap_validate_response(const onvif_gsoap_context_t* ctx) {
   return ONVIF_SUCCESS;
 }
 
-int onvif_gsoap_extract_operation_name(const char* request_data, size_t request_size,
-                                       char* operation_name, size_t operation_name_size) {
+/**
+ * @brief Initialize gSOAP context with request buffer
+ */
+static void setup_soap_input_buffer(struct soap* soap_ctx, const char* request_data, size_t request_size) {
+  soap_ctx->is = (char*)request_data;
+  soap_ctx->bufidx = 0;
+  soap_ctx->buflen = request_size;
+  soap_ctx->ahead = 0;
+}
+
+/**
+ * @brief Extract operation name from tag, handling namespace prefixes
+ */
+static int extract_operation_from_tag(const char* tag, char* operation_name, size_t operation_name_size) {
+  if (!tag) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Handle namespace prefix (e.g., "tds:GetCapabilities" -> "GetCapabilities")
+  const char* operation = tag;
+  const char* colon = strchr(tag, ':');
+  if (colon) {
+    operation = colon + 1;
+  }
+
+  size_t op_len = strlen(operation);
+  if (op_len > 0 && op_len < operation_name_size) {
+    strncpy(operation_name, operation, operation_name_size - 1);
+    operation_name[operation_name_size - 1] = '\0';
+    return ONVIF_SUCCESS;
+  }
+
+  return ONVIF_ERROR_PARSE_FAILED;
+}
+
+/**
+ * @brief Parse SOAP envelope and extract operation tag
+ */
+static int parse_soap_envelope_for_operation(struct soap* soap_ctx, char* operation_name, size_t operation_name_size) {
+  // Start receiving SOAP message
+  if (soap_begin_recv(soap_ctx) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Parse SOAP envelope
+  if (soap_envelope_begin_in(soap_ctx) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Skip SOAP header if present
+  if (soap_recv_header(soap_ctx) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Parse SOAP body start
+  if (soap_body_begin_in(soap_ctx) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Get the operation element tag
+  if (soap_element_begin_in(soap_ctx, NULL, 0, NULL) != SOAP_OK) {
+    return ONVIF_ERROR_PARSE_FAILED;
+  }
+
+  // Extract operation name from tag
+  return extract_operation_from_tag(soap_ctx->tag, operation_name, operation_name_size);
+}
+
+int onvif_gsoap_extract_operation_name(const char* request_data, size_t request_size, char* operation_name, size_t operation_name_size) {
   if (!request_data || request_size == 0 || !operation_name || operation_name_size == 0) {
     return ONVIF_ERROR_INVALID;
   }
 
-  // Initialize gSOAP context for proper XML parsing
+  // Initialize gSOAP context for XML parsing
   struct soap soap_ctx;
   soap_init(&soap_ctx);
   soap_set_mode(&soap_ctx, SOAP_C_UTFSTRING | SOAP_XML_STRICT);
 
-  int result = ONVIF_ERROR_PARSE_FAILED;
+  // Set up input buffer
+  setup_soap_input_buffer(&soap_ctx, request_data, request_size);
 
-  // Set up input buffer for gSOAP parsing
-  soap_ctx.is = (char*)request_data;
-  soap_ctx.bufidx = 0;
-  soap_ctx.buflen = request_size;
-  soap_ctx.ahead = 0;
+  // Parse SOAP envelope and extract operation
+  int result = parse_soap_envelope_for_operation(&soap_ctx, operation_name, operation_name_size);
 
-  // Use gSOAP's XML parser to parse the SOAP envelope
-  if (soap_begin_recv(&soap_ctx) == SOAP_OK) {
-    // Parse SOAP envelope
-    if (soap_envelope_begin_in(&soap_ctx) == SOAP_OK) {
-      // Skip SOAP header if present
-      if (soap_recv_header(&soap_ctx) == SOAP_OK) {
-        // Parse SOAP body start
-        if (soap_body_begin_in(&soap_ctx) == SOAP_OK) {
-          // Get the next XML element tag - this is our operation
-          if (soap_element_begin_in(&soap_ctx, NULL, 0, NULL) == SOAP_OK) {
-            // The soap_ctx.tag now contains the operation element name
-            const char* tag = soap_ctx.tag;
-            if (tag) {
-              // Extract operation name, handling namespace prefixes
-              const char* operation = tag;
-              const char* colon = strchr(tag, ':');
-              if (colon) {
-                operation = colon + 1; // Skip namespace prefix
-              }
-
-              size_t op_len = strlen(operation);
-              if (op_len > 0 && op_len < operation_name_size) {
-                strncpy(operation_name, operation, operation_name_size - 1);
-                operation_name[operation_name_size - 1] = '\0';
-                result = ONVIF_SUCCESS;
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Check for gSOAP parsing errors
-  if (result != ONVIF_SUCCESS && soap_ctx.error != SOAP_OK) {
-    // All parsing errors map to the same result for simplicity
-    result = ONVIF_ERROR_PARSE_FAILED;
-  }
-
+  // Cleanup gSOAP context
   soap_end(&soap_ctx);
   soap_done(&soap_ctx);
 
   return result;
 }
 
-int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code,
-                                        const char* fault_string, const char* fault_actor,
-                                        const char* fault_detail, char* output_buffer,
-                                        size_t buffer_size) {
-  // Validate required parameters
+/**
+ * @brief Create temporary gSOAP context if needed
+ */
+static int create_temp_context_if_needed(onvif_gsoap_context_t** ctx, bool* is_temp) {
+  if (*ctx != NULL) {
+    *is_temp = false;
+    return ONVIF_SUCCESS;
+  }
+
+  *is_temp = true;
+  *ctx = (onvif_gsoap_context_t*)malloc(sizeof(onvif_gsoap_context_t));
+  if (!*ctx) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  if (onvif_gsoap_init(*ctx) != ONVIF_SUCCESS) {
+    free(*ctx);
+    *ctx = NULL;
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Setup fault callback data structure
+ */
+static void setup_fault_callback_data(
+  fault_callback_data_t* data, const char* fault_code, // NOLINT(bugprone-easily-swappable-parameters) - SOAP fault field order matches specification
+  const char* fault_string,                            // NOLINT(bugprone-easily-swappable-parameters) - SOAP fault field order matches specification
+  const char* fault_actor,                             // NOLINT(bugprone-easily-swappable-parameters) - SOAP fault field order matches specification
+  const char* fault_detail) {
+  memset(data, 0, sizeof(fault_callback_data_t));
+
+  // Fault code (use default if not provided)
+  const char* code = fault_code ? fault_code : "SOAP-ENV:Receiver";
+  strncpy(data->fault_code, code, sizeof(data->fault_code) - 1);
+  data->fault_code[sizeof(data->fault_code) - 1] = '\0';
+
+  // Fault string (required)
+  strncpy(data->fault_string, fault_string, sizeof(data->fault_string) - 1);
+  data->fault_string[sizeof(data->fault_string) - 1] = '\0';
+
+  // Optional fault actor
+  if (fault_actor) {
+    strncpy(data->fault_actor, fault_actor, sizeof(data->fault_actor) - 1);
+    data->fault_actor[sizeof(data->fault_actor) - 1] = '\0';
+  }
+
+  // Optional fault detail
+  if (fault_detail) {
+    strncpy(data->fault_detail, fault_detail, sizeof(data->fault_detail) - 1);
+    data->fault_detail[sizeof(data->fault_detail) - 1] = '\0';
+  }
+}
+
+/**
+ * @brief Copy generated response to output buffer
+ */
+static int copy_response_to_buffer(onvif_gsoap_context_t* ctx, char* output_buffer, size_t buffer_size) {
+  if (!output_buffer || buffer_size == 0) {
+    return ONVIF_SUCCESS; // No buffer provided, just return success
+  }
+
+  const char* response_data = onvif_gsoap_get_response_data(ctx);
+  size_t response_length = onvif_gsoap_get_response_length(ctx);
+
+  if (!response_data || response_length == 0) {
+    return ONVIF_ERROR_IO;
+  }
+
+  if (response_length >= buffer_size) {
+    return ONVIF_ERROR_MEMORY;
+  }
+
+  strncpy(output_buffer, response_data, buffer_size - 1);
+  output_buffer[buffer_size - 1] = '\0';
+  return (int)response_length;
+}
+
+int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* fault_code, const char* fault_string, const char* fault_actor,
+                                        const char* fault_detail, char* output_buffer, size_t buffer_size) {
   if (!fault_string) {
     return ONVIF_ERROR_INVALID;
   }
 
-  // Use default SOAP 1.2 fault code if not provided
-  const char* default_fault_code = "SOAP-ENV:Receiver";
-  const char* actual_fault_code = fault_code ? fault_code : default_fault_code;
-
-  // Determine if we need to create a temporary context
-  bool temp_ctx = (ctx == NULL);
-  onvif_gsoap_context_t* actual_ctx = ctx;
-
   // Create temporary context if needed
-  if (temp_ctx) {
-    actual_ctx = (onvif_gsoap_context_t*)malloc(sizeof(onvif_gsoap_context_t));
-    if (!actual_ctx) {
-      return ONVIF_ERROR_MEMORY_ALLOCATION;
-    }
-
-    if (onvif_gsoap_init(actual_ctx) != ONVIF_SUCCESS) {
-      free(actual_ctx);
-      return ONVIF_ERROR_MEMORY_ALLOCATION;
-    }
-  }
-
-  // Validate context
-  if (!actual_ctx) {
-    if (temp_ctx && actual_ctx) {
-      free(actual_ctx);
-    }
-    return ONVIF_ERROR_INVALID;
-  }
-
-  // Prepare callback data
-  fault_callback_data_t callback_data;
-  memset(&callback_data, 0, sizeof(callback_data));
-
-  // Set fault code and string
-  strncpy(callback_data.fault_code, actual_fault_code, sizeof(callback_data.fault_code) - 1);
-  callback_data.fault_code[sizeof(callback_data.fault_code) - 1] = '\0';
-
-  strncpy(callback_data.fault_string, fault_string, sizeof(callback_data.fault_string) - 1);
-  callback_data.fault_string[sizeof(callback_data.fault_string) - 1] = '\0';
-
-  // Set optional fault actor
-  if (fault_actor) {
-    strncpy(callback_data.fault_actor, fault_actor, sizeof(callback_data.fault_actor) - 1);
-    callback_data.fault_actor[sizeof(callback_data.fault_actor) - 1] = '\0';
-  }
-
-  // Set optional fault detail
-  if (fault_detail) {
-    strncpy(callback_data.fault_detail, fault_detail, sizeof(callback_data.fault_detail) - 1);
-    callback_data.fault_detail[sizeof(callback_data.fault_detail) - 1] = '\0';
-  }
-
-  // Generate fault response
-  int result = onvif_gsoap_generate_response_with_callback(actual_ctx, fault_response_callback,
-                                                           &callback_data);
+  bool temp_ctx = false;
+  onvif_gsoap_context_t* actual_ctx = ctx;
+  int result = create_temp_context_if_needed(&actual_ctx, &temp_ctx);
   if (result != ONVIF_SUCCESS) {
-    if (temp_ctx) {
-      onvif_gsoap_cleanup(actual_ctx);
-      free(actual_ctx);
-    }
     return result;
   }
 
-  // If output buffer is provided, copy the generated XML
-  if (output_buffer && buffer_size > 0) {
-    const char* response_data = onvif_gsoap_get_response_data(actual_ctx);
-    size_t response_length = onvif_gsoap_get_response_length(actual_ctx);
+  // Setup fault callback data
+  fault_callback_data_t callback_data;
+  setup_fault_callback_data(&callback_data, fault_code, fault_string, fault_actor, fault_detail);
 
-    if (response_data && response_length > 0) {
-      if (response_length < buffer_size) {
-        strncpy(output_buffer, response_data, buffer_size - 1);
-        output_buffer[buffer_size - 1] = '\0';
-        result = (int)response_length;
-      } else {
-        result = ONVIF_ERROR_MEMORY;
-      }
-    } else {
-      result = ONVIF_ERROR_IO;
+  // Generate fault response
+  result = onvif_gsoap_generate_response_with_callback(actual_ctx, fault_response_callback, &callback_data);
+  if (result == ONVIF_SUCCESS) {
+    // Copy response to output buffer if provided
+    result = copy_response_to_buffer(actual_ctx, output_buffer, buffer_size);
+
+    if (result == ONVIF_SUCCESS || result > 0) {
+      platform_log_debug("ONVIF gSOAP: Generated fault response: %s - %s", callback_data.fault_code, callback_data.fault_string);
     }
   }
 
-  // Clean up temporary context if created
+  // Cleanup temporary context if created
   if (temp_ctx) {
     onvif_gsoap_cleanup(actual_ctx);
     free(actual_ctx);
-  }
-
-  if (result == ONVIF_SUCCESS) {
-    platform_log_debug("ONVIF gSOAP: Generated fault response: %s - %s", callback_data.fault_code,
-                       callback_data.fault_string);
   }
 
   return result;

@@ -7,12 +7,16 @@
 
 #include "hash_utils.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
+#include <sys/types.h>
+#include <unistd.h>
 
+#include "platform/platform.h"
 #include "sha256.h"
 #include "utils/error/error_handling.h"
 
@@ -23,8 +27,11 @@
 /* Maximum password length for security */
 #define MAX_PASSWORD_LENGTH 256
 
-int onvif_sha256_compute(const uint8_t* data, size_t len,
-                         uint8_t digest[ONVIF_SHA256_DIGEST_SIZE]) {
+/* Hexadecimal conversion constants */
+#define HEX_BASE       16
+#define MAX_BYTE_VALUE 255
+
+int onvif_sha256_compute(const uint8_t* data, size_t len, uint8_t digest[ONVIF_SHA256_DIGEST_SIZE]) {
   if (!data || !digest) {
     platform_log_error("NULL pointer in onvif_sha256_compute\n");
     return ONVIF_ERROR_INVALID;
@@ -38,8 +45,7 @@ int onvif_sha256_compute(const uint8_t* data, size_t len,
   return ONVIF_SUCCESS;
 }
 
-int onvif_sha256_to_hex(const uint8_t digest[ONVIF_SHA256_DIGEST_SIZE], char* hex_output,
-                        size_t output_size) {
+int onvif_sha256_to_hex(const uint8_t digest[ONVIF_SHA256_DIGEST_SIZE], char* hex_output, size_t output_size) {
   if (!digest || !hex_output) {
     platform_log_error("NULL pointer in onvif_sha256_to_hex\n");
     return ONVIF_ERROR_INVALID;
@@ -50,17 +56,19 @@ int onvif_sha256_to_hex(const uint8_t digest[ONVIF_SHA256_DIGEST_SIZE], char* he
     return ONVIF_ERROR_BUFFER_TOO_SMALL;
   }
 
+  static const char hex_chars[] = "0123456789abcdef";
   /* Convert each byte to 2 hex characters */
   for (size_t i = 0; i < ONVIF_SHA256_DIGEST_SIZE; i++) {
-    snprintf(&hex_output[i * 2], 3, "%02x", digest[i]);
+    uint8_t b = digest[i];
+    hex_output[i * 2] = hex_chars[(b >> 4) & 0xF];
+    hex_output[i * 2 + 1] = hex_chars[b & 0xF];
   }
   hex_output[ONVIF_SHA256_DIGEST_SIZE * 2] = '\0';
 
   return ONVIF_SUCCESS;
 }
 
-int onvif_sha256_compute_hex(const uint8_t* data, size_t len, char* hex_output,
-                             size_t output_size) {
+int onvif_sha256_compute_hex(const uint8_t* data, size_t len, char* hex_output, size_t output_size) {
   uint8_t digest[ONVIF_SHA256_DIGEST_SIZE];
 
   int result = onvif_sha256_compute(data, len, digest);
@@ -71,8 +79,43 @@ int onvif_sha256_compute_hex(const uint8_t* data, size_t len, char* hex_output,
   return onvif_sha256_to_hex(digest, hex_output, output_size);
 }
 
-/* Global counter for salt uniqueness */
-static unsigned int g_salt_counter = 0;
+int onvif_generate_random_bytes(uint8_t* buffer, size_t size) {
+  if (!buffer || size == 0) {
+    platform_log_error("Invalid parameters for random byte generation\n");
+    return ONVIF_ERROR_INVALID;
+  }
+
+  /* Open /dev/urandom for cryptographically secure random bytes */
+  int random_fd = open("/dev/urandom", O_RDONLY);
+  if (random_fd < 0) {
+    platform_log_error("Failed to open /dev/urandom: %s\n", strerror(errno));
+    return ONVIF_ERROR_IO;
+  }
+
+  size_t bytes_read = 0;
+  while (bytes_read < size) {
+    ssize_t result = read(random_fd, buffer + bytes_read, size - bytes_read);
+    if (result < 0) {
+      if (errno == EINTR) {
+        /* Interrupted by signal, retry */
+        continue;
+      }
+      platform_log_error("Failed to read from /dev/urandom: %s\n", strerror(errno));
+      close(random_fd);
+      return ONVIF_ERROR_IO;
+    }
+    if (result == 0) {
+      /* Unexpected EOF */
+      platform_log_error("Unexpected EOF from /dev/urandom\n");
+      close(random_fd);
+      return ONVIF_ERROR_IO;
+    }
+    bytes_read += (size_t)result;
+  }
+
+  close(random_fd);
+  return ONVIF_SUCCESS;
+}
 
 /**
  * @brief Generate random salt for password hashing
@@ -80,16 +123,8 @@ static unsigned int g_salt_counter = 0;
  * @return ONVIF_SUCCESS on success, error code on failure
  */
 static int generate_salt(uint8_t salt[SALT_SIZE]) {
-  /* Use time, counter, and pseudo-random data for salt generation */
-  /* Note: For production use, consider using /dev/urandom or similar */
-  unsigned int seed = (unsigned int)time(NULL) + g_salt_counter++;
-  srand(seed);
-
-  for (int i = 0; i < SALT_SIZE; i++) {
-    salt[i] = (uint8_t)(rand() & 0xFF);
-  }
-
-  return ONVIF_SUCCESS;
+  /* Use cryptographically secure random number generator */
+  return onvif_generate_random_bytes(salt, SALT_SIZE);
 }
 
 /**
@@ -99,45 +134,38 @@ static int generate_salt(uint8_t salt[SALT_SIZE]) {
  * @return ONVIF_SUCCESS on success, error code on failure
  */
 static int salt_to_hex(const uint8_t salt[SALT_SIZE], char hex_output[SALT_HEX_SIZE]) {
+  static const char hex_chars[] = "0123456789abcdef";
   for (int i = 0; i < SALT_SIZE; i++) {
-    snprintf(&hex_output[i * 2], 3, "%02x", salt[i]);
+    uint8_t b = salt[i];
+    hex_output[i * 2] = hex_chars[(b >> 4) & 0xF];
+    hex_output[i * 2 + 1] = hex_chars[b & 0xF];
   }
   hex_output[SALT_SIZE * 2] = '\0';
   return ONVIF_SUCCESS;
 }
 
-/**
- * @brief Convert hexadecimal string to salt bytes
- * @param hex_input Input hex string (32 chars)
- * @param salt Output buffer for salt bytes (SALT_SIZE bytes)
- * @return ONVIF_SUCCESS on success, error code on failure
- */
 static int hex_to_salt(const char* hex_input, uint8_t salt[SALT_SIZE]) {
+  if (!hex_input) {
+    return ONVIF_ERROR_INVALID;
+  }
   if (strlen(hex_input) < SALT_SIZE * 2) {
     return ONVIF_ERROR_INVALID;
   }
 
   for (int i = 0; i < SALT_SIZE; i++) {
-    unsigned int byte;
-    if (sscanf(&hex_input[i * 2], "%2x", &byte) != 1) {
+    char hex_pair[3] = {hex_input[i * 2], hex_input[i * 2 + 1], '\0'};
+    char* endptr = NULL;
+    unsigned long byte = strtoul(hex_pair, &endptr, HEX_BASE);
+
+    if (endptr != hex_pair + 2 || byte > MAX_BYTE_VALUE) {
       return ONVIF_ERROR_INVALID;
     }
     salt[i] = (uint8_t)byte;
   }
-
   return ONVIF_SUCCESS;
 }
 
-/**
- * @brief Hash password with salt
- * @param password Plain text password
- * @param salt Salt bytes (SALT_SIZE bytes)
- * @param hash_output Output buffer for hash hex string
- * @param output_size Size of output buffer
- * @return ONVIF_SUCCESS on success, error code on failure
- */
-static int hash_password_with_salt(const char* password, const uint8_t salt[SALT_SIZE],
-                                   char* hash_output, size_t output_size) {
+static int hash_password_with_salt(const char* password, const uint8_t salt[SALT_SIZE], char* hash_output, size_t output_size) {
   if (output_size < ONVIF_SHA256_HEX_SIZE) {
     return ONVIF_ERROR_BUFFER_TOO_SMALL;
   }
@@ -151,8 +179,9 @@ static int hash_password_with_salt(const char* password, const uint8_t salt[SALT
     return ONVIF_ERROR_MEMORY;
   }
 
-  memcpy(combined, password, pwd_len);
+  memcpy(combined, password, pwd_len); // NOLINT(bugprone-not-null-terminated-result)
   memcpy(combined + pwd_len, salt, SALT_SIZE);
+  /* Note: combined buffer is not null-terminated by design (binary data) */
 
   /* Compute SHA256 hash */
   uint8_t digest[ONVIF_SHA256_DIGEST_SIZE];
@@ -211,7 +240,11 @@ int onvif_hash_password(const char* password, char* hash, size_t hash_size) {
   }
 
   /* Combine salt and hash: "salt$hash" */
-  snprintf(hash, hash_size, "%s$%s", salt_hex, hash_hex);
+  int snprintf_result = snprintf(hash, hash_size, "%s$%s", salt_hex, hash_hex);
+  if (snprintf_result >= (int)hash_size) {
+    /* String was truncated, ensure null termination */
+    hash[hash_size - 1] = '\0';
+  }
 
   return ONVIF_SUCCESS;
 }
@@ -264,7 +297,6 @@ int onvif_verify_password(const char* password, const char* hash) {
   const char* stored_hash = separator + 1;
   if (strcmp(computed_hash, stored_hash) == 0) {
     return ONVIF_SUCCESS;
-  } else {
-    return ONVIF_ERROR_AUTH_FAILED;
   }
+  return ONVIF_ERROR_AUTH_FAILED;
 }

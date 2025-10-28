@@ -40,15 +40,14 @@ static bool rtsp_session_pointer_is_valid(rtsp_session_t* session) {
   }
 
   // Check for obviously invalid pointers (below typical user space)
-  if ((uintptr_t)session < 0x1000) {
+  if ((uintptr_t)session < RTSP_MIN_USERSPACE_ADDRESS) {
     platform_log_error("rtsp_session_pointer_is_valid: Invalid session pointer (0x%p)\n", session);
     return false;
   }
 
   // Check for alignment (should be 4-byte aligned)
   if ((uintptr_t)session & 0x3) {
-    platform_log_error("rtsp_session_pointer_is_valid: Misaligned session pointer (0x%p)\n",
-                       session);
+    platform_log_error("rtsp_session_pointer_is_valid: Misaligned session pointer (0x%p)\n", session);
     return false;
   }
 
@@ -272,8 +271,7 @@ int rtsp_session_remove(rtsp_server_t* server, rtsp_session_t* session) {
 /**
  * Get session statistics
  */
-int rtsp_session_get_stats(rtsp_session_t* session, uint64_t* bytes_sent, uint32_t* packets_sent,
-                           time_t* last_activity) {
+int rtsp_session_get_stats(rtsp_session_t* session, uint64_t* bytes_sent, uint32_t* packets_sent, time_t* last_activity) {
   if (!session) {
     return -1;
   }
@@ -378,7 +376,7 @@ bool rtsp_session_is_valid(rtsp_session_t* session) {
  * Get session info string
  */
 int rtsp_session_get_info(rtsp_session_t* session, char* buffer, size_t buffer_size) {
-  if (!session || !buffer || buffer_size < 64) {
+  if (!session || !buffer || buffer_size < RTSP_MIN_BUFFER_SIZE) {
     return -1;
   }
 
@@ -407,7 +405,6 @@ int rtsp_session_get_info(rtsp_session_t* session, char* buffer, size_t buffer_s
   return snprintf(buffer, buffer_size,
                   "Session %s: %s:%d, State: %s, Age: %lds, Idle: %lds, "
                   "Packets: %u, Bytes: %u",
-                  session->session_id, client_ip, ntohs(session->addr.sin_port), state_str,
-                  rtsp_session_get_age(session), rtsp_session_get_idle_time(session),
-                  session->rtp_session.stats.packets_sent, session->rtp_session.stats.octets_sent);
+                  session->session_id, client_ip, ntohs(session->addr.sin_port), state_str, rtsp_session_get_age(session),
+                  rtsp_session_get_idle_time(session), session->rtp_session.stats.packets_sent, session->rtp_session.stats.octets_sent);
 }

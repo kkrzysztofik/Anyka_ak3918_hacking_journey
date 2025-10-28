@@ -16,11 +16,25 @@
 #include <time.h>
 
 #include "core/config/config.h"
+#include "utils/error/error_handling.h"
+
+/* ============================================================================
+ * Constants - Logging
+ * ============================================================================ */
+
+/* Timestamp buffer size and conversion constants */
+#define LOG_TIMESTAMP_BUFFER_SIZE 32   /* Buffer size for formatted timestamp */
+#define LOG_US_TO_MS_DIVISOR      1000 /* Microseconds to milliseconds conversion */
 
 /* Log level strings */
-static const char* LOG_LEVEL_STRINGS[] = {"DEBUG", "INFO ", "NOTICE", "WARN ", "ERROR"};
+/* ============================================================================
+ * Global State
+ * ============================================================================ */
+
+static const char* LOG_LEVEL_STRINGS[] = {"DEBUG", "INFO ", "NOTICE", "WARN ", "ERROR"}; // NOLINT
 
 /* Log level colors for terminal output */
+// NOLINTBEGIN
 static const char* LOG_LEVEL_COLORS[] = {
   "\033[1;37m", /* DEBUG - White */
   "\033[1;32m", /* INFO  - Green */
@@ -28,11 +42,12 @@ static const char* LOG_LEVEL_COLORS[] = {
   "\033[1;33m", /* WARN  - Yellow */
   "\033[1;31m"  /* ERROR - Red */
 };
+// NOLINTEND
 
-static const char* COLOR_RESET = "\033[0m";
+static const char* COLOR_RESET = "\033[0m"; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables) - read-only color reset string
 
 /* Global logging configuration */
-static platform_logging_config_t g_log_config = { // NOLINT
+static platform_logging_config_t g_log_config = { // NOLINT(cppcoreguidelines-avoid-non-const-global-variables) - runtime-configurable logging state
   .enabled = true,
   .use_colors = true,
   .use_timestamps = true,
@@ -45,13 +60,17 @@ static platform_logging_config_t g_log_config = { // NOLINT
  * @param size Size of the buffer
  * @return 0 on success, -1 on error
  */
+/* ============================================================================
+ * INTERNAL HELPERS - Timestamp Formatting
+ * ============================================================================ */
+
 static int get_timestamp(char* buffer, size_t size) {
-  if (!buffer || size < 32) {
+  if (!buffer || size < LOG_TIMESTAMP_BUFFER_SIZE) {
     return -1;
   }
 
-  struct timeval tv;
-  struct tm* tm_info;
+  struct timeval tv; // NOLINT(readability-identifier-length) - standard POSIX timeval name
+  struct tm* tm_info = NULL;
 
   if (gettimeofday(&tv, NULL) != 0) {
     return -1;
@@ -63,15 +82,15 @@ static int get_timestamp(char* buffer, size_t size) {
   }
 
   /* Format: YYYY-MM-DD HH:MM:SS.mmm */
-  int written = strftime(buffer, size, "%Y-%m-%d %H:%M:%S", tm_info);
+  size_t written = strftime(buffer, size, "%Y-%m-%d %H:%M:%S", tm_info);
   if (written == 0) {
     return -1;
   }
 
   /* Add milliseconds */
-  snprintf(buffer + written, size - written, ".%03ld", tv.tv_usec / 1000);
+  (void)snprintf(buffer + written, size - written, ".%03ld", tv.tv_usec / LOG_US_TO_MS_DIVISOR);
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /**
@@ -93,13 +112,14 @@ static bool should_log(platform_log_level_t level) {
  * @param args Variable arguments
  * @return Number of characters printed
  */
-int platform_log_printf(platform_log_level_t level, const char* file, const char* function,
-                        int line, const char* format, va_list args) {
+int platform_log_printf(
+  platform_log_level_t level, const char* file, const char* function, int line, const char* format, // NOLINT
+  va_list args) { // NOLINT(bugprone-easily-swappable-parameters) - file and function are semantically different source location attributes
   if (!should_log(level)) {
     return 0;
   }
 
-  char timestamp[32];
+  char timestamp[LOG_TIMESTAMP_BUFFER_SIZE];
   int chars_written = 0;
 
   /* Get timestamp if enabled */
@@ -118,8 +138,7 @@ int platform_log_printf(platform_log_level_t level, const char* file, const char
 
   /* Add log level with color if enabled */
   if (g_log_config.use_colors) {
-    chars_written +=
-      printf("%s[%s]%s ", LOG_LEVEL_COLORS[level], LOG_LEVEL_STRINGS[level], COLOR_RESET);
+    chars_written += printf("%s[%s]%s ", LOG_LEVEL_COLORS[level], LOG_LEVEL_STRINGS[level], COLOR_RESET);
   } else {
     chars_written += printf("[%s] ", LOG_LEVEL_STRINGS[level]);
   }
@@ -142,7 +161,7 @@ int platform_log_printf(platform_log_level_t level, const char* file, const char
     chars_written += printf("\n");
   }
 
-  fflush(stdout);
+  (void)fflush(stdout);
   return chars_written;
 }
 

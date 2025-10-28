@@ -57,8 +57,7 @@ const struct CMUnitTest* get_ptz_unit_tests(size_t* count) {
   // Get PTZ callbacks tests
   size_t callbacks_count = 0;
   const struct CMUnitTest* callbacks_tests = get_ptz_callbacks_unit_tests(&callbacks_count);
-  memcpy(&unified_ptz_tests[offset], callbacks_tests,
-         callbacks_count * sizeof(struct CMUnitTest));
+  memcpy(&unified_ptz_tests[offset], callbacks_tests, callbacks_count * sizeof(struct CMUnitTest));
   offset += callbacks_count;
 
   // Get PTZ adapter tests (21 tests from external array)

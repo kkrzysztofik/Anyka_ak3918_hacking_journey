@@ -11,8 +11,8 @@
 
 #include "platform/adapters/ptz_adapter.h"
 
+#include <bits/pthreadtypes.h>
 #include <errno.h>
-#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,14 +75,12 @@ static void* continuous_move_timeout_thread(void* unused_arg) {
   clock_gettime(CLOCK_REALTIME, &timeout);
   timeout.tv_sec += g_ptz_adapter_continuous_move_timeout_s;
 
-  platform_log_debug("[PTZ][timeout-thread] armed (timeout=%d s)\n",
-                     g_ptz_adapter_continuous_move_timeout_s);
+  platform_log_debug("[PTZ][timeout-thread] armed (timeout=%d s)\n", g_ptz_adapter_continuous_move_timeout_s);
 
   pthread_mutex_lock(&g_ptz_adapter_lock);
 
   /* Wait for timeout or shutdown signal */
-  int wait_result =
-    pthread_cond_timedwait(&g_ptz_adapter_timer_cond, &g_ptz_adapter_lock, &timeout);
+  int wait_result = pthread_cond_timedwait(&g_ptz_adapter_timer_cond, &g_ptz_adapter_lock, &timeout);
 
   /* Check if shutdown was requested */
   if (g_ptz_adapter_timer_shutdown_requested) {
@@ -93,8 +91,7 @@ static void* continuous_move_timeout_thread(void* unused_arg) {
 
   /* If timeout occurred and continuous move is still active, stop it */
   if (wait_result == ETIMEDOUT && g_ptz_adapter_continuous_move_active) {
-    platform_log_info("PTZ continuous move timeout after %ds, stopping movement\n",
-                      g_ptz_adapter_continuous_move_timeout_s);
+    platform_log_info("PTZ continuous move timeout after %ds, stopping movement\n", g_ptz_adapter_continuous_move_timeout_s);
 
     platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_LEFT);
     platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_RIGHT);
@@ -102,8 +99,7 @@ static void* continuous_move_timeout_thread(void* unused_arg) {
     platform_ptz_turn_stop(PLATFORM_PTZ_DIRECTION_DOWN);
     g_ptz_adapter_continuous_move_active = 0;
   } else {
-    platform_log_debug("[PTZ][timeout-thread] woke; wait_result=%d active=%d\n", wait_result,
-                       g_ptz_adapter_continuous_move_active);
+    platform_log_debug("[PTZ][timeout-thread] woke; wait_result=%d active=%d\n", wait_result, g_ptz_adapter_continuous_move_active);
   }
 
   pthread_mutex_unlock(&g_ptz_adapter_lock);
@@ -144,8 +140,7 @@ platform_result_t ptz_adapter_init(void) {
 void ptz_adapter_cleanup(void) {
   platform_log_debug("[PTZ] cleanup requested\n");
   pthread_mutex_lock(&g_ptz_adapter_lock);
-  platform_log_debug("[PTZ] cleanup state: initialized=%d active=%d thread=%lu\n",
-                     g_ptz_adapter_initialized, g_ptz_adapter_continuous_move_active,
+  platform_log_debug("[PTZ] cleanup state: initialized=%d active=%d thread=%lu\n", g_ptz_adapter_initialized, g_ptz_adapter_continuous_move_active,
                      (unsigned long)g_ptz_adapter_continuous_move_timer_thread);
   if (g_ptz_adapter_initialized) {
     /* Stop any ongoing continuous movement */
@@ -204,10 +199,9 @@ platform_result_t ptz_adapter_get_status(struct ptz_device_status* status) {
 
 platform_result_t ptz_adapter_absolute_move(int pan_degrees, int tilt_degrees, // NOLINT
                                             int move_speed) {                  // NOLINT
-  (void)move_speed; // Speed parameter not used by current platform implementation
+  (void)move_speed;                                                            // Speed parameter not used by current platform implementation
 
-  platform_log_debug("[PTZ] absolute move request pan=%d tilt=%d speed=%d\n", pan_degrees,
-                     tilt_degrees, move_speed);
+  platform_log_debug("[PTZ] absolute move request pan=%d tilt=%d speed=%d\n", pan_degrees, tilt_degrees, move_speed);
   pthread_mutex_lock(&g_ptz_adapter_lock);
   if (!g_ptz_adapter_initialized) {
     pthread_mutex_unlock(&g_ptz_adapter_lock);
@@ -234,8 +228,7 @@ platform_result_t ptz_adapter_absolute_move(int pan_degrees, int tilt_degrees, /
   if (ret == PLATFORM_SUCCESS) {
     g_ptz_adapter_current_pan_pos = pan_degrees;
     g_ptz_adapter_current_tilt_pos = tilt_degrees;
-    platform_log_debug("[PTZ] absolute move updated position pan=%d tilt=%d\n",
-                       g_ptz_adapter_current_pan_pos, g_ptz_adapter_current_tilt_pos);
+    platform_log_debug("[PTZ] absolute move updated position pan=%d tilt=%d\n", g_ptz_adapter_current_pan_pos, g_ptz_adapter_current_tilt_pos);
   } else {
     platform_log_debug("[PTZ] absolute move platform call failed ret=%d\n", ret);
   }
@@ -247,25 +240,22 @@ platform_result_t ptz_adapter_absolute_move(int pan_degrees, int tilt_degrees, /
 platform_result_t ptz_adapter_relative_move(int pan_delta_degrees,  // NOLINT
                                             int tilt_delta_degrees, // NOLINT
                                             int move_speed) {       // NOLINT
-  (void)move_speed; // Speed parameter not used by current platform implementation
+  (void)move_speed;                                                 // Speed parameter not used by current platform implementation
 
-  platform_log_debug("[PTZ] relative move request pan_delta=%d tilt_delta=%d speed=%d\n",
-                     pan_delta_degrees, tilt_delta_degrees, move_speed);
+  platform_log_debug("[PTZ] relative move request pan_delta=%d tilt_delta=%d speed=%d\n", pan_delta_degrees, tilt_delta_degrees, move_speed);
   pthread_mutex_lock(&g_ptz_adapter_lock);
   if (!g_ptz_adapter_initialized) {
     pthread_mutex_unlock(&g_ptz_adapter_lock);
     return PLATFORM_ERROR_INVALID;
   }
 
-  platform_log_info("PTZ relative move pan_delta=%d, tilt_delta=%d\n", pan_delta_degrees,
-                    tilt_delta_degrees);
+  platform_log_info("PTZ relative move pan_delta=%d, tilt_delta=%d\n", pan_delta_degrees, tilt_delta_degrees);
 
   platform_result_t ret = PLATFORM_SUCCESS;
 
   /* Horizontal movement - based on akipc implementation with step size 16 */
   if (pan_delta_degrees != 0) {
-    platform_ptz_direction_t dir =
-      (pan_delta_degrees > 0) ? PLATFORM_PTZ_DIRECTION_LEFT : PLATFORM_PTZ_DIRECTION_RIGHT;
+    platform_ptz_direction_t dir = (pan_delta_degrees > 0) ? PLATFORM_PTZ_DIRECTION_LEFT : PLATFORM_PTZ_DIRECTION_RIGHT;
     int steps = simple_abs(pan_delta_degrees);
     if (steps > PTZ_MAX_STEP_SIZE_PAN) {
       steps = PTZ_MAX_STEP_SIZE_PAN; /* Limit step size like in akipc */
@@ -281,8 +271,7 @@ platform_result_t ptz_adapter_relative_move(int pan_delta_degrees,  // NOLINT
 
   /* Vertical movement - based on akipc implementation with step size 8 */
   if (tilt_delta_degrees != 0) {
-    platform_ptz_direction_t dir =
-      (tilt_delta_degrees > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
+    platform_ptz_direction_t dir = (tilt_delta_degrees > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
     int steps = simple_abs(tilt_delta_degrees);
     if (steps > PTZ_MAX_STEP_SIZE_TILT) {
       steps = PTZ_MAX_STEP_SIZE_TILT; /* Limit step size like in akipc */
@@ -303,13 +292,10 @@ platform_result_t ptz_adapter_relative_move(int pan_delta_degrees,  // NOLINT
 
 platform_result_t ptz_adapter_continuous_move(int pan_velocity, int tilt_velocity, // NOLINT
                                               int timeout_seconds) {
-  platform_log_debug("[PTZ] continuous move request pan_vel=%d tilt_vel=%d timeout=%d\n",
-                     pan_velocity, tilt_velocity, timeout_seconds);
+  platform_log_debug("[PTZ] continuous move request pan_vel=%d tilt_vel=%d timeout=%d\n", pan_velocity, tilt_velocity, timeout_seconds);
   pthread_mutex_lock(&g_ptz_adapter_lock);
-  platform_log_debug(
-    "[PTZ] continuous move state before start: initialized=%d active=%d thread=%lu\n",
-    g_ptz_adapter_initialized, g_ptz_adapter_continuous_move_active,
-    (unsigned long)g_ptz_adapter_continuous_move_timer_thread);
+  platform_log_debug("[PTZ] continuous move state before start: initialized=%d active=%d thread=%lu\n", g_ptz_adapter_initialized,
+                     g_ptz_adapter_continuous_move_active, (unsigned long)g_ptz_adapter_continuous_move_timer_thread);
   if (!g_ptz_adapter_initialized) {
     pthread_mutex_unlock(&g_ptz_adapter_lock);
     return PLATFORM_ERROR_INVALID;
@@ -342,15 +328,13 @@ platform_result_t ptz_adapter_continuous_move(int pan_velocity, int tilt_velocit
 
   /* Start movement in appropriate directions */
   if (pan_velocity != 0) {
-    platform_ptz_direction_t dir =
-      (pan_velocity > 0) ? PLATFORM_PTZ_DIRECTION_RIGHT : PLATFORM_PTZ_DIRECTION_LEFT;
+    platform_ptz_direction_t dir = (pan_velocity > 0) ? PLATFORM_PTZ_DIRECTION_RIGHT : PLATFORM_PTZ_DIRECTION_LEFT;
     platform_log_debug("[PTZ] continuous move pan dir=%d\n", dir);
     platform_ptz_turn(dir, PTZ_MAX_PAN_DEGREES); /* Large number for continuous movement */
   }
 
   if (tilt_velocity != 0) {
-    platform_ptz_direction_t dir =
-      (tilt_velocity > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
+    platform_ptz_direction_t dir = (tilt_velocity > 0) ? PLATFORM_PTZ_DIRECTION_DOWN : PLATFORM_PTZ_DIRECTION_UP;
     platform_log_debug("[PTZ] continuous move tilt dir=%d\n", dir);
     platform_ptz_turn(dir, PTZ_MAX_TILT_DEGREES); /* Large number for continuous movement */
   }
@@ -361,8 +345,7 @@ platform_result_t ptz_adapter_continuous_move(int pan_velocity, int tilt_velocit
     g_ptz_adapter_continuous_move_active = 1;
     g_ptz_adapter_timer_shutdown_requested = 0; /* Reset shutdown flag for new timer */
 
-    if (pthread_create(&g_ptz_adapter_continuous_move_timer_thread, NULL,
-                       continuous_move_timeout_thread, NULL) != 0) {
+    if (pthread_create(&g_ptz_adapter_continuous_move_timer_thread, NULL, continuous_move_timeout_thread, NULL) != 0) {
       platform_log_error("Failed to create continuous move timeout thread\n");
       g_ptz_adapter_continuous_move_active = 0;
       pthread_mutex_unlock(&g_ptz_adapter_lock);
@@ -375,8 +358,7 @@ platform_result_t ptz_adapter_continuous_move(int pan_velocity, int tilt_velocit
   }
 
   pthread_mutex_unlock(&g_ptz_adapter_lock);
-  platform_log_debug("[PTZ] continuous move setup done active=%d thread=%lu\n",
-                     g_ptz_adapter_continuous_move_active,
+  platform_log_debug("[PTZ] continuous move setup done active=%d thread=%lu\n", g_ptz_adapter_continuous_move_active,
                      (unsigned long)g_ptz_adapter_continuous_move_timer_thread);
   return PLATFORM_SUCCESS;
 }
@@ -384,8 +366,7 @@ platform_result_t ptz_adapter_continuous_move(int pan_velocity, int tilt_velocit
 platform_result_t ptz_adapter_stop(void) {
   platform_log_debug("[PTZ] stop request received\n");
   pthread_mutex_lock(&g_ptz_adapter_lock);
-  platform_log_debug("[PTZ] stop state: initialized=%d active=%d thread=%lu\n",
-                     g_ptz_adapter_initialized, g_ptz_adapter_continuous_move_active,
+  platform_log_debug("[PTZ] stop state: initialized=%d active=%d thread=%lu\n", g_ptz_adapter_initialized, g_ptz_adapter_continuous_move_active,
                      (unsigned long)g_ptz_adapter_continuous_move_timer_thread);
   if (!g_ptz_adapter_initialized) {
     pthread_mutex_unlock(&g_ptz_adapter_lock);
@@ -434,8 +415,8 @@ platform_result_t ptz_adapter_set_preset(const char* name, int preset_id) {
     return PLATFORM_ERROR_INVALID;
   }
 
-  platform_log_info("PTZ set preset %s (id=%d) at pan=%d, tilt=%d\n", name ? name : "unnamed",
-                    preset_id, g_ptz_adapter_current_pan_pos, g_ptz_adapter_current_tilt_pos);
+  platform_log_info("PTZ set preset %s (id=%d) at pan=%d, tilt=%d\n", name ? name : "unnamed", preset_id, g_ptz_adapter_current_pan_pos,
+                    g_ptz_adapter_current_tilt_pos);
 
   /* For now, just store current position - could be enhanced to save to file */
   pthread_mutex_unlock(&g_ptz_adapter_lock);

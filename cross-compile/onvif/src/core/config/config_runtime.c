@@ -1,0 +1,2429 @@
+/**
+ * @file config_runtime.c
+ * @brief Schema-driven runtime configuration manager implementation
+ *
+ * Part of the Unified Configuration System (Feature 001)
+ *
+ * @author Anyka ONVIF Development Team
+ * @date 2025-10-11
+ */
+
+#include "core/config/config_runtime.h"
+
+#include <bits/pthreadtypes.h>
+#include <bits/types.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "common/onvif_constants.h"
+#include "core/config/config.h"
+#include "core/config/config_storage.h"
+#include "platform/platform.h"
+#include "services/common/onvif_imaging_types.h"
+#include "services/common/video_config_types.h"
+#include "services/ptz/onvif_ptz.h"
+#include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
+#include "utils/security/hash_utils.h"
+#include "utils/validation/common_validation.h"
+
+/* Constants */
+#define CONFIG_STRING_MAX_LEN_DEFAULT  256
+#define CONFIG_STRING_MAX_LEN_STANDARD 64
+#define CONFIG_STRING_MAX_LEN_SHORT    32
+#define CONFIG_PORT_MIN                1
+#define CONFIG_PORT_MAX                65535
+#define CONFIG_PERSISTENCE_QUEUE_MAX   32
+#define CONFIG_DECIMAL_BASE            10 /* Base for decimal number parsing */
+
+/* Stringify macros for converting expanded constants to strings */
+#define STRINGIFY_HELPER(x) #x
+#define STRINGIFY(x)        STRINGIFY_HELPER(x)
+
+/* Helper function to set output type and return field pointer */
+static void* config_runtime_set_field_ptr(config_value_type_t type, void* field_ptr, config_value_type_t* out_type) {
+  if (out_type) {
+    *out_type = type;
+  }
+  return field_ptr;
+}
+
+/* ONVIF section field handler */
+static void* config_runtime_get_onvif_field_ptr(struct onvif_settings* onvif, const char* key, config_value_type_t* out_type) {
+  if (strcmp(key, "enabled") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &onvif->enabled, out_type);
+  }
+  if (strcmp(key, "http_port") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &onvif->http_port, out_type);
+  }
+  if (strcmp(key, "auth_enabled") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &onvif->auth_enabled, out_type);
+  }
+  return NULL;
+}
+
+/* Network section field handler */
+static void* config_runtime_get_network_field_ptr(struct network_settings* network, const char* key, config_value_type_t* out_type) {
+  if (strcmp(key, "rtsp_port") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &network->rtsp_port, out_type);
+  }
+  if (strcmp(key, "snapshot_port") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &network->snapshot_port, out_type);
+  }
+  if (strcmp(key, "ws_discovery_port") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &network->ws_discovery_port, out_type);
+  }
+  return NULL;
+}
+
+/* Device section field handler */
+static void* config_runtime_get_device_field_ptr(struct device_info* device, const char* key, config_value_type_t* out_type) {
+  if (strcmp(key, "manufacturer") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, device->manufacturer, out_type);
+  }
+  if (strcmp(key, "model") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, device->model, out_type);
+  }
+  if (strcmp(key, "firmware_version") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, device->firmware_version, out_type);
+  }
+  if (strcmp(key, "serial_number") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, device->serial_number, out_type);
+  }
+  if (strcmp(key, "hardware_id") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, device->hardware_id, out_type);
+  }
+  return NULL;
+}
+
+/* Logging section field handler */
+static void* config_runtime_get_logging_field_ptr(struct logging_settings* logging, const char* key, config_value_type_t* out_type) {
+  if (strcmp(key, "enabled") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &logging->enabled, out_type);
+  }
+  if (strcmp(key, "use_colors") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &logging->use_colors, out_type);
+  }
+  if (strcmp(key, "use_timestamps") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &logging->use_timestamps, out_type);
+  }
+  if (strcmp(key, "min_level") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &logging->min_level, out_type);
+  }
+  if (strcmp(key, "tag") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, logging->tag, out_type);
+  }
+  if (strcmp(key, "http_verbose") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &logging->http_verbose, out_type);
+  }
+  return NULL;
+}
+
+/* Server section field handler */
+static void* config_runtime_get_server_field_ptr(struct server_settings* server, const char* key, config_value_type_t* out_type) {
+  if (strcmp(key, "worker_threads") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &server->worker_threads, out_type);
+  }
+  if (strcmp(key, "max_connections") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &server->max_connections, out_type);
+  }
+  if (strcmp(key, "connection_timeout") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &server->connection_timeout, out_type);
+  }
+  if (strcmp(key, "keepalive_timeout") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &server->keepalive_timeout, out_type);
+  }
+  if (strcmp(key, "epoll_timeout") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &server->epoll_timeout, out_type);
+  }
+  if (strcmp(key, "cleanup_interval") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &server->cleanup_interval, out_type);
+  }
+  return NULL;
+}
+
+/* Stream profile field handler */
+static void* config_runtime_get_stream_profile_field_ptr(video_config_t* profile, const char* key, config_value_type_t* out_type) {
+  if (strcmp(key, "name") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, profile->name, out_type);
+  }
+  if (strcmp(key, "width") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &profile->width, out_type);
+  }
+  if (strcmp(key, "height") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &profile->height, out_type);
+  }
+  if (strcmp(key, "fps") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &profile->fps, out_type);
+  }
+  if (strcmp(key, "bitrate") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &profile->bitrate, out_type);
+  }
+  if (strcmp(key, "gop_size") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &profile->gop_size, out_type);
+  }
+  if (strcmp(key, "profile") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &profile->profile, out_type);
+  }
+  if (strcmp(key, "codec_type") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &profile->codec_type, out_type);
+  }
+  if (strcmp(key, "br_mode") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &profile->br_mode, out_type);
+  }
+  return NULL;
+}
+
+/* PTZ preset profile field handler */
+static void* config_runtime_get_ptz_preset_field_ptr(struct ptz_preset_profile* preset, const char* key, config_value_type_t* out_type) {
+  if (strcmp(key, "preset_count") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &preset->preset_count, out_type);
+  }
+  if (strcmp(key, "preset1_token") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, preset->preset1_token, out_type);
+  }
+  if (strcmp(key, "preset1_name") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, preset->preset1_name, out_type);
+  }
+  if (strcmp(key, "preset1_pan") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset1_pan, out_type);
+  }
+  if (strcmp(key, "preset1_tilt") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset1_tilt, out_type);
+  }
+  if (strcmp(key, "preset1_zoom") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset1_zoom, out_type);
+  }
+  if (strcmp(key, "preset2_token") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, preset->preset2_token, out_type);
+  }
+  if (strcmp(key, "preset2_name") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, preset->preset2_name, out_type);
+  }
+  if (strcmp(key, "preset2_pan") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset2_pan, out_type);
+  }
+  if (strcmp(key, "preset2_tilt") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset2_tilt, out_type);
+  }
+  if (strcmp(key, "preset2_zoom") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset2_zoom, out_type);
+  }
+  if (strcmp(key, "preset3_token") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, preset->preset3_token, out_type);
+  }
+  if (strcmp(key, "preset3_name") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, preset->preset3_name, out_type);
+  }
+  if (strcmp(key, "preset3_pan") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset3_pan, out_type);
+  }
+  if (strcmp(key, "preset3_tilt") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset3_tilt, out_type);
+  }
+  if (strcmp(key, "preset3_zoom") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset3_zoom, out_type);
+  }
+  if (strcmp(key, "preset4_token") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, preset->preset4_token, out_type);
+  }
+  if (strcmp(key, "preset4_name") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, preset->preset4_name, out_type);
+  }
+  if (strcmp(key, "preset4_pan") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset4_pan, out_type);
+  }
+  if (strcmp(key, "preset4_tilt") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset4_tilt, out_type);
+  }
+  if (strcmp(key, "preset4_zoom") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_FLOAT, &preset->preset4_zoom, out_type);
+  }
+  return NULL;
+}
+
+/* Imaging section field handler */
+static void* config_runtime_get_imaging_field_ptr(struct imaging_settings* imaging, const char* key, config_value_type_t* out_type) {
+  if (strcmp(key, "brightness") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &imaging->brightness, out_type);
+  }
+  if (strcmp(key, "contrast") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &imaging->contrast, out_type);
+  }
+  if (strcmp(key, "saturation") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &imaging->saturation, out_type);
+  }
+  if (strcmp(key, "sharpness") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &imaging->sharpness, out_type);
+  }
+  if (strcmp(key, "hue") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &imaging->hue, out_type);
+  }
+  return NULL;
+}
+
+/* Auto day/night section field handler */
+static void* config_runtime_get_auto_daynight_field_ptr(struct auto_daynight_config* auto_dn, const char* key, config_value_type_t* out_type) {
+  if (strcmp(key, "mode") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, (int*)&auto_dn->mode, out_type);
+  }
+  if (strcmp(key, "day_to_night_threshold") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &auto_dn->day_to_night_threshold, out_type);
+  }
+  if (strcmp(key, "night_to_day_threshold") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &auto_dn->night_to_day_threshold, out_type);
+  }
+  if (strcmp(key, "lock_time_seconds") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &auto_dn->lock_time_seconds, out_type);
+  }
+  if (strcmp(key, "ir_led_mode") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, (int*)&auto_dn->ir_led_mode, out_type);
+  }
+  if (strcmp(key, "ir_led_level") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &auto_dn->ir_led_level, out_type);
+  }
+  if (strcmp(key, "enable_auto_switching") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &auto_dn->enable_auto_switching, out_type);
+  }
+  return NULL;
+}
+
+/* Snapshot section field handler */
+static void* config_runtime_get_snapshot_field_ptr(struct snapshot_settings* snapshot, const char* key, config_value_type_t* out_type) {
+  if (strcmp(key, "width") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &snapshot->width, out_type);
+  }
+  if (strcmp(key, "height") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &snapshot->height, out_type);
+  }
+  if (strcmp(key, "quality") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &snapshot->quality, out_type);
+  }
+  if (strcmp(key, "format") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, snapshot->format, out_type);
+  }
+  return NULL;
+}
+
+/* Global state variables */
+static struct application_config* g_config_runtime_app_config = NULL;      // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static pthread_mutex_t g_config_runtime_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static uint32_t g_config_runtime_generation = 0;                           // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static int g_config_runtime_initialized = 0;                               // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+/* Persistence queue state */
+static persistence_queue_entry_t g_persistence_queue[CONFIG_PERSISTENCE_QUEUE_MAX]; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static size_t g_persistence_queue_count = 0;                                        // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static pthread_mutex_t g_persistence_queue_mutex = PTHREAD_MUTEX_INITIALIZER;       // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+/* Schema definition for validation */
+static const config_schema_entry_t g_config_schema[] = {
+  /* ONVIF Section */
+  {CONFIG_SECTION_ONVIF, "onvif", "enabled", CONFIG_TYPE_BOOL, 1, 0, 1, 0, "1"},
+  {CONFIG_SECTION_ONVIF, "onvif", "http_port", CONFIG_TYPE_INT, 1, CONFIG_PORT_MIN, CONFIG_PORT_MAX, 0, STRINGIFY(HTTP_PORT_DEFAULT)},
+  {CONFIG_SECTION_ONVIF, "onvif", "auth_enabled", CONFIG_TYPE_BOOL, 1, 0, 1, 0, "0"},
+
+  /* Network Section */
+  {CONFIG_SECTION_NETWORK, "network", "rtsp_port", CONFIG_TYPE_INT, 1, CONFIG_PORT_MIN, CONFIG_PORT_MAX, 0, STRINGIFY(ONVIF_RTSP_PORT_DEFAULT)},
+  {CONFIG_SECTION_NETWORK, "network", "snapshot_port", CONFIG_TYPE_INT, 1, CONFIG_PORT_MIN, CONFIG_PORT_MAX, 0,
+   STRINGIFY(ONVIF_SNAPSHOT_PORT_DEFAULT)},
+  {CONFIG_SECTION_NETWORK, "network", "ws_discovery_port", CONFIG_TYPE_INT, 1, CONFIG_PORT_MIN, CONFIG_PORT_MAX, 0,
+   STRINGIFY(ONVIF_WS_DISCOVERY_PORT)},
+
+  /* Device Section */
+  {CONFIG_SECTION_DEVICE, "device", "manufacturer", CONFIG_TYPE_STRING, 1, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ONVIF_DEVICE_MANUFACTURER_DEFAULT},
+  {CONFIG_SECTION_DEVICE, "device", "model", CONFIG_TYPE_STRING, 1, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ONVIF_DEVICE_MODEL_DEFAULT},
+  {CONFIG_SECTION_DEVICE, "device", "firmware_version", CONFIG_TYPE_STRING, 1, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD,
+   ONVIF_DEVICE_FIRMWARE_VER_DEFAULT},
+  {CONFIG_SECTION_DEVICE, "device", "serial_number", CONFIG_TYPE_STRING, 1, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ONVIF_DEVICE_SERIAL_DEFAULT},
+  {CONFIG_SECTION_DEVICE, "device", "hardware_id", CONFIG_TYPE_STRING, 1, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ONVIF_DEVICE_HARDWARE_ID_DEFAULT},
+
+  /* Logging Section */
+  {CONFIG_SECTION_LOGGING, "logging", "enabled", CONFIG_TYPE_INT, 1, 0, 1, 0, "1"},
+  {CONFIG_SECTION_LOGGING, "logging", "use_colors", CONFIG_TYPE_INT, 0, 0, 1, 0, "1"},
+  {CONFIG_SECTION_LOGGING, "logging", "use_timestamps", CONFIG_TYPE_INT, 0, 0, 1, 0, "1"},
+  {CONFIG_SECTION_LOGGING, "logging", "min_level", CONFIG_TYPE_INT, 1, 0, 5, 0, "2"},
+  {CONFIG_SECTION_LOGGING, "logging", "tag", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_SHORT, "ONVIF"},
+  {CONFIG_SECTION_LOGGING, "logging", "http_verbose", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* Server Section */
+  {CONFIG_SECTION_SERVER, "server", "worker_threads", CONFIG_TYPE_INT, 1, 1, 32, 0, "4"},
+  {CONFIG_SECTION_SERVER, "server", "max_connections", CONFIG_TYPE_INT, 1, 1, 1000, 0, "100"},
+  {CONFIG_SECTION_SERVER, "server", "connection_timeout", CONFIG_TYPE_INT, 1, 1, 300, 0, "30"},
+  {CONFIG_SECTION_SERVER, "server", "keepalive_timeout", CONFIG_TYPE_INT, 1, 1, 300, 0, "60"},
+  {CONFIG_SECTION_SERVER, "server", "epoll_timeout", CONFIG_TYPE_INT, 1, 1, 10000, 0, "1000"},
+  {CONFIG_SECTION_SERVER, "server", "cleanup_interval", CONFIG_TYPE_INT, 1, 1, 3600, 0, "300"},
+
+  /* Stream Profile 1 (User Story 4) */
+  {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "High Definition"},
+  {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "1920"},
+  {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "1080"},
+  {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "30"},
+  {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "bitrate", CONFIG_TYPE_INT, 0, 64, 16384, 0, "4096"},
+  {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "gop_size", CONFIG_TYPE_INT, 0, 1, 300, 0, "60"},
+  {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "profile", CONFIG_TYPE_INT, 0, 0, 2, 0, "1"},
+  {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "codec_type", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+  {CONFIG_SECTION_STREAM_PROFILE_1, "stream_profile_1", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* Stream Profile 2 (User Story 4) */
+  {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "Standard Definition"},
+  {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "1280"},
+  {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "720"},
+  {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "30"},
+  {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "bitrate", CONFIG_TYPE_INT, 0, 64, 16384, 0, "2048"},
+  {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "gop_size", CONFIG_TYPE_INT, 0, 1, 300, 0, "60"},
+  {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "profile", CONFIG_TYPE_INT, 0, 0, 2, 0, "1"},
+  {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "codec_type", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+  {CONFIG_SECTION_STREAM_PROFILE_2, "stream_profile_2", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* Stream Profile 3 (User Story 4) */
+  {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "Mobile Stream"},
+  {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "640"},
+  {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "480"},
+  {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "15"},
+  {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "bitrate", CONFIG_TYPE_INT, 0, 64, 16384, 0, "512"},
+  {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "gop_size", CONFIG_TYPE_INT, 0, 1, 300, 0, "30"},
+  {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "profile", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+  {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "codec_type", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+  {CONFIG_SECTION_STREAM_PROFILE_3, "stream_profile_3", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* Stream Profile 4 (User Story 4) */
+  {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, "Low Bandwidth"},
+  {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "width", CONFIG_TYPE_INT, 0, 160, 1920, 0, "320"},
+  {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "height", CONFIG_TYPE_INT, 0, 120, 1080, 0, "240"},
+  {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "fps", CONFIG_TYPE_INT, 0, 1, 60, 0, "10"},
+  {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "bitrate", CONFIG_TYPE_INT, 0, 64, 16384, 0, "256"},
+  {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "gop_size", CONFIG_TYPE_INT, 0, 1, 300, 0, "20"},
+  {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "profile", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+  {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "codec_type", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+  {CONFIG_SECTION_STREAM_PROFILE_4, "stream_profile_4", "br_mode", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* PTZ Preset Profile 1 - 4 presets max per profile */
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset_count", CONFIG_TYPE_INT, 0, 0, 4, 0, "0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset1_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset1_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset1_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset1_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset1_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset2_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset2_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset2_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset2_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset2_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset3_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset3_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset3_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset3_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset3_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset4_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset4_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset4_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset4_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "ptz_preset_profile_1", "preset4_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+
+  /* PTZ Preset Profile 2 - 4 presets max per profile */
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset_count", CONFIG_TYPE_INT, 0, 0, 4, 0, "0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset1_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset1_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset1_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset1_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset1_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset2_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset2_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset2_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset2_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset2_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset3_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset3_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset3_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset3_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset3_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset4_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset4_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset4_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset4_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_2, "ptz_preset_profile_2", "preset4_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+
+  /* PTZ Preset Profile 3 - 4 presets max per profile */
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset_count", CONFIG_TYPE_INT, 0, 0, 4, 0, "0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset1_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset1_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset1_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset1_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset1_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset2_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset2_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset2_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset2_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset2_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset3_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset3_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset3_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset3_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset3_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset4_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset4_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset4_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset4_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_3, "ptz_preset_profile_3", "preset4_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+
+  /* PTZ Preset Profile 4 - 4 presets max per profile */
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset_count", CONFIG_TYPE_INT, 0, 0, 4, 0, "0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset1_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset1_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset1_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset1_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset1_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset2_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset2_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset2_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset2_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset2_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset3_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset3_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset3_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset3_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset3_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset4_token", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset4_name", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_STANDARD, ""},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset4_pan", CONFIG_TYPE_FLOAT, 0, -180, 180, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset4_tilt", CONFIG_TYPE_FLOAT, 0, -90, 90, 0, "0.0"},
+  {CONFIG_SECTION_PTZ_PRESET_PROFILE_4, "ptz_preset_profile_4", "preset4_zoom", CONFIG_TYPE_FLOAT, 0, 0, 1, 0, "0.0"},
+
+  /* Imaging Section */
+  {CONFIG_SECTION_IMAGING, "imaging", "brightness", CONFIG_TYPE_INT, 0, -100, 100, 0, "0"},
+  {CONFIG_SECTION_IMAGING, "imaging", "contrast", CONFIG_TYPE_INT, 0, -100, 100, 0, "0"},
+  {CONFIG_SECTION_IMAGING, "imaging", "saturation", CONFIG_TYPE_INT, 0, -100, 100, 0, "0"},
+  {CONFIG_SECTION_IMAGING, "imaging", "sharpness", CONFIG_TYPE_INT, 0, -100, 100, 0, "0"},
+  {CONFIG_SECTION_IMAGING, "imaging", "hue", CONFIG_TYPE_INT, 0, -180, 180, 0, "0"},
+
+  /* Auto Day/Night Section */
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "mode", CONFIG_TYPE_INT, 0, 0, 2, 0, "0"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "day_to_night_threshold", CONFIG_TYPE_INT, 0, 0, 100, 0, "30"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "night_to_day_threshold", CONFIG_TYPE_INT, 0, 0, 100, 0, "70"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "lock_time_seconds", CONFIG_TYPE_INT, 0, 1, 600, 0, "10"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "ir_led_mode", CONFIG_TYPE_INT, 0, 0, 2, 0, "2"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "ir_led_level", CONFIG_TYPE_INT, 0, 0, 100, 0, "1"},
+  {CONFIG_SECTION_AUTO_DAYNIGHT, "imaging_auto", "enable_auto_switching", CONFIG_TYPE_INT, 0, 0, 1, 0, "1"},
+
+  /* Snapshot Configuration (Service Integration - T086) */
+  {CONFIG_SECTION_SNAPSHOT, "snapshot", "width", CONFIG_TYPE_INT, 0, 160, 2048, 0, "640"},
+  {CONFIG_SECTION_SNAPSHOT, "snapshot", "height", CONFIG_TYPE_INT, 0, 120, 2048, 0, "480"},
+  {CONFIG_SECTION_SNAPSHOT, "snapshot", "quality", CONFIG_TYPE_INT, 0, 1, 100, 0, "85"},
+  {CONFIG_SECTION_SNAPSHOT, "snapshot", "format", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_SHORT, "jpeg"},
+};
+
+static const size_t g_config_schema_count = sizeof(g_config_schema) / sizeof(g_config_schema[0]);
+
+/* Forward declarations */
+static int config_runtime_validate_section(config_section_t section);
+static int config_runtime_validate_key(const char* key);
+static void* config_runtime_get_section_ptr(config_section_t section);
+static void* config_runtime_get_field_ptr(config_section_t section, const char* key, config_value_type_t* out_type);
+static const config_schema_entry_t* config_runtime_find_schema_entry(config_section_t section, const char* key);
+static int config_runtime_validate_int_value(const config_schema_entry_t* schema, int value);
+static int config_runtime_validate_float_value(const config_schema_entry_t* schema, float value);
+static int config_runtime_validate_string_value(const config_schema_entry_t* schema, const char* value);
+static int config_runtime_find_queue_entry(config_section_t section, const char* key);
+static int config_runtime_validate_username(const char* username);
+static int config_runtime_find_user_index(const char* username);
+static int config_runtime_find_free_user_slot(void);
+
+/* ============================================================================
+ * PUBLIC API - Initialization & Lifecycle
+ * ============================================================================ */
+
+/**
+ * @brief Bootstrap the runtime configuration manager
+ */
+int config_runtime_init(struct application_config* cfg) {
+  if (cfg == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (g_config_runtime_initialized) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_ALREADY_EXISTS;
+  }
+
+  g_config_runtime_app_config = cfg;
+  g_config_runtime_generation = 0;
+  g_config_runtime_initialized = 1;
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Shutdown the runtime configuration manager
+ */
+int config_runtime_cleanup(void) {
+  int persist_count = 0;
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Flush any pending persistence updates before shutdown */
+  pthread_mutex_lock(&g_persistence_queue_mutex);
+  persist_count = (int)g_persistence_queue_count;
+  pthread_mutex_unlock(&g_persistence_queue_mutex);
+
+  if (persist_count > 0) {
+    platform_log_info("[CONFIG] Flushing %d pending configuration updates to disk before shutdown\n", persist_count);
+    config_runtime_process_persistence_queue();
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+  g_config_runtime_app_config = NULL;
+  g_config_runtime_initialized = 0;
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Clear persistence queue after flush */
+  pthread_mutex_lock(&g_persistence_queue_mutex);
+  g_persistence_queue_count = 0;
+  pthread_mutex_unlock(&g_persistence_queue_mutex);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Check if the runtime configuration manager is initialized
+ */
+int config_runtime_is_initialized(void) {
+  int initialized = 0;
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+  initialized = g_config_runtime_initialized;
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  return initialized;
+}
+
+/**
+ * @brief Apply default values for all configuration parameters
+ *
+ * Iterates through the schema and applies default_literal values to all
+ * configuration fields. Uses direct field assignment (not setter functions)
+ * to avoid queueing defaults for persistence.
+ */
+int config_runtime_apply_defaults(void) {
+  size_t entry_idx = 0;
+  size_t applied_count = 0;
+  size_t skipped_count = 0;
+  char* endptr = NULL;
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Schema-driven default loading - iterate through all schema entries */
+  for (entry_idx = 0; entry_idx < g_config_schema_count; entry_idx++) {
+    const config_schema_entry_t* entry = &g_config_schema[entry_idx];
+    config_value_type_t field_type = entry->type;
+    void* field_ptr = NULL;
+
+    /* Skip entries without default values */
+    if (entry->default_literal == NULL || entry->default_literal[0] == '\0') {
+      skipped_count++;
+      continue;
+    }
+
+    /* Get pointer to the configuration field */
+    field_ptr = config_runtime_get_field_ptr(entry->section, entry->key, &field_type);
+    if (field_ptr == NULL) {
+      /* Field doesn't exist in current config structure - skip silently */
+      skipped_count++;
+      continue;
+    }
+
+    /* Parse and apply default value based on type */
+    switch (entry->type) {
+    case CONFIG_TYPE_INT:
+    case CONFIG_TYPE_BOOL: {
+      long parsed_value = strtol(entry->default_literal, &endptr, CONFIG_DECIMAL_BASE);
+      if (endptr != entry->default_literal && *endptr == '\0') {
+        *(int*)field_ptr = (int)parsed_value;
+        applied_count++;
+      } else {
+        platform_log_warning("[CONFIG] Failed to parse int default for %s.%s: '%s'\n", entry->section_name, entry->key, entry->default_literal);
+        skipped_count++;
+      }
+      break;
+    }
+
+    case CONFIG_TYPE_FLOAT: {
+      double parsed_value = strtod(entry->default_literal, &endptr);
+      if (endptr != entry->default_literal && *endptr == '\0') {
+        *(float*)field_ptr = (float)parsed_value;
+        applied_count++;
+      } else {
+        platform_log_warning("[CONFIG] Failed to parse float default for %s.%s: '%s'\n", entry->section_name, entry->key, entry->default_literal);
+        skipped_count++;
+      }
+      break;
+    }
+
+    case CONFIG_TYPE_STRING: {
+      char* dest = (char*)field_ptr;
+      size_t max_len = entry->max_length;
+
+      /* Safe string copy with bounds checking */
+      if (max_len > 0) {
+        strncpy(dest, entry->default_literal, max_len - 1);
+        dest[max_len - 1] = '\0';
+      } else {
+        /* Fallback for strings without explicit max_length */
+        strncpy(dest, entry->default_literal, CONFIG_STRING_MAX_LEN_DEFAULT - 1);
+        dest[CONFIG_STRING_MAX_LEN_DEFAULT - 1] = '\0';
+      }
+      applied_count++;
+      break;
+    }
+
+    default:
+      /* Unknown type - skip */
+      skipped_count++;
+      break;
+    }
+  }
+
+  /* Increment generation counter to signal configuration change */
+  g_config_runtime_generation++;
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Log summary for diagnostics */
+  platform_log_debug("[CONFIG] Applied %zu defaults, skipped %zu entries\n", applied_count, skipped_count);
+
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
+ * PUBLIC API - Basic Type Getters
+ * ============================================================================ */
+
+/**
+ * @brief Get integer configuration value with validation
+ */
+
+int config_runtime_get_int(config_section_t section, const char* key, int* out_value) {
+  config_value_type_t field_type = CONFIG_TYPE_INT;
+  void* field_ptr = NULL;
+
+  if (key == NULL || out_value == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_section(section) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_key(key) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Get pointer to the field */
+  field_ptr = config_runtime_get_field_ptr(section, key, &field_type);
+  if (field_ptr == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+
+  /* Validate type matches */
+  if (field_type != CONFIG_TYPE_INT && field_type != CONFIG_TYPE_BOOL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Copy the value */
+  *out_value = *(int*)field_ptr;
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Get string configuration value with validation
+ */
+int config_runtime_get_string(config_section_t section, const char* key, char* out_value, size_t buffer_size) {
+  config_value_type_t field_type = CONFIG_TYPE_STRING;
+  void* field_ptr = NULL;
+  const char* str_value = NULL;
+  int result = 0;
+
+  if (key == NULL || out_value == NULL || buffer_size == 0) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_section(section) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_key(key) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Get pointer to the field */
+  field_ptr = config_runtime_get_field_ptr(section, key, &field_type);
+  if (field_ptr == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+
+  /* Validate type matches */
+  if (field_type != CONFIG_TYPE_STRING) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Copy the string safely */
+  str_value = (const char*)field_ptr;
+  result = snprintf(out_value, buffer_size, "%s", str_value);
+
+  /* Check for truncation */
+  if (result < 0 || (size_t)result >= buffer_size) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_INVALID;
+  }
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Get boolean configuration value with validation
+ */
+int config_runtime_get_bool(config_section_t section, const char* key, int* out_value) {
+  /* Booleans are stored as integers */
+  return config_runtime_get_int(section, key, out_value);
+}
+
+/**
+ * @brief Get float configuration value with validation
+ */
+int config_runtime_get_float(config_section_t section, const char* key, float* out_value) {
+  config_value_type_t field_type = CONFIG_TYPE_FLOAT;
+
+  if (key == NULL || out_value == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_section(section) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_key(key) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Get pointer to the field */
+  void* field_ptr = config_runtime_get_field_ptr(section, key, &field_type);
+  if (field_ptr == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+
+  /* Type must be int or float */
+  if (field_type == CONFIG_TYPE_INT) {
+    *out_value = (float)(*(int*)field_ptr);
+  } else if (field_type == CONFIG_TYPE_FLOAT) {
+    *out_value = *(float*)field_ptr;
+  } else {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_INVALID;
+  }
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
+ * PUBLIC API - Basic Type Setters
+ * ============================================================================ */
+
+/**
+ * @brief Set integer configuration value with validation
+ */
+
+int config_runtime_set_int(config_section_t section, const char* key, int value) {
+  config_value_type_t field_type = CONFIG_TYPE_INT;
+  void* field_ptr = NULL;
+  const config_schema_entry_t* schema = NULL;
+
+  if (key == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_section(section) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_key(key) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Get pointer to the field */
+  field_ptr = config_runtime_get_field_ptr(section, key, &field_type);
+  if (field_ptr == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+
+  /* Validate type matches */
+  if (field_type != CONFIG_TYPE_INT && field_type != CONFIG_TYPE_BOOL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Find schema entry for bounds validation */
+  schema = config_runtime_find_schema_entry(section, key);
+  if (schema != NULL) {
+    /* Validate value against schema bounds */
+    if (config_runtime_validate_int_value(schema, value) != ONVIF_SUCCESS) {
+      pthread_mutex_unlock(&g_config_runtime_mutex);
+      return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+  }
+
+  /* Set the value */
+  *(int*)field_ptr = value;
+
+  /* Increment generation counter to signal change */
+  g_config_runtime_generation++;
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Queue for async persistence */
+  config_runtime_queue_persistence_update(section, key, &value, CONFIG_TYPE_INT);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Set string configuration value with validation
+ */
+int config_runtime_set_string(config_section_t section, const char* key, const char* value) {
+  config_value_type_t field_type = CONFIG_TYPE_STRING;
+  void* field_ptr = NULL;
+  char* str_field = NULL;
+  const config_schema_entry_t* schema = NULL;
+  size_t max_len = CONFIG_STRING_MAX_LEN_DEFAULT;
+
+  if (key == NULL || value == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_section(section) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_key(key) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Get pointer to the field */
+  field_ptr = config_runtime_get_field_ptr(section, key, &field_type);
+  if (field_ptr == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+
+  /* Validate type matches */
+  if (field_type != CONFIG_TYPE_STRING) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Find schema entry for length validation */
+  schema = config_runtime_find_schema_entry(section, key);
+  if (schema != NULL) {
+    /* Validate value against schema */
+    if (config_runtime_validate_string_value(schema, value) != ONVIF_SUCCESS) {
+      pthread_mutex_unlock(&g_config_runtime_mutex);
+      return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+    max_len = schema->max_length;
+  } else {
+    /* Fallback: Determine max length based on section */
+    if (section == CONFIG_SECTION_LOGGING) {
+      max_len = CONFIG_STRING_MAX_LEN_SHORT;
+    } else if (section == CONFIG_SECTION_ONVIF || section == CONFIG_SECTION_DEVICE) {
+      max_len = CONFIG_STRING_MAX_LEN_STANDARD;
+    }
+  }
+
+  /* Copy the string safely */
+  str_field = (char*)field_ptr;
+  strncpy(str_field, value, max_len - 1);
+  str_field[max_len - 1] = '\0'; /* Ensure null termination */
+
+  /* Increment generation counter to signal change */
+  g_config_runtime_generation++;
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Queue for async persistence */
+  config_runtime_queue_persistence_update(section, key, value, CONFIG_TYPE_STRING);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Set boolean configuration value with validation
+ */
+int config_runtime_set_bool(config_section_t section, const char* key, int value) {
+  /* Booleans are stored as integers */
+  return config_runtime_set_int(section, key, value);
+}
+
+/**
+ * @brief Set float configuration value with validation
+ */
+int config_runtime_set_float(config_section_t section, const char* key, float value) {
+  config_value_type_t field_type = CONFIG_TYPE_FLOAT;
+  void* field_ptr = NULL;
+
+  if (key == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_section(section) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (config_runtime_validate_key(key) != ONVIF_SUCCESS) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Get pointer to the field */
+  field_ptr = config_runtime_get_field_ptr(section, key, &field_type);
+  if (field_ptr == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+
+  /* Type must be float or int (for conversion) */
+  if (field_type == CONFIG_TYPE_FLOAT) {
+    *(float*)field_ptr = value;
+  } else if (field_type == CONFIG_TYPE_INT) {
+    *(int*)field_ptr = (int)value;
+  } else {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_INVALID;
+  }
+
+  g_config_runtime_generation++;
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Queue for async persistence */
+  config_runtime_queue_persistence_update(section, key, &value, CONFIG_TYPE_FLOAT);
+
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
+ * PUBLIC API - Runtime Status & Snapshot
+ * ============================================================================ */
+
+/**
+ * @brief Get current configuration snapshot
+ */
+const struct application_config* config_runtime_snapshot(void) {
+  const struct application_config* snapshot = NULL;
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (g_config_runtime_initialized && g_config_runtime_app_config != NULL) {
+    snapshot = g_config_runtime_app_config;
+  }
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  return snapshot;
+}
+
+/**
+ * @brief Get configuration schema entries
+ */
+const config_schema_entry_t* config_runtime_get_schema(size_t* count) {
+  if (count == NULL) {
+    return NULL;
+  }
+
+  *count = g_config_schema_count;
+  return g_config_schema;
+}
+
+/**
+ * @brief Get current configuration generation counter
+ */
+uint32_t config_runtime_get_generation(void) {
+  uint32_t generation = 0;
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+  generation = g_config_runtime_generation;
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  return generation;
+}
+
+/* Persistence Queue Implementation (User Story 3) */
+
+/**
+ * @brief Find existing queue entry for coalescing
+ *
+ * @param[in] section Configuration section
+ * @param[in] key Configuration key
+ * @return Index of existing entry, or -1 if not found
+ */
+static int config_runtime_find_queue_entry(config_section_t section, const char* key) {
+  size_t idx = 0;
+
+  for (idx = 0; idx < g_persistence_queue_count; idx++) {
+    if (g_persistence_queue[idx].section == section && strcmp(g_persistence_queue[idx].key, key) == 0) {
+      return (int)idx;
+    }
+  }
+
+  return -1;
+}
+
+/* ============================================================================
+ * PUBLIC API - Persistence Queue Management
+ * ============================================================================ */
+
+/**
+ * @brief Queue a configuration update for async persistence
+ *
+ * This function implements coalescing: multiple updates to the same key
+ * will replace the previous queued value rather than adding a new entry.
+ */
+int config_runtime_queue_persistence_update(config_section_t section, const char* key, const void* value, config_value_type_t type) {
+  int existing_index = -1;
+  persistence_queue_entry_t* entry = NULL;
+
+  if (key == NULL || value == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_persistence_queue_mutex);
+
+  /* Check for existing entry (coalescing) */
+  existing_index = config_runtime_find_queue_entry(section, key);
+
+  if (existing_index >= 0) {
+    /* Update existing entry (coalescing) */
+    entry = &g_persistence_queue[existing_index];
+  } else {
+    /* Add new entry */
+    if (g_persistence_queue_count >= CONFIG_PERSISTENCE_QUEUE_MAX) {
+      pthread_mutex_unlock(&g_persistence_queue_mutex);
+      return ONVIF_ERROR_RESOURCE_LIMIT;
+    }
+
+    entry = &g_persistence_queue[g_persistence_queue_count];
+    g_persistence_queue_count++;
+
+    /* Initialize entry */
+    entry->section = section;
+    strncpy(entry->key, key, sizeof(entry->key) - 1);
+    entry->key[sizeof(entry->key) - 1] = '\0';
+    entry->type = type;
+  }
+
+  /* Copy the value based on type */
+  switch (type) {
+  case CONFIG_TYPE_INT:
+  case CONFIG_TYPE_BOOL:
+    entry->value.int_value = *(const int*)value;
+    break;
+
+  case CONFIG_TYPE_FLOAT:
+    entry->value.float_value = *(const float*)value;
+    break;
+
+  case CONFIG_TYPE_STRING:
+    strncpy(entry->value.string_value, (const char*)value, sizeof(entry->value.string_value) - 1);
+    entry->value.string_value[sizeof(entry->value.string_value) - 1] = '\0';
+    break;
+
+  default:
+    pthread_mutex_unlock(&g_persistence_queue_mutex);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Update timestamp */
+  entry->timestamp = (uint64_t)time(NULL);
+
+  pthread_mutex_unlock(&g_persistence_queue_mutex);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Process pending persistence queue entries
+ *
+ * Writes all queued configuration updates to persistent storage.
+ * This function is called during shutdown or can be called periodically.
+ */
+int config_runtime_process_persistence_queue(void) {
+  int result = ONVIF_SUCCESS;
+  size_t queue_count = 0;
+
+  pthread_mutex_lock(&g_persistence_queue_mutex);
+  queue_count = g_persistence_queue_count;
+  pthread_mutex_unlock(&g_persistence_queue_mutex);
+
+  /* Early return if queue is empty */
+  if (queue_count == 0) {
+    return ONVIF_SUCCESS;
+  }
+
+  /* Save the current runtime configuration to disk */
+  result = config_storage_save(ONVIF_CONFIG_FILE, NULL);
+
+  if (result != ONVIF_SUCCESS) {
+    platform_log_error("[CONFIG] Failed to persist %zu configuration updates to %s (error=%d (%s))\n", queue_count, ONVIF_CONFIG_FILE, result, onvif_error_to_string(result));
+    /* Don't clear queue on failure - allow retry */
+    return result;
+  }
+
+  /* Success - clear the queue */
+  pthread_mutex_lock(&g_persistence_queue_mutex);
+  g_persistence_queue_count = 0;
+  pthread_mutex_unlock(&g_persistence_queue_mutex);
+
+  platform_log_debug("[CONFIG] Successfully persisted %zu configuration updates to %s\n", queue_count, ONVIF_CONFIG_FILE);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Get persistence queue status
+ *
+ * @return Number of pending operations, or -1 on error
+ */
+int config_runtime_get_persistence_status(void) {
+  int count = 0;
+
+  pthread_mutex_lock(&g_persistence_queue_mutex);
+  count = (int)g_persistence_queue_count;
+  pthread_mutex_unlock(&g_persistence_queue_mutex);
+
+  return count;
+}
+
+/* ============================================================================
+ * PUBLIC API - Stream Profile Management
+ * ============================================================================ */
+
+/**
+ * @brief Get stream profile configuration
+ */
+int config_runtime_get_stream_profile(int profile_index, video_config_t* profile) {
+  config_section_t section = CONFIG_SECTION_ONVIF;
+  int result = ONVIF_ERROR;
+
+  /* Validate parameters */
+  if (profile_index < 0 || profile_index > 3) {
+    platform_log_error("[CONFIG] Invalid profile index: %d (valid range: 0-3)\n", profile_index);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (profile == NULL) {
+    platform_log_error("[CONFIG] NULL profile pointer\n");
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Check initialization */
+  pthread_mutex_lock(&g_config_runtime_mutex);
+  if (!g_config_runtime_initialized) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Map profile index to section */
+  section = CONFIG_SECTION_STREAM_PROFILE_1 + profile_index;
+
+  /* Retrieve all profile parameters */
+  result = config_runtime_get_string(section, "name", profile->name, sizeof(profile->name));
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_get_int(section, "width", &profile->width);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_get_int(section, "height", &profile->height);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_get_int(section, "fps", &profile->fps);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_get_int(section, "bitrate", &profile->bitrate);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_get_int(section, "gop_size", &profile->gop_size);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_get_int(section, "profile", &profile->profile);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_get_int(section, "codec_type", &profile->codec_type);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_get_int(section, "br_mode", &profile->br_mode);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  platform_log_debug("[CONFIG] Retrieved stream profile %d: %dx%d@%dfps, %dkbps\n", profile_index + 1, profile->width, profile->height, profile->fps,
+                     profile->bitrate);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Set stream profile configuration
+ */
+int config_runtime_set_stream_profile(int profile_index, const video_config_t* profile) {
+  config_section_t section = CONFIG_SECTION_ONVIF;
+  int result = ONVIF_ERROR;
+
+  /* Validate parameters */
+  if (profile_index < 0 || profile_index > 3) {
+    platform_log_error("[CONFIG] Invalid profile index: %d (valid range: 0-3)\n", profile_index);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (profile == NULL) {
+    platform_log_error("[CONFIG] NULL profile pointer\n");
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate profile parameters first */
+  result = config_runtime_validate_stream_profile(profile);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Check initialization */
+  pthread_mutex_lock(&g_config_runtime_mutex);
+  if (!g_config_runtime_initialized) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Map profile index to section */
+  section = CONFIG_SECTION_STREAM_PROFILE_1 + profile_index;
+
+  /* Set all profile parameters (schema validation happens in set_int/set_string) */
+  result = config_runtime_set_string(section, "name", profile->name);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_set_int(section, "width", profile->width);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_set_int(section, "height", profile->height);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_set_int(section, "fps", profile->fps);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_set_int(section, "bitrate", profile->bitrate);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_set_int(section, "gop_size", profile->gop_size);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_set_int(section, "profile", profile->profile);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_set_int(section, "codec_type", profile->codec_type);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  result = config_runtime_set_int(section, "br_mode", profile->br_mode);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  platform_log_info("[CONFIG] Updated stream profile %d: %dx%d@%dfps, %dkbps\n", profile_index + 1, profile->width, profile->height, profile->fps,
+                    profile->bitrate);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Validate stream profile parameters
+ */
+int config_runtime_validate_stream_profile(const video_config_t* profile) {
+  const config_schema_entry_t* schema_entry = NULL;
+
+  if (profile == NULL) {
+    platform_log_error("[CONFIG] NULL profile pointer for validation\n");
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate width */
+  schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "width");
+  if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->width) != ONVIF_SUCCESS) {
+    platform_log_error("[CONFIG] Invalid width: %d (valid range: %d-%d)\n", profile->width, schema_entry->min_value, schema_entry->max_value);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate height */
+  schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "height");
+  if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->height) != ONVIF_SUCCESS) {
+    platform_log_error("[CONFIG] Invalid height: %d (valid range: %d-%d)\n", profile->height, schema_entry->min_value, schema_entry->max_value);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate FPS */
+  schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "fps");
+  if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->fps) != ONVIF_SUCCESS) {
+    platform_log_error("[CONFIG] Invalid FPS: %d (valid range: %d-%d)\n", profile->fps, schema_entry->min_value, schema_entry->max_value);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate bitrate */
+  schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "bitrate");
+  if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->bitrate) != ONVIF_SUCCESS) {
+    platform_log_error("[CONFIG] Invalid bitrate: %d (valid range: %d-%d kbps)\n", profile->bitrate, schema_entry->min_value,
+                       schema_entry->max_value);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate GOP size */
+  schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "gop_size");
+  if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->gop_size) != ONVIF_SUCCESS) {
+    platform_log_error("[CONFIG] Invalid GOP size: %d (valid range: %d-%d)\n", profile->gop_size, schema_entry->min_value, schema_entry->max_value);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate profile */
+  schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "profile");
+  if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->profile) != ONVIF_SUCCESS) {
+    platform_log_error("[CONFIG] Invalid profile: %d (valid range: %d-%d)\n", profile->profile, schema_entry->min_value, schema_entry->max_value);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate codec type */
+  schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "codec_type");
+  if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->codec_type) != ONVIF_SUCCESS) {
+    platform_log_error("[CONFIG] Invalid codec type: %d (valid range: %d-%d)\n", profile->codec_type, schema_entry->min_value,
+                       schema_entry->max_value);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate bitrate mode */
+  schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_STREAM_PROFILE_1, "br_mode");
+  if (schema_entry && config_runtime_validate_int_value(schema_entry, profile->br_mode) != ONVIF_SUCCESS) {
+    platform_log_error("[CONFIG] Invalid bitrate mode: %d (valid range: %d-%d)\n", profile->br_mode, schema_entry->min_value,
+                       schema_entry->max_value);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  platform_log_debug("[CONFIG] Stream profile validation passed: %dx%d@%dfps, %dkbps\n", profile->width, profile->height, profile->fps,
+                     profile->bitrate);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Get stream profile count
+ */
+int config_runtime_get_stream_profile_count(void) {
+  return 4; /* Fixed at 4 profiles per FR-012, FR-013 */
+}
+
+/* ============================================================================
+ * PUBLIC API - PTZ Preset Profile Management
+ * ============================================================================ */
+
+/**
+ * @brief Get PTZ presets for a specific profile
+ */
+int config_runtime_get_ptz_profile_presets(int profile_index, ptz_preset_list_t* presets) {
+  config_section_t section = CONFIG_SECTION_ONVIF;
+  int result = ONVIF_ERROR;
+  int idx = 0;
+  char key[CONFIG_STRING_MEDIUM_LEN];
+
+  /* Validate parameters */
+  if (profile_index < 0 || profile_index > 3) {
+    platform_log_error("[CONFIG] Invalid PTZ profile index: %d (valid range: 0-3)\n", profile_index);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (presets == NULL) {
+    platform_log_error("[CONFIG] NULL presets pointer\n");
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Check initialization - assume mutex is already held by caller */
+  if (!g_config_runtime_initialized) {
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Map profile index to section */
+  section = CONFIG_SECTION_PTZ_PRESET_PROFILE_1 + profile_index;
+
+  /* Get preset count */
+  result = config_runtime_get_int(section, "preset_count", &presets->preset_count);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Retrieve each preset */
+  for (idx = 0; idx < presets->preset_count && idx < 4; idx++) {
+    /* Get token - snprintf return value safe to ignore (max 13 chars in 64-byte buffer) */
+    (void)snprintf(key, sizeof(key), "preset%d_token", idx + 1);
+    result = config_runtime_get_string(section, key, presets->presets[idx].token, sizeof(presets->presets[idx].token));
+    if (result != ONVIF_SUCCESS) {
+      return result;
+    }
+
+    /* Get name */
+    (void)snprintf(key, sizeof(key), "preset%d_name", idx + 1);
+    result = config_runtime_get_string(section, key, presets->presets[idx].name, sizeof(presets->presets[idx].name));
+    if (result != ONVIF_SUCCESS) {
+      return result;
+    }
+
+    /* Get pan */
+    (void)snprintf(key, sizeof(key), "preset%d_pan", idx + 1);
+    result = config_runtime_get_float(section, key, &presets->presets[idx].ptz_position.pan_tilt.x);
+    if (result != ONVIF_SUCCESS) {
+      return result;
+    }
+
+    /* Get tilt */
+    (void)snprintf(key, sizeof(key), "preset%d_tilt", idx + 1);
+    result = config_runtime_get_float(section, key, &presets->presets[idx].ptz_position.pan_tilt.y);
+    if (result != ONVIF_SUCCESS) {
+      return result;
+    }
+
+    /* Get zoom */
+    (void)snprintf(key, sizeof(key), "preset%d_zoom", idx + 1);
+    result = config_runtime_get_float(section, key, &presets->presets[idx].ptz_position.zoom);
+    if (result != ONVIF_SUCCESS) {
+      return result;
+    }
+
+    /* Set space URI (empty for now, will be set by PTZ service) */
+    presets->presets[idx].ptz_position.space[0] = '\0';
+  }
+
+  platform_log_debug("[CONFIG] Retrieved %d PTZ presets for profile %d\n", presets->preset_count, profile_index + 1);
+
+  return ONVIF_SUCCESS;
+}
+
+/* Helper function to set a single PTZ preset */
+static int config_runtime_set_single_ptz_preset(config_section_t section, int preset_index, const struct ptz_preset* preset) { // NOLINT
+  int result = ONVIF_ERROR;
+  char key[CONFIG_STRING_MEDIUM_LEN];
+
+  /* Set token */
+  (void)snprintf(key, sizeof(key), "preset%d_token", preset_index + 1);
+  result = config_runtime_set_string(section, key, preset->token);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Set name */
+  (void)snprintf(key, sizeof(key), "preset%d_name", preset_index + 1);
+  result = config_runtime_set_string(section, key, preset->name);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Set pan */
+  (void)snprintf(key, sizeof(key), "preset%d_pan", preset_index + 1);
+  result = config_runtime_set_float(section, key, preset->ptz_position.pan_tilt.x);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Set tilt */
+  (void)snprintf(key, sizeof(key), "preset%d_tilt", preset_index + 1);
+  result = config_runtime_set_float(section, key, preset->ptz_position.pan_tilt.y);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Set zoom */
+  (void)snprintf(key, sizeof(key), "preset%d_zoom", preset_index + 1);
+  result = config_runtime_set_float(section, key, preset->ptz_position.zoom);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/* Helper function to clear a single PTZ preset slot */
+static int config_runtime_clear_single_ptz_preset(config_section_t section, int preset_index) { // NOLINT
+  int result = ONVIF_ERROR;
+  char key[CONFIG_STRING_MEDIUM_LEN];
+
+  /* Clear token */
+  (void)snprintf(key, sizeof(key), "preset%d_token", preset_index + 1);
+  result = config_runtime_set_string(section, key, "");
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Clear name */
+  (void)snprintf(key, sizeof(key), "preset%d_name", preset_index + 1);
+  result = config_runtime_set_string(section, key, "");
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Reset pan to zero */
+  (void)snprintf(key, sizeof(key), "preset%d_pan", preset_index + 1);
+  result = config_runtime_set_float(section, key, 0.0F);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Reset tilt to zero */
+  (void)snprintf(key, sizeof(key), "preset%d_tilt", preset_index + 1);
+  result = config_runtime_set_float(section, key, 0.0F);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Reset zoom to zero */
+  (void)snprintf(key, sizeof(key), "preset%d_zoom", preset_index + 1);
+  result = config_runtime_set_float(section, key, 0.0F);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Set PTZ presets for a specific profile
+ */
+int config_runtime_set_ptz_profile_presets(int profile_index, const ptz_preset_list_t* presets) {
+  config_section_t section = CONFIG_SECTION_ONVIF;
+  int result = ONVIF_ERROR;
+  int idx = 0;
+
+  /* Validate parameters */
+  if (profile_index < 0 || profile_index > 3) {
+    platform_log_error("[CONFIG] Invalid PTZ profile index: %d (valid range: 0-3)\n", profile_index);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (presets == NULL) {
+    platform_log_error("[CONFIG] NULL presets pointer\n");
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate presets first */
+  result = config_runtime_validate_ptz_profile_presets(presets);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Check initialization - assume mutex is already held by caller */
+  if (!g_config_runtime_initialized) {
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Map profile index to section */
+  section = CONFIG_SECTION_PTZ_PRESET_PROFILE_1 + profile_index;
+
+  /* Set preset count */
+  result = config_runtime_set_int(section, "preset_count", presets->preset_count);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Set each preset using helper function */
+  for (idx = 0; idx < presets->preset_count && idx < 4; idx++) {
+    result = config_runtime_set_single_ptz_preset(section, idx, &presets->presets[idx]);
+    if (result != ONVIF_SUCCESS) {
+      return result;
+    }
+  }
+
+  /* Clear remaining preset slots using helper function */
+  for (idx = presets->preset_count; idx < 4; idx++) {
+    result = config_runtime_clear_single_ptz_preset(section, idx);
+    if (result != ONVIF_SUCCESS) {
+      return result;
+    }
+  }
+
+  platform_log_info("[CONFIG] Updated %d PTZ presets for profile %d\n", presets->preset_count, profile_index + 1);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Validate PTZ preset list parameters
+ */
+int config_runtime_validate_ptz_profile_presets(const ptz_preset_list_t* presets) {
+  const config_schema_entry_t* schema_entry = NULL;
+  int idx = 0;
+
+  if (presets == NULL) {
+    platform_log_error("[CONFIG] NULL presets pointer for validation\n");
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate preset count */
+  schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "preset_count");
+  if (schema_entry && config_runtime_validate_int_value(schema_entry, presets->preset_count) != ONVIF_SUCCESS) {
+    platform_log_error("[CONFIG] Invalid preset count: %d (valid range: %d-%d)\n", presets->preset_count, schema_entry->min_value,
+                       schema_entry->max_value);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate each preset's position values */
+  for (idx = 0; idx < presets->preset_count && idx < 4; idx++) {
+    /* Validate pan (-180 to 180) */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "preset1_pan");
+    if (schema_entry && config_runtime_validate_float_value(schema_entry, presets->presets[idx].ptz_position.pan_tilt.x) != ONVIF_SUCCESS) {
+      platform_log_error("[CONFIG] Invalid pan for preset %d: %.2f (valid range: %.2f-%.2f)\n", idx + 1,
+                         presets->presets[idx].ptz_position.pan_tilt.x, (float)schema_entry->min_value, (float)schema_entry->max_value);
+      return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate tilt (-90 to 90) */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "preset1_tilt");
+    if (schema_entry && config_runtime_validate_float_value(schema_entry, presets->presets[idx].ptz_position.pan_tilt.y) != ONVIF_SUCCESS) {
+      platform_log_error("[CONFIG] Invalid tilt for preset %d: %.2f (valid range: %.2f-%.2f)\n", idx + 1,
+                         presets->presets[idx].ptz_position.pan_tilt.y, (float)schema_entry->min_value, (float)schema_entry->max_value);
+      return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate zoom (0 to 1) */
+    schema_entry = config_runtime_find_schema_entry(CONFIG_SECTION_PTZ_PRESET_PROFILE_1, "preset1_zoom");
+    if (schema_entry && config_runtime_validate_float_value(schema_entry, presets->presets[idx].ptz_position.zoom) != ONVIF_SUCCESS) {
+      platform_log_error("[CONFIG] Invalid zoom for preset %d: %.2f (valid range: %.2f-%.2f)\n", idx + 1, presets->presets[idx].ptz_position.zoom,
+                         (float)schema_entry->min_value, (float)schema_entry->max_value);
+      return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    /* Validate token and name are not empty */
+    if (presets->presets[idx].token[0] == '\0') {
+      platform_log_error("[CONFIG] Empty token for preset %d\n", idx + 1);
+      return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+
+    if (presets->presets[idx].name[0] == '\0') {
+      platform_log_error("[CONFIG] Empty name for preset %d\n", idx + 1);
+      return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+  }
+
+  platform_log_debug("[CONFIG] PTZ preset list validation passed: %d presets\n", presets->preset_count);
+
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
+ * PUBLIC API - User Credential Management
+ * ============================================================================ */
+
+/**
+ * @brief Hash password using salted SHA256 from hash_utils
+ * Generates random salt and produces salt$hash format
+ */
+int config_runtime_hash_password(const char* password, char* hash_output, size_t output_size) {
+  /* Validate parameters */
+  if (password == NULL || hash_output == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Output buffer must hold salted hash: salt$hash format (128 bytes) */
+  if (output_size < ONVIF_PASSWORD_HASH_SIZE) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Use hash_utils salted password hashing */
+  return onvif_hash_password(password, hash_output, output_size);
+}
+
+/**
+ * @brief Verify password against stored salted hash
+ */
+int config_runtime_verify_password(const char* password, const char* stored_hash) {
+  int result = ONVIF_ERROR;
+
+  /* Validate parameters */
+  if (password == NULL || stored_hash == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Use hash_utils salted password verification */
+  result = onvif_verify_password(password, stored_hash);
+
+  /* Convert hash_utils result to config_runtime result */
+  if (result == ONVIF_SUCCESS) {
+    return ONVIF_SUCCESS;
+  }
+
+  if (result == ONVIF_ERROR_AUTH_FAILED) {
+    return ONVIF_ERROR_AUTHENTICATION_FAILED;
+  }
+
+  return result;
+}
+
+/**
+ * @brief Add a new user account
+ */
+int config_runtime_add_user(const char* username, const char* password) {
+  int user_index = -1;
+  int result = ONVIF_ERROR;
+  char password_hash[ONVIF_PASSWORD_HASH_SIZE] = {0};
+
+  /* Validate parameters */
+  if (username == NULL || password == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate username format */
+  result = config_runtime_validate_username(username);
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Check if user already exists */
+  user_index = config_runtime_find_user_index(username);
+  if (user_index >= 0) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_ALREADY_EXISTS;
+  }
+
+  /* Find free slot */
+  user_index = config_runtime_find_free_user_slot();
+  if (user_index < 0) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_OUT_OF_RESOURCES;
+  }
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Hash the password */
+  result = config_runtime_hash_password(password, password_hash, sizeof(password_hash));
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Add the user */
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  strncpy(g_config_runtime_app_config->users[user_index].username, username, MAX_USERNAME_LENGTH);
+  g_config_runtime_app_config->users[user_index].username[MAX_USERNAME_LENGTH] = '\0';
+
+  strncpy(g_config_runtime_app_config->users[user_index].password_hash, password_hash, MAX_PASSWORD_HASH_LENGTH);
+  g_config_runtime_app_config->users[user_index].password_hash[MAX_PASSWORD_HASH_LENGTH] = '\0';
+
+  g_config_runtime_app_config->users[user_index].active = 1;
+
+  g_config_runtime_generation++;
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  platform_log_info("[CONFIG] Added user: %s\n", username);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Remove a user account
+ */
+int config_runtime_remove_user(const char* username) {
+  int user_index = -1;
+
+  /* Validate parameters */
+  if (username == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Find user */
+  user_index = config_runtime_find_user_index(username);
+  if (user_index < 0) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+
+  /* Mark as inactive and clear data */
+  g_config_runtime_app_config->users[user_index].active = 0;
+  memset(g_config_runtime_app_config->users[user_index].username, 0, sizeof(g_config_runtime_app_config->users[user_index].username));
+  memset(g_config_runtime_app_config->users[user_index].password_hash, 0, sizeof(g_config_runtime_app_config->users[user_index].password_hash));
+
+  g_config_runtime_generation++;
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  platform_log_info("[CONFIG] Removed user: %s\n", username);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Update user password
+ */
+int config_runtime_update_user_password(const char* username, const char* new_password) {
+  int user_index = -1;
+  int result = ONVIF_ERROR;
+  char password_hash[ONVIF_PASSWORD_HASH_SIZE] = {0};
+
+  /* Validate parameters */
+  if (username == NULL || new_password == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Find user */
+  user_index = config_runtime_find_user_index(username);
+  if (user_index < 0) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Hash the new password */
+  result = config_runtime_hash_password(new_password, password_hash, sizeof(password_hash));
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  /* Update the password hash */
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  strncpy(g_config_runtime_app_config->users[user_index].password_hash, password_hash, MAX_PASSWORD_HASH_LENGTH);
+  g_config_runtime_app_config->users[user_index].password_hash[MAX_PASSWORD_HASH_LENGTH] = '\0';
+
+  g_config_runtime_generation++;
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  platform_log_info("[CONFIG] Updated password for user: %s\n", username);
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Authenticate user with username and password
+ */
+int config_runtime_authenticate_user(const char* username, const char* password) {
+  int user_index = -1;
+  int result = ONVIF_ERROR_INVALID_PARAMETER;
+
+  /* Validate parameters */
+  if (username == NULL || password == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Find user */
+  user_index = config_runtime_find_user_index(username);
+  if (user_index < 0) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+
+  /* Verify password against stored hash */
+  result = config_runtime_verify_password(password, g_config_runtime_app_config->users[user_index].password_hash);
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  return result;
+}
+
+/**
+ * @brief Get list of all usernames (T081)
+ */
+int config_runtime_enumerate_users(char usernames[][MAX_USERNAME_LENGTH + 1], int max_users, int* user_count) {
+  int idx = 0;
+  int count = 0;
+
+  /* Validate parameters */
+  if (usernames == NULL || user_count == NULL || max_users <= 0) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  pthread_mutex_lock(&g_config_runtime_mutex);
+
+  if (!g_config_runtime_initialized || g_config_runtime_app_config == NULL) {
+    pthread_mutex_unlock(&g_config_runtime_mutex);
+    return ONVIF_ERROR_NOT_INITIALIZED;
+  }
+
+  /* Iterate through all user slots and copy active usernames */
+  for (idx = 0; idx < MAX_USERS && count < max_users; idx++) {
+    if (g_config_runtime_app_config->users[idx].active) {
+      strncpy(usernames[count], g_config_runtime_app_config->users[idx].username, MAX_USERNAME_LENGTH);
+      usernames[count][MAX_USERNAME_LENGTH] = '\0';
+      count++;
+    }
+  }
+
+  *user_count = count;
+
+  pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  platform_log_debug("[CONFIG] Enumerated %d active users\n", count);
+
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
+ * PRIVATE HELPERS - Validation
+ * ============================================================================ */
+
+static int config_runtime_validate_section(config_section_t section) {
+  /* Validate that section is within reasonable bounds */
+  if (section < CONFIG_SECTION_ONVIF || section > CONFIG_SECTION_USER_8) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+  return ONVIF_SUCCESS;
+}
+
+static int config_runtime_validate_key(const char* key) {
+  if (key == NULL || key[0] == '\0') {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
+ * PRIVATE HELPERS - Schema & Field Access
+ * ============================================================================ */
+
+/**
+ * @brief Get pointer to configuration section structure
+ */
+static void* config_runtime_get_section_ptr(config_section_t section) {
+  if (g_config_runtime_app_config == NULL) {
+    return NULL;
+  }
+
+  switch (section) {
+  case CONFIG_SECTION_ONVIF:
+    return &g_config_runtime_app_config->onvif;
+  case CONFIG_SECTION_NETWORK:
+    return &g_config_runtime_app_config->network;
+  case CONFIG_SECTION_DEVICE:
+    return &g_config_runtime_app_config->device;
+  case CONFIG_SECTION_LOGGING:
+    return &g_config_runtime_app_config->logging;
+  case CONFIG_SECTION_SERVER:
+    return &g_config_runtime_app_config->server;
+  case CONFIG_SECTION_MAIN_STREAM:
+    return &g_config_runtime_app_config->main_stream;
+  case CONFIG_SECTION_SUB_STREAM:
+    return &g_config_runtime_app_config->sub_stream;
+  case CONFIG_SECTION_STREAM_PROFILE_1:
+    return &g_config_runtime_app_config->stream_profile_1;
+  case CONFIG_SECTION_STREAM_PROFILE_2:
+    return &g_config_runtime_app_config->stream_profile_2;
+  case CONFIG_SECTION_STREAM_PROFILE_3:
+    return &g_config_runtime_app_config->stream_profile_3;
+  case CONFIG_SECTION_STREAM_PROFILE_4:
+    return &g_config_runtime_app_config->stream_profile_4;
+  case CONFIG_SECTION_IMAGING:
+    return &g_config_runtime_app_config->imaging;
+  case CONFIG_SECTION_AUTO_DAYNIGHT:
+    return &g_config_runtime_app_config->auto_daynight;
+  case CONFIG_SECTION_SNAPSHOT:
+    return &g_config_runtime_app_config->snapshot;
+  case CONFIG_SECTION_PTZ_PRESET_PROFILE_1:
+    return &g_config_runtime_app_config->ptz_preset_profile_1;
+  case CONFIG_SECTION_PTZ_PRESET_PROFILE_2:
+    return &g_config_runtime_app_config->ptz_preset_profile_2;
+  case CONFIG_SECTION_PTZ_PRESET_PROFILE_3:
+    return &g_config_runtime_app_config->ptz_preset_profile_3;
+  case CONFIG_SECTION_PTZ_PRESET_PROFILE_4:
+    return &g_config_runtime_app_config->ptz_preset_profile_4;
+  default:
+    return NULL;
+  }
+}
+
+/**
+ * @brief Get pointer to specific field within a configuration section
+ *
+ * This function maps section/key pairs to actual struct field pointers.
+ * It also returns the type of the field for validation.
+ */
+static void* config_runtime_get_field_ptr(config_section_t section, const char* key, config_value_type_t* out_type) {
+  void* section_ptr = config_runtime_get_section_ptr(section);
+  if (section_ptr == NULL) {
+    return NULL;
+  }
+
+  /* Route to appropriate section handler */
+  switch (section) {
+  case CONFIG_SECTION_ONVIF:
+    return config_runtime_get_onvif_field_ptr((struct onvif_settings*)section_ptr, key, out_type);
+  case CONFIG_SECTION_NETWORK:
+    return config_runtime_get_network_field_ptr((struct network_settings*)section_ptr, key, out_type);
+  case CONFIG_SECTION_DEVICE:
+    return config_runtime_get_device_field_ptr((struct device_info*)section_ptr, key, out_type);
+  case CONFIG_SECTION_LOGGING:
+    return config_runtime_get_logging_field_ptr((struct logging_settings*)section_ptr, key, out_type);
+
+  case CONFIG_SECTION_SERVER:
+    return config_runtime_get_server_field_ptr((struct server_settings*)section_ptr, key, out_type);
+  case CONFIG_SECTION_STREAM_PROFILE_1:
+  case CONFIG_SECTION_STREAM_PROFILE_2:
+  case CONFIG_SECTION_STREAM_PROFILE_3:
+  case CONFIG_SECTION_STREAM_PROFILE_4:
+    return config_runtime_get_stream_profile_field_ptr((video_config_t*)section_ptr, key, out_type);
+  case CONFIG_SECTION_PTZ_PRESET_PROFILE_1:
+  case CONFIG_SECTION_PTZ_PRESET_PROFILE_2:
+  case CONFIG_SECTION_PTZ_PRESET_PROFILE_3:
+  case CONFIG_SECTION_PTZ_PRESET_PROFILE_4:
+    return config_runtime_get_ptz_preset_field_ptr((struct ptz_preset_profile*)section_ptr, key, out_type);
+  case CONFIG_SECTION_IMAGING:
+    return config_runtime_get_imaging_field_ptr((struct imaging_settings*)section_ptr, key, out_type);
+
+  case CONFIG_SECTION_AUTO_DAYNIGHT:
+    return config_runtime_get_auto_daynight_field_ptr((struct auto_daynight_config*)section_ptr, key, out_type);
+
+  case CONFIG_SECTION_SNAPSHOT:
+    return config_runtime_get_snapshot_field_ptr((struct snapshot_settings*)section_ptr, key, out_type);
+
+  default:
+    return NULL;
+  }
+}
+
+/**
+ * @brief Find schema entry for a given section and key
+ *
+ * @param[in] section Configuration section
+ * @param[in] key Configuration key
+ * @return Pointer to schema entry, or NULL if not found
+ */
+static const config_schema_entry_t* config_runtime_find_schema_entry(config_section_t section, const char* key) {
+  size_t idx = 0;
+
+  if (key == NULL) {
+    return NULL;
+  }
+
+  for (idx = 0; idx < g_config_schema_count; idx++) {
+    if (g_config_schema[idx].section == section && strcmp(g_config_schema[idx].key, key) == 0) {
+      return &g_config_schema[idx];
+    }
+  }
+
+  return NULL;
+}
+
+/**
+ * @brief Validate integer value against schema bounds
+ *
+ * @param[in] schema Schema entry with validation rules
+ * @param[in] value Value to validate
+ * @return ONVIF_SUCCESS if valid, error code otherwise
+ */
+static int config_runtime_validate_int_value(const config_schema_entry_t* schema, int value) {
+  validation_result_t validation_result;
+
+  if (schema == NULL) {
+    platform_log_error("[CONFIG] Schema validation failed: NULL schema pointer\n");
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Check if this is an integer or boolean type */
+  if (schema->type != CONFIG_TYPE_INT && schema->type != CONFIG_TYPE_BOOL) {
+    platform_log_error("[CONFIG] Schema validation failed for '%s.%s': Expected integer or boolean "
+                       "type, got type %d\n",
+                       schema->section_name, schema->key, schema->type);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Use common validation utility for integer bounds checking */
+  validation_result = validate_int(schema->key, value, schema->min_value, schema->max_value);
+
+  if (!validation_is_valid(&validation_result)) {
+    /* Log structured validation error */
+    platform_log_error("[CONFIG] Configuration validation failed for '%s.%s': %s (value=%d, min=%d, max=%d)\n", schema->section_name, schema->key,
+                       validation_get_error_message(&validation_result), value, schema->min_value, schema->max_value);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Validate float value against schema bounds
+ */
+static int config_runtime_validate_float_value(const config_schema_entry_t* schema, float value) {
+  if (schema == NULL) {
+    platform_log_error("[CONFIG] Schema validation failed: NULL schema pointer\n");
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Check if this is a float type */
+  if (schema->type != CONFIG_TYPE_FLOAT) {
+    platform_log_error("[CONFIG] Schema validation failed for '%s.%s': Expected float type, got type %d\n", schema->section_name, schema->key,
+                       schema->type);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Validate bounds (min_value and max_value are stored as ints in schema) */
+  float min = (float)schema->min_value;
+  float max = (float)schema->max_value;
+
+  if (value < min || value > max) {
+    platform_log_error("[CONFIG] Configuration validation failed for '%s.%s': Value %.2f out of "
+                       "range (min=%.2f, max=%.2f)\n",
+                       schema->section_name, schema->key, value, min, max);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Validate string value against schema constraints
+ *
+ * @param[in] schema Schema entry with validation rules
+ * @param[in] value String value to validate
+ * @return ONVIF_SUCCESS if valid, error code otherwise
+ */
+static int config_runtime_validate_string_value(const config_schema_entry_t* schema, const char* value) {
+  validation_result_t validation_result;
+
+  if (schema == NULL) {
+    platform_log_error("[CONFIG] String validation failed: NULL schema pointer\n");
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  if (value == NULL) {
+    platform_log_error("[CONFIG] String validation failed for '%s.%s': NULL value provided\n", schema->section_name, schema->key);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Check if this is a string type */
+  if (schema->type != CONFIG_TYPE_STRING) {
+    platform_log_error("[CONFIG] Schema validation failed for '%s.%s': Expected string type, got type %d\n", schema->section_name, schema->key,
+                       schema->type);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Use common validation utility for string validation */
+  /* Note: max_length includes null terminator, so we check against max_length-1 */
+  validation_result = validate_string(schema->key, value, 0, schema->max_length - 1, 1);
+
+  if (!validation_is_valid(&validation_result)) {
+    /* Log structured validation error */
+    platform_log_error("[CONFIG] Configuration validation failed for '%s.%s': %s (length=%zu, max=%zu)\n", schema->section_name, schema->key,
+                       validation_get_error_message(&validation_result), strlen(value), schema->max_length - 1);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Validate username format
+ * Username must be 3-32 alphanumeric characters
+ */
+static int config_runtime_validate_username(const char* username) {
+  size_t len = 0;
+  size_t idx = 0;
+
+  if (username == NULL) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  len = strlen(username);
+
+  /* Check length */
+  if (len < 3 || len > MAX_USERNAME_LENGTH) {
+    platform_log_error("[CONFIG] Invalid username length: %zu (valid range: 3-%d)\n", len, MAX_USERNAME_LENGTH);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* Check for alphanumeric characters only */
+  for (idx = 0; idx < len; idx++) {
+    if (!((username[idx] >= 'a' && username[idx] <= 'z') || (username[idx] >= 'A' && username[idx] <= 'Z') ||
+          (username[idx] >= '0' && username[idx] <= '9'))) {
+      platform_log_error("[CONFIG] Invalid character in username: '%c' at position %zu\n", username[idx], idx);
+      return ONVIF_ERROR_INVALID_PARAMETER;
+    }
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/* ============================================================================
+ * PRIVATE HELPERS - User Management
+ * ============================================================================ */
+
+/**
+ * @brief Find user index by username
+ * @return User index (0-7) if found, -1 if not found
+ */
+static int config_runtime_find_user_index(const char* username) {
+  int idx = 0;
+
+  if (username == NULL || g_config_runtime_app_config == NULL) {
+    return -1;
+  }
+
+  for (idx = 0; idx < MAX_USERS; idx++) {
+    if (g_config_runtime_app_config->users[idx].active && strcmp(g_config_runtime_app_config->users[idx].username, username) == 0) {
+      return idx;
+    }
+  }
+
+  return -1;
+}
+
+/**
+ * @brief Find first free user slot
+ * @return Free slot index (0-7) if found, -1 if all slots full
+ */
+static int config_runtime_find_free_user_slot(void) {
+  int idx = 0;
+
+  if (g_config_runtime_app_config == NULL) {
+    return -1;
+  }
+
+  for (idx = 0; idx < MAX_USERS; idx++) {
+    if (!g_config_runtime_app_config->users[idx].active) {
+      return idx;
+    }
+  }
+
+  return -1;
+}

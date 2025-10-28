@@ -22,12 +22,15 @@
 #include "common/time_utils.h"
 #include "imaging_service_optimization_tests.h"
 #include "mocks/buffer_pool_mock.h"
+#include "mocks/config_mock.h"
 #include "mocks/gsoap_mock.h"
 #include "mocks/mock_service_dispatcher.h"
 #include "mocks/platform_mock.h"
 #include "mocks/smart_response_mock.h"
 
 // ONVIF project includes
+#include "core/config/config.h"
+#include "core/config/config_runtime.h"
 #include "services/common/onvif_imaging_types.h"
 #include "services/common/service_dispatcher.h"
 #include "services/imaging/onvif_imaging.h"
@@ -104,71 +107,128 @@
  * Test Setup and Teardown
  * ============================================================================ */
 
-int setup_imaging_integration(void** state) {
-  (void)state;
+// Test state structure to hold both app_config and config pointers
+typedef struct {
+  struct application_config* app_config;
+  config_manager_t* config;
+} imaging_optimization_test_state_t;
 
+int setup_imaging_integration(void** state) {
   // Initialize memory manager for tracking
   memory_manager_init();
 
-  // Enable real functions for integration testing (test real service interactions)
+  // Allocate test state structure
+  imaging_optimization_test_state_t* test_state = calloc(1, sizeof(imaging_optimization_test_state_t));
+  assert_non_null(test_state);
+
+  // Heap-allocate application config structure (required for config_runtime_init)
+  test_state->app_config = calloc(1, sizeof(struct application_config));
+  assert_non_null(test_state->app_config);
+
+  // Initialize direct struct members (no allocation needed)
+  memset(&test_state->app_config->imaging, 0, sizeof(struct imaging_settings));
+  memset(&test_state->app_config->auto_daynight, 0, sizeof(struct auto_daynight_config));
+
+  // Enable real functions for integration testing BEFORE calling config_runtime_init
   service_dispatcher_mock_use_real_function(true);
   buffer_pool_mock_use_real_function(true);
+  config_mock_use_real_function(true);
   gsoap_mock_use_real_function(true);
   smart_response_mock_use_real_function(true);
 
-  // Configure platform mock expectations for imaging service initialization
-  // The imaging service init calls platform_irled_init(level) and applies VPSS settings
+  // Initialize runtime configuration system
+  int config_result = config_runtime_init(test_state->app_config);
+  assert_int_equal(ONVIF_SUCCESS, config_result);
 
-  // 1. IR LED initialization
-  expect_function_call(__wrap_platform_irled_init);
-  expect_any(__wrap_platform_irled_init, level);
-  will_return(__wrap_platform_irled_init, PLATFORM_SUCCESS);
+  // Apply default configuration values
+  config_result = config_runtime_apply_defaults();
+  assert_int_equal(ONVIF_SUCCESS, config_result);
 
-  // 2. VPSS effect settings (brightness, contrast, saturation, sharpness, hue)
-  //    Called during apply_imaging_settings_to_vpss() if vi_handle is non-NULL
-  //    Since we pass NULL to onvif_imaging_init(), vi_handle will be NULL, so these won't be called
-  //    No need to mock VPSS calls
+  // Initialize config manager for imaging service
+  test_state->config = malloc(sizeof(config_manager_t));
+  assert_non_null(test_state->config);
+  memset(test_state->config, 0, sizeof(config_manager_t));
+  test_state->config->app_config = test_state->app_config;
 
-  // Initialize service dispatcher
+  // Initialize service dispatcher first
   int result = onvif_service_dispatcher_init();
   if (result != ONVIF_SUCCESS) {
     printf("Failed to initialize service dispatcher: %d\n", result);
     return -1;
   }
 
-  // Initialize real imaging service
+  // Configure platform mock expectations for imaging service initialization
+  // The imaging service init calls platform_irled_init(level) and applies VPSS settings
+
+  // 1. IR LED initialization - expect to be called with a level from config (default is 1)
+  expect_function_call(__wrap_platform_irled_init);
+  expect_value(__wrap_platform_irled_init, level, 1);
+  will_return(__wrap_platform_irled_init, PLATFORM_SUCCESS);
+
+  // 2. IR LED mode setting - NOT called with default IR_LED_AUTO mode
+  // Only called if mode is IR_LED_ON or IR_LED_OFF, but default is IR_LED_AUTO
+
+  // 3. VPSS effect settings (brightness, contrast, saturation, sharpness, hue)
+  //    Called during apply_imaging_settings_to_vpss() if vi_handle is non-NULL
+  //    Since we pass NULL to onvif_imaging_init(), vi_handle will be NULL, so these won't be called
+  //    No need to mock VPSS calls
+
+  // Initialize imaging service handler for SOAP operations
+  result = onvif_imaging_service_init(test_state->config);
+  if (result != ONVIF_SUCCESS) {
+    printf("Failed to initialize imaging service handler: %d\n", result);
+    return -1;
+  }
+
+  // Initialize real imaging service AFTER handler is set up
   result = onvif_imaging_init(NULL);
   if (result != ONVIF_SUCCESS) {
     printf("Failed to initialize imaging service: %d\n", result);
     return -1;
   }
 
-  // Initialize imaging service handler for SOAP operations
-  result = onvif_imaging_service_init(NULL);
-  if (result != ONVIF_SUCCESS) {
-    printf("Failed to initialize imaging service handler: %d\n", result);
-    return -1;
-  }
-
+  *state = test_state;
   return 0;
 }
 
 int teardown_imaging_integration(void** state) {
-  (void)state;
+  imaging_optimization_test_state_t* test_state = (imaging_optimization_test_state_t*)*state;
 
   // Cleanup real imaging service (this unregisters from dispatcher)
   onvif_imaging_cleanup();
 
-  // Note: Don't cleanup dispatcher - keep it alive for next test
-  // The dispatcher mutex gets destroyed and can't be reinitialized
+  // Free config first, before leak checking
+  if (test_state && test_state->config) {
+    free(test_state->config);
+    test_state->config = NULL;
+  }
 
   // Cleanup memory manager
   memory_manager_cleanup();
 
-  // Restore mock behavior for subsequent tests
+  // Cleanup runtime configuration system (while real functions are still enabled)
+  config_runtime_cleanup();
+
+  // Free imaging and auto_daynight structures BEFORE freeing app_config
+  if (test_state && test_state->app_config) {
+    // All struct members are direct, no free needed
+
+    // Free heap-allocated app_config AFTER freeing its members
+    free(test_state->app_config);
+    test_state->app_config = NULL;
+  }
+
+  // Free test state structure
+  if (test_state) {
+    free(test_state);
+  }
+
+  // Restore mock behavior for subsequent tests (AFTER config cleanup)
   service_dispatcher_mock_use_real_function(false);
   buffer_pool_mock_use_real_function(false);
+  config_mock_use_real_function(false);
   gsoap_mock_use_real_function(false);
+  smart_response_mock_use_real_function(false);
 
   return 0;
 }
@@ -183,16 +243,14 @@ void test_integration_imaging_bulk_settings_validation(void** state) {
   printf("\nTest: Bulk Settings Validation Optimization\n");
   printf("----------------------------------------------------------\n");
 
-  struct imaging_settings settings = {
-    .brightness = BRIGHTNESS_BASELINE,
-    .contrast = CONTRAST_BASELINE,
-    .saturation = SATURATION_HIGH,
-    .sharpness = SHARPNESS_LOW,
-    .hue = HUE_SMALL_POS,
-    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
+  struct imaging_settings settings = {.brightness = BRIGHTNESS_BASELINE,
+                                      .contrast = CONTRAST_BASELINE,
+                                      .saturation = SATURATION_HIGH,
+                                      .sharpness = SHARPNESS_LOW,
+                                      .hue = HUE_SMALL_POS,
+                                      .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
 
   // First call - should validate and apply all parameters
-  // Note: This test now uses real platform functions instead of mocks
   int result = onvif_imaging_set_settings(&settings);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -229,12 +287,7 @@ void test_integration_imaging_batch_parameter_update_optimization(void** state) 
 
   // Set baseline settings
   struct imaging_settings baseline_settings = {
-    .brightness = 0,
-    .contrast = 0,
-    .saturation = 0,
-    .sharpness = 0,
-    .hue = 0,
-    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
+    .brightness = 0, .contrast = 0, .saturation = 0, .sharpness = 0, .hue = 0, .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
 
   int result = onvif_imaging_set_settings(&baseline_settings);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -242,13 +295,12 @@ void test_integration_imaging_batch_parameter_update_optimization(void** state) 
   printf("Baseline set completed\n");
 
   // Test 1: Update all 5 parameters
-  struct imaging_settings all_changed = {
-    .brightness = BRIGHTNESS_LOW,
-    .contrast = CONTRAST_MEDIUM,
-    .saturation = SATURATION_MEDIUM,
-    .sharpness = SHARPNESS_HIGH,
-    .hue = HUE_MEDIUM_POS,
-    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
+  struct imaging_settings all_changed = {.brightness = BRIGHTNESS_LOW,
+                                         .contrast = CONTRAST_MEDIUM,
+                                         .saturation = SATURATION_MEDIUM,
+                                         .sharpness = SHARPNESS_HIGH,
+                                         .hue = HUE_MEDIUM_POS,
+                                         .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
 
   result = onvif_imaging_set_settings(&all_changed);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -256,13 +308,12 @@ void test_integration_imaging_batch_parameter_update_optimization(void** state) 
   printf("All parameters changed test completed\n");
 
   // Test 2: Update only brightness
-  struct imaging_settings brightness_only = {
-    .brightness = BRIGHTNESS_LOW_MED, // Changed
-    .contrast = CONTRAST_MEDIUM,
-    .saturation = SATURATION_MEDIUM,
-    .sharpness = SHARPNESS_HIGH,
-    .hue = HUE_MEDIUM_POS,
-    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
+  struct imaging_settings brightness_only = {.brightness = BRIGHTNESS_LOW_MED, // Changed
+                                             .contrast = CONTRAST_MEDIUM,
+                                             .saturation = SATURATION_MEDIUM,
+                                             .sharpness = SHARPNESS_HIGH,
+                                             .hue = HUE_MEDIUM_POS,
+                                             .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
 
   result = onvif_imaging_set_settings(&brightness_only);
   assert_int_equal(result, ONVIF_SUCCESS);
@@ -287,13 +338,12 @@ void test_integration_imaging_parameter_cache_efficiency(void** state) {
   printf("\nTest: Parameter Cache Efficiency\n");
   printf("-----------------------------------------------\n");
 
-  struct imaging_settings settings = {
-    .brightness = BRIGHTNESS_MEDIUM,
-    .contrast = CONTRAST_LOW,
-    .saturation = SATURATION_MIN,
-    .sharpness = SHARPNESS_MEDIUM_LOW,
-    .hue = HUE_SMALL_POS_ALT,
-    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
+  struct imaging_settings settings = {.brightness = BRIGHTNESS_MEDIUM,
+                                      .contrast = CONTRAST_LOW,
+                                      .saturation = SATURATION_MIN,
+                                      .sharpness = SHARPNESS_MEDIUM_LOW,
+                                      .hue = HUE_SMALL_POS_ALT,
+                                      .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
 
   // First call - should validate and apply
   long start_time = test_get_time_microseconds();
@@ -399,13 +449,12 @@ void test_integration_imaging_performance_regression(void** state) {
   printf("\nTest: Performance Regression Check\n");
   printf("-------------------------------------------------\n");
 
-  struct imaging_settings test_settings = {
-    .brightness = BRIGHTNESS_HIGH_ALT,
-    .contrast = CONTRAST_NEG_MED,
-    .saturation = SATURATION_MEDIUM_ALT,
-    .sharpness = SHARPNESS_NEUTRAL,
-    .hue = HUE_LARGE_NEG,
-    .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
+  struct imaging_settings test_settings = {.brightness = BRIGHTNESS_HIGH_ALT,
+                                           .contrast = CONTRAST_NEG_MED,
+                                           .saturation = SATURATION_MEDIUM_ALT,
+                                           .sharpness = SHARPNESS_NEUTRAL,
+                                           .hue = HUE_LARGE_NEG,
+                                           .daynight = {.mode = DAY_NIGHT_AUTO, .enable_auto_switching = 1}};
 
   // Warm up
   for (int i = 0; i < WARMUP_ITERATIONS; i++) {
@@ -436,15 +485,12 @@ void test_integration_imaging_performance_regression(void** state) {
   printf("  Total operations: %d\n", TEST_ITERATIONS * 2);
   printf("  Total time: %ld μs\n", total_time);
   printf("  Average time per operation: %ld μs\n", avg_time_per_operation);
-  printf("  Operations per second: %.2f\n",
-         (double)((long)(TEST_ITERATIONS * 2)) / ((double)total_time / (double)MICROS_PER_SECOND));
+  printf("  Operations per second: %.2f\n", (double)((long)(TEST_ITERATIONS * 2)) / ((double)total_time / (double)MICROS_PER_SECOND));
 
   if (avg_time_per_operation < BENCHMARK_THRESHOLD_US) {
-    printf("✅ Performance regression test passed (under %d μs threshold)\n",
-           BENCHMARK_THRESHOLD_US);
+    printf("✅ Performance regression test passed (under %d μs threshold)\n", BENCHMARK_THRESHOLD_US);
   } else {
-    printf("⚠️  Performance regression test warning (exceeds %d μs threshold)\n",
-           BENCHMARK_THRESHOLD_US);
+    printf("⚠️  Performance regression test warning (exceeds %d μs threshold)\n", BENCHMARK_THRESHOLD_US);
   }
 }
 
@@ -455,7 +501,6 @@ void test_integration_imaging_performance_regression(void** state) {
 void test_integration_imaging_get_settings_soap(void** state) {
   (void)state;
 
-  // Note: Imaging service is already initialized by setup_imaging_integration()
   // Platform mock, service dispatcher, and imaging service are ready
 
   // Configure platform configuration mock expectations for gSOAP verbosity lookup
@@ -465,8 +510,7 @@ void test_integration_imaging_get_settings_soap(void** state) {
   will_return(__wrap_platform_config_get_int, 0);
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request(
-    "GetImagingSettings", SOAP_IMAGING_GET_IMAGING_SETTINGS, "/onvif/imaging_service");
+  http_request_t* request = soap_test_create_request("GetImagingSettings", SOAP_IMAGING_GET_IMAGING_SETTINGS, "/onvif/imaging_service");
   assert_non_null(request);
 
   // Step 3: Validate request structure
@@ -492,25 +536,31 @@ void test_integration_imaging_get_settings_soap(void** state) {
   int has_fault = soap_test_check_soap_fault(&response, fault_code, fault_string);
   assert_int_equal(0, has_fault);
 
-  // Step 7: Validate SOAP response contains expected elements
-  assert_true(strstr(response.body, "GetImagingSettingsResponse") != NULL);
-  assert_true(strstr(response.body, "Brightness") != NULL);
+  // Step 7: Parse SOAP response using gSOAP
+  onvif_gsoap_context_t ctx;
+  memset(&ctx, 0, sizeof(onvif_gsoap_context_t));
+  result = soap_test_init_response_parsing(&ctx, &response);
+  assert_int_equal(ONVIF_SUCCESS, result);
 
-  // Step 8: Verify response contains ImagingSettings with valid brightness value
-  char brightness_value[64] = {0};
-  result = soap_test_extract_element_text(response.body, "Brightness", brightness_value,
-                                          sizeof(brightness_value));
-  if (result == ONVIF_SUCCESS) {
-    assert_true(strlen(brightness_value) > 0);
+  struct _timg__GetImagingSettingsResponse* settings_response = NULL;
+  result = soap_test_parse_get_imaging_settings_response(&ctx, &settings_response);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_non_null(settings_response);
+
+  // Step 8: Validate parsed response data
+  assert_non_null(settings_response->ImagingSettings);
+  // Brightness is optional in ONVIF, but if present, verify it's valid
+  if (settings_response->ImagingSettings->Brightness) {
+    assert_true(*settings_response->ImagingSettings->Brightness >= -100.0F);
+    assert_true(*settings_response->ImagingSettings->Brightness <= 100.0F);
   }
 
   // Step 9: Cleanup resources
+  onvif_gsoap_cleanup(&ctx);
   soap_test_free_request(request);
   if (response.body) {
     ONVIF_FREE(response.body);
   }
-
-  // Note: Imaging service cleanup handled by teardown_imaging_integration()
 }
 
 /**
@@ -532,8 +582,7 @@ void test_integration_imaging_set_settings_soap(void** state) {
   will_return(__wrap_platform_config_get_int, 0);
 
   // Step 1: Create SOAP request envelope
-  http_request_t* request = soap_test_create_request(
-    "SetImagingSettings", SOAP_IMAGING_SET_IMAGING_SETTINGS, "/onvif/imaging_service");
+  http_request_t* request = soap_test_create_request("SetImagingSettings", SOAP_IMAGING_SET_IMAGING_SETTINGS, "/onvif/imaging_service");
   assert_non_null(request);
 
   // Step 2: Prepare response structure
@@ -576,22 +625,16 @@ void test_integration_imaging_set_settings_soap(void** state) {
  * ============================================================================ */
 
 const struct CMUnitTest imaging_service_optimization_tests[] = {
-  cmocka_unit_test_setup_teardown(test_integration_imaging_parameter_cache_efficiency,
-                                  setup_imaging_integration, teardown_imaging_integration),
-  cmocka_unit_test_setup_teardown(test_integration_imaging_bulk_settings_validation,
-                                  setup_imaging_integration, teardown_imaging_integration),
-  cmocka_unit_test_setup_teardown(test_integration_imaging_batch_parameter_update_optimization,
-                                  setup_imaging_integration, teardown_imaging_integration),
-  cmocka_unit_test_setup_teardown(test_integration_imaging_performance_regression,
-                                  setup_imaging_integration, teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_parameter_cache_efficiency, setup_imaging_integration, teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_bulk_settings_validation, setup_imaging_integration, teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_batch_parameter_update_optimization, setup_imaging_integration,
+                                  teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_performance_regression, setup_imaging_integration, teardown_imaging_integration),
 
   // SOAP integration tests (full HTTP/SOAP layer validation)
-  cmocka_unit_test_setup_teardown(test_integration_imaging_get_settings_soap,
-                                  setup_imaging_integration, teardown_imaging_integration),
-  cmocka_unit_test_setup_teardown(test_integration_imaging_set_settings_soap,
-                                  setup_imaging_integration, teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_get_settings_soap, setup_imaging_integration, teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_set_settings_soap, setup_imaging_integration, teardown_imaging_integration),
 
   // Concurrent tests (may hang - placed at end)
-  cmocka_unit_test_setup_teardown(test_integration_imaging_concurrent_access,
-                                  setup_imaging_integration, teardown_imaging_integration),
+  cmocka_unit_test_setup_teardown(test_integration_imaging_concurrent_access, setup_imaging_integration, teardown_imaging_integration),
 };

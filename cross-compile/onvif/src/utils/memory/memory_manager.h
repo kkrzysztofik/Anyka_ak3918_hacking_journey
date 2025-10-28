@@ -117,33 +117,32 @@ void onvif_free(void* ptr, const char* file, int line, const char* function);
 #define ONVIF_FREE(ptr)           onvif_free((ptr), __FILE__, __LINE__, __FUNCTION__)
 
 /* Safe memory macros */
-#define MEMORY_SAFE_FREE(ptr)                                                                      \
-  do {                                                                                             \
-    if (ptr) {                                                                                     \
-      ONVIF_FREE(ptr);                                                                             \
-      (ptr) = NULL;                                                                                \
-    }                                                                                              \
+#define MEMORY_SAFE_FREE(ptr)                                                                                                                        \
+  do {                                                                                                                                               \
+    if (ptr) {                                                                                                                                       \
+      ONVIF_FREE(ptr);                                                                                                                               \
+      (ptr) = NULL;                                                                                                                                  \
+    }                                                                                                                                                \
   } while (0)
 
 /* Null pointer protection */
-#define NULL_CHECK_RETURN(ptr, ret_val)                                                            \
-  do {                                                                                             \
-    if ((ptr) == NULL) {                                                                           \
-      platform_log_error("Null pointer detected at %s:%d in %s()\n", __FILE__, __LINE__,           \
-                         __FUNCTION__);                                                            \
-      return ret_val;                                                                              \
-    }                                                                                              \
+#define NULL_CHECK_RETURN(ptr, ret_val)                                                                                                              \
+  do {                                                                                                                                               \
+    if ((ptr) == NULL) {                                                                                                                             \
+      platform_log_error("Null pointer detected at %s:%d in %s()\n", __FILE__, __LINE__, __FUNCTION__);                                              \
+      return ret_val;                                                                                                                                \
+    }                                                                                                                                                \
   } while (0)
 
 /* Memory validation */
-#define MEMORY_VALIDATE_SIZE(size)                                                                 \
-  ({                                                                                               \
-    int _valid = 1;                                                                                \
-    if ((size) == 0 || (size) > SIZE_MAX / 2) {                                                    \
-      platform_log_error("Invalid size %zu at %s:%d\n", (size), __FILE__, __LINE__);               \
-      _valid = 0;                                                                                  \
-    }                                                                                              \
-    _valid;                                                                                        \
+#define MEMORY_VALIDATE_SIZE(size)                                                                                                                   \
+  ({                                                                                                                                                 \
+    int _valid = 1;                                                                                                                                  \
+    if ((size) == 0 || (size) > SIZE_MAX / 2) {                                                                                                      \
+      platform_log_error("Invalid size %zu at %s:%d\n", (size), __FILE__, __LINE__);                                                                 \
+      _valid = 0;                                                                                                                                    \
+    }                                                                                                                                                \
+    _valid;                                                                                                                                          \
   })
 
 /* Safe string functions */
@@ -177,8 +176,7 @@ int dynamic_buffer_init(dynamic_buffer_t* buffer, size_t initial_size);
  * @param max_size Maximum buffer size
  * @return 0 on success, negative error code on failure
  */
-int dynamic_buffer_init_custom(dynamic_buffer_t* buffer, size_t initial_size, size_t growth_factor,
-                               size_t max_size);
+int dynamic_buffer_init_custom(dynamic_buffer_t* buffer, size_t initial_size, size_t growth_factor, size_t max_size);
 
 /**
  * @brief Clean up and free dynamic buffer resources
@@ -323,8 +321,7 @@ int buffer_validate_string(const char* str, size_t max_len, buffer_safety_flags_
  * @param attributes NULL-terminated array of attribute name-value pairs
  * @return Number of characters appended, or -1 on error
  */
-int buffer_safe_append_xml_element(char* buffer, size_t buffer_size, const char* element_name,
-                                   const char* content, const char** attributes);
+int buffer_safe_append_xml_element(char* buffer, size_t buffer_size, const char* element_name, const char* content, const char** attributes);
 
 /**
  * @brief Safely escape XML content

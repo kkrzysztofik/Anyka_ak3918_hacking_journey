@@ -17,35 +17,45 @@
 #include "core/lifecycle/video_lifecycle.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
+#include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
 
-/* Global platform state - static variables with internal linkage only */
+/* ============================================================================
+ * Global State
+ * ============================================================================ */
+
 static volatile bool g_platform_initialized = false; // NOLINT
 static volatile int g_platform_status = 0;           // NOLINT
 
-/* ---------------------------- Public Interface ------------------------- */
+/* ============================================================================
+ * PUBLIC API - Platform Initialization
+ * ============================================================================ */
 
 int platform_lifecycle_init(void) {
   platform_log_info("Initializing platform...\n");
 
   // Initialize memory manager first
-  if (memory_manager_init() != 0) {
+  if (memory_manager_init() != ONVIF_SUCCESS) {
     platform_log_error("Failed to initialize memory manager\n");
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
 
   // Initialize platform components
   if (platform_init() != PLATFORM_SUCCESS) {
     platform_log_error("Failed to initialize platform\n");
     memory_manager_cleanup();
-    return -1;
+    return ONVIF_ERROR_HARDWARE;
   }
 
   g_platform_initialized = true;
   g_platform_status = PLATFORM_SUCCESS;
   platform_log_info("Platform initialized successfully\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * PUBLIC API - Cleanup
+ * ============================================================================ */
 
 void platform_lifecycle_cleanup(void) {
   static bool cleanup_done = false;

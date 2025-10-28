@@ -91,7 +91,6 @@ typedef struct {
   int expected_result;
 } null_param_test_t;
 
-
 /* ============================================================================
  * Service Callback Test Helpers
  * ============================================================================ */
@@ -126,8 +125,7 @@ void test_helper_service_registration_duplicate(void** state, const service_test
  * @param state CMocka test state
  * @param config Service test configuration
  */
-void test_helper_service_registration_null_config(void** state,
-                                                  const service_test_config_t* config);
+void test_helper_service_registration_null_config(void** state, const service_test_config_t* config);
 
 /**
  * @brief Test service registration with dispatcher failure
@@ -137,8 +135,7 @@ void test_helper_service_registration_null_config(void** state,
  * @param state CMocka test state
  * @param config Service test configuration
  */
-void test_helper_service_registration_dispatcher_failure(void** state,
-                                                         const service_test_config_t* config);
+void test_helper_service_registration_dispatcher_failure(void** state, const service_test_config_t* config);
 
 /**
  * @brief Test service unregistration success
@@ -160,8 +157,7 @@ void test_helper_service_unregistration_success(void** state, const service_test
  * @param state CMocka test state
  * @param config Service test configuration
  */
-void test_helper_service_unregistration_not_initialized(void** state,
-                                                        const service_test_config_t* config);
+void test_helper_service_unregistration_not_initialized(void** state, const service_test_config_t* config);
 
 /**
  * @brief Verify service registration data
@@ -171,8 +167,7 @@ void test_helper_service_unregistration_not_initialized(void** state,
  * @param registration The registration data to verify
  * @param config Service test configuration
  */
-void test_helper_verify_service_registration(const onvif_service_registration_t* registration,
-                                             const service_test_config_t* config);
+void test_helper_verify_service_registration(const onvif_service_registration_t* registration, const service_test_config_t* config);
 
 /* ============================================================================
  * NULL Parameter Test Helpers
@@ -190,8 +185,7 @@ void test_helper_verify_service_registration(const onvif_service_registration_t*
  * @param tests Array of NULL parameter test configurations
  * @param test_count Number of tests in the array
  */
-void test_helper_null_parameters(void** state, const char* function_name,
-                                 void (*test_func)(void**, const null_param_test_t*),
+void test_helper_null_parameters(void** state, const char* function_name, void (*test_func)(void**, const null_param_test_t*),
                                  const null_param_test_t* tests, int test_count);
 
 // Generic NULL parameter test wrappers
@@ -202,8 +196,7 @@ void test_helper_null_param_4_args(void** state, const null_param_test_t* test_c
 // Helper to create NULL parameter test configurations
 // Helper to create NULL parameter test configurations
 // Helper to create NULL parameter test configurations
-null_param_test_t test_helper_create_null_test(const char* description, int param_index,
-                                               int expected_result);
+null_param_test_t test_helper_create_null_test(const char* description, int param_index, int expected_result);
 
 /* ============================================================================
  * Test State Management System
@@ -221,43 +214,34 @@ typedef struct {
 
 // Test state management functions
 void test_helper_reset_state(const test_state_config_t* config);
-test_state_config_t test_helper_create_state_config(void (*reset_func)(void),
-                                                    void (*cleanup_func)(void), int* counters,
-                                                    int counter_count);
+test_state_config_t test_helper_create_state_config(void (*reset_func)(void), void (*cleanup_func)(void), int* counters, int counter_count);
 
 /* ============================================================================
  * Service-Specific Test Helper Functions
  * ============================================================================ */
 
 // HTTP test helpers
-int test_helper_http_build_basic_auth_header(const char* username, const char* password,
-                                             char* header_value, size_t header_size);
+int test_helper_http_build_basic_auth_header(const char* username, const char* password, char* header_value, size_t header_size);
 int test_helper_http_init_auth_config(struct http_auth_config* config, int auth_type, int enabled);
 int test_helper_http_create_request(const char* method, const char* uri, http_request_t* request);
 int test_helper_http_create_response(int status_code, http_response_t* response);
 
 // PTZ test helpers
-int test_helper_ptz_create_test_position(struct ptz_vector* position, float pan, float tilt,
-                                         float zoom);
+int test_helper_ptz_create_test_position(struct ptz_vector* position, float pan, float tilt, float zoom);
 int test_helper_ptz_create_test_speed(struct ptz_speed* speed, float pan_tilt, float zoom);
-int test_helper_ptz_create_test_preset(struct ptz_preset* preset, const char* token,
-                                       const char* name);
+int test_helper_ptz_create_test_preset(struct ptz_preset* preset, const char* token, const char* name);
 
 // Macro to simplify state management
-#define TEST_HELPER_DECLARE_COUNTERS(name, ...)                                                    \
-  static int g_##name##_counter_values[] = {__VA_ARGS__};                                          \
-  static int* g_##name##_counters[] = {                                                            \
-    &g_##name##_counter_values[0],                                                                 \
-    &g_##name##_counter_values[1],                                                                 \
-    &g_##name##_counter_values[2],                                                                 \
-    &g_##name##_counter_values[3]                                                                  \
-  };                                                                                               \
-  static void reset_##name##_state(void) {                                                         \
-    test_state_config_t config = {                                                                 \
-      .counters = g_##name##_counters,                                                             \
-      .counter_count = sizeof(g_##name##_counter_values) / sizeof(int),                            \
-    };                                                                                             \
-    test_helper_reset_state(&config);                                                              \
+#define TEST_HELPER_DECLARE_COUNTERS(name, ...)                                                                                                      \
+  static int g_##name##_counter_values[] = {__VA_ARGS__};                                                                                            \
+  static int* g_##name##_counters[] = {&g_##name##_counter_values[0], &g_##name##_counter_values[1], &g_##name##_counter_values[2],                  \
+                                       &g_##name##_counter_values[3]};                                                                               \
+  static void reset_##name##_state(void) {                                                                                                           \
+    test_state_config_t config = {                                                                                                                   \
+      .counters = g_##name##_counters,                                                                                                               \
+      .counter_count = sizeof(g_##name##_counter_values) / sizeof(int),                                                                              \
+    };                                                                                                                                               \
+    test_helper_reset_state(&config);                                                                                                                \
   };
 
 /* ============================================================================
@@ -280,31 +264,27 @@ typedef struct {
 // Generic mock handler functions
 int test_helper_generic_init_handler(generic_mock_handler_state_t* state);
 void test_helper_generic_cleanup_handler(generic_mock_handler_state_t* state);
-int test_helper_generic_operation_handler(generic_mock_handler_state_t* state,
-                                          const char* operation, const void* request,
-                                          void* response);
+int test_helper_generic_operation_handler(generic_mock_handler_state_t* state, const char* operation, const void* request, void* response);
 void test_helper_reset_generic_mock_state(generic_mock_handler_state_t* state);
 
 // Macro to create service-specific mock handlers easily
-#define TEST_HELPER_CREATE_MOCK_HANDLERS(service_name)                                             \
-  static generic_mock_handler_state_t g_##service_name##_mock_state = {0};                         \
-                                                                                                   \
-  static int service_name##_mock_init(void) {                                                      \
-    return test_helper_generic_init_handler(&g_##service_name##_mock_state);                       \
-  }                                                                                                \
-                                                                                                   \
-  static void service_name##_mock_cleanup(void) {                                                  \
-    test_helper_generic_cleanup_handler(&g_##service_name##_mock_state);                           \
-  }                                                                                                \
-                                                                                                   \
-  static int service_name##_mock_operation(                                                        \
-    const char* operation_name, const http_request_t* request, http_response_t* response) {        \
-    return test_helper_generic_operation_handler(&g_##service_name##_mock_state, operation_name,   \
-                                                 (const void*)request, (void*)response);           \
-  }                                                                                                \
-                                                                                                   \
-  static void service_name##_reset_mock_state(void) {                                              \
-    test_helper_reset_generic_mock_state(&g_##service_name##_mock_state);                          \
+#define TEST_HELPER_CREATE_MOCK_HANDLERS(service_name)                                                                                               \
+  static generic_mock_handler_state_t g_##service_name##_mock_state = {0};                                                                           \
+                                                                                                                                                     \
+  static int service_name##_mock_init(void) {                                                                                                        \
+    return test_helper_generic_init_handler(&g_##service_name##_mock_state);                                                                         \
+  }                                                                                                                                                  \
+                                                                                                                                                     \
+  static void service_name##_mock_cleanup(void) {                                                                                                    \
+    test_helper_generic_cleanup_handler(&g_##service_name##_mock_state);                                                                             \
+  }                                                                                                                                                  \
+                                                                                                                                                     \
+  static int service_name##_mock_operation(const char* operation_name, const http_request_t* request, http_response_t* response) {                   \
+    return test_helper_generic_operation_handler(&g_##service_name##_mock_state, operation_name, (const void*)request, (void*)response);             \
+  }                                                                                                                                                  \
+                                                                                                                                                     \
+  static void service_name##_reset_mock_state(void) {                                                                                                \
+    test_helper_reset_generic_mock_state(&g_##service_name##_mock_state);                                                                            \
   }
 
 /* ============================================================================
@@ -349,8 +329,7 @@ void test_helper_assert_non_null(const void* ptr, const char* description);
  * @param expected Expected string value
  * @param description Description of what is being compared
  */
-void test_helper_assert_string_equal(const char* actual, const char* expected,
-                                     const char* description);
+void test_helper_assert_string_equal(const char* actual, const char* expected, const char* description);
 
 /**
  * @brief Assert that an integer matches expected value with descriptive message
@@ -368,8 +347,7 @@ void test_helper_assert_int_equal(int actual, int expected, const char* descript
  * @param expected_count Expected call count
  * @param function_name Name of the mocked function
  */
-void test_helper_assert_mock_called(int actual_count, int expected_count,
-                                    const char* function_name);
+void test_helper_assert_mock_called(int actual_count, int expected_count, const char* function_name);
 
 /* ============================================================================
  * Test Data Initialization Helpers
@@ -400,67 +378,49 @@ void test_helper_init_http_response(void* response);
  * @param cleanup_func Cleanup function
  * @return Initialized service_test_config_t structure
  */
-service_test_config_t test_helper_create_service_config(const char* service_name,
-                                                        const char* namespace_uri,
-                                                        int (*init_func)(void*),
+service_test_config_t test_helper_create_service_config(const char* service_name, const char* namespace_uri, int (*init_func)(void*),
                                                         void (*cleanup_func)(void));
 
-
 // Service Dispatch Helpers
-void test_helper_service_dispatch_success(void** state, const service_test_config_t* config,
-                                          const char* operation, http_request_t* request,
+void test_helper_service_dispatch_success(void** state, const service_test_config_t* config, const char* operation, http_request_t* request,
                                           http_response_t* response);
-void test_helper_service_dispatch_unknown_operation(void** state,
-                                                    const service_test_config_t* config,
-                                                    const char* operation, http_request_t* request,
+void test_helper_service_dispatch_unknown_operation(void** state, const service_test_config_t* config, const char* operation, http_request_t* request,
                                                     http_response_t* response);
-void test_helper_service_dispatch_null_service(void** state, const char* operation,
-                                               http_request_t* request, http_response_t* response);
-void test_helper_service_dispatch_null_operation(void** state, const char* service_name,
-                                                 http_request_t* request,
-                                                 http_response_t* response);
-void test_helper_service_dispatch_null_request(void** state, const char* service_name,
-                                               const char* operation, http_response_t* response);
-void test_helper_service_dispatch_null_response(void** state, const char* service_name,
-                                                const char* operation, http_request_t* request);
+void test_helper_service_dispatch_null_service(void** state, const char* operation, http_request_t* request, http_response_t* response);
+void test_helper_service_dispatch_null_operation(void** state, const char* service_name, http_request_t* request, http_response_t* response);
+void test_helper_service_dispatch_null_request(void** state, const char* service_name, const char* operation, http_response_t* response);
+void test_helper_service_dispatch_null_response(void** state, const char* service_name, const char* operation, http_request_t* request);
 
 // Operation Handler Helpers
-void test_helper_operation_handler_success(void** state, const service_test_config_t* config,
-                                           const char* operation, http_request_t* request,
+void test_helper_operation_handler_success(void** state, const service_test_config_t* config, const char* operation, http_request_t* request,
                                            http_response_t* response);
-void test_helper_operation_handler_null_operation(void** state, http_request_t* request,
-                                                  http_response_t* response);
-void test_helper_operation_handler_null_request(void** state, const char* operation,
-                                                http_response_t* response);
-void test_helper_operation_handler_null_response(void** state, const char* operation,
-                                                 http_request_t* request);
-void test_helper_operation_handler_unknown_operation(void** state, const char* operation,
-                                                     http_request_t* request,
-                                                     http_response_t* response);
+void test_helper_operation_handler_null_operation(void** state, http_request_t* request, http_response_t* response);
+void test_helper_operation_handler_null_request(void** state, const char* operation, http_response_t* response);
+void test_helper_operation_handler_null_response(void** state, const char* operation, http_request_t* request);
+void test_helper_operation_handler_unknown_operation(void** state, const char* operation, http_request_t* request, http_response_t* response);
 
 // Error Handling Helpers
-void test_helper_service_registration_failure_handling(void** state,
-                                                       const service_test_config_t* config,
-                                                       int error_code);
-void test_helper_service_dispatch_failure_handling(void** state,
-                                                   const service_test_config_t* config,
-                                                   const char* operation, http_request_t* request,
+void test_helper_service_registration_failure_handling(void** state, const service_test_config_t* config, int error_code);
+void test_helper_service_dispatch_failure_handling(void** state, const service_test_config_t* config, const char* operation, http_request_t* request,
                                                    http_response_t* response);
-void test_helper_service_unregistration_failure_handling(void** state,
-                                                         const service_test_config_t* config);
+void test_helper_service_unregistration_failure_handling(void** state, const service_test_config_t* config);
 
 // Logging Helpers
-void test_helper_service_callback_logging_success(void** state, const service_test_config_t* config,
-                                                  const char* operation, http_request_t* request,
+void test_helper_service_callback_logging_success(void** state, const service_test_config_t* config, const char* operation, http_request_t* request,
                                                   http_response_t* response);
-void test_helper_service_callback_logging_failure(void** state,
-                                                  const service_test_config_t* config);
+void test_helper_service_callback_logging_failure(void** state, const service_test_config_t* config);
+
+/**
+ * @brief Get the absolute path of a test resource file
+ * @param relative_path Relative path from tests directory (e.g., "configs/test.ini")
+ * @param output_buffer Buffer to store the absolute path
+ * @param buffer_size Size of the output buffer
+ * @return 0 on success, -1 on failure
+ */
+int test_helper_get_test_resource_path(const char* relative_path, char* output_buffer, size_t buffer_size);
 
 /* ============================================================================
  * Generic Mock Framework Helpers
  * ============================================================================ */
-
-// NOTE: Generic mock framework helpers have been removed as part of CMocka migration.
-// These functions are no longer needed with CMocka's built-in mocking patterns.
 
 #endif /* TEST_HELPERS_H */

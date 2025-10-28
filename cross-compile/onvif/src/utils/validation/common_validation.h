@@ -13,6 +13,40 @@
 // Forward declarations
 struct imaging_settings;
 
+/* ============================================================================
+ * Validation Constants
+ * ============================================================================ */
+
+/** @brief ONVIF token maximum length */
+#define ONVIF_TOKEN_MAX_LENGTH 64
+
+/** @brief ONVIF name maximum length */
+#define ONVIF_NAME_MAX_LENGTH 32
+
+/** @brief Imaging parameter range (brightness, contrast, saturation, sharpness) */
+#define IMAGING_PARAM_MIN (-100)
+#define IMAGING_PARAM_MAX 100
+
+/** @brief Hue parameter range */
+#define IMAGING_HUE_MIN (-180)
+#define IMAGING_HUE_MAX 180
+
+/** @brief Video resolution limits */
+#define VIDEO_RESOLUTION_MIN 1
+#define VIDEO_RESOLUTION_MAX 4096
+
+/** @brief Video quality range */
+#define VIDEO_QUALITY_MIN 0.0F
+#define VIDEO_QUALITY_MAX 10.0F
+
+/** @brief Bitrate range (bps) */
+#define VIDEO_BITRATE_MIN 1
+#define VIDEO_BITRATE_MAX 100000 // 100 Mbps
+
+/** @brief Framerate range (fps) */
+#define VIDEO_FRAMERATE_MIN 1
+#define VIDEO_FRAMERATE_MAX 120
+
 /**
  * @brief Validation result
  */
@@ -32,8 +66,7 @@ typedef struct {
  * @return Validation result
  * @note Parameter order: field_name, value, min_length, max_length, allow_empty
  */
-validation_result_t validate_string(const char* field_name, const char* value, size_t min_length,
-                                    size_t max_length, int allow_empty);
+validation_result_t validate_string(const char* field_name, const char* value, size_t min_length, size_t max_length, int allow_empty);
 
 /**
  * @brief Validate integer parameter
@@ -55,8 +88,7 @@ validation_result_t validate_int(const char* field_name, int value, int min_valu
  * @return Validation result
  * @note Parameter order: field_name, value, min_value, max_value
  */
-validation_result_t validate_float(const char* field_name, float value, float min_value,
-                                   float max_value);
+validation_result_t validate_float(const char* field_name, float value, float min_value, float max_value);
 
 /**
  * @brief Validate ONVIF token

@@ -36,10 +36,4 @@ void network_lifecycle_cleanup(void);
  */
 bool network_lifecycle_initialized(void);
 
-/**
- * @brief Start optional network services (non-fatal if some fail)
- * @param cfg Application configuration
- */
-void network_lifecycle_start_optional_services(const struct application_config* cfg);
-
 #endif /* ONVIF_NETWORK_LIFECYCLE_H */

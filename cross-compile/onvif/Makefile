@@ -71,7 +71,8 @@ SRCS := \
 	src/core/main/onvifd.c \
 	src/platform/platform_anyka.c \
 	src/platform/adapters/ptz_adapter.c \
-	src/core/config/config.c \
+	src/core/config/config_runtime.c \
+	src/core/config/config_storage.c \
 	src/core/lifecycle/service_manager.c \
 	src/core/lifecycle/video_lifecycle.c \
 	src/core/lifecycle/network_lifecycle.c \
@@ -133,8 +134,8 @@ OBJS := $(SRCS:src/%.c=$(OUT_DIR)/%.o)
 # Documentation directory
 DOCS_DIR = docs
 
-# Limit parallel jobs to prevent memory issues
-MAKEFLAGS += -j1
+# Enable parallel compilation with 4 jobs by default
+MAKEFLAGS += -j4
 
 # Main targets
 all: $(OUT_DIR)/onvifd
@@ -311,16 +312,16 @@ test-list:
 
 test-coverage:
 	@echo "Running tests with coverage analysis..."
-	@$(MAKE) -C tests coverage
+	@$(MAKE) -C tests coverage $(if $(TYPE),TYPE=$(TYPE)) $(if $(SUITE),SUITE=$(SUITE))
 
 
 test-coverage-html:
 	@echo "Generating HTML coverage report..."
-	@$(MAKE) -C tests coverage-html
+	@$(MAKE) -C tests coverage-html $(if $(TYPE),TYPE=$(TYPE)) $(if $(SUITE),SUITE=$(SUITE))
 
 test-coverage-report:
 	@echo "Generating coverage summary..."
-	@$(MAKE) -C tests coverage-report
+	@$(MAKE) -C tests coverage-report $(if $(TYPE),TYPE=$(TYPE)) $(if $(SUITE),SUITE=$(SUITE))
 
 test-coverage-clean:
 	@echo "Cleaning coverage files..."

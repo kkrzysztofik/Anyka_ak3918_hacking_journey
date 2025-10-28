@@ -7,10 +7,13 @@
 
 #include "transport_types.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "common/onvif_constants.h"
+#include "core/config/config.h"
+#include "utils/error/error_handling.h"
 
 /* ==================== Transport Protocol Utilities ==================== */
 
@@ -61,7 +64,7 @@ int onvif_transport_protocol_get_default_port(onvif_transport_protocol_t protoco
   case ONVIF_TRANSPORT_RTSP:
     return ONVIF_RTSP_PORT_DEFAULT; // 554 for RTP/RTSP protocols
   case ONVIF_TRANSPORT_HTTP:
-    return ONVIF_HTTP_PORT_DEFAULT; // 8080
+    return HTTP_PORT_DEFAULT; // 8080
   case ONVIF_TRANSPORT_UNKNOWN:
   default:
     return -1;
@@ -90,8 +93,6 @@ const char* onvif_network_protocol_to_string(onvif_network_protocol_t protocol) 
   switch (protocol) {
   case ONVIF_NETWORK_HTTP:
     return "HTTP";
-  case ONVIF_NETWORK_HTTPS:
-    return "HTTPS";
   case ONVIF_NETWORK_RTSP:
     return "RTSP";
   case ONVIF_NETWORK_UNKNOWN:
@@ -108,9 +109,6 @@ onvif_network_protocol_t onvif_string_to_network_protocol(const char* str) {
   if (strcmp(str, "HTTP") == 0) {
     return ONVIF_NETWORK_HTTP;
   }
-  if (strcmp(str, "HTTPS") == 0) {
-    return ONVIF_NETWORK_HTTPS;
-  }
   if (strcmp(str, "RTSP") == 0) {
     return ONVIF_NETWORK_RTSP;
   }
@@ -125,13 +123,11 @@ int onvif_network_protocol_get_default_port(onvif_network_protocol_t protocol) {
   switch (protocol) {
   case ONVIF_NETWORK_HTTP:
     return ONVIF_HTTP_STANDARD_PORT; // 80
-  case ONVIF_NETWORK_HTTPS:
-    return ONVIF_HTTPS_PORT_DEFAULT; // 443
   case ONVIF_NETWORK_RTSP:
     return ONVIF_RTSP_PORT_DEFAULT; // 554
   case ONVIF_NETWORK_UNKNOWN:
   default:
-    return -1;
+    return ONVIF_ERROR_INVALID;
   }
 }
 
@@ -151,14 +147,27 @@ onvif_transport_protocol_t onvif_gsoap_to_transport_enum(int gsoap_protocol) {
 }
 
 int onvif_network_to_gsoap_enum(onvif_network_protocol_t protocol) {
-  // Direct mapping since our enum values match gSOAP's tt__NetworkProtocolType
-  return (int)protocol;
+  // Map our enum values to gSOAP's tt__NetworkProtocolType
+  switch (protocol) {
+  case ONVIF_NETWORK_HTTP:
+    return 0; // tt__NetworkProtocolType__HTTP
+  case ONVIF_NETWORK_RTSP:
+    return 2; // tt__NetworkProtocolType__RTSP
+  case ONVIF_NETWORK_UNKNOWN:
+  default:
+    return -1; // Invalid
+  }
 }
 
 onvif_network_protocol_t onvif_gsoap_to_network_enum(int gsoap_protocol) {
-  // Direct mapping since our enum values match gSOAP's tt__NetworkProtocolType
-  if (gsoap_protocol >= 0 && gsoap_protocol <= 2) {
-    return (onvif_network_protocol_t)gsoap_protocol;
+  // Map gSOAP's tt__NetworkProtocolType to our enum values
+  switch (gsoap_protocol) {
+  case 0: // tt__NetworkProtocolType__HTTP
+    return ONVIF_NETWORK_HTTP;
+  case 2: // tt__NetworkProtocolType__RTSP
+    return ONVIF_NETWORK_RTSP;
+  case 1: // tt__NetworkProtocolType__HTTPS - not supported
+  default:
+    return ONVIF_NETWORK_UNKNOWN;
   }
-  return ONVIF_NETWORK_UNKNOWN;
 }

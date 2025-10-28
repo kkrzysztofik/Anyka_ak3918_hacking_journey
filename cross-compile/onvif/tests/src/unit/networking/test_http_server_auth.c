@@ -12,8 +12,11 @@
 #include "cmocka_wrapper.h"
 #include "common/test_helpers.h"
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
+#include "mocks/config_mock.h"
 #include "mocks/http_server_mock.h"
 #include "mocks/mock_service_dispatcher.h"
+#include "mocks/network_mock.h"
 #include "networking/http/http_auth.h"
 #include "networking/http/http_server.h"
 #include "utils/error/error_handling.h"
@@ -26,14 +29,72 @@ TEST_HELPER_CREATE_MOCK_HANDLERS(http_server_auth)
 TEST_HELPER_DECLARE_COUNTERS(http_server_auth, 0, 0, 0, 0)
 
 /* ============================================================================
+ * Forward Declarations
+ * ============================================================================ */
+
+static struct application_config* create_test_app_config(int auth_enabled);
+static void free_test_app_config(struct application_config* app_config);
+
+/* ============================================================================
  * Test Setup/Teardown
  * ============================================================================ */
 
-static int setup_http_server_auth_tests(void** state) {
-  (void)state;
+// Test-specific state structure
+struct http_server_auth_test_state {
+  struct application_config* runtime_config;
+  /* runtime_initialized == 1 means this setup call performed a config_runtime_init()
+     and therefore teardown must call config_runtime_cleanup(). If 0, the runtime was
+     already initialized by another test and teardown must not cleanup it. */
+  int runtime_initialized;
+};
 
+static int setup_http_server_auth_tests(void** state) {
   // Initialize memory manager for proper memory leak detection
   memory_manager_init();
+
+  // Create test state for this specific test
+  struct http_server_auth_test_state* test_state = test_malloc(sizeof(struct http_server_auth_test_state));
+  if (!test_state) {
+    return -1;
+  }
+  test_state->runtime_initialized = 0;
+
+  // Create application config for runtime init
+  test_state->runtime_config = create_test_app_config(1);
+  if (!test_state->runtime_config) {
+    test_free(test_state);
+    return -1;
+  }
+
+  // Enable real config functions for integration testing with real authentication
+  config_mock_use_real_function(true);
+
+  // Enable real network functions for integration testing
+  network_mock_use_real_function(true);
+
+  // Initialize runtime config system for authentication tests
+  int result = config_runtime_init(test_state->runtime_config);
+  if (result == ONVIF_SUCCESS) {
+    test_state->runtime_initialized = 1;
+  } else if (result == ONVIF_ERROR_ALREADY_EXISTS) {
+    test_state->runtime_initialized = 0;
+  } else {
+    free_test_app_config(test_state->runtime_config);
+    test_free(test_state);
+    return -1;
+  }
+
+  // Add test user for authentication validation
+  result = config_runtime_add_user("admin", "admin");
+  if (result != ONVIF_SUCCESS && result != ONVIF_ERROR_ALREADY_EXISTS) {
+    // Only cleanup if this setup actually initialized the runtime
+    if (test_state->runtime_initialized) {
+      config_runtime_cleanup();
+    }
+    free_test_app_config(test_state->runtime_config);
+    test_free(test_state);
+    return -1;
+  }
 
   // Enable real HTTP server functions for integration testing
   http_server_mock_use_real_function(true);
@@ -43,11 +104,13 @@ static int setup_http_server_auth_tests(void** state) {
 
   http_server_auth_reset_mock_state();
   reset_http_server_auth_state();
+
+  *state = test_state;
   return 0;
 }
 
 static int teardown_http_server_auth_tests(void** state) {
-  (void)state;
+  struct http_server_auth_test_state* test_state = (struct http_server_auth_test_state*)*state;
 
   // Reset global HTTP app config to prevent test pollution
   extern const struct application_config* g_http_app_config;
@@ -56,11 +119,25 @@ static int teardown_http_server_auth_tests(void** state) {
   // Reset HTTP auth config to prevent memory leaks
   http_server_reset_auth_config();
 
-  // Disable real functions to restore mock behavior for other tests
-  http_server_mock_use_real_function(false);
-
   // Cleanup service dispatcher mock (pure CMocka pattern)
   mock_service_dispatcher_cleanup();
+
+  // Cleanup runtime config system only if this setup initialized it
+  if (test_state) {
+    if (test_state->runtime_initialized) {
+      config_runtime_cleanup();
+    }
+    if (test_state->runtime_config) {
+      free_test_app_config(test_state->runtime_config);
+    }
+    test_free(test_state);
+  }
+
+  // Disable real functions to restore mock behavior for other tests
+  http_server_mock_use_real_function(false);
+  network_mock_use_real_function(false);
+  config_mock_use_real_function(false);
+
   return 0;
 }
 
@@ -85,8 +162,8 @@ static struct application_config* create_test_app_config(int auth_enabled) {
   app_config->onvif.enabled = 1;
   app_config->onvif.http_port = 8080;
   app_config->onvif.auth_enabled = auth_enabled;
-  strcpy(app_config->onvif.username, "admin");
-  strcpy(app_config->onvif.password, "admin");
+  // Note: username/password fields removed from onvif_settings struct
+  // Authentication is now handled through separate auth system
 
   return app_config;
 }
@@ -521,36 +598,30 @@ void test_unit_http_server_auth_switch_behavior(void** state) {
 
 const struct CMUnitTest http_server_auth_tests[] = {
   // Authentication Disabled Tests
-  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_disabled_allows_requests,
-                                  setup_http_server_auth_tests, teardown_http_server_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_disabled_allows_invalid_credentials,
-                                  setup_http_server_auth_tests, teardown_http_server_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_disabled_allows_valid_credentials,
-                                  setup_http_server_auth_tests, teardown_http_server_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_disabled_allows_requests, setup_http_server_auth_tests, teardown_http_server_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_disabled_allows_invalid_credentials, setup_http_server_auth_tests,
+                                  teardown_http_server_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_disabled_allows_valid_credentials, setup_http_server_auth_tests,
+                                  teardown_http_server_auth_tests),
 
   // Authentication Enabled Tests
-  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_enabled_rejects_no_header,
-                                  setup_http_server_auth_tests, teardown_http_server_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_enabled_rejects_invalid_credentials,
-                                  setup_http_server_auth_tests, teardown_http_server_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_enabled_accepts_valid_credentials,
-                                  setup_http_server_auth_tests, teardown_http_server_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_enabled_rejects_no_header, setup_http_server_auth_tests,
+                                  teardown_http_server_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_enabled_rejects_invalid_credentials, setup_http_server_auth_tests,
+                                  teardown_http_server_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_enabled_accepts_valid_credentials, setup_http_server_auth_tests,
+                                  teardown_http_server_auth_tests),
 
   // NULL Parameter Tests
-  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_null_request,
-                                  setup_http_server_auth_tests, teardown_http_server_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_null_security_context,
-                                  setup_http_server_auth_tests, teardown_http_server_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_null_request, setup_http_server_auth_tests, teardown_http_server_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_null_security_context, setup_http_server_auth_tests, teardown_http_server_auth_tests),
 
   // Configuration Edge Cases
-  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_null_app_config,
-                                  setup_http_server_auth_tests, teardown_http_server_auth_tests),
-  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_null_onvif_config,
-                                  setup_http_server_auth_tests, teardown_http_server_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_null_app_config, setup_http_server_auth_tests, teardown_http_server_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_null_onvif_config, setup_http_server_auth_tests, teardown_http_server_auth_tests),
 
   // Integration Tests
-  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_switch_behavior,
-                                  setup_http_server_auth_tests, teardown_http_server_auth_tests),
+  cmocka_unit_test_setup_teardown(test_unit_http_server_auth_switch_behavior, setup_http_server_auth_tests, teardown_http_server_auth_tests),
 };
 
 /**

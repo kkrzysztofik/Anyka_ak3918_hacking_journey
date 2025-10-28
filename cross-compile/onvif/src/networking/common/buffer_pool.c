@@ -23,9 +23,8 @@ int buffer_pool_init(buffer_pool_t* pool) {
     return -1;
   }
 
-  platform_log_debug(
-    "buffer_pool_init: Starting initialization (initialized=%d, mutex_initialized=%d)\n",
-    pool->initialized, pool->mutex_initialized);
+  platform_log_debug("buffer_pool_init: Starting initialization (initialized=%d, mutex_initialized=%d)\n", pool->initialized,
+                     pool->mutex_initialized);
 
   // Check if already initialized - allow idempotent initialization
   if (pool->initialized) {
@@ -57,7 +56,7 @@ int buffer_pool_init(buffer_pool_t* pool) {
         free(pool->buffers[j]);
         pool->buffers[j] = NULL;
       }
-      // Note: Don't destroy mutex on error - it will be reused or cleaned up later
+      // Don't destroy mutex on error - it will be reused or cleaned up later
       return -1;
     }
     pool->available[i] = 1;
@@ -99,7 +98,7 @@ void buffer_pool_cleanup(buffer_pool_t* pool) {
     }
   }
 
-  // NOTE: Do NOT destroy the mutex to allow reinitialization
+  // Do NOT destroy the mutex to allow reinitialization
   // The mutex will be reused on next init call
   // pthread_mutex_destroy(&pool->mutex);  // Commented out for idempotent init/cleanup
 
@@ -139,8 +138,7 @@ char* buffer_pool_get(buffer_pool_t* pool) {
   }
 
   // Calculate current utilization percentage
-  int current_utilization =
-    ((BUFFER_POOL_SIZE - available_count) * BUFFER_POOL_UTILIZATION_MAX_PERCENT) / BUFFER_POOL_SIZE;
+  int current_utilization = ((BUFFER_POOL_SIZE - available_count) * BUFFER_POOL_UTILIZATION_MAX_PERCENT) / BUFFER_POOL_SIZE;
 
   // Update peak utilization if current is higher
   if (current_utilization > pool->peak_utilization) {
@@ -159,8 +157,7 @@ char* buffer_pool_get(buffer_pool_t* pool) {
     if (current_utilization > BUFFER_POOL_UTILIZATION_WARNING_THRESHOLD) {
       platform_log_warning("buffer_pool_get: HIGH UTILIZATION WARNING - Pool utilization at %d%% "
                            "(%d/%d buffers in use)",
-                           current_utilization, BUFFER_POOL_SIZE - available_count + 1,
-                           BUFFER_POOL_SIZE);
+                           current_utilization, BUFFER_POOL_SIZE - available_count + 1, BUFFER_POOL_SIZE);
     }
   } else {
     pool->misses++; // Atomic increment for thread safety
@@ -169,9 +166,8 @@ char* buffer_pool_get(buffer_pool_t* pool) {
                        BUFFER_POOL_SIZE, BUFFER_POOL_UTILIZATION_MAX_PERCENT);
 
     // Log warning for pool exhaustion
-    platform_log_warning(
-      "buffer_pool_get: POOL EXHAUSTED - All %d buffers in use (%d%% utilization)",
-      BUFFER_POOL_SIZE, BUFFER_POOL_UTILIZATION_MAX_PERCENT);
+    platform_log_warning("buffer_pool_get: POOL EXHAUSTED - All %d buffers in use (%d%% utilization)", BUFFER_POOL_SIZE,
+                         BUFFER_POOL_UTILIZATION_MAX_PERCENT);
   }
 
   return buffer;
@@ -205,8 +201,7 @@ void buffer_pool_return(buffer_pool_t* pool, const char* buffer) {
   }
 
   // Calculate current utilization percentage after return
-  int current_utilization =
-    ((BUFFER_POOL_SIZE - available_count) * BUFFER_POOL_UTILIZATION_MAX_PERCENT) / BUFFER_POOL_SIZE;
+  int current_utilization = ((BUFFER_POOL_SIZE - available_count) * BUFFER_POOL_UTILIZATION_MAX_PERCENT) / BUFFER_POOL_SIZE;
 
   pthread_mutex_unlock(&pool->mutex);
 
@@ -292,13 +287,11 @@ buffer_pool_stats_t get_buffer_pool_stats(buffer_pool_t* pool) {
   if (stats.utilization_percent > BUFFER_POOL_UTILIZATION_WARNING_THRESHOLD) {
     platform_log_warning("get_buffer_pool_stats: HIGH UTILIZATION - Pool at %d%% utilization "
                          "(%d/%d buffers in use, peak: %d%%)",
-                         stats.utilization_percent, stats.current_used, BUFFER_POOL_SIZE,
-                         stats.peak_utilization);
+                         stats.utilization_percent, stats.current_used, BUFFER_POOL_SIZE, stats.peak_utilization);
   } else {
     platform_log_debug("get_buffer_pool_stats: Pool utilization at %d%% (%d/%d buffers in use, "
                        "peak: %d%%, hits: %d, misses: %d)",
-                       stats.utilization_percent, stats.current_used, BUFFER_POOL_SIZE,
-                       stats.peak_utilization, stats.hits, stats.misses);
+                       stats.utilization_percent, stats.current_used, BUFFER_POOL_SIZE, stats.peak_utilization, stats.hits, stats.misses);
   }
 
   return stats;

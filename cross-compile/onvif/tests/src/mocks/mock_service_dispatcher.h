@@ -20,8 +20,7 @@
 /**
  * @brief CMocka wrapped version of onvif_service_dispatcher_register_service
  */
-int __wrap_onvif_service_dispatcher_register_service(
-  const onvif_service_registration_t* registration);
+int __wrap_onvif_service_dispatcher_register_service(const onvif_service_registration_t* registration);
 
 /**
  * @brief CMocka wrapped version of onvif_service_dispatcher_unregister_service
@@ -41,8 +40,7 @@ void __wrap_onvif_service_dispatcher_cleanup(void);
 /**
  * @brief CMocka wrapped version of onvif_service_dispatcher_dispatch
  */
-int __wrap_onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name,
-                                             void* request, void* response);
+int __wrap_onvif_service_dispatcher_dispatch(const char* service_name, const char* operation_name, void* request, void* response);
 
 /* ============================================================================
  * Conditional Mock/Real Function Control
@@ -137,37 +135,18 @@ const char* mock_service_dispatcher_get_last_dispatch_service(void);
 const char* mock_service_dispatcher_get_last_dispatch_operation(void);
 
 /* ============================================================================
- * Legacy Helper Functions (for backward compatibility)
- * ============================================================================ */
-
-/**
- * @brief Set the last registration data for verification
- * @note Legacy function - now handled automatically in __wrap function
- */
-void mock_service_dispatcher_set_last_registration(
-  const onvif_service_registration_t* registration);
-
-/**
- * @brief Set the last unregister service name for verification
- * @note Legacy function - now handled automatically in __wrap function
- */
-void mock_service_dispatcher_set_last_unregister_service(const char* service_name);
-
-/* ============================================================================
  * CMocka Helper Macros
  * ============================================================================ */
 
 /**
  * @brief Expect service dispatcher registration call
  */
-#define EXPECT_SERVICE_DISPATCHER_REGISTER()                                                       \
-  expect_function_call(__wrap_onvif_service_dispatcher_register_service)
+#define EXPECT_SERVICE_DISPATCHER_REGISTER() expect_function_call(__wrap_onvif_service_dispatcher_register_service)
 
 /**
  * @brief Expect service dispatcher unregister call
  */
-#define EXPECT_SERVICE_DISPATCHER_UNREGISTER()                                                     \
-  expect_function_call(__wrap_onvif_service_dispatcher_unregister_service)
+#define EXPECT_SERVICE_DISPATCHER_UNREGISTER() expect_function_call(__wrap_onvif_service_dispatcher_unregister_service)
 
 /**
  * @brief Expect service dispatcher init call
@@ -177,25 +156,21 @@ void mock_service_dispatcher_set_last_unregister_service(const char* service_nam
 /**
  * @brief Expect service dispatcher cleanup call
  */
-#define EXPECT_SERVICE_DISPATCHER_CLEANUP()                                                        \
-  expect_function_call(__wrap_onvif_service_dispatcher_cleanup)
+#define EXPECT_SERVICE_DISPATCHER_CLEANUP() expect_function_call(__wrap_onvif_service_dispatcher_cleanup)
 
 /**
  * @brief Set service dispatcher register result
  */
-#define SET_SERVICE_DISPATCHER_REGISTER_RESULT(result)                                             \
-  will_return(__wrap_onvif_service_dispatcher_register_service, result)
+#define SET_SERVICE_DISPATCHER_REGISTER_RESULT(result) will_return(__wrap_onvif_service_dispatcher_register_service, result)
 
 /**
  * @brief Set service dispatcher unregister result
  */
-#define SET_SERVICE_DISPATCHER_UNREGISTER_RESULT(result)                                           \
-  will_return(__wrap_onvif_service_dispatcher_unregister_service, result)
+#define SET_SERVICE_DISPATCHER_UNREGISTER_RESULT(result) will_return(__wrap_onvif_service_dispatcher_unregister_service, result)
 
 /**
  * @brief Set service dispatcher init result
  */
-#define SET_SERVICE_DISPATCHER_INIT_RESULT(result)                                                 \
-  will_return(__wrap_onvif_service_dispatcher_init, result)
+#define SET_SERVICE_DISPATCHER_INIT_RESULT(result) will_return(__wrap_onvif_service_dispatcher_init, result)
 
 #endif /* MOCK_SERVICE_DISPATCHER_H */

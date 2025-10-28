@@ -7,16 +7,15 @@
 
 #include "test_helpers.h"
 
+#include <limits.h>
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 // Mock includes
 #include "mocks/mock_service_dispatcher.h"
-#include "mocks/platform_mock.h"
-#include "mocks/platform_ptz_mock.h"
-#include "mocks/ptz_adapter_mock.h"
 
 // ONVIF includes
 #include "networking/http/http_auth.h"
@@ -63,12 +62,10 @@ void test_helper_service_registration_success(void** state, const service_test_c
   assert_int_equal(config->expected_init_success, result);
 
   // Verify registration was called exactly once
-  test_helper_assert_mock_called(mock_service_dispatcher_get_register_call_count(), 1,
-                                 "service_dispatcher_register");
+  test_helper_assert_mock_called(mock_service_dispatcher_get_register_call_count(), 1, "service_dispatcher_register");
 
   // Verify registration data
-  const onvif_service_registration_t* registration =
-    mock_service_dispatcher_get_last_registration();
+  const onvif_service_registration_t* registration = mock_service_dispatcher_get_last_registration();
   test_helper_verify_service_registration(registration, config);
 }
 
@@ -91,12 +88,10 @@ void test_helper_service_registration_duplicate(void** state, const service_test
   assert_int_equal(ONVIF_ERROR_DUPLICATE, result);
 
   // Verify registration was attempted
-  test_helper_assert_mock_called(mock_service_dispatcher_get_register_call_count(), 1,
-                                 "service_dispatcher_register");
+  test_helper_assert_mock_called(mock_service_dispatcher_get_register_call_count(), 1, "service_dispatcher_register");
 }
 
-void test_helper_service_registration_null_config(void** state,
-                                                  const service_test_config_t* config) {
+void test_helper_service_registration_null_config(void** state, const service_test_config_t* config) {
   (void)state;
 
   assert_non_null(config);
@@ -117,8 +112,7 @@ void test_helper_service_registration_null_config(void** state,
   assert_int_equal(config->expected_init_success, result);
 }
 
-void test_helper_service_registration_dispatcher_failure(void** state,
-                                                         const service_test_config_t* config) {
+void test_helper_service_registration_dispatcher_failure(void** state, const service_test_config_t* config) {
   (void)state;
 
   assert_non_null(config);
@@ -137,8 +131,7 @@ void test_helper_service_registration_dispatcher_failure(void** state,
   assert_int_equal(ONVIF_ERROR_INVALID, result);
 
   // Verify registration was attempted
-  test_helper_assert_mock_called(mock_service_dispatcher_get_register_call_count(), 1,
-                                 "service_dispatcher_register");
+  test_helper_assert_mock_called(mock_service_dispatcher_get_register_call_count(), 1, "service_dispatcher_register");
 }
 
 void test_helper_service_unregistration_success(void** state, const service_test_config_t* config) {
@@ -165,12 +158,10 @@ void test_helper_service_unregistration_success(void** state, const service_test
   config->cleanup_func();
 
   // Verify unregistration was called
-  test_helper_assert_mock_called(mock_service_dispatcher_get_unregister_call_count(), 1,
-                                 "service_dispatcher_unregister");
+  test_helper_assert_mock_called(mock_service_dispatcher_get_unregister_call_count(), 1, "service_dispatcher_unregister");
 }
 
-void test_helper_service_unregistration_not_initialized(void** state,
-                                                        const service_test_config_t* config) {
+void test_helper_service_unregistration_not_initialized(void** state, const service_test_config_t* config) {
   (void)state;
 
   assert_non_null(config);
@@ -186,12 +177,10 @@ void test_helper_service_unregistration_not_initialized(void** state,
   // (Implementation-dependent behavior)
 }
 
-void test_helper_verify_service_registration(const onvif_service_registration_t* registration,
-                                             const service_test_config_t* config) {
+void test_helper_verify_service_registration(const onvif_service_registration_t* registration, const service_test_config_t* config) {
   test_helper_assert_non_null(registration, "service registration");
   test_helper_assert_string_equal(registration->service_name, config->service_name, "service name");
-  test_helper_assert_string_equal(registration->namespace_uri, config->namespace_uri,
-                                  "namespace URI");
+  test_helper_assert_string_equal(registration->namespace_uri, config->namespace_uri, "namespace URI");
   test_helper_assert_non_null(registration->operation_handler, "operation handler");
   test_helper_assert_non_null(registration->init_handler, "init handler");
   test_helper_assert_non_null(registration->cleanup_handler, "cleanup handler");
@@ -202,8 +191,7 @@ void test_helper_verify_service_registration(const onvif_service_registration_t*
  * NULL Parameter Test Helpers
  * ============================================================================ */
 
-void test_helper_null_parameters(void** state, const char* function_name,
-                                 void (*test_func)(void**, const null_param_test_t*),
+void test_helper_null_parameters(void** state, const char* function_name, void (*test_func)(void**, const null_param_test_t*),
                                  const null_param_test_t* tests, int test_count) {
   (void)state;
 
@@ -329,8 +317,7 @@ void test_helper_generic_cleanup_handler(generic_mock_handler_state_t* state) {
  * @param response Response data
  * @return Result from operation handler
  */
-int test_helper_generic_operation_handler(generic_mock_handler_state_t* state,
-                                          const char* operation, const void* request, // NOLINT
+int test_helper_generic_operation_handler(generic_mock_handler_state_t* state, const char* operation, const void* request, // NOLINT
                                           void* response) {
   if (!state) {
     return ONVIF_ERROR_INVALID;
@@ -426,8 +413,7 @@ void test_helper_reset_state(const test_state_config_t* config) {
  * @return test_state_config_t structure
  */
 test_state_config_t test_helper_create_state_config(void (*reset_func)(void), // NOLINT
-                                                    void (*cleanup_func)(void), int* counters,
-                                                    int counter_count) {
+                                                    void (*cleanup_func)(void), int* counters, int counter_count) {
   test_state_config_t config = {0};
   config.reset_func = reset_func;
   config.cleanup_func = cleanup_func;
@@ -448,8 +434,7 @@ test_state_config_t test_helper_create_state_config(void (*reset_func)(void), //
  * @param header_size Size of header_value buffer
  * @return 0 on success, -1 on error
  */
-int test_helper_http_build_basic_auth_header(const char* username, const char* password,
-                                             char* header_value, size_t header_size) {
+int test_helper_http_build_basic_auth_header(const char* username, const char* password, char* header_value, size_t header_size) {
   if (!username || !password || !header_value || header_size == 0) {
     return -1;
   }
@@ -463,8 +448,7 @@ int test_helper_http_build_basic_auth_header(const char* username, const char* p
 
   // Encode credentials
   char encoded[TEST_ENCODED_BUFFER_SIZE];
-  int base64_result = onvif_util_base64_encode((const unsigned char*)credentials,
-                                               strlen(credentials), encoded, sizeof(encoded));
+  int base64_result = onvif_util_base64_encode((const unsigned char*)credentials, strlen(credentials), encoded, sizeof(encoded));
   if (base64_result != ONVIF_SUCCESS) {
     return -1;
   }
@@ -572,8 +556,7 @@ int test_helper_ptz_create_test_position(struct ptz_vector* position, float pan,
   position->pan_tilt.x = pan;
   position->pan_tilt.y = tilt;
   position->zoom = zoom;
-  strncpy(position->space, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace",
-          sizeof(position->space) - 1);
+  strncpy(position->space, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace", sizeof(position->space) - 1);
   position->space[sizeof(position->space) - 1] = '\0';
 
   return 0;
@@ -609,8 +592,7 @@ int test_helper_ptz_create_test_speed(struct ptz_speed* speed, float pan_tilt,
  * @param name Preset name
  * @return 0 on success, -1 on error
  */
-int test_helper_ptz_create_test_preset(struct ptz_preset* preset, const char* token,
-                                       const char* name) {
+int test_helper_ptz_create_test_preset(struct ptz_preset* preset, const char* token, const char* name) {
   if (!preset || !token || !name) {
     return -1;
   }
@@ -641,11 +623,9 @@ void test_helper_assert_non_null(const void* ptr, const char* description) {
   assert_non_null(ptr);
 }
 
-void test_helper_assert_string_equal(const char* actual, const char* expected,
-                                     const char* description) {
+void test_helper_assert_string_equal(const char* actual, const char* expected, const char* description) {
   if (actual == NULL || expected == NULL) {
-    fail_msg("String comparison for %s failed: actual=%s, expected=%s", description,
-             actual ? actual : "NULL", expected ? expected : "NULL");
+    fail_msg("String comparison for %s failed: actual=%s, expected=%s", description, actual ? actual : "NULL", expected ? expected : "NULL");
   }
 
   if (strcmp(actual, expected) != 0) {
@@ -663,11 +643,9 @@ void test_helper_assert_int_equal(int actual, int expected, const char* descript
   assert_int_equal(actual, expected);
 }
 
-void test_helper_assert_mock_called(int actual_count, int expected_count,
-                                    const char* function_name) {
+void test_helper_assert_mock_called(int actual_count, int expected_count, const char* function_name) {
   if (actual_count != expected_count) {
-    fail_msg("Mock call count mismatch for %s: expected %d calls, got %d calls", function_name,
-             expected_count, actual_count);
+    fail_msg("Mock call count mismatch for %s: expected %d calls, got %d calls", function_name, expected_count, actual_count);
   }
 
   assert_int_equal(actual_count, expected_count);
@@ -687,9 +665,7 @@ void test_helper_init_http_response(void* response) {
   memset(response, 0, sizeof(http_response_t));
 }
 
-service_test_config_t test_helper_create_service_config(const char* service_name,
-                                                        const char* namespace_uri,
-                                                        int (*init_func)(void*),
+service_test_config_t test_helper_create_service_config(const char* service_name, const char* namespace_uri, int (*init_func)(void*),
                                                         void (*cleanup_func)(void)) {
   service_test_config_t config = {
     .service_name = service_name,
@@ -716,8 +692,7 @@ service_test_config_t test_helper_create_service_config(const char* service_name
  * @param request HTTP request
  * @param response HTTP response
  */
-void test_helper_service_dispatch_success(void** state, const service_test_config_t* config,
-                                          const char* operation, http_request_t* request,
+void test_helper_service_dispatch_success(void** state, const service_test_config_t* config, const char* operation, http_request_t* request,
                                           http_response_t* response) {
   (void)state;
 
@@ -735,7 +710,7 @@ void test_helper_service_dispatch_success(void** state, const service_test_confi
   // Test dispatch through service dispatcher
   result = onvif_service_dispatcher_dispatch(config->service_name, operation, request, response);
 
-  // Note: This will likely return an error due to missing gSOAP context
+  // This will likely return an error due to missing gSOAP context
   // but we're testing the dispatch mechanism
   assert_true(result == ONVIF_SUCCESS || result == ONVIF_ERROR);
 
@@ -753,9 +728,7 @@ void test_helper_service_dispatch_success(void** state, const service_test_confi
  * @param request HTTP request
  * @param response HTTP response
  */
-void test_helper_service_dispatch_unknown_operation(void** state,
-                                                    const service_test_config_t* config,
-                                                    const char* operation, http_request_t* request,
+void test_helper_service_dispatch_unknown_operation(void** state, const service_test_config_t* config, const char* operation, http_request_t* request,
                                                     http_response_t* response) {
   (void)state;
 
@@ -788,8 +761,7 @@ void test_helper_service_dispatch_unknown_operation(void** state,
  * @param request HTTP request
  * @param response HTTP response
  */
-void test_helper_service_dispatch_null_service(void** state, const char* operation,
-                                               http_request_t* request, http_response_t* response) {
+void test_helper_service_dispatch_null_service(void** state, const char* operation, http_request_t* request, http_response_t* response) {
   (void)state;
 
   // Test dispatch with NULL service name
@@ -805,9 +777,7 @@ void test_helper_service_dispatch_null_service(void** state, const char* operati
  * @param request HTTP request
  * @param response HTTP response
  */
-void test_helper_service_dispatch_null_operation(void** state, const char* service_name,
-                                                 http_request_t* request,
-                                                 http_response_t* response) {
+void test_helper_service_dispatch_null_operation(void** state, const char* service_name, http_request_t* request, http_response_t* response) {
   (void)state;
 
   // Test dispatch with NULL operation name
@@ -823,8 +793,7 @@ void test_helper_service_dispatch_null_operation(void** state, const char* servi
  * @param operation Operation name
  * @param response HTTP response
  */
-void test_helper_service_dispatch_null_request(void** state, const char* service_name,
-                                               const char* operation, http_response_t* response) {
+void test_helper_service_dispatch_null_request(void** state, const char* service_name, const char* operation, http_response_t* response) {
   (void)state;
 
   // Test dispatch with NULL request
@@ -840,8 +809,7 @@ void test_helper_service_dispatch_null_request(void** state, const char* service
  * @param operation Operation name
  * @param request HTTP request
  */
-void test_helper_service_dispatch_null_response(void** state, const char* service_name,
-                                                const char* operation, http_request_t* request) {
+void test_helper_service_dispatch_null_response(void** state, const char* service_name, const char* operation, http_request_t* request) {
   (void)state;
 
   // Test dispatch with NULL response
@@ -862,8 +830,7 @@ void test_helper_service_dispatch_null_response(void** state, const char* servic
  * @param request HTTP request
  * @param response HTTP response
  */
-void test_helper_operation_handler_success(void** state, const service_test_config_t* config,
-                                           const char* operation, http_request_t* request,
+void test_helper_operation_handler_success(void** state, const service_test_config_t* config, const char* operation, http_request_t* request,
                                            http_response_t* response) {
   (void)state;
 
@@ -879,7 +846,7 @@ void test_helper_operation_handler_success(void** state, const service_test_conf
   // Test operation handler directly
   result = onvif_ptz_handle_operation(operation, request, response);
 
-  // Note: This will likely return an error due to missing gSOAP context
+  // This will likely return an error due to missing gSOAP context
   // but we're testing the handler mechanism
   assert_true(result == ONVIF_SUCCESS || result == ONVIF_ERROR);
 }
@@ -890,8 +857,7 @@ void test_helper_operation_handler_success(void** state, const service_test_conf
  * @param request HTTP request
  * @param response HTTP response
  */
-void test_helper_operation_handler_null_operation(void** state, http_request_t* request,
-                                                  http_response_t* response) {
+void test_helper_operation_handler_null_operation(void** state, http_request_t* request, http_response_t* response) {
   (void)state;
 
   int result = onvif_ptz_handle_operation(NULL, request, response);
@@ -905,8 +871,7 @@ void test_helper_operation_handler_null_operation(void** state, http_request_t* 
  * @param operation Operation name
  * @param response HTTP response
  */
-void test_helper_operation_handler_null_request(void** state, const char* operation,
-                                                http_response_t* response) {
+void test_helper_operation_handler_null_request(void** state, const char* operation, http_response_t* response) {
   (void)state;
 
   int result = onvif_ptz_handle_operation(operation, NULL, response);
@@ -920,8 +885,7 @@ void test_helper_operation_handler_null_request(void** state, const char* operat
  * @param operation Operation name
  * @param request HTTP request
  */
-void test_helper_operation_handler_null_response(void** state, const char* operation,
-                                                 http_request_t* request) {
+void test_helper_operation_handler_null_response(void** state, const char* operation, http_request_t* request) {
   (void)state;
 
   int result = onvif_ptz_handle_operation(operation, request, NULL);
@@ -936,9 +900,7 @@ void test_helper_operation_handler_null_response(void** state, const char* opera
  * @param request HTTP request
  * @param response HTTP response
  */
-void test_helper_operation_handler_unknown_operation(void** state, const char* operation,
-                                                     http_request_t* request,
-                                                     http_response_t* response) {
+void test_helper_operation_handler_unknown_operation(void** state, const char* operation, http_request_t* request, http_response_t* response) {
   (void)state;
 
   int result = onvif_ptz_handle_operation(operation, request, response);
@@ -956,9 +918,7 @@ void test_helper_operation_handler_unknown_operation(void** state, const char* o
  * @param config Service configuration
  * @param error_code Expected error code
  */
-void test_helper_service_registration_failure_handling(void** state,
-                                                       const service_test_config_t* config,
-                                                       int error_code) {
+void test_helper_service_registration_failure_handling(void** state, const service_test_config_t* config, int error_code) {
   (void)state;
 
   // Mock registration failure (pure CMocka pattern)
@@ -983,9 +943,7 @@ void test_helper_service_registration_failure_handling(void** state,
  * @param request HTTP request
  * @param response HTTP response
  */
-void test_helper_service_dispatch_failure_handling(void** state,
-                                                   const service_test_config_t* config,
-                                                   const char* operation, http_request_t* request,
+void test_helper_service_dispatch_failure_handling(void** state, const service_test_config_t* config, const char* operation, http_request_t* request,
                                                    http_response_t* response) {
   (void)state;
 
@@ -1014,8 +972,7 @@ void test_helper_service_dispatch_failure_handling(void** state,
  * @param state Test state
  * @param config Service configuration
  */
-void test_helper_service_unregistration_failure_handling(void** state,
-                                                         const service_test_config_t* config) {
+void test_helper_service_unregistration_failure_handling(void** state, const service_test_config_t* config) {
   (void)state;
 
   // Mock successful registration but unregistration failure (pure CMocka pattern)
@@ -1048,8 +1005,7 @@ void test_helper_service_unregistration_failure_handling(void** state,
  * @param request HTTP request
  * @param response HTTP response
  */
-void test_helper_service_callback_logging_success(void** state, const service_test_config_t* config,
-                                                  const char* operation, http_request_t* request,
+void test_helper_service_callback_logging_success(void** state, const service_test_config_t* config, const char* operation, http_request_t* request,
                                                   http_response_t* response) {
   (void)state;
 
@@ -1077,8 +1033,7 @@ void test_helper_service_callback_logging_success(void** state, const service_te
  * @param state Test state
  * @param config Service configuration
  */
-void test_helper_service_callback_logging_failure(void** state,
-                                                  const service_test_config_t* config) {
+void test_helper_service_callback_logging_failure(void** state, const service_test_config_t* config) {
   (void)state;
 
   // Mock failure operations (pure CMocka pattern)
@@ -1134,8 +1089,48 @@ size_t test_helper_get_memory_usage(void) {
 }
 
 /* ============================================================================
- * Generic Mock Framework Helpers
+ * Path Resolution Helpers
  * ============================================================================ */
 
-// NOTE: Generic mock framework helpers have been removed as part of CMocka migration.
-// These functions are no longer needed with CMocka's built-in mocking patterns.
+/**
+ * @brief Get the absolute path of a test resource file
+ * @param relative_path Relative path from tests directory (e.g., "configs/test.ini")
+ * @param output_buffer Buffer to store the absolute path
+ * @param buffer_size Size of the output buffer
+ * @return 0 on success, -1 on failure
+ *
+ * This function resolves relative paths to absolute paths based on the test
+ * executable's location, making tests location-independent.
+ */
+int test_helper_get_test_resource_path(const char* relative_path, char* output_buffer, size_t buffer_size) {
+  if (!relative_path || !output_buffer || buffer_size == 0) {
+    return -1;
+  }
+
+  // Get the directory of the test executable using /proc/self/exe
+  char exe_path[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+
+  if (len == -1) {
+    // Fallback: use __FILE__ macro to get current source location
+    // Note: This is a fallback and may not work in all cases
+    strncpy(output_buffer, relative_path, buffer_size - 1);
+    output_buffer[buffer_size - 1] = '\0';
+    return 0;
+  }
+
+  exe_path[len] = '\0';
+
+  // Extract directory from full path
+  char* last_slash = strrchr(exe_path, '/');
+  if (last_slash) {
+    *last_slash = '\0';
+  }
+
+  // Construct the full path to the test resource
+  if (snprintf(output_buffer, buffer_size, "%s/../%s", exe_path, relative_path) >= (int)buffer_size) {
+    return -1;
+  }
+
+  return 0;
+}

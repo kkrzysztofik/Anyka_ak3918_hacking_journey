@@ -12,7 +12,6 @@
 
 #include "core/config/config.h"
 #include "networking/http/http_parser.h"
-#include "services/common/onvif_types.h"
 #include "services/media/onvif_media.h"
 
 #ifdef __cplusplus
@@ -80,8 +79,7 @@ void onvif_snapshot_service_cleanup(void);
  * @param response Response structure
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int onvif_snapshot_handle_request(const char* action_name, const http_request_t* request,
-                                  http_response_t* response);
+int onvif_snapshot_handle_request(const char* action_name, const http_request_t* request, http_response_t* response);
 
 #ifdef __cplusplus
 }

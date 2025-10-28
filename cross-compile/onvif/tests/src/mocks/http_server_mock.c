@@ -104,8 +104,7 @@ void __wrap_process_connection(void* conn) {
  * @param security_ctx Security context for logging
  * @return ONVIF_SUCCESS if authentication succeeds, ONVIF_ERROR if it fails
  */
-int __wrap_http_validate_authentication(const http_request_t* request,
-                                        security_context_t* security_ctx) {
+int __wrap_http_validate_authentication(const http_request_t* request, security_context_t* security_ctx) {
   if (g_use_real_functions) {
     return __real_http_validate_authentication(request, security_ctx);
   }
@@ -137,6 +136,3 @@ int __wrap_http_validate_authentication(const http_request_t* request,
   // In a real implementation, this would validate the credentials
   return ONVIF_SUCCESS;
 }
-
-// HTTP metrics functions are defined in test_http_metrics_simple.c
-// to avoid multiple definition conflicts

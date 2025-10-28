@@ -66,8 +66,7 @@ int onvif_gsoap_parse_delete_profile(onvif_gsoap_context_t* ctx, struct _trt__De
  * @note Extracts Configuration (Name, Token, Bounds, SourceToken) and ForcePersistence
  * @note Output structure is allocated with soap_new__trt__SetVideoSourceConfiguration()
  */
-int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
-                                              struct _trt__SetVideoSourceConfiguration** out);
+int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx, struct _trt__SetVideoSourceConfiguration** out);
 
 /**
  * @brief Parse SetVideoEncoderConfiguration ONVIF Media service request
@@ -78,8 +77,7 @@ int onvif_gsoap_parse_set_video_source_config(onvif_gsoap_context_t* ctx,
  * ForcePersistence
  * @note Output structure is allocated with soap_new__trt__SetVideoEncoderConfiguration()
  */
-int onvif_gsoap_parse_set_video_encoder_config(onvif_gsoap_context_t* ctx,
-                                               struct _trt__SetVideoEncoderConfiguration** out);
+int onvif_gsoap_parse_set_video_encoder_config(onvif_gsoap_context_t* ctx, struct _trt__SetVideoEncoderConfiguration** out);
 
 /* ============================================================================
  * Media Service Response Generation Functions
@@ -245,8 +243,7 @@ int media_set_metadata_config_response_callback(struct soap* soap, void* user_da
  * @param profile_count Number of profiles in array
  * @return 0 on success, error code on failure
  */
-int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
-                                           const struct media_profile* profiles, int profile_count);
+int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx, const struct media_profile* profiles, int profile_count);
 
 /**
  * @brief Generate Media GetStreamUri response
@@ -254,8 +251,7 @@ int onvif_gsoap_generate_profiles_response(onvif_gsoap_context_t* ctx,
  * @param uri Stream URI structure
  * @return 0 on success, error code on failure
  */
-int onvif_gsoap_generate_stream_uri_response(onvif_gsoap_context_t* ctx,
-                                             const struct stream_uri* uri);
+int onvif_gsoap_generate_stream_uri_response(onvif_gsoap_context_t* ctx, const struct stream_uri* uri);
 
 /**
  * @brief Generate Media CreateProfile response
@@ -263,8 +259,7 @@ int onvif_gsoap_generate_stream_uri_response(onvif_gsoap_context_t* ctx,
  * @param profile Created media profile
  * @return 0 on success, error code on failure
  */
-int onvif_gsoap_generate_create_profile_response(onvif_gsoap_context_t* ctx,
-                                                 const struct media_profile* profile);
+int onvif_gsoap_generate_create_profile_response(onvif_gsoap_context_t* ctx, const struct media_profile* profile);
 
 /**
  * @brief Generate Media DeleteProfile response
@@ -308,8 +303,7 @@ int onvif_gsoap_generate_stop_multicast_streaming_response(onvif_gsoap_context_t
  * @param count Number of configurations in array
  * @return 0 on success, error code on failure
  */
-int onvif_gsoap_generate_get_metadata_configurations_response(
-  onvif_gsoap_context_t* ctx, const struct metadata_configuration* configs, int count);
+int onvif_gsoap_generate_get_metadata_configurations_response(onvif_gsoap_context_t* ctx, const struct metadata_configuration* configs, int count);
 
 /**
  * @brief Generate Media SetMetadataConfiguration response

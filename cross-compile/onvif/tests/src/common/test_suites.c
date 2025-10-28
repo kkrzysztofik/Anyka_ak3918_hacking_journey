@@ -7,10 +7,19 @@
 
 #include "test_suites.h"
 
-#include "unit/core/test_config_auth.h"
+#include <stddef.h>
+
+#include "unit/core/config/test_config_runtime.h"
+#include "unit/core/config/test_config_storage.h"
 #include "unit/networking/test_http_server_auth.h"
 #include "unit/utils/test_hash_utils.h"
 #include "utils/test_gsoap_utils.h"
+
+// Forward declarations for T086 (Snapshot integration tests)
+extern const struct CMUnitTest* get_snapshot_integration_tests(size_t* count);
+
+// Forward declarations for T087 (Network layer integration tests)
+extern const struct CMUnitTest* get_network_integration_tests(size_t* count);
 
 /**
  * @brief Global test suite registry
@@ -44,10 +53,17 @@ const test_suite_t g_test_suites[] = {
    .setup = NULL,
    .teardown = NULL},
 
-  {.name = "config-auth",
-   .full_name = "Configuration Authentication",
+  {.name = "config-runtime",
+   .full_name = "Configuration Runtime Manager",
    .category = TEST_CATEGORY_UNIT,
-   .get_tests = get_config_auth_unit_tests,
+   .get_tests = get_config_runtime_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  {.name = "config-storage",
+   .full_name = "Configuration Storage Layer",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_config_storage_unit_tests,
    .setup = NULL,
    .teardown = NULL},
 
@@ -110,6 +126,13 @@ const test_suite_t g_test_suites[] = {
    .setup = NULL,
    .teardown = NULL},
 
+  {.name = "device-service",
+   .full_name = "Device Service Unit Tests",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_device_service_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
   // PTZ unit tests (unified: service + callbacks + adapter)
   {.name = "ptz-unit",
    .full_name = "PTZ Unit Tests",
@@ -138,6 +161,13 @@ const test_suite_t g_test_suites[] = {
    .full_name = "Imaging Callbacks",
    .category = TEST_CATEGORY_UNIT,
    .get_tests = get_imaging_callbacks_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  {.name = "imaging-service",
+   .full_name = "Imaging Service Operations",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_imaging_service_unit_tests,
    .setup = NULL,
    .teardown = NULL},
 
@@ -177,11 +207,55 @@ const test_suite_t g_test_suites[] = {
    .setup = setup_imaging_integration,
    .teardown = teardown_imaging_integration},
 
+  // Snapshot service integration tests (T086)
+  {.name = "snapshot-integration",
+   .full_name = "Snapshot Service Integration",
+   .category = TEST_CATEGORY_INTEGRATION,
+   .get_tests = get_snapshot_integration_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
   // SOAP error tests
   {.name = "soap-errors",
    .full_name = "SOAP Error Handling",
    .category = TEST_CATEGORY_INTEGRATION,
    .get_tests = get_soap_error_integration_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  // HTTP authentication integration tests
+  {.name = "http-auth-integration",
+   .full_name = "HTTP Authentication Integration",
+   .category = TEST_CATEGORY_INTEGRATION,
+   .get_tests = get_http_auth_integration_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  // Network layer integration tests (T087)
+  {.name = "network-integration",
+   .full_name = "Network Layer Integration",
+   .category = TEST_CATEGORY_INTEGRATION,
+   .get_tests = get_network_integration_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  // ============================================================================
+  // Polish Phase Test Suites (T104-T106)
+  // ============================================================================
+
+  // Configuration performance tests (T104)
+  {.name = "config-performance",
+   .full_name = "Configuration System Performance Benchmarking",
+   .category = TEST_CATEGORY_INTEGRATION,
+   .get_tests = get_config_performance_integration_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  // Configuration security tests (T105)
+  {.name = "config-security",
+   .full_name = "Configuration System Security Hardening",
+   .category = TEST_CATEGORY_INTEGRATION,
+   .get_tests = get_config_security_integration_tests,
    .setup = NULL,
    .teardown = NULL},
 };

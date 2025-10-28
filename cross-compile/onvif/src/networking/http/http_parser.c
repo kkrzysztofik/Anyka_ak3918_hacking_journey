@@ -21,7 +21,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "common/onvif_constants.h"
+#include "networking/http/http_constants.h"
 #include "platform/platform.h"
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
@@ -40,9 +40,6 @@
 #define HTTP_CONTENT_LENGTH_BUFFER_SIZE 32
 #define HTTP_STRTOL_BASE                10
 #define HTTP_RESPONSE_BUFFER_SIZE       512
-#define HTTP_STATUS_OK                  200
-#define HTTP_STATUS_BAD_REQUEST         400
-#define HTTP_STATUS_NOT_FOUND           404
 #define HTTP_MAX_HEADER_LINE_LENGTH     8192
 
 /* Safe string functions are now provided by utils/safe_string.h */
@@ -51,21 +48,14 @@
  * utils/validation/input_validation.h */
 
 /* Helper function declarations */
-static int parse_single_header_line(const char* line_start, size_t line_len, http_header_t* header,
-                                    size_t header_index);
-static int validate_header_name_value(const char* name, size_t name_len, const char* value,
-                                      size_t value_len);
-static int parse_http_method(const char* buffer, size_t* pos, size_t buffer_used,
-                             http_request_t* request, const char** line_start);
-static int parse_http_path(const char* buffer, size_t* pos, size_t buffer_used,
-                           http_request_t* request, const char** line_start);
-static int parse_http_version(const char* buffer, size_t* pos, size_t buffer_used,
-                              http_request_t* request, const char** line_start);
-static int parse_http_headers_state(const char* buffer, size_t* pos, size_t buffer_used,
-                                    http_request_t* request, const char** line_start,
+static int parse_single_header_line(const char* line_start, size_t line_len, http_header_t* header, size_t header_index);
+static int validate_header_name_value(const char* name, size_t name_len, const char* value, size_t value_len);
+static int parse_http_method(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start);
+static int parse_http_path(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start);
+static int parse_http_version(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start);
+static int parse_http_headers_state(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start,
                                     size_t* header_length);
-static int parse_http_body(const char* buffer, size_t buffer_used, http_request_t* request,
-                           size_t header_length, int* need_more_data);
+static int parse_http_body(const char* buffer, size_t buffer_used, http_request_t* request, size_t header_length, int* need_more_data);
 static size_t count_http_headers(const char* headers, size_t headers_size);
 
 /* ============================================================================
@@ -81,8 +71,7 @@ static size_t count_http_headers(const char* headers, size_t headers_size);
  * @param header_index Index of the header in the array
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
-static int parse_single_header_line(const char* line_start, size_t line_len, http_header_t* header,
-                                    size_t header_index) {
+static int parse_single_header_line(const char* line_start, size_t line_len, http_header_t* header, size_t header_index) {
   if (!line_start || !header || line_len == 0) {
     return ONVIF_ERROR_NULL;
   }
@@ -138,8 +127,7 @@ static int parse_single_header_line(const char* line_start, size_t line_len, htt
  * @param value_len Length of header value
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
-static int validate_header_name_value(const char* name, size_t name_len, const char* value,
-                                      size_t value_len) {
+static int validate_header_name_value(const char* name, size_t name_len, const char* value, size_t value_len) {
   if (!name || !value || name_len == 0 || value_len == 0) {
     return ONVIF_ERROR_NULL;
   }
@@ -147,8 +135,8 @@ static int validate_header_name_value(const char* name, size_t name_len, const c
   // Check for valid header name characters
   for (size_t i = 0; i < name_len; i++) {
     char char_value = name[i];
-    if (!((char_value >= 'A' && char_value <= 'Z') || (char_value >= 'a' && char_value <= 'z') ||
-          (char_value >= '0' && char_value <= '9') || char_value == '-' || char_value == '_')) {
+    if (!((char_value >= 'A' && char_value <= 'Z') || (char_value >= 'a' && char_value <= 'z') || (char_value >= '0' && char_value <= '9') ||
+          char_value == '-' || char_value == '_')) {
       platform_log_error("Invalid character in header name: %c\n", char_value);
       return ONVIF_ERROR_INVALID;
     }
@@ -172,8 +160,7 @@ static int validate_header_name_value(const char* name, size_t name_len, const c
  * @param line_start Start of current line
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
-static int parse_http_method(const char* buffer, size_t* pos, size_t buffer_used,
-                             http_request_t* request, const char** line_start) {
+static int parse_http_method(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start) {
   if (!buffer || !pos || !request || !line_start) {
     return ONVIF_ERROR_NULL;
   }
@@ -190,8 +177,7 @@ static int parse_http_method(const char* buffer, size_t* pos, size_t buffer_used
   }
 
   // Copy method with bounds checking using safe string function
-  if (memory_safe_strncpy(request->method, sizeof(request->method), *line_start,
-                          method_end - *pos) < 0) {
+  if (memory_safe_strncpy(request->method, sizeof(request->method), *line_start, method_end - *pos) < 0) {
     platform_log_error("Failed to copy HTTP method safely\n");
     return ONVIF_ERROR_MEMORY;
   }
@@ -209,8 +195,7 @@ static int parse_http_method(const char* buffer, size_t* pos, size_t buffer_used
  * @param line_start Start of current line
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
-static int parse_http_path(const char* buffer, size_t* pos, size_t buffer_used,
-                           http_request_t* request, const char** line_start) {
+static int parse_http_path(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start) {
   if (!buffer || !pos || !request || !line_start) {
     return ONVIF_ERROR_NULL;
   }
@@ -246,8 +231,7 @@ static int parse_http_path(const char* buffer, size_t* pos, size_t buffer_used,
  * @param line_start Start of current line
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
-static int parse_http_version(const char* buffer, size_t* pos, size_t buffer_used,
-                              http_request_t* request, const char** line_start) {
+static int parse_http_version(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start) {
   if (!buffer || !pos || !request || !line_start) {
     return ONVIF_ERROR_NULL;
   }
@@ -265,8 +249,7 @@ static int parse_http_version(const char* buffer, size_t* pos, size_t buffer_use
 
   // Copy version with bounds checking using safe string function
   const char* version_start = *line_start + (*pos - (*line_start - buffer));
-  if (memory_safe_strncpy(request->version, sizeof(request->version), version_start,
-                          version_end - *pos) < 0) {
+  if (memory_safe_strncpy(request->version, sizeof(request->version), version_start, version_end - *pos) < 0) {
     platform_log_error("Failed to copy HTTP version safely\n");
     return ONVIF_ERROR_MEMORY;
   }
@@ -285,16 +268,14 @@ static int parse_http_version(const char* buffer, size_t* pos, size_t buffer_use
  * @param header_length Length of headers section
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
-static int parse_http_headers_state(const char* buffer, size_t* pos, size_t buffer_used,
-                                    http_request_t* request, const char** line_start,
+static int parse_http_headers_state(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start,
                                     size_t* header_length) {
   if (!buffer || !pos || !request || !line_start || !header_length) {
     return ONVIF_ERROR_NULL;
   }
 
   // Parse headers
-  int result = parse_http_headers(buffer + *pos, buffer_used - *pos, &request->headers,
-                                  &request->header_count);
+  int result = parse_http_headers(buffer + *pos, buffer_used - *pos, &request->headers, &request->header_count);
   if (result != 0) {
     platform_log_error("Failed to parse HTTP headers\n");
     return ONVIF_ERROR_PARSE_FAILED;
@@ -314,20 +295,17 @@ static int parse_http_headers_state(const char* buffer, size_t* pos, size_t buff
  * @param need_more_data Flag indicating if more data is needed
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
-static int parse_http_body(const char* buffer, size_t buffer_used, http_request_t* request,
-                           size_t header_length, int* need_more_data) {
+static int parse_http_body(const char* buffer, size_t buffer_used, http_request_t* request, size_t header_length, int* need_more_data) {
   if (!buffer || !request || !need_more_data) {
     return ONVIF_ERROR_NULL;
   }
 
   // Check if we have Content-Length header
   char content_length_str[HTTP_CONTENT_LENGTH_BUFFER_SIZE];
-  if (find_header_value(request->headers, request->header_count, "Content-Length",
-                        content_length_str, sizeof(content_length_str)) == 0) {
+  if (find_header_value(request->headers, request->header_count, "Content-Length", content_length_str, sizeof(content_length_str)) == 0) {
     char* endptr = NULL;
     long parsed_length = strtol(content_length_str, &endptr, HTTP_STRTOL_BASE);
-    if (endptr == content_length_str || *endptr != '\0' || parsed_length < 0 ||
-        parsed_length > MAX_CONTENT_LENGTH) {
+    if (endptr == content_length_str || *endptr != '\0' || parsed_length < 0 || parsed_length > MAX_CONTENT_LENGTH) {
       platform_log_error("Invalid Content-Length: %s\n", content_length_str);
       return ONVIF_ERROR_INVALID;
     }
@@ -473,26 +451,21 @@ int parse_http_request_line(const char* request, http_request_t* req) {
   }
 
   // Validate parsed components using common validation utilities
-  validation_result_t method_validation =
-    validate_string("HTTP method", req->method, 1, sizeof(req->method) - 1, 0);
+  validation_result_t method_validation = validate_string("HTTP method", req->method, 1, sizeof(req->method) - 1, 0);
   if (!validation_is_valid(&method_validation)) {
-    platform_log_error("Invalid HTTP method: %s\n",
-                       validation_get_error_message(&method_validation));
+    platform_log_error("Invalid HTTP method: %s\n", validation_get_error_message(&method_validation));
     return ONVIF_ERROR_INVALID;
   }
 
-  validation_result_t path_validation =
-    validate_string("HTTP path", req->path, 1, sizeof(req->path) - 1, 0);
+  validation_result_t path_validation = validate_string("HTTP path", req->path, 1, sizeof(req->path) - 1, 0);
   if (!validation_is_valid(&path_validation)) {
     platform_log_error("Invalid HTTP path: %s\n", validation_get_error_message(&path_validation));
     return ONVIF_ERROR_INVALID;
   }
 
-  validation_result_t version_validation =
-    validate_string("HTTP version", req->version, 1, sizeof(req->version) - 1, 0);
+  validation_result_t version_validation = validate_string("HTTP version", req->version, 1, sizeof(req->version) - 1, 0);
   if (!validation_is_valid(&version_validation)) {
-    platform_log_error("Invalid HTTP version: %s\n",
-                       validation_get_error_message(&version_validation));
+    platform_log_error("Invalid HTTP version: %s\n", validation_get_error_message(&version_validation));
     return ONVIF_ERROR_INVALID;
   }
 
@@ -523,8 +496,7 @@ int parse_http_request_line(const char* request, http_request_t* req) {
  * @param count Number of headers to parse
  * @return Number of headers successfully parsed
  */
-static size_t parse_header_lines(const char* headers, size_t headers_size,
-                                 http_header_t* parsed_headers, size_t count) {
+static size_t parse_header_lines(const char* headers, size_t headers_size, http_header_t* parsed_headers, size_t count) {
   const char* current = headers;
   const char* line_start = headers;
   size_t header_index = 0;
@@ -557,19 +529,15 @@ static size_t parse_header_lines(const char* headers, size_t headers_size,
 static int validate_parsed_headers(http_header_t* parsed_headers, size_t header_count) {
   for (size_t i = 0; i < header_count; i++) {
     if (parsed_headers[i].name && parsed_headers[i].value) {
-      validation_result_t name_validation =
-        validate_string("Header name", parsed_headers[i].name, 1, HTTP_MAX_HEADER_LINE_LENGTH, 0);
+      validation_result_t name_validation = validate_string("Header name", parsed_headers[i].name, 1, HTTP_MAX_HEADER_LINE_LENGTH, 0);
       if (!validation_is_valid(&name_validation)) {
-        platform_log_error("Invalid header name: %s\n",
-                           validation_get_error_message(&name_validation));
+        platform_log_error("Invalid header name: %s\n", validation_get_error_message(&name_validation));
         return ONVIF_ERROR_INVALID;
       }
 
-      validation_result_t value_validation =
-        validate_string("Header value", parsed_headers[i].value, 0, HTTP_MAX_HEADER_LINE_LENGTH, 1);
+      validation_result_t value_validation = validate_string("Header value", parsed_headers[i].value, 0, HTTP_MAX_HEADER_LINE_LENGTH, 1);
       if (!validation_is_valid(&value_validation)) {
-        platform_log_error("Invalid header value: %s\n",
-                           validation_get_error_message(&value_validation));
+        platform_log_error("Invalid header value: %s\n", validation_get_error_message(&value_validation));
         return ONVIF_ERROR_INVALID;
       }
     }
@@ -586,8 +554,7 @@ static int validate_parsed_headers(http_header_t* parsed_headers, size_t header_
  * @param header_count Number of headers found
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
-int parse_http_headers(const char* headers, size_t headers_size, http_header_t** parsed_headers,
-                       size_t* header_count) {
+int parse_http_headers(const char* headers, size_t headers_size, http_header_t** parsed_headers, size_t* header_count) {
   if (!headers || !parsed_headers || !header_count) {
     return ONVIF_ERROR_INVALID;
   }
@@ -627,8 +594,7 @@ int parse_http_headers(const char* headers, size_t headers_size, http_header_t**
  * @param need_more_data Flag indicating if more data is needed
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
-int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_request_t* request,
-                                     int* need_more_data) {
+int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_request_t* request, int* need_more_data) {
   if (!buffer || !request || !need_more_data) {
     return ONVIF_ERROR_INVALID;
   }
@@ -662,8 +628,7 @@ int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_requ
 
       if (parse_http_method(buffer, &current_pos, buffer_used, request, &current_line_start) != 0 ||
           parse_http_path(buffer, &current_pos, buffer_used, request, &current_line_start) != 0 ||
-          parse_http_version(buffer, &current_pos, buffer_used, request, &current_line_start) !=
-            0) {
+          parse_http_version(buffer, &current_pos, buffer_used, request, &current_line_start) != 0) {
         platform_log_error("Failed to parse request line\n");
         return ONVIF_ERROR_INVALID;
       }
@@ -684,8 +649,7 @@ int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_requ
 
       // Parse headers using helper function
       const char* const_line_start = line_start;
-      if (parse_http_headers_state(buffer, &pos, buffer_used, request, &const_line_start,
-                                   &header_length) != 0) {
+      if (parse_http_headers_state(buffer, &pos, buffer_used, request, &const_line_start, &header_length) != 0) {
         platform_log_error("Failed to parse headers\n");
         return ONVIF_ERROR_INVALID;
       }
@@ -733,8 +697,7 @@ int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_requ
  * @param value_size Size of value buffer
  * @return ONVIF_SUCCESS if found, ONVIF_ERROR_NOT_FOUND if not found, ONVIF_ERROR_INVALID on error
  */
-int find_header_value(const http_header_t* headers, size_t header_count, const char* header_name,
-                      char* value, size_t value_size) {
+int find_header_value(const http_header_t* headers, size_t header_count, const char* header_name, char* value, size_t value_size) {
   if (!headers || !header_name || !value || value_size == 0) {
     return ONVIF_ERROR_INVALID;
   }
@@ -742,8 +705,7 @@ int find_header_value(const http_header_t* headers, size_t header_count, const c
   for (size_t i = 0; i < header_count; i++) {
     if (headers[i].name && strcasecmp(headers[i].name, header_name) == 0) {
       if (headers[i].value) {
-        if (memory_safe_strncpy(value, value_size, headers[i].value, strlen(headers[i].value)) <
-            0) {
+        if (memory_safe_strncpy(value, value_size, headers[i].value, strlen(headers[i].value)) < 0) {
           platform_log_error("Failed to copy header value safely\n");
           return ONVIF_ERROR_INVALID;
         }
@@ -790,19 +752,16 @@ int send_http_response(int client, const http_response_t* response) {
   const char* status_text = (response->status_code == HTTP_STATUS_OK)             ? "OK"
                             : (response->status_code == HTTP_STATUS_NOT_FOUND)    ? "Not Found"
                             : (response->status_code == HTTP_STATUS_UNAUTHORIZED) ? "Unauthorized"
-                            : (response->status_code == HTTP_STATUS_BAD_REQUEST)
-                              ? "Bad Request"
-                              : "Internal Server Error";
+                            : (response->status_code == HTTP_STATUS_BAD_REQUEST)  ? "Bad Request"
+                                                                                  : "Internal Server Error";
 
   // Start building the response header
-  int result =
-    snprintf(header, sizeof(header),
-             "HTTP/1.1 %d %s\r\n"
-             "Content-Type: %s\r\n"
-             "Content-Length: %zu\r\n"
-             "Connection: close\r\n",
-             response->status_code, status_text,
-             response->content_type ? response->content_type : "text/plain", response->body_length);
+  int result = snprintf(header, sizeof(header),
+                        "HTTP/1.1 %d %s\r\n"
+                        "Content-Type: %s\r\n"
+                        "Content-Length: %zu\r\n"
+                        "Connection: close\r\n",
+                        response->status_code, status_text, response->content_type ? response->content_type : "text/plain", response->body_length);
 
   if (result < 0 || (size_t)result >= sizeof(header)) {
     platform_log_error("Failed to format HTTP response header\n");
@@ -812,8 +771,7 @@ int send_http_response(int client, const http_response_t* response) {
   // Add custom headers
   for (size_t i = 0; i < response->header_count; i++) {
     int header_result =
-      snprintf(header + strlen(header), sizeof(header) - strlen(header), "%s: %s\r\n",
-               response->headers[i].name, response->headers[i].value);
+      snprintf(header + strlen(header), sizeof(header) - strlen(header), "%s: %s\r\n", response->headers[i].name, response->headers[i].value);
 
     if (header_result < 0 || (size_t)header_result >= (sizeof(header) - strlen(header))) {
       platform_log_error("Failed to format custom header\n");
@@ -854,12 +812,10 @@ int send_http_response(int client, const http_response_t* response) {
  * @param content_type Content type
  * @return Response structure (static, don't free)
  */
-http_response_t create_http_200_response(const char* body, size_t body_length,
-                                         const char* content_type) {
+http_response_t create_http_200_response(const char* body, size_t body_length, const char* content_type) {
   static http_response_t response;
   response.status_code = HTTP_STATUS_OK;
-  response.content_type =
-    (char*)(content_type ? content_type : "application/soap+xml; charset=utf-8");
+  response.content_type = (char*)(content_type ? content_type : "application/soap+xml; charset=utf-8");
   response.body = (char*)body;
   response.body_length = body_length;
   response.headers = NULL;
@@ -912,8 +868,7 @@ int http_response_add_header(http_response_t* response, const char* name, const 
   }
 
   // Allocate new header
-  http_header_t* new_headers =
-    realloc(response->headers, (response->header_count + 1) * sizeof(http_header_t));
+  http_header_t* new_headers = realloc(response->headers, (response->header_count + 1) * sizeof(http_header_t));
   if (!new_headers) {
     return ONVIF_ERROR_INVALID;
   }
@@ -925,8 +880,7 @@ int http_response_add_header(http_response_t* response, const char* name, const 
   if (!response->headers[response->header_count].name) {
     return ONVIF_ERROR_INVALID;
   }
-  if (memory_safe_strcpy(response->headers[response->header_count].name, strlen(name) + 1, name) <
-      0) {
+  if (memory_safe_strcpy(response->headers[response->header_count].name, strlen(name) + 1, name) < 0) {
     free(response->headers[response->header_count].name);
     return ONVIF_ERROR_INVALID;
   }
@@ -937,8 +891,7 @@ int http_response_add_header(http_response_t* response, const char* name, const 
     free(response->headers[response->header_count].name);
     return ONVIF_ERROR_INVALID;
   }
-  if (memory_safe_strcpy(response->headers[response->header_count].value, strlen(value) + 1,
-                         value) < 0) {
+  if (memory_safe_strcpy(response->headers[response->header_count].value, strlen(value) + 1, value) < 0) {
     free(response->headers[response->header_count].name);
     free(response->headers[response->header_count].value);
     return ONVIF_ERROR_INVALID;

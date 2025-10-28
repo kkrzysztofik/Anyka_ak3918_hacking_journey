@@ -119,8 +119,7 @@ static void test_base64_encode(void** state) {
 
   // Test basic encoding
   const char* input1 = "Hello, World!";
-  int result = onvif_base64_encode((const unsigned char*)input1, strlen(input1), output,
-                                   sizeof(output), &output_len);
+  int result = onvif_base64_encode((const unsigned char*)input1, strlen(input1), output, sizeof(output), &output_len);
   assert_int_equal(result, ONVIF_SUCCESS);
   assert_true(output_len > 0);
   assert_string_equal(output, "SGVsbG8sIFdvcmxkIQ==");
@@ -135,14 +134,12 @@ static void test_base64_encode(void** state) {
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
   // Test NULL output buffer
-  result = onvif_base64_encode((const unsigned char*)input1, strlen(input1), NULL, sizeof(output),
-                               &output_len);
+  result = onvif_base64_encode((const unsigned char*)input1, strlen(input1), NULL, sizeof(output), &output_len);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
   // Test insufficient output buffer
   char small_output[4];
-  result = onvif_base64_encode((const unsigned char*)input1, strlen(input1), small_output,
-                               sizeof(small_output), &output_len);
+  result = onvif_base64_encode((const unsigned char*)input1, strlen(input1), small_output, sizeof(small_output), &output_len);
   assert_int_equal(result, ONVIF_ERROR_BUFFER_TOO_SMALL);
 }
 
@@ -170,8 +167,7 @@ static void test_base64_decode(void** state) {
 
   // Test invalid Base64 input
   const char* invalid_input = "Invalid@Base64!";
-  result =
-    onvif_base64_decode(invalid_input, strlen(invalid_input), output, sizeof(output), &output_len);
+  result = onvif_base64_decode(invalid_input, strlen(invalid_input), output, sizeof(output), &output_len);
   assert_int_equal(result, ONVIF_ERROR_INVALID);
 
   // Test NULL input
@@ -196,8 +192,7 @@ static void test_base64_roundtrip(void** state) {
   size_t encoded_len, decoded_len;
 
   // Encode
-  int result = onvif_base64_encode((const unsigned char*)original, strlen(original), encoded,
-                                   sizeof(encoded), &encoded_len);
+  int result = onvif_base64_encode((const unsigned char*)original, strlen(original), encoded, sizeof(encoded), &encoded_len);
   assert_int_equal(result, ONVIF_SUCCESS);
 
   // Decode

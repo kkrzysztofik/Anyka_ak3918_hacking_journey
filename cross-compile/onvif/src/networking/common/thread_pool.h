@@ -11,8 +11,12 @@
 #ifndef THREAD_POOL_H
 #define THREAD_POOL_H
 
+#include <bits/pthreadtypes.h>
 #include <pthread.h>
-#include <stdint.h>
+
+/* Thread pool configuration */
+#define THREAD_POOL_MAX_THREADS       32  /* Maximum number of worker threads */
+#define THREAD_POOL_SHUTDOWN_DELAY_MS 200 /* Delay for threads to process shutdown signal */
 
 /* Forward declarations */
 struct connection;

@@ -16,12 +16,14 @@
 #include <string.h>
 #include <time.h>
 
+#include "common/onvif_constants.h"
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
+#include "generated/soapH.h"
 #include "networking/common/buffer_pool.h"
 #include "networking/http/http_parser.h"
 #include "platform/adapters/ptz_adapter.h"
 #include "platform/platform.h"
-#include "platform/platform_common.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
 #include "protocol/gsoap/onvif_gsoap_ptz.h"
 #include "protocol/gsoap/onvif_gsoap_response.h"
@@ -30,12 +32,15 @@
 #include "services/common/onvif_types.h"
 #include "services/common/service_dispatcher.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
 
 #ifdef UNIT_TESTING
 #include "services/common/onvif_service_test_helpers.h"
 #endif
+
+/* Network configuration constants */
 
 /* PTZ Movement Constants */
 #define PTZ_MOVEMENT_TIMEOUT_MS        5000
@@ -47,7 +52,7 @@
 #define PTZ_MAX_STEP_SIZE_PAN          16
 #define PTZ_MAX_STEP_SIZE_TILT         8
 #define PTZ_DEFAULT_SPEED              50
-#define PTZ_MAX_PRESETS                10
+#define PTZ_MAX_PRESETS                4 /* Max presets per profile */
 
 /* PTZ Coordinate Constants */
 #define PTZ_PAN_RANGE_DEGREES       180
@@ -70,42 +75,40 @@ static const struct ptz_node g_ptz_node = {
                                                  "PositionGenericSpace",
                                           .x_range = {.min = -180.0F, .max = 180.0F},
                                           .y_range = {.min = -90.0F, .max = 90.0F}},
-     .absolute_zoom_position_space = {.uri = "",
-                                      .x_range = {.min = 0.0F, .max = 0.0F},
-                                      .y_range = {.min = 0.0F, .max = 0.0F}},
+     .absolute_zoom_position_space = {.uri = "", .x_range = {.min = 0.0F, .max = 0.0F}, .y_range = {.min = 0.0F, .max = 0.0F}},
      .relative_pan_tilt_translation_space = {.uri = "http://www.onvif.org/ver10/tptz/PanTiltSpaces/"
                                                     "TranslationGenericSpace",
                                              .x_range = {.min = -180.0F, .max = 180.0F},
                                              .y_range = {.min = -90.0F, .max = 90.0F}},
-     .relative_zoom_translation_space = {.uri = "",
-                                         .x_range = {.min = 0.0F, .max = 0.0F},
-                                         .y_range = {.min = 0.0F, .max = 0.0F}},
+     .relative_zoom_translation_space = {.uri = "", .x_range = {.min = 0.0F, .max = 0.0F}, .y_range = {.min = 0.0F, .max = 0.0F}},
      .continuous_pan_tilt_velocity_space = {.uri = "http://www.onvif.org/ver10/tptz/PanTiltSpaces/"
                                                    "VelocityGenericSpace",
                                             .x_range = {.min = -1.0F, .max = 1.0F},
                                             .y_range = {.min = -1.0F, .max = 1.0F}},
-     .continuous_zoom_velocity_space = {.uri = "",
-                                        .x_range = {.min = 0.0F, .max = 0.0F},
-                                        .y_range = {.min = 0.0F, .max = 0.0F}}},
+     .continuous_zoom_velocity_space = {.uri = "", .x_range = {.min = 0.0F, .max = 0.0F}, .y_range = {.min = 0.0F, .max = 0.0F}}},
   .maximum_number_of_presets = PTZ_MAX_PRESETS,
   .home_supported = 1,
   .auxiliary_commands = {0} /* No auxiliary commands */
 };
 
-/* Static preset storage */
-static struct ptz_preset g_ptz_presets[PTZ_MAX_PRESETS]; // NOLINT
-static int g_ptz_preset_count = 0;                       // NOLINT
+/* Profile-based preset storage (4 profiles × 4 presets each = 16 total) */
+#define PTZ_PROFILE_COUNT       4
+#define PTZ_PRESETS_PER_PROFILE 4
+
+static ptz_preset_list_t g_profile_presets[PTZ_PROFILE_COUNT]; // NOLINT
+static int g_presets_loaded = 0;                               // NOLINT - Lazy loading flag
 
 /* Service initialization guard */
-static int g_ptz_initialized = 0; // NOLINT
-static int g_ptz_cleanup_in_progress = 0;
+static int g_ptz_initialized = 0;         // NOLINT
+static int g_ptz_cleanup_in_progress = 0; // NOLINT
 
 /* Global buffer pool for PTZ service responses */
 static buffer_pool_t g_ptz_response_buffer_pool = {0}; // NOLINT
 
-/* Preset management helper functions */
-static int find_preset_by_token(const char* token, int* index);
-static int remove_preset_at_index(int index);
+/* Profile-based preset management helper functions */
+static int load_ptz_presets_from_config(void);
+static int get_profile_index_from_token(const char* profile_token);
+static int find_preset_by_token_in_profile(int profile_index, const char* token, int* preset_index);
 static int cleanup_preset_memory(void);
 static int reset_preset_state(void);
 
@@ -135,8 +138,7 @@ static float degrees_to_normalize_tilt(int degrees) {
 static int normalize_to_speed(float normalized_velocity) {
   /* Convert from [-1, 1] to [15, 100] driver speed range */
   float abs_vel = fabsf(normalized_velocity);
-  return (int)(PTZ_SPEED_BASE +
-               abs_vel * PTZ_SPEED_RANGE); /* PTZ_SPEED_BASE + (0-1) * PTZ_SPEED_RANGE = 15-100 */
+  return (int)(PTZ_SPEED_BASE + abs_vel * PTZ_SPEED_RANGE); /* PTZ_SPEED_BASE + (0-1) * PTZ_SPEED_RANGE = 15-100 */
 }
 
 int onvif_ptz_get_nodes(struct ptz_node** nodes, int* count) {
@@ -171,18 +173,12 @@ int onvif_ptz_get_configuration(const char* config_token, struct ptz_configurati
   strncpy(config->node_token, g_ptz_node.token, sizeof(config->node_token) - 1);
   config->node_token[sizeof(config->node_token) - 1] = '\0';
 
-  config->default_absolute_pan_tilt_position_space =
-    g_ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space;
-  config->default_absolute_zoom_position_space =
-    g_ptz_node.supported_ptz_spaces.absolute_zoom_position_space;
-  config->default_relative_pan_tilt_translation_space =
-    g_ptz_node.supported_ptz_spaces.relative_pan_tilt_translation_space;
-  config->default_relative_zoom_translation_space =
-    g_ptz_node.supported_ptz_spaces.relative_zoom_translation_space;
-  config->default_continuous_pan_tilt_velocity_space =
-    g_ptz_node.supported_ptz_spaces.continuous_pan_tilt_velocity_space;
-  config->default_continuous_zoom_velocity_space =
-    g_ptz_node.supported_ptz_spaces.continuous_zoom_velocity_space;
+  config->default_absolute_pan_tilt_position_space = g_ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space;
+  config->default_absolute_zoom_position_space = g_ptz_node.supported_ptz_spaces.absolute_zoom_position_space;
+  config->default_relative_pan_tilt_translation_space = g_ptz_node.supported_ptz_spaces.relative_pan_tilt_translation_space;
+  config->default_relative_zoom_translation_space = g_ptz_node.supported_ptz_spaces.relative_zoom_translation_space;
+  config->default_continuous_pan_tilt_velocity_space = g_ptz_node.supported_ptz_spaces.continuous_pan_tilt_velocity_space;
+  config->default_continuous_zoom_velocity_space = g_ptz_node.supported_ptz_spaces.continuous_zoom_velocity_space;
 
   config->default_ptz_speed.pan_tilt.x = PTZ_DEFAULT_PAN_TILT_SPEED;
   config->default_ptz_speed.pan_tilt.y = PTZ_DEFAULT_PAN_TILT_SPEED;
@@ -194,8 +190,7 @@ int onvif_ptz_get_configuration(const char* config_token, struct ptz_configurati
   config->pan_tilt_limits.range.x_range.max = 1.0F;
   config->pan_tilt_limits.range.y_range.min = -1.0F;
   config->pan_tilt_limits.range.y_range.max = 1.0F;
-  strncpy(config->pan_tilt_limits.range.uri,
-          g_ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.uri,
+  strncpy(config->pan_tilt_limits.range.uri, g_ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.uri,
           sizeof(config->pan_tilt_limits.range.uri) - 1);
   config->pan_tilt_limits.range.uri[sizeof(config->pan_tilt_limits.range.uri) - 1] = '\0';
 
@@ -222,14 +217,11 @@ int onvif_ptz_get_status(const char* profile_token, struct ptz_status* status) {
   status->position.pan_tilt.y = degrees_to_normalize_tilt(adapter_status.v_pos_deg);
   status->position.zoom = 0.0F; /* No zoom support */
 
-  strncpy(status->position.space,
-          g_ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.uri,
-          sizeof(status->position.space) - 1);
+  strncpy(status->position.space, g_ptz_node.supported_ptz_spaces.absolute_pan_tilt_position_space.uri, sizeof(status->position.space) - 1);
   status->position.space[sizeof(status->position.space) - 1] = '\0';
 
   /* Movement status */
-  status->move_status.pan_tilt =
-    (adapter_status.h_speed > 0 || adapter_status.v_speed > 0) ? PTZ_MOVE_MOVING : PTZ_MOVE_IDLE;
+  status->move_status.pan_tilt = (adapter_status.h_speed > 0 || adapter_status.v_speed > 0) ? PTZ_MOVE_MOVING : PTZ_MOVE_IDLE;
   status->move_status.zoom = PTZ_MOVE_IDLE;
 
   /* Error status */
@@ -243,8 +235,7 @@ int onvif_ptz_get_status(const char* profile_token, struct ptz_status* status) {
   return ONVIF_SUCCESS;
 }
 
-int onvif_ptz_absolute_move(const char* profile_token, const struct ptz_vector* position,
-                            const struct ptz_speed* speed) {
+int onvif_ptz_absolute_move(const char* profile_token, const struct ptz_vector* position, const struct ptz_speed* speed) {
   ONVIF_CHECK_NULL(profile_token);
   ONVIF_CHECK_NULL(position);
 
@@ -260,8 +251,7 @@ int onvif_ptz_absolute_move(const char* profile_token, const struct ptz_vector* 
   return ptz_adapter_absolute_move(pan_deg, tilt_deg, move_speed);
 }
 
-int onvif_ptz_relative_move(const char* profile_token, const struct ptz_vector* translation,
-                            const struct ptz_speed* speed) {
+int onvif_ptz_relative_move(const char* profile_token, const struct ptz_vector* translation, const struct ptz_speed* speed) {
   ONVIF_CHECK_NULL(profile_token);
   ONVIF_CHECK_NULL(translation);
 
@@ -277,8 +267,7 @@ int onvif_ptz_relative_move(const char* profile_token, const struct ptz_vector* 
   return ptz_adapter_relative_move(pan_delta, tilt_delta, move_speed);
 }
 
-int onvif_ptz_continuous_move(const char* profile_token, const struct ptz_speed* velocity,
-                              int timeout) {
+int onvif_ptz_continuous_move(const char* profile_token, const struct ptz_speed* velocity, int timeout) {
   ONVIF_CHECK_NULL(profile_token);
   ONVIF_CHECK_NULL(velocity);
 
@@ -337,49 +326,120 @@ int onvif_ptz_get_presets(const char* profile_token, struct ptz_preset** preset_
   ONVIF_CHECK_NULL(preset_list);
   ONVIF_CHECK_NULL(count);
 
-  *preset_list = g_ptz_presets;
-  *count = g_ptz_preset_count;
+  // Get profile index from token
+  int profile_index = get_profile_index_from_token(profile_token);
+  if (profile_index < 0) {
+    platform_log_error("[PTZ] Invalid profile token: %s\n", profile_token);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  // Ensure presets are loaded from configuration
+  int result = load_ptz_presets_from_config();
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  // Return profile-specific presets
+  ptz_preset_list_t* profile = &g_profile_presets[profile_index];
+  *preset_list = profile->presets;
+  *count = profile->preset_count;
+
   return ONVIF_SUCCESS;
 }
 
-int onvif_ptz_set_preset(const char* profile_token, // NOLINT
-                         const char* preset_name, char* output_preset_token,
-                         size_t token_size) { // NOLINT
+int onvif_ptz_set_preset(const char* profile_token,                                                                               // NOLINT
+                         const char* preset_name, const char* input_preset_token, char* output_preset_token, size_t token_size) { // NOLINT
   ONVIF_CHECK_NULL(profile_token);
   ONVIF_CHECK_NULL(preset_name);
   ONVIF_CHECK_NULL(output_preset_token);
 
-  if (g_ptz_preset_count >= PTZ_MAX_PRESETS) {
-    return ONVIF_ERROR; /* Maximum presets reached */
+  platform_log_debug("[PTZ] onvif_ptz_set_preset() called: profile='%s' preset_name='%s' input_token='%s'\n", profile_token, preset_name,
+                     input_preset_token ? input_preset_token : "NULL");
+
+  // Get profile index from token
+  int profile_index = get_profile_index_from_token(profile_token);
+  if (profile_index < 0) {
+    platform_log_error("[PTZ] Invalid profile token: %s\n", profile_token);
+    return ONVIF_ERROR_INVALID_PARAMETER;
   }
 
-  /* Get current position */
+  // Ensure presets are loaded from configuration
+  int result = load_ptz_presets_from_config();
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  // Get profile-specific preset list
+  ptz_preset_list_t* profile = &g_profile_presets[profile_index];
+  platform_log_debug("[PTZ] Profile %d current preset_count=%d before set operation\n", profile_index + 1, profile->preset_count);
+
+  /* Get current position; if unavailable, fall back to neutral (0,0,0) */
   struct ptz_status status;
-  if (onvif_ptz_get_status(profile_token, &status) != 0) {
-    return ONVIF_ERROR;
+  if (onvif_ptz_get_status(profile_token, &status) != ONVIF_SUCCESS) {
+    status.position.pan_tilt.x = 0.0F;
+    status.position.pan_tilt.y = 0.0F;
+    status.position.zoom = 0.0F;
+    status.position.space[0] = '\0';
+    status.move_status.pan_tilt = PTZ_MOVE_IDLE;
+    status.move_status.zoom = PTZ_MOVE_IDLE;
+    status.error[0] = '\0';
+    status.utc_time[0] = '\0';
   }
 
-  /* Use buffer pool for preset token generation */
-  char* temp_token = buffer_pool_get(&g_ptz_response_buffer_pool);
-  if (!temp_token) {
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  /* Use stack-allocated buffer for preset token generation */
+  char temp_token[PTZ_PRESET_TOKEN_MAX_LENGTH + 1];
+  struct ptz_preset* preset = NULL;
+  int preset_index = -1;
+
+  /* Handle input token logic */
+  if (input_preset_token && input_preset_token[0] != '\0') {
+    // Check if preset with this token already exists
+    result = find_preset_by_token_in_profile(profile_index, input_preset_token, &preset_index);
+    if (result == ONVIF_SUCCESS) {
+      // Update existing preset
+      preset = &profile->presets[preset_index];
+      platform_log_info("[PTZ] Updating existing preset '%s' with token '%s'\n", preset_name, input_preset_token);
+    } else {
+      // Create new preset with provided token
+      if (profile->preset_count >= PTZ_PRESETS_PER_PROFILE) {
+        platform_log_error("[PTZ] Maximum presets (%d) reached for profile %s\n", PTZ_PRESETS_PER_PROFILE, profile_token);
+        return ONVIF_ERROR;
+      }
+      preset_index = profile->preset_count;
+      preset = &profile->presets[preset_index];
+      profile->preset_count++;
+      platform_log_info("[PTZ] Creating new preset '%s' with token '%s'\n", preset_name, input_preset_token);
+    }
+
+    // Use the provided token
+    size_t token_len = strlen(input_preset_token);
+    if (token_len >= sizeof(preset->token)) {
+      token_len = sizeof(preset->token) - 1;
+    }
+    memcpy(preset->token, input_preset_token, token_len);
+    preset->token[token_len] = '\0';
+  } else {
+    // Auto-generate token as before
+    if (profile->preset_count >= PTZ_PRESETS_PER_PROFILE) {
+      platform_log_error("[PTZ] Maximum presets (%d) reached for profile %s\n", PTZ_PRESETS_PER_PROFILE, profile_token);
+      return ONVIF_ERROR;
+    }
+
+    preset_index = profile->preset_count;
+    preset = &profile->presets[preset_index];
+    profile->preset_count++;
+
+    /* Generate preset token: "Profile1_Preset1", "Profile2_Preset2", etc. */
+    int token_len = snprintf(temp_token, PTZ_PRESET_TOKEN_MAX_LENGTH + 1, "%s_Preset%d", profile_token, preset_index + 1);
+    if (token_len >= PTZ_PRESET_TOKEN_MAX_LENGTH + 1) {
+      return ONVIF_ERROR;
+    }
+
+    /* Optimized string copying with explicit bounds checking */
+    size_t token_copy_len = (size_t)token_len < sizeof(preset->token) - 1 ? (size_t)token_len : sizeof(preset->token) - 1;
+    memcpy(preset->token, temp_token, token_copy_len);
+    preset->token[token_copy_len] = '\0';
   }
-
-  /* Create new preset */
-  struct ptz_preset* preset = &g_ptz_presets[g_ptz_preset_count];
-
-  /* Generate preset token using buffer pool with optimized formatting */
-  int token_len = snprintf(temp_token, PTZ_PRESET_TOKEN_SIZE, "Preset%d", g_ptz_preset_count + 1);
-  if (token_len >= PTZ_PRESET_TOKEN_SIZE) {
-    buffer_pool_return(&g_ptz_response_buffer_pool, temp_token);
-    return ONVIF_ERROR;
-  }
-
-  /* Optimized string copying with explicit bounds checking */
-  size_t token_copy_len =
-    (size_t)token_len < sizeof(preset->token) - 1 ? (size_t)token_len : sizeof(preset->token) - 1;
-  memcpy(preset->token, temp_token, token_copy_len);
-  preset->token[token_copy_len] = '\0';
 
   size_t name_len = strlen(preset_name);
   if (name_len >= sizeof(preset->name)) {
@@ -390,18 +450,35 @@ int onvif_ptz_set_preset(const char* profile_token, // NOLINT
 
   preset->ptz_position = status.position;
 
-  /* Call adapter to persist preset */
-  ptz_adapter_set_preset(preset_name, g_ptz_preset_count + 1);
-
-  g_ptz_preset_count++;
-
-  if (output_preset_token) {
-    strncpy(output_preset_token, preset->token, PTZ_PRESET_TOKEN_MAX_LENGTH);
-    output_preset_token[PTZ_PRESET_TOKEN_MAX_LENGTH] = '\0';
+  /* Persist to configuration (tolerate uninitialized config during tests) */
+  result = config_runtime_set_ptz_profile_presets(profile_index, profile);
+  if (result != ONVIF_SUCCESS) {
+    platform_log_error("[PTZ] Failed to persist preset to configuration for profile %s\n", profile_token);
+    /* Rollback: decrement preset count if this was a new preset */
+    if (!input_preset_token || input_preset_token[0] == '\0' ||
+        find_preset_by_token_in_profile(profile_index, input_preset_token, &preset_index) != ONVIF_SUCCESS) {
+      profile->preset_count--;
+    }
+    return result;
   }
 
-  /* Return buffer pool allocation */
-  buffer_pool_return(&g_ptz_response_buffer_pool, temp_token);
+  /* Call adapter to persist preset (legacy compatibility) */
+  ptz_adapter_set_preset(preset_name, profile->preset_count);
+
+  /* Copy token to output using provided buffer size */
+  if (output_preset_token && token_size > 0) {
+    size_t max_copy = token_size - 1;
+    size_t actual_len = 0;
+    while (actual_len < max_copy && actual_len < PTZ_PRESET_TOKEN_MAX_LENGTH && preset->token[actual_len] != '\0') {
+      actual_len++;
+    }
+    memcpy(output_preset_token, preset->token, actual_len);
+    output_preset_token[actual_len] = '\0';
+  }
+
+  /* Stack-allocated buffer, no cleanup needed */
+
+  platform_log_info("[PTZ] Preset '%s' created for profile %s (token: %s)\n", preset_name, profile_token, preset->token);
 
   return ONVIF_SUCCESS;
 }
@@ -411,13 +488,50 @@ int onvif_ptz_remove_preset(const char* profile_token, // NOLINT
   ONVIF_CHECK_NULL(profile_token);
   ONVIF_CHECK_NULL(preset_token_to_remove);
 
-  /* Find and remove preset using helper function */
-  int index = 0;
-  if (find_preset_by_token(preset_token_to_remove, &index) == ONVIF_SUCCESS) {
-    return remove_preset_at_index(index);
+  // Get profile index from token
+  int profile_index = get_profile_index_from_token(profile_token);
+  if (profile_index < 0) {
+    platform_log_error("[PTZ] Invalid profile token: %s\n", profile_token);
+    return ONVIF_ERROR_INVALID_PARAMETER;
   }
 
-  return ONVIF_ERROR_NOT_FOUND;
+  // Ensure presets are loaded from configuration
+  int result = load_ptz_presets_from_config();
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  // Find preset in profile
+  int preset_index = 0;
+  result = find_preset_by_token_in_profile(profile_index, preset_token_to_remove, &preset_index);
+  if (result != ONVIF_SUCCESS) {
+    platform_log_error("[PTZ] Preset token '%s' not found in profile %s\n", preset_token_to_remove, profile_token);
+    return ONVIF_ERROR_NOT_FOUND;
+  }
+
+  // Get profile-specific preset list
+  ptz_preset_list_t* profile = &g_profile_presets[profile_index];
+
+  // Remove preset by shifting remaining presets
+  if (preset_index < profile->preset_count - 1) {
+    memmove(&profile->presets[preset_index], &profile->presets[preset_index + 1],
+            (profile->preset_count - preset_index - 1) * sizeof(struct ptz_preset));
+  }
+
+  // Clear the last slot and decrement count
+  memset(&profile->presets[profile->preset_count - 1], 0, sizeof(struct ptz_preset));
+  profile->preset_count--;
+
+  // Persist to configuration
+  result = config_runtime_set_ptz_profile_presets(profile_index, profile);
+  if (result != ONVIF_SUCCESS) {
+    platform_log_error("[PTZ] Failed to persist preset removal to configuration for profile %s\n", profile_token);
+    return result;
+  }
+
+  platform_log_info("[PTZ] Preset '%s' removed from profile %s\n", preset_token_to_remove, profile_token);
+
+  return ONVIF_SUCCESS;
 }
 
 int onvif_ptz_goto_preset(const char* profile_token, // NOLINT
@@ -425,14 +539,47 @@ int onvif_ptz_goto_preset(const char* profile_token, // NOLINT
   ONVIF_CHECK_NULL(profile_token);
   ONVIF_CHECK_NULL(preset_token_to_goto);
 
-  /* Find preset using helper function */
-  int index = 0;
-  if (find_preset_by_token(preset_token_to_goto, &index) != ONVIF_SUCCESS) {
+  platform_log_debug("[PTZ] onvif_ptz_goto_preset() called: profile='%s' preset_token='%s'\n", profile_token, preset_token_to_goto);
+
+  // Get profile index from token
+  int profile_index = get_profile_index_from_token(profile_token);
+  if (profile_index < 0) {
+    platform_log_error("[PTZ] Invalid profile token: %s\n", profile_token);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  platform_log_debug("[PTZ] Profile index resolved: %d (from token '%s')\n", profile_index, profile_token);
+
+  // Ensure presets are loaded from configuration
+  int result = load_ptz_presets_from_config();
+  if (result != ONVIF_SUCCESS) {
+    platform_log_error("[PTZ] Failed to load presets from config (result=%d (%s))\n", result, onvif_error_to_string(result));
+    return result;
+  }
+
+  // Get profile-specific preset list to show current state
+  ptz_preset_list_t* profile = &g_profile_presets[profile_index];
+  platform_log_debug("[PTZ] Profile %d current preset_count=%d before goto operation\n", profile_index + 1, profile->preset_count);
+
+  // Find preset in profile
+  int preset_index = 0;
+  result = find_preset_by_token_in_profile(profile_index, preset_token_to_goto, &preset_index);
+  if (result != ONVIF_SUCCESS) {
+    platform_log_error("[PTZ] Preset token '%s' not found in profile %s (preset_count=%d)\n", preset_token_to_goto, profile_token,
+                       profile->preset_count);
+    // Log all available presets for debugging
+    for (int i = 0; i < profile->preset_count; i++) {
+      platform_log_debug("[PTZ]   Available preset[%d]: token='%s' name='%s'\n", i, profile->presets[i].token, profile->presets[i].name);
+    }
     return ONVIF_ERROR_NOT_FOUND;
   }
 
+  platform_log_debug("[PTZ] Found preset at index %d in profile %d\n", preset_index, profile_index + 1);
+
   /* Move to preset position */
-  return onvif_ptz_absolute_move(profile_token, &g_ptz_presets[index].ptz_position, speed);
+  platform_log_info("[PTZ] Moving to preset '%s' in profile %s\n", preset_token_to_goto, profile_token);
+
+  return onvif_ptz_absolute_move(profile_token, &profile->presets[preset_index].ptz_position, speed);
 }
 
 /* SOAP XML generation helpers - now using common utilities */
@@ -451,17 +598,16 @@ static struct {
  * ============================================================================ */
 
 // Action handler forward declarations
-static int handle_get_nodes(const service_handler_config_t* config, const http_request_t* request,
-                            http_response_t* response, onvif_gsoap_context_t* gsoap_ctx);
-static int handle_absolute_move(const service_handler_config_t* config,
-                                const http_request_t* request, http_response_t* response,
+static int handle_get_nodes(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+                            onvif_gsoap_context_t* gsoap_ctx);
+static int handle_absolute_move(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
                                 onvif_gsoap_context_t* gsoap_ctx);
-static int handle_get_presets(const service_handler_config_t* config, const http_request_t* request,
-                              http_response_t* response, onvif_gsoap_context_t* gsoap_ctx);
-static int handle_set_preset(const service_handler_config_t* config, const http_request_t* request,
-                             http_response_t* response, onvif_gsoap_context_t* gsoap_ctx);
-static int handle_goto_preset(const service_handler_config_t* config, const http_request_t* request,
-                              http_response_t* response, onvif_gsoap_context_t* gsoap_ctx);
+static int handle_get_presets(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+                              onvif_gsoap_context_t* gsoap_ctx);
+static int handle_set_preset(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+                             onvif_gsoap_context_t* gsoap_ctx);
+static int handle_goto_preset(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+                              onvif_gsoap_context_t* gsoap_ctx);
 
 /* ============================================================================
  * PTZ Service Operations Lookup Table
@@ -470,8 +616,7 @@ static int handle_goto_preset(const service_handler_config_t* config, const http
 /**
  * @brief PTZ operation handler function pointer type
  */
-typedef int (*ptz_operation_handler_t)(const service_handler_config_t* config,
-                                       const http_request_t* request, http_response_t* response,
+typedef int (*ptz_operation_handler_t)(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
                                        onvif_gsoap_context_t* gsoap_ctx);
 
 /**
@@ -482,16 +627,23 @@ typedef struct {
   ptz_operation_handler_t handler;
 } ptz_operation_entry_t;
 
+/* Forward declarations for RemovePreset handlers */
+static int remove_ptz_preset_business_logic(const service_handler_config_t* config, // NOLINT
+                                            const http_request_t* request,          // NOLINT
+                                            http_response_t* response, onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx,
+                                            error_context_t* error_ctx, void* callback_data);
+static int handle_remove_preset(const service_handler_config_t* config, // NOLINT
+                                const http_request_t* request,          // NOLINT
+                                http_response_t* response, onvif_gsoap_context_t* gsoap_ctx);
+
 /**
  * @brief PTZ service operation dispatch table
  */
-static const ptz_operation_entry_t g_ptz_operations[] = {{"GetNodes", handle_get_nodes},
-                                                         {"AbsoluteMove", handle_absolute_move},
-                                                         {"GetPresets", handle_get_presets},
-                                                         {"SetPreset", handle_set_preset},
-                                                         {"GotoPreset", handle_goto_preset}};
+static const ptz_operation_entry_t g_ptz_operations[] = {{"GetNodes", handle_get_nodes},     {"AbsoluteMove", handle_absolute_move},
+                                                         {"GetPresets", handle_get_presets}, {"SetPreset", handle_set_preset},
+                                                         {"GotoPreset", handle_goto_preset}, {"RemovePreset", handle_remove_preset}};
 
-#define PTZ_OPERATIONS_COUNT (sizeof(g_ptz_operations) / sizeof(g_ptz_operations[0]))
+#define PTZ_OPERATIONS_COUNT ((int)(sizeof(g_ptz_operations) / sizeof(g_ptz_operations[0])))
 
 /* ============================================================================
  * PTZ Service Helper Functions
@@ -519,16 +671,51 @@ static int ptz_service_capabilities_handler(const char* capability_name) {
 }
 
 /**
+ * @brief Generate PTZ service capability structure
+ * @param ctx gSOAP context for memory allocation
+ * @param capabilities_ptr Output pointer to tt__PTZCapabilities*
+ * @return ONVIF_SUCCESS on success, error code otherwise
+ */
+static int ptz_service_get_capabilities(struct soap* ctx, void** capabilities_ptr) {
+  if (!ctx || !capabilities_ptr) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Allocate PTZCapabilities structure
+  struct tt__PTZCapabilities* caps = soap_new_tt__PTZCapabilities(ctx, 1);
+  if (!caps) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+  soap_default_tt__PTZCapabilities(ctx, caps);
+
+  // Get device IP and port from runtime config
+  char device_ip[ONVIF_IP_BUFFER_SIZE] = "192.168.1.100"; // Default value
+  int http_port = HTTP_PORT_DEFAULT;                      // Default value
+
+  // Try to get values from runtime config (ignore errors, use defaults)
+  (void)config_runtime_get_string(CONFIG_SECTION_NETWORK, "device_ip", device_ip, sizeof(device_ip));
+  (void)config_runtime_get_int(CONFIG_SECTION_NETWORK, "http_port", &http_port);
+
+  // Build XAddr
+  char xaddr[ONVIF_XADDR_BUFFER_SIZE];
+  (void)snprintf(xaddr, sizeof(xaddr), "http://%s:%d/onvif/ptz_service", device_ip, http_port);
+  caps->XAddr = soap_strdup(ctx, xaddr);
+
+  *capabilities_ptr = (void*)caps;
+  return ONVIF_SUCCESS;
+}
+
+/**
  * @brief PTZ service registration structure using standardized interface
  */
-static const onvif_service_registration_t g_ptz_service_registration = {
-  .service_name = "ptz",
-  .namespace_uri = "http://www.onvif.org/ver10/ptz/wsdl",
-  .operation_handler = onvif_ptz_handle_operation,
-  .init_handler = NULL, // Service is initialized explicitly before registration
-  .cleanup_handler = ptz_service_cleanup_handler,
-  .capabilities_handler = ptz_service_capabilities_handler,
-  .reserved = {NULL, NULL, NULL, NULL}};
+static const onvif_service_registration_t g_ptz_service_registration = {.service_name = "ptz",
+                                                                        .namespace_uri = "http://www.onvif.org/ver10/ptz/wsdl",
+                                                                        .operation_handler = onvif_ptz_handle_operation,
+                                                                        .init_handler = NULL, // Service is initialized explicitly before registration
+                                                                        .cleanup_handler = ptz_service_cleanup_handler,
+                                                                        .capabilities_handler = ptz_service_capabilities_handler,
+                                                                        .get_capabilities = ptz_service_get_capabilities,
+                                                                        .reserved = {NULL, NULL, NULL}};
 
 /* ============================================================================
  * PTZ Service Operation Definitions
@@ -547,8 +734,7 @@ static int get_ptz_nodes_business_logic(const service_handler_config_t* config, 
   // Initialize gSOAP context for request parsing
   int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
   if (result != 0) {
-    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result,
-                                  "Failed to initialize gSOAP request parsing");
+    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result, "Failed to initialize gSOAP request parsing");
     return ONVIF_ERROR;
   }
 
@@ -556,8 +742,7 @@ static int get_ptz_nodes_business_logic(const service_handler_config_t* config, 
   struct _tptz__GetNodes* get_nodes_req = NULL;
   result = onvif_gsoap_parse_get_nodes(gsoap_ctx, &get_nodes_req);
   if (result != ONVIF_SUCCESS) {
-    service_log_operation_failure(log_ctx, "parse_get_nodes", result,
-                                  "Failed to parse GetNodes request");
+    service_log_operation_failure(log_ctx, "parse_get_nodes", result, "Failed to parse GetNodes request");
     return result;
   }
 
@@ -585,16 +770,13 @@ static int get_ptz_nodes_business_logic(const service_handler_config_t* config, 
  */
 static int ptz_absolute_move_business_logic(const service_handler_config_t* config, // NOLINT
                                             const http_request_t* request,          // NOLINT
-                                            http_response_t* response,
-                                            onvif_gsoap_context_t* gsoap_ctx,
-                                            service_log_context_t* log_ctx,
+                                            http_response_t* response, onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx,
                                             error_context_t* error_ctx,
                                             void* callback_data) { // NOLINT
   // Initialize gSOAP context for request parsing
   int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
   if (result != 0) {
-    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result,
-                                  "Failed to initialize gSOAP request parsing");
+    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result, "Failed to initialize gSOAP request parsing");
     return error_handle_system(error_ctx, ONVIF_ERROR, "gsoap_init", response);
   }
 
@@ -602,8 +784,7 @@ static int ptz_absolute_move_business_logic(const service_handler_config_t* conf
   struct _tptz__AbsoluteMove* absolute_move_req = NULL;
   result = onvif_gsoap_parse_absolute_move(gsoap_ctx, &absolute_move_req);
   if (result != ONVIF_SUCCESS || !absolute_move_req) {
-    service_log_operation_failure(log_ctx, "parse_absolute_move", result,
-                                  "Failed to parse AbsoluteMove request");
+    service_log_operation_failure(log_ctx, "parse_absolute_move", result, "Failed to parse AbsoluteMove request");
     return error_handle_parameter(error_ctx, "AbsoluteMove", "parse_failed", response);
   }
 
@@ -636,15 +817,12 @@ static int ptz_absolute_move_business_logic(const service_handler_config_t* conf
  */
 static int get_ptz_presets_business_logic(const service_handler_config_t* config, // NOLINT
                                           const http_request_t* request,          // NOLINT
-                                          http_response_t* response,
-                                          onvif_gsoap_context_t* gsoap_ctx,
-                                          service_log_context_t* log_ctx,
+                                          http_response_t* response, onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx,
                                           error_context_t* error_ctx, void* callback_data) {
   // Initialize gSOAP context for request parsing
   int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
   if (result != 0) {
-    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result,
-                                  "Failed to initialize gSOAP request parsing");
+    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result, "Failed to initialize gSOAP request parsing");
     return error_handle_system(error_ctx, ONVIF_ERROR, "gsoap_init", response);
   }
 
@@ -652,8 +830,7 @@ static int get_ptz_presets_business_logic(const service_handler_config_t* config
   struct _tptz__GetPresets* get_presets_req = NULL;
   result = onvif_gsoap_parse_get_presets(gsoap_ctx, &get_presets_req);
   if (result != ONVIF_SUCCESS || !get_presets_req) {
-    service_log_operation_failure(log_ctx, "parse_get_presets", result,
-                                  "Failed to parse GetPresets request");
+    service_log_operation_failure(log_ctx, "parse_get_presets", result, "Failed to parse GetPresets request");
     return error_handle_parameter(error_ctx, "GetPresets", "parse_failed", response);
   }
 
@@ -685,15 +862,12 @@ static int get_ptz_presets_business_logic(const service_handler_config_t* config
  */
 static int set_ptz_preset_business_logic(const service_handler_config_t* config, // NOLINT
                                          const http_request_t* request,          // NOLINT
-                                         http_response_t* response,
-                                         onvif_gsoap_context_t* gsoap_ctx,
-                                         service_log_context_t* log_ctx, error_context_t* error_ctx,
-                                         void* callback_data) {
+                                         http_response_t* response, onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx,
+                                         error_context_t* error_ctx, void* callback_data) {
   // Initialize gSOAP context for request parsing
   int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
   if (result != 0) {
-    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result,
-                                  "Failed to initialize gSOAP request parsing");
+    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result, "Failed to initialize gSOAP request parsing");
     return error_handle_system(error_ctx, ONVIF_ERROR, "gsoap_init", response);
   }
 
@@ -701,8 +875,7 @@ static int set_ptz_preset_business_logic(const service_handler_config_t* config,
   struct _tptz__SetPreset* set_preset_req = NULL;
   result = onvif_gsoap_parse_set_preset(gsoap_ctx, &set_preset_req);
   if (result != ONVIF_SUCCESS || !set_preset_req) {
-    service_log_operation_failure(log_ctx, "parse_set_preset", result,
-                                  "Failed to parse SetPreset request");
+    service_log_operation_failure(log_ctx, "parse_set_preset", result, "Failed to parse SetPreset request");
     return error_handle_parameter(error_ctx, "SetPreset", "parse_failed", response);
   }
 
@@ -715,18 +888,15 @@ static int set_ptz_preset_business_logic(const service_handler_config_t* config,
   // Extract preset name (optional, defaults to "Preset")
   const char* preset_name = set_preset_req->PresetName ? set_preset_req->PresetName : "Preset";
 
-  // Use buffer pool for preset token output
-  char* preset_token = buffer_pool_get(&g_ptz_response_buffer_pool);
-  if (!preset_token) {
-    return error_handle_system(error_ctx, ONVIF_ERROR_MEMORY_ALLOCATION, "buffer_pool_get",
-                               response);
-  }
+  // Extract input preset token (optional)
+  const char* input_preset_token = set_preset_req->PresetToken;
+
+  // Use stack-allocated buffer for preset token output (safer than buffer pool)
+  char preset_token[PTZ_PRESET_TOKEN_MAX_LENGTH + 1];
 
   // Set preset using existing function
-  result =
-    onvif_ptz_set_preset(profile_token, preset_name, preset_token, PTZ_PRESET_NAME_MAX_LENGTH);
+  result = onvif_ptz_set_preset(profile_token, preset_name, input_preset_token, preset_token, PTZ_PRESET_TOKEN_MAX_LENGTH + 1);
   if (result != ONVIF_SUCCESS) {
-    buffer_pool_return(&g_ptz_response_buffer_pool, preset_token);
     return error_handle_system(error_ctx, result, "set_preset", response);
   }
 
@@ -743,16 +913,13 @@ static int set_ptz_preset_business_logic(const service_handler_config_t* config,
  */
 static int goto_ptz_preset_business_logic(const service_handler_config_t* config, // NOLINT
                                           const http_request_t* request,          // NOLINT
-                                          http_response_t* response,
-                                          onvif_gsoap_context_t* gsoap_ctx,
-                                          service_log_context_t* log_ctx,
+                                          http_response_t* response, onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx,
                                           error_context_t* error_ctx,
                                           void* callback_data) { // NOLINT
   // Initialize gSOAP context for request parsing
   int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
   if (result != 0) {
-    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result,
-                                  "Failed to initialize gSOAP request parsing");
+    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result, "Failed to initialize gSOAP request parsing");
     return error_handle_system(error_ctx, ONVIF_ERROR, "gsoap_init", response);
   }
 
@@ -760,8 +927,7 @@ static int goto_ptz_preset_business_logic(const service_handler_config_t* config
   struct _tptz__GotoPreset* goto_preset_req = NULL;
   result = onvif_gsoap_parse_goto_preset(gsoap_ctx, &goto_preset_req);
   if (result != ONVIF_SUCCESS || !goto_preset_req) {
-    service_log_operation_failure(log_ctx, "parse_goto_preset", result,
-                                  "Failed to parse GotoPreset request");
+    service_log_operation_failure(log_ctx, "parse_goto_preset", result, "Failed to parse GotoPreset request");
     return error_handle_parameter(error_ctx, "GotoPreset", "parse_failed", response);
   }
 
@@ -777,10 +943,20 @@ static int goto_ptz_preset_business_logic(const service_handler_config_t* config
   }
   const char* preset_token = goto_preset_req->PresetToken;
 
-  // Parse PTZ speed from request (optional) - for now, initialize with defaults
+  // Parse PTZ speed from request (optional)
   struct ptz_speed speed;
   memset(&speed, 0, sizeof(speed));
-  // TODO: Implement proper PTZ speed parsing using gSOAP parsing functions
+
+  // Extract speed from gSOAP structure if provided
+  if (goto_preset_req->Speed) {
+    if (goto_preset_req->Speed->PanTilt) {
+      speed.pan_tilt.x = goto_preset_req->Speed->PanTilt->x;
+      speed.pan_tilt.y = goto_preset_req->Speed->PanTilt->y;
+    }
+    if (goto_preset_req->Speed->Zoom) {
+      speed.zoom = goto_preset_req->Speed->Zoom->x;
+    }
+  }
 
   // Goto preset using existing function
   result = onvif_ptz_goto_preset(profile_token, preset_token, &speed);
@@ -795,118 +971,162 @@ static int goto_ptz_preset_business_logic(const service_handler_config_t* config
 /**
  * @brief PTZ nodes service operation definition
  */
-static const onvif_service_operation_t get_ptz_nodes_operation = {
-  .service_name = "PTZ",
-  .operation_name = "GetNodes",
-  .operation_context = "nodes_retrieval",
-  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
-                .execute_business_logic = get_ptz_nodes_business_logic,
-                .post_process_response = onvif_util_standard_post_process}};
+static const onvif_service_operation_t get_ptz_nodes_operation = {.service_name = "PTZ",
+                                                                  .operation_name = "GetNodes",
+                                                                  .operation_context = "nodes_retrieval",
+                                                                  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                                                                                .execute_business_logic = get_ptz_nodes_business_logic,
+                                                                                .post_process_response = onvif_util_standard_post_process}};
 
 /**
  * @brief PTZ absolute move service operation definition
  */
-static const onvif_service_operation_t ptz_absolute_move_operation = {
-  .service_name = "PTZ",
-  .operation_name = "AbsoluteMove",
-  .operation_context = "ptz_movement",
-  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
-                .execute_business_logic = ptz_absolute_move_business_logic,
-                .post_process_response = onvif_util_standard_post_process}};
+static const onvif_service_operation_t ptz_absolute_move_operation = {.service_name = "PTZ",
+                                                                      .operation_name = "AbsoluteMove",
+                                                                      .operation_context = "ptz_movement",
+                                                                      .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                                                                                    .execute_business_logic = ptz_absolute_move_business_logic,
+                                                                                    .post_process_response = onvif_util_standard_post_process}};
 
 /**
  * @brief PTZ presets service operation definition
  */
-static const onvif_service_operation_t get_ptz_presets_operation = {
-  .service_name = "PTZ",
-  .operation_name = "GetPresets",
-  .operation_context = "presets_retrieval",
-  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
-                .execute_business_logic = get_ptz_presets_business_logic,
-                .post_process_response = onvif_util_standard_post_process}};
+static const onvif_service_operation_t get_ptz_presets_operation = {.service_name = "PTZ",
+                                                                    .operation_name = "GetPresets",
+                                                                    .operation_context = "presets_retrieval",
+                                                                    .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                                                                                  .execute_business_logic = get_ptz_presets_business_logic,
+                                                                                  .post_process_response = onvif_util_standard_post_process}};
 
 /**
  * @brief PTZ set preset service operation definition
  */
-static const onvif_service_operation_t set_ptz_preset_operation = {
-  .service_name = "PTZ",
-  .operation_name = "SetPreset",
-  .operation_context = "preset_creation",
-  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
-                .execute_business_logic = set_ptz_preset_business_logic,
-                .post_process_response = onvif_util_standard_post_process}};
+static const onvif_service_operation_t set_ptz_preset_operation = {.service_name = "PTZ",
+                                                                   .operation_name = "SetPreset",
+                                                                   .operation_context = "preset_creation",
+                                                                   .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                                                                                 .execute_business_logic = set_ptz_preset_business_logic,
+                                                                                 .post_process_response = onvif_util_standard_post_process}};
 
 /**
  * @brief PTZ goto preset service operation definition
  */
-static const onvif_service_operation_t goto_ptz_preset_operation = {
-  .service_name = "PTZ",
-  .operation_name = "GotoPreset",
-  .operation_context = "preset_movement",
-  .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
-                .execute_business_logic = goto_ptz_preset_business_logic,
-                .post_process_response = onvif_util_standard_post_process}};
+static const onvif_service_operation_t goto_ptz_preset_operation = {.service_name = "PTZ",
+                                                                    .operation_name = "GotoPreset",
+                                                                    .operation_context = "preset_movement",
+                                                                    .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                                                                                  .execute_business_logic = goto_ptz_preset_business_logic,
+                                                                                  .post_process_response = onvif_util_standard_post_process}};
+
+/**
+ * @brief PTZ remove preset service operation definition
+ */
+static const onvif_service_operation_t remove_ptz_preset_operation = {.service_name = "PTZ",
+                                                                      .operation_name = "RemovePreset",
+                                                                      .operation_context = "preset_removal",
+                                                                      .callbacks = {.validate_parameters = onvif_util_validate_standard_parameters,
+                                                                                    .execute_business_logic = remove_ptz_preset_business_logic,
+                                                                                    .post_process_response = onvif_util_standard_post_process}};
 
 /* ============================================================================
  * Action Handlers
  * ============================================================================ */
 
 // Action handlers
-static int handle_get_nodes(const service_handler_config_t* config, const http_request_t* request,
-                            http_response_t* response, onvif_gsoap_context_t* gsoap_ctx) {
+static int handle_get_nodes(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+                            onvif_gsoap_context_t* gsoap_ctx) {
   // Prepare callback data for PTZ nodes
   ptz_nodes_callback_data_t callback_data = {.nodes = NULL, .count = 0};
 
   // Use the enhanced callback-based handler
-  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
-                                           &get_ptz_nodes_operation, ptz_nodes_response_callback,
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx, &get_ptz_nodes_operation, ptz_nodes_response_callback,
                                            &callback_data);
 }
 
-static int handle_absolute_move(const service_handler_config_t* config,
-                                const http_request_t* request, http_response_t* response,
+static int handle_absolute_move(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
                                 onvif_gsoap_context_t* gsoap_ctx) {
   // Prepare callback data for PTZ absolute move
   ptz_absolute_move_callback_data_t callback_data = {.message = "PTZ absolute move completed"};
 
   // Use the enhanced callback-based handler
-  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
-                                           &ptz_absolute_move_operation,
-                                           ptz_absolute_move_response_callback, &callback_data);
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx, &ptz_absolute_move_operation, ptz_absolute_move_response_callback,
+                                           &callback_data);
 }
 
 // Additional action handlers
-static int handle_get_presets(const service_handler_config_t* config, const http_request_t* request,
-                              http_response_t* response, onvif_gsoap_context_t* gsoap_ctx) {
+static int handle_get_presets(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+                              onvif_gsoap_context_t* gsoap_ctx) {
   // Prepare callback data for PTZ presets
   ptz_presets_callback_data_t callback_data = {.presets = NULL, .count = 0};
 
   // Use the enhanced callback-based handler
-  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
-                                           &get_ptz_presets_operation,
-                                           ptz_presets_response_callback, &callback_data);
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx, &get_ptz_presets_operation, ptz_presets_response_callback,
+                                           &callback_data);
 }
 
-static int handle_set_preset(const service_handler_config_t* config, const http_request_t* request,
-                             http_response_t* response, onvif_gsoap_context_t* gsoap_ctx) {
+static int handle_set_preset(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+                             onvif_gsoap_context_t* gsoap_ctx) {
   // Prepare callback data for PTZ set preset
   ptz_set_preset_callback_data_t callback_data = {0};
 
   // Use the enhanced callback-based handler
-  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
-                                           &set_ptz_preset_operation,
-                                           ptz_set_preset_response_callback, &callback_data);
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx, &set_ptz_preset_operation, ptz_set_preset_response_callback,
+                                           &callback_data);
 }
 
-static int handle_goto_preset(const service_handler_config_t* config, const http_request_t* request,
-                              http_response_t* response, onvif_gsoap_context_t* gsoap_ctx) {
+static int handle_goto_preset(const service_handler_config_t* config, const http_request_t* request, http_response_t* response,
+                              onvif_gsoap_context_t* gsoap_ctx) {
   // Prepare callback data for PTZ goto preset
   ptz_goto_preset_callback_data_t callback_data = {.message = "PTZ goto preset completed"};
 
   // Use the enhanced callback-based handler
-  return onvif_util_handle_service_request(config, request, response, gsoap_ctx,
-                                           &goto_ptz_preset_operation,
-                                           ptz_goto_preset_response_callback, &callback_data);
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx, &goto_ptz_preset_operation, ptz_goto_preset_response_callback,
+                                           &callback_data);
+}
+
+static int remove_ptz_preset_business_logic(const service_handler_config_t* config, // NOLINT
+                                            const http_request_t* request,          // NOLINT
+                                            http_response_t* response, onvif_gsoap_context_t* gsoap_ctx, service_log_context_t* log_ctx,
+                                            error_context_t* error_ctx, void* callback_data) {
+  (void)config;
+  (void)callback_data;
+
+  // Initialize gSOAP context for request parsing
+  int result = onvif_gsoap_init_request_parsing(gsoap_ctx, request->body, strlen(request->body));
+  if (result != 0) {
+    service_log_operation_failure(log_ctx, "gsoap_request_parsing", result, "Failed to initialize gSOAP request parsing");
+    return error_handle_system(error_ctx, ONVIF_ERROR, "gsoap_init", response);
+  }
+
+  // Parse RemovePreset request
+  struct _tptz__RemovePreset* remove_req = NULL;
+  result = onvif_gsoap_parse_remove_preset(gsoap_ctx, &remove_req);
+  if (result != ONVIF_SUCCESS || !remove_req) {
+    service_log_operation_failure(log_ctx, "parse_remove_preset", result, "Failed to parse RemovePreset request");
+    return error_handle_parameter(error_ctx, "RemovePreset", "parse_failed", response);
+  }
+
+  // Validate parameters
+  if (!remove_req->ProfileToken || !remove_req->PresetToken) {
+    return error_handle_parameter(error_ctx, "RemovePreset", "missing_fields", response);
+  }
+
+  // Execute removal
+  result = onvif_ptz_remove_preset(remove_req->ProfileToken, remove_req->PresetToken);
+  if (result != ONVIF_SUCCESS) {
+    return error_handle_system(error_ctx, result, "remove_preset", response);
+  }
+
+  // Generate response and build HTTP response
+  return onvif_gsoap_generate_remove_preset_response(gsoap_ctx);
+}
+
+static int handle_remove_preset(const service_handler_config_t* config, // NOLINT
+                                const http_request_t* request,          // NOLINT
+                                http_response_t* response, onvif_gsoap_context_t* gsoap_ctx) {
+  // Use the enhanced callback-based handler with our business logic
+  return onvif_util_handle_service_request(config, request, response, gsoap_ctx, &remove_ptz_preset_operation, ptz_remove_preset_response_callback,
+                                           NULL);
 }
 
 /* ============================================================================
@@ -921,8 +1141,7 @@ static int handle_goto_preset(const service_handler_config_t* config, const http
  * @return ONVIF_SUCCESS on success, error code on failure
  * @note This function implements the standardized onvif_service_operation_handler_t interface
  */
-int onvif_ptz_handle_operation(const char* operation_name, const http_request_t* request,
-                               http_response_t* response) {
+int onvif_ptz_handle_operation(const char* operation_name, const http_request_t* request, http_response_t* response) {
   if (!operation_name || !request || !response) {
     return ONVIF_ERROR_INVALID;
   }
@@ -931,18 +1150,16 @@ int onvif_ptz_handle_operation(const char* operation_name, const http_request_t*
   onvif_gsoap_context_t gsoap_ctx;
   int init_result = onvif_gsoap_init(&gsoap_ctx);
   if (init_result != ONVIF_SUCCESS) {
-    platform_log_error("Failed to initialize gSOAP context for PTZ request (error: %d)\n",
-                       init_result);
+    platform_log_error("Failed to initialize gSOAP context for PTZ request (error: %d (%s))\n", init_result, onvif_error_to_string(init_result));
     return ONVIF_ERROR_MEMORY;
   }
 
   // CRITICAL: Initialize request parsing from HTTP body
   // This is required for gSOAP's soap_read_* functions to work
   if (request->body && request->body_length > 0) {
-    int parse_init =
-      onvif_gsoap_init_request_parsing(&gsoap_ctx, request->body, request->body_length);
+    int parse_init = onvif_gsoap_init_request_parsing(&gsoap_ctx, request->body, request->body_length);
     if (parse_init != ONVIF_SUCCESS) {
-      platform_log_error("Failed to initialize SOAP request parsing (error: %d)\n", parse_init);
+      platform_log_error("Failed to initialize SOAP request parsing (error: %d (%s))\n", parse_init, onvif_error_to_string(parse_init));
       onvif_gsoap_cleanup(&gsoap_ctx);
       return ONVIF_ERROR_PARSE_FAILED;
     }
@@ -952,8 +1169,7 @@ int onvif_ptz_handle_operation(const char* operation_name, const http_request_t*
   int result = ONVIF_ERROR_NOT_FOUND;
   for (size_t i = 0; i < PTZ_OPERATIONS_COUNT; i++) {
     if (strcmp(operation_name, g_ptz_operations[i].operation_name) == 0) {
-      result =
-        g_ptz_operations[i].handler(&g_ptz_handler_state.config, request, response, &gsoap_ctx);
+      result = g_ptz_operations[i].handler(&g_ptz_handler_state.config, request, response, &gsoap_ctx);
       break;
     }
   }
@@ -972,8 +1188,7 @@ int onvif_ptz_handle_operation(const char* operation_name, const http_request_t*
  * @return ONVIF_SUCCESS on success, error code on failure
  * @note This function provides the HTTP server interface for PTZ service
  */
-int onvif_ptz_handle_request(const char* action_name, const http_request_t* request,
-                             http_response_t* response) {
+int onvif_ptz_handle_request(const char* action_name, const http_request_t* request, http_response_t* response) {
   if (!action_name || !request || !response) {
     return ONVIF_ERROR_INVALID;
   }
@@ -1009,8 +1224,7 @@ int onvif_ptz_init(config_manager_t* config) {
   g_ptz_initialized = 1;
 
 #ifdef UNIT_TESTING
-  int result = onvif_service_unit_register(&g_ptz_service_registration, &g_ptz_initialized,
-                                           onvif_ptz_cleanup, "PTZ");
+  int result = onvif_service_unit_register(&g_ptz_service_registration, &g_ptz_initialized, onvif_ptz_cleanup, "PTZ");
   if (result != ONVIF_SUCCESS) {
     return result;
   }
@@ -1059,16 +1273,127 @@ void onvif_ptz_cleanup(void) {
 /* ============================================================================
  * Preset Management Helper Functions
  * ============================================================================ */
-static int find_preset_by_token(const char* token, int* index) {
-  if (!token || !index) {
+
+/**
+ * @brief Load PTZ presets from configuration (lazy loading pattern)
+ * @return ONVIF_SUCCESS on success, error code on failure
+ * @note Following media profile pattern from onvif_media.c
+ */
+static int load_ptz_presets_from_config(void) {
+  if (g_presets_loaded) {
+    platform_log_debug("[PTZ] Presets already loaded (g_presets_loaded=1), skipping reload\n");
+    return ONVIF_SUCCESS;
+  }
+
+  platform_log_debug("[PTZ] Loading presets from configuration (g_presets_loaded=0)\n");
+
+  // Load presets for all 4 profiles
+  for (int i = 0; i < PTZ_PROFILE_COUNT; i++) {
+    int result = config_runtime_get_ptz_profile_presets(i, &g_profile_presets[i]);
+    platform_log_debug("[PTZ] config_runtime_get_ptz_profile_presets(profile=%d) returned %d\n", i, result);
+
+    if (result == ONVIF_ERROR_NOT_FOUND) {
+      // Configuration not initialized yet - treat as empty (valid fresh/reset state)
+      g_profile_presets[i].preset_count = 0;
+      memset(g_profile_presets[i].presets, 0, sizeof(g_profile_presets[i].presets));
+      platform_log_debug("[PTZ] No presets found for profile %d (fresh state) - initialized to 0 presets\n", i + 1);
+      continue;
+    }
+    if (result != ONVIF_SUCCESS) {
+      platform_log_error("[PTZ] Failed to load presets for profile %d from configuration (error=%d (%s))\n", i + 1, result,
+                         onvif_error_to_string(result));
+      return result;
+    }
+
+    // Successfully loaded presets
+    platform_log_debug("[PTZ] Loaded %d presets for profile %d from configuration\n", g_profile_presets[i].preset_count, i + 1);
+  }
+
+  g_presets_loaded = 1;
+  platform_log_info("[PTZ] Loaded presets for %d profiles from runtime configuration (g_presets_loaded set to 1)\n", PTZ_PROFILE_COUNT);
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Map profile token to profile index
+ * @param profile_token Profile token (e.g., "Profile1", "ProfileToken1", "ptz_profile_1")
+ * @return Profile index (0-3) on success, -1 on error
+ */
+static int get_profile_index_from_token(const char* profile_token) {
+  if (!profile_token) {
+    return -1;
+  }
+
+  // Support multiple profile token formats for compatibility
+  // Format 1: "Profile1", "Profile2", "Profile3", "Profile4"
+  if (strcmp(profile_token, "Profile1") == 0) {
+    return 0;
+  }
+  if (strcmp(profile_token, "Profile2") == 0) {
+    return 1;
+  }
+  if (strcmp(profile_token, "Profile3") == 0) {
+    return 2;
+  }
+  if (strcmp(profile_token, "Profile4") == 0) {
+    return 3;
+  }
+
+  // Format 2: "ProfileToken1", "ProfileToken2", etc. (legacy test format)
+  if (strcmp(profile_token, "ProfileToken1") == 0) {
+    return 0;
+  }
+  if (strcmp(profile_token, "ProfileToken2") == 0) {
+    return 1;
+  }
+  if (strcmp(profile_token, "ProfileToken3") == 0) {
+    return 2;
+  }
+  if (strcmp(profile_token, "ProfileToken4") == 0) {
+    return 3;
+  }
+
+  // Format 3: "ptz_profile_1", "ptz_profile_2", etc. (SOAP test format)
+  if (strcmp(profile_token, "ptz_profile_1") == 0) {
+    return 0;
+  }
+  if (strcmp(profile_token, "ptz_profile_2") == 0) {
+    return 1;
+  }
+  if (strcmp(profile_token, "ptz_profile_3") == 0) {
+    return 2;
+  }
+  if (strcmp(profile_token, "ptz_profile_4") == 0) {
+    return 3;
+  }
+
+  platform_log_error("[PTZ] Unknown profile token: %s\n", profile_token);
+  return -1;
+}
+
+/**
+ * @brief Find preset by token within specific profile
+ * @param profile_index Profile index (0-3)
+ * @param token Preset token to find
+ * @param preset_index Output parameter for preset index within profile
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR_NOT_FOUND if not found
+ */
+static int find_preset_by_token_in_profile(int profile_index, const char* token, int* preset_index) {
+  if (profile_index < 0 || profile_index >= PTZ_PROFILE_COUNT || !token || !preset_index) {
     return ONVIF_ERROR_INVALID;
   }
 
-  // For small arrays (PTZ_MAX_PRESETS = 10), linear search is efficient
-  // and simpler than binary search with sorting overhead
-  for (int i = 0; i < g_ptz_preset_count; i++) {
-    if (strcmp(g_ptz_presets[i].token, token) == 0) {
-      *index = i;
+  // Ensure presets are loaded
+  int result = load_ptz_presets_from_config();
+  if (result != ONVIF_SUCCESS) {
+    return result;
+  }
+
+  // Linear search within profile's preset list (max 4 presets)
+  ptz_preset_list_t* profile = &g_profile_presets[profile_index];
+  for (int i = 0; i < profile->preset_count && i < PTZ_PRESETS_PER_PROFILE; i++) {
+    if (strcmp(profile->presets[i].token, token) == 0) {
+      *preset_index = i;
       return ONVIF_SUCCESS;
     }
   }
@@ -1076,78 +1401,16 @@ static int find_preset_by_token(const char* token, int* index) {
   return ONVIF_ERROR_NOT_FOUND;
 }
 
-static int remove_preset_at_index(int index) {
-  if (index < 0 || index >= g_ptz_preset_count) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  /* Optimized removal: use memmove for efficient memory shifting */
-  if (index < g_ptz_preset_count - 1) {
-    memmove(&g_ptz_presets[index], &g_ptz_presets[index + 1],
-            (g_ptz_preset_count - index - 1) * sizeof(struct ptz_preset));
-  }
-
-  g_ptz_preset_count--;
-
-  /* Clear the last slot to prevent stale data */
-  memset(&g_ptz_presets[g_ptz_preset_count], 0, sizeof(struct ptz_preset));
-
-  return ONVIF_SUCCESS;
-}
-
-/**
- * @brief Sort presets by token for efficient searching
- * @return ONVIF_SUCCESS on success, error code on failure
- */
-static int sort_presets_by_token(void) {
-  if (g_ptz_preset_count <= 1) {
-    return ONVIF_SUCCESS; // Already sorted or empty
-  }
-
-  // Simple bubble sort for small arrays (PTZ_MAX_PRESETS = 10)
-  for (int i = 0; i < g_ptz_preset_count - 1; i++) {
-    for (int j = 0; j < g_ptz_preset_count - i - 1; j++) {
-      if (strcmp(g_ptz_presets[j].token, g_ptz_presets[j + 1].token) > 0) {
-        // Swap presets
-        struct ptz_preset temp = g_ptz_presets[j];
-        g_ptz_presets[j] = g_ptz_presets[j + 1];
-        g_ptz_presets[j + 1] = temp;
-      }
-    }
-  }
-
-  return ONVIF_SUCCESS;
-}
-
-/**
- * @brief Get preset memory usage statistics
- * @param used_count Number of presets currently used
- * @param total_count Total preset capacity
- * @param memory_used Memory used by presets in bytes
- * @return ONVIF_SUCCESS on success, error code on failure
- */
-static int get_preset_memory_stats(int* used_count, int* total_count, size_t* memory_used) {
-  if (!used_count || !total_count || !memory_used) {
-    return ONVIF_ERROR_INVALID;
-  }
-
-  *used_count = g_ptz_preset_count;
-  *total_count = PTZ_MAX_PRESETS;
-  *memory_used = (size_t)g_ptz_preset_count * sizeof(struct ptz_preset);
-
-  return ONVIF_SUCCESS;
-}
-
 /**
  * @brief Cleanup preset memory and reset to initial state
  * @return ONVIF_SUCCESS on success, error code on failure
  */
 static int cleanup_preset_memory(void) {
-  // Clear all preset data
-  memset(g_ptz_presets, 0, sizeof(g_ptz_presets));
-  g_ptz_preset_count = 0;
+  // Clear all profile preset data
+  memset(g_profile_presets, 0, sizeof(g_profile_presets));
+  g_presets_loaded = 0;
 
-  platform_log_info("PTZ preset memory cleaned up: %zu bytes freed\n", sizeof(g_ptz_presets));
+  platform_log_info("[PTZ] Preset memory cleaned up: %zu bytes freed\n", sizeof(g_profile_presets));
 
   return ONVIF_SUCCESS;
 }
@@ -1155,12 +1418,14 @@ static int cleanup_preset_memory(void) {
 /**
  * @brief Reset preset state (internal implementation)
  * @return ONVIF_SUCCESS on success
- * @note This resets the preset count and clears preset data without logging
+ * @note This resets the loaded flag and clears preset data without logging
  */
 static int reset_preset_state(void) {
-  // Clear all preset data
-  memset(g_ptz_presets, 0, sizeof(g_ptz_presets));
-  g_ptz_preset_count = 0;
+  // Clear all profile preset data
+  memset(g_profile_presets, 0, sizeof(g_profile_presets));
+  g_presets_loaded = 0;
+
+  platform_log_debug("[PTZ] reset_preset_state() called - cleared in-memory preset data (g_presets_loaded=0)\n");
 
   return ONVIF_SUCCESS;
 }
@@ -1170,5 +1435,6 @@ static int reset_preset_state(void) {
  * @return ONVIF_SUCCESS on success
  */
 int onvif_ptz_reset_presets(void) {
+  platform_log_debug("[PTZ] onvif_ptz_reset_presets() called - delegating to reset_preset_state()\n");
   return reset_preset_state();
 }

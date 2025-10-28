@@ -127,6 +127,18 @@ unsigned int platform_mock_get_ptz_turn_stop_mask(void);
 void platform_ptz_mock_set_async_mode(bool enable);
 
 /**
+ * @brief Enable or disable permissive mode for PTZ platform mocks
+ * @param permissive true to return success without parameter validation (for integration tests)
+ */
+void platform_ptz_mock_set_permissive_mode(bool permissive);
+
+/**
+ * @brief Get the current permissive mode state
+ * @return true if permissive mode is enabled
+ */
+bool platform_ptz_mock_get_permissive_mode(void);
+
+/**
  * @brief Determine whether the current thread should bypass CMocka expectations
  * @return true if expectations must be skipped for the calling thread
  */

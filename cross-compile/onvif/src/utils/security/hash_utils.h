@@ -32,8 +32,7 @@ int onvif_sha256_compute(const uint8_t* data, size_t len, uint8_t digest[ONVIF_S
  * @param output_size Size of output buffer
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int onvif_sha256_to_hex(const uint8_t digest[ONVIF_SHA256_DIGEST_SIZE], char* hex_output,
-                        size_t output_size);
+int onvif_sha256_to_hex(const uint8_t digest[ONVIF_SHA256_DIGEST_SIZE], char* hex_output, size_t output_size);
 
 /**
  * @brief Compute SHA256 hash and output as hexadecimal string
@@ -64,5 +63,17 @@ int onvif_hash_password(const char* password, char* hash, size_t hash_size);
  * failure
  */
 int onvif_verify_password(const char* password, const char* hash);
+
+/**
+ * @brief Generate cryptographically secure random bytes
+ * @param buffer Output buffer for random bytes
+ * @param size Number of random bytes to generate
+ * @return ONVIF_SUCCESS on success, error code on failure
+ *
+ * Uses /dev/urandom on Linux for cryptographically secure random generation.
+ * This is suitable for security-critical operations like nonce generation,
+ * salt generation, and session tokens.
+ */
+int onvif_generate_random_bytes(uint8_t* buffer, size_t size);
 
 #endif /* ONVIF_HASH_UTILS_H */

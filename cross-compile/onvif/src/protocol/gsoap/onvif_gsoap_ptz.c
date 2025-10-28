@@ -27,7 +27,7 @@
 #include "generated/soapH.h"
 #include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
-#include "utils/common/time_utils.h"
+#include "services/ptz/onvif_ptz.h"
 #include "utils/error/error_handling.h"
 #include "utils/error/error_translation.h"
 
@@ -50,8 +50,7 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _tptz__GetNod
   /* 2. Allocate GetNodes structure using gSOAP managed memory */
   *out = soap_new__tptz__GetNodes(&ctx->soap, -1);
   if (!*out) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
-                          "Failed to allocate GetNodes request structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__, "Failed to allocate GetNodes request structure");
     return ONVIF_ERROR_MEMORY;
   }
 
@@ -65,9 +64,10 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _tptz__GetNod
   /* 4. Parse the actual GetNodes structure */
   struct _tptz__GetNodes* result_ptr = soap_get__tptz__GetNodes(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_get_nodes: soap_get__tptz__GetNodes failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse GetNodes structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse GetNodes structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -89,8 +89,7 @@ int onvif_gsoap_parse_get_nodes(onvif_gsoap_context_t* ctx, struct _tptz__GetNod
  * @note Extracts ProfileToken, Position (PanTilt and Zoom), and optional Speed
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
-                                    struct _tptz__AbsoluteMove** out) {
+int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx, struct _tptz__AbsoluteMove** out) {
   /* 1. Validate context and begin parse operation */
   int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "AbsoluteMove", __func__);
   if (result != ONVIF_SUCCESS) {
@@ -100,8 +99,7 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
   /* 2. Allocate AbsoluteMove structure using gSOAP managed memory */
   *out = soap_new__tptz__AbsoluteMove(&ctx->soap, -1);
   if (!*out) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
-                          "Failed to allocate AbsoluteMove request structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__, "Failed to allocate AbsoluteMove request structure");
     return ONVIF_ERROR_MEMORY;
   }
 
@@ -115,9 +113,10 @@ int onvif_gsoap_parse_absolute_move(onvif_gsoap_context_t* ctx,
   /* 4. Parse the actual AbsoluteMove structure */
   struct _tptz__AbsoluteMove* result_ptr = soap_get__tptz__AbsoluteMove(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_absolute_move: soap_get__tptz__AbsoluteMove failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse AbsoluteMove structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse AbsoluteMove structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -149,8 +148,7 @@ int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _tptz__GetP
   /* 2. Allocate GetPresets structure using gSOAP managed memory */
   *out = soap_new__tptz__GetPresets(&ctx->soap, -1);
   if (!*out) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
-                          "Failed to allocate GetPresets request structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__, "Failed to allocate GetPresets request structure");
     return ONVIF_ERROR_MEMORY;
   }
 
@@ -164,9 +162,10 @@ int onvif_gsoap_parse_get_presets(onvif_gsoap_context_t* ctx, struct _tptz__GetP
   /* 4. Parse the actual GetPresets structure */
   struct _tptz__GetPresets* result_ptr = soap_get__tptz__GetPresets(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_get_presets: soap_get__tptz__GetPresets failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse GetPresets structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse GetPresets structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -199,8 +198,7 @@ int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _tptz__SetPr
   /* 2. Allocate SetPreset structure using gSOAP managed memory */
   *out = soap_new__tptz__SetPreset(&ctx->soap, -1);
   if (!*out) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
-                          "Failed to allocate SetPreset request structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__, "Failed to allocate SetPreset request structure");
     return ONVIF_ERROR_MEMORY;
   }
 
@@ -214,9 +212,10 @@ int onvif_gsoap_parse_set_preset(onvif_gsoap_context_t* ctx, struct _tptz__SetPr
   /* 4. Parse the actual SetPreset structure */
   struct _tptz__SetPreset* result_ptr = soap_get__tptz__SetPreset(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_set_preset: soap_get__tptz__SetPreset failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse SetPreset structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse SetPreset structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -249,8 +248,7 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _tptz__Goto
   /* 2. Allocate GotoPreset structure using gSOAP managed memory */
   *out = soap_new__tptz__GotoPreset(&ctx->soap, -1);
   if (!*out) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
-                          "Failed to allocate GotoPreset request structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__, "Failed to allocate GotoPreset request structure");
     return ONVIF_ERROR_MEMORY;
   }
 
@@ -264,9 +262,10 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _tptz__Goto
   /* 4. Parse the actual GotoPreset structure */
   struct _tptz__GotoPreset* result_ptr = soap_get__tptz__GotoPreset(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_goto_preset: soap_get__tptz__GotoPreset failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse GotoPreset structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse GotoPreset structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -289,8 +288,7 @@ int onvif_gsoap_parse_goto_preset(onvif_gsoap_context_t* ctx, struct _tptz__Goto
  * @note PresetToken identifies which preset to remove from profile
  * @note Output structure is allocated and managed by gSOAP context
  */
-int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
-                                    struct _tptz__RemovePreset** out) {
+int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx, struct _tptz__RemovePreset** out) {
   /* 1. Validate context and begin parse operation */
   int result = onvif_gsoap_validate_and_begin_parse(ctx, out, "RemovePreset", __func__);
   if (result != ONVIF_SUCCESS) {
@@ -300,8 +298,7 @@ int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
   /* 2. Allocate RemovePreset structure using gSOAP managed memory */
   *out = soap_new__tptz__RemovePreset(&ctx->soap, -1);
   if (!*out) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__,
-                          "Failed to allocate RemovePreset request structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_MEMORY, __func__, "Failed to allocate RemovePreset request structure");
     return ONVIF_ERROR_MEMORY;
   }
 
@@ -315,9 +312,10 @@ int onvif_gsoap_parse_remove_preset(onvif_gsoap_context_t* ctx,
   /* 4. Parse the actual RemovePreset structure */
   struct _tptz__RemovePreset* result_ptr = soap_get__tptz__RemovePreset(&ctx->soap, *out, NULL, NULL);
   if (!result_ptr || ctx->soap.error != SOAP_OK) {
+    int soap_err = ctx->soap.error;
+    platform_log_debug("onvif_gsoap_parse_remove_preset: soap_get__tptz__RemovePreset failed: %d (%s)", soap_err, soap_error_to_string(soap_err));
     *out = NULL;
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__,
-                          "Failed to parse RemovePreset structure");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_PARSE_FAILED, __func__, "Failed to parse RemovePreset structure");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
@@ -359,11 +357,39 @@ int ptz_nodes_response_callback(struct soap* soap, void* user_data) {
 
     node->token = soap_strdup(soap, src_node->token);
     node->Name = soap_strdup(soap, src_node->name);
-    node->FixedHomePosition = src_node->home_supported ? xsd__boolean__true_ : xsd__boolean__false_;
+    node->FixedHomePosition = soap_new_xsd__boolean(soap, 1);
+    if (node->FixedHomePosition) {
+      *(node->FixedHomePosition) = src_node->home_supported ? xsd__boolean__true_ : xsd__boolean__false_;
+    }
+
+    // Initialize required fields to prevent NULL pointer access
+    node->SupportedPTZSpaces = soap_new_tt__PTZSpaces(soap, 1);
+    if (node->SupportedPTZSpaces) {
+      node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace = soap_new_tt__Space2DDescription(soap, 1);
+      if (node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace) {
+        node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->URI =
+          soap_strdup(soap, src_node->supported_ptz_spaces.absolute_pan_tilt_position_space.uri);
+        node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->XRange = soap_new_tt__FloatRange(soap, 1);
+        if (node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->XRange) {
+          node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->XRange->Min =
+            src_node->supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.min;
+          node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->XRange->Max =
+            src_node->supported_ptz_spaces.absolute_pan_tilt_position_space.x_range.max;
+        }
+        node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->YRange = soap_new_tt__FloatRange(soap, 1);
+        if (node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->YRange) {
+          node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->YRange->Min =
+            src_node->supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.min;
+          node->SupportedPTZSpaces->AbsolutePanTiltPositionSpace->YRange->Max =
+            src_node->supported_ptz_spaces.absolute_pan_tilt_position_space.y_range.max;
+        }
+      }
+    }
+
+    node->MaximumNumberOfPresets = src_node->maximum_number_of_presets;
   }
 
-  if (soap_put__tptz__GetNodesResponse(soap, response, "tptz:GetNodesResponse", NULL) !=
-      SOAP_OK) {
+  if (soap_put__tptz__GetNodesResponse(soap, response, "tptz:GetNodesResponse", NULL) != SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -382,8 +408,7 @@ int ptz_absolute_move_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  if (soap_put__tptz__AbsoluteMoveResponse(soap, response, "tptz:AbsoluteMoveResponse", NULL) !=
-      SOAP_OK) {
+  if (soap_put__tptz__AbsoluteMoveResponse(soap, response, "tptz:AbsoluteMoveResponse", NULL) != SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -421,21 +446,18 @@ int ptz_presets_response_callback(struct soap* soap, void* user_data) {
       if (preset->PTZPosition->PanTilt) {
         preset->PTZPosition->PanTilt->x = src_preset->ptz_position.pan_tilt.x;
         preset->PTZPosition->PanTilt->y = src_preset->ptz_position.pan_tilt.y;
-        preset->PTZPosition->PanTilt->space =
-          soap_strdup(soap, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace");
+        preset->PTZPosition->PanTilt->space = soap_strdup(soap, "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace");
       }
 
       preset->PTZPosition->Zoom = soap_new_tt__Vector1D(soap, 1);
       if (preset->PTZPosition->Zoom) {
         preset->PTZPosition->Zoom->x = src_preset->ptz_position.zoom;
-        preset->PTZPosition->Zoom->space =
-          soap_strdup(soap, "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace");
+        preset->PTZPosition->Zoom->space = soap_strdup(soap, "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace");
       }
     }
   }
 
-  if (soap_put__tptz__GetPresetsResponse(soap, response, "tptz:GetPresetsResponse", NULL) !=
-      SOAP_OK) {
+  if (soap_put__tptz__GetPresetsResponse(soap, response, "tptz:GetPresetsResponse", NULL) != SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -454,12 +476,13 @@ int ptz_set_preset_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  // Note: SetPresetResponse struct is empty in ONVIF spec
-  // The preset token is returned in the SetPreset request parsing, not in response generation
-  (void)data; // Suppress unused parameter warning
+  // Set the PresetToken in the response
+  response->PresetToken = soap_strdup(soap, data->preset_token);
+  if (!response->PresetToken) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
 
-  if (soap_put__tptz__SetPresetResponse(soap, response, "tptz:SetPresetResponse", NULL) !=
-      SOAP_OK) {
+  if (soap_put__tptz__SetPresetResponse(soap, response, "tptz:SetPresetResponse", NULL) != SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
@@ -478,12 +501,36 @@ int ptz_goto_preset_response_callback(struct soap* soap, void* user_data) {
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
-  if (soap_put__tptz__GotoPresetResponse(soap, response, "tptz:GotoPresetResponse", NULL) !=
-      SOAP_OK) {
+  if (soap_put__tptz__GotoPresetResponse(soap, response, "tptz:GotoPresetResponse", NULL) != SOAP_OK) {
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
   return ONVIF_SUCCESS;
+}
+
+int ptz_remove_preset_response_callback(struct soap* soap, void* user_data) {
+  (void)user_data;
+
+  struct _tptz__RemovePresetResponse* response = soap_new__tptz__RemovePresetResponse(soap, 1);
+  if (!response) {
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  if (soap_put__tptz__RemovePresetResponse(soap, response, "tptz:RemovePresetResponse", NULL) != SOAP_OK) {
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+int onvif_gsoap_generate_remove_preset_response(onvif_gsoap_context_t* ctx) {
+  if (!ctx) {
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER, "onvif_gsoap_generate_remove_preset_response",
+                          "Invalid parameters for remove preset response");
+    return ONVIF_ERROR_INVALID;
+  }
+
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_remove_preset_response_callback, NULL);
 }
 
 /* ============================================================================
@@ -491,74 +538,61 @@ int ptz_goto_preset_response_callback(struct soap* soap, void* user_data) {
  * ============================================================================
  */
 
-int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
-                                            const struct ptz_node* nodes, int count) {
+int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx, const struct ptz_node* nodes, int count) {
   if (!ctx || !ctx || !nodes || count <= 0) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
-                          "onvif_gsoap_generate_get_nodes_response",
-                          "Invalid parameters for get nodes response");
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER, "onvif_gsoap_generate_get_nodes_response", "Invalid parameters for get nodes response");
     return ONVIF_ERROR_INVALID;
   }
 
   ptz_nodes_callback_data_t callback_data = {.nodes = nodes, .count = count};
 
-  return onvif_gsoap_generate_response_with_callback(ctx, ptz_nodes_response_callback,
-                                                     &callback_data);
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_nodes_response_callback, &callback_data);
 }
 
 int onvif_gsoap_generate_absolute_move_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
-                          "onvif_gsoap_generate_absolute_move_response",
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER, "onvif_gsoap_generate_absolute_move_response",
                           "Invalid parameters for absolute move response");
     return ONVIF_ERROR_INVALID;
   }
 
   ptz_absolute_move_callback_data_t callback_data = {.message = ""};
 
-  return onvif_gsoap_generate_response_with_callback(ctx, ptz_absolute_move_response_callback,
-                                                     &callback_data);
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_absolute_move_response_callback, &callback_data);
 }
 
-int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
-                                              const struct ptz_preset* presets, int count) {
+int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx, const struct ptz_preset* presets, int count) {
   if (!ctx || !ctx || !presets || count < 0) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
-                          "onvif_gsoap_generate_get_presets_response",
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER, "onvif_gsoap_generate_get_presets_response",
                           "Invalid parameters for get presets response");
     return ONVIF_ERROR_INVALID;
   }
 
   ptz_presets_callback_data_t callback_data = {.presets = presets, .count = count};
 
-  return onvif_gsoap_generate_response_with_callback(ctx, ptz_presets_response_callback,
-                                                     &callback_data);
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_presets_response_callback, &callback_data);
 }
 
 int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const char* preset_token) {
   if (!ctx || !ctx || !preset_token) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
-                          "onvif_gsoap_generate_set_preset_response",
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER, "onvif_gsoap_generate_set_preset_response",
                           "Invalid parameters for set preset response");
     return ONVIF_ERROR_INVALID;
   }
 
   ptz_set_preset_callback_data_t callback_data = {.preset_token = preset_token};
 
-  return onvif_gsoap_generate_response_with_callback(ctx, ptz_set_preset_response_callback,
-                                                     &callback_data);
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_set_preset_response_callback, &callback_data);
 }
 
 int onvif_gsoap_generate_goto_preset_response(onvif_gsoap_context_t* ctx) {
   if (!ctx || !ctx) {
-    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER,
-                          "onvif_gsoap_generate_goto_preset_response",
+    onvif_gsoap_set_error(ctx, ONVIF_ERROR_INVALID_PARAMETER, "onvif_gsoap_generate_goto_preset_response",
                           "Invalid parameters for goto preset response");
     return ONVIF_ERROR_INVALID;
   }
 
   ptz_goto_preset_callback_data_t callback_data = {.message = ""};
 
-  return onvif_gsoap_generate_response_with_callback(ctx, ptz_goto_preset_response_callback,
-                                                     &callback_data);
+  return onvif_gsoap_generate_response_with_callback(ctx, ptz_goto_preset_response_callback, &callback_data);
 }

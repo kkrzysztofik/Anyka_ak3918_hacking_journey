@@ -66,7 +66,7 @@ tramp
 # -----------------------------------------------------------------------------
 # Core dumps
 debugging/coredump/core*
-core
+/core
 core.*
 vgcore.*
 

@@ -8,9 +8,7 @@
 #include "service_manager.h"
 
 #include <stdbool.h>
-#include <string.h>
 
-#include "core/config/config.h"
 #include "platform/adapters/ptz_adapter.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
@@ -18,51 +16,45 @@
 #include "services/device/onvif_device.h"
 #include "services/imaging/onvif_imaging.h"
 #include "services/media/onvif_media.h"
-#include "services/ptz/onvif_ptz.h"
+#include "utils/error/error_handling.h"
+
+/* ============================================================================
+ * Global State
+ * ============================================================================ */
 
 static volatile bool g_service_services_initialized = false; // NOLINT
 
+/* ============================================================================
+ * PUBLIC API - Service Initialization
+ * ============================================================================ */
+
 int onvif_services_init(platform_vi_handle_t vi_handle) {
   if (g_service_services_initialized) {
-    return 0; // Already initialized
+    return ONVIF_SUCCESS; // Already initialized
   }
 
   platform_log_info("Initializing ONVIF services...\n");
 
-  // Create a temporary config manager for service initialization
-  config_manager_t config;
-  struct application_config app_config;
-  memset(&config, 0, sizeof(config_manager_t));
-  memset(&app_config, 0, sizeof(struct application_config));
-
-  // Initialize config manager
-  if (config_init(&config, &app_config) != 0) {
-    platform_log_error("Failed to initialize config manager\n");
-    return -1;
-  }
-
   // Initialize service dispatcher (required before any service registration)
   if (onvif_service_dispatcher_init() != 0) {
     platform_log_error("Failed to initialize service dispatcher\n");
-    config_cleanup(&config);
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
   platform_log_info("Service dispatcher initialized\n");
 
   // Initialize Device service (required)
-  if (onvif_device_init(&config) != 0) {
+  // Services now use config_runtime API directly
+  if (onvif_device_init() != 0) {
     platform_log_error("Failed to initialize Device service\n");
-    config_cleanup(&config);
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
   platform_log_info("Device service initialized\n");
 
   // Initialize Media service (required)
-  if (onvif_media_init(&config) != 0) {
+  if (onvif_media_init() != 0) {
     platform_log_error("Failed to initialize Media service\n");
     onvif_device_cleanup();
-    config_cleanup(&config);
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
   platform_log_info("Media service initialized\n");
 
@@ -82,14 +74,15 @@ int onvif_services_init(platform_vi_handle_t vi_handle) {
     platform_log_info("Imaging service initialized\n");
   }
 
-  // Clean up temporary config
-  config_cleanup(&config);
-
   g_service_services_initialized = true;
   platform_log_info("ONVIF services initialization completed\n");
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * PUBLIC API - Cleanup
+ * ============================================================================ */
 
 void onvif_services_cleanup(void) {
   if (!g_service_services_initialized) {

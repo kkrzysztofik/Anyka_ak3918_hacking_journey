@@ -106,34 +106,32 @@ struct ptz_preset {
   struct ptz_vector ptz_position;
 };
 
-int onvif_ptz_get_nodes(struct ptz_node** nodes, int* count); /**< Get all PTZ nodes. */
-int onvif_ptz_get_node(const char* node_token,
-                       struct ptz_node* node); /**< Retrieve PTZ node capabilities. */
-int onvif_ptz_get_configuration(
-  const char* config_token, struct ptz_configuration_ex* config); /**< Fetch PTZ configuration. */
-int onvif_ptz_get_status(const char* profile_token,
-                         struct ptz_status* status); /**< Get current position & status. */
-int onvif_ptz_absolute_move(const char* profile_token, const struct ptz_vector* position,
-                            const struct ptz_speed* speed); /**< AbsoluteMove. */
-int onvif_ptz_relative_move(const char* profile_token, const struct ptz_vector* translation,
-                            const struct ptz_speed* speed); /**< RelativeMove. */
-int onvif_ptz_continuous_move(const char* profile_token, const struct ptz_speed* velocity,
-                              int timeout);                            /**< ContinuousMove. */
-int onvif_ptz_stop(const char* profile_token, int pan_tilt, int zoom); /**< Stop motion axes. */
-int onvif_ptz_goto_home_position(const char* profile_token,
-                                 const struct ptz_speed* speed); /**< GotoHomePosition. */
-int onvif_ptz_set_home_position(const char* profile_token);      /**< SetHomePosition. */
-int onvif_ptz_get_presets(const char* profile_token, struct ptz_preset** preset_list,
-                          int* count); /**< GetPresets list. */
-int onvif_ptz_set_preset(const char* profile_token, const char* preset_name, char* preset_token,
-                         size_t token_size); /**< SetPreset. */
-int onvif_ptz_goto_preset(const char* profile_token, const char* preset_token,
-                          const struct ptz_speed* speed); /**< GotoPreset. */
-int onvif_ptz_remove_preset(const char* profile_token,
-                            const char* preset_token); /**< RemovePreset. */
-int onvif_ptz_handle_operation(
-  const char* operation_name, const http_request_t* request,
-  http_response_t* response); /**< Handle ONVIF PTZ service operations (standardized). */
+/**
+ * @brief PTZ preset list for a single media profile
+ * Each profile has its own isolated preset storage (max 4 presets per profile)
+ */
+typedef struct ptz_preset_list {
+  int preset_count;             /**< Number of active presets (0-4) */
+  struct ptz_preset presets[4]; /**< Preset array (max 4 per profile) */
+} ptz_preset_list_t;
+
+int onvif_ptz_get_nodes(struct ptz_node** nodes, int* count);                                   /**< Get all PTZ nodes. */
+int onvif_ptz_get_node(const char* node_token, struct ptz_node* node);                          /**< Retrieve PTZ node capabilities. */
+int onvif_ptz_get_configuration(const char* config_token, struct ptz_configuration_ex* config); /**< Fetch PTZ configuration. */
+int onvif_ptz_get_status(const char* profile_token, struct ptz_status* status);                 /**< Get current position & status. */
+int onvif_ptz_absolute_move(const char* profile_token, const struct ptz_vector* position, const struct ptz_speed* speed);    /**< AbsoluteMove. */
+int onvif_ptz_relative_move(const char* profile_token, const struct ptz_vector* translation, const struct ptz_speed* speed); /**< RelativeMove. */
+int onvif_ptz_continuous_move(const char* profile_token, const struct ptz_speed* velocity, int timeout);                     /**< ContinuousMove. */
+int onvif_ptz_stop(const char* profile_token, int pan_tilt, int zoom);                                                       /**< Stop motion axes. */
+int onvif_ptz_goto_home_position(const char* profile_token, const struct ptz_speed* speed);                                  /**< GotoHomePosition. */
+int onvif_ptz_set_home_position(const char* profile_token);                                                                  /**< SetHomePosition. */
+int onvif_ptz_get_presets(const char* profile_token, struct ptz_preset** preset_list, int* count);                           /**< GetPresets list. */
+int onvif_ptz_set_preset(const char* profile_token, const char* preset_name, const char* input_preset_token, char* output_preset_token,
+                         size_t token_size);                                                                   /**< SetPreset. */
+int onvif_ptz_goto_preset(const char* profile_token, const char* preset_token, const struct ptz_speed* speed); /**< GotoPreset. */
+int onvif_ptz_remove_preset(const char* profile_token, const char* preset_token);                              /**< RemovePreset. */
+int onvif_ptz_handle_operation(const char* operation_name, const http_request_t* request,
+                               http_response_t* response); /**< Handle ONVIF PTZ service operations (standardized). */
 
 /**
  * @struct ptz_device_status
@@ -176,7 +174,6 @@ int onvif_ptz_reset_presets(void);
  * @return ONVIF_SUCCESS on success, error code on failure
  * @note This function provides the HTTP server interface for PTZ service
  */
-int onvif_ptz_handle_request(const char* action_name, const http_request_t* request,
-                             http_response_t* response);
+int onvif_ptz_handle_request(const char* action_name, const http_request_t* request, http_response_t* response);
 
 #endif

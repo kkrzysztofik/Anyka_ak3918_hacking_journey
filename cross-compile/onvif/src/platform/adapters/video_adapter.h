@@ -24,25 +24,18 @@ extern "C" {
 /* Video input operations */
 platform_result_t video_adapter_vi_open(platform_vi_handle_t* handle);
 void video_adapter_vi_close(platform_vi_handle_t handle);
-platform_result_t video_adapter_vi_get_sensor_resolution(platform_vi_handle_t handle, int* width,
-                                                         int* height);
+platform_result_t video_adapter_vi_get_sensor_resolution(platform_vi_handle_t handle, int* width, int* height);
 platform_result_t video_adapter_vi_switch_day_night(platform_vi_handle_t handle, bool day_mode);
-platform_result_t video_adapter_vi_set_flip_mirror(platform_vi_handle_t handle, bool flip,
-                                                   bool mirror);
-platform_result_t video_adapter_vpss_effect_set(platform_vi_handle_t handle,
-                                                platform_vpss_effect_t effect);
-platform_result_t video_adapter_vpss_effect_get(platform_vi_handle_t handle,
-                                                platform_vpss_effect_t* effect);
+platform_result_t video_adapter_vi_set_flip_mirror(platform_vi_handle_t handle, bool flip, bool mirror);
+platform_result_t video_adapter_vpss_effect_set(platform_vi_handle_t handle, platform_vpss_effect_t effect);
+platform_result_t video_adapter_vpss_effect_get(platform_vi_handle_t handle, platform_vpss_effect_t* effect);
 
 /* Video encoding operations */
-platform_result_t video_adapter_venc_init(platform_venc_handle_t* handle,
-                                          const platform_video_config_t* config);
+platform_result_t video_adapter_venc_init(platform_venc_handle_t* handle, const platform_video_config_t* config);
 void video_adapter_venc_cleanup(platform_venc_handle_t handle);
-platform_result_t video_adapter_venc_get_frame(platform_venc_handle_t handle, uint8_t** data,
-                                               size_t* size, uint64_t* timestamp);
+platform_result_t video_adapter_venc_get_frame(platform_venc_handle_t handle, uint8_t** data, size_t* size, uint64_t* timestamp);
 void video_adapter_venc_release_frame(platform_venc_handle_t handle, uint8_t* data);
-platform_result_t video_adapter_venc_get_stream(platform_venc_handle_t handle, uint8_t** data,
-                                                size_t* size, uint64_t* timestamp);
+platform_result_t video_adapter_venc_get_stream(platform_venc_handle_t handle, uint8_t** data, size_t* size, uint64_t* timestamp);
 void video_adapter_venc_release_stream(platform_venc_handle_t handle, uint8_t* data);
 
 #ifdef __cplusplus

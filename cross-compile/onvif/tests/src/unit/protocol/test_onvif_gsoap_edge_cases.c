@@ -18,7 +18,6 @@
 #include "utils/error/error_handling.h"
 #include "utils/test_gsoap_utils.h"
 
-
 /* ============================================================================
  * Memory Allocation Edge Cases
  * ============================================================================ */
@@ -71,11 +70,10 @@ void test_unit_gsoap_edge_large_xml_allocation(void** state) {
   assert_non_null(large_xml);
 
   // Fill with valid XML structure
-  snprintf(
-    large_xml, large_size,
-    "<?xml version=\"1.0\"?><soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">"
-    "<soap:Body>%*s</soap:Body></soap:Envelope>",
-    (int)(large_size - 200), " ");
+  snprintf(large_xml, large_size,
+           "<?xml version=\"1.0\"?><soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">"
+           "<soap:Body>%*s</soap:Body></soap:Envelope>",
+           (int)(large_size - 200), " ");
 
   // Test parsing initialization with large XML
   result = onvif_gsoap_init_request_parsing(&ctx, large_xml, strlen(large_xml));
@@ -740,7 +738,3 @@ void test_unit_gsoap_edge_rapid_state_transitions(void** state) {
     onvif_gsoap_cleanup(&ctx);
   }
 }
-
-/* ============================================================================
- * Test functions are registered in test_gsoap_edge_suite.c
- * ============================================================================ */

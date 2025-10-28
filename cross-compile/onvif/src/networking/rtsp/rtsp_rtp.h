@@ -12,6 +12,9 @@
 #ifndef RTSP_RTP_H
 #define RTSP_RTP_H
 
+#include <bits/types.h>
+#include <stdint.h>
+
 #include "rtsp_types.h"
 
 /* RTP functions */
@@ -75,8 +78,7 @@ void rtsp_cleanup_audio_rtp_session(rtsp_session_t* session);
  * @param timestamp RTP timestamp
  * @return 0 on success, -1 on error
  */
-int rtsp_send_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t len,
-                         uint32_t timestamp);
+int rtsp_send_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t len, uint32_t timestamp);
 
 /**
  * @brief Send RTP packet for audio
@@ -86,8 +88,7 @@ int rtsp_send_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t le
  * @param timestamp RTP timestamp
  * @return 0 on success, -1 on error
  */
-int rtsp_send_audio_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t len,
-                               uint32_t timestamp);
+int rtsp_send_audio_rtp_packet(rtsp_session_t* session, const uint8_t* data, size_t len, uint32_t timestamp);
 
 /**
  * @brief Send RTP packet over UDP
@@ -97,8 +98,7 @@ int rtsp_send_audio_rtp_packet(rtsp_session_t* session, const uint8_t* data, siz
  * @param timestamp RTP timestamp
  * @return 0 on success, -1 on error
  */
-int rtsp_send_rtp_packet_udp(rtsp_session_t* session, const uint8_t* data, size_t len,
-                             uint32_t timestamp);
+int rtsp_send_rtp_packet_udp(rtsp_session_t* session, const uint8_t* data, size_t len, uint32_t timestamp);
 
 /**
  * @brief Send RTP packet over TCP (interleaved)
@@ -108,7 +108,6 @@ int rtsp_send_rtp_packet_udp(rtsp_session_t* session, const uint8_t* data, size_
  * @param timestamp RTP timestamp
  * @return 0 on success, -1 on error
  */
-int rtsp_send_rtp_packet_tcp(rtsp_session_t* session, const uint8_t* data, size_t len,
-                             uint32_t timestamp);
+int rtsp_send_rtp_packet_tcp(rtsp_session_t* session, const uint8_t* data, size_t len, uint32_t timestamp);
 
 #endif /* RTSP_RTP_H */

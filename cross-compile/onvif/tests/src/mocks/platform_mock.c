@@ -8,9 +8,13 @@
 #include "platform_mock.h"
 
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
+#include "platform/platform.h"
+#include "platform/platform_common.h"
 #include "platform_ptz_mock.h"
 
 /* ============================================================================
@@ -106,8 +110,7 @@ platform_result_t __wrap_platform_vi_close(void* vi_handle) {
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_vi_get_sensor_resolution(
-  platform_video_resolution_t* resolution) {
+platform_result_t __wrap_platform_vi_get_sensor_resolution(platform_video_resolution_t* resolution) {
   check_expected_ptr(resolution);
   function_called();
   if (resolution) {
@@ -117,13 +120,15 @@ platform_result_t __wrap_platform_vi_get_sensor_resolution(
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_vi_switch_day_night(platform_daynight_mode_t mode) {
+platform_result_t __wrap_platform_vi_switch_day_night(platform_vi_handle_t handle, platform_daynight_mode_t mode) {
+  check_expected_ptr(handle);
   check_expected(mode);
   function_called();
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_vi_set_flip_mirror(int flip, int mirror) {
+platform_result_t __wrap_platform_vi_set_flip_mirror(platform_vi_handle_t handle, bool flip, bool mirror) {
+  check_expected_ptr(handle);
   check_expected(flip);
   check_expected(mirror);
   function_called();
@@ -165,8 +170,7 @@ platform_result_t __wrap_platform_vi_get_fps(int* fps) {
  * Video Processing (VPSS) Functions
  * ============================================================================ */
 
-platform_result_t __wrap_platform_vpss_effect_set(platform_vi_handle_t handle,
-                                                  platform_vpss_effect_t effect, int value) {
+platform_result_t __wrap_platform_vpss_effect_set(platform_vi_handle_t handle, platform_vpss_effect_t effect, int value) {
   check_expected_ptr(handle);
   check_expected(effect);
   check_expected(value);
@@ -174,8 +178,7 @@ platform_result_t __wrap_platform_vpss_effect_set(platform_vi_handle_t handle,
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_vpss_effect_get(platform_vi_handle_t handle,
-                                                  platform_vpss_effect_t effect, int* value) {
+platform_result_t __wrap_platform_vpss_effect_get(platform_vi_handle_t handle, platform_vpss_effect_t effect, int* value) {
   check_expected_ptr(handle);
   check_expected(effect);
   check_expected_ptr(value);
@@ -226,8 +229,7 @@ platform_result_t __wrap_platform_venc_release_frame(void* venc_handle, void* fr
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_venc_get_stream(void* venc_handle,
-                                                  platform_venc_stream_t* stream) {
+platform_result_t __wrap_platform_venc_get_stream(void* venc_handle, platform_venc_stream_t* stream) {
   check_expected_ptr(venc_handle);
   check_expected_ptr(stream);
   function_called();
@@ -240,8 +242,7 @@ platform_result_t __wrap_platform_venc_get_stream(void* venc_handle,
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_venc_release_stream(void* venc_handle,
-                                                      platform_venc_stream_t* stream) {
+platform_result_t __wrap_platform_venc_release_stream(void* venc_handle, platform_venc_stream_t* stream) {
   check_expected_ptr(venc_handle);
   check_expected_ptr(stream);
   function_called();
@@ -264,8 +265,7 @@ platform_result_t __wrap_platform_venc_cancel_stream(void* stream_handle) {
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_venc_get_stream_by_handle(void* stream_handle,
-                                                            platform_venc_stream_t* stream) {
+platform_result_t __wrap_platform_venc_get_stream_by_handle(void* stream_handle, platform_venc_stream_t* stream) {
   check_expected_ptr(stream_handle);
   check_expected_ptr(stream);
   function_called();
@@ -278,16 +278,14 @@ platform_result_t __wrap_platform_venc_get_stream_by_handle(void* stream_handle,
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_venc_release_stream_by_handle(void* stream_handle,
-                                                                platform_venc_stream_t* stream) {
+platform_result_t __wrap_platform_venc_release_stream_by_handle(void* stream_handle, platform_venc_stream_t* stream) {
   check_expected_ptr(stream_handle);
   check_expected_ptr(stream);
   function_called();
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_venc_get_buffer_status(void* venc_handle, int* buffer_count,
-                                                         int* max_buffers, int* overflow_count) {
+platform_result_t __wrap_platform_venc_get_buffer_status(void* venc_handle, int* buffer_count, int* max_buffers, int* overflow_count) {
   check_expected_ptr(venc_handle);
   check_expected_ptr(buffer_count);
   check_expected_ptr(max_buffers);
@@ -358,8 +356,7 @@ platform_result_t __wrap_platform_aenc_release_frame(void* aenc_handle, void* fr
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_aenc_get_stream(void* aenc_handle,
-                                                  platform_aenc_stream_t* stream) {
+platform_result_t __wrap_platform_aenc_get_stream(void* aenc_handle, platform_aenc_stream_t* stream) {
   check_expected_ptr(aenc_handle);
   check_expected_ptr(stream);
   function_called();
@@ -371,8 +368,7 @@ platform_result_t __wrap_platform_aenc_get_stream(void* aenc_handle,
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_aenc_release_stream(void* aenc_handle,
-                                                      platform_aenc_stream_t* stream) {
+platform_result_t __wrap_platform_aenc_release_stream(void* aenc_handle, platform_aenc_stream_t* stream) {
   check_expected_ptr(aenc_handle);
   check_expected_ptr(stream);
   function_called();
@@ -419,6 +415,15 @@ platform_result_t __wrap_platform_ptz_check_self(void) {
 }
 
 platform_result_t __wrap_platform_ptz_move_to_position(int pan_deg, int tilt_deg) {
+  // Check if permissive mode is enabled
+  if (platform_ptz_mock_get_permissive_mode()) {
+    // Permissive mode: Just return success without validation
+    // Used by integration tests that don't care about exact parameters
+    platform_ptz_mock_record_absolute_move(pan_deg, tilt_deg, 0);
+    return PLATFORM_SUCCESS;
+  }
+
+  // Strict mode: Validate parameters (for unit tests)
   check_expected(pan_deg);
   check_expected(tilt_deg);
   // Record the move (speed is 0 since it's not part of this function's signature)
@@ -433,8 +438,7 @@ int __wrap_platform_ptz_get_step_position(platform_ptz_axis_t axis) {
   return (int)mock();
 }
 
-platform_result_t __wrap_platform_ptz_get_status(platform_ptz_axis_t axis,
-                                                 platform_ptz_status_t* status) {
+platform_result_t __wrap_platform_ptz_get_status(platform_ptz_axis_t axis, platform_ptz_status_t* status) {
   check_expected(axis);
   check_expected_ptr(status);
   function_called();
@@ -495,12 +499,8 @@ platform_result_t __wrap_platform_irled_set_mode(int mode) {
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_irled_get_status(int* status) {
-  check_expected_ptr(status);
+platform_result_t __wrap_platform_irled_get_status(void) {
   function_called();
-  if (status) {
-    *status = (int)mock();
-  }
   return (platform_result_t)mock();
 }
 
@@ -518,8 +518,7 @@ platform_result_t __wrap_platform_snapshot_cleanup(void) {
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_snapshot_capture(platform_snapshot_handle_t handle,
-                                                   platform_snapshot_t* snapshot) {
+platform_result_t __wrap_platform_snapshot_capture(platform_snapshot_handle_t handle, platform_snapshot_t* snapshot) {
   check_expected(handle);
   check_expected_ptr(snapshot);
   function_called();
@@ -531,8 +530,7 @@ platform_result_t __wrap_platform_snapshot_capture(platform_snapshot_handle_t ha
   return (platform_result_t)mock();
 }
 
-platform_result_t __wrap_platform_snapshot_release(platform_snapshot_handle_t handle,
-                                                   platform_snapshot_t* snapshot) {
+platform_result_t __wrap_platform_snapshot_release(platform_snapshot_handle_t handle, platform_snapshot_t* snapshot) {
   check_expected(handle);
   check_expected_ptr(snapshot);
   function_called();
@@ -569,7 +567,7 @@ platform_result_t __wrap_platform_config_get_string(const char* key, char* value
   }
   return (platform_result_t)mock();
 }
-
+//NOLINTNEXTLINE
 int __wrap_platform_config_get_int(const char* section, const char* key, int default_value) {
   check_expected_ptr(section);
   check_expected_ptr(key);
@@ -592,6 +590,17 @@ platform_result_t __wrap_platform_get_system_info(platform_system_info_t* info) 
     info->uptime_ms = (unsigned int)mock();
   }
   return (platform_result_t)mock();
+}
+
+/**
+ * @brief Mock implementation of platform_system
+ * @param command Command string to execute
+ * @return Mocked return value
+ */
+int __wrap_platform_system(const char* command) {
+  check_expected_ptr(command);
+  function_called();
+  return (int)mock();
 }
 
 /* ============================================================================

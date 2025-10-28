@@ -8,10 +8,9 @@
 #ifndef TEST_VALIDATION_UTILS_H
 #define TEST_VALIDATION_UTILS_H
 
-#include <cmocka.h>
-#include <setjmp.h>
-#include <stdarg.h>
 #include <stddef.h>
+
+#include "cmocka_wrapper.h"
 
 /**
  * @brief Test common validation functions

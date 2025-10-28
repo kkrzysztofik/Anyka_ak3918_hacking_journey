@@ -1,0 +1,32 @@
+---
+extends: default
+
+rules:
+  # GitHub Actions specific rules
+  truthy:
+    allowed-values: ["true", "false", "on", "off", "yes", "no"]
+
+  # Line length - more lenient for GitHub Actions
+  line-length:
+    max: 120
+    level: warning
+
+  # Comments - allow inline comments
+  comments:
+    require-starting-space: true
+    ignore-shebangs: true
+    min-spaces-from-content: 1
+
+  # Indentation - 2 spaces for YAML
+  indentation:
+    spaces: 2
+    indent-sequences: true
+    check-multi-line-strings: false
+
+  # Document start - allow documents without ---
+  document-start:
+    present: false
+
+  # Trailing spaces - allow in some contexts
+  trailing-spaces:
+    level: warning

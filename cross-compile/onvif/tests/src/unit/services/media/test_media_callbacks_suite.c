@@ -30,22 +30,16 @@ void test_unit_media_callback_unregistration_failure(void** state);
  */
 const struct CMUnitTest* get_media_callbacks_unit_tests(size_t* count) {
   static const struct CMUnitTest tests[] = {
-    cmocka_unit_test_setup_teardown(test_unit_media_callback_registration_success,
-                                    setup_media_callback_tests, teardown_media_callback_tests),
-    cmocka_unit_test_setup_teardown(test_unit_media_callback_registration_duplicate,
-                                    setup_media_callback_tests, teardown_media_callback_tests),
-    cmocka_unit_test_setup_teardown(test_unit_media_callback_registration_null_config,
-                                    setup_media_callback_tests, teardown_media_callback_tests),
-    cmocka_unit_test_setup_teardown(test_unit_media_callback_registration_dispatcher_failure,
-                                    setup_media_callback_tests, teardown_media_callback_tests),
-    cmocka_unit_test_setup_teardown(test_unit_media_callback_double_initialization,
-                                    setup_media_callback_tests, teardown_media_callback_tests),
-    cmocka_unit_test_setup_teardown(test_unit_media_callback_unregistration_success,
-                                    setup_media_callback_tests, teardown_media_callback_tests),
-    cmocka_unit_test_setup_teardown(test_unit_media_callback_unregistration_not_initialized,
-                                    setup_media_callback_tests, teardown_media_callback_tests),
-    cmocka_unit_test_setup_teardown(test_unit_media_callback_unregistration_failure,
-                                    setup_media_callback_tests, teardown_media_callback_tests),
+    cmocka_unit_test_setup_teardown(test_unit_media_callback_registration_success, setup_media_callback_tests, teardown_media_callback_tests),
+    cmocka_unit_test_setup_teardown(test_unit_media_callback_registration_duplicate, setup_media_callback_tests, teardown_media_callback_tests),
+    cmocka_unit_test_setup_teardown(test_unit_media_callback_registration_null_config, setup_media_callback_tests, teardown_media_callback_tests),
+    cmocka_unit_test_setup_teardown(test_unit_media_callback_registration_dispatcher_failure, setup_media_callback_tests,
+                                    teardown_media_callback_tests),
+    cmocka_unit_test_setup_teardown(test_unit_media_callback_double_initialization, setup_media_callback_tests, teardown_media_callback_tests),
+    cmocka_unit_test_setup_teardown(test_unit_media_callback_unregistration_success, setup_media_callback_tests, teardown_media_callback_tests),
+    cmocka_unit_test_setup_teardown(test_unit_media_callback_unregistration_not_initialized, setup_media_callback_tests,
+                                    teardown_media_callback_tests),
+    cmocka_unit_test_setup_teardown(test_unit_media_callback_unregistration_failure, setup_media_callback_tests, teardown_media_callback_tests),
   };
   *count = sizeof(tests) / sizeof(tests[0]);
   return tests;

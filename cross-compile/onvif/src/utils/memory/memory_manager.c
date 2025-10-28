@@ -51,6 +51,10 @@
  * ============================================================================
  */
 
+/* ============================================================================
+ * Global State
+ * ============================================================================ */
+
 static memory_tracker_t g_memory_tracker = {0};           // NOLINT
 static bool g_memory_manager_initialized = false;         // NOLINT
 static buffer_safety_stats_t g_buffer_safety_stats = {0}; // NOLINT
@@ -58,9 +62,63 @@ static buffer_safety_stats_t g_buffer_safety_stats = {0}; // NOLINT
 // Global error message buffer for dynamic buffers
 static char g_dynamic_buffer_error_msg[MEMORY_MANAGER_ERROR_MSG_SIZE] = {0}; // NOLINT
 
+/* ============================================================================
+ * INTERNAL HELPERS - Memory Tracking
+ * ============================================================================ */
+
+static int memory_tracker_add(void* ptr, size_t size, const char* file, int line, const char* function) {
+  if (!g_memory_manager_initialized) {
+    return ONVIF_SUCCESS; // Not tracking
+  }
+
+  NULL_CHECK_RETURN(ptr, -1);
+  NULL_CHECK_RETURN(file, -1);
+  NULL_CHECK_RETURN(function, -1);
+
+  if (g_memory_tracker.count >= g_memory_tracker.capacity) {
+    // Expand tracker
+    size_t new_capacity = g_memory_tracker.capacity * 2;
+    memory_allocation_t* new_allocations = realloc(g_memory_tracker.allocations, new_capacity * sizeof(memory_allocation_t));
+    if (!new_allocations) {
+      return -1;
+    }
+    g_memory_tracker.allocations = new_allocations;
+    g_memory_tracker.capacity = new_capacity;
+  }
+
+  g_memory_tracker.allocations[g_memory_tracker.count].ptr = ptr;
+  g_memory_tracker.allocations[g_memory_tracker.count].size = size;
+  g_memory_tracker.allocations[g_memory_tracker.count].file = file;
+  g_memory_tracker.allocations[g_memory_tracker.count].line = line;
+  g_memory_tracker.allocations[g_memory_tracker.count].function = function;
+  g_memory_tracker.count++;
+
+  return ONVIF_SUCCESS;
+}
+
+static int memory_tracker_remove(void* ptr) {
+  if (!g_memory_manager_initialized || !ptr) {
+    return ONVIF_SUCCESS;
+  }
+
+  for (size_t i = 0; i < g_memory_tracker.count; i++) {
+    if (g_memory_tracker.allocations[i].ptr == ptr) {
+      g_memory_tracker.allocations[i].ptr = NULL;
+      return ONVIF_SUCCESS;
+    }
+  }
+
+  platform_log_warning("Attempted to free untracked memory at %p\n", ptr);
+  return -1;
+}
+
+/* ============================================================================
+ * PUBLIC API - Initialization and Cleanup
+ * ============================================================================ */
+
 int memory_manager_init(void) {
   if (g_memory_manager_initialized) {
-    return 0;
+    return ONVIF_SUCCESS;
   }
 
   g_memory_tracker.capacity = MEMORY_MANAGER_INITIAL_CAPACITY;
@@ -74,7 +132,7 @@ int memory_manager_init(void) {
   g_memory_manager_initialized = true;
 
   platform_log_info("Memory manager initialized\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 void memory_manager_cleanup(void) {
@@ -88,10 +146,8 @@ void memory_manager_cleanup(void) {
   // Free all tracked allocations
   for (size_t i = 0; i < g_memory_tracker.count; i++) {
     if (g_memory_tracker.allocations[i].ptr) {
-      platform_log_error("Leaked %zu bytes allocated at %s:%d in %s()\n",
-                         g_memory_tracker.allocations[i].size, g_memory_tracker.allocations[i].file,
-                         g_memory_tracker.allocations[i].line,
-                         g_memory_tracker.allocations[i].function);
+      platform_log_error("Leaked %zu bytes allocated at %s:%d in %s()\n", g_memory_tracker.allocations[i].size, g_memory_tracker.allocations[i].file,
+                         g_memory_tracker.allocations[i].line, g_memory_tracker.allocations[i].function);
       free(g_memory_tracker.allocations[i].ptr);
     }
   }
@@ -120,8 +176,7 @@ void memory_manager_log_stats(void) {
     }
   }
 
-  platform_log_info("Memory stats: %zu active allocations, %zu bytes total\n", active_allocations,
-                    total_allocated);
+  platform_log_info("Memory stats: %zu active allocations, %zu bytes total\n", active_allocations, total_allocated);
 }
 
 size_t memory_manager_get_allocated_size(void) {
@@ -142,7 +197,7 @@ size_t memory_manager_get_allocated_size(void) {
 
 int memory_manager_check_leaks(void) {
   if (!g_memory_manager_initialized) {
-    return 0;
+    return ONVIF_SUCCESS;
   }
 
   int leak_count = 0;
@@ -150,10 +205,8 @@ int memory_manager_check_leaks(void) {
   for (size_t i = 0; i < g_memory_tracker.count; i++) {
     if (g_memory_tracker.allocations[i].ptr) {
       leak_count++;
-      platform_log_error("Memory leak: %zu bytes allocated at %s:%d in %s()\n",
-                         g_memory_tracker.allocations[i].size, g_memory_tracker.allocations[i].file,
-                         g_memory_tracker.allocations[i].line,
-                         g_memory_tracker.allocations[i].function);
+      platform_log_error("Memory leak: %zu bytes allocated at %s:%d in %s()\n", g_memory_tracker.allocations[i].size,
+                         g_memory_tracker.allocations[i].file, g_memory_tracker.allocations[i].line, g_memory_tracker.allocations[i].function);
     }
   }
 
@@ -163,57 +216,12 @@ int memory_manager_check_leaks(void) {
   }
 
   platform_log_info("No memory leaks detected\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
-static int memory_tracker_add(void* ptr, size_t size, const char* file, int line,
-                              const char* function) {
-  if (!g_memory_manager_initialized) {
-    return 0; // Not tracking
-  }
-
-  NULL_CHECK_RETURN(ptr, -1);
-  NULL_CHECK_RETURN(file, -1);
-  NULL_CHECK_RETURN(function, -1);
-
-  if (g_memory_tracker.count >= g_memory_tracker.capacity) {
-    // Expand tracker
-    size_t new_capacity = g_memory_tracker.capacity * 2;
-    memory_allocation_t* new_allocations =
-      realloc(g_memory_tracker.allocations, new_capacity * sizeof(memory_allocation_t));
-    if (!new_allocations) {
-      platform_log_error("Failed to expand memory tracker\n");
-      return -1;
-    }
-    g_memory_tracker.allocations = new_allocations;
-    g_memory_tracker.capacity = new_capacity;
-  }
-
-  g_memory_tracker.allocations[g_memory_tracker.count].ptr = ptr;
-  g_memory_tracker.allocations[g_memory_tracker.count].size = size;
-  g_memory_tracker.allocations[g_memory_tracker.count].file = file;
-  g_memory_tracker.allocations[g_memory_tracker.count].line = line;
-  g_memory_tracker.allocations[g_memory_tracker.count].function = function;
-  g_memory_tracker.count++;
-
-  return 0;
-}
-
-static int memory_tracker_remove(void* ptr) {
-  if (!g_memory_manager_initialized || !ptr) {
-    return 0;
-  }
-
-  for (size_t i = 0; i < g_memory_tracker.count; i++) {
-    if (g_memory_tracker.allocations[i].ptr == ptr) {
-      g_memory_tracker.allocations[i].ptr = NULL;
-      return 0;
-    }
-  }
-
-  platform_log_warning("Attempted to free untracked memory at %p\n", ptr);
-  return -1;
-}
+/* ============================================================================
+ * PUBLIC API - Memory Allocation
+ * ============================================================================ */
 
 void* onvif_malloc(size_t size, const char* file, int line, const char* function) {
   NULL_CHECK_RETURN(file, NULL);
@@ -226,8 +234,7 @@ void* onvif_malloc(size_t size, const char* file, int line, const char* function
 
   void* ptr = malloc(size);
   if (!ptr) {
-    platform_log_error("malloc failed for %zu bytes at %s:%d in %s()\n", size, file, line,
-                       function);
+    platform_log_error("malloc failed for %zu bytes at %s:%d in %s()\n", size, file, line, function);
     return NULL;
   }
 
@@ -238,8 +245,7 @@ void* onvif_malloc(size_t size, const char* file, int line, const char* function
 void* onvif_calloc(size_t count, size_t size, const char* file, int line, const char* function) {
   void* ptr = calloc(count, size);
   if (!ptr) {
-    platform_log_error("calloc failed for %zu * %zu bytes at %s:%d in %s()\n", count, size, file,
-                       line, function);
+    platform_log_error("calloc failed for %zu * %zu bytes at %s:%d in %s()\n", count, size, file, line, function);
     return NULL;
   }
 
@@ -258,8 +264,7 @@ void* onvif_realloc(void* ptr, size_t size, const char* file, int line, const ch
 
   void* new_ptr = realloc(ptr, size);
   if (!new_ptr) {
-    platform_log_error("realloc failed for %zu bytes at %s:%d in %s()\n", size, file, line,
-                       function);
+    platform_log_error("realloc failed for %zu bytes at %s:%d in %s()\n", size, file, line, function);
     return NULL;
   }
 
@@ -307,7 +312,7 @@ int memory_safe_strcpy(char* dest, size_t dest_size, const char* src) {
   }
 
   strcpy(dest, src);
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int memory_safe_strncpy(char* dest, size_t dest_size, const char* src, size_t n) {
@@ -318,7 +323,7 @@ int memory_safe_strncpy(char* dest, size_t dest_size, const char* src, size_t n)
   size_t copy_len = n < dest_size - 1 ? n : dest_size - 1;
   strncpy(dest, src, copy_len);
   dest[copy_len] = '\0';
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int memory_safe_snprintf(char* dest, size_t dest_size, const char* format, ...) {
@@ -330,8 +335,7 @@ int memory_safe_snprintf(char* dest, size_t dest_size, const char* format, ...) 
   va_start(args, format);
 
   // For simple format strings, use vsnprintf directly
-  if (strcmp(format, "<%s") == 0 || strcmp(format, " %s=\"%s\"") == 0 ||
-      strcmp(format, "/>") == 0 || strcmp(format, "</%s>") == 0 ||
+  if (strcmp(format, "<%s") == 0 || strcmp(format, " %s=\"%s\"") == 0 || strcmp(format, "/>") == 0 || strcmp(format, "</%s>") == 0 ||
       strcmp(format, ">%s</%s>") == 0 || strcmp(format, "<%s>") == 0) {
     int result = vsnprintf(dest, dest_size, format, args);
     va_end(args);
@@ -451,8 +455,7 @@ static void set_buffer_error(dynamic_buffer_t* buffer, const char* format, ...) 
  * @return Next buffer size
  */
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-static size_t calculate_next_size(size_t current_size, size_t required_size, size_t growth_factor,
-                                  size_t max_size) {
+static size_t calculate_next_size(size_t current_size, size_t required_size, size_t growth_factor, size_t max_size) {
   size_t next_size = current_size;
 
   // Double the size until we have enough space
@@ -520,7 +523,7 @@ int dynamic_buffer_init(dynamic_buffer_t* buffer, size_t initial_size) {
   buffer->stats.current_size = initial_size;
 
   platform_log_debug("Dynamic Buffer: Initialized with %zu bytes", initial_size);
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
@@ -545,13 +548,12 @@ int dynamic_buffer_init_custom(dynamic_buffer_t* buffer, size_t initial_size,
 
   // Initialize with default settings first
   int result = dynamic_buffer_init(buffer, initial_size);
-  if (result != 0) {
+  if (result != ONVIF_SUCCESS) {
     return result;
   }
 
-  platform_log_debug("Dynamic Buffer: Custom initialization - growth: %zu, max: %zu", growth_factor,
-                     max_size);
-  return 0;
+  platform_log_debug("Dynamic Buffer: Custom initialization - growth: %zu, max: %zu", growth_factor, max_size);
+  return ONVIF_SUCCESS;
 }
 
 void dynamic_buffer_cleanup(dynamic_buffer_t* buffer) {
@@ -598,16 +600,14 @@ int dynamic_buffer_ensure_capacity(dynamic_buffer_t* buffer, size_t required_cap
 
   // Check if we already have enough capacity
   if (buffer->capacity >= required_capacity) {
-    return 0;
+    return ONVIF_SUCCESS;
   }
 
   // Calculate new size
-  size_t new_size = calculate_next_size(buffer->capacity, required_capacity,
-                                        DYNAMIC_BUFFER_GROWTH_FACTOR, DYNAMIC_BUFFER_MAX_SIZE);
+  size_t new_size = calculate_next_size(buffer->capacity, required_capacity, DYNAMIC_BUFFER_GROWTH_FACTOR, DYNAMIC_BUFFER_MAX_SIZE);
 
   if (new_size < required_capacity) {
-    set_buffer_error(buffer, "Required capacity %zu exceeds maximum size %zu", required_capacity,
-                     DYNAMIC_BUFFER_MAX_SIZE);
+    set_buffer_error(buffer, "Required capacity %zu exceeds maximum size %zu", required_capacity, DYNAMIC_BUFFER_MAX_SIZE);
     return ONVIF_ERROR_MEMORY;
   }
 
@@ -626,7 +626,7 @@ int dynamic_buffer_ensure_capacity(dynamic_buffer_t* buffer, size_t required_cap
   buffer->stats.current_size = new_size;
 
   platform_log_debug("Dynamic Buffer: Expanded to %zu bytes", new_size);
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int dynamic_buffer_append(dynamic_buffer_t* buffer, const void* data, size_t length) {
@@ -635,12 +635,12 @@ int dynamic_buffer_append(dynamic_buffer_t* buffer, const void* data, size_t len
   }
 
   if (length == 0) {
-    return 0; // Nothing to append
+    return ONVIF_SUCCESS; // Nothing to append
   }
 
   // Ensure we have enough capacity
   int result = dynamic_buffer_ensure_capacity(buffer, buffer->length + length + 1);
-  if (result != 0) {
+  if (result != ONVIF_SUCCESS) {
     return result;
   }
 
@@ -650,7 +650,7 @@ int dynamic_buffer_append(dynamic_buffer_t* buffer, const void* data, size_t len
   buffer->data[buffer->length] = '\0'; // Null-terminate
   buffer->stats.total_bytes_written += length;
 
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int dynamic_buffer_appendf(dynamic_buffer_t* buffer, const char* format, ...) {
@@ -693,7 +693,7 @@ int dynamic_buffer_appendf(dynamic_buffer_t* buffer, const char* format, ...) {
 
 int dynamic_buffer_append_string(dynamic_buffer_t* buffer, const char* str) {
   if (!str) {
-    return 0; // NULL string is treated as empty
+    return ONVIF_SUCCESS; // NULL string is treated as empty
   }
 
   return dynamic_buffer_append(buffer, str, strlen(str));
@@ -789,8 +789,7 @@ int buffer_safe_strcat(char* dest, size_t dest_size, const char* src, size_t max
   }
 
   if (dest_len + src_len >= dest_size) {
-    platform_log_error("String concatenation would overflow buffer: %zu + %zu >= %zu", dest_len,
-                       src_len, dest_size);
+    platform_log_error("String concatenation would overflow buffer: %zu + %zu >= %zu", dest_len, src_len, dest_size);
     g_buffer_safety_stats.buffer_overflows_prevented++;
     g_buffer_safety_stats.failed_validations++;
     return -1;
@@ -863,11 +862,10 @@ int buffer_validate_string(const char* str, size_t max_len, buffer_safety_flags_
   }
 
   g_buffer_safety_stats.total_validations++;
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
-int buffer_safe_append_xml_element(char* buffer, size_t buffer_size, const char* element_name,
-                                   const char* content, const char** attributes) {
+int buffer_safe_append_xml_element(char* buffer, size_t buffer_size, const char* element_name, const char* content, const char** attributes) {
   if (!buffer || !element_name || buffer_size == 0) {
     g_buffer_safety_stats.failed_validations++;
     return -1;
@@ -887,8 +885,7 @@ int buffer_safe_append_xml_element(char* buffer, size_t buffer_size, const char*
   // Add attributes if provided
   if (attributes) {
     for (int i = 0; attributes[i] && attributes[i + 1]; i += 2) {
-      result += snprintf(element + result, sizeof(element) - result, " %s=\"%s\"", attributes[i],
-                         attributes[i + 1]);
+      result += snprintf(element + result, sizeof(element) - result, " %s=\"%s\"", attributes[i], attributes[i + 1]);
       if (result < 0 || (size_t)result >= sizeof(element)) {
         g_buffer_safety_stats.failed_validations++;
         return -1;
@@ -898,8 +895,7 @@ int buffer_safe_append_xml_element(char* buffer, size_t buffer_size, const char*
 
   // Add content or make self-closing
   if (content) {
-    result +=
-      snprintf(element + result, sizeof(element) - result, ">%s</%s>", content, element_name);
+    result += snprintf(element + result, sizeof(element) - result, ">%s</%s>", content, element_name);
   } else {
     result += snprintf(element + result, sizeof(element) - result, "/>");
   }
@@ -932,8 +928,7 @@ int buffer_safe_append_xml_element(char* buffer, size_t buffer_size, const char*
  * @param entity_len Length of HTML entity
  * @return 0 on success, -1 on buffer overflow
  */
-static int append_html_entity(char* dest, size_t* dest_pos, size_t dest_size, const char* entity,
-                              size_t entity_len) {
+static int append_html_entity(char* dest, size_t* dest_pos, size_t dest_size, const char* entity, size_t entity_len) {
   if (*dest_pos + entity_len >= dest_size) {
     g_buffer_safety_stats.buffer_overflows_prevented++;
     g_buffer_safety_stats.failed_validations++;
@@ -942,7 +937,7 @@ static int append_html_entity(char* dest, size_t* dest_pos, size_t dest_size, co
 
   strcpy(dest + *dest_pos, entity);
   *dest_pos += entity_len;
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 int buffer_safe_escape_xml(char* dest, size_t dest_size, const char* src, size_t src_len) {

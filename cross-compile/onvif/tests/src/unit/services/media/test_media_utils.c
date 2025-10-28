@@ -11,17 +11,79 @@
 #include <string.h>
 
 #include "cmocka_wrapper.h"
+#include "common/test_helpers.h"
+#include "core/config/config_runtime.h"
+#include "core/config/config_storage.h"
+#include "mocks/config_mock.h"
 #include "services/media/onvif_media.h"
 #include "services/media/onvif_media_unit_test.h"
 #include "utils/error/error_handling.h"
 
 // Test constants derived from media service defaults
-#define TEST_MEDIA_PROFILE_COUNT        2
+#define TEST_MEDIA_PROFILE_COUNT        4 /* Updated for User Story 4 - 4 profiles */
 #define TEST_VIDEO_SOURCE_COUNT         1
 #define TEST_AUDIO_SOURCE_COUNT         1
 #define TEST_VIDEO_ENCODER_CONFIG_COUNT 2
 #define TEST_AUDIO_ENCODER_CONFIG_COUNT 3
 #define TEST_METADATA_CONFIG_COUNT      1
+
+/* Test state for config management */
+static struct {
+  struct application_config test_config;
+  int runtime_initialized;
+} g_media_test_state = {0};
+
+/* Test setup - initializes config runtime system for media tests */
+static int media_tests_setup(void** state) {
+  (void)state;
+  int result;
+
+  /* Clear test state */
+  memset(&g_media_test_state, 0, sizeof(g_media_test_state));
+
+  /* Enable real config_runtime functions for media tests */
+  config_mock_use_real_function(true);
+
+  /* Allocate stream profiles */
+  memset(&g_media_test_state.test_config.stream_profile_1, 0, sizeof(video_config_t));
+  memset(&g_media_test_state.test_config.stream_profile_2, 0, sizeof(video_config_t));
+  memset(&g_media_test_state.test_config.stream_profile_3, 0, sizeof(video_config_t));
+  memset(&g_media_test_state.test_config.stream_profile_4, 0, sizeof(video_config_t));
+
+  /* Initialize runtime configuration manager */
+  result = config_runtime_init(&g_media_test_state.test_config);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  g_media_test_state.runtime_initialized = 1;
+
+  /* Load test configuration from INI file */
+  char config_path[256];
+  result = test_helper_get_test_resource_path("configs/media_test_config.ini", config_path, sizeof(config_path));
+  assert_int_equal(0, result);
+  result = config_storage_load(config_path, NULL);
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  return 0;
+}
+
+/* Test teardown - cleans up config runtime system */
+static int media_tests_teardown(void** state) {
+  (void)state;
+
+  if (g_media_test_state.runtime_initialized) {
+    config_runtime_cleanup();
+    g_media_test_state.runtime_initialized = 0;
+  }
+
+  /* Free allocated profiles */
+  // All struct members are direct, no free needed
+
+  memset(&g_media_test_state, 0, sizeof(g_media_test_state));
+
+  /* Restore mock behavior for other test suites */
+  config_mock_use_real_function(false);
+
+  return 0;
+}
 
 static void assert_string_prefix(const char* value, const char* prefix) {
   assert_non_null(value);
@@ -38,34 +100,42 @@ void test_unit_media_profile_functions(void** state) {
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_non_null(profiles);
   assert_int_equal(TEST_MEDIA_PROFILE_COUNT, count);
-  assert_string_equal("MainProfile", profiles[0].token);
-  assert_string_equal("SubProfile", profiles[1].token);
+  assert_string_equal("Profile1", profiles[0].token);
+  assert_string_equal("Profile2", profiles[1].token);
+  assert_string_equal("Profile3", profiles[2].token);
+  assert_string_equal("Profile4", profiles[3].token);
 
   struct media_profile profile;
   memset(&profile, 0, sizeof(profile));
+
+  /* Test Profile1 (replaces MainProfile) */
+  result = onvif_media_get_profile("Profile1", &profile);
+  assert_int_equal(ONVIF_SUCCESS, result);
+  assert_string_equal("Profile1", profile.token);
+  assert_string_equal("Video Profile 1", profile.name);
+
+  /* Test legacy MainProfile token support */
   result = onvif_media_get_profile("MainProfile", &profile);
   assert_int_equal(ONVIF_SUCCESS, result);
-  assert_string_equal("MainProfile", profile.token);
-  assert_string_equal("Main Video Profile", profile.name);
+  assert_string_equal("Profile1", profile.token);
 
   result = onvif_media_get_profile("NonExistentProfile", &profile);
   assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
 
+  /* Profile creation/deletion not supported with runtime configuration system (T062) */
   struct media_profile custom_profile;
   memset(&custom_profile, 0, sizeof(custom_profile));
   result = onvif_media_create_profile("New Profile", "CustomProfile", &custom_profile);
-  assert_int_equal(ONVIF_SUCCESS, result);
-  assert_string_equal("CustomProfile", custom_profile.token);
-  assert_string_equal("New Profile", custom_profile.name);
-  assert_int_equal(0, custom_profile.fixed);
+  assert_int_equal(ONVIF_ERROR_NOT_SUPPORTED, result); /* Config-managed profiles */
 
   result = onvif_media_create_profile("Invalid", "OtherProfile", &custom_profile);
   assert_int_equal(ONVIF_ERROR_NOT_SUPPORTED, result);
 
+  /* All profiles are fixed and cannot be deleted */
+  result = onvif_media_delete_profile("Profile1");
+  assert_int_equal(ONVIF_ERROR_NOT_SUPPORTED, result);
   result = onvif_media_delete_profile("MainProfile");
   assert_int_equal(ONVIF_ERROR_NOT_SUPPORTED, result);
-  result = onvif_media_delete_profile("CustomProfile");
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
 }
 
 void test_unit_media_video_source_functions(void** state) {
@@ -162,20 +232,24 @@ void test_unit_media_stream_uri_functions(void** state) {
   memset(&stream_uri, 0, sizeof(stream_uri));
   onvif_media_unit_reset_cached_uris();
 
-  int result = onvif_media_get_stream_uri("MainProfile", "RTSP", &stream_uri);
+  int result = onvif_media_get_stream_uri("Profile1", "RTSP", &stream_uri);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_string_prefix(stream_uri.uri, "rtsp://");
   assert_false(stream_uri.invalid_after_connect);
   assert_false(stream_uri.invalid_after_reboot);
 
-  result = onvif_media_get_stream_uri("MainProfile", "HTTP", &stream_uri);
+  result = onvif_media_get_stream_uri("Profile1", "HTTP", &stream_uri);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_string_prefix(stream_uri.uri, "http://");
+
+  /* Test legacy MainProfile token support */
+  result = onvif_media_get_stream_uri("MainProfile", "RTSP", &stream_uri);
+  assert_int_equal(ONVIF_SUCCESS, result);
 
   result = onvif_media_get_stream_uri("UnknownProfile", "RTSP", &stream_uri);
   assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
 
-  result = onvif_media_get_stream_uri("MainProfile", "SRT", &stream_uri);
+  result = onvif_media_get_stream_uri("Profile1", "SRT", &stream_uri);
   assert_int_equal(ONVIF_ERROR_NOT_FOUND, result);
 }
 
@@ -183,11 +257,15 @@ void test_unit_media_snapshot_uri_functions(void** state) {
   (void)state;
 
   struct stream_uri snapshot_uri;
-  int result = onvif_media_get_snapshot_uri("MainProfile", &snapshot_uri);
+  int result = onvif_media_get_snapshot_uri("Profile1", &snapshot_uri);
   assert_int_equal(ONVIF_SUCCESS, result);
   assert_string_prefix(snapshot_uri.uri, "http://");
   assert_false(snapshot_uri.invalid_after_connect);
   assert_false(snapshot_uri.invalid_after_reboot);
+
+  /* Test legacy MainProfile token support */
+  result = onvif_media_get_snapshot_uri("MainProfile", &snapshot_uri);
+  assert_int_equal(ONVIF_SUCCESS, result);
 
   result = onvif_media_get_snapshot_uri(NULL, &snapshot_uri);
   assert_int_equal(ONVIF_ERROR_NULL, result);
@@ -196,9 +274,13 @@ void test_unit_media_snapshot_uri_functions(void** state) {
 void test_unit_media_multicast_functions(void** state) {
   (void)state;
 
-  int result = onvif_media_start_multicast_streaming("MainProfile");
+  int result = onvif_media_start_multicast_streaming("Profile1");
   assert_int_equal(ONVIF_SUCCESS, result);
-  result = onvif_media_stop_multicast_streaming("MainProfile");
+  result = onvif_media_stop_multicast_streaming("Profile1");
+  assert_int_equal(ONVIF_SUCCESS, result);
+
+  /* Test legacy MainProfile token support */
+  result = onvif_media_start_multicast_streaming("MainProfile");
   assert_int_equal(ONVIF_SUCCESS, result);
 
   result = onvif_media_start_multicast_streaming("NonExistentProfile");
@@ -238,9 +320,7 @@ void test_unit_media_cached_uri_initialization(void** state) {
   onvif_media_unit_reset_cached_uris();
 
   assert_int_equal(ONVIF_SUCCESS, onvif_media_unit_init_cached_uris());
-  assert_int_equal(
-    ONVIF_SUCCESS,
-    onvif_media_unit_get_cached_rtsp_uri(main_token, uri_buffer, sizeof(uri_buffer)));
+  assert_int_equal(ONVIF_SUCCESS, onvif_media_unit_get_cached_rtsp_uri(main_token, uri_buffer, sizeof(uri_buffer)));
   assert_string_prefix(uri_buffer, "rtsp://");
 
   // Second init should be idempotent
@@ -256,15 +336,10 @@ void test_unit_media_cached_uri_error_paths(void** state) {
   onvif_media_unit_reset_cached_uris();
   assert_int_equal(ONVIF_SUCCESS, onvif_media_unit_init_cached_uris());
 
-  assert_int_equal(ONVIF_ERROR_INVALID,
-                   onvif_media_unit_get_cached_rtsp_uri(NULL, uri_buffer, sizeof(uri_buffer)));
-  assert_int_equal(ONVIF_ERROR_INVALID,
-                   onvif_media_unit_get_cached_rtsp_uri(main_token, NULL, sizeof(uri_buffer)));
-  assert_int_equal(ONVIF_ERROR_INVALID,
-                   onvif_media_unit_get_cached_rtsp_uri(main_token, uri_buffer, 0));
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND,
-                   onvif_media_unit_get_cached_rtsp_uri("UnknownProfile", uri_buffer,
-                                                        sizeof(uri_buffer)));
+  assert_int_equal(ONVIF_ERROR_INVALID, onvif_media_unit_get_cached_rtsp_uri(NULL, uri_buffer, sizeof(uri_buffer)));
+  assert_int_equal(ONVIF_ERROR_INVALID, onvif_media_unit_get_cached_rtsp_uri(main_token, NULL, sizeof(uri_buffer)));
+  assert_int_equal(ONVIF_ERROR_INVALID, onvif_media_unit_get_cached_rtsp_uri(main_token, uri_buffer, 0));
+  assert_int_equal(ONVIF_ERROR_NOT_FOUND, onvif_media_unit_get_cached_rtsp_uri("UnknownProfile", uri_buffer, sizeof(uri_buffer)));
 }
 
 void test_unit_media_validate_profile_token(void** state) {
@@ -276,8 +351,7 @@ void test_unit_media_validate_profile_token(void** state) {
   assert_int_equal(ONVIF_SUCCESS, onvif_media_unit_validate_profile_token(main_token));
   assert_int_equal(ONVIF_SUCCESS, onvif_media_unit_validate_profile_token(sub_token));
   assert_int_equal(ONVIF_ERROR_INVALID, onvif_media_unit_validate_profile_token(NULL));
-  assert_int_equal(ONVIF_ERROR_NOT_FOUND,
-                   onvif_media_unit_validate_profile_token("UnknownProfile"));
+  assert_int_equal(ONVIF_ERROR_NOT_FOUND, onvif_media_unit_validate_profile_token("UnknownProfile"));
 }
 
 void test_unit_media_validate_protocol(void** state) {
@@ -286,8 +360,7 @@ void test_unit_media_validate_protocol(void** state) {
   assert_int_equal(ONVIF_SUCCESS, onvif_media_unit_validate_protocol("RTSP"));
   assert_int_equal(ONVIF_SUCCESS, onvif_media_unit_validate_protocol("RTP-Unicast"));
   assert_int_equal(ONVIF_ERROR_INVALID, onvif_media_unit_validate_protocol(NULL));
-  assert_int_equal(ONVIF_ERROR_NOT_SUPPORTED,
-                   onvif_media_unit_validate_protocol("HTTP"));
+  assert_int_equal(ONVIF_ERROR_NOT_SUPPORTED, onvif_media_unit_validate_protocol("HTTP"));
 }
 
 void test_unit_media_parse_value_from_request(void** state) {
@@ -298,25 +371,13 @@ void test_unit_media_parse_value_from_request(void** state) {
 
   char value_buffer[32];
 
-  assert_int_equal(ONVIF_ERROR_INVALID,
-                   onvif_media_unit_parse_value_from_request(NULL, &gsoap_ctx, "/xpath", value_buffer,
-                                                             sizeof(value_buffer)));
-  assert_int_equal(ONVIF_ERROR_INVALID,
-                   onvif_media_unit_parse_value_from_request("<xml>", NULL, "/xpath", value_buffer,
-                                                             sizeof(value_buffer)));
-  assert_int_equal(ONVIF_ERROR_INVALID,
-                   onvif_media_unit_parse_value_from_request("<xml>", &gsoap_ctx, NULL,
-                                                             value_buffer, sizeof(value_buffer)));
-  assert_int_equal(ONVIF_ERROR_INVALID,
-                   onvif_media_unit_parse_value_from_request("<xml>", &gsoap_ctx, "/xpath", NULL,
-                                                             sizeof(value_buffer)));
-  assert_int_equal(ONVIF_ERROR_INVALID,
-                   onvif_media_unit_parse_value_from_request("<xml>", &gsoap_ctx, "/xpath",
-                                                             value_buffer, 0));
+  assert_int_equal(ONVIF_ERROR_INVALID, onvif_media_unit_parse_value_from_request(NULL, &gsoap_ctx, "/xpath", value_buffer, sizeof(value_buffer)));
+  assert_int_equal(ONVIF_ERROR_INVALID, onvif_media_unit_parse_value_from_request("<xml>", NULL, "/xpath", value_buffer, sizeof(value_buffer)));
+  assert_int_equal(ONVIF_ERROR_INVALID, onvif_media_unit_parse_value_from_request("<xml>", &gsoap_ctx, NULL, value_buffer, sizeof(value_buffer)));
+  assert_int_equal(ONVIF_ERROR_INVALID, onvif_media_unit_parse_value_from_request("<xml>", &gsoap_ctx, "/xpath", NULL, sizeof(value_buffer)));
+  assert_int_equal(ONVIF_ERROR_INVALID, onvif_media_unit_parse_value_from_request("<xml>", &gsoap_ctx, "/xpath", value_buffer, 0));
 
-  assert_int_equal(ONVIF_SUCCESS,
-                   onvif_media_unit_parse_value_from_request("<xml>", &gsoap_ctx, "/xpath",
-                                                             value_buffer, sizeof(value_buffer)));
+  assert_int_equal(ONVIF_SUCCESS, onvif_media_unit_parse_value_from_request("<xml>", &gsoap_ctx, "/xpath", value_buffer, sizeof(value_buffer)));
   assert_string_equal("", value_buffer);
 }
 
@@ -379,21 +440,21 @@ void test_unit_media_metadata_configurations(void** state) {
 }
 
 static const struct CMUnitTest media_utils_tests[] = {
-  cmocka_unit_test(test_unit_media_profile_functions),
-  cmocka_unit_test(test_unit_media_video_source_functions),
-  cmocka_unit_test(test_unit_media_audio_source_functions),
-  cmocka_unit_test(test_unit_media_video_configuration_functions),
-  cmocka_unit_test(test_unit_media_audio_configuration_functions),
-  cmocka_unit_test(test_unit_media_stream_uri_functions),
-  cmocka_unit_test(test_unit_media_snapshot_uri_functions),
-  cmocka_unit_test(test_unit_media_multicast_functions),
-  cmocka_unit_test(test_unit_media_metadata_functions),
-  cmocka_unit_test(test_unit_media_cached_uri_initialization),
-  cmocka_unit_test(test_unit_media_cached_uri_error_paths),
-  cmocka_unit_test(test_unit_media_validate_profile_token),
-  cmocka_unit_test(test_unit_media_validate_protocol),
-  cmocka_unit_test(test_unit_media_parse_value_from_request),
-  cmocka_unit_test(test_unit_media_error_handling),
+  cmocka_unit_test_setup_teardown(test_unit_media_profile_functions, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_video_source_functions, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_audio_source_functions, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_video_configuration_functions, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_audio_configuration_functions, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_stream_uri_functions, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_snapshot_uri_functions, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_multicast_functions, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_metadata_functions, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_cached_uri_initialization, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_cached_uri_error_paths, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_validate_profile_token, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_validate_protocol, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_parse_value_from_request, media_tests_setup, media_tests_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_media_error_handling, media_tests_setup, media_tests_teardown),
 };
 
 const struct CMUnitTest* get_media_utils_unit_tests(size_t* count) {

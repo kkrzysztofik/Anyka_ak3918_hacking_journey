@@ -13,8 +13,8 @@ TabWidth: 2
 UseTab: Never
 ContinuationIndentWidth: 2
 
-# Line length and wrapping (100 chars for embedded readability)
-ColumnLimit: 100
+# Line length and wrapping (150 chars for embedded readability)
+ColumnLimit: 150
 AlwaysBreakAfterReturnType: None
 AlwaysBreakAfterDefinitionReturnType: None
 AlwaysBreakBeforeMultilineStrings: false
@@ -89,7 +89,7 @@ SortUsingDeclarations: true
 IncludeCategories:
   - Regex: '^<.*\.h>'
     Priority: 1
-  - Regex: '^<.*>'
+  - Regex: "^<.*>"
     Priority: 2
   - Regex: '^"include/.*"'
     Priority: 3
@@ -98,11 +98,11 @@ IncludeCategories:
 
 # Comments
 ReflowComments: true
-CommentPragmas: '^ IWYU pragma:'
+CommentPragmas: "^ IWYU pragma:"
 
 # Preprocessor
 IndentPPDirectives: None
-IncludeIsMainRegex: '(Test)?$'
+IncludeIsMainRegex: "(Test)?$"
 
 # Namespace and class formatting
 NamespaceIndentation: None

@@ -25,15 +25,15 @@ void test_integration_ptz_preset_removal(void** state);
 void test_integration_ptz_preset_memory_optimization(void** state);
 
 // Test function declarations for PTZ service optimization validation
-void test_integration_ptz_memory_usage_improvements(void** state);
-void test_integration_ptz_buffer_pool_usage(void** state);
 void test_integration_ptz_string_operations_optimization(void** state);
 void test_integration_ptz_error_handling_robustness(void** state);
 
 // Test function declarations for PTZ service performance
-void test_integration_ptz_concurrent_operations(void** state);
 void test_integration_ptz_stress_testing(void** state);
-void test_integration_ptz_memory_leak_detection(void** state);
+
+// Test function declarations for additional PTZ SOAP operations
+void test_integration_ptz_get_node_soap(void** state);
+// Note: GetConfiguration, GetStatus, and GotoHomePosition are not supported by the PTZ service
 
 // Test suite
 extern const struct CMUnitTest ptz_service_optimization_tests[];

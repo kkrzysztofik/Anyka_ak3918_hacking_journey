@@ -7,17 +7,20 @@
 #ifndef HTTP_SERVER_H
 #define HTTP_SERVER_H
 
+#include <bits/pthreadtypes.h>
+#include <bits/types.h>
+#include <stdint.h>
+
 #include "networking/common/buffer_pool.h"
 #include "networking/common/thread_pool.h"
 #include "networking/http/http_parser.h"
-#include "utils/error/error_handling.h"
 #include "utils/security/security_hardening.h"
 
 /* Forward declaration */
 struct application_config;
 
 /* Global variable for testing */
-extern const struct application_config* g_http_app_config;
+extern const struct application_config* g_http_app_config; // NOLINT
 
 /**
  * @brief Start the ONVIF HTTP/SOAP server.

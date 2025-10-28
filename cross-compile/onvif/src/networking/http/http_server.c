@@ -16,6 +16,7 @@
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +41,7 @@
 #include "services/snapshot/onvif_snapshot.h"
 #include "utils/common/time_utils.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 #include "utils/logging/service_logging.h"
 #include "utils/memory/memory_manager.h"
 #include "utils/security/security_hardening.h"
@@ -83,14 +85,7 @@ static struct http_auth_config g_http_auth_config = {0}; // NOLINT
 /** @brief Maximum HTTP header line length */
 #define HTTP_MAX_HEADER_LINE_LENGTH 8192
 
-/** @brief HTTP status code constants */
-#define HTTP_STATUS_OK                    200
-#define HTTP_STATUS_INTERNAL_SERVER_ERROR 500
-#define HTTP_STATUS_SUCCESS_MIN           200
-#define HTTP_STATUS_SUCCESS_MAX           299
-#define HTTP_STATUS_CLIENT_ERROR_MIN      400
-#define HTTP_STATUS_CLIENT_ERROR_MAX      499
-#define HTTP_STATUS_SERVER_ERROR_MIN      500
+// (Moved to http_constants.h)
 
 /* ============================================================================
  * HTTP Logging Helpers
@@ -104,8 +99,7 @@ static struct http_auth_config g_http_auth_config = {0}; // NOLINT
  * @param operation HTTP operation
  * @param level Log level
  */
-static void http_log_init_context(service_log_context_t* context, const char* client_ip,
-                                  const char* operation, service_log_level_t level) {
+static void http_log_init_context(service_log_context_t* context, const char* client_ip, const char* operation, service_log_level_t level) {
   if (!context) {
     return;
   }
@@ -113,8 +107,7 @@ static void http_log_init_context(service_log_context_t* context, const char* cl
   // Create enhanced action name that includes client IP for better context
   static char enhanced_action[HTTP_ENHANCED_ACTION_MAX_LEN];
   if (client_ip && strlen(client_ip) > 0) {
-    (void)snprintf(enhanced_action, sizeof(enhanced_action), "%s [%s]",
-                   operation ? operation : "unknown", client_ip);
+    (void)snprintf(enhanced_action, sizeof(enhanced_action), "%s [%s]", operation ? operation : "unknown", client_ip);
     service_log_init_context(context, "HTTP", enhanced_action, level);
   } else {
     service_log_init_context(context, "HTTP", operation, level);
@@ -127,8 +120,7 @@ static void http_log_init_context(service_log_context_t* context, const char* cl
  * @param operation Server operation
  * @param level Log level
  */
-static void http_server_log_init_context(service_log_context_t* context, const char* operation,
-                                         service_log_level_t level) {
+static void http_server_log_init_context(service_log_context_t* context, const char* operation, service_log_level_t level) {
   service_log_init_context(context, "HTTP_SERVER", operation, level);
 }
 
@@ -140,10 +132,10 @@ static void http_server_log_init_context(service_log_context_t* context, const c
  * @brief Check if verbose HTTP logging is enabled in configuration
  */
 static int http_verbose_enabled(void) {
-  if (!g_http_app_config || !g_http_app_config->logging) {
+  if (!g_http_app_config) {
     return 0;
   }
-  return g_http_app_config->logging->http_verbose ? 1 : 0;
+  return g_http_app_config->logging.http_verbose ? 1 : 0;
 }
 
 /**
@@ -170,8 +162,7 @@ static void http_log_full_request(const http_request_t* request) {
   }
   service_log_context_t log_ctx;
   http_log_init_context(&log_ctx, request->client_ip, "request", SERVICE_LOG_INFO);
-  service_log_info(&log_ctx, "HTTP Request: %s %s %s", request->method, request->path,
-                   request->version);
+  service_log_info(&log_ctx, "HTTP Request: %s %s %s", request->method, request->path, request->version);
 
   for (size_t i = 0; i < request->header_count; i++) {
     if (!request->headers[i].name || !request->headers[i].value) {
@@ -208,13 +199,11 @@ static void http_log_full_response(const http_response_t* response, const char* 
   }
   service_log_context_t log_ctx;
   http_log_init_context(&log_ctx, client_ip, "response", SERVICE_LOG_INFO);
-  service_log_info(&log_ctx, "HTTP Response: status=%d, content-type=%s, body_len=%zu",
-                   response->status_code, response->content_type ? response->content_type : "",
-                   response->body_length);
+  service_log_info(&log_ctx, "HTTP Response: status=%d, content-type=%s, body_len=%zu", response->status_code,
+                   response->content_type ? response->content_type : "", response->body_length);
   for (size_t i = 0; i < response->header_count; i++) {
     if (response->headers[i].name && response->headers[i].value) {
-      service_log_info(&log_ctx, "Header: %s: %s", response->headers[i].name,
-                       response->headers[i].value);
+      service_log_info(&log_ctx, "Header: %s: %s", response->headers[i].name, response->headers[i].value);
     }
   }
   if (response->body && response->body_length > 0) {
@@ -244,8 +233,7 @@ static void http_log_full_response(const http_response_t* response, const char* 
  * @param message Error message format string
  * @param ... Additional arguments for message formatting
  */
-static void http_error_context_init(error_context_t* error_ctx, const char* function_name,
-                                    int error_code, const char* message, ...) {
+static void http_error_context_init(error_context_t* error_ctx, const char* function_name, int error_code, const char* message, ...) {
   if (!error_ctx || !function_name) {
     return;
   }
@@ -274,8 +262,7 @@ static void http_error_context_init(error_context_t* error_ctx, const char* func
  * @param ... Additional arguments for message formatting
  * @return The error code passed as parameter
  */
-static int http_error_log_and_return(const char* function_name, int error_code, const char* message,
-                                     ...) {
+static int http_error_log_and_return(const char* function_name, int error_code, const char* message, ...) {
   error_context_t error_ctx;
 
   /* Use http_error_context_init for consistent error context setup */
@@ -339,8 +326,7 @@ static const char* extract_operation_name(const char* body) {
   static char operation_name[HTTP_OPERATION_NAME_BUFFER_SIZE];
 
   // Use gSOAP-based extraction for robust SOAP parsing
-  int result =
-    onvif_gsoap_extract_operation_name(body, body_length, operation_name, sizeof(operation_name));
+  int result = onvif_gsoap_extract_operation_name(body, body_length, operation_name, sizeof(operation_name));
 
   if (result == ONVIF_SUCCESS) {
     service_log_context_t log_ctx;
@@ -351,7 +337,7 @@ static const char* extract_operation_name(const char* body) {
 
   service_log_context_t log_ctx;
   http_log_init_context(&log_ctx, NULL, "gsoap_extract", SERVICE_LOG_WARNING);
-  service_log_warning(&log_ctx, "gSOAP failed to extract operation name, error: %d", result);
+  service_log_warning(&log_ctx, "gSOAP failed to extract operation name, error: %d (%s)", result, soap_error_to_string(result));
   return NULL;
 }
 
@@ -368,8 +354,7 @@ static const char* extract_operation_name(const char* body) {
  */
 int http_validate_authentication(const http_request_t* request, security_context_t* security_ctx) {
   if (!request || !security_ctx) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_NULL,
-                                     "HTTP authentication validation failed: null parameters");
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_NULL, "HTTP authentication validation failed: null parameters");
   }
 
   // Check if authentication is enabled in configuration
@@ -385,8 +370,7 @@ int http_validate_authentication(const http_request_t* request, security_context
   if (!g_http_auth_config.enabled) {
     // Initialize auth config on first use
     if (http_auth_init(&g_http_auth_config) != HTTP_AUTH_SUCCESS) {
-      return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR,
-                                       "Failed to initialize HTTP auth configuration");
+      return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Failed to initialize HTTP auth configuration");
     }
 
     // Enable Basic authentication
@@ -396,19 +380,15 @@ int http_validate_authentication(const http_request_t* request, security_context
 
   // Validate credentials against configuration
   if (!g_http_app_config) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR,
-                                     "Application configuration not available for authentication");
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Application configuration not available for authentication");
   }
 
-  // Use http_auth module for validation
-  int auth_result =
-    http_auth_validate_basic(request, &g_http_auth_config, g_http_app_config->onvif.username,
-                             g_http_app_config->onvif.password);
+  // Use http_auth module for validation (credentials now verified against runtime user management)
+  int auth_result = http_auth_validate_basic(request, &g_http_auth_config);
 
   if (auth_result != HTTP_AUTH_SUCCESS) {
     service_log_context_t log_ctx;
-    http_log_init_context(&log_ctx, security_ctx->client_ip, "auth_validation",
-                          SERVICE_LOG_WARNING);
+    http_log_init_context(&log_ctx, security_ctx->client_ip, "auth_validation", SERVICE_LOG_WARNING);
 
     // Map http_auth error codes to appropriate logging and security actions
     switch (auth_result) {
@@ -451,9 +431,7 @@ int http_validate_authentication(const http_request_t* request, security_context
  * @param response HTTP response structure
  * @return ONVIF_SUCCESS if handling succeeds, error code if it fails
  */
-static int handle_onvif_request_by_operation(onvif_service_type_t service_type,
-                                             const char* operation_name,
-                                             const http_request_t* request,
+static int handle_onvif_request_by_operation(onvif_service_type_t service_type, const char* operation_name, const http_request_t* request,
                                              http_response_t* response) {
   if (!operation_name || !request || !response) {
     return ONVIF_ERROR;
@@ -477,8 +455,7 @@ static int handle_onvif_request_by_operation(onvif_service_type_t service_type,
     return onvif_snapshot_handle_request(operation_name, request, response);
 
   default:
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_NOT_SUPPORTED,
-                                     "Unknown ONVIF service type: %d", service_type);
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_NOT_SUPPORTED, "Unknown ONVIF service type: %d", service_type);
   }
 }
 
@@ -498,14 +475,12 @@ static int send_chunk_header(size_t chunk_size, int client_fd) { // NOLINT
   int header_len = snprintf(chunk_header, sizeof(chunk_header), "%zx\r\n", chunk_size);
 
   if (header_len < 0 || (size_t)header_len >= sizeof(chunk_header)) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR,
-                                     "Failed to format chunk header for size %zu", chunk_size);
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Failed to format chunk header for size %zu", chunk_size);
   }
 
   ssize_t sent = send(client_fd, chunk_header, header_len, 0);
   if (sent < 0 || (size_t)sent != (size_t)header_len) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_IO,
-                                     "Failed to send chunk header: %s", strerror(errno));
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_IO, "Failed to send chunk header: %s", strerror(errno));
   }
 
   return ONVIF_SUCCESS;
@@ -527,15 +502,13 @@ static int send_chunk(int client_fd, const char* data, size_t size) {
   // Send chunk data
   ssize_t sent = send(client_fd, data, size, 0);
   if (sent < 0 || (size_t)sent != size) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_IO, "Failed to send chunk data: %s",
-                                     strerror(errno));
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_IO, "Failed to send chunk data: %s", strerror(errno));
   }
 
   // Send trailing CRLF
   sent = send(client_fd, "\r\n", 2, 0);
   if (sent < 0 || sent != 2) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_IO,
-                                     "Failed to send chunk trailing CRLF: %s", strerror(errno));
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_IO, "Failed to send chunk trailing CRLF: %s", strerror(errno));
   }
 
   return ONVIF_SUCCESS;
@@ -551,8 +524,7 @@ static int send_final_chunk(int client_fd) {
   const char* final_chunk = "0\r\n\r\n";
   ssize_t sent = send(client_fd, final_chunk, FINAL_CHUNK_SIZE, 0);
   if (sent < 0 || sent != FINAL_CHUNK_SIZE) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_IO, "Failed to send final chunk: %s",
-                                     strerror(errno));
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_IO, "Failed to send final chunk: %s", strerror(errno));
   }
 
   return ONVIF_SUCCESS;
@@ -585,8 +557,7 @@ static const char* get_http_status_text(int status_code) {
  * @param client_ip Client IP address for logging context
  * @return ONVIF_SUCCESS if error response generated successfully, error code if it fails
  */
-static int generate_http_error_response(const error_context_t* error_ctx,
-                                        http_response_t* http_response, const char* client_ip) {
+static int generate_http_error_response(const error_context_t* error_ctx, http_response_t* http_response, const char* client_ip) {
   if (!error_ctx || !http_response) {
     return ONVIF_ERROR_INVALID;
   }
@@ -649,8 +620,7 @@ static int generate_http_error_response(const error_context_t* error_ctx,
 
   // Create error result for SOAP fault generation
   error_result_t error_result;
-  if (error_create_result_from_pattern(pattern, error_ctx->message, &error_result) !=
-      ONVIF_SUCCESS) {
+  if (error_create_result_from_pattern(pattern, error_ctx->message, &error_result) != ONVIF_SUCCESS) {
     // Fallback to simple error message
     error_result.error_code = error_ctx->error_code;
     error_result.error_message = error_ctx->message;
@@ -661,10 +631,8 @@ static int generate_http_error_response(const error_context_t* error_ctx,
   // Generate SOAP fault response body using gSOAP
   {
     // Use gSOAP to generate proper SOAP fault XML
-    const char* fault_code =
-      error_result.soap_fault_code ? error_result.soap_fault_code : "soap:Server";
-    const char* fault_string =
-      error_result.soap_fault_string ? error_result.soap_fault_string : "Internal server error";
+    const char* fault_code = error_result.soap_fault_code ? error_result.soap_fault_code : "soap:Server";
+    const char* fault_string = error_result.soap_fault_string ? error_result.soap_fault_string : "Internal server error";
 
     // Allocate buffer for the fault XML
     const size_t max_fault_size = 2048;
@@ -673,8 +641,7 @@ static int generate_http_error_response(const error_context_t* error_ctx,
       return ONVIF_ERROR_MEMORY;
     }
 
-    int written = onvif_gsoap_generate_fault_response(NULL, fault_code, fault_string, NULL, NULL,
-                                                      error_xml, max_fault_size);
+    int written = onvif_gsoap_generate_fault_response(NULL, fault_code, fault_string, NULL, NULL, error_xml, max_fault_size);
 
     if (written < 0) {
       free(error_xml);
@@ -697,8 +664,7 @@ static int generate_http_error_response(const error_context_t* error_ctx,
   // Log the error with full context
   service_log_context_t log_ctx;
   http_log_init_context(&log_ctx, client_ip, "error_response", SERVICE_LOG_ERROR);
-  service_log_operation_failure(&log_ctx, "HTTP error response", error_ctx->error_code,
-                                error_ctx->message);
+  service_log_operation_failure(&log_ctx, "HTTP error response", error_ctx->error_code, error_ctx->message);
 
   return ONVIF_SUCCESS;
 }
@@ -716,8 +682,7 @@ static int build_chunked_header(const http_response_t* response, char* header, s
   }
 
   const char* status_text = get_http_status_text(response->status_code);
-  const char* content_type =
-    response->content_type ? response->content_type : "application/soap+xml; charset=utf-8";
+  const char* content_type = response->content_type ? response->content_type : "application/soap+xml; charset=utf-8";
 
   int result = snprintf(header, header_size,
                         "HTTP/1.1 %d %s\r\n"
@@ -727,26 +692,22 @@ static int build_chunked_header(const http_response_t* response, char* header, s
                         response->status_code, status_text, content_type);
 
   if (result < 0 || (size_t)result >= header_size) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR,
-                                     "Failed to format chunked HTTP response header");
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Failed to format chunked HTTP response header");
   }
 
   // Add custom headers
   for (size_t i = 0; i < response->header_count; i++) {
     int header_result =
-      snprintf(header + strlen(header), header_size - strlen(header), "%s: %s\r\n",
-               response->headers[i].name, response->headers[i].value);
+      snprintf(header + strlen(header), header_size - strlen(header), "%s: %s\r\n", response->headers[i].name, response->headers[i].value);
 
     if (header_result < 0 || (size_t)header_result >= (header_size - strlen(header))) {
-      return http_error_log_and_return(
-        __FUNCTION__, ONVIF_ERROR, "Failed to format custom header: %s", response->headers[i].name);
+      return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Failed to format custom header: %s", response->headers[i].name);
     }
   }
 
   // Add final CRLF to end headers
   if (strlen(header) + 2 >= header_size) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR,
-                                     "Response header too large: %zu bytes", strlen(header));
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Response header too large: %zu bytes", strlen(header));
   }
   strcat(header, "\r\n");
 
@@ -782,8 +743,7 @@ static int send_response_body_chunks(int client_fd, const http_response_t* respo
 
     service_log_context_t log_ctx;
     http_log_init_context(&log_ctx, NULL, "chunk_progress", SERVICE_LOG_DEBUG);
-    service_log_debug(&log_ctx, "Sent chunk: %zu bytes, remaining: %zu bytes", chunk_size,
-                      remaining);
+    service_log_debug(&log_ctx, "Sent chunk: %zu bytes, remaining: %zu bytes", chunk_size, remaining);
   }
 
   return ONVIF_SUCCESS;
@@ -796,11 +756,9 @@ static int send_response_body_chunks(int client_fd, const http_response_t* respo
  * @param conn Connection structure with buffer for streaming
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
-static int send_chunked_response(int client_fd, const http_response_t* response,
-                                 connection_t* conn) {
+static int send_chunked_response(int client_fd, const http_response_t* response, connection_t* conn) {
   if (!response || !conn) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_NULL,
-                                     "Invalid parameters for chunked response");
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_NULL, "Invalid parameters for chunked response");
   }
 
   // Build HTTP header with chunked transfer encoding
@@ -812,8 +770,7 @@ static int send_chunked_response(int client_fd, const http_response_t* response,
   // Send header
   ssize_t sent = send(client_fd, header, strlen(header), 0);
   if (sent < 0) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_IO,
-                                     "Failed to send chunked header: %s", strerror(errno));
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_IO, "Failed to send chunked header: %s", strerror(errno));
   }
 
   // Send response body in chunks
@@ -846,32 +803,25 @@ static int send_chunked_response(int client_fd, const http_response_t* response,
 static int validate_request_components(const http_request_t* request, const char* client_ip) {
   (void)client_ip; /* client_ip currently unused in validation but kept for future logging */
   if (!request) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_NULL,
-                                     "HTTP request validation failed: null request");
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_NULL, "HTTP request validation failed: null request");
   }
 
   // Validate HTTP method
-  validation_result_t method_validation =
-    validate_string("HTTP method", request->method, 1, sizeof(request->method) - 1, 0);
+  validation_result_t method_validation = validate_string("HTTP method", request->method, 1, sizeof(request->method) - 1, 0);
   if (!validation_is_valid(&method_validation)) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_INVALID, "Invalid HTTP method: %s",
-                                     request->method);
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_INVALID, "Invalid HTTP method: %s", request->method);
   }
 
   // Validate HTTP path
-  validation_result_t path_validation =
-    validate_string("HTTP path", request->path, 1, sizeof(request->path) - 1, 0);
+  validation_result_t path_validation = validate_string("HTTP path", request->path, 1, sizeof(request->path) - 1, 0);
   if (!validation_is_valid(&path_validation)) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_INVALID, "Invalid HTTP path: %s",
-                                     request->path);
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_INVALID, "Invalid HTTP path: %s", request->path);
   }
 
   // Validate HTTP version
-  validation_result_t version_validation =
-    validate_string("HTTP version", request->version, 1, sizeof(request->version) - 1, 0);
+  validation_result_t version_validation = validate_string("HTTP version", request->version, 1, sizeof(request->version) - 1, 0);
   if (!validation_is_valid(&version_validation)) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_INVALID, "Invalid HTTP version: %s",
-                                     request->version);
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_INVALID, "Invalid HTTP version: %s", request->version);
   }
 
   return ONVIF_SUCCESS;
@@ -883,17 +833,14 @@ static int validate_request_components(const http_request_t* request, const char
  * @param security_ctx Security context
  * @return ONVIF_SUCCESS if validation succeeds, error code if it fails
  */
-static int perform_security_validation(const http_request_t* request,
-                                       security_context_t* security_ctx) {
+static int perform_security_validation(const http_request_t* request, security_context_t* security_ctx) {
   if (!request || !security_ctx) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_NULL,
-                                     "Security validation failed: null parameters");
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR_NULL, "Security validation failed: null parameters");
   }
 
   // Perform comprehensive security validation
   if (security_validate_request(request, security_ctx) != ONVIF_SUCCESS) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR,
-                                     "Request security validation failed");
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Request security validation failed");
   }
 
   // Check HTTP Basic Authentication with attack detection
@@ -905,8 +852,7 @@ static int perform_security_validation(const http_request_t* request,
 
   // Validate request body for security threats
   if (security_validate_request_body(request, security_ctx) != ONVIF_SUCCESS) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR,
-                                     "Request body contains potential security threats");
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Request body contains potential security threats");
   }
 
   return ONVIF_SUCCESS;
@@ -930,12 +876,10 @@ static int handle_onvif_request(const http_request_t* request, http_response_t* 
 
   // Initialize security context
   security_context_t security_ctx = {{0}, 0, 0, 0};
-  if (memory_safe_strncpy(security_ctx.client_ip, sizeof(security_ctx.client_ip),
-                          request->client_ip, strlen(request->client_ip)) < 0) {
+  if (memory_safe_strncpy(security_ctx.client_ip, sizeof(security_ctx.client_ip), request->client_ip, strlen(request->client_ip)) < 0) {
     service_log_context_t log_ctx;
     http_log_init_context(&log_ctx, NULL, "client_ip_copy", SERVICE_LOG_ERROR);
-    service_log_operation_failure(&log_ctx, "client IP copy", -1,
-                                  "Failed to copy client IP safely");
+    service_log_operation_failure(&log_ctx, "client IP copy", -1, "Failed to copy client IP safely");
     return ONVIF_ERROR;
   }
   security_ctx.last_request_time = security_get_current_time();
@@ -962,23 +906,19 @@ static int handle_onvif_request(const http_request_t* request, http_response_t* 
   // Validate request body content if present
   if (request->body && request->body_length > 0) {
     if (validate_xml_content(request->body, request->body_length) != ONVIF_VALIDATION_SUCCESS) {
-      return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR,
-                                       "Invalid XML content in request body (length: %zu)",
-                                       request->body_length);
+      return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Invalid XML content in request body (length: %zu)", request->body_length);
     }
   }
 
   // Extract operation name from SOAP body
   const char* operation_name = extract_operation_name(request->body);
   if (!operation_name) {
-    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR,
-                                     "Failed to extract operation name from SOAP body");
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Failed to extract operation name from SOAP body");
   }
 
   service_log_context_t log_ctx;
   http_log_init_context(&log_ctx, security_ctx.client_ip, "request_handling", SERVICE_LOG_INFO);
-  service_log_info(&log_ctx, "Handling ONVIF request: service=%d, operation=%s", service_type,
-                   operation_name);
+  service_log_info(&log_ctx, "Handling ONVIF request: service=%d, operation=%s", service_type, operation_name);
 
   // Route to appropriate service handler
   int result = handle_onvif_request_by_operation(service_type, operation_name, request, response);
@@ -987,8 +927,7 @@ static int handle_onvif_request(const http_request_t* request, http_response_t* 
   if (result == ONVIF_SUCCESS && response) {
     if (security_add_security_headers(response, &security_ctx) != ONVIF_SUCCESS) {
       service_log_context_t log_ctx;
-      http_log_init_context(&log_ctx, security_ctx.client_ip, "security_headers",
-                            SERVICE_LOG_WARNING);
+      http_log_init_context(&log_ctx, security_ctx.client_ip, "security_headers", SERVICE_LOG_WARNING);
       service_log_warning(&log_ctx, "Failed to add security headers to response");
       // Don't fail the request, just log the warning
     }
@@ -996,23 +935,18 @@ static int handle_onvif_request(const http_request_t* request, http_response_t* 
     // Generate standardized error response for service handler failure
     error_context_t error_ctx;
     http_error_context_init(&error_ctx, __FUNCTION__, result, "ONVIF service handler failed");
-    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Service: %d, Operation: %s",
-                              security_ctx.client_ip, service_type, operation_name);
+    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Service: %d, Operation: %s", security_ctx.client_ip, service_type, operation_name);
 
     // Generate error response using utilities
-    if (error_handle_service(&error_ctx, result, "ONVIF service handler", response) !=
-        ONVIF_SUCCESS) {
+    if (error_handle_service(&error_ctx, result, "ONVIF service handler", response) != ONVIF_SUCCESS) {
       service_log_context_t log_ctx;
       http_log_init_context(&log_ctx, security_ctx.client_ip, "error_handling", SERVICE_LOG_ERROR);
-      service_log_warning(&log_ctx,
-                          "Failed to generate error response for service handler failure");
+      service_log_warning(&log_ctx, "Failed to generate error response for service handler failure");
     }
 
     service_log_context_t error_log_ctx;
-    http_log_init_context(&error_log_ctx, security_ctx.client_ip, "service_handler",
-                          SERVICE_LOG_ERROR);
-    service_log_operation_failure(&error_log_ctx, "ONVIF service handler", result,
-                                  "Service handler returned error");
+    http_log_init_context(&error_log_ctx, security_ctx.client_ip, "service_handler", SERVICE_LOG_ERROR);
+    service_log_operation_failure(&error_log_ctx, "ONVIF service handler", result, "Service handler returned error");
   }
 
   return result;
@@ -1044,8 +978,7 @@ int http_server_init(int port) {
   if (buffer_pool_init(&g_http_server.buffer_pool) != 0) {
     service_log_context_t log_ctx;
     http_server_log_init_context(&log_ctx, "buffer_pool_init", SERVICE_LOG_ERROR);
-    service_log_operation_failure(&log_ctx, "buffer pool initialization", -1,
-                                  "Failed to initialize buffer pool");
+    service_log_operation_failure(&log_ctx, "buffer pool initialization", -1, "Failed to initialize buffer pool");
     return ONVIF_ERROR;
   }
 
@@ -1053,8 +986,7 @@ int http_server_init(int port) {
   if (http_metrics_init() != ONVIF_SUCCESS) {
     service_log_context_t log_ctx;
     http_server_log_init_context(&log_ctx, "metrics_init", SERVICE_LOG_ERROR);
-    service_log_operation_failure(&log_ctx, "metrics initialization", -1,
-                                  "Failed to initialize performance metrics");
+    service_log_operation_failure(&log_ctx, "metrics initialization", -1, "Failed to initialize performance metrics");
     buffer_pool_cleanup(&g_http_server.buffer_pool);
     return ONVIF_ERROR;
   }
@@ -1090,8 +1022,7 @@ int http_server_init(int port) {
   if (bind(g_http_server.socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
     error_context_t error_ctx;
     http_error_context_init(&error_ctx, __FUNCTION__, ONVIF_ERROR, "Socket binding failed");
-    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Port: %d, Error: %s (errno: %d)", port, strerror(errno),
-                              errno);
+    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Port: %d, Error: %s (errno: %d)", port, strerror(errno), errno);
     onvif_log_error_context(&error_ctx);
     close(g_http_server.socket);
     g_http_server.socket = -1;
@@ -1102,8 +1033,7 @@ int http_server_init(int port) {
   if (listen(g_http_server.socket, HTTP_SOCKET_BACKLOG_SIZE) < 0) {
     error_context_t error_ctx;
     http_error_context_init(&error_ctx, __FUNCTION__, ONVIF_ERROR, "Socket listening failed");
-    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Backlog: %d, Error: %s (errno: %d)",
-                              HTTP_SOCKET_BACKLOG_SIZE, strerror(errno), errno);
+    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Backlog: %d, Error: %s (errno: %d)", HTTP_SOCKET_BACKLOG_SIZE, strerror(errno), errno);
     onvif_log_error_context(&error_ctx);
     close(g_http_server.socket);
     g_http_server.socket = -1;
@@ -1152,8 +1082,7 @@ static ssize_t read_http_request(int client_fd, char* buffer, const char* client
   if (bytes_read <= 0) {
     service_log_context_t log_ctx;
     http_log_init_context(&log_ctx, client_ip_str, "socket_read", SERVICE_LOG_ERROR);
-    service_log_operation_failure(&log_ctx, "socket read", errno,
-                                  "Failed to read from client socket");
+    service_log_operation_failure(&log_ctx, "socket read", errno, "Failed to read from client socket");
     return -1;
   }
 
@@ -1169,14 +1098,11 @@ static ssize_t read_http_request(int client_fd, char* buffer, const char* client
  * @param client_ip_str Client IP string for logging
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-static int parse_and_validate_request(char* buffer, ssize_t bytes_read, http_request_t* request,
-                                      const char* client_ip_str) {
+static int parse_and_validate_request(char* buffer, ssize_t bytes_read, http_request_t* request, const char* client_ip_str) {
   // Set client IP in request using safe string function
-  if (memory_safe_strncpy(request->client_ip, sizeof(request->client_ip), client_ip_str,
-                          strlen(client_ip_str)) < 0) {
+  if (memory_safe_strncpy(request->client_ip, sizeof(request->client_ip), client_ip_str, strlen(client_ip_str)) < 0) {
     error_context_t error_ctx;
-    http_error_context_init(&error_ctx, __FUNCTION__, ONVIF_ERROR,
-                            "Failed to copy client IP safely");
+    http_error_context_init(&error_ctx, __FUNCTION__, ONVIF_ERROR, "Failed to copy client IP safely");
     ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s", client_ip_str);
     onvif_log_error_context(&error_ctx);
     return ONVIF_ERROR;
@@ -1187,8 +1113,7 @@ static int parse_and_validate_request(char* buffer, ssize_t bytes_read, http_req
     error_context_t error_ctx;
     error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
     ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "Failed to parse HTTP request");
-    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Bytes read: %d", client_ip_str,
-                              bytes_read);
+    ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Bytes read: %d", client_ip_str, bytes_read);
     onvif_log_error_context(&error_ctx);
     return ONVIF_ERROR;
   }
@@ -1203,8 +1128,7 @@ static int parse_and_validate_request(char* buffer, ssize_t bytes_read, http_req
  * @param client_ip_str Client IP string for logging
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-static int send_http_response_with_fallback(int client_fd, http_response_t* response,
-                                            const char* client_ip_str) {
+static int send_http_response_with_fallback(int client_fd, http_response_t* response, const char* client_ip_str) {
   int result = ONVIF_SUCCESS;
 
   // Check if we should use chunked transfer encoding
@@ -1215,8 +1139,7 @@ static int send_http_response_with_fallback(int client_fd, http_response_t* resp
 
     service_log_context_t log_ctx;
     http_log_init_context(&log_ctx, client_ip_str, "chunked_transfer", SERVICE_LOG_DEBUG);
-    service_log_debug(&log_ctx, "Using chunked transfer for large response: %zu bytes",
-                      response->body_length);
+    service_log_debug(&log_ctx, "Using chunked transfer for large response: %zu bytes", response->body_length);
 
     result = send_chunked_response(client_fd, response, &conn);
     if (result != ONVIF_SUCCESS) {
@@ -1225,21 +1148,18 @@ static int send_http_response_with_fallback(int client_fd, http_response_t* resp
       error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
       error_ctx.error_code = ONVIF_ERROR_IO;
       ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "Failed to send chunked response");
-      ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Response size: %zu", client_ip_str,
-                                response->body_length);
+      ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Response size: %zu", client_ip_str, response->body_length);
 
       // Create error response
       http_response_t error_response = {0};
-      if (generate_http_error_response(&error_ctx, &error_response, client_ip_str) ==
-          ONVIF_SUCCESS) {
+      if (generate_http_error_response(&error_ctx, &error_response, client_ip_str) == ONVIF_SUCCESS) {
         send_http_response(client_fd, &error_response);
         http_response_free(&error_response);
       }
 
       service_log_context_t error_log_ctx;
       http_log_init_context(&error_log_ctx, client_ip_str, "chunked_send", SERVICE_LOG_ERROR);
-      service_log_operation_failure(&error_log_ctx, "chunked response transmission", result,
-                                    "Failed to send chunked response");
+      service_log_operation_failure(&error_log_ctx, "chunked response transmission", result, "Failed to send chunked response");
     }
   } else {
     // Use regular HTTP response for smaller responses
@@ -1254,21 +1174,18 @@ static int send_http_response_with_fallback(int client_fd, http_response_t* resp
       error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
       error_ctx.error_code = ONVIF_ERROR_IO;
       ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "Failed to send HTTP response");
-      ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Response size: %zu", client_ip_str,
-                                response->body_length);
+      ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Response size: %zu", client_ip_str, response->body_length);
 
       // Create error response
       http_response_t error_response = {0};
-      if (generate_http_error_response(&error_ctx, &error_response, client_ip_str) ==
-          ONVIF_SUCCESS) {
+      if (generate_http_error_response(&error_ctx, &error_response, client_ip_str) == ONVIF_SUCCESS) {
         send_http_response(client_fd, &error_response);
         http_response_free(&error_response);
       }
 
       service_log_context_t log_ctx;
       http_log_init_context(&log_ctx, client_ip_str, "response_send", SERVICE_LOG_ERROR);
-      service_log_operation_failure(&log_ctx, "HTTP response transmission", result,
-                                    "Failed to send HTTP response");
+      service_log_operation_failure(&log_ctx, "HTTP response transmission", result, "Failed to send HTTP response");
     }
   }
 
@@ -1297,8 +1214,7 @@ static void handle_request_error(int client_fd, const char* client_ip_str, int r
 
   service_log_context_t error_log_ctx;
   http_log_init_context(&error_log_ctx, client_ip_str, "request_processing", SERVICE_LOG_ERROR);
-  service_log_operation_failure(&error_log_ctx, "HTTP request processing", result,
-                                "Failed to process HTTP request");
+  service_log_operation_failure(&error_log_ctx, "HTTP request processing", result, "Failed to process HTTP request");
 }
 
 /**
@@ -1325,8 +1241,7 @@ int http_server_process_request(int client_fd) {
   if (!buffer) {
     service_log_context_t log_ctx;
     http_log_init_context(&log_ctx, client_ip_str, "buffer_pool", SERVICE_LOG_ERROR);
-    service_log_operation_failure(&log_ctx, "buffer pool acquisition", -1,
-                                  "No available buffers in pool");
+    service_log_operation_failure(&log_ctx, "buffer pool acquisition", -1, "No available buffers in pool");
     return ONVIF_ERROR;
   }
 
@@ -1550,8 +1465,8 @@ int http_metrics_get_current(http_performance_metrics_t* metrics) {
  * @param status_code HTTP status code
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-int http_metrics_record_request(uint64_t latency_ms, size_t response_size,
-                                int status_code) { // NOLINT
+int http_metrics_record_request(uint64_t latency_ms, size_t response_size, // NOLINT
+                                int status_code) {                         // NOLINT
   // Update all metrics with mutex protection for thread safety
   pthread_mutex_lock(&g_http_server.metrics.metrics_mutex);
 
@@ -1576,8 +1491,7 @@ int http_metrics_record_request(uint64_t latency_ms, size_t response_size,
   // Categorize by status code
   if (status_code >= HTTP_STATUS_SUCCESS_MIN && status_code <= HTTP_STATUS_SUCCESS_MAX) {
     g_http_server.metrics.successful_requests++;
-  } else if (status_code >= HTTP_STATUS_CLIENT_ERROR_MIN &&
-             status_code <= HTTP_STATUS_CLIENT_ERROR_MAX) {
+  } else if (status_code >= HTTP_STATUS_CLIENT_ERROR_MIN && status_code <= HTTP_STATUS_CLIENT_ERROR_MAX) {
     g_http_server.metrics.client_errors++;
   } else if (status_code >= HTTP_STATUS_SERVER_ERROR_MIN) {
     g_http_server.metrics.server_errors++;

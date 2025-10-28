@@ -21,10 +21,9 @@
 #include "mocks/ptz_adapter_mock.h"
 
 #define PTZ_TURN_STOP_BIT(direction) (1U << (direction))
-#define PTZ_TIMEOUT_EXPECTED_MASK                                                                  \
-  (PTZ_TURN_STOP_BIT(PLATFORM_PTZ_DIRECTION_LEFT) |                                                \
-   PTZ_TURN_STOP_BIT(PLATFORM_PTZ_DIRECTION_RIGHT) |                                               \
-   PTZ_TURN_STOP_BIT(PLATFORM_PTZ_DIRECTION_UP) | PTZ_TURN_STOP_BIT(PLATFORM_PTZ_DIRECTION_DOWN))
+#define PTZ_TIMEOUT_EXPECTED_MASK                                                                                                                    \
+  (PTZ_TURN_STOP_BIT(PLATFORM_PTZ_DIRECTION_LEFT) | PTZ_TURN_STOP_BIT(PLATFORM_PTZ_DIRECTION_RIGHT) | PTZ_TURN_STOP_BIT(PLATFORM_PTZ_DIRECTION_UP) | \
+   PTZ_TURN_STOP_BIT(PLATFORM_PTZ_DIRECTION_DOWN))
 
 static void wait_for_turn_stop_mask(unsigned int expected_mask, int timeout_ms) {
   const int sleep_step_ms = 20;
@@ -40,8 +39,7 @@ static void wait_for_turn_stop_mask(unsigned int expected_mask, int timeout_ms) 
     waited_ms += sleep_step_ms;
   }
 
-  fail_msg("Timed out waiting for PTZ turn stop mask: expected=0x%02x actual=0x%02x", expected_mask,
-           platform_mock_get_ptz_turn_stop_mask());
+  fail_msg("Timed out waiting for PTZ turn stop mask: expected=0x%02x actual=0x%02x", expected_mask, platform_mock_get_ptz_turn_stop_mask());
 }
 
 /* ============================================================================
@@ -51,32 +49,17 @@ static void wait_for_turn_stop_mask(unsigned int expected_mask, int timeout_ms) 
 static int ptz_adapter_test_setup(void** state) {
   (void)state;
 
-  printf("DEBUG: setup starting\n");
-  fflush(stdout);
-
   // Initialize memory manager
   memory_manager_init();
-
-  printf("DEBUG: memory_manager_init done\n");
-  fflush(stdout);
 
   // Initialize platform mocks
   platform_ptz_mock_init();
 
-  printf("DEBUG: platform_ptz_mock_init done\n");
-  fflush(stdout);
-
   // Use REAL PTZ adapter functions (we're testing the adapter, not mocking it)
   ptz_adapter_mock_use_real_function(true);
 
-  printf("DEBUG: ptz_adapter_mock_use_real_function done\n");
-  fflush(stdout);
-
-  // Note: Platform PTZ functions remain mocked (they call unavailable hardware APIs)
+  // Platform PTZ functions remain mocked (they call unavailable hardware APIs)
   // Each test must set up platform mock expectations (will_return, expect_function_call, etc.)
-
-  printf("DEBUG: setup complete\n");
-  fflush(stdout);
 
   return 0;
 }
@@ -111,15 +94,12 @@ static int ptz_adapter_test_teardown(void** state) {
 void test_unit_ptz_adapter_init_success(void** state) {
   (void)state;
 
-  printf("DEBUG: test_unit_ptz_adapter_init_success starting\n");
-  fflush(stdout);
-
   // Mock platform_ptz_init (called by adapter init)
   expect_function_call(__wrap_platform_ptz_init);
   will_return(__wrap_platform_ptz_init, PLATFORM_SUCCESS);
 
   // Mock platform_ptz_move_to_position (called by adapter init to reset to center)
-  // Note: Adapter calls with (0, 0) for pan/tilt, mock expects pan/tilt/zoom
+  // Adapter calls with (0, 0) for pan/tilt, mock expects pan/tilt/zoom
   expect_function_call(__wrap_platform_ptz_move_to_position);
   expect_value(__wrap_platform_ptz_move_to_position, pan_deg, 0);
   expect_value(__wrap_platform_ptz_move_to_position, tilt_deg, 0);
@@ -145,8 +125,7 @@ void test_unit_ptz_adapter_init_idempotent(void** state) {
 
   // Initialize twice
   platform_result_t result1 = ptz_adapter_init();
-  platform_result_t result2 =
-    ptz_adapter_init(); // Second call shouldn't call platform (idempotent)
+  platform_result_t result2 = ptz_adapter_init(); // Second call shouldn't call platform (idempotent)
 
   assert_int_equal(PLATFORM_SUCCESS, result1);
   assert_int_equal(PLATFORM_SUCCESS, result2);
@@ -681,58 +660,37 @@ void test_unit_ptz_adapter_goto_preset_home(void** state) {
 
 const struct CMUnitTest ptz_adapter_unit_tests[] = {
   // Initialization tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_init_success, ptz_adapter_test_setup,
-                                  ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_init_idempotent, ptz_adapter_test_setup,
-                                  ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_init_failure, ptz_adapter_test_setup,
-                                  ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_cleanup_safe_when_not_initialized,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_init_success, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_init_idempotent, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_init_failure, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_cleanup_safe_when_not_initialized, ptz_adapter_test_setup, ptz_adapter_test_teardown),
 
   // Absolute move tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_success,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_clamping_pan_max,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_clamping_pan_min,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_clamping_tilt_max,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_clamping_tilt_min,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_not_initialized,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_success, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_clamping_pan_max, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_clamping_pan_min, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_clamping_tilt_max, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_clamping_tilt_min, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_absolute_move_not_initialized, ptz_adapter_test_setup, ptz_adapter_test_teardown),
 
   // Status tracking tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_get_status_success, ptz_adapter_test_setup,
-                                  ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_get_status_null_parameter,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_get_status_not_initialized,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_position_tracking_after_move,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_get_status_success, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_get_status_null_parameter, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_get_status_not_initialized, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_position_tracking_after_move, ptz_adapter_test_setup, ptz_adapter_test_teardown),
 
   // Relative move tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_relative_move_positive_delta,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_relative_move_delta_clamping,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_relative_move_positive_delta, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_relative_move_delta_clamping, ptz_adapter_test_setup, ptz_adapter_test_teardown),
 
   // Continuous move tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_continuous_move_with_timeout,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_continuous_move_no_timeout,
-                                  ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_continuous_move_with_timeout, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_continuous_move_no_timeout, ptz_adapter_test_setup, ptz_adapter_test_teardown),
 
   // Stop tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_stop_success, ptz_adapter_test_setup,
-                                  ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_stop_success, ptz_adapter_test_setup, ptz_adapter_test_teardown),
 
   // Preset tests
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_set_preset, ptz_adapter_test_setup,
-                                  ptz_adapter_test_teardown),
-  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_goto_preset_home, ptz_adapter_test_setup,
-                                  ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_set_preset, ptz_adapter_test_setup, ptz_adapter_test_teardown),
+  cmocka_unit_test_setup_teardown(test_unit_ptz_adapter_goto_preset_home, ptz_adapter_test_setup, ptz_adapter_test_teardown),
 };

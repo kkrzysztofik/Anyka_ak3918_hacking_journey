@@ -32,17 +32,6 @@ typedef struct http_performance_metrics {
 static http_performance_metrics_t g_test_metrics = {0};
 
 // Mock functions for testing
-// NOTE: http_metrics_init() is now provided by the real http_server.c implementation
-
-// NOTE: http_metrics_cleanup() is now provided by the real http_server.c implementation
-
-// NOTE: http_metrics_get_current() is now provided by the real http_server.c implementation
-
-// NOTE: http_metrics_record_request() is now provided by the real http_server.c implementation
-
-// NOTE: http_metrics_update_connections() is now provided by the real http_server.c implementation
-
-/* ==================== Test Setup/Teardown ==================== */
 
 /**
  * @brief Setup function for metrics tests
@@ -63,8 +52,6 @@ int teardown_http_metrics_tests(void** state) {
   (void)state;
   return http_metrics_cleanup();
 }
-
-/* ==================== Unit Tests ==================== */
 
 /**
  * @brief Test metrics initialization and cleanup
@@ -176,26 +163,22 @@ void test_unit_http_metrics_realistic_patterns(void** state) {
   assert_true(metrics.client_errors >= 10);          // Some client errors
   assert_true(metrics.total_response_bytes > 50000); // Reasonable response size
   // Calculate average latency
-  uint64_t avg_latency =
-    (metrics.total_requests > 0) ? (metrics.total_latency_ms / metrics.total_requests) : 0;
+  uint64_t avg_latency = (metrics.total_requests > 0) ? (metrics.total_latency_ms / metrics.total_requests) : 0;
   assert_true(avg_latency > 0); // Average latency calculated
 }
 
 // Add stub functions for the missing tests referenced in test_runner.c
 void test_unit_http_metrics_concurrency(void** state) {
   (void)state;
-  // Placeholder - concurrency test implementation pending
   assert_true(1); // Always pass for now
 }
 
 void test_unit_http_metrics_cpu_overhead(void** state) {
   (void)state;
-  // Placeholder - CPU overhead test implementation pending
   assert_true(1); // Always pass for now
 }
 
 void test_unit_http_metrics_retrieval_performance(void** state) {
   (void)state;
-  // Placeholder - retrieval performance test implementation pending
   assert_true(1); // Always pass for now
 }

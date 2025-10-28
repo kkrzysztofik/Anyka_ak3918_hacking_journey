@@ -7,6 +7,7 @@
 
 #include <string.h>
 
+#include "common/onvif_constants.h"
 #include "core/config/config.h"
 #include "core/lifecycle/config_lifecycle.h"
 #include "core/lifecycle/network_lifecycle.h"
@@ -25,7 +26,7 @@
  * @param cfg Application configuration
  */
 static void print_endpoints(const struct application_config* cfg) {
-  char device_ip[64];
+  char device_ip[ONVIF_IP_BUFFER_SIZE];
 
   // Get the real device IP address
   if (get_local_ip_address(device_ip, sizeof(device_ip)) != 0) {
@@ -36,14 +37,10 @@ static void print_endpoints(const struct application_config* cfg) {
 
   platform_log_notice("ONVIF daemon started successfully on port %d\n", cfg->onvif.http_port);
   platform_log_notice("Device services available at:\n");
-  platform_log_notice("  Device:  http://%s:%d/onvif/device_service\n", device_ip,
-                      cfg->onvif.http_port);
-  platform_log_notice("  Media:   http://%s:%d/onvif/media_service\n", device_ip,
-                      cfg->onvif.http_port);
-  platform_log_notice("  PTZ:     http://%s:%d/onvif/ptz_service\n", device_ip,
-                      cfg->onvif.http_port);
-  platform_log_notice("  Imaging: http://%s:%d/onvif/imaging_service\n", device_ip,
-                      cfg->onvif.http_port);
+  platform_log_notice("  Device:  http://%s:%d/onvif/device_service\n", device_ip, cfg->onvif.http_port);
+  platform_log_notice("  Media:   http://%s:%d/onvif/media_service\n", device_ip, cfg->onvif.http_port);
+  platform_log_notice("  PTZ:     http://%s:%d/onvif/ptz_service\n", device_ip, cfg->onvif.http_port);
+  platform_log_notice("  Imaging: http://%s:%d/onvif/imaging_service\n", device_ip, cfg->onvif.http_port);
 
   rtsp_multistream_server_t* rtsp_server = video_lifecycle_get_rtsp_server();
   if (rtsp_server) {
@@ -60,6 +57,8 @@ static void print_endpoints(const struct application_config* cfg) {
 /* ---------------------------- Main Function ------------------------- */
 
 int main(int argc, char** argv) {
+  (void)argc; // Reserved for future command-line argument handling
+  (void)argv; // Reserved for future command-line argument handling
   struct application_config cfg;
 
   /* Initialize configuration structure to prevent garbage data */
@@ -90,9 +89,7 @@ int main(int argc, char** argv) {
   }
 
   /* Apply logging configuration */
-  if (cfg.logging) {
-    platform_logging_apply_config(cfg.logging);
-  }
+  platform_logging_apply_config(&cfg.logging);
 
   if (!cfg.onvif.enabled) {
     platform_log_notice("ONVIF service is disabled in configuration\n");

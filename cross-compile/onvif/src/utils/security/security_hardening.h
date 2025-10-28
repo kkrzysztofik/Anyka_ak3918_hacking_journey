@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <time.h>
 
+#include "common/onvif_constants.h"
 #include "networking/http/http_parser.h"
 
 /* Forward declaration */
@@ -23,16 +24,11 @@ typedef struct connection connection_t;
 #define MAX_XML_ATTRIBUTES      64
 
 /* Security levels */
-typedef enum {
-  SECURITY_LEVEL_NONE = 0,
-  SECURITY_LEVEL_BASIC = 1,
-  SECURITY_LEVEL_ENHANCED = 2,
-  SECURITY_LEVEL_MAXIMUM = 3
-} security_level_t;
+typedef enum { SECURITY_LEVEL_NONE = 0, SECURITY_LEVEL_BASIC = 1, SECURITY_LEVEL_ENHANCED = 2, SECURITY_LEVEL_MAXIMUM = 3 } security_level_t;
 
 /* Security context structure */
 typedef struct {
-  char client_ip[46]; /* IPv6 address max length */
+  char client_ip[ONVIF_IP_BUFFER_SIZE]; /* IP address max length */
   time_t last_request_time;
   int request_count;
   security_level_t security_level;
@@ -40,7 +36,7 @@ typedef struct {
 
 /* Rate limiting structure */
 typedef struct {
-  char client_ip[46];
+  char client_ip[ONVIF_IP_BUFFER_SIZE];
   time_t window_start;
   int request_count;
   int is_blocked;
@@ -59,8 +55,7 @@ typedef struct {
 /* Input validation and sanitization */
 int security_validate_http_headers(const http_request_t* request, security_context_t* context);
 int security_validate_xml_structure(const char* xml, size_t length, security_context_t* context);
-int security_sanitize_input(const char* input, char* output, size_t output_size,
-                            security_context_t* context);
+int security_sanitize_input(const char* input, char* output, size_t output_size, security_context_t* context);
 int security_validate_file_path(const char* path, security_context_t* context);
 
 /* Rate limiting and DoS protection */
@@ -78,8 +73,7 @@ int security_detect_xxe_attack(const char* xml, size_t length);
 
 /* Security headers and responses */
 int security_add_security_headers(http_response_t* response, security_context_t* context);
-int security_generate_security_headers(char* headers, size_t headers_size,
-                                       security_context_t* context);
+int security_generate_security_headers(char* headers, size_t headers_size, security_context_t* context);
 
 /* Configuration and initialization */
 int security_init(security_level_t level);
@@ -95,17 +89,12 @@ const char* security_get_client_ip(const connection_t* conn);
 time_t security_get_current_time(void);
 int security_is_valid_ip(const char* ip_address);
 int security_is_private_ip(const char* ip_address);
-
-/* Hash and password utilities */
-#include "hash_utils.h"
-
 /* Comprehensive request validation functions */
 int security_validate_request(const http_request_t* request, security_context_t* context);
 int security_validate_request_body(const http_request_t* request, security_context_t* context);
 
 /* Security validation macros */
-#define SECURITY_VALIDATE_INPUT(input, max_len)                                                    \
-  security_validate_input_length((input), (max_len), __FILE__, __LINE__)
+#define SECURITY_VALIDATE_INPUT(input, max_len) security_validate_input_length((input), (max_len), __FILE__, __LINE__)
 
 #define SECURITY_VALIDATE_XML(xml, len) security_validate_xml_structure((xml), (len), NULL)
 

@@ -20,6 +20,10 @@
 #include "cmocka_wrapper.h"
 #include "common/test_suites.h"
 
+#ifdef ENABLE_GCOV_FLUSH
+#include <gcov.h>
+#endif
+
 #define MAX_SUITE_FILTERS 32
 #define OUTPUT_LOG_FILE   "OUT.log"
 #define BUFFER_SIZE       4096
@@ -130,8 +134,7 @@ static void print_help(const char* program_name) {
   printf("  %s --type=unit                    # Run only unit tests\n", program_name);
   printf("  %s --type=integration             # Run only integration tests\n", program_name);
   printf("  %s --suite=ptz-service            # Run only PTZ service tests\n", program_name);
-  printf("  %s --type=unit --suite=ptz-service,media-utils  # PTZ + Media unit tests\n",
-         program_name);
+  printf("  %s --type=unit --suite=ptz-service,media-utils  # PTZ + Media unit tests\n", program_name);
   printf("  %s --list                         # List all available suites\n", program_name);
   printf("\nAvailable Suites:\n");
   for (size_t i = 0; i < g_test_suite_count; i++) {
@@ -273,8 +276,7 @@ static void list_test_suites(const test_runner_options_t* options) {
     suite->get_tests(&test_count);
 
     const char* category_str = suite->category == TEST_CATEGORY_UNIT ? "unit" : "integration";
-    printf("  %-20s (%2zu tests) - %s [%s]\n", suite->name, test_count, suite->full_name,
-           category_str);
+    printf("  %-20s (%2zu tests) - %s [%s]\n", suite->name, test_count, suite->full_name, category_str);
 
     if (suite->category == TEST_CATEGORY_UNIT) {
       unit_count += (int)test_count;
@@ -332,8 +334,7 @@ int main(int argc, char* argv[]) {
   if (options.suite_filter_count > 0) {
     test_printf(&options, "Filtering suites: ");
     for (int i = 0; i < options.suite_filter_count; i++) {
-      test_printf(&options, "%s%s", options.suite_filters[i],
-                  i < options.suite_filter_count - 1 ? ", " : "\n");
+      test_printf(&options, "%s%s", options.suite_filters[i], i < options.suite_filter_count - 1 ? ", " : "\n");
     }
   }
   test_printf(&options, "\n");
@@ -357,14 +358,12 @@ int main(int argc, char* argv[]) {
     test_printf(&options, "Running suite: %s (%zu tests)\n", suite->full_name, test_count);
 
     // Use _cmocka_run_group_tests directly with explicit count to avoid sizeof() macro issue
-    int failures =
-      _cmocka_run_group_tests(suite->name, tests, test_count, suite->setup, suite->teardown);
+    int failures = _cmocka_run_group_tests(suite->name, tests, test_count, suite->setup, suite->teardown);
     total_failures += failures;
     total_tests_run += (int)test_count;
     suites_run++;
 
-    test_printf(&options, "Suite %s: %zu passed, %d failed\n\n", suite->name,
-                test_count - (size_t)failures, failures);
+    test_printf(&options, "Suite %s: %zu passed, %d failed\n\n", suite->name, test_count - (size_t)failures, failures);
   }
 
   clock_t end_time = clock();
@@ -386,6 +385,10 @@ int main(int argc, char* argv[]) {
   // Force exit immediately after tests complete to avoid CMocka exit(255)
   fflush(stdout);
   fflush(stderr);
+
+#ifdef ENABLE_GCOV_FLUSH
+  __gcov_dump();
+#endif
 
   if (total_failures == 0) {
     _exit(0);

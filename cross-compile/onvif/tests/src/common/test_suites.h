@@ -26,9 +26,9 @@ typedef enum {
  * Describes a test suite with its name, category, tests, and optional setup/teardown functions.
  */
 typedef struct {
-  const char* name;         /**< Suite name (e.g., "ptz", "media", "networking") */
-  const char* full_name;    /**< Full descriptive name for display */
-  test_category_t category; /**< Test category (unit or integration) */
+  const char* name;                                     /**< Suite name (e.g., "ptz", "media", "networking") */
+  const char* full_name;                                /**< Full descriptive name for display */
+  test_category_t category;                             /**< Test category (unit or integration) */
   const struct CMUnitTest* (*get_tests)(size_t* count); /**< Function to retrieve test array */
   int (*setup)(void** state);                           /**< Optional suite setup function */
   int (*teardown)(void** state);                        /**< Optional suite teardown function */
@@ -67,6 +67,7 @@ const struct CMUnitTest* get_ptz_unit_tests(size_t* count);
 const struct CMUnitTest* get_media_utils_unit_tests(size_t* count);
 const struct CMUnitTest* get_media_callbacks_unit_tests(size_t* count);
 const struct CMUnitTest* get_imaging_callbacks_unit_tests(size_t* count);
+const struct CMUnitTest* get_imaging_service_unit_tests(size_t* count);
 
 // Integration test suite exports
 const struct CMUnitTest* get_ptz_integration_tests(size_t* count);
@@ -74,6 +75,11 @@ const struct CMUnitTest* get_media_integration_tests(size_t* count);
 const struct CMUnitTest* get_device_integration_tests(size_t* count);
 const struct CMUnitTest* get_imaging_integration_tests(size_t* count);
 const struct CMUnitTest* get_soap_error_integration_tests(size_t* count);
+const struct CMUnitTest* get_http_auth_integration_tests(size_t* count);
+
+// Polish phase test suite exports (T104-T106)
+const struct CMUnitTest* get_config_performance_integration_tests(size_t* count);
+const struct CMUnitTest* get_config_security_integration_tests(size_t* count);
 
 // Setup/teardown function declarations for integration tests
 int ptz_service_setup(void** state);

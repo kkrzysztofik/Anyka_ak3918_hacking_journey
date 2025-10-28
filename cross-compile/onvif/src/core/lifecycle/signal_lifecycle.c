@@ -23,6 +23,7 @@
 #include "core/config/config.h"
 #include "core/lifecycle/video_lifecycle.h"
 #include "platform/platform.h"
+#include "utils/error/error_handling.h"
 
 /* Define SA_RESTART if not available */
 #ifndef SA_RESTART
@@ -41,24 +42,28 @@ static volatile int g_signal_running = 1; // NOLINT
  * This function redirects stdin to /dev/null to prevent any console input
  * from being processed, while still allowing signals (Ctrl+C, Ctrl+D) to work.
  *
- * @return 0 on success, -1 on failure
+ * @return ONVIF_SUCCESS on success, ONVIF_ERROR on failure
  */
+/* ============================================================================
+ * INTERNAL HELPERS - Console Management
+ * ============================================================================ */
+
 static int block_console_input(void) {
   int null_fd = open("/dev/null", O_RDONLY);
   if (null_fd == -1) {
     platform_log_error("Failed to open /dev/null: %s\n", strerror(errno));
-    return -1;
+    return ONVIF_ERROR_IO;
   }
 
   if (dup2(null_fd, STDIN_FILENO) == -1) {
     platform_log_error("Failed to redirect stdin to /dev/null: %s\n", strerror(errno));
     close(null_fd);
-    return -1;
+    return ONVIF_ERROR_IO;
   }
 
   close(null_fd);
   platform_log_info("Console input blocked - stdin redirected to /dev/null\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 /* ---------------------------- Signal Handler ------------------------- */
@@ -118,13 +123,17 @@ static bool check_eof_condition(void) {
 
 /* ---------------------------- Public Interface ------------------------- */
 
+/* ============================================================================
+ * PUBLIC API - Signal Handler Registration
+ * ============================================================================ */
+
 int signal_lifecycle_register_handlers(void) {
   platform_log_info("Registering signal handlers...\n");
 
   // Block all console input except signals
-  if (block_console_input() != 0) {
+  if (block_console_input() != ONVIF_SUCCESS) {
     platform_log_error("Failed to block console input\n");
-    return -1;
+    return ONVIF_ERROR_IO;
   }
 
   struct sigaction signal_action;
@@ -134,34 +143,39 @@ int signal_lifecycle_register_handlers(void) {
 
   if (sigaction(SIGINT, &signal_action, NULL) != 0) {
     platform_log_error("Failed to register SIGINT handler\n");
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
   if (sigaction(SIGTERM, &signal_action, NULL) != 0) {
     platform_log_error("Failed to register SIGTERM handler\n");
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
   if (sigaction(SIGHUP, &signal_action, NULL) != 0) {
     platform_log_error("Failed to register SIGHUP handler\n");
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
 
   /* Ignore SIGPIPE to prevent crashes on broken pipes */
   signal_action.sa_handler = SIG_IGN;
   if (sigaction(SIGPIPE, &signal_action, NULL) != 0) {
     platform_log_error("Failed to register SIGPIPE handler\n");
-    return -1;
+    return ONVIF_ERROR_INITIALIZATION;
   }
 
   platform_log_info("Signal handlers registered successfully\n");
   platform_log_info("Console input blocked - only signals (Ctrl+C, Ctrl+D) are processed\n");
-  return 0;
+  return ONVIF_SUCCESS;
 }
 
 bool signal_lifecycle_should_continue(void) {
   return g_signal_running;
 }
 
+/* ============================================================================
+ * PUBLIC API - Daemon Loop
+ * ============================================================================ */
+
 void signal_lifecycle_run_daemon_loop(const struct application_config* cfg) {
+  (void)cfg; // Reserved for future configuration use
   platform_log_info("ONVIF daemon running... (Press Ctrl+C to stop)\n");
 
   while (g_signal_running) {

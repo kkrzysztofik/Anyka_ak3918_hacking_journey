@@ -17,10 +17,10 @@
 
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
 #include "networking/http/http_parser.h"
 #include "platform/platform.h"
 #include "platform/platform_common.h"
-#include "protocol/gsoap/onvif_gsoap_core.h"
 #include "protocol/gsoap/onvif_gsoap_response.h"
 #include "protocol/response/onvif_service_handler.h"
 #include "services/common/onvif_types.h"
@@ -28,6 +28,10 @@
 #include "utils/error/error_handling.h"
 #include "utils/memory/memory_manager.h"
 #include "utils/network/network_utils.h"
+
+/* ============================================================================
+ * Global State - Snapshot Service
+ * ============================================================================ */
 
 /* Snapshot service state */
 static bool g_snapshot_initialized = false;                          // NOLINT
@@ -39,9 +43,17 @@ static pthread_mutex_t g_snapshot_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 static onvif_service_handler_instance_t g_snapshot_handler; // NOLINT
 static int g_handler_initialized = 0;                       // NOLINT
 
-/* Default snapshot resolution */
+/* Default snapshot resolution fallbacks */
 #define DEFAULT_SNAPSHOT_WIDTH  640
 #define DEFAULT_SNAPSHOT_HEIGHT 480
+
+/* Snapshot timeout constants */
+#define SNAPSHOT_CAPTURE_TIMEOUT_MS  5000 /* Snapshot capture timeout in milliseconds (5 seconds) */
+#define SNAPSHOT_URI_TIMEOUT_SECONDS 60   /* Snapshot URI validity timeout in seconds (1 minute) */
+
+/* ============================================================================
+ * PUBLIC API - Snapshot Lifecycle
+ * ============================================================================ */
 
 int onvif_snapshot_init(void) {
   if (g_snapshot_initialized) {
@@ -50,6 +62,19 @@ int onvif_snapshot_init(void) {
 
   platform_log_info("Initializing ONVIF Snapshot service\n");
 
+  // Get configuration from unified config system
+  const struct application_config* config = config_runtime_snapshot();
+  int snapshot_width = DEFAULT_SNAPSHOT_WIDTH;   // fallback default
+  int snapshot_height = DEFAULT_SNAPSHOT_HEIGHT; // fallback default
+
+  if (config) {
+    snapshot_width = config->snapshot.width;
+    snapshot_height = config->snapshot.height;
+    platform_log_info("Using snapshot resolution from config: %dx%d\n", snapshot_width, snapshot_height);
+  } else {
+    platform_log_warning("No snapshot config available, using defaults: %dx%d\n", snapshot_width, snapshot_height);
+  }
+
   // Open video input for snapshots
   platform_result_t result = platform_vi_open(&g_vi_handle);
   if (result != PLATFORM_SUCCESS) {
@@ -57,9 +82,8 @@ int onvif_snapshot_init(void) {
     return ONVIF_ERROR;
   }
 
-  // Initialize snapshot capture
-  result = platform_snapshot_init(&g_snapshot_handle, g_vi_handle, DEFAULT_SNAPSHOT_WIDTH,
-                                  DEFAULT_SNAPSHOT_HEIGHT);
+  // Initialize snapshot capture with configured resolution
+  result = platform_snapshot_init(&g_snapshot_handle, g_vi_handle, snapshot_width, snapshot_height);
   if (result != PLATFORM_SUCCESS) {
     platform_log_error("Failed to initialize snapshot capture\n");
     platform_vi_close(g_vi_handle);
@@ -68,7 +92,7 @@ int onvif_snapshot_init(void) {
   }
 
   g_snapshot_initialized = true;
-  platform_log_info("ONVIF Snapshot service initialized successfully\n");
+  platform_log_info("ONVIF Snapshot service initialized successfully with %dx%d\n", snapshot_width, snapshot_height);
   return ONVIF_SUCCESS;
 }
 
@@ -96,6 +120,10 @@ void onvif_snapshot_cleanup(void) {
   pthread_mutex_unlock(&g_snapshot_mutex);
 }
 
+/* ============================================================================
+ * PUBLIC API - Snapshot Capture Operations
+ * ============================================================================ */
+
 int onvif_snapshot_capture(const snapshot_dimensions_t* dimensions, uint8_t** data, size_t* size) {
   if (!g_snapshot_initialized || !dimensions || !data || !size) {
     return ONVIF_ERROR_NULL;
@@ -103,17 +131,14 @@ int onvif_snapshot_capture(const snapshot_dimensions_t* dimensions, uint8_t** da
 
   // Validate dimensions
   if (dimensions->width <= 0 || dimensions->height <= 0) {
-    platform_log_error("Invalid snapshot dimensions: %dx%d\n", dimensions->width,
-                       dimensions->height);
+    platform_log_error("Invalid snapshot dimensions: %dx%d\n", dimensions->width, dimensions->height);
     return ONVIF_ERROR_INVALID;
   }
 
   // Check if dimensions match the configured snapshot resolution
-  if (dimensions->width != DEFAULT_SNAPSHOT_WIDTH ||
-      dimensions->height != DEFAULT_SNAPSHOT_HEIGHT) {
-    platform_log_warning("Requested snapshot dimensions %dx%d differ from configured %dx%d\n",
-                         dimensions->width, dimensions->height, DEFAULT_SNAPSHOT_WIDTH,
-                         DEFAULT_SNAPSHOT_HEIGHT);
+  if (dimensions->width != DEFAULT_SNAPSHOT_WIDTH || dimensions->height != DEFAULT_SNAPSHOT_HEIGHT) {
+    platform_log_warning("Requested snapshot dimensions %dx%d differ from configured %dx%d\n", dimensions->width, dimensions->height,
+                         DEFAULT_SNAPSHOT_WIDTH, DEFAULT_SNAPSHOT_HEIGHT);
     // Note: For now, we capture at the configured resolution
     // TODO: Implement dynamic resolution reconfiguration if needed
   }
@@ -121,7 +146,7 @@ int onvif_snapshot_capture(const snapshot_dimensions_t* dimensions, uint8_t** da
   pthread_mutex_lock(&g_snapshot_mutex);
 
   platform_snapshot_t snapshot;
-  platform_result_t result = platform_snapshot_capture(g_snapshot_handle, &snapshot, 5000);
+  platform_result_t result = platform_snapshot_capture(g_snapshot_handle, &snapshot, SNAPSHOT_CAPTURE_TIMEOUT_MS);
 
   if (result != PLATFORM_SUCCESS) {
     platform_log_error("Failed to capture snapshot\n");
@@ -170,10 +195,14 @@ int onvif_snapshot_get_uri(const char* profile_token, struct stream_uri* uri) {
   build_device_url("http", ONVIF_SNAPSHOT_PORT_DEFAULT, SNAPSHOT_PATH, uri->uri, sizeof(uri->uri));
   uri->invalid_after_connect = 0;
   uri->invalid_after_reboot = 0;
-  uri->timeout = 60;
+  uri->timeout = SNAPSHOT_URI_TIMEOUT_SECONDS;
 
   return ONVIF_SUCCESS;
 }
+
+/* ============================================================================
+ * Service Handler Integration
+ * ============================================================================ */
 
 /* Service handler action implementations */
 // NOTE: GetSnapshotUri has been removed - it belongs in the imaging service
@@ -190,15 +219,14 @@ int onvif_snapshot_service_init(config_manager_t* config) {
     return ONVIF_SUCCESS;
   }
 
-  service_handler_config_t handler_config = {
-    .service_type = ONVIF_SERVICE_IMAGING, // Snapshot is part of Imaging service
-    .service_name = "Snapshot",
-    .config = config,
-    .enable_validation = 1,
-    .enable_logging = 1};
+  service_handler_config_t handler_config = {.service_type = ONVIF_SERVICE_IMAGING, // Snapshot is part of Imaging service
+                                             .service_name = "Snapshot",
+                                             .config = config,
+                                             .enable_validation = 1,
+                                             .enable_logging = 1};
 
-  int result = onvif_service_handler_init(&g_snapshot_handler, &handler_config, snapshot_actions,
-                                          sizeof(snapshot_actions) / sizeof(snapshot_actions[0]));
+  int result =
+    onvif_service_handler_init(&g_snapshot_handler, &handler_config, snapshot_actions, sizeof(snapshot_actions) / sizeof(snapshot_actions[0]));
 
   if (result == ONVIF_SUCCESS) {
     g_handler_initialized = 1;
@@ -217,8 +245,7 @@ void onvif_snapshot_service_cleanup(void) {
   }
 }
 
-int onvif_snapshot_handle_request(const char* action_name, const http_request_t* request,
-                                  http_response_t* response) {
+int onvif_snapshot_handle_request(const char* action_name, const http_request_t* request, http_response_t* response) {
   if (!g_handler_initialized) {
     return ONVIF_ERROR;
   }

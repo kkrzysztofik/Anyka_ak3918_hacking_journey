@@ -172,8 +172,7 @@ int ptz_goto_preset_response_callback(struct soap* soap, void* user_data);
  * @param count Number of nodes in array
  * @return 0 on success, error code on failure
  */
-int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx,
-                                            const struct ptz_node* nodes, int count);
+int onvif_gsoap_generate_get_nodes_response(onvif_gsoap_context_t* ctx, const struct ptz_node* nodes, int count);
 
 /**
  * @brief Generate PTZ AbsoluteMove response
@@ -189,8 +188,7 @@ int onvif_gsoap_generate_absolute_move_response(onvif_gsoap_context_t* ctx);
  * @param count Number of presets in array
  * @return 0 on success, error code on failure
  */
-int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
-                                              const struct ptz_preset* presets, int count);
+int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx, const struct ptz_preset* presets, int count);
 
 /**
  * @brief Generate PTZ SetPreset response
@@ -199,6 +197,8 @@ int onvif_gsoap_generate_get_presets_response(onvif_gsoap_context_t* ctx,
  * @return 0 on success, error code on failure
  */
 int onvif_gsoap_generate_set_preset_response(onvif_gsoap_context_t* ctx, const char* preset_token);
+int onvif_gsoap_generate_remove_preset_response(onvif_gsoap_context_t* ctx);
+int ptz_remove_preset_response_callback(struct soap* soap, void* user_data);
 
 /**
  * @brief Generate PTZ GotoPreset response

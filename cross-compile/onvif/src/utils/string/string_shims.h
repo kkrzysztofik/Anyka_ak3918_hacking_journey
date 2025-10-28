@@ -5,6 +5,8 @@
  * @date 2025
  */
 
+// NOLINTBEGIN - Fallback implementations for missing standard library functions
+
 #ifndef ONVIF_STRING_SHIMS_H
 #define ONVIF_STRING_SHIMS_H
 
@@ -64,5 +66,7 @@ int memory_safe_vsnprintf(char* str, size_t size, const char* format, va_list ar
 #ifdef __cplusplus
 }
 #endif
+
+// NOLINTEND
 
 #endif /* ONVIF_STRING_SHIMS_H */

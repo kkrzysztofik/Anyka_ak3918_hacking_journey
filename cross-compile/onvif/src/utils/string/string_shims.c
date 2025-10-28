@@ -5,6 +5,8 @@
  * @date 2025
  */
 
+// NOLINTBEGIN - Fallback implementations for missing standard library functions
+
 #include "string_shims.h"
 
 #include <ctype.h>
@@ -12,12 +14,17 @@
 #include <stdio.h>
 #include <string.h>
 
+/* ============================================================================
+ * Fallback Implementations - Standard String Functions
+ * ============================================================================ */
+
 /* Fallback implementation for missing strcasecmp function */
 #ifndef strcasecmp
 int strcasecmp(const char* s1, const char* s2) {
   if (!s1 || !s2) {
-    if (s1 == s2)
+    if (s1 == s2) {
       return 0;
+    }
     return s1 ? 1 : -1;
   }
 
@@ -85,6 +92,10 @@ size_t strnlen(const char* s, size_t maxlen) {
 }
 #endif
 
+/* ============================================================================
+ * PUBLIC API - String Utility Functions
+ * ============================================================================ */
+
 /* Trim leading and trailing whitespace from a string */
 void trim_whitespace(char* s) {
   if (!s || *s == '\0') {
@@ -144,3 +155,5 @@ int memory_safe_vsnprintf(char* str, size_t size, const char* format, va_list ar
   // (excluding the null terminator)
   return result;
 }
+
+// NOLINTEND

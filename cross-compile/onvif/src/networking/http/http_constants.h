@@ -79,6 +79,18 @@
 #define HTTP_STATUS_INTERNAL_SERVER_ERROR 500
 
 /* ============================================================================
+ * HTTP Status Code Ranges
+ * ============================================================================
+ */
+
+/** @brief HTTP status code range constants */
+#define HTTP_STATUS_SUCCESS_MIN      200
+#define HTTP_STATUS_SUCCESS_MAX      299
+#define HTTP_STATUS_CLIENT_ERROR_MIN 400
+#define HTTP_STATUS_CLIENT_ERROR_MAX 499
+#define HTTP_STATUS_SERVER_ERROR_MIN 500
+
+/* ============================================================================
  * SOAP/XML Parsing Constants
  * ============================================================================
  */
@@ -97,5 +109,19 @@
 
 /** @brief Length of "</Body>" tag */
 #define SOAP_BODY_END_TAG_LEN 7
+
+/* ============================================================================
+ * HTTP Request Field Sizes
+ * ============================================================================
+ */
+
+/** @brief Maximum size for HTTP method string (GET, POST, PUT, DELETE, etc.) */
+#define HTTP_METHOD_SIZE 16
+
+/** @brief Maximum size for HTTP request path/URI */
+#define HTTP_PATH_SIZE 256
+
+/** @brief Maximum size for HTTP version string (HTTP/1.1, HTTP/1.0) */
+#define HTTP_VERSION_SIZE 16
 
 #endif /* HTTP_CONSTANTS_H */

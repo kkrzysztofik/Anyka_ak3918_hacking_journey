@@ -11,13 +11,7 @@
 #include <stddef.h>
 
 /* ONVIF service types */
-typedef enum {
-  ONVIF_SERVICE_DEVICE,
-  ONVIF_SERVICE_MEDIA,
-  ONVIF_SERVICE_PTZ,
-  ONVIF_SERVICE_IMAGING,
-  ONVIF_SERVICE_SNAPSHOT
-} onvif_service_type_t;
+typedef enum { ONVIF_SERVICE_DEVICE, ONVIF_SERVICE_MEDIA, ONVIF_SERVICE_PTZ, ONVIF_SERVICE_IMAGING, ONVIF_SERVICE_SNAPSHOT } onvif_service_type_t;
 
 /* ONVIF action types are now handled as string names directly */
 
