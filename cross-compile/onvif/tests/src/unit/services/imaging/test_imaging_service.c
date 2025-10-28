@@ -13,10 +13,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "/home/kmk/anyka-dev/cross-compile/onvif/src/core/config/config.h"
-#include "/home/kmk/anyka-dev/cross-compile/onvif/src/platform/platform.h"
-#include "/home/kmk/anyka-dev/cross-compile/onvif/src/platform/platform_common.h"
-#include "/home/kmk/anyka-dev/cross-compile/onvif/src/services/common/service_dispatcher.h"
+#include "core/config/config.h"
+#include "platform/platform.h"
+#include "platform/platform_common.h"
+#include "services/common/service_dispatcher.h"
 #include "cmocka_wrapper.h"
 #include "common/test_helpers.h"
 #include "core/config/config_runtime.h"
