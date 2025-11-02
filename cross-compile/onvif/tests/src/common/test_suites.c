@@ -9,8 +9,10 @@
 
 #include <stddef.h>
 
+#include "unit/core/config/test_config_path_resolution.h"
 #include "unit/core/config/test_config_runtime.h"
 #include "unit/core/config/test_config_storage.h"
+#include "unit/core/config/test_user_persistence.h"
 #include "unit/networking/test_http_server_auth.h"
 #include "unit/utils/test_hash_utils.h"
 #include "utils/test_gsoap_utils.h"
@@ -20,6 +22,9 @@ extern const struct CMUnitTest* get_snapshot_integration_tests(size_t* count);
 
 // Forward declarations for T087 (Network layer integration tests)
 extern const struct CMUnitTest* get_network_integration_tests(size_t* count);
+
+// Forward declarations for config path resolution tests
+extern const struct CMUnitTest* get_config_path_resolution_unit_tests(size_t* count);
 
 /**
  * @brief Global test suite registry
@@ -60,10 +65,24 @@ const test_suite_t g_test_suites[] = {
    .setup = NULL,
    .teardown = NULL},
 
+  {.name = "user-persistence",
+   .full_name = "User Credentials Persistence",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_user_persistence_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
   {.name = "config-storage",
    .full_name = "Configuration Storage Layer",
    .category = TEST_CATEGORY_UNIT,
    .get_tests = get_config_storage_unit_tests,
+   .setup = NULL,
+   .teardown = NULL},
+
+  {.name = "config-path-resolution",
+   .full_name = "Configuration Path Resolution",
+   .category = TEST_CATEGORY_UNIT,
+   .get_tests = get_config_path_resolution_unit_tests,
    .setup = NULL,
    .teardown = NULL},
 

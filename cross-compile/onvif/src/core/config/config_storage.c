@@ -11,6 +11,7 @@
 #include "core/config/config_storage.h"
 
 #include <errno.h>
+#include <libgen.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,7 @@
 #include "core/config/config.h"
 #include "core/config/config_runtime.h"
 #include "platform/platform.h"
+#include "platform/platform_common.h"
 #include "utils/error/error_handling.h"
 #include "utils/error/error_translation.h"
 
@@ -59,6 +61,9 @@ static int config_storage_append_key_value_string(char* buffer, size_t buffer_si
 static int config_storage_append_key_value_float(char* buffer, size_t buffer_size, size_t* offset, const char* key, float value);
 static int config_storage_serialize_to_ini(char* buffer, size_t buffer_size);
 
+/* Forward declaration for path resolution */
+static int config_storage_resolve_config_path(const char* config_filename, char* resolved_path, size_t buffer_size);
+
 /* ============================================================================
  * PUBLIC API - File Operations
  * ============================================================================ */
@@ -70,21 +75,34 @@ static int config_storage_serialize_to_ini(char* buffer, size_t buffer_size);
  * using the schema-validated setters. This eliminates dependency on legacy config.c.
  */
 int config_storage_load(const char* path, config_manager_t* manager) {
+  char resolved_path[CONFIG_MAX_LINE_LENGTH];
   int result = ONVIF_ERROR;
+  struct stat file_stat;
 
   if (path == NULL) {
     return ONVIF_ERROR_INVALID_PARAMETER;
   }
 
-  /* Check if file exists */
-  if (access(path, F_OK) != 0) {
-    config_storage_log_error("load", path, errno);
+  /* Log start of config loading */
+  platform_log_info("[CONFIG_STORAGE] Loading configuration from: %s\n", path);
+
+  /* Resolve path relative to executable directory */
+  (void)config_storage_resolve_config_path(path, resolved_path, sizeof(resolved_path));
+
+  /* Check if file exists (use resolved_path instead of path) */
+  if (access(resolved_path, F_OK) != 0) {
+    config_storage_log_error("load", resolved_path, errno);
     return ONVIF_ERROR_NOT_FOUND;
   }
 
+  /* Get file size for logging */
+  if (stat(resolved_path, &file_stat) == 0) {
+    platform_log_info("[CONFIG_STORAGE] Config file found, size: %ld bytes\n", (long)file_stat.st_size);
+  }
+
   /* Validate file size */
-  if (config_storage_check_file_size(path) != ONVIF_SUCCESS) {
-    config_storage_log_error("load", path, ONVIF_ERROR_INVALID);
+  if (config_storage_check_file_size(resolved_path) != ONVIF_SUCCESS) {
+    config_storage_log_error("load", resolved_path, ONVIF_ERROR_INVALID);
     return ONVIF_ERROR_INVALID;
   }
 
@@ -97,10 +115,13 @@ int config_storage_load(const char* path, config_manager_t* manager) {
     return ONVIF_ERROR_NOT_INITIALIZED;
   }
 
+  /* Log start of parsing */
+  platform_log_info("[CONFIG_STORAGE] Parsing config file...\n");
+
   /* Parse INI file and load values into runtime configuration */
-  result = config_storage_parse_ini(path);
+  result = config_storage_parse_ini(resolved_path);
   if (result != ONVIF_SUCCESS) {
-    config_storage_log_error("parse_ini", path, result);
+    config_storage_log_error("parse_ini", resolved_path, result);
     return result;
   }
 
@@ -122,12 +143,16 @@ int config_storage_load(const char* path, config_manager_t* manager) {
  * @return ONVIF_SUCCESS on success, error code otherwise
  */
 int config_storage_save(const char* path, const config_manager_t* manager) {
+  char resolved_path[CONFIG_MAX_LINE_LENGTH];
   char* buffer = NULL;
   int result = ONVIF_SUCCESS;
 
   if (path == NULL) {
     return ONVIF_ERROR_INVALID_PARAMETER;
   }
+
+  /* Resolve path relative to executable directory */
+  (void)config_storage_resolve_config_path(path, resolved_path, sizeof(resolved_path));
 
   (void)manager; /* Unused - maintained for interface compatibility */
 
@@ -155,7 +180,7 @@ int config_storage_save(const char* path, const config_manager_t* manager) {
 
   /* Write to file atomically */
   size_t buffer_len = strlen(buffer);
-  result = config_storage_atomic_write(path, buffer, buffer_len);
+  result = config_storage_atomic_write(resolved_path, buffer, buffer_len);
   if (result != ONVIF_SUCCESS) {
     platform_log_error("[CONFIG_STORAGE] Failed to write configuration file\n");
     free(buffer);
@@ -163,7 +188,7 @@ int config_storage_save(const char* path, const config_manager_t* manager) {
   }
 
   free(buffer);
-  platform_log_info("[CONFIG_STORAGE] Configuration saved successfully to %s\n", path);
+  platform_log_info("[CONFIG_STORAGE] Configuration saved successfully to %s\n", resolved_path);
   return ONVIF_SUCCESS;
 }
 
@@ -367,6 +392,83 @@ void config_storage_log_error(const char* operation, const char* path, int error
  * PRIVATE HELPERS - File Operations
  * ============================================================================ */
 
+/**
+ * @brief Resolve config file path relative to executable directory
+ *
+ * Uses platform_get_executable_path() to determine the executable's location
+ * and constructs the config file path in the same directory. Falls back to
+ * using the config_filename as-is if path resolution fails.
+ *
+ * @param[in] config_filename Name of config file (e.g., "config.ini")
+ * @param[out] resolved_path Buffer to store the resolved absolute path
+ * @param[in] buffer_size Size of the resolved_path buffer
+ * @return ONVIF_SUCCESS on successful resolution, error code on fallback
+ */
+static int config_storage_resolve_config_path(const char* config_filename, char* resolved_path, size_t buffer_size) {
+  char exe_path[CONFIG_MAX_LINE_LENGTH];
+  char exe_dir[CONFIG_MAX_LINE_LENGTH];
+  char* dir_result = NULL;
+  int written = 0;
+  platform_result_t platform_result = PLATFORM_ERROR;
+
+  /* Validate parameters */
+  if (config_filename == NULL || resolved_path == NULL || buffer_size == 0) {
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
+
+  /* If path is absolute, use it directly */
+  if (config_filename[0] == '/') {
+    strncpy(resolved_path, config_filename, buffer_size - 1);
+    resolved_path[buffer_size - 1] = '\0';
+    return ONVIF_SUCCESS;
+  }
+
+  /* Get executable path using platform abstraction */
+  platform_result = platform_get_executable_path(exe_path, sizeof(exe_path));
+
+  if (platform_result != PLATFORM_SUCCESS) {
+    /* Fallback: use config_filename as-is (current working directory) */
+    platform_log_warning("[CONFIG_STORAGE] Cannot resolve executable path, "
+                         "using current directory\n");
+    strncpy(resolved_path, config_filename, buffer_size - 1);
+    resolved_path[buffer_size - 1] = '\0';
+    return ONVIF_ERROR; /* Indicate fallback was used */
+  }
+
+  /* Extract directory from executable path */
+  strncpy(exe_dir, exe_path, sizeof(exe_dir) - 1);
+  exe_dir[sizeof(exe_dir) - 1] = '\0';
+  dir_result = dirname(exe_dir);
+
+  if (dir_result == NULL) {
+    /* Fallback if dirname fails */
+    platform_log_warning("[CONFIG_STORAGE] Failed to extract directory from path\n");
+    strncpy(resolved_path, config_filename, buffer_size - 1);
+    resolved_path[buffer_size - 1] = '\0';
+    return ONVIF_ERROR;
+  }
+
+  /* Strip ./ prefix from config_filename if present */
+  const char* clean_filename = config_filename;
+  if (config_filename[0] == '.' && config_filename[1] == '/') {
+    clean_filename = config_filename + 2; /* Skip "./" prefix */
+  }
+
+  /* Construct config file path in executable directory */
+  written = snprintf(resolved_path, buffer_size, "%s/%s", dir_result, clean_filename);
+
+  if (written < 0 || (size_t)written >= buffer_size) {
+    /* Buffer too small - fallback */
+    platform_log_error("[CONFIG_STORAGE] Config path buffer too small\n");
+    strncpy(resolved_path, config_filename, buffer_size - 1);
+    resolved_path[buffer_size - 1] = '\0';
+    return ONVIF_ERROR_BUFFER_TOO_SMALL;
+  }
+
+  platform_log_debug("[CONFIG_STORAGE] Resolved config path: %s\n", resolved_path);
+  return ONVIF_SUCCESS;
+}
+
 static int config_storage_check_file_size(const char* path) {
   struct stat file_stat;
 
@@ -503,6 +605,30 @@ static config_section_t config_storage_parse_section_name(const char* section_na
   if (strcmp(section_name, "snapshot") == 0) {
     return CONFIG_SECTION_SNAPSHOT;
   }
+  if (strcmp(section_name, "user_1") == 0) {
+    return CONFIG_SECTION_USER_1;
+  }
+  if (strcmp(section_name, "user_2") == 0) {
+    return CONFIG_SECTION_USER_2;
+  }
+  if (strcmp(section_name, "user_3") == 0) {
+    return CONFIG_SECTION_USER_3;
+  }
+  if (strcmp(section_name, "user_4") == 0) {
+    return CONFIG_SECTION_USER_4;
+  }
+  if (strcmp(section_name, "user_5") == 0) {
+    return CONFIG_SECTION_USER_5;
+  }
+  if (strcmp(section_name, "user_6") == 0) {
+    return CONFIG_SECTION_USER_6;
+  }
+  if (strcmp(section_name, "user_7") == 0) {
+    return CONFIG_SECTION_USER_7;
+  }
+  if (strcmp(section_name, "user_8") == 0) {
+    return CONFIG_SECTION_USER_8;
+  }
 
   return CONFIG_SECTION_ONVIF; /* Default to ONVIF section */
 }
@@ -538,14 +664,18 @@ static int config_storage_parse_key_value(const char* trimmed, const char* secti
   if (*endptr == '\0' && endptr != value) {
     /* Valid integer */
     result = config_runtime_set_int(current_section, key, (int)int_value);
-    if (result != ONVIF_SUCCESS && result != ONVIF_ERROR_NOT_FOUND) {
+    if (result == ONVIF_SUCCESS) {
+      platform_log_debug("[CONFIG_STORAGE] Loaded [%s] %s = %ld (int)\n", section_name, key, int_value);
+    } else if (result != ONVIF_ERROR_NOT_FOUND) {
       platform_log_error("[CONFIG_STORAGE] Failed to set int %s.%s=%ld (error: %d (%s)) at line %d\n", section_name, key, int_value, result,
                          onvif_error_to_string(result), line_number);
     }
   } else {
     /* Try as string */
     result = config_runtime_set_string(current_section, key, value);
-    if (result != ONVIF_SUCCESS && result != ONVIF_ERROR_NOT_FOUND) {
+    if (result == ONVIF_SUCCESS) {
+      platform_log_debug("[CONFIG_STORAGE] Loaded [%s] %s = %s (string)\n", section_name, key, value);
+    } else if (result != ONVIF_ERROR_NOT_FOUND) {
       platform_log_error("[CONFIG_STORAGE] Failed to set string %s.%s=%s (error: %d (%s)) at line %d\n", section_name, key, value, result,
                          onvif_error_to_string(result), line_number);
     }
@@ -563,6 +693,7 @@ static int config_storage_parse_ini(const char* path) {
   char section_name[CONFIG_MAX_SECTION_NAME] = "onvif";
   config_section_t current_section = CONFIG_SECTION_ONVIF;
   int line_number = 0;
+  int keys_loaded = 0;
 
   file_ptr = fopen(path, "r");
   if (file_ptr == NULL) {
@@ -593,7 +724,10 @@ static int config_storage_parse_ini(const char* path) {
       }
     }
 
-    /* Parse key=value pairs */
+    /* Parse key=value pairs - count if it's a valid key=value pair */
+    if (strchr(trimmed, '=') != NULL) {
+      keys_loaded++;
+    }
     config_storage_parse_key_value(trimmed, section_name, current_section, line_number);
   }
 
@@ -601,6 +735,8 @@ static int config_storage_parse_ini(const char* path) {
     platform_log_error("[CONFIG_STORAGE] Failed to close file\n");
     return ONVIF_ERROR_IO;
   }
+
+  platform_log_info("[CONFIG_STORAGE] Configuration loaded successfully: %d keys loaded\n", keys_loaded);
   return ONVIF_SUCCESS;
 }
 

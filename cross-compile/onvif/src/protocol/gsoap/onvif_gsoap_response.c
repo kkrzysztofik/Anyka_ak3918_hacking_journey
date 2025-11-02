@@ -16,6 +16,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "core/config/config.h"
+#include "core/config/config_runtime.h"
 #include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
 #include "utils/error/error_handling.h"
@@ -75,6 +77,35 @@ static uint64_t get_timestamp_us(void) {
   struct timespec timespec_val;
   clock_gettime(CLOCK_MONOTONIC, &timespec_val);
   return (uint64_t)timespec_val.tv_sec * SECONDS_TO_MICROSECONDS + timespec_val.tv_nsec / NANOSECONDS_TO_MICROSECONDS;
+}
+
+/**
+ * @brief Check if HTTP verbose logging is enabled in configuration
+ * @return 1 if enabled, 0 if disabled
+ * @note This function unifies the http_verbose check across http_server.c and onvif_gsoap_response.c
+ *       by checking g_http_app_config first (if available), then falling back to config_runtime_get_int
+ */
+static int http_verbose_enabled(void) {
+  int http_verbose_value = 0;
+
+  // Try to use g_http_app_config first (same as http_server.c)
+  extern const struct application_config* g_http_app_config; // NOLINT
+  if (g_http_app_config) {
+    http_verbose_value = g_http_app_config->logging.http_verbose ? 1 : 0;
+    platform_log_debug("http_verbose_enabled (gsoap): Using g_http_app_config->logging.http_verbose = %d", http_verbose_value);
+  } else {
+    // Fallback to runtime config if g_http_app_config is not available
+    platform_log_debug("http_verbose_enabled (gsoap): g_http_app_config is NULL, using config_runtime_get_int");
+    int result = config_runtime_get_int(CONFIG_SECTION_LOGGING, "http_verbose", &http_verbose_value);
+    if (result != ONVIF_SUCCESS) {
+      platform_log_debug("http_verbose_enabled (gsoap): config_runtime_get_int failed (result=%d), defaulting to 0", result);
+      http_verbose_value = 0;
+    } else {
+      platform_log_debug("http_verbose_enabled (gsoap): config_runtime_get_int returned http_verbose = %d", http_verbose_value);
+    }
+  }
+
+  return http_verbose_value;
 }
 
 /**
@@ -284,12 +315,24 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx, onvi
   // Copy the generated string to our buffer
   if (output_string) {
     size_t response_len = strlen(output_string);
-    platform_log_debug("ONVIF gSOAP: output_string length=%zu, content=%s", response_len, output_string);
+    if (http_verbose_enabled()) {
+      platform_log_debug("ONVIF gSOAP: output_string length=%zu, content=%s", response_len, output_string);
+      // Log length before setting to catch uninitialized values
+      platform_log_debug("ONVIF gSOAP: Buffer length before copy: %zu", ctx->soap.length);
+    }
     if (response_len < sizeof(ctx->soap.buf)) {
       strncpy(ctx->soap.buf, output_string, sizeof(ctx->soap.buf) - 1);
       ctx->soap.buf[sizeof(ctx->soap.buf) - 1] = '\0';
-      ctx->soap.length = response_len;
-      platform_log_debug("ONVIF gSOAP: Copied to buffer, length set to %zu", ctx->soap.length);
+      // Store response_len in local variable before assignment to catch any issues
+      size_t expected_length = response_len;
+      ctx->soap.length = expected_length;
+      if (http_verbose_enabled()) {
+        platform_log_debug("ONVIF gSOAP: Copied to buffer, response_len=%zu, length set to %zu, verifying...", expected_length, ctx->soap.length);
+        // Verify the assignment worked correctly
+        if (ctx->soap.length != expected_length) {
+          platform_log_error("ONVIF gSOAP: LENGTH MISMATCH! Expected %zu but got %zu", expected_length, ctx->soap.length);
+        }
+      }
     } else {
       set_soap_error(&ctx->soap, "Response too large for buffer");
       return ONVIF_ERROR_SERIALIZATION_FAILED;
@@ -300,10 +343,11 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx, onvi
     return ONVIF_ERROR_SERIALIZATION_FAILED;
   }
 
-  // Debug: Check buffer after generation
-  platform_log_debug("ONVIF gSOAP: Buffer after generation: ptr=%p, length=%zu", ctx->soap.buf, ctx->soap.length);
-
-  platform_log_debug("ONVIF gSOAP: Generated response with callback");
+  // Debug: Check buffer after generation (only if http_verbose is enabled)
+  if (http_verbose_enabled()) {
+    platform_log_debug("ONVIF gSOAP: Buffer after generation: ptr=%p, length=%zu", ctx->soap.buf, ctx->soap.length);
+    platform_log_debug("ONVIF gSOAP: Generated response with callback");
+  }
   return ONVIF_SUCCESS;
 }
 
@@ -436,6 +480,9 @@ static int create_temp_context_if_needed(onvif_gsoap_context_t** ctx, bool* is_t
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
+  // Explicitly ensure length is initialized to 0 (defense in depth)
+  (*ctx)->soap.length = 0;
+
   return ONVIF_SUCCESS;
 }
 
@@ -501,11 +548,21 @@ int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* 
     return ONVIF_ERROR_INVALID;
   }
 
+  // Log root cause before generating fault response to aid debugging
+  platform_log_error("ONVIF gSOAP: Generating fault response - Code: %s, Message: %s", fault_code ? fault_code : "NULL", fault_string);
+  if (fault_actor) {
+    platform_log_error("ONVIF gSOAP: Fault actor: %s", fault_actor);
+  }
+  if (fault_detail) {
+    platform_log_error("ONVIF gSOAP: Fault detail: %s", fault_detail);
+  }
+
   // Create temporary context if needed
   bool temp_ctx = false;
   onvif_gsoap_context_t* actual_ctx = ctx;
   int result = create_temp_context_if_needed(&actual_ctx, &temp_ctx);
   if (result != ONVIF_SUCCESS) {
+    platform_log_error("ONVIF gSOAP: Failed to create context for fault generation (error: %d)", result);
     return result;
   }
 
@@ -515,6 +572,9 @@ int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* 
 
   // Generate fault response
   result = onvif_gsoap_generate_response_with_callback(actual_ctx, fault_response_callback, &callback_data);
+  if (result != ONVIF_SUCCESS) {
+    platform_log_error("ONVIF gSOAP: Failed to generate fault response with callback (error: %d)", result);
+  }
   if (result == ONVIF_SUCCESS) {
     // Copy response to output buffer if provided
     result = copy_response_to_buffer(actual_ctx, output_buffer, buffer_size);

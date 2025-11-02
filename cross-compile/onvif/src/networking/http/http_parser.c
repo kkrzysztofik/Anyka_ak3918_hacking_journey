@@ -274,15 +274,19 @@ static int parse_http_headers_state(const char* buffer, size_t* pos, size_t buff
     return ONVIF_ERROR_NULL;
   }
 
-  // Parse headers
-  int result = parse_http_headers(buffer + *pos, buffer_used - *pos, &request->headers, &request->header_count);
+  // Parse headers - parse from current position to buffer_used
+  size_t header_data_len = buffer_used - *pos;
+  int result = parse_http_headers(buffer + *pos, header_data_len, &request->headers, &request->header_count);
   if (result != 0) {
     platform_log_error("Failed to parse HTTP headers\n");
     return ONVIF_ERROR_PARSE_FAILED;
   }
 
-  *header_length = buffer_used - *pos;
-  *pos = buffer_used; // Move to end of headers
+  platform_log_debug("parse_http_headers_state: Parsed %zu headers, header_length=%zu", request->header_count, *header_length);
+
+  // header_length should already be set by caller (it knows where headers end)
+  // Just update pos to end of parsed headers
+  *pos = buffer_used;
   return ONVIF_SUCCESS;
 }
 
@@ -313,15 +317,29 @@ static int parse_http_body(const char* buffer, size_t buffer_used, http_request_
     request->content_length = (size_t)parsed_length;
     request->body_length = request->content_length;
 
+    platform_log_debug("parse_http_body: Content-Length=%zu, header_length=%zu, buffer_used=%zu", request->content_length, header_length,
+                       buffer_used);
+
     // Check if we have enough data for the body
     size_t body_start = header_length;
     if (buffer_used < body_start + request->content_length) {
+      platform_log_debug("parse_http_body: Need more data - buffer_used (%zu) < body_start + content_length (%zu + %zu = %zu)", buffer_used,
+                         body_start, request->content_length, body_start + request->content_length);
       *need_more_data = 1;
       return ONVIF_SUCCESS;
     }
 
+    // Validate body pointer is within buffer bounds
+    if (body_start >= buffer_used || body_start + request->content_length > buffer_used) {
+      platform_log_error("parse_http_body: Body start (%zu) or end (%zu) outside buffer bounds (%zu)\n", body_start,
+                         body_start + request->content_length, buffer_used);
+      return ONVIF_ERROR_INVALID;
+    }
+
     request->body = (char*)buffer + body_start;
     request->body_length = request->content_length;
+
+    platform_log_debug("parse_http_body: Body parsed successfully - body=%p, body_length=%zu", (void*)request->body, request->body_length);
 
     // Validate request body content if present
     if (request->body && request->body_length > 0) {
@@ -332,6 +350,7 @@ static int parse_http_body(const char* buffer, size_t buffer_used, http_request_
     }
   } else {
     // No Content-Length header, assume no body
+    platform_log_debug("parse_http_body: No Content-Length header found, assuming no body");
     request->body = NULL;
     request->body_length = 0;
     request->content_length = 0;
@@ -647,13 +666,25 @@ int parse_http_request_state_machine(char* buffer, size_t buffer_used, http_requ
         return ONVIF_SUCCESS;
       }
 
+      // Calculate header length correctly: from start of headers to end of headers (including \r\n\r\n)
+      // header_end points to the first \r of \r\n\r\n, so we add 4 to include the separator
+      header_length = (header_end - buffer) + 4;
+      size_t header_start = pos;
+
+      platform_log_debug("parse_http_request_state_machine: Header parsing - start=%zu, end=%zu, length=%zu", header_start, header_end - buffer + 4,
+                         header_length);
+
       // Parse headers using helper function
       const char* const_line_start = line_start;
-      if (parse_http_headers_state(buffer, &pos, buffer_used, request, &const_line_start, &header_length) != 0) {
+      // Pass the end position where headers end (before body)
+      size_t headers_end_pos = header_end - buffer + 4;
+      if (parse_http_headers_state(buffer, &pos, headers_end_pos, request, &const_line_start, &header_length) != 0) {
         platform_log_error("Failed to parse headers\n");
         return ONVIF_ERROR_INVALID;
       }
 
+      // Update pos to after headers (where body starts) - this is now set correctly
+      pos = headers_end_pos;
       state = 2;
       break;
     }

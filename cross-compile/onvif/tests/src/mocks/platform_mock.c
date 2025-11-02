@@ -567,7 +567,7 @@ platform_result_t __wrap_platform_config_get_string(const char* key, char* value
   }
   return (platform_result_t)mock();
 }
-//NOLINTNEXTLINE
+// NOLINTNEXTLINE
 int __wrap_platform_config_get_int(const char* section, const char* key, int default_value) {
   check_expected_ptr(section);
   check_expected_ptr(key);
@@ -601,6 +601,23 @@ int __wrap_platform_system(const char* command) {
   check_expected_ptr(command);
   function_called();
   return (int)mock();
+}
+
+/**
+ * @brief Mock implementation of platform_get_executable_path
+ * @param path_buffer Buffer to store the executable path
+ * @param buffer_size Size of the path_buffer
+ * @return Mocked return value
+ */
+platform_result_t __wrap_platform_get_executable_path(char* path_buffer, size_t buffer_size) {
+  /* Always provide fallback behavior for this function */
+  if (path_buffer && buffer_size > 0) {
+    strncpy(path_buffer, "/usr/bin/test_executable", buffer_size - 1);
+    path_buffer[buffer_size - 1] = '\0';
+    return PLATFORM_SUCCESS;
+  }
+
+  return PLATFORM_ERROR_INVALID_PARAM;
 }
 
 /* ============================================================================

@@ -243,7 +243,8 @@ WRAP_FUNCTIONS := \
 	http_server_start \
 	http_server_stop \
 	process_connection \
-	http_validate_authentication
+	http_validate_authentication \
+	platform_get_executable_path
 
 # Generate linker wrap flags for CMocka function interception
 WRAP_FLAGS := $(addprefix -Wl$(comma)--wrap=,$(WRAP_FUNCTIONS))
@@ -275,7 +276,9 @@ UTILS_TEST_SRCS := \
 	src/unit/utils/test_logging_utils.c \
 	src/unit/utils/test_hash_utils.c \
 	src/unit/core/config/test_config_runtime.c \
-	src/unit/core/config/test_config_storage.c
+	src/unit/core/config/test_config_storage.c \
+	src/unit/core/config/test_config_path_resolution.c \
+	src/unit/core/config/test_user_persistence.c
 
 NETWORKING_TEST_SRCS := \
 	src/unit/networking/test_http_auth.c \

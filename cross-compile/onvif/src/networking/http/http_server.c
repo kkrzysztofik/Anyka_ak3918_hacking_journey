@@ -132,10 +132,24 @@ static void http_server_log_init_context(service_log_context_t* context, const c
  * @brief Check if verbose HTTP logging is enabled in configuration
  */
 static int http_verbose_enabled(void) {
-  if (!g_http_app_config) {
-    return 0;
+  int http_verbose_value = 0;
+
+  if (g_http_app_config) {
+    http_verbose_value = g_http_app_config->logging.http_verbose ? 1 : 0;
+    platform_log_debug("http_verbose_enabled: Using g_http_app_config->logging.http_verbose = %d", http_verbose_value);
+  } else {
+    // Fallback to runtime config if g_http_app_config is not available
+    platform_log_debug("http_verbose_enabled: g_http_app_config is NULL, falling back to config_runtime_get_int");
+    int result = config_runtime_get_int(CONFIG_SECTION_LOGGING, "http_verbose", &http_verbose_value);
+    if (result != ONVIF_SUCCESS) {
+      platform_log_debug("http_verbose_enabled: config_runtime_get_int failed (result=%d), defaulting to 0", result);
+      http_verbose_value = 0;
+    } else {
+      platform_log_debug("http_verbose_enabled: config_runtime_get_int returned http_verbose = %d", http_verbose_value);
+    }
   }
-  return g_http_app_config->logging.http_verbose ? 1 : 0;
+
+  return http_verbose_value;
 }
 
 /**
@@ -186,6 +200,15 @@ static void http_log_full_request(const http_request_t* request) {
       service_log_info(&log_ctx, "Body (%zu bytes):", request->body_length);
       service_log_info(&log_ctx, "%s", temp);
       free(temp);
+    }
+  } else {
+    /* Explicitly log when body is missing to aid debugging */
+    if (!request->body) {
+      service_log_info(&log_ctx, "Body: NULL (body pointer is NULL)");
+    } else if (request->body_length == 0) {
+      service_log_info(&log_ctx, "Body: Empty (body_length is 0, body pointer=%p)", (void*)request->body);
+    } else {
+      service_log_info(&log_ctx, "Body: Missing or invalid (body=%p, body_length=%zu)", (void*)request->body, request->body_length);
     }
   }
 }
@@ -317,9 +340,14 @@ static onvif_service_type_t get_service_type(const char* path) {
  * @return Operation name string, or NULL if not found
  */
 static const char* extract_operation_name(const char* body) {
+  // Check for NULL body before calling strlen() to prevent segmentation fault
+  if (!body) {
+    return NULL;
+  }
+
   size_t body_length = strlen(body);
 
-  if (!body || body_length == 0) {
+  if (body_length == 0) {
     return NULL;
   }
 
@@ -910,7 +938,11 @@ static int handle_onvif_request(const http_request_t* request, http_response_t* 
     }
   }
 
-  // Extract operation name from SOAP body
+  // Extract operation name from SOAP body - check for NULL body before calling
+  if (!request->body || request->body_length == 0) {
+    return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Request body is missing or empty, cannot extract operation name");
+  }
+
   const char* operation_name = extract_operation_name(request->body);
   if (!operation_name) {
     return http_error_log_and_return(__FUNCTION__, ONVIF_ERROR, "Failed to extract operation name from SOAP body");
@@ -922,6 +954,12 @@ static int handle_onvif_request(const http_request_t* request, http_response_t* 
 
   // Route to appropriate service handler
   int result = handle_onvif_request_by_operation(service_type, operation_name, request, response);
+
+  // Log completion of ONVIF request handling
+  service_log_context_t completion_log_ctx;
+  http_log_init_context(&completion_log_ctx, security_ctx.client_ip, "request_completion", SERVICE_LOG_INFO);
+  service_log_info(&completion_log_ctx, "ONVIF request handling completed: service=%d, operation=%s, result=%d", service_type, operation_name,
+                   result);
 
   // Add security headers to successful responses
   if (result == ONVIF_SUCCESS && response) {
@@ -1227,6 +1265,15 @@ int http_server_process_request(int client_fd) {
     return ONVIF_ERROR;
   }
 
+  // Validate that configuration is loaded
+  if (!g_http_app_config) {
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, "unknown", "config_validation", SERVICE_LOG_ERROR);
+    service_log_operation_failure(&log_ctx, "configuration check", -1, "g_http_app_config is NULL - configuration not loaded");
+    // Don't fail the request, but log the error for debugging
+    platform_log_error("http_server_process_request: g_http_app_config is NULL - http_verbose will use fallback config");
+  }
+
   // Record request start time for latency measurement
   uint64_t request_start_time = get_time_ms();
 
@@ -1264,6 +1311,20 @@ int http_server_process_request(int client_fd) {
   /* Verbose log full inbound request if enabled */
   http_log_full_request(&request);
 
+  /* If body is missing after parsing, log raw buffer for debugging */
+  if (http_verbose_enabled() && (!request.body || request.body_length == 0) && bytes_read > 0) {
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, client_ip_str, "request_debug", SERVICE_LOG_DEBUG);
+    size_t log_size = (size_t)bytes_read < 512 ? (size_t)bytes_read : 512;
+    char* log_buffer = (char*)malloc(log_size + 1);
+    if (log_buffer) {
+      memcpy(log_buffer, buffer, log_size);
+      log_buffer[log_size] = '\0';
+      service_log_debug(&log_ctx, "Raw request buffer (first %zu of %zu bytes): %s", log_size, (size_t)bytes_read, log_buffer);
+      free(log_buffer);
+    }
+  }
+
   // Handle ONVIF request
   int result = handle_onvif_request(&request, &response);
 
@@ -1284,12 +1345,20 @@ int http_server_process_request(int client_fd) {
 
   http_metrics_record_request(latency_ms, response_size, status_code);
 
+  // Log HTTP request handling completion
+  service_log_context_t end_log_ctx;
+  http_log_init_context(&end_log_ctx, client_ip_str, "request_end", SERVICE_LOG_INFO);
+  service_log_info(&end_log_ctx, "HTTP request handling completed: status=%d, latency=%llu ms, response_size=%zu bytes, result=%d", status_code,
+                   (unsigned long long)latency_ms, response_size, result);
+
   // Cleanup response
   http_response_free(&response);
 
   // Cleanup
   buffer_pool_return(&g_http_server.buffer_pool, buffer);
   close(client_fd);
+
+  platform_log_debug("http_server_process_request: Request processing finished for client %s, returning result=%d", client_ip_str, result);
 
   return result;
 }

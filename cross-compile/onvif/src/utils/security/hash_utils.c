@@ -28,8 +28,9 @@
 #define MAX_PASSWORD_LENGTH 256
 
 /* Hexadecimal conversion constants */
-#define HEX_BASE       16
-#define MAX_BYTE_VALUE 255
+#define HEX_BASE        16
+#define MAX_BYTE_VALUE  255
+#define HEX_NIBBLE_MASK 0xF
 
 int onvif_sha256_compute(const uint8_t* data, size_t len, uint8_t digest[ONVIF_SHA256_DIGEST_SIZE]) {
   if (!data || !digest) {
@@ -59,9 +60,9 @@ int onvif_sha256_to_hex(const uint8_t digest[ONVIF_SHA256_DIGEST_SIZE], char* he
   static const char hex_chars[] = "0123456789abcdef";
   /* Convert each byte to 2 hex characters */
   for (size_t i = 0; i < ONVIF_SHA256_DIGEST_SIZE; i++) {
-    uint8_t b = digest[i];
-    hex_output[i * 2] = hex_chars[(b >> 4) & 0xF];
-    hex_output[i * 2 + 1] = hex_chars[b & 0xF];
+    uint8_t byte_value = digest[i];
+    hex_output[i * 2] = hex_chars[(byte_value >> 4) & HEX_NIBBLE_MASK];
+    hex_output[i * 2 + 1] = hex_chars[byte_value & HEX_NIBBLE_MASK];
   }
   hex_output[ONVIF_SHA256_DIGEST_SIZE * 2] = '\0';
 
@@ -136,9 +137,9 @@ static int generate_salt(uint8_t salt[SALT_SIZE]) {
 static int salt_to_hex(const uint8_t salt[SALT_SIZE], char hex_output[SALT_HEX_SIZE]) {
   static const char hex_chars[] = "0123456789abcdef";
   for (int i = 0; i < SALT_SIZE; i++) {
-    uint8_t b = salt[i];
-    hex_output[i * 2] = hex_chars[(b >> 4) & 0xF];
-    hex_output[i * 2 + 1] = hex_chars[b & 0xF];
+    uint8_t byte_value = salt[i];
+    hex_output[i * 2] = hex_chars[(byte_value >> 4) & HEX_NIBBLE_MASK];
+    hex_output[i * 2 + 1] = hex_chars[byte_value & HEX_NIBBLE_MASK];
   }
   hex_output[SALT_SIZE * 2] = '\0';
   return ONVIF_SUCCESS;
