@@ -146,7 +146,11 @@ int error_handle_pattern(const error_context_t* context, error_pattern_t pattern
   // Set HTTP response for SOAP fault
   // SOAP faults should return HTTP 200 with fault in body (per SOAP 1.2 spec)
   response->status_code = HTTP_STATUS_OK;
-  response->content_type = "application/soap+xml; charset=utf-8";
+  response->content_type = memory_safe_strdup("application/soap+xml; charset=utf-8");
+  if (!response->content_type) {
+    ONVIF_FREE(soap_fault_xml);
+    return ONVIF_ERROR_MEMORY;
+  }
   response->body = soap_fault_xml;
   response->body_length = (size_t)xml_length;
 

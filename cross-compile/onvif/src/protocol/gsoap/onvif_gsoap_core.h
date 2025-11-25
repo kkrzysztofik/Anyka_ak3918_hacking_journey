@@ -70,10 +70,10 @@ typedef struct onvif_gsoap_context_s {
 
   /* Enhanced error context for debugging */
   struct {
-    int last_error_code;        /* Last error code from error_handling.h */
-    char error_message[ERROR_MESSAGE_SIZE];    /* Detailed error message */
-    const char* error_location; /* Function where error occurred */
-    int soap_error_code;        /* gSOAP-specific error code */
+    int last_error_code;                    /* Last error code from error_handling.h */
+    char error_message[ERROR_MESSAGE_SIZE]; /* Detailed error message */
+    const char* error_location;             /* Function where error occurred */
+    int soap_error_code;                    /* gSOAP-specific error code */
   } error_context;
 
   /* Optional user data */

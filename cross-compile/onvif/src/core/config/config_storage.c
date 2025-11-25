@@ -152,7 +152,18 @@ int config_storage_save(const char* path, const config_manager_t* manager) {
   }
 
   /* Resolve path relative to executable directory */
-  (void)config_storage_resolve_config_path(path, resolved_path, sizeof(resolved_path));
+  result = config_storage_resolve_config_path(path, resolved_path, sizeof(resolved_path));
+  if (result != ONVIF_SUCCESS && result != ONVIF_ERROR) {
+    /* Path resolution failed with a critical error (not just fallback) */
+    platform_log_error("[CONFIG_STORAGE] Failed to resolve config path: %s (error=%d)\n", path, result);
+    return result;
+  }
+
+  /* Validate resolved path is not empty */
+  if (resolved_path[0] == '\0') {
+    platform_log_error("[CONFIG_STORAGE] Resolved path is empty for: %s\n", path);
+    return ONVIF_ERROR_INVALID_PARAMETER;
+  }
 
   (void)manager; /* Unused - maintained for interface compatibility */
 

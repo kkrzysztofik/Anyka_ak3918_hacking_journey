@@ -36,32 +36,32 @@
 #define RTSP_MAX_REALM_LEN       128
 #define RTSP_MAX_NONCE_LEN       32
 #define RTSP_MAX_RESPONSE_LEN    64
-#define RTSP_SESSION_ID_SIZE     64  /* Maximum size for RTSP session identifier */
+#define RTSP_SESSION_ID_SIZE     64 /* Maximum size for RTSP session identifier */
 
 /* RTSP header field sizes */
-#define RTSP_HEADER_NAME_SIZE    64  /* Maximum size for RTSP header field name */
-#define RTSP_HEADER_VALUE_SIZE   256 /* Maximum size for RTSP header field value */
+#define RTSP_HEADER_NAME_SIZE  64  /* Maximum size for RTSP header field name */
+#define RTSP_HEADER_VALUE_SIZE 256 /* Maximum size for RTSP header field value */
 
 /* SDP media description field sizes */
-#define SDP_PROTOCOL_SIZE        16  /* SDP media protocol string size */
-#define SDP_ENCODING_SIZE        32  /* SDP media encoding name size */
-#define SDP_CONTROL_SIZE         64  /* SDP media control URL size */
-#define SDP_ATTRIBUTE_SIZE       256 /* SDP media attribute string size (fmtp, rtcp-fb, extmap) */
-#define SDP_MID_SIZE             32  /* SDP media identifier size */
-#define SDP_SSRC_SIZE            32  /* SDP media SSRC string size */
+#define SDP_PROTOCOL_SIZE  16  /* SDP media protocol string size */
+#define SDP_ENCODING_SIZE  32  /* SDP media encoding name size */
+#define SDP_CONTROL_SIZE   64  /* SDP media control URL size */
+#define SDP_ATTRIBUTE_SIZE 256 /* SDP media attribute string size (fmtp, rtcp-fb, extmap) */
+#define SDP_MID_SIZE       32  /* SDP media identifier size */
+#define SDP_SSRC_SIZE      32  /* SDP media SSRC string size */
 
 /* SDP session description field sizes */
-#define SDP_ORIGIN_SIZE          128 /* SDP session origin string size */
-#define SDP_SESSION_NAME_SIZE    128 /* SDP session name string size */
-#define SDP_SESSION_INFO_SIZE    256 /* SDP session information string size */
-#define SDP_URI_SIZE             256 /* SDP URI string size */
-#define SDP_EMAIL_SIZE           128 /* SDP email address string size */
-#define SDP_PHONE_SIZE           64  /* SDP phone number string size */
-#define SDP_CONNECTION_SIZE      128 /* SDP connection information string size */
-#define SDP_BANDWIDTH_SIZE       64  /* SDP bandwidth information string size */
-#define SDP_TIMEZONE_SIZE        32  /* SDP timezone string size */
-#define SDP_KEY_SIZE             64  /* SDP encryption key string size */
-#define SDP_ATTRIBUTES_SIZE      512 /* SDP session attributes string size */
+#define SDP_ORIGIN_SIZE       128 /* SDP session origin string size */
+#define SDP_SESSION_NAME_SIZE 128 /* SDP session name string size */
+#define SDP_SESSION_INFO_SIZE 256 /* SDP session information string size */
+#define SDP_URI_SIZE          256 /* SDP URI string size */
+#define SDP_EMAIL_SIZE        128 /* SDP email address string size */
+#define SDP_PHONE_SIZE        64  /* SDP phone number string size */
+#define SDP_CONNECTION_SIZE   128 /* SDP connection information string size */
+#define SDP_BANDWIDTH_SIZE    64  /* SDP bandwidth information string size */
+#define SDP_TIMEZONE_SIZE     32  /* SDP timezone string size */
+#define SDP_KEY_SIZE          64  /* SDP encryption key string size */
+#define SDP_ATTRIBUTES_SIZE   512 /* SDP session attributes string size */
 
 /* Stream configuration field sizes */
 #define RTSP_STREAM_PATH_SIZE    64  /* Maximum size for RTSP stream path */
@@ -69,46 +69,46 @@
 #define RTSP_H264_PARAM_B64_SIZE 256 /* Maximum size for H.264 parameter sets in base64 */
 
 /* H.264 NAL unit constants */
-#define H264_NAL_TYPE_MASK       0x1F /* Mask for extracting NAL unit type (5 bits) */
-#define H264_NAL_SPS             7    /* Sequence Parameter Set NAL type */
-#define H264_NAL_PPS             8    /* Picture Parameter Set NAL type */
-#define H264_START_CODE_SIZE     4    /* Size of H.264 start code (0x00 0x00 0x00 0x01) */
-#define H264_FU_INDICATOR_SIZE   1    /* Size of FU indicator byte */
-#define H264_FU_HEADER_SIZE      1    /* Size of FU header byte */
-#define H264_FU_A_TYPE           28   /* Fragmentation Unit A type */
-#define H264_FU_START_BIT        0x80 /* FU header start bit */
-#define H264_FU_END_BIT          0x40 /* FU header end bit */
-#define H264_FU_TYPE_MASK        0x1F /* FU header NAL type mask */
+#define H264_NAL_TYPE_MASK     0x1F /* Mask for extracting NAL unit type (5 bits) */
+#define H264_NAL_SPS           7    /* Sequence Parameter Set NAL type */
+#define H264_NAL_PPS           8    /* Picture Parameter Set NAL type */
+#define H264_START_CODE_SIZE   4    /* Size of H.264 start code (0x00 0x00 0x00 0x01) */
+#define H264_FU_INDICATOR_SIZE 1    /* Size of FU indicator byte */
+#define H264_FU_HEADER_SIZE    1    /* Size of FU header byte */
+#define H264_FU_A_TYPE         28   /* Fragmentation Unit A type */
+#define H264_FU_START_BIT      0x80 /* FU header start bit */
+#define H264_FU_END_BIT        0x40 /* FU header end bit */
+#define H264_FU_TYPE_MASK      0x1F /* FU header NAL type mask */
 
 /* Multistream timing constants */
-#define RTSP_FRAME_ENCODING_WAIT_MS     200   /* Wait time for first frame encoding */
-#define RTSP_TIMEOUT_CHECK_INTERVAL_S   10    /* Interval for checking session timeouts */
-#define RTSP_MAX_RETRY_DELAY_MS         100   /* Maximum retry delay for operations */
-#define RTSP_SHUTDOWN_TIMEOUT_MS        10    /* Timeout during server shutdown */
-#define RTSP_RETRY_DELAY_SHUTDOWN_MS    5     /* Retry delay during shutdown */
-#define RTSP_RETRY_DELAY_NORMAL_MS      20    /* Retry delay during normal operation */
-#define RTSP_THREAD_MUTEX_RETRY_MS      10    /* Retry delay for mutex lock failures */
-#define RTSP_THREAD_POLL_DELAY_MS       10    /* Thread polling delay to prevent busy waiting */
-#define RTSP_THREAD_POLL_DELAY_1MS      1     /* Fine-grained thread polling delay */
-#define RTSP_THREAD_POLL_ITERATIONS     10    /* Number of fine-grained polling iterations */
-#define RTSP_AUDIO_STREAM_TIMEOUT_MS    100   /* Timeout for getting audio stream */
-#define RTSP_FRAME_INTERVAL_MIN_US      5     /* Minimum frame interval in microseconds */
-#define RTSP_FRAME_INTERVAL_MAX_US      20    /* Maximum frame interval in microseconds */
-#define RTSP_STATS_UPDATE_INTERVAL_US   10000 /* Statistics update interval in microseconds */
-#define RTSP_STATS_UPDATE_INTERVAL_MS   10000 /* Statistics update interval in milliseconds */
-#define RTSP_DECIMAL_BASE               10    /* Decimal number base for conversions */
-#define RTSP_HTTP_OK                    200   /* HTTP 200 OK status code */
-#define RTSP_LISTEN_BACKLOG             10    /* TCP listen queue size */
+#define RTSP_FRAME_ENCODING_WAIT_MS   200   /* Wait time for first frame encoding */
+#define RTSP_TIMEOUT_CHECK_INTERVAL_S 10    /* Interval for checking session timeouts */
+#define RTSP_MAX_RETRY_DELAY_MS       100   /* Maximum retry delay for operations */
+#define RTSP_SHUTDOWN_TIMEOUT_MS      10    /* Timeout during server shutdown */
+#define RTSP_RETRY_DELAY_SHUTDOWN_MS  5     /* Retry delay during shutdown */
+#define RTSP_RETRY_DELAY_NORMAL_MS    20    /* Retry delay during normal operation */
+#define RTSP_THREAD_MUTEX_RETRY_MS    10    /* Retry delay for mutex lock failures */
+#define RTSP_THREAD_POLL_DELAY_MS     10    /* Thread polling delay to prevent busy waiting */
+#define RTSP_THREAD_POLL_DELAY_1MS    1     /* Fine-grained thread polling delay */
+#define RTSP_THREAD_POLL_ITERATIONS   10    /* Number of fine-grained polling iterations */
+#define RTSP_AUDIO_STREAM_TIMEOUT_MS  100   /* Timeout for getting audio stream */
+#define RTSP_FRAME_INTERVAL_MIN_US    5     /* Minimum frame interval in microseconds */
+#define RTSP_FRAME_INTERVAL_MAX_US    20    /* Maximum frame interval in microseconds */
+#define RTSP_STATS_UPDATE_INTERVAL_US 10000 /* Statistics update interval in microseconds */
+#define RTSP_STATS_UPDATE_INTERVAL_MS 10000 /* Statistics update interval in milliseconds */
+#define RTSP_DECIMAL_BASE             10    /* Decimal number base for conversions */
+#define RTSP_HTTP_OK                  200   /* HTTP 200 OK status code */
+#define RTSP_LISTEN_BACKLOG           10    /* TCP listen queue size */
 
 /* RTSP protocol string lengths */
-#define RTSP_PREFIX_LEN                 5     /* Length of "RTSP/" prefix */
-#define RTSP_VERSION_1_0_LEN            8     /* Length of "RTSP/1.0" string */
+#define RTSP_PREFIX_LEN      5 /* Length of "RTSP/" prefix */
+#define RTSP_VERSION_1_0_LEN 8 /* Length of "RTSP/1.0" string */
 
 /* Base64 encoding constants */
-#define BASE64_BITS_PER_CHAR            6     /* Number of bits per base64 character */
-#define BASE64_CHAR_MASK                0x3F  /* Mask for 6-bit base64 character value */
-#define BASE64_TRIPLE_SHIFT_HIGH        18    /* Bit shift for first base64 character */
-#define BASE64_TRIPLE_SHIFT_MID_HIGH    12    /* Bit shift for second base64 character */
+#define BASE64_BITS_PER_CHAR         6    /* Number of bits per base64 character */
+#define BASE64_CHAR_MASK             0x3F /* Mask for 6-bit base64 character value */
+#define BASE64_TRIPLE_SHIFT_HIGH     18   /* Bit shift for first base64 character */
+#define BASE64_TRIPLE_SHIFT_MID_HIGH 12   /* Bit shift for second base64 character */
 
 /* RTP transport modes */
 #define RTP_TRANSPORT_UDP 0
@@ -124,14 +124,14 @@
 #define RTP_PAYLOAD_TYPE_MASK   0x7F
 
 /* RTP header bit masks and shifts */
-#define RTP_VERSION_MASK   0xC0
-#define RTP_VERSION_SHIFT  6
-#define RTP_PADDING_MASK   0x20
-#define RTP_EXTENSION_MASK 0x10
-#define RTP_CSRC_MASK      0x0F
-#define RTP_MARKER_MASK    0x80
-#define RTP_PT_MASK        0x7F
-#define RTP_BYTE_MASK      0xFF
+#define RTP_VERSION_MASK      0xC0
+#define RTP_VERSION_SHIFT     6
+#define RTP_PADDING_MASK      0x20
+#define RTP_EXTENSION_MASK    0x10
+#define RTP_CSRC_MASK         0x0F
+#define RTP_MARKER_MASK       0x80
+#define RTP_PT_MASK           0x7F
+#define RTP_BYTE_MASK         0xFF
 #define RTP_VERSION_BITS_MASK 0x03 // Mask for 2-bit version field after shift
 
 /* Bit shift values for multi-byte fields */
@@ -144,17 +144,17 @@
 #define AUDIO_BITS_PER_SAMPLE_16 16   /* Audio bits per sample for 16-bit audio */
 
 /* RTCP constants */
-#define RTCP_HEADER_SIZE         8
-#define RTCP_VERSION             2
+#define RTCP_HEADER_SIZE          8
+#define RTCP_VERSION              2
 #define RTCP_THREAD_POLL_DELAY_MS 100 // Polling delay in RTCP thread to prevent busy waiting
-#define RTCP_PT_SR             200 // Sender Report
-#define RTCP_PT_RR             201 // Receiver Report
-#define RTCP_PT_SDES           202 // Source Description
-#define RTCP_PT_BYE            203 // Goodbye
-#define RTCP_PT_APP            204 // Application-defined
-#define RTCP_SR_PACKET_SIZE    28  // Sender Report packet size
-#define RTCP_REPORT_COUNT_MASK 0x1F
-#define RTCP_PT_MASK           0x7F
+#define RTCP_PT_SR                200 // Sender Report
+#define RTCP_PT_RR                201 // Receiver Report
+#define RTCP_PT_SDES              202 // Source Description
+#define RTCP_PT_BYE               203 // Goodbye
+#define RTCP_PT_APP               204 // Application-defined
+#define RTCP_SR_PACKET_SIZE       28  // Sender Report packet size
+#define RTCP_REPORT_COUNT_MASK    0x1F
+#define RTCP_PT_MASK              0x7F
 
 /* RTCP header construction constants */
 #define RTCP_VERSION_BYTE      0x80 // Version 2 (bits 6-7 = 10b)
@@ -171,19 +171,19 @@
 #define NTP_FRAC_SHIFT_32 32
 
 /* Authentication constants */
-#define MD5_HASH_SIZE              16  /* MD5 hash size in bytes */
-#define HEX_DIGIT_MASK             0x0F /* Mask for extracting hex digit value (4 bits) */
-#define HEX_DIGIT_SHIFT            4   /* Bit shift for high nibble in hex conversion */
-#define AUTH_BASIC_PREFIX_LEN      6   /* Length of "Basic " prefix (including space) */
-#define AUTH_DIGEST_PREFIX_LEN     7   /* Length of "Digest " prefix (including space) */
-#define AUTH_USERNAME_KEY_LEN      9   /* Length of "username=" key */
-#define AUTH_REALM_KEY_LEN         6   /* Length of "realm=" key */
-#define AUTH_NONCE_KEY_LEN         6   /* Length of "nonce=" key */
-#define AUTH_RESPONSE_KEY_LEN      9   /* Length of "response=" key */
-#define DIGEST_AUTH_BUFFER_SIZE    512 /* Buffer size for digest authentication intermediate strings */
-#define WWW_AUTH_HEADER_SIZE       512 /* Buffer size for WWW-Authenticate header */
-#define WWW_AUTH_MIN_SIZE          64  /* Minimum WWW-Authenticate header buffer size */
-#define MD5_HEX_STRING_SIZE        64  /* MD5 hash as hex string (32 bytes * 2 + null terminator) */
+#define MD5_HASH_SIZE           16   /* MD5 hash size in bytes */
+#define HEX_DIGIT_MASK          0x0F /* Mask for extracting hex digit value (4 bits) */
+#define HEX_DIGIT_SHIFT         4    /* Bit shift for high nibble in hex conversion */
+#define AUTH_BASIC_PREFIX_LEN   6    /* Length of "Basic " prefix (including space) */
+#define AUTH_DIGEST_PREFIX_LEN  7    /* Length of "Digest " prefix (including space) */
+#define AUTH_USERNAME_KEY_LEN   9    /* Length of "username=" key */
+#define AUTH_REALM_KEY_LEN      6    /* Length of "realm=" key */
+#define AUTH_NONCE_KEY_LEN      6    /* Length of "nonce=" key */
+#define AUTH_RESPONSE_KEY_LEN   9    /* Length of "response=" key */
+#define DIGEST_AUTH_BUFFER_SIZE 512  /* Buffer size for digest authentication intermediate strings */
+#define WWW_AUTH_HEADER_SIZE    512  /* Buffer size for WWW-Authenticate header */
+#define WWW_AUTH_MIN_SIZE       64   /* Minimum WWW-Authenticate header buffer size */
+#define MD5_HEX_STRING_SIZE     64   /* MD5 hash as hex string (32 bytes * 2 + null terminator) */
 
 /* Audio sample rates */
 #define AUDIO_SAMPLE_RATE_8KHZ    8000

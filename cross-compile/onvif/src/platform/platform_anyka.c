@@ -8,7 +8,6 @@
  * into a single implementation for the Anyka AK3918 platform.
  */
 
-#define _GNU_SOURCE
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif

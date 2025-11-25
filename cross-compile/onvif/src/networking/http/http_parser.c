@@ -13,6 +13,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,7 +55,7 @@ static int parse_http_method(const char* buffer, size_t* pos, size_t buffer_used
 static int parse_http_path(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start);
 static int parse_http_version(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start);
 static int parse_http_headers_state(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start,
-                                    size_t* header_length);
+                                    const size_t* header_length);
 static int parse_http_body(const char* buffer, size_t buffer_used, http_request_t* request, size_t header_length, int* need_more_data);
 static size_t count_http_headers(const char* headers, size_t headers_size);
 
@@ -269,7 +270,7 @@ static int parse_http_version(const char* buffer, size_t* pos, size_t buffer_use
  * @return ONVIF_SUCCESS on success, ONVIF_ERROR_* on error
  */
 static int parse_http_headers_state(const char* buffer, size_t* pos, size_t buffer_used, http_request_t* request, const char** line_start,
-                                    size_t* header_length) {
+                                    const size_t* header_length) {
   if (!buffer || !pos || !request || !line_start || !header_length) {
     return ONVIF_ERROR_NULL;
   }
@@ -958,9 +959,21 @@ void http_response_free(http_response_t* response) {
     response->body = NULL;
   }
 
-  // Free content type
+  // Free content type - must be dynamically allocated (never use static strings)
+  // Static string literals are in read-only memory and cannot be freed
   if (response->content_type) {
-    free(response->content_type);
-    response->content_type = NULL;
+// Defense-in-depth: Basic check to detect obvious static string addresses
+// Static strings on ARM are typically in low address ranges (< STATIC_STRING_THRESHOLD)
+// This is a heuristic and not foolproof, but helps catch common mistakes
+#define STATIC_STRING_THRESHOLD 0x100000
+    uintptr_t ptr_val = (uintptr_t)response->content_type;
+    if (ptr_val < STATIC_STRING_THRESHOLD) {
+      // Likely a static string - log warning but don't free (would crash)
+      platform_log_error("http_response_free: content_type appears to be static string (ptr=0x%lx), skipping free", (unsigned long)ptr_val);
+      response->content_type = NULL;
+    } else {
+      free(response->content_type);
+      response->content_type = NULL;
+    }
   }
 }

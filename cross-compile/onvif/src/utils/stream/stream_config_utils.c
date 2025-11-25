@@ -16,7 +16,6 @@
 #include "services/common/video_config_types.h"
 #include "utils/error/error_handling.h"
 
-
 // Default configuration values
 #define DEFAULT_MAIN_FPS      25
 #define DEFAULT_MAIN_BITRATE  2048

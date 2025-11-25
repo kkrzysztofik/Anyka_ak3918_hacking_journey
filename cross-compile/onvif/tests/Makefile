@@ -32,7 +32,12 @@ BUILD_TYPE ?= debug
 VERBOSE ?= 0
 
 # Base compiler flags for native testing
-BASE_CFLAGS=-std=c99 -D_POSIX_C_SOURCE=199309L -DTEST_BUILD -fno-builtin -fstrict-aliasing -Wall -Wextra -fPIC
+# Use -std=gnu99 (not -std=c99) to enable GNU extensions including full pthread support
+# _GNU_SOURCE must be defined first to enable all POSIX features
+# _POSIX_C_SOURCE=200809L explicitly enables pthread rwlocks, barriers, spinlocks (POSIX.1-2008)
+# Explicitly define internal glibc macros that <bits/pthreadtypes.h> needs when included directly
+# -pthread adds proper pthread support (compile-time defines and link-time library)
+BASE_CFLAGS=-std=gnu99 -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -D__USE_UNIX98 -D__USE_XOPEN2K -D__USE_GNU -DTEST_BUILD -fno-builtin -fstrict-aliasing -Wall -Wextra -fPIC -pthread
 
 # Test-specific flags
 TEST_CFLAGS=-DUNIT_TESTING -DPLATFORM_MOCK -DWITH_NO_C_LOCALE
@@ -82,7 +87,7 @@ NATIVE_LIB_AVAILABLE = $(shell test -d $(NATIVE_LIB_DIR) && test -f $(NATIVE_LIB
 ifeq ($(NATIVE_LIB_AVAILABLE), yes)
     GSOAP_LIBS = -L$(NATIVE_LIB_DIR) -lgsoap -lgsoapck
     BASE64_LIBS = -L$(NATIVE_LIB_DIR) -lb64
-    NATIVE_INCLUDES = -I../src
+    NATIVE_INCLUDES = ../src
     $(info Using native libraries for unit testing)
 else
     GSOAP_LIBS = -L../lib -lgsoap -lgsoapck
@@ -250,6 +255,7 @@ WRAP_FUNCTIONS := \
 WRAP_FLAGS := $(addprefix -Wl$(comma)--wrap=,$(WRAP_FUNCTIONS))
 
 # CMocka library for native testing
+# Note: -pthread is already in BASE_CFLAGS, so we only need -lpthread for linking
 CMOCKA_LIBS=-lcmocka -lpthread -lm $(GSOAP_LIBS) $(BASE64_LIBS)
 
 # Dynamic test runner with filtering (replaces all old individual runners)
@@ -394,6 +400,12 @@ MAIN_SRCS := \
 	../src/networking/http/http_parser.c \
 	../src/networking/http/http_server.c \
 	../src/networking/common/buffer_pool.c \
+	../src/networking/rtsp/rtsp_multistream.c \
+	../src/networking/rtsp/rtsp_auth.c \
+	../src/networking/rtsp/rtsp_sdp.c \
+	../src/networking/rtsp/rtsp_rtcp.c \
+	../src/networking/rtsp/rtsp_session.c \
+	../src/networking/rtsp/rtsp_rtp.c \
 	../src/utils/validation/common_validation.c \
 	../src/utils/validation/input_validation.c \
 	../src/utils/security/base64_utils.c \
@@ -401,6 +413,7 @@ MAIN_SRCS := \
 	../src/utils/security/sha256.c \
 	../src/utils/security/hash_utils.c \
 	../src/utils/string/string_shims.c \
+	../src/utils/stream/stream_config_utils.c \
 	../src/services/common/service_dispatcher.c \
 	../src/services/common/onvif_service_common.c \
 	../src/services/device/onvif_device.c \
@@ -412,7 +425,9 @@ MAIN_SRCS := \
 	../src/utils/network/network_utils.c \
 	../src/utils/error/error_handling.c \
 	../src/core/config/config_runtime.c \
-	../src/core/config/config_storage.c
+	../src/core/config/config_storage.c \
+	../src/core/lifecycle/signal_lifecycle.c \
+	../src/core/lifecycle/video_lifecycle.c
 
 # Object files for each module
 UTILS_TEST_OBJS := $(UTILS_TEST_SRCS:src/%.c=$(OUT_DIR)/%.o)
@@ -604,6 +619,12 @@ $(OUT_DIR)/main/%.o: ../src/%.c | $(OUT_DIR)
 	@mkdir -p $(dir $@)
 	@mkdir -p $(dir $(OUT_DIR)/main/$*.d)
 	$(CC) $(CFLAGS) -MT $@ -MMD -MP -MF $(OUT_DIR)/main/$*.d $(INCLUDES:%=-I%) -c $< -o $@ -pipe
+
+# Special rule for rtsp_multistream.c (no longer needed since _GNU_SOURCE is in BASE_CFLAGS)
+$(OUT_DIR)/main/networking/rtsp/rtsp_multistream.o: ../src/networking/rtsp/rtsp_multistream.c | $(OUT_DIR)
+	@mkdir -p $(dir $@)
+	@mkdir -p $(dir $(OUT_DIR)/main/networking/rtsp/rtsp_multistream.d)
+	$(CC) $(CFLAGS) -MT $@ -MMD -MP -MF $(OUT_DIR)/main/networking/rtsp/rtsp_multistream.d $(INCLUDES:%=-I%) -c $< -o $@ -pipe
 
 # Special fast compilation rule for soapC.c (no optimization, no warnings for generated code)
 $(OUT_DIR)/main/generated/soapC.o: ../src/generated/soapC.c | $(OUT_DIR)

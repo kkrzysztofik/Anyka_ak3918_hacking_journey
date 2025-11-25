@@ -804,7 +804,7 @@ int onvif_device_init(void) {
 #ifdef UNIT_TESTING
   int result = onvif_service_unit_register(&g_device_service_registration, &g_handler_initialized, onvif_device_cleanup, "Device");
   if (result != ONVIF_SUCCESS) {
-    onvif_device_cleanup();  // Clean up buffer pool and reset flag on registration failure
+    onvif_device_cleanup(); // Clean up buffer pool and reset flag on registration failure
     return result;
   }
   return ONVIF_SUCCESS;

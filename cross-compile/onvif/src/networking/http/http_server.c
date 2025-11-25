@@ -27,11 +27,14 @@
 
 #include "common/onvif_constants.h"
 #include "core/config/config.h"
+#include "core/config/config_runtime.h"
+#include "core/lifecycle/signal_lifecycle.h"
 #include "networking/common/buffer_pool.h"
 #include "networking/common/connection_manager.h"
 #include "networking/http/http_auth.h"
 #include "networking/http/http_constants.h"
 #include "networking/http/http_parser.h"
+#include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap_response.h"
 #include "services/common/onvif_types.h"
 #include "services/device/onvif_device.h"
@@ -78,6 +81,9 @@ static struct http_auth_config g_http_auth_config = {0}; // NOLINT
 
 /** @brief Chunk header buffer size for chunked transfer encoding */
 #define CHUNK_HEADER_BUFFER_SIZE 16
+
+/** @brief Content-Length header value buffer size */
+#define HTTP_CONTENT_LENGTH_BUFFER_SIZE 32
 
 /** @brief Final chunk message size (including CRLF) */
 #define FINAL_CHUNK_SIZE 5
@@ -1129,14 +1135,72 @@ static ssize_t read_http_request(int client_fd, char* buffer, const char* client
 }
 
 /**
+ * @brief Read additional HTTP request data from socket and append to buffer
+ * @param client_fd Client socket file descriptor
+ * @param buffer Buffer containing existing data
+ * @param current_size Current size of data in buffer
+ * @param bytes_to_read Maximum number of bytes to read
+ * @param client_ip_str Client IP string for logging
+ * @return Number of bytes read on success, -1 on failure, 0 on EOF
+ * @note clang-tidy warns about easily swappable parameters (current_size and bytes_to_read),
+ *       but this signature is used throughout the codebase. Defensive programming below
+ *       catches common mistakes.
+ */
+static ssize_t read_http_request_append(int client_fd, char* buffer, size_t current_size, size_t bytes_to_read, const char* client_ip_str) { // NOLINT
+  if (!buffer || current_size >= BUFFER_SIZE - 1) {
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, client_ip_str, "socket_read_append", SERVICE_LOG_ERROR);
+    service_log_operation_failure(&log_ctx, "buffer check", -1, "Invalid buffer or buffer full");
+    return -1;
+  }
+
+  // Calculate available space in buffer
+  size_t available_space = BUFFER_SIZE - 1 - current_size;
+  size_t read_size = bytes_to_read < available_space ? bytes_to_read : available_space;
+
+  // Read additional data into buffer at offset
+  ssize_t bytes_read = read(client_fd, buffer + current_size, read_size);
+  if (bytes_read < 0) {
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, client_ip_str, "socket_read_append", SERVICE_LOG_ERROR);
+    service_log_operation_failure(&log_ctx, "socket read append", errno, "Failed to read additional data from socket");
+    return -1;
+  }
+
+  if (bytes_read == 0) {
+    // EOF - no more data available
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, client_ip_str, "socket_read_append", SERVICE_LOG_DEBUG);
+    service_log_debug(&log_ctx, "EOF reached while reading additional request data");
+    return 0;
+  }
+
+  // Null terminate the extended buffer
+  buffer[current_size + bytes_read] = '\0';
+
+  service_log_context_t log_ctx;
+  http_log_init_context(&log_ctx, client_ip_str, "socket_read_append", SERVICE_LOG_DEBUG);
+  service_log_debug(&log_ctx, "Read %zd additional bytes, total buffer size now %zu", bytes_read, current_size + bytes_read);
+
+  return bytes_read;
+}
+
+/**
  * @brief Parse HTTP request and validate
  * @param buffer Request buffer
  * @param bytes_read Number of bytes read
  * @param request HTTP request structure to populate
  * @param client_ip_str Client IP string for logging
+ * @param need_more_data Output parameter: set to 1 if more data is needed, 0 otherwise
  * @return ONVIF_SUCCESS on success, error code on failure
  */
-static int parse_and_validate_request(char* buffer, ssize_t bytes_read, http_request_t* request, const char* client_ip_str) {
+static int parse_and_validate_request(char* buffer, ssize_t bytes_read, http_request_t* request, const char* client_ip_str, int* need_more_data) {
+  if (!need_more_data) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  *need_more_data = 0;
+
   // Set client IP in request using safe string function
   if (memory_safe_strncpy(request->client_ip, sizeof(request->client_ip), client_ip_str, strlen(client_ip_str)) < 0) {
     error_context_t error_ctx;
@@ -1146,14 +1210,21 @@ static int parse_and_validate_request(char* buffer, ssize_t bytes_read, http_req
     return ONVIF_ERROR;
   }
 
-  int need_more_data = 0;
-  if (parse_http_request_state_machine(buffer, bytes_read, request, &need_more_data) != 0) {
+  int parser_need_more_data = 0;
+  if (parse_http_request_state_machine(buffer, bytes_read, request, &parser_need_more_data) != 0) {
     error_context_t error_ctx;
     error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
     ERROR_CONTEXT_SET_MESSAGE(&error_ctx, "Failed to parse HTTP request");
     ERROR_CONTEXT_SET_CONTEXT(&error_ctx, "Client IP: %s, Bytes read: %d", client_ip_str, bytes_read);
     onvif_log_error_context(&error_ctx);
     return ONVIF_ERROR;
+  }
+
+  *need_more_data = parser_need_more_data;
+  if (*need_more_data) {
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, client_ip_str, "request_parsing", SERVICE_LOG_DEBUG);
+    service_log_debug(&log_ctx, "HTTP request parsing: need_more_data=1, bytes_read=%zd, request body incomplete", bytes_read);
   }
 
   return ONVIF_SUCCESS;
@@ -1255,6 +1326,220 @@ static void handle_request_error(int client_fd, const char* client_ip_str, int r
   service_log_operation_failure(&error_log_ctx, "HTTP request processing", result, "Failed to process HTTP request");
 }
 
+/* ============================================================================
+ * Request Processing Helper Functions
+ * ============================================================================
+ */
+
+/**
+ * @brief Parse content length and header length from HTTP request
+ * @param request HTTP request structure
+ * @param buffer Request buffer
+ * @param header_length Output parameter for header length
+ * @param content_length Output parameter for content length
+ */
+static void parse_content_length_from_request(const http_request_t* request, const char* buffer, size_t* header_length, size_t* content_length) {
+  *header_length = 0;
+  *content_length = 0;
+
+  if (!request || !buffer || !header_length || !content_length) {
+    return;
+  }
+
+  if (request->headers && request->header_count > 0) {
+    // Find Content-Length header if present
+    char content_length_str[HTTP_CONTENT_LENGTH_BUFFER_SIZE];
+    if (find_header_value(request->headers, request->header_count, "Content-Length", content_length_str, sizeof(content_length_str)) == 0) {
+      char* endptr = NULL;
+      // Base 10 for decimal parsing (standard strtol usage)
+      long parsed_length = strtol(content_length_str, &endptr, 10); // NOLINT
+      if (endptr != content_length_str && *endptr == '\0' && parsed_length > 0) {
+        *content_length = (size_t)parsed_length;
+      }
+    }
+
+    // Estimate header length (find end of headers)
+    const char* header_end = strstr(buffer, "\r\n\r\n");
+    if (header_end) {
+      *header_length = (header_end - buffer) + 4;
+    }
+  }
+}
+
+/**
+ * @brief Calculate how many bytes are still needed to complete the request
+ * @param content_length Content-Length value from headers (0 if not present)
+ * @param header_length Length of HTTP headers
+ * @param bytes_read Current number of bytes read
+ * @return Number of bytes needed, or 0 if no more data needed
+ */
+static size_t calculate_bytes_needed(size_t content_length, size_t header_length, ssize_t bytes_read) {
+  if (content_length > 0 && header_length > 0) {
+    size_t body_received = (bytes_read > (ssize_t)header_length) ? (bytes_read - header_length) : 0;
+    if (body_received < content_length) {
+      return content_length - body_received;
+    }
+    return 0;
+  }
+
+  // If we don't know exact size, read a reasonable chunk
+  size_t bytes_needed = BUFFER_SIZE - bytes_read - 1;
+  if (bytes_needed > HTTP_READ_CHUNK_SIZE) {
+    bytes_needed = HTTP_READ_CHUNK_SIZE; // Limit to 4KB chunks
+  }
+  return bytes_needed;
+}
+
+/**
+ * @brief Validate read timeout and retry limits
+ * @param read_start_time Start time of read operation
+ * @param client_ip_str Client IP address for logging
+ * @param read_attempts Current number of read attempts
+ * @param buffer Buffer to return on error
+ * @return ONVIF_SUCCESS if validation passes, error code if timeout/retry limit exceeded
+ * @note clang-tidy warns about easily swappable parameters, but this signature
+ *       is used throughout the codebase with clear semantic ordering.
+ */
+static int validate_read_timeout_and_retries(uint64_t read_start_time, const char* client_ip_str, int read_attempts, char* buffer) { // NOLINT
+  // Check timeout
+  uint64_t current_time = get_time_ms();
+  uint64_t elapsed_ms = current_time - read_start_time;
+  if (elapsed_ms > HTTP_READ_TIMEOUT_MS) {
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, client_ip_str, "request_timeout", SERVICE_LOG_ERROR);
+    char timeout_msg[HTTP_ERROR_MSG_BUFFER_SIZE];
+    (void)snprintf(timeout_msg, sizeof(timeout_msg), "Timeout waiting for complete request body (%llu ms elapsed)", (unsigned long long)elapsed_ms);
+    service_log_operation_failure(&log_ctx, "request reading", -1, timeout_msg);
+    buffer_pool_return(&g_http_server.buffer_pool, buffer);
+    return ONVIF_ERROR_TIMEOUT;
+  }
+
+  // Check retry limit
+  if (read_attempts >= HTTP_MAX_READ_RETRIES) {
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, client_ip_str, "request_retry_limit", SERVICE_LOG_ERROR);
+    char retry_msg[HTTP_ERROR_MSG_BUFFER_SIZE];
+    (void)snprintf(retry_msg, sizeof(retry_msg), "Maximum read retries (%d) exceeded", HTTP_MAX_READ_RETRIES);
+    service_log_operation_failure(&log_ctx, "request reading", -1, retry_msg);
+    buffer_pool_return(&g_http_server.buffer_pool, buffer);
+    return ONVIF_ERROR;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Log request debug information when verbose logging is enabled
+ * @param request HTTP request structure
+ * @param buffer Request buffer
+ * @param bytes_read Number of bytes read
+ * @param client_ip_str Client IP address for logging
+ */
+static void log_request_debug_info(const http_request_t* request, const char* buffer, ssize_t bytes_read, const char* client_ip_str) {
+  if (!http_verbose_enabled() || !request || !buffer || bytes_read <= 0) {
+    return;
+  }
+
+  if (request->body && request->body_length > 0) {
+    return; // Body is present, no need for debug logging
+  }
+
+  service_log_context_t log_ctx;
+  http_log_init_context(&log_ctx, client_ip_str, "request_debug", SERVICE_LOG_DEBUG);
+  size_t log_size = (size_t)bytes_read < HTTP_DEBUG_LOG_BUFFER_SIZE ? (size_t)bytes_read : HTTP_DEBUG_LOG_BUFFER_SIZE;
+  char* log_buffer = (char*)malloc(log_size + 1);
+  if (log_buffer) {
+    memcpy(log_buffer, buffer, log_size);
+    log_buffer[log_size] = '\0';
+    service_log_debug(&log_ctx, "Raw request buffer (first %zu of %zu bytes): %s", log_size, (size_t)bytes_read, log_buffer);
+    free(log_buffer);
+  }
+}
+
+/**
+ * @brief Read complete HTTP request data with multiple reads if needed
+ * @param client_fd Client socket file descriptor
+ * @param buffer Buffer to store request data
+ * @param bytes_read Input/output parameter: current bytes read, updated on return
+ * @param request HTTP request structure to populate
+ * @param client_ip_str Client IP address for logging
+ * @return ONVIF_SUCCESS if request read successfully, error code on failure
+ */
+static int read_complete_request_data(int client_fd, char* buffer, ssize_t* bytes_read, http_request_t* request, const char* client_ip_str) {
+  if (!buffer || !bytes_read || !request || !client_ip_str) {
+    return ONVIF_ERROR_NULL;
+  }
+
+  int need_more_data = 0;
+  int read_attempts = 0;
+  uint64_t read_start_time = get_time_ms();
+
+  do {
+    // Parse the current buffer
+    if (parse_and_validate_request(buffer, *bytes_read, request, client_ip_str, &need_more_data) != ONVIF_SUCCESS) {
+      buffer_pool_return(&g_http_server.buffer_pool, buffer);
+      return ONVIF_ERROR;
+    }
+
+    // Check if we need more data
+    if (!need_more_data) {
+      break;
+    }
+
+    // Validate timeout and retry limits
+    int validation_result = validate_read_timeout_and_retries(read_start_time, client_ip_str, read_attempts, buffer);
+    if (validation_result != ONVIF_SUCCESS) {
+      return validation_result;
+    }
+
+    // Calculate how many bytes we still need
+    size_t header_length = 0;
+    size_t content_length = 0;
+    parse_content_length_from_request(request, buffer, &header_length, &content_length);
+
+    // Calculate bytes needed
+    size_t bytes_needed = calculate_bytes_needed(content_length, header_length, *bytes_read);
+
+    if (bytes_needed == 0) {
+      // No more space or no content length, break
+      break;
+    }
+
+    // Log the read attempt
+    service_log_context_t log_ctx;
+    http_log_init_context(&log_ctx, client_ip_str, "request_multi_read", SERVICE_LOG_DEBUG);
+    service_log_debug(&log_ctx, "Reading additional request data: attempt=%d, bytes_needed=%zu, bytes_read_so_far=%zd", read_attempts + 1,
+                      bytes_needed, *bytes_read);
+
+    // Read additional data
+    ssize_t additional_bytes = read_http_request_append(client_fd, buffer, (size_t)*bytes_read, bytes_needed, client_ip_str);
+    if (additional_bytes < 0) {
+      buffer_pool_return(&g_http_server.buffer_pool, buffer);
+      return ONVIF_ERROR;
+    }
+
+    if (additional_bytes == 0) {
+      // EOF reached but still need more data - this is an error
+      service_log_context_t eof_log_ctx;
+      http_log_init_context(&eof_log_ctx, client_ip_str, "request_incomplete", SERVICE_LOG_ERROR);
+      char eof_msg[HTTP_ERROR_MSG_BUFFER_SIZE];
+      (void)snprintf(eof_msg, sizeof(eof_msg), "EOF reached but request body incomplete (expected %zu bytes, got %zd)", content_length, *bytes_read);
+      service_log_operation_failure(&eof_log_ctx, "request reading", -1, eof_msg);
+      buffer_pool_return(&g_http_server.buffer_pool, buffer);
+      return ONVIF_ERROR;
+    }
+
+    *bytes_read += additional_bytes;
+    read_attempts++;
+
+    // Reset request structure for re-parsing
+    memset(request, 0, sizeof(http_request_t));
+
+  } while (need_more_data && (size_t)*bytes_read < BUFFER_SIZE - 1);
+
+  return ONVIF_SUCCESS;
+}
+
 /**
  * @brief Process HTTP request
  * @param client_fd Client socket file descriptor
@@ -1292,38 +1577,28 @@ int http_server_process_request(int client_fd) {
     return ONVIF_ERROR;
   }
 
-  // Read request
+  // Read initial request data
   ssize_t bytes_read = read_http_request(client_fd, buffer, client_ip_str);
   if (bytes_read < 0) {
     buffer_pool_return(&g_http_server.buffer_pool, buffer);
     return ONVIF_ERROR;
   }
 
-  // Parse HTTP request
+  // Parse HTTP request with loop to handle incomplete requests
   http_request_t request = {0};
   http_response_t response = {0};
 
-  if (parse_and_validate_request(buffer, bytes_read, &request, client_ip_str) != ONVIF_SUCCESS) {
-    buffer_pool_return(&g_http_server.buffer_pool, buffer);
-    return ONVIF_ERROR;
+  // Read complete request data (handles multi-read logic)
+  int read_result = read_complete_request_data(client_fd, buffer, &bytes_read, &request, client_ip_str);
+  if (read_result != ONVIF_SUCCESS) {
+    return read_result;
   }
 
   /* Verbose log full inbound request if enabled */
   http_log_full_request(&request);
 
-  /* If body is missing after parsing, log raw buffer for debugging */
-  if (http_verbose_enabled() && (!request.body || request.body_length == 0) && bytes_read > 0) {
-    service_log_context_t log_ctx;
-    http_log_init_context(&log_ctx, client_ip_str, "request_debug", SERVICE_LOG_DEBUG);
-    size_t log_size = (size_t)bytes_read < 512 ? (size_t)bytes_read : 512;
-    char* log_buffer = (char*)malloc(log_size + 1);
-    if (log_buffer) {
-      memcpy(log_buffer, buffer, log_size);
-      log_buffer[log_size] = '\0';
-      service_log_debug(&log_ctx, "Raw request buffer (first %zu of %zu bytes): %s", log_size, (size_t)bytes_read, log_buffer);
-      free(log_buffer);
-    }
-  }
+  /* Log debug information if body is missing */
+  log_request_debug_info(&request, buffer, bytes_read, client_ip_str);
 
   // Handle ONVIF request
   int result = handle_onvif_request(&request, &response);
@@ -1385,12 +1660,37 @@ int http_server_start(int port, const struct application_config* config) {
   http_server_log_init_context(&log_ctx, "server_start", SERVICE_LOG_INFO);
   service_log_info(&log_ctx, "Starting HTTP server on port %d", port);
 
-  while (1) {
+  while (g_http_server.running && signal_lifecycle_should_continue()) {
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
 
     int client_fd = accept(g_http_server.socket, (struct sockaddr*)&client_addr, &client_len);
     if (client_fd < 0) {
+      // Check if shutdown was requested
+      if (!g_http_server.running || !signal_lifecycle_should_continue()) {
+        service_log_context_t log_ctx;
+        http_server_log_init_context(&log_ctx, "server_start", SERVICE_LOG_INFO);
+        service_log_info(&log_ctx, "HTTP server shutdown requested, exiting accept loop");
+        break;
+      }
+
+      // Handle signal interruption (EINTR) - continue loop
+      if (errno == EINTR) {
+        service_log_context_t log_ctx;
+        http_server_log_init_context(&log_ctx, "server_start", SERVICE_LOG_DEBUG);
+        service_log_debug(&log_ctx, "Accept interrupted by signal, continuing...");
+        continue;
+      }
+
+      // Handle socket closed (EBADF) - treat as shutdown
+      if (errno == EBADF) {
+        service_log_context_t log_ctx;
+        http_server_log_init_context(&log_ctx, "server_start", SERVICE_LOG_INFO);
+        service_log_info(&log_ctx, "HTTP server socket closed, exiting accept loop");
+        break;
+      }
+
+      // Log other errors but continue
       error_context_t error_ctx;
       error_context_init(&error_ctx, "HTTP", __FUNCTION__, "HTTP server error");
       error_ctx.error_code = ONVIF_ERROR;
@@ -1421,6 +1721,10 @@ int http_server_stop(void) {
     return ONVIF_SUCCESS;
   }
 
+  // Set running flag to false FIRST to signal shutdown to accept loop
+  g_http_server.running = 0;
+
+  // Close socket to interrupt accept() call
   if (g_http_server.socket >= 0) {
     close(g_http_server.socket);
     g_http_server.socket = -1;
@@ -1430,8 +1734,6 @@ int http_server_stop(void) {
 
   // Cleanup performance metrics
   http_metrics_cleanup();
-
-  g_http_server.running = 0;
 
   service_log_context_t log_ctx;
   http_server_log_init_context(&log_ctx, "server_stop", SERVICE_LOG_INFO);

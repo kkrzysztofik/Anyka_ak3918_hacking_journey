@@ -269,7 +269,8 @@ int http_auth_verify_credentials(const char* username, const char* password) {
   }
 
   /* System error */
-  platform_log_error("[HTTP_AUTH] System error during authentication for user: %s (error: %d (%s))\n", username, result, onvif_error_to_string(result));
+  platform_log_error("[HTTP_AUTH] System error during authentication for user: %s (error: %d (%s))\n", username, result,
+                     onvif_error_to_string(result));
   return HTTP_AUTH_ERROR_INVALID;
 }
 

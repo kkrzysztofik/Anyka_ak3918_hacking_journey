@@ -74,15 +74,15 @@ The platform abstraction provides a clean, hardware-agnostic interface:
 
 ```c
 // Video encoder stream for RTSP
-platform_result_t platform_venc_get_stream(platform_venc_handle_t handle, 
-                                          platform_venc_stream_t *stream, 
+platform_result_t platform_venc_get_stream(platform_venc_handle_t handle,
+                                          platform_venc_stream_t *stream,
                                           uint32_t timeout_ms);
 
 // PTZ control
 platform_result_t platform_ptz_move_to_position(int pan_deg, int tilt_deg);
 
 // Configuration management
-const char* platform_config_get_string(const char *section, const char *key, 
+const char* platform_config_get_string(const char *section, const char *key,
                                       const char *default_value);
 ```
 
@@ -572,7 +572,7 @@ analysis-results/
 ### Getting Your Snyk API Token
 
 1. **Create a free Snyk account**: Visit https://app.snyk.io/
-2. **Navigate to Account Settings**: 
+2. **Navigate to Account Settings**:
    - Click on your profile → Account Settings
    - Go to General Settings → API Token
 3. **Copy your token**: Click "click to show" to reveal your API token

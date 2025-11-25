@@ -20,7 +20,8 @@ extern "C" {
  * @param error_code ONVIF error code
  * @return Human-readable error string
  */
-static inline const char* onvif_error_to_string(int error_code) {
+// NOLINTNEXTLINE(misc-unused-function) - static inline header utility may appear unused in some translation units
+static inline __attribute__((unused)) const char* onvif_error_to_string(int error_code) {
   switch (error_code) {
   case ONVIF_SUCCESS:
     return "ONVIF_SUCCESS";
@@ -58,7 +59,8 @@ static inline const char* onvif_error_to_string(int error_code) {
  * @param soap_error gSOAP error code
  * @return Human-readable error string
  */
-static inline const char* soap_error_to_string(int soap_error) {
+// NOLINTNEXTLINE(misc-unused-function) - static inline header utility may appear unused in some translation units
+static inline __attribute__((unused)) const char* soap_error_to_string(int soap_error) {
   switch (soap_error) {
   case SOAP_OK:
     return "SOAP_OK";
