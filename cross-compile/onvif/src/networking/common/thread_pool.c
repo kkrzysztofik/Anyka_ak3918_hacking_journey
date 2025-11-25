@@ -4,12 +4,13 @@
  * @author kkrzysztofik
  * @date 2025
  */
-
-#include <stdbool.h>
 #define _GNU_SOURCE
+#include "thread_pool.h"
+
 #include <bits/pthreadtypes.h>
 #include <errno.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -18,10 +19,8 @@
 #include "core/lifecycle/signal_lifecycle.h"
 #include "networking/common/connection_manager.h"
 #include "platform/platform.h"
-#include "thread_pool.h"
 #include "utils/common/time_utils.h"
 #include "utils/memory/memory_manager.h"
-
 
 /* Forward declaration for connection processing */
 extern void process_connection(void* conn);

@@ -309,6 +309,20 @@ static void* config_runtime_get_snapshot_field_ptr(struct snapshot_settings* sna
   return NULL;
 }
 
+/* User section field handler */
+static void* config_runtime_get_user_field_ptr(struct user_credential* user, const char* key, config_value_type_t* out_type) {
+  if (strcmp(key, "username") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, user->username, out_type);
+  }
+  if (strcmp(key, "password_hash") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_STRING, user->password_hash, out_type);
+  }
+  if (strcmp(key, "active") == 0) {
+    return config_runtime_set_field_ptr(CONFIG_TYPE_INT, &user->active, out_type);
+  }
+  return NULL;
+}
+
 /* Global state variables */
 static struct application_config* g_config_runtime_app_config = NULL;      // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 static pthread_mutex_t g_config_runtime_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -515,6 +529,47 @@ static const config_schema_entry_t g_config_schema[] = {
   {CONFIG_SECTION_SNAPSHOT, "snapshot", "height", CONFIG_TYPE_INT, 0, 120, 2048, 0, "480"},
   {CONFIG_SECTION_SNAPSHOT, "snapshot", "quality", CONFIG_TYPE_INT, 0, 1, 100, 0, "85"},
   {CONFIG_SECTION_SNAPSHOT, "snapshot", "format", CONFIG_TYPE_STRING, 0, 0, 0, CONFIG_STRING_MAX_LEN_SHORT, "jpeg"},
+
+  /* User Credential Sections (User Story 5) - 8 user slots */
+  /* User 1 */
+  {CONFIG_SECTION_USER_1, "user_1", "username", CONFIG_TYPE_STRING, 0, 0, 0, MAX_USERNAME_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_1, "user_1", "password_hash", CONFIG_TYPE_STRING, 0, 0, 0, MAX_PASSWORD_HASH_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_1, "user_1", "active", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* User 2 */
+  {CONFIG_SECTION_USER_2, "user_2", "username", CONFIG_TYPE_STRING, 0, 0, 0, MAX_USERNAME_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_2, "user_2", "password_hash", CONFIG_TYPE_STRING, 0, 0, 0, MAX_PASSWORD_HASH_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_2, "user_2", "active", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* User 3 */
+  {CONFIG_SECTION_USER_3, "user_3", "username", CONFIG_TYPE_STRING, 0, 0, 0, MAX_USERNAME_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_3, "user_3", "password_hash", CONFIG_TYPE_STRING, 0, 0, 0, MAX_PASSWORD_HASH_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_3, "user_3", "active", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* User 4 */
+  {CONFIG_SECTION_USER_4, "user_4", "username", CONFIG_TYPE_STRING, 0, 0, 0, MAX_USERNAME_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_4, "user_4", "password_hash", CONFIG_TYPE_STRING, 0, 0, 0, MAX_PASSWORD_HASH_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_4, "user_4", "active", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* User 5 */
+  {CONFIG_SECTION_USER_5, "user_5", "username", CONFIG_TYPE_STRING, 0, 0, 0, MAX_USERNAME_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_5, "user_5", "password_hash", CONFIG_TYPE_STRING, 0, 0, 0, MAX_PASSWORD_HASH_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_5, "user_5", "active", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* User 6 */
+  {CONFIG_SECTION_USER_6, "user_6", "username", CONFIG_TYPE_STRING, 0, 0, 0, MAX_USERNAME_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_6, "user_6", "password_hash", CONFIG_TYPE_STRING, 0, 0, 0, MAX_PASSWORD_HASH_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_6, "user_6", "active", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* User 7 */
+  {CONFIG_SECTION_USER_7, "user_7", "username", CONFIG_TYPE_STRING, 0, 0, 0, MAX_USERNAME_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_7, "user_7", "password_hash", CONFIG_TYPE_STRING, 0, 0, 0, MAX_PASSWORD_HASH_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_7, "user_7", "active", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
+
+  /* User 8 */
+  {CONFIG_SECTION_USER_8, "user_8", "username", CONFIG_TYPE_STRING, 0, 0, 0, MAX_USERNAME_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_8, "user_8", "password_hash", CONFIG_TYPE_STRING, 0, 0, 0, MAX_PASSWORD_HASH_LENGTH + 1, ""},
+  {CONFIG_SECTION_USER_8, "user_8", "active", CONFIG_TYPE_INT, 0, 0, 1, 0, "0"},
 };
 
 static const size_t g_config_schema_count = sizeof(g_config_schema) / sizeof(g_config_schema[0]);
@@ -1245,7 +1300,8 @@ int config_runtime_process_persistence_queue(void) {
   result = config_storage_save(ONVIF_CONFIG_FILE, NULL);
 
   if (result != ONVIF_SUCCESS) {
-    platform_log_error("[CONFIG] Failed to persist %zu configuration updates to %s (error=%d (%s))\n", queue_count, ONVIF_CONFIG_FILE, result, onvif_error_to_string(result));
+    platform_log_error("[CONFIG] Failed to persist %zu configuration updates to %s (error=%d (%s))\n", queue_count, ONVIF_CONFIG_FILE, result,
+                       onvif_error_to_string(result));
     /* Don't clear queue on failure - allow retry */
     return result;
   }
@@ -1935,6 +1991,13 @@ int config_runtime_add_user(const char* username, const char* password) {
 
   pthread_mutex_unlock(&g_config_runtime_mutex);
 
+  /* Queue persistence updates for the user fields */
+  config_section_t user_section = CONFIG_SECTION_USER_1 + user_index;
+  config_runtime_queue_persistence_update(user_section, "username", username, CONFIG_TYPE_STRING);
+  config_runtime_queue_persistence_update(user_section, "password_hash", password_hash, CONFIG_TYPE_STRING);
+  int active_value = 1;
+  config_runtime_queue_persistence_update(user_section, "active", &active_value, CONFIG_TYPE_INT);
+
   platform_log_info("[CONFIG] Added user: %s\n", username);
 
   return ONVIF_SUCCESS;
@@ -1973,6 +2036,13 @@ int config_runtime_remove_user(const char* username) {
   g_config_runtime_generation++;
 
   pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Queue persistence updates for the user fields */
+  config_section_t user_section = CONFIG_SECTION_USER_1 + user_index;
+  config_runtime_queue_persistence_update(user_section, "username", "", CONFIG_TYPE_STRING);
+  config_runtime_queue_persistence_update(user_section, "password_hash", "", CONFIG_TYPE_STRING);
+  int inactive_value = 0;
+  config_runtime_queue_persistence_update(user_section, "active", &inactive_value, CONFIG_TYPE_INT);
 
   platform_log_info("[CONFIG] Removed user: %s\n", username);
 
@@ -2023,6 +2093,10 @@ int config_runtime_update_user_password(const char* username, const char* new_pa
   g_config_runtime_generation++;
 
   pthread_mutex_unlock(&g_config_runtime_mutex);
+
+  /* Queue persistence update for the password hash field */
+  config_section_t user_section = CONFIG_SECTION_USER_1 + user_index;
+  config_runtime_queue_persistence_update(user_section, "password_hash", password_hash, CONFIG_TYPE_STRING);
 
   platform_log_info("[CONFIG] Updated password for user: %s\n", username);
 
@@ -2168,6 +2242,22 @@ static void* config_runtime_get_section_ptr(config_section_t section) {
     return &g_config_runtime_app_config->ptz_preset_profile_3;
   case CONFIG_SECTION_PTZ_PRESET_PROFILE_4:
     return &g_config_runtime_app_config->ptz_preset_profile_4;
+  case CONFIG_SECTION_USER_1:
+    return &g_config_runtime_app_config->users[CONFIG_SECTION_USER_1 - CONFIG_SECTION_USER_1];
+  case CONFIG_SECTION_USER_2:
+    return &g_config_runtime_app_config->users[CONFIG_SECTION_USER_2 - CONFIG_SECTION_USER_1];
+  case CONFIG_SECTION_USER_3:
+    return &g_config_runtime_app_config->users[CONFIG_SECTION_USER_3 - CONFIG_SECTION_USER_1];
+  case CONFIG_SECTION_USER_4:
+    return &g_config_runtime_app_config->users[CONFIG_SECTION_USER_4 - CONFIG_SECTION_USER_1];
+  case CONFIG_SECTION_USER_5:
+    return &g_config_runtime_app_config->users[CONFIG_SECTION_USER_5 - CONFIG_SECTION_USER_1];
+  case CONFIG_SECTION_USER_6:
+    return &g_config_runtime_app_config->users[CONFIG_SECTION_USER_6 - CONFIG_SECTION_USER_1];
+  case CONFIG_SECTION_USER_7:
+    return &g_config_runtime_app_config->users[CONFIG_SECTION_USER_7 - CONFIG_SECTION_USER_1];
+  case CONFIG_SECTION_USER_8:
+    return &g_config_runtime_app_config->users[CONFIG_SECTION_USER_8 - CONFIG_SECTION_USER_1];
   default:
     return NULL;
   }
@@ -2216,6 +2306,16 @@ static void* config_runtime_get_field_ptr(config_section_t section, const char* 
 
   case CONFIG_SECTION_SNAPSHOT:
     return config_runtime_get_snapshot_field_ptr((struct snapshot_settings*)section_ptr, key, out_type);
+
+  case CONFIG_SECTION_USER_1:
+  case CONFIG_SECTION_USER_2:
+  case CONFIG_SECTION_USER_3:
+  case CONFIG_SECTION_USER_4:
+  case CONFIG_SECTION_USER_5:
+  case CONFIG_SECTION_USER_6:
+  case CONFIG_SECTION_USER_7:
+  case CONFIG_SECTION_USER_8:
+    return config_runtime_get_user_field_ptr((struct user_credential*)section_ptr, key, out_type);
 
   default:
     return NULL;

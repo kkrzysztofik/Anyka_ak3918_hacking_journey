@@ -18,6 +18,7 @@
 #include "protocol/response/onvif_service_handler.h"
 #include "utils/error/error_handling.h"
 #include "utils/logging/service_logging.h"
+#include "utils/memory/memory_manager.h"
 #include "utils/memory/smart_response_builder.h"
 
 /* ============================================================================
@@ -54,9 +55,12 @@ int onvif_util_standard_post_process(http_response_t* response, service_log_cont
     return ONVIF_ERROR;
   }
 
-  // Set default content type if not set
+  // Set default content type if not set - must use dynamic allocation
   if (!response->content_type) {
-    response->content_type = "application/soap+xml";
+    response->content_type = memory_safe_strdup("application/soap+xml");
+    if (!response->content_type) {
+      return ONVIF_ERROR_MEMORY;
+    }
   }
 
   // Set default status code if not set

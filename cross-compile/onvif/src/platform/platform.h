@@ -402,6 +402,20 @@ platform_result_t platform_get_system_info(platform_system_info_t* info);
  */
 int platform_system(const char* command);
 
+/**
+ * @brief Get the absolute path to the currently running executable
+ *
+ * This function retrieves the full path to the executable file that
+ * is currently running. On Linux, this uses /proc/self/exe.
+ *
+ * @param[out] path_buffer Buffer to store the executable path
+ * @param[in] buffer_size Size of the path_buffer
+ * @return PLATFORM_SUCCESS on success, PLATFORM_ERROR on failure
+ * @note The returned path is null-terminated. If the buffer is too small
+ *       or the path cannot be determined, returns PLATFORM_ERROR.
+ */
+platform_result_t platform_get_executable_path(char* path_buffer, size_t buffer_size);
+
 /** @} */
 
 #endif /* ONVIF_PLATFORM_H */

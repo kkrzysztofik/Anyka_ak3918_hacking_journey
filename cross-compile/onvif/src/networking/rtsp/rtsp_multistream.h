@@ -24,8 +24,8 @@
 
 /* Stream information structure */
 typedef struct {
-  char path[RTSP_STREAM_PATH_SIZE];                /* Stream path (e.g., "/vs0") */
-  char name[RTSP_STREAM_NAME_SIZE];                /* Stream name (e.g., "main") */
+  char path[RTSP_STREAM_PATH_SIZE];                 /* Stream path (e.g., "/vs0") */
+  char name[RTSP_STREAM_NAME_SIZE];                 /* Stream name (e.g., "main") */
   bool enabled;                                     /* Whether this stream is enabled */
   platform_venc_handle_t venc_handle;               /* Video encoder handle */
   platform_venc_stream_handle_t venc_stream_handle; /* Video stream handle for get/release */

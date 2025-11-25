@@ -13,18 +13,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "core/config/config.h"
-#include "platform/platform.h"
-#include "platform/platform_common.h"
-#include "services/common/service_dispatcher.h"
 #include "cmocka_wrapper.h"
 #include "common/test_helpers.h"
+#include "core/config/config.h"
 #include "core/config/config_runtime.h"
 #include "core/config/config_storage.h"
 #include "mocks/buffer_pool_mock.h"
 #include "mocks/config_mock.h"
 #include "mocks/mock_service_dispatcher.h"
+#include "platform/platform.h"
+#include "platform/platform_common.h"
 #include "services/common/onvif_imaging_types.h"
+#include "services/common/service_dispatcher.h"
 #include "services/imaging/onvif_imaging.h"
 #include "utils/error/error_handling.h"
 

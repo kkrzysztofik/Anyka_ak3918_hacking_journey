@@ -14,8 +14,10 @@
 #include "cmocka_wrapper.h"
 #include "common/onvif_constants.h"
 #include "common/soap_test_helpers.h"
+#include "core/config/config_runtime.h"
 #include "data/response_test_data.h"
 #include "generated/soapH.h"
+#include "mocks/config_mock.h"
 #include "mocks/gsoap_mock.h"
 #include "networking/http/http_parser.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
@@ -68,13 +70,27 @@
 // ============================================================================
 
 /**
+ * @brief Test state structure for response generation tests
+ */
+typedef struct {
+  onvif_gsoap_context_t* ctx;
+  struct application_config* app_config;
+} response_generation_test_state_t;
+
+/**
  * @brief Setup function for response generation tests
  * @param state Test state
  * @return 0 on success
  */
 static int response_generation_setup(void** state) {
+  response_generation_test_state_t* test_state = calloc(1, sizeof(response_generation_test_state_t));
+  if (!test_state) {
+    return -1;
+  }
+
   onvif_gsoap_context_t* ctx = calloc(1, sizeof(onvif_gsoap_context_t));
   if (!ctx) {
+    free(test_state);
     return -1;
   }
 
@@ -82,23 +98,47 @@ static int response_generation_setup(void** state) {
   int init_result = response_test_data_init();
   if (init_result != ONVIF_SUCCESS) {
     free(ctx);
+    free(test_state);
     return -1;
   }
 
   // Use real functions instead of mocks
   gsoap_mock_use_real_function(true);
+  config_mock_use_real_function(true); // Enable real config functions for http_verbose_enabled()
 
-  // Mock platform_config_get_int call for http_verbose check
-  setup_http_verbose_mock(); // Return default value
+  // Initialize config_runtime for real config functions to work
+  struct application_config* app_config = calloc(1, sizeof(struct application_config));
+  if (!app_config) {
+    free(ctx);
+    free(test_state);
+    return -1;
+  }
+  memset(app_config, 0, sizeof(struct application_config));
+
+  int config_result = config_runtime_init(app_config);
+  if (config_result != ONVIF_SUCCESS && config_result != ONVIF_ERROR_ALREADY_EXISTS) {
+    free(app_config);
+    free(ctx);
+    free(test_state);
+    return -1;
+  }
+
+  // Apply defaults to ensure config values are valid
+  (void)config_runtime_apply_defaults();
 
   // Initialize the gSOAP context
   int result = onvif_gsoap_init(ctx);
   if (result != ONVIF_SUCCESS) {
+    config_runtime_cleanup();
+    free(app_config);
     free(ctx);
+    free(test_state);
     return -1;
   }
 
-  *state = ctx;
+  test_state->ctx = ctx;
+  test_state->app_config = app_config;
+  *state = test_state;
   return 0;
 }
 
@@ -108,15 +148,29 @@ static int response_generation_setup(void** state) {
  * @return 0 on success
  */
 static int response_generation_teardown(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
-  if (ctx) {
-    // Cleanup the gSOAP context
-    onvif_gsoap_cleanup(ctx);
-    free(ctx);
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  if (test_state) {
+    if (test_state->ctx) {
+      // Cleanup the gSOAP context
+      onvif_gsoap_cleanup(test_state->ctx);
+      free(test_state->ctx);
+    }
+
+    // Cleanup config_runtime
+    config_runtime_cleanup();
+
+    // Free app_config AFTER config_runtime_cleanup()
+    // config_runtime_cleanup() sets the global pointer to NULL, so we can safely free now
+    if (test_state->app_config) {
+      free(test_state->app_config);
+    }
+
+    free(test_state);
   }
 
   // Re-enable mocks for other tests
   gsoap_mock_use_real_function(false);
+  config_mock_use_real_function(false);
 
   return 0;
 }
@@ -129,7 +183,8 @@ static int response_generation_teardown(void** state) {
  * @brief Test successful device info response generation
  */
 static void test_unit_onvif_gsoap_generate_device_info_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   assert_non_null(ctx);
@@ -151,7 +206,6 @@ static void test_unit_onvif_gsoap_generate_device_info_response_success(void** s
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -185,7 +239,8 @@ static void test_unit_onvif_gsoap_generate_device_info_response_null_context(voi
  * @brief Test device info response generation with NULL parameters
  */
 static void test_unit_onvif_gsoap_generate_device_info_response_null_params(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
 
   int result = onvif_gsoap_generate_device_info_response(ctx, NULL, mock_device_info_valid.model, mock_device_info_valid.firmware_version,
                                                          mock_device_info_valid.serial_number, mock_device_info_valid.hardware_id);
@@ -198,7 +253,8 @@ static void test_unit_onvif_gsoap_generate_device_info_response_null_params(void
  * @brief Test device info response generation with empty parameters
  */
 static void test_unit_onvif_gsoap_generate_device_info_response_empty_params(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   // Test with empty parameters using real functions
@@ -218,7 +274,6 @@ static void test_unit_onvif_gsoap_generate_device_info_response_empty_params(voi
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -240,7 +295,8 @@ static void test_unit_onvif_gsoap_generate_device_info_response_empty_params(voi
  * @brief Test successful system reboot response generation
  */
 static void test_unit_onvif_gsoap_generate_system_reboot_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
   const char* test_message = "System will reboot in 5 seconds";
 
@@ -265,7 +321,6 @@ static void test_unit_onvif_gsoap_generate_system_reboot_response_success(void**
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -298,7 +353,8 @@ static void test_unit_onvif_gsoap_generate_system_reboot_response_null_context(v
  * @brief Test system reboot response generation with NULL user_data
  */
 static void test_unit_onvif_gsoap_generate_system_reboot_response_null_params(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
 
   system_reboot_callback_data_t callback_data = {.message = NULL};
 
@@ -312,7 +368,8 @@ static void test_unit_onvif_gsoap_generate_system_reboot_response_null_params(vo
  * @brief Test successful GetCapabilities response generation
  */
 static void test_unit_onvif_gsoap_generate_capabilities_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_LARGE];
   const char* test_device_ip = "192.168.1.100";
   const int test_http_port = 80;
@@ -354,7 +411,6 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_success(void** 
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -387,7 +443,8 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_success(void** 
  * @brief Test GetCapabilities response generation with NULL capabilities (fallback path)
  */
 static void test_unit_onvif_gsoap_generate_capabilities_response_null_fallback(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_LARGE];
   const char* test_device_ip = "192.168.1.100";
   const int test_http_port = 80;
@@ -403,7 +460,6 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_null_fallback(v
   http_response_t http_resp = {.body = response_buffer, .body_length = strlen(response_buffer), .status_code = TEST_HTTP_STATUS_OK};
 
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -445,7 +501,8 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_null_context(vo
  * @brief Test GetCapabilities response generation with NULL parameters
  */
 static void test_unit_onvif_gsoap_generate_capabilities_response_null_params(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   const int test_http_port = 80;
 
   int result = onvif_gsoap_generate_capabilities_response(ctx, NULL, NULL, test_http_port);
@@ -458,7 +515,8 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_null_params(voi
  * @brief Test GetCapabilities response generation with real capabilities data
  */
 static void test_unit_onvif_gsoap_generate_capabilities_response_with_real_data(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_LARGE];
   const char* test_device_ip = "192.168.1.100";
   const int test_http_port = 80;
@@ -488,7 +546,6 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_with_real_data(
   http_response_t http_resp = {.body = response_buffer, .body_length = strlen(response_buffer), .status_code = TEST_HTTP_STATUS_OK};
 
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -514,7 +571,8 @@ static void test_unit_onvif_gsoap_generate_capabilities_response_with_real_data(
  * @brief Test GetSystemDateAndTime response generation success scenario
  */
 static void test_unit_onvif_gsoap_generate_system_date_time_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_LARGE];
 
   // Create a specific test time: 2025-01-15 14:30:45 UTC
@@ -539,7 +597,6 @@ static void test_unit_onvif_gsoap_generate_system_date_time_response_success(voi
 
   // Parse response back
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -594,7 +651,8 @@ static void test_unit_onvif_gsoap_generate_system_date_time_response_null_contex
  * @brief Test GetSystemDateAndTime response generation with NULL time (uses current time)
  */
 static void test_unit_onvif_gsoap_generate_system_date_time_response_null_time(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_LARGE];
 
   int result = onvif_gsoap_generate_system_date_time_response(ctx, NULL);
@@ -608,7 +666,6 @@ static void test_unit_onvif_gsoap_generate_system_date_time_response_null_time(v
   http_response_t http_resp = {.body = response_buffer, .body_length = strlen(response_buffer), .status_code = TEST_HTTP_STATUS_OK};
 
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -637,7 +694,8 @@ static void test_unit_onvif_gsoap_generate_system_date_time_response_null_time(v
  * @brief Test GetServices response generation success scenario
  */
 static void test_unit_onvif_gsoap_generate_services_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_LARGE];
   const char* test_device_ip = "192.168.1.100";
   const int test_http_port = 80;
@@ -656,7 +714,6 @@ static void test_unit_onvif_gsoap_generate_services_response_success(void** stat
 
   // Parse response back
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -700,7 +757,8 @@ static void test_unit_onvif_gsoap_generate_services_response_null_context(void**
  * @brief Test GetServices response generation with NULL device_ip
  */
 static void test_unit_onvif_gsoap_generate_services_response_null_params(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   const int test_http_port = 80;
 
   int result = onvif_gsoap_generate_services_response(ctx, 0, NULL, test_http_port);
@@ -717,7 +775,8 @@ static void test_unit_onvif_gsoap_generate_services_response_null_params(void** 
  * @brief Test successful profiles response generation
  */
 static void test_unit_onvif_gsoap_generate_profiles_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_LARGE];
 
   // Create a simple test profile that matches struct media_profile
@@ -758,7 +817,6 @@ static void test_unit_onvif_gsoap_generate_profiles_response_success(void** stat
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -806,7 +864,8 @@ static void test_unit_onvif_gsoap_generate_profiles_response_null_context(void**
  * @brief Test successful stream URI response generation
  */
 static void test_unit_onvif_gsoap_generate_stream_uri_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   // Create a simple test stream URI that matches struct stream_uri
@@ -830,7 +889,6 @@ static void test_unit_onvif_gsoap_generate_stream_uri_response_success(void** st
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -866,7 +924,8 @@ static void test_unit_onvif_gsoap_generate_stream_uri_response_null_context(void
  * @brief Test successful create profile response generation
  */
 static void test_unit_onvif_gsoap_generate_create_profile_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   // Create a simple test profile that matches struct media_profile
@@ -889,7 +948,6 @@ static void test_unit_onvif_gsoap_generate_create_profile_response_success(void*
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -921,7 +979,8 @@ static void test_unit_onvif_gsoap_generate_create_profile_response_null_context(
  * @brief Test successful set video source configuration response generation
  */
 static void test_unit_onvif_gsoap_generate_set_video_source_configuration_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   int result = onvif_gsoap_generate_set_video_source_configuration_response(ctx);
@@ -938,7 +997,6 @@ static void test_unit_onvif_gsoap_generate_set_video_source_configuration_respon
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -967,7 +1025,8 @@ static void test_unit_onvif_gsoap_generate_set_video_source_configuration_respon
  * @brief Test successful set video encoder configuration response generation
  */
 static void test_unit_onvif_gsoap_generate_set_video_encoder_configuration_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   int result = onvif_gsoap_generate_set_video_encoder_configuration_response(ctx);
@@ -984,7 +1043,6 @@ static void test_unit_onvif_gsoap_generate_set_video_encoder_configuration_respo
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -1013,7 +1071,8 @@ static void test_unit_onvif_gsoap_generate_set_video_encoder_configuration_respo
  * @brief Test successful start multicast streaming response generation
  */
 static void test_unit_onvif_gsoap_generate_start_multicast_streaming_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   int result = onvif_gsoap_generate_start_multicast_streaming_response(ctx);
@@ -1030,7 +1089,6 @@ static void test_unit_onvif_gsoap_generate_start_multicast_streaming_response_su
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -1059,7 +1117,8 @@ static void test_unit_onvif_gsoap_generate_start_multicast_streaming_response_nu
  * @brief Test successful stop multicast streaming response generation
  */
 static void test_unit_onvif_gsoap_generate_stop_multicast_streaming_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   int result = onvif_gsoap_generate_stop_multicast_streaming_response(ctx);
@@ -1076,7 +1135,6 @@ static void test_unit_onvif_gsoap_generate_stop_multicast_streaming_response_suc
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -1105,7 +1163,8 @@ static void test_unit_onvif_gsoap_generate_stop_multicast_streaming_response_nul
  * @brief Test successful get metadata configurations response generation
  */
 static void test_unit_onvif_gsoap_generate_get_metadata_configurations_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   // Create a simple test metadata configuration that matches struct metadata_configuration
@@ -1134,7 +1193,6 @@ static void test_unit_onvif_gsoap_generate_get_metadata_configurations_response_
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -1172,7 +1230,8 @@ static void test_unit_onvif_gsoap_generate_get_metadata_configurations_response_
  * @brief Test successful set metadata configuration response generation
  */
 static void test_unit_onvif_gsoap_generate_set_metadata_configuration_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   int result = onvif_gsoap_generate_set_metadata_configuration_response(ctx);
@@ -1189,7 +1248,6 @@ static void test_unit_onvif_gsoap_generate_set_metadata_configuration_response_s
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -1218,7 +1276,8 @@ static void test_unit_onvif_gsoap_generate_set_metadata_configuration_response_n
  * @brief Test successful delete profile response generation
  */
 static void test_unit_onvif_gsoap_generate_delete_profile_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   int result = onvif_gsoap_generate_delete_profile_response(ctx);
@@ -1235,7 +1294,6 @@ static void test_unit_onvif_gsoap_generate_delete_profile_response_success(void*
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -1268,7 +1326,8 @@ static void test_unit_onvif_gsoap_generate_delete_profile_response_null_context(
  * @brief Test successful absolute move response generation
  */
 static void test_unit_onvif_gsoap_generate_absolute_move_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   int result = onvif_gsoap_generate_absolute_move_response(ctx);
@@ -1285,7 +1344,6 @@ static void test_unit_onvif_gsoap_generate_absolute_move_response_success(void**
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -1314,7 +1372,8 @@ static void test_unit_onvif_gsoap_generate_absolute_move_response_null_context(v
  * @brief Test successful goto preset response generation
  */
 static void test_unit_onvif_gsoap_generate_goto_preset_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   int result = onvif_gsoap_generate_goto_preset_response(ctx);
@@ -1331,7 +1390,6 @@ static void test_unit_onvif_gsoap_generate_goto_preset_response_success(void** s
 
   // Deserialize response back to gSOAP structure for proper validation
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -1364,7 +1422,8 @@ static void test_unit_onvif_gsoap_generate_goto_preset_response_null_context(voi
  * @brief Test successful fault response generation
  */
 static void test_unit_onvif_gsoap_generate_fault_response_success(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char output_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   int result = onvif_gsoap_generate_fault_response(ctx, mock_fault_invalid_parameter.fault_code, mock_fault_invalid_parameter.fault_string,
@@ -1379,7 +1438,6 @@ static void test_unit_onvif_gsoap_generate_fault_response_success(void** state) 
 
   // Parse SOAP Fault using helper function
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   int init_result = soap_test_init_response_parsing(&parse_ctx, &fault_http_resp);
   assert_int_equal(init_result, ONVIF_SUCCESS);
 
@@ -1409,7 +1467,7 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_context(void** st
   (void)state;
   char output_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
-  setup_http_verbose_mock(); // NULL context creates temp ctx which calls onvif_gsoap_init
+  // NULL context creates temp ctx which calls onvif_gsoap_init
   int result = onvif_gsoap_generate_fault_response(NULL, mock_fault_invalid_parameter.fault_code, mock_fault_invalid_parameter.fault_string,
                                                    "test_actor", mock_fault_invalid_parameter.fault_detail, output_buffer, sizeof(output_buffer));
 
@@ -1422,7 +1480,6 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_context(void** st
 
   // Parse SOAP Fault using helper function
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   int init_result = soap_test_init_response_parsing(&parse_ctx, &fault_http_resp);
   assert_int_equal(init_result, ONVIF_SUCCESS);
 
@@ -1445,7 +1502,8 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_context(void** st
  * @brief Test fault response generation with NULL fault code
  */
 static void test_unit_onvif_gsoap_generate_fault_response_null_fault_code(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char output_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   int result = onvif_gsoap_generate_fault_response(ctx, NULL, mock_fault_invalid_parameter.fault_string, "test_actor",
@@ -1459,7 +1517,6 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_fault_code(void**
   http_response_t fault_http_resp = {.body = output_buffer, .body_length = strlen(output_buffer), .status_code = TEST_HTTP_STATUS_ERROR};
 
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   int init_result = soap_test_init_response_parsing(&parse_ctx, &fault_http_resp);
   assert_int_equal(init_result, ONVIF_SUCCESS);
 
@@ -1480,7 +1537,8 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_fault_code(void**
  * @brief Test fault response generation with NULL fault string
  */
 static void test_unit_onvif_gsoap_generate_fault_response_null_fault_string(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char output_buffer[TEST_BUFFER_SIZE_SMALL];
 
   int result = onvif_gsoap_generate_fault_response(ctx, mock_fault_invalid_parameter.fault_code, NULL, "test_actor",
@@ -1493,7 +1551,8 @@ static void test_unit_onvif_gsoap_generate_fault_response_null_fault_string(void
  * @brief Test fault response generation with undersized buffer
  */
 static void test_unit_onvif_gsoap_generate_fault_response_buffer_overflow(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char small_buffer[TEST_TIMEOUT_10]; // Intentionally too small for SOAP fault
 
   // Test with undersized buffer - should return error without crashing
@@ -1512,7 +1571,8 @@ static void test_unit_onvif_gsoap_generate_fault_response_buffer_overflow(void**
  * @brief Test device info response generation with large strings
  */
 static void test_unit_onvif_gsoap_generate_device_info_response_large_strings(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_LARGE]; // Larger buffer for large strings
 
   // Test with large manufacturer string (512 chars)
@@ -1531,7 +1591,6 @@ static void test_unit_onvif_gsoap_generate_device_info_response_large_strings(vo
   http_response_t http_resp = {.body = response_buffer, .body_length = strlen(response_buffer), .status_code = TEST_HTTP_STATUS_OK};
 
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 
@@ -1553,7 +1612,8 @@ static void test_unit_onvif_gsoap_generate_device_info_response_large_strings(vo
  * @brief Test device info response generation with special XML characters
  */
 static void test_unit_onvif_gsoap_generate_device_info_response_special_chars(void** state) {
-  onvif_gsoap_context_t* ctx = (onvif_gsoap_context_t*)*state;
+  response_generation_test_state_t* test_state = (response_generation_test_state_t*)*state;
+  onvif_gsoap_context_t* ctx = test_state ? test_state->ctx : NULL;
   char response_buffer[TEST_BUFFER_SIZE_MEDIUM];
 
   // Test with special XML characters that need escaping
@@ -1578,7 +1638,6 @@ static void test_unit_onvif_gsoap_generate_device_info_response_special_chars(vo
   http_response_t http_resp = {.body = response_buffer, .body_length = strlen(response_buffer), .status_code = TEST_HTTP_STATUS_OK};
 
   onvif_gsoap_context_t parse_ctx;
-  setup_http_verbose_mock();
   result = soap_test_init_response_parsing(&parse_ctx, &http_resp);
   assert_int_equal(result, ONVIF_SUCCESS);
 

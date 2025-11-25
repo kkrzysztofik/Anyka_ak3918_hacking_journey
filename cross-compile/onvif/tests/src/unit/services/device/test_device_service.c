@@ -30,7 +30,6 @@
 #include "mocks/platform_mock.h"
 #include "mocks/smart_response_mock.h"
 #include "mocks/thread_mock.h"
-
 #include "protocol/gsoap/onvif_gsoap_device.h"
 
 // Test data structures

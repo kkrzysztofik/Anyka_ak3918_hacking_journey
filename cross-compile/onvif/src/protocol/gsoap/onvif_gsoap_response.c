@@ -16,9 +16,12 @@
 #include <string.h>
 #include <time.h>
 
+#include "core/config/config.h"
+#include "core/config/config_runtime.h"
 #include "platform/platform.h"
 #include "protocol/gsoap/onvif_gsoap_core.h"
 #include "utils/error/error_handling.h"
+#include "utils/error/error_translation.h"
 
 // Include gSOAP generated files
 #include "generated/soapH.h"
@@ -75,6 +78,35 @@ static uint64_t get_timestamp_us(void) {
   struct timespec timespec_val;
   clock_gettime(CLOCK_MONOTONIC, &timespec_val);
   return (uint64_t)timespec_val.tv_sec * SECONDS_TO_MICROSECONDS + timespec_val.tv_nsec / NANOSECONDS_TO_MICROSECONDS;
+}
+
+/**
+ * @brief Check if HTTP verbose logging is enabled in configuration
+ * @return 1 if enabled, 0 if disabled
+ * @note This function unifies the http_verbose check across http_server.c and onvif_gsoap_response.c
+ *       by checking g_http_app_config first (if available), then falling back to config_runtime_get_int
+ */
+static int http_verbose_enabled(void) {
+  int http_verbose_value = 0;
+
+  // Try to use g_http_app_config first (same as http_server.c)
+  extern const struct application_config* g_http_app_config; // NOLINT
+  if (g_http_app_config) {
+    http_verbose_value = g_http_app_config->logging.http_verbose ? 1 : 0;
+    platform_log_debug("http_verbose_enabled (gsoap): Using g_http_app_config->logging.http_verbose = %d", http_verbose_value);
+  } else {
+    // Fallback to runtime config if g_http_app_config is not available
+    platform_log_debug("http_verbose_enabled (gsoap): g_http_app_config is NULL, using config_runtime_get_int");
+    int result = config_runtime_get_int(CONFIG_SECTION_LOGGING, "http_verbose", &http_verbose_value);
+    if (result != ONVIF_SUCCESS) {
+      platform_log_debug("http_verbose_enabled (gsoap): config_runtime_get_int failed (result=%d), defaulting to 0", result);
+      http_verbose_value = 0;
+    } else {
+      platform_log_debug("http_verbose_enabled (gsoap): config_runtime_get_int returned http_verbose = %d", http_verbose_value);
+    }
+  }
+
+  return http_verbose_value;
 }
 
 /**
@@ -136,6 +168,168 @@ static int fault_response_callback(struct soap* soap, void* user_data) {
   return ONVIF_SUCCESS;
 }
 
+/**
+ * @brief Set SOAP error message and log it
+ * @param soap gSOAP context
+ * @param format Error message format string
+ * @param ... Additional arguments for formatting
+ */
+static void set_soap_error(struct soap* soap, const char* format, ...) {
+  va_list args;
+  va_start(args, format);
+  (void)vsnprintf(g_onvif_gsoap_error_msg, sizeof(g_onvif_gsoap_error_msg), format, args);
+  va_end(args);
+
+  if (soap) {
+    soap->error = SOAP_FAULT;
+    // Ensure fault structure exists before accessing it
+    if (onvif_gsoap_validate_context(soap) == ONVIF_SUCCESS && soap->fault) {
+      soap->fault->faultstring = soap_strdup(soap, g_onvif_gsoap_error_msg);
+    }
+  }
+  platform_log_error("ONVIF gSOAP Error: %s", g_onvif_gsoap_error_msg);
+}
+
+/**
+ * @brief Setup SOAP envelope for response generation with string output
+ * @param ctx gSOAP context
+ * @param output_string_ptr Pointer to output string pointer (will be set by gSOAP)
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int setup_soap_envelope_for_response(onvif_gsoap_context_t* ctx, char** output_string_ptr) {
+  if (!ctx || !output_string_ptr) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  // Ensure gSOAP context is properly initialized for fault handling
+  if (onvif_gsoap_validate_context(&ctx->soap) != ONVIF_SUCCESS) {
+    platform_log_error("ONVIF gSOAP: Failed to initialize fault handling context");
+    return ONVIF_ERROR_MEMORY_ALLOCATION;
+  }
+
+  // Set up gSOAP for string output - this is the correct way to get XML as a string
+  *output_string_ptr = NULL;
+  ctx->soap.os = (void*)output_string_ptr;
+
+  // Begin SOAP send with string output mode
+  if (soap_begin_send(&ctx->soap) != SOAP_OK) {
+    set_soap_error(&ctx->soap, "Failed to begin SOAP send");
+    ctx->soap.os = NULL;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  // Use gSOAP's proper envelope functions for complete SOAP envelope generation
+  if (soap_envelope_begin_out(&ctx->soap) != SOAP_OK) {
+    set_soap_error(&ctx->soap, "Failed to begin SOAP envelope");
+    ctx->soap.os = NULL;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  if (soap_body_begin_out(&ctx->soap) != SOAP_OK) {
+    set_soap_error(&ctx->soap, "Failed to begin SOAP body");
+    ctx->soap.os = NULL;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Teardown SOAP envelope after response generation
+ * @param ctx gSOAP context
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int teardown_soap_envelope_for_response(onvif_gsoap_context_t* ctx) {
+  if (!ctx) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  if (soap_body_end_out(&ctx->soap) != SOAP_OK) {
+    set_soap_error(&ctx->soap, "Failed to end SOAP body");
+    ctx->soap.os = NULL;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  if (soap_envelope_end_out(&ctx->soap) != SOAP_OK) {
+    set_soap_error(&ctx->soap, "Failed to end SOAP envelope");
+    ctx->soap.os = NULL;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  if (soap_end_send(&ctx->soap) != SOAP_OK) {
+    set_soap_error(&ctx->soap, "Failed to end SOAP send");
+    ctx->soap.os = NULL;
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  // Clear the output stream pointer
+  ctx->soap.os = NULL;
+
+  return ONVIF_SUCCESS;
+}
+
+/**
+ * @brief Log debug information for gSOAP response generation
+ * @param ctx gSOAP context
+ * @param output_string Generated output string
+ * @param response_len Length of the response
+ * @param before_copy Whether this is before or after copying to buffer
+ */
+static void log_gsoap_response_generation_debug(const onvif_gsoap_context_t* ctx, const char* output_string, size_t response_len, bool before_copy) {
+  if (!http_verbose_enabled() || !ctx) {
+    return;
+  }
+
+  if (before_copy) {
+    platform_log_debug("ONVIF gSOAP: output_string length=%zu, content=%s", response_len, output_string ? output_string : "NULL");
+    platform_log_debug("ONVIF gSOAP: Buffer length before copy: %zu", ctx->soap.length);
+  } else {
+    platform_log_debug("ONVIF gSOAP: Copied to buffer, response_len=%zu, length set to %zu, verifying...", response_len, ctx->soap.length);
+    // Verify the assignment worked correctly
+    if (ctx->soap.length != response_len) {
+      platform_log_error("ONVIF gSOAP: LENGTH MISMATCH! Expected %zu but got %zu", response_len, ctx->soap.length);
+    }
+    platform_log_debug("ONVIF gSOAP: Buffer after generation: ptr=%p, length=%zu", ctx->soap.buf, ctx->soap.length);
+    platform_log_debug("ONVIF gSOAP: Generated response with callback");
+  }
+}
+
+/**
+ * @brief Copy gSOAP output string to context buffer
+ * @param ctx gSOAP context
+ * @param output_string Output string generated by gSOAP
+ * @return ONVIF_SUCCESS on success, error code on failure
+ */
+static int copy_gsoap_output_string_to_buffer(onvif_gsoap_context_t* ctx, const char* output_string) {
+  if (!ctx) {
+    return ONVIF_ERROR_INVALID;
+  }
+
+  if (!output_string) {
+    platform_log_error("ONVIF gSOAP: output_string is NULL after callback");
+    set_soap_error(&ctx->soap, "No output string generated");
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  size_t response_len = strlen(output_string);
+  log_gsoap_response_generation_debug(ctx, output_string, response_len, true);
+
+  if (response_len >= sizeof(ctx->soap.buf)) {
+    set_soap_error(&ctx->soap, "Response too large for buffer");
+    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  }
+
+  strncpy(ctx->soap.buf, output_string, sizeof(ctx->soap.buf) - 1);
+  ctx->soap.buf[sizeof(ctx->soap.buf) - 1] = '\0';
+  // Store response_len in local variable before assignment to catch any issues
+  size_t expected_length = response_len;
+  ctx->soap.length = expected_length;
+
+  log_gsoap_response_generation_debug(ctx, output_string, expected_length, false);
+
+  return ONVIF_SUCCESS;
+}
+
 /* ============================================================================
  * Public API Functions
  * ============================================================================
@@ -155,22 +349,6 @@ int onvif_gsoap_validate_context(struct soap* soap) {
   }
 
   return ONVIF_SUCCESS;
-}
-
-static void set_soap_error(struct soap* soap, const char* format, ...) {
-  va_list args;
-  va_start(args, format);
-  (void)vsnprintf(g_onvif_gsoap_error_msg, sizeof(g_onvif_gsoap_error_msg), format, args);
-  va_end(args);
-
-  if (soap) {
-    soap->error = SOAP_FAULT;
-    // Ensure fault structure exists before accessing it
-    if (onvif_gsoap_validate_context(soap) == ONVIF_SUCCESS && soap->fault) {
-      soap->fault->faultstring = soap_strdup(soap, g_onvif_gsoap_error_msg);
-    }
-  }
-  platform_log_error("ONVIF gSOAP Error: %s", g_onvif_gsoap_error_msg);
 }
 
 int onvif_gsoap_serialize_response(onvif_gsoap_context_t* ctx, void* response_data) {
@@ -221,35 +399,11 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx, onvi
     return ONVIF_ERROR_INVALID;
   }
 
-  // Ensure gSOAP context is properly initialized for fault handling
-  if (onvif_gsoap_validate_context(&ctx->soap) != ONVIF_SUCCESS) {
-    platform_log_error("ONVIF gSOAP: Failed to initialize fault handling context");
-    return ONVIF_ERROR_MEMORY_ALLOCATION;
-  }
-
-  // Set up gSOAP for string output - this is the correct way to get XML as a
-  // string
+  // Setup SOAP envelope for response generation
   char* output_string = NULL;
-  ctx->soap.os = (void*)&output_string;
-
-  // Begin SOAP send with string output mode
-  if (soap_begin_send(&ctx->soap) != SOAP_OK) {
-    set_soap_error(&ctx->soap, "Failed to begin SOAP send");
-    ctx->soap.os = NULL;
-    return ONVIF_ERROR_SERIALIZATION_FAILED;
-  }
-
-  // Use gSOAP's proper envelope functions for complete SOAP envelope generation
-  if (soap_envelope_begin_out(&ctx->soap) != SOAP_OK) {
-    set_soap_error(&ctx->soap, "Failed to begin SOAP envelope");
-    ctx->soap.os = NULL;
-    return ONVIF_ERROR_SERIALIZATION_FAILED;
-  }
-
-  if (soap_body_begin_out(&ctx->soap) != SOAP_OK) {
-    set_soap_error(&ctx->soap, "Failed to begin SOAP body");
-    ctx->soap.os = NULL;
-    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  int setup_result = setup_soap_envelope_for_response(ctx, &output_string);
+  if (setup_result != ONVIF_SUCCESS) {
+    return setup_result;
   }
 
   // Call the endpoint-specific callback to generate the response content
@@ -260,50 +414,18 @@ int onvif_gsoap_generate_response_with_callback(onvif_gsoap_context_t* ctx, onvi
     return callback_result;
   }
 
-  if (soap_body_end_out(&ctx->soap) != SOAP_OK) {
-    set_soap_error(&ctx->soap, "Failed to end SOAP body");
-    ctx->soap.os = NULL;
-    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  // Teardown SOAP envelope after response generation
+  int teardown_result = teardown_soap_envelope_for_response(ctx);
+  if (teardown_result != ONVIF_SUCCESS) {
+    return teardown_result;
   }
-
-  if (soap_envelope_end_out(&ctx->soap) != SOAP_OK) {
-    set_soap_error(&ctx->soap, "Failed to end SOAP envelope");
-    ctx->soap.os = NULL;
-    return ONVIF_ERROR_SERIALIZATION_FAILED;
-  }
-
-  if (soap_end_send(&ctx->soap) != SOAP_OK) {
-    set_soap_error(&ctx->soap, "Failed to end SOAP send");
-    ctx->soap.os = NULL;
-    return ONVIF_ERROR_SERIALIZATION_FAILED;
-  }
-
-  // Clear the output stream pointer
-  ctx->soap.os = NULL;
 
   // Copy the generated string to our buffer
-  if (output_string) {
-    size_t response_len = strlen(output_string);
-    platform_log_debug("ONVIF gSOAP: output_string length=%zu, content=%s", response_len, output_string);
-    if (response_len < sizeof(ctx->soap.buf)) {
-      strncpy(ctx->soap.buf, output_string, sizeof(ctx->soap.buf) - 1);
-      ctx->soap.buf[sizeof(ctx->soap.buf) - 1] = '\0';
-      ctx->soap.length = response_len;
-      platform_log_debug("ONVIF gSOAP: Copied to buffer, length set to %zu", ctx->soap.length);
-    } else {
-      set_soap_error(&ctx->soap, "Response too large for buffer");
-      return ONVIF_ERROR_SERIALIZATION_FAILED;
-    }
-  } else {
-    platform_log_error("ONVIF gSOAP: output_string is NULL after callback");
-    set_soap_error(&ctx->soap, "No output string generated");
-    return ONVIF_ERROR_SERIALIZATION_FAILED;
+  int copy_result = copy_gsoap_output_string_to_buffer(ctx, output_string);
+  if (copy_result != ONVIF_SUCCESS) {
+    return copy_result;
   }
 
-  // Debug: Check buffer after generation
-  platform_log_debug("ONVIF gSOAP: Buffer after generation: ptr=%p, length=%zu", ctx->soap.buf, ctx->soap.length);
-
-  platform_log_debug("ONVIF gSOAP: Generated response with callback");
   return ONVIF_SUCCESS;
 }
 
@@ -436,6 +558,9 @@ static int create_temp_context_if_needed(onvif_gsoap_context_t** ctx, bool* is_t
     return ONVIF_ERROR_MEMORY_ALLOCATION;
   }
 
+  // Explicitly ensure length is initialized to 0 (defense in depth)
+  (*ctx)->soap.length = 0;
+
   return ONVIF_SUCCESS;
 }
 
@@ -501,11 +626,21 @@ int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* 
     return ONVIF_ERROR_INVALID;
   }
 
+  // Log root cause before generating fault response to aid debugging
+  platform_log_error("ONVIF gSOAP: Generating fault response - Code: %s, Message: %s", fault_code ? fault_code : "NULL", fault_string);
+  if (fault_actor) {
+    platform_log_error("ONVIF gSOAP: Fault actor: %s", fault_actor);
+  }
+  if (fault_detail) {
+    platform_log_error("ONVIF gSOAP: Fault detail: %s", fault_detail);
+  }
+
   // Create temporary context if needed
   bool temp_ctx = false;
   onvif_gsoap_context_t* actual_ctx = ctx;
   int result = create_temp_context_if_needed(&actual_ctx, &temp_ctx);
   if (result != ONVIF_SUCCESS) {
+    platform_log_error("ONVIF gSOAP: Failed to create context for fault generation (error: %d (%s))", result, onvif_error_to_string(result));
     return result;
   }
 
@@ -515,6 +650,9 @@ int onvif_gsoap_generate_fault_response(onvif_gsoap_context_t* ctx, const char* 
 
   // Generate fault response
   result = onvif_gsoap_generate_response_with_callback(actual_ctx, fault_response_callback, &callback_data);
+  if (result != ONVIF_SUCCESS) {
+    platform_log_error("ONVIF gSOAP: Failed to generate fault response with callback (error: %d (%s))", result, onvif_error_to_string(result));
+  }
   if (result == ONVIF_SUCCESS) {
     // Copy response to output buffer if provided
     result = copy_response_to_buffer(actual_ctx, output_buffer, buffer_size);

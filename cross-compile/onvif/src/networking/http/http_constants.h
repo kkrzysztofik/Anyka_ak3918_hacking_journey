@@ -124,4 +124,24 @@
 /** @brief Maximum size for HTTP version string (HTTP/1.1, HTTP/1.0) */
 #define HTTP_VERSION_SIZE 16
 
+/* ============================================================================
+ * HTTP Request Processing Constants
+ * ============================================================================
+ */
+
+/** @brief Buffer size for error message strings */
+#define HTTP_ERROR_MSG_BUFFER_SIZE 256
+
+/** @brief Chunk size for reading HTTP request data (4KB) */
+#define HTTP_READ_CHUNK_SIZE 4096
+
+/** @brief Buffer size for debug log messages */
+#define HTTP_DEBUG_LOG_BUFFER_SIZE 512
+
+/** @brief Maximum number of read retry attempts */
+#define HTTP_MAX_READ_RETRIES 10
+
+/** @brief Read timeout in milliseconds */
+#define HTTP_READ_TIMEOUT_MS 5000
+
 #endif /* HTTP_CONSTANTS_H */

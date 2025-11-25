@@ -46,7 +46,8 @@
 #define ONVIF_DAYNIGHT_LOCK_TIME_DEFAULT     10
 
 /* File Paths */
-#define ONVIF_CONFIG_FILE_DEFAULT "/etc/jffs2/anyka_cfg.ini"
+/* Note: Relative paths are resolved relative to the executable's directory */
+#define ONVIF_CONFIG_FILE_DEFAULT "./config.ini"
 #define ONVIF_CONFIG_FILE         ONVIF_CONFIG_FILE_DEFAULT
 #define ONVIF_DMALLOC_LOG_FILE    "dmalloc.log"
 

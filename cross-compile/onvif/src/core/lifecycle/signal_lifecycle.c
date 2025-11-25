@@ -139,7 +139,7 @@ int signal_lifecycle_register_handlers(void) {
   struct sigaction signal_action;
   signal_action.sa_handler = signal_handler;
   sigemptyset(&signal_action.sa_mask);
-  signal_action.sa_flags = SA_RESTART; // Restart interrupted system calls
+  signal_action.sa_flags = 0; // Allow system calls to be interrupted (required for graceful shutdown)
 
   if (sigaction(SIGINT, &signal_action, NULL) != 0) {
     platform_log_error("Failed to register SIGINT handler\n");

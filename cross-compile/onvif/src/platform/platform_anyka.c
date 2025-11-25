@@ -8,6 +8,10 @@
  * into a single implementation for the Anyka AK3918 platform.
  */
 
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <bits/pthreadtypes.h>
 #include <bits/types.h>
 #include <errno.h>
@@ -20,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -2230,6 +2235,34 @@ int platform_system(const char* command) {
   // NOLINTNEXTLINE(cert-env33-c) - Acceptable: Only used with hardcoded commands (e.g., "reboot"), no user input
   int result = system(command);
   return result;
+}
+
+/**
+ * @brief Get the absolute path to the currently running executable
+ */
+platform_result_t platform_get_executable_path(char* path_buffer, size_t buffer_size) {
+  ssize_t len = 0;
+
+  if (path_buffer == NULL || buffer_size == 0) {
+    platform_log_error("[PLATFORM] Invalid parameters for get_executable_path\n");
+    return PLATFORM_ERROR_INVALID_PARAM;
+  }
+
+  /* Use /proc/self/exe on Linux */
+  len = readlink("/proc/self/exe", path_buffer, buffer_size - 1);
+
+  if (len == -1) {
+    platform_log_warning("[PLATFORM] Failed to read /proc/self/exe: %s\n", strerror(errno));
+    return PLATFORM_ERROR;
+  }
+
+  if ((size_t)len >= buffer_size) {
+    platform_log_error("[PLATFORM] Executable path buffer too small\n");
+    return PLATFORM_ERROR_INVALID;
+  }
+
+  path_buffer[len] = '\0';
+  return PLATFORM_SUCCESS;
 }
 
 /* Enhanced video encoder logging and statistics functions implementation */

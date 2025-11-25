@@ -45,6 +45,9 @@ int onvif_gsoap_init(onvif_gsoap_context_t* ctx) {
   platform_log_debug("onvif_gsoap_init: Initializing embedded soap context");
   soap_init(&ctx->soap);
 
+  // Explicitly initialize length field to prevent uninitialized value bugs
+  ctx->soap.length = 0;
+
   // Set SOAP version to 1.2 for ONVIF compliance
   soap_set_version(&ctx->soap, 2);
 

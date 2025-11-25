@@ -33,11 +33,11 @@ typedef enum {
  * @brief Logging configuration structure
  */
 typedef struct {
-  bool enabled;                          /**< Enable/disable logging */
-  bool use_colors;                       /**< Enable/disable color output */
-  bool use_timestamps;                   /**< Enable/disable timestamps */
-  platform_log_level_t min_level;        /**< Minimum log level to print */
-  char tag[PLATFORM_LOG_TAG_SIZE];       /**< Log tag identifier */
+  bool enabled;                    /**< Enable/disable logging */
+  bool use_colors;                 /**< Enable/disable color output */
+  bool use_timestamps;             /**< Enable/disable timestamps */
+  platform_log_level_t min_level;  /**< Minimum log level to print */
+  char tag[PLATFORM_LOG_TAG_SIZE]; /**< Log tag identifier */
 } platform_logging_config_t;
 
 /**

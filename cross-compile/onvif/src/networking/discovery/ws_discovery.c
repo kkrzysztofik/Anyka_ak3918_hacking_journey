@@ -5,7 +5,6 @@
  * @date 2025
  */
 
-#define _GNU_SOURCE
 #include "ws_discovery.h"
 
 #include <arpa/inet.h>
@@ -30,28 +29,28 @@
 #include "utils/network/network_utils.h"
 
 /* WS-Discovery algorithm constants */
-#define MAC_ADDRESS_SIZE          6           /* Standard MAC address size in bytes */
-#define MAC_ADDRESS_LAST_INDEX    5           /* Last valid index in MAC address array (SIZE - 1) */
-#define DJB2_HASH_INIT            5381        /* DJB2 hash algorithm initial value */
-#define DJB2_HASH_SHIFT           5           /* DJB2 hash left shift amount */
-#define MAC_LOCAL_ADMIN_FLAG      0x02        /* Locally administered MAC address flag */
-#define WSD_MESSAGE_ID_SIZE       64          /* WS-Discovery message ID buffer size */
-#define LCG_MULTIPLIER            1103515245U /* Linear Congruential Generator multiplier (glibc) */
-#define LCG_INCREMENT             12345U      /* Linear Congruential Generator increment (glibc) */
-#define LCG_RAND_SHIFT            16          /* Bit shift to extract random value from LCG seed */
-#define LCG_RAND_MASK             0xFFFF      /* Mask for 16-bit random value */
+#define MAC_ADDRESS_SIZE       6           /* Standard MAC address size in bytes */
+#define MAC_ADDRESS_LAST_INDEX 5           /* Last valid index in MAC address array (SIZE - 1) */
+#define DJB2_HASH_INIT         5381        /* DJB2 hash algorithm initial value */
+#define DJB2_HASH_SHIFT        5           /* DJB2 hash left shift amount */
+#define MAC_LOCAL_ADMIN_FLAG   0x02        /* Locally administered MAC address flag */
+#define WSD_MESSAGE_ID_SIZE    64          /* WS-Discovery message ID buffer size */
+#define LCG_MULTIPLIER         1103515245U /* Linear Congruential Generator multiplier (glibc) */
+#define LCG_INCREMENT          12345U      /* Linear Congruential Generator increment (glibc) */
+#define LCG_RAND_SHIFT         16          /* Bit shift to extract random value from LCG seed */
+#define LCG_RAND_MASK          0xFFFF      /* Mask for 16-bit random value */
 
 /* Common bit manipulation constants */
-#define SHIFT_8_BITS              8           /* Bit shift for extracting second byte */
-#define SHIFT_16_BITS             16          /* Bit shift for extracting third byte */
-#define SHIFT_24_BITS             24          /* Bit shift for extracting fourth byte */
-#define BYTE_MASK                 0xFF        /* Mask for extracting single byte */
+#define SHIFT_8_BITS  8    /* Bit shift for extracting second byte */
+#define SHIFT_16_BITS 16   /* Bit shift for extracting third byte */
+#define SHIFT_24_BITS 24   /* Bit shift for extracting fourth byte */
+#define BYTE_MASK     0xFF /* Mask for extracting single byte */
 
 /* UUID generation constants (RFC 4122) */
-#define UUID_VERSION_MASK         0x0FFF      /* Mask for UUID version field (clear version bits) */
-#define UUID_VERSION_4_FLAG       0x4000      /* UUID version 4 (random) flag */
-#define UUID_VARIANT_MASK         0x3FFF      /* Mask for UUID variant field (clear variant bits) */
-#define UUID_VARIANT_RFC_FLAG     0x8000      /* UUID variant RFC 4122 flag */
+#define UUID_VERSION_MASK     0x0FFF /* Mask for UUID version field (clear version bits) */
+#define UUID_VERSION_4_FLAG   0x4000 /* UUID version 4 (random) flag */
+#define UUID_VARIANT_MASK     0x3FFF /* Mask for UUID variant field (clear variant bits) */
+#define UUID_VARIANT_RFC_FLAG 0x8000 /* UUID variant RFC 4122 flag */
 
 /* Some stripped uClibc headers may omit ip_mreq; provide minimal fallback */
 #ifndef IP_ADD_MEMBERSHIP
@@ -103,11 +102,11 @@ static void build_endpoint_uuid(void) {
   unsigned char mac[MAC_ADDRESS_SIZE];
   derive_pseudo_mac(mac);
   /* Simple deterministic UUID style using MAC expanded */
-  int result =
-    snprintf(g_endpoint_uuid, sizeof(g_endpoint_uuid),
-             "urn:uuid:%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%"
-             "02x%02x%02x",
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[MAC_ADDRESS_LAST_INDEX], mac[0], mac[1], mac[2], mac[3], mac[4], mac[MAC_ADDRESS_LAST_INDEX], mac[0], mac[1], mac[2], mac[3]);
+  int result = snprintf(g_endpoint_uuid, sizeof(g_endpoint_uuid),
+                        "urn:uuid:%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%"
+                        "02x%02x%02x",
+                        mac[0], mac[1], mac[2], mac[3], mac[4], mac[MAC_ADDRESS_LAST_INDEX], mac[0], mac[1], mac[2], mac[3], mac[4],
+                        mac[MAC_ADDRESS_LAST_INDEX], mac[0], mac[1], mac[2], mac[3]);
   (void)result; // Suppress unused variable warning
 }
 
@@ -132,7 +131,8 @@ static void gen_msg_uuid(char* out, size_t len) {
   seed = seed * LCG_MULTIPLIER + LCG_INCREMENT;
   unsigned int rand6 = (seed >> LCG_RAND_SHIFT) & LCG_RAND_MASK;
 
-  int result = snprintf(out, len, "%08x-%04x-%04x-%04x-%04x%08x", rand1, rand2, (rand3 & UUID_VERSION_MASK) | UUID_VERSION_4_FLAG, (rand4 & UUID_VARIANT_MASK) | UUID_VARIANT_RFC_FLAG, rand5, rand6);
+  int result = snprintf(out, len, "%08x-%04x-%04x-%04x-%04x%08x", rand1, rand2, (rand3 & UUID_VERSION_MASK) | UUID_VERSION_4_FLAG,
+                        (rand4 & UUID_VARIANT_MASK) | UUID_VARIANT_RFC_FLAG, rand5, rand6);
   (void)result; // Suppress unused variable warning
 }
 

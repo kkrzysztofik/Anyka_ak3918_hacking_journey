@@ -327,6 +327,11 @@ test-coverage-clean:
 	@echo "Cleaning coverage files..."
 	@$(MAKE) -C tests coverage-clean
 
+tools:
+	@echo "Building ONVIF tools..."
+	@$(MAKE) -C tools/onvif_user_manager
+
 clean:
 	rm -rf $(OUT_DIR)
 	@$(MAKE) -C tests clean
+	@$(MAKE) -C tools/onvif_user_manager clean

@@ -99,7 +99,10 @@ int onvif_service_handler_handle_request(onvif_service_handler_instance_t* handl
     response->status_code = HTTP_STATUS_BAD_REQUEST;
     response->body = (char*)"Unsupported action";
     response->body_length = strlen("Unsupported action");
-    response->content_type = "application/soap+xml";
+    response->content_type = memory_safe_strdup("application/soap+xml");
+    if (!response->content_type) {
+      return ONVIF_ERROR_MEMORY;
+    }
     return ONVIF_SUCCESS;
   }
 
@@ -209,7 +212,10 @@ int onvif_service_handler_generate_success(onvif_service_handler_instance_t* han
   response->status_code = HTTP_STATUS_OK;
   response->body = (char*)body_content;
   response->body_length = strlen(body_content);
-  response->content_type = "application/soap+xml";
+  response->content_type = memory_safe_strdup("application/soap+xml");
+  if (!response->content_type) {
+    return ONVIF_ERROR_MEMORY;
+  }
 
   // Log success
   if (handler->config.enable_logging) {
@@ -230,7 +236,10 @@ int onvif_service_handler_generate_error(onvif_service_handler_instance_t* handl
   response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
   response->body = (char*)error_message;
   response->body_length = strlen(error_message);
-  response->content_type = "application/soap+xml";
+  response->content_type = memory_safe_strdup("application/soap+xml");
+  if (!response->content_type) {
+    return ONVIF_ERROR_MEMORY;
+  }
 
   // Log error
   if (handler->config.enable_logging) {

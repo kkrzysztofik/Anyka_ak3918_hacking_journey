@@ -31,6 +31,7 @@
 #include "services/common/onvif_service_common.h"
 #include "services/common/onvif_types.h"
 #include "services/common/service_dispatcher.h"
+#include "utils/memory/memory_manager.h"
 #ifdef UNIT_TESTING
 #include "services/common/onvif_service_test_helpers.h"
 #endif
@@ -38,7 +39,6 @@
 #include "utils/error/error_translation.h"
 #include "utils/logging/logging_utils.h"
 #include "utils/logging/service_logging.h"
-#include "utils/memory/memory_manager.h"
 #include "utils/memory/smart_response_builder.h"
 #include "utils/validation/common_validation.h"
 
@@ -835,7 +835,7 @@ int onvif_imaging_service_init(config_manager_t* config) {
 #else
   int result = onvif_service_dispatcher_register_service(&g_imaging_service_registration);
   if (result != ONVIF_SUCCESS) {
-    platform_log_error("Failed to register imaging service with dispatcher: %d\n", result);
+    platform_log_error("Failed to register imaging service with dispatcher: %d (%s)\n", result, onvif_error_to_string(result));
     onvif_imaging_service_cleanup();
     return result;
   }
@@ -854,7 +854,8 @@ void onvif_imaging_service_cleanup(void) {
   // Unregister from standardized service dispatcher
   int unregister_result = onvif_service_dispatcher_unregister_service("imaging");
   if (unregister_result != ONVIF_SUCCESS) {
-    platform_log_error("Failed to unregister imaging service from dispatcher: %d\n", unregister_result);
+    platform_log_error("Failed to unregister imaging service from dispatcher: %d (%s)\n", unregister_result,
+                       onvif_error_to_string(unregister_result));
     // Don't fail cleanup for this, but log the error
   }
 
@@ -1012,7 +1013,10 @@ static int handle_set_imaging_settings(const service_handler_config_t* config, c
 
   // Set response headers
   response->status_code = HTTP_STATUS_OK;
-  response->content_type = "application/soap+xml; charset=utf-8";
+  response->content_type = memory_safe_strdup("application/soap+xml; charset=utf-8");
+  if (!response->content_type) {
+    return ONVIF_ERROR_MEMORY;
+  }
 
   service_log_info(&log_ctx, "Successfully updated imaging settings\n");
   return ONVIF_SUCCESS;

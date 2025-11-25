@@ -5,12 +5,10 @@
  * @date 2025
  */
 
-#define _GNU_SOURCE
 #include "rtsp_multistream.h"
 
 #include <arpa/inet.h>
 #include <asm/socket.h>
-#include <bits/pthreadtypes.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <pthread.h>
