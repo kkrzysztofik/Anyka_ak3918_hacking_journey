@@ -1,0 +1,32 @@
+{
+  "arch": "arm",
+  "data-layout": "e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64",
+  "dynamic-linking": true,
+  "env": "uclibc",
+  "executables": true,
+  "features": "+soft-float,+strict-align",
+  "has-elf-tls": false,
+  "has-rpath": true,
+  "is-builtin": false,
+  "linker": "clang",
+  "linker-flavor": "gcc",
+  "llvm-target": "arm-unknown-linux-uclibcgnueabi",
+  "max-atomic-width": 32,
+  "os": "linux",
+  "panic-strategy": " unwind",
+  "position-independent-executables": true,
+  "pre-link-args": {
+    "gcc": [
+      "--target=arm-unknown-linux-uclibcgnueabi",
+      "-march=armv5te",
+      "-mfloat-abi=soft",
+      "-mtune=arm926ej-s"
+    ]
+  },
+  "relro-level": "full",
+  "target-c-int-width": "32",
+  "target-endian": "little",
+  "target-family": "unix",
+  "target-pointer-width": "32",
+  "vendor": "unknown"
+}
