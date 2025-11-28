@@ -1,63 +1,55 @@
 FROM ubuntu:24.04
 
-# Set up 32-bit architecture support
-RUN dpkg --add-architecture i386
-
-# Update and install dependencies
-RUN apt-get update && apt-get install -y \
+# Install base dependencies for Rust ONVIF project
+RUN apt-get update && apt-get install -y --no-install-recommends \
   git \
   wget \
   file \
   binutils \
-  binutils-multiarch \
-  libc6:i386 \
-  libncurses6:i386 \
-  libstdc++6:i386 \
-  zlib1g:i386 \
-  build-essential \
-  gdb \
-  libcmocka-dev \
-  gcc-multilib \
-  g++-multilib \
-  doxygen \
-  graphviz \
-  make \
-  clang \
-  clang-tools \
-  clangd \
-  cppcheck \
   curl \
-  lcov \
   sudo \
   unzip \
   python3 \
   python3-pip \
   bc \
   pkg-config \
+  perl \
   ccache \
-  bear \
-  && rm -rf /var/lib/apt/lists/*
+  ca-certificates \
+  libxml2 \
+  zlib1g \
+  libtinfo6 \
+  libc6-dev \
+  && rm -rf /var/lib/apt/lists/* \
+  && apt-get clean
 
-# Pre-install ONVIF test dependencies and native libraries
-COPY cross-compile/onvif/tests /opt/onvif/tests
-RUN bash /opt/onvif/tests/scripts/install_dependencies.sh \
-  && rm -rf /opt/onvif/tests/build_native \
-  && rm -rf /var/lib/apt/lists/*
+# Copy toolchain and optimize size
+COPY toolchain/arm-anykav200-crosstool-ng /opt/arm-anykav200-crosstool-ng
+RUN rm -rf /opt/arm-anykav200-crosstool-ng/share/doc \
+  /opt/arm-anykav200-crosstool-ng/share/man \
+  /opt/arm-anykav200-crosstool-ng/share/info \
+  /opt/arm-anykav200-crosstool-ng/share/locale \
+  /opt/arm-anykav200-crosstool-ng/lib/*.la \
+  2>/dev/null || true && \
+  find /opt/arm-anykav200-crosstool-ng/bin -type f -executable -exec strip --strip-debug {} \; 2>/dev/null || true
 
-# Copy and extract local Anyka toolchain
-COPY toolchain/arm-anykav200-crosstool.zip /tmp/
-COPY toolchain/arm-anykav200-gdb-7.12.tar.gz /tmp/
-RUN cd /tmp \
-  && unzip -q arm-anykav200-crosstool.zip \
-  && tar -xzf arm-anykav200-gdb-7.12.tar.gz \
-  && mv arm-anykav200-crosstool /opt/ \
-  && mv gdb /opt/arm-anykav200-crosstool/usr/bin/ \
-  && mv gdbserver /opt/arm-anykav200-crosstool/usr/bin/ \
-  && mv arm-anykav200-linux-uclibcgnueabi-gdb /opt/arm-anykav200-crosstool/usr/bin/ \
-  && rm arm-anykav200-crosstool.zip arm-anykav200-gdb-7.12.tar.gz
+ENV PATH="/opt/arm-anykav200-crosstool-ng/bin:${PATH}"
 
-# Add toolchain to PATH
-ENV PATH="/opt/arm-anykav200-crosstool/usr/bin:${PATH}"
+# Install build-essential for host builds (gcc for x86_64 proc-macros and build scripts)
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
+  rm -rf /var/lib/apt/lists/* && apt-get clean
+
+# Install cargo via rustup (toolchain's cargo is a symlink that won't work in Docker)
+RUN if ! command -v cargo >/dev/null 2>&1; then \
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal --component cargo --component rustfmt --component clippy && \
+  /root/.cargo/bin/cargo --version && \
+  rm -rf /root/.rustup/toolchains/*/share/doc \
+  /root/.rustup/toolchains/*/share/man \
+  /root/.rustup/toolchains/*/lib/rustlib/*/doc \
+  /root/.rustup/toolchains/*/lib/rustlib/*/src \
+  /root/.rustup/toolchains/*/lib/rustlib/src; \
+  fi
+ENV PATH="${PATH}:/root/.cargo/bin"
 
 # Install Snyk CLI
 RUN curl -Lo snyk-linux https://downloads.snyk.io/cli/stable/snyk-linux \
@@ -67,22 +59,19 @@ RUN curl -Lo snyk-linux https://downloads.snyk.io/cli/stable/snyk-linux \
   && mv snyk-linux /usr/local/bin/snyk \
   && rm snyk-linux.sha256
 
-# Install clangd-tidy (faster alternative to clang-tidy)
-# Using --break-system-packages for Docker container (safe in isolated environment)
-RUN pip3 install --break-system-packages clangd-tidy
-
 # Verify installation
-RUN arm-anykav200-linux-uclibcgnueabi-gcc -v
-RUN doxygen --version
-RUN dot -V
-RUN clang --version
-RUN clangd --version
-RUN cppcheck --version
-RUN snyk --version
-RUN clangd-tidy --version
-RUN bc --version
-RUN ccache --version
-RUN bear --version
+RUN arm-unknown-linux-uclibcgnueabi-gcc --version || arm-anykav200-linux-uclibcgnueabi-gcc --version && \
+  EXPECTED_RUSTC="/opt/arm-anykav200-crosstool-ng/bin/rustc" && \
+  ACTUAL_RUSTC=$(which rustc) && \
+  rustc --version && \
+  if [ "$ACTUAL_RUSTC" != "$EXPECTED_RUSTC" ]; then \
+  echo "ERROR: rustc is not from toolchain! Expected: $EXPECTED_RUSTC, Found: $ACTUAL_RUSTC" && \
+  exit 1; \
+  fi && \
+  cargo --version && \
+  clang --version && \
+  snyk --version && \
+  ccache --version
 
 # Set working directory
 WORKDIR /workspace

@@ -224,6 +224,323 @@ CXX_armv5te_unknown_linux_uclibceabi = "/home/kmk/anyka-dev/toolchain/arm-anykav
 AR_armv5te_unknown_linux_uclibceabi = "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-ar"
 ```
 
+## Application Lifecycle Architecture
+
+### Design Principles
+
+The lifecycle architecture follows these rules:
+
+- **Explicit `start()`**: Ordered, async, fallible initialization
+- **Explicit `shutdown()`**: Coordinated, async, graceful shutdown
+- **No global state**: All state owned by `Application` struct
+- **No `Drop` for async**: `Drop` only deallocates memory; async cleanup via `shutdown()`
+- **Dependency injection**: Components receive dependencies, not global lookups
+- **Optional components**: Handled at startup with degraded mode support
+
+### Architecture Overview
+
+```text
+Application
+├── start() → ordered async initialization
+├── run() → main event loop with signal handling
+├── shutdown() → coordinated async cleanup
+└── Drop → memory deallocation only (no async, no side effects)
+
+Components (owned by Application):
+├── Config (non-optional, loaded first)
+├── Platform (non-optional, hardware abstraction)
+├── ServiceManager
+│   ├── DeviceService (required)
+│   ├── MediaService (required)
+│   ├── PtzService (optional - degraded mode if unavailable)
+│   └── ImagingService (optional - degraded mode if unavailable)
+├── NetworkManager
+│   ├── HttpServer (required)
+│   ├── WsDiscovery (optional)
+│   └── SnapshotHandler (optional)
+└── ShutdownCoordinator (broadcast channel for graceful shutdown)
+```
+
+### Application Struct
+
+```rust
+// src/app.rs
+pub struct Application {
+    config: ConfigRuntime,
+    platform: Arc<dyn Platform>,
+    services: ServiceManager,
+    network: NetworkManager,
+    shutdown_tx: broadcast::Sender<()>,
+    started_at: Instant,
+}
+
+impl Application {
+    /// Ordered async initialization - the ONLY way to create Application
+    pub async fn start(config_path: &str) -> Result<Self, StartupError>;
+
+    /// Run until shutdown signal received
+    pub async fn run(&self) -> Result<(), RuntimeError>;
+
+    /// Coordinated async shutdown - MUST be called before drop
+    pub async fn shutdown(self) -> ShutdownReport;
+
+    /// Health check for observability
+    pub fn health(&self) -> HealthStatus;
+}
+```
+
+### Startup Sequence
+
+Initialization order (matches C implementation):
+
+1. Load and validate configuration
+2. Initialize platform abstraction (with hardware stubs for testing)
+3. Initialize required services (Device, Media)
+4. Initialize optional services (PTZ, Imaging) - log warning on failure, continue
+5. Initialize network (HTTP server - required; WS-Discovery - optional)
+6. Send WS-Discovery Hello message
+
+```rust
+// src/lifecycle/startup.rs
+pub async fn startup_sequence(config_path: &str) -> Result<Application, StartupError> {
+    tracing::info!("Starting ONVIF application...");
+
+    // Phase 1: Configuration
+    tracing::info!("Phase 1: Loading configuration...");
+    let config = ConfigRuntime::load(config_path)
+        .map_err(StartupError::Config)?;
+
+    // Phase 2: Platform
+    tracing::info!("Phase 2: Initializing platform...");
+    let platform = create_platform(&config)
+        .await
+        .map_err(StartupError::Platform)?;
+
+    // Phase 3: Services (required + optional)
+    tracing::info!("Phase 3: Initializing services...");
+    let (shutdown_tx, _) = broadcast::channel(1);
+    let services = ServiceManager::new(&config, platform.clone(), shutdown_tx.subscribe())
+        .await
+        .map_err(StartupError::Services)?;
+
+    // Phase 4: Network
+    tracing::info!("Phase 4: Initializing network...");
+    let network = NetworkManager::new(&config, services.clone(), shutdown_tx.subscribe())
+        .await
+        .map_err(StartupError::Network)?;
+
+    // Phase 5: Discovery Hello
+    if let Some(discovery) = &network.discovery {
+        tracing::info!("Phase 5: Sending WS-Discovery Hello...");
+        discovery.send_hello().await.ok(); // Non-fatal
+    }
+
+    tracing::info!("Application started successfully");
+    Ok(Application {
+        config,
+        platform,
+        services,
+        network,
+        shutdown_tx,
+        started_at: Instant::now(),
+    })
+}
+```
+
+### Shutdown Coordination
+
+Shutdown sequence:
+
+1. Send WS-Discovery Bye message
+2. Stop accepting new HTTP connections
+3. Broadcast shutdown signal to all tasks
+4. Wait for in-flight requests (with timeout)
+5. Shutdown services in reverse order
+6. Shutdown platform
+7. Return shutdown report (success/timeout/errors)
+
+```rust
+// src/lifecycle/shutdown.rs
+pub struct ShutdownCoordinator {
+    shutdown_tx: broadcast::Sender<()>,
+    timeout: Duration,
+}
+
+impl ShutdownCoordinator {
+    pub fn new(shutdown_tx: broadcast::Sender<()>, timeout: Duration) -> Self {
+        Self { shutdown_tx, timeout }
+    }
+
+    pub async fn initiate_shutdown(&self) -> ShutdownReport {
+        let start = Instant::now();
+        let mut report = ShutdownReport::new();
+
+        tracing::info!("Initiating graceful shutdown...");
+
+        // Broadcast shutdown signal to all listeners
+        let _ = self.shutdown_tx.send(());
+
+        // Wait for tasks with timeout
+        match tokio::time::timeout(self.timeout, self.wait_for_tasks()).await {
+            Ok(_) => {
+                report.status = ShutdownStatus::Success;
+                tracing::info!("All tasks completed gracefully");
+            }
+            Err(_) => {
+                report.status = ShutdownStatus::Timeout;
+                tracing::warn!("Shutdown timeout - some tasks may not have completed");
+            }
+        }
+
+        report.duration = start.elapsed();
+        report
+    }
+}
+```
+
+### Optional Component Handling
+
+```rust
+// src/onvif/services/manager.rs
+pub struct ServiceManager {
+    device: DeviceService,           // Required - startup fails if unavailable
+    media: MediaService,             // Required - startup fails if unavailable
+    ptz: Option<PtzService>,         // Optional - None if init failed
+    imaging: Option<ImagingService>, // Optional - None if init failed
+    degraded_services: Vec<String>,  // Track what's unavailable
+}
+
+impl ServiceManager {
+    pub async fn new(
+        config: &ConfigRuntime,
+        platform: Arc<dyn Platform>,
+        shutdown_rx: broadcast::Receiver<()>,
+    ) -> Result<Self, ServiceInitError> {
+        // Required services - fail if unavailable
+        let device = DeviceService::new(config, platform.clone()).await?;
+        let media = MediaService::new(config, platform.clone()).await?;
+
+        // Optional services - log warning and continue
+        let mut degraded_services = Vec::new();
+
+        let ptz = match PtzService::new(config, platform.clone()).await {
+            Ok(ptz) => Some(ptz),
+            Err(e) => {
+                tracing::warn!("PTZ service unavailable: {}", e);
+                degraded_services.push("PTZ".to_string());
+                None
+            }
+        };
+
+        let imaging = match ImagingService::new(config, platform.clone()).await {
+            Ok(imaging) => Some(imaging),
+            Err(e) => {
+                tracing::warn!("Imaging service unavailable: {}", e);
+                degraded_services.push("Imaging".to_string());
+                None
+            }
+        };
+
+        Ok(Self {
+            device,
+            media,
+            ptz,
+            imaging,
+            degraded_services,
+        })
+    }
+
+    pub fn is_degraded(&self) -> bool {
+        !self.degraded_services.is_empty()
+    }
+}
+```
+
+### Health Status
+
+```rust
+// src/lifecycle/health.rs
+#[derive(Debug, Clone)]
+pub enum HealthState {
+    Healthy,
+    Degraded,
+    Unhealthy,
+}
+
+#[derive(Debug, Clone)]
+pub struct ComponentHealth {
+    pub name: String,
+    pub status: HealthState,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HealthStatus {
+    pub status: HealthState,
+    pub uptime: Duration,
+    pub components: HashMap<String, ComponentHealth>,
+    pub degraded_services: Vec<String>,
+}
+
+impl Application {
+    pub fn health(&self) -> HealthStatus {
+        let mut components = HashMap::new();
+
+        // Check each component
+        components.insert("config".to_string(), ComponentHealth {
+            name: "Configuration".to_string(),
+            status: HealthState::Healthy,
+            message: None,
+        });
+
+        components.insert("platform".to_string(), ComponentHealth {
+            name: "Platform".to_string(),
+            status: HealthState::Healthy,
+            message: None,
+        });
+
+        // Determine overall status
+        let status = if self.services.is_degraded() {
+            HealthState::Degraded
+        } else {
+            HealthState::Healthy
+        };
+
+        HealthStatus {
+            status,
+            uptime: self.started_at.elapsed(),
+            components,
+            degraded_services: self.services.degraded_services.clone(),
+        }
+    }
+}
+```
+
+### Main Entry Point
+
+```rust
+// src/main.rs
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Initialize logging first
+    init_logging()?;
+
+    // Single entry point - no global state
+    let app = Application::start("/etc/onvif/config.toml").await?;
+
+    // Run until shutdown signal
+    if let Err(e) = app.run().await {
+        tracing::error!("Runtime error: {}", e);
+    }
+
+    // Explicit graceful shutdown
+    let report = app.shutdown().await;
+    tracing::info!("Shutdown complete: {:?}", report);
+
+    Ok(())
+}
+```
+
 ## Subsystem Implementation Plans
 
 ### 1. Platform Abstraction Layer

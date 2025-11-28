@@ -1,0 +1,55 @@
+[package]
+name = "onvif-rust"
+version = "0.1.0"
+edition = "2024"
+description = "Rust rewrite of the Anyka ONVIF services stack"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync"] }
+axum = "0.8"
+tower = { version = "0.5", features = ["timeout", "limit"] }
+tower-http = { version = "0.6", features = ["trace", "timeout", "limit"] }
+quick-xml = { version = "0.38", features = ["serialize"] }
+toml = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-log = "0.2"
+argon2 = "0.5"
+sha1 = "0.10"
+md-5 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+rand = "0.9"
+constant_time_eq = "0.4"
+socket2 = "0.6"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.18", features = ["v4"] }
+parking_lot = "0.12"
+dashmap = "6.1"
+bytes = "1.11"
+libc = "0.2"
+anyhow = "1.0"
+thiserror = "2.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockall = "0.14"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+wiremock = "0.6"
+criterion = "0.7"
+
+[build-dependencies]
+cc = "1.2"
+bindgen = "0.72"
+
+[features]
+default = []
+memory-profiling = []
+verbose-logging = []
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

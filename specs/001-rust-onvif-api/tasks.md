@@ -11,33 +11,33 @@
 
 ### Workspace & Build Setup
 
-- [ ] T001 Create the Rust workspace directory structure at `/home/kmk/anyka-dev/cross-compile/onvif-rust/` with subdirectories: `src/`, `tests/`, `scripts/`, `docs/`.
-- [ ] T002 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/main.rs` with minimal async entry point using tokio runtime.
-- [ ] T003 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lib.rs` as library root with module declarations.
-- [ ] T004 Initialize `/home/kmk/anyka-dev/cross-compile/onvif-rust/Cargo.toml` with all dependencies from plan.md: tokio, axum, tower, tower-http, quick-xml, toml, serde, tracing, tracing-subscriber, tracing-log, argon2, sha1, md-5, hmac, base64, rand, constant_time_eq, socket2, chrono, uuid, parking_lot, dashmap, bytes, libc, anyhow, thiserror.
-- [ ] T005 Add dev-dependencies to Cargo.toml: tokio-test, mockall, reqwest, wiremock, criterion.
-- [ ] T006 Add build-dependencies to Cargo.toml: cc, bindgen.
-- [ ] T007 Configure Cargo.toml features: `default = []`, `memory-profiling = []`, `verbose-logging = []`.
-- [ ] T008 Configure Cargo.toml release profile with `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `strip = true`.
-- [ ] T009 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/.cargo/config.toml` with cross-compilation settings: target `armv5te-unknown-linux-uclibceabi`, linker path, rustflags for ARM architecture.
-- [ ] T010 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/arm-unknown-linux-uclibcgnueabi.json` custom target specification with ARMv5TE parameters, soft-float ABI, uClibc settings.
+- [X] T001 Create the Rust workspace directory structure at `/home/kmk/anyka-dev/cross-compile/onvif-rust/` with subdirectories: `src/`, `tests/`, `scripts/`, `docs/`.
+- [X] T002 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/main.rs` with minimal async entry point using tokio runtime.
+- [X] T003 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lib.rs` as library root with module declarations.
+- [X] T004 Initialize `/home/kmk/anyka-dev/cross-compile/onvif-rust/Cargo.toml` with all dependencies from plan.md: tokio, axum, tower, tower-http, quick-xml, toml, serde, tracing, tracing-subscriber, tracing-log, argon2, sha1, md-5, hmac, base64, rand, constant_time_eq, socket2, chrono, uuid, parking_lot, dashmap, bytes, libc, anyhow, thiserror.
+- [X] T005 Add dev-dependencies to Cargo.toml: tokio-test, mockall, reqwest, wiremock, criterion.
+- [X] T006 Add build-dependencies to Cargo.toml: cc, bindgen.
+- [X] T007 Configure Cargo.toml features: `default = []`, `memory-profiling = []`, `verbose-logging = []`.
+- [X] T008 Configure Cargo.toml release profile with `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `strip = true`.
+- [X] T009 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/.cargo/config.toml` with cross-compilation settings: target `armv5te-unknown-linux-uclibceabi`, linker path, rustflags for ARM architecture.
+- [X] T010 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/arm-unknown-linux-uclibcgnueabi.json` custom target specification with ARMv5TE parameters, soft-float ABI, uClibc settings.
 
 ### CI/CD Infrastructure
 
-- [ ] T011 [P] Create `/home/kmk/anyka-dev/.github/workflows/ci.yml` GitHub Actions workflow for CI: triggers on push/PR to `001-rust-onvif-api` branch.
-- [ ] T012 [P] Add CI job `test` to run `cargo test --all-features` with Rust stable toolchain.
-- [ ] T013 [P] Add CI job step for `cargo clippy -- -D warnings` static analysis.
-- [ ] T014 [P] Add CI job step for `cargo fmt --check` formatting verification.
-- [ ] T015 [P] Add CI job `coverage` with cargo-tarpaulin generating HTML, LCOV, and Cobertura XML reports.
-- [ ] T016 [P] Configure CI job to upload coverage artifacts: `coverage-html`, `coverage-lcov`, `coverage-cobertura`.
-- [ ] T017 [P] Add cargo caching to CI workflow using `actions/cache@v4` for `~/.cargo/registry`, `~/.cargo/git`, `target/`.
-- [ ] T018 [P] Create `/home/kmk/anyka-dev/.github/workflows/release.yml` GitHub Actions workflow for releases: triggers on git tags `v*`.
-- [ ] T019 [P] Configure release workflow to use Docker container with ARM cross-compilation toolchain.
-- [ ] T020 [P] Add release job step to cross-compile for `armv5te-unknown-linux-uclibceabi` target.
-- [ ] T021 [P] Add release job step to create SD_card_content directory structure and copy binary.
-- [ ] T022 [P] Add release job step to create ZIP archive and upload as GitHub Release artifact.
-- [ ] T022a Verify CI workflow executes successfully with placeholder test (empty test suite passes).
-- [ ] T022b Verify release workflow configuration is valid (dry-run tag push validation).
+- [X] T011 [P] Create `/home/kmk/anyka-dev/.github/workflows/ci.yml` GitHub Actions workflow for CI: triggers on push/PR to `001-rust-onvif-api` branch.
+- [X] T012 [P] Add CI job `test` to run `cargo test --all-features` with Rust stable toolchain.
+- [X] T013 [P] Add CI job step for `cargo clippy -- -D warnings` static analysis.
+- [X] T014 [P] Add CI job step for `cargo fmt --check` formatting verification.
+- [X] T015 [P] Add CI job `coverage` with cargo-tarpaulin generating HTML, LCOV, and Cobertura XML reports.
+- [X] T016 [P] Configure CI job to upload coverage artifacts: `coverage-html`, `coverage-lcov`, `coverage-cobertura`.
+- [X] T017 [P] Add cargo caching to CI workflow using `actions/cache@v4` for `~/.cargo/registry`, `~/.cargo/git`, `target/`.
+- [X] T018 [P] Create `/home/kmk/anyka-dev/.github/workflows/release.yml` GitHub Actions workflow for releases: triggers on git tags `v*`.
+- [X] T019 [P] Configure release workflow to use Docker container with ARM cross-compilation toolchain.
+- [X] T020 [P] Add release job step to cross-compile for `armv5te-unknown-linux-uclibceabi` target.
+- [X] T021 [P] Add release job step to create SD_card_content directory structure and copy binary.
+- [X] T022 [P] Add release job step to create ZIP archive and upload as GitHub Release artifact.
+- [X] T022a Verify CI workflow executes successfully with placeholder test (empty test suite passes).
+- [X] T022b Verify release workflow configuration is valid (dry-run tag push validation).
 
 **Checkpoint**: Workspace compiles, CI/CD pipelines operational.
 
@@ -110,6 +110,27 @@
 - [ ] T069 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/logging/platform.rs` with `ak_print_wrapper` FFI function.
 - [ ] T070 [P] Implement C string to Rust string conversion in ak_print_wrapper with level mapping (ERROR, WARNING, INFO, DEBUG).
 - [ ] T071 [P] Add configurable log level filtering based on `[logging]` configuration section.
+
+### Application Lifecycle
+
+- [ ] T071a [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/app.rs` with `Application` struct definition.
+- [ ] T071b [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/mod.rs` with module exports.
+- [ ] T071c [P] Define `StartupError` enum in lifecycle/mod.rs with variants for each initialization phase.
+- [ ] T071d [P] Define `ShutdownReport` struct with timing, errors, and component status.
+- [ ] T071e [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/startup.rs` with startup sequence.
+- [ ] T071f [P] Implement `Application::start()` with ordered initialization: Config → Platform → Services → Network.
+- [ ] T071g [P] Add startup logging at each phase for debugging.
+- [ ] T071h [P] Implement optional service initialization with degraded mode fallback.
+- [ ] T071i [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/shutdown.rs` with shutdown coordinator.
+- [ ] T071j [P] Implement `ShutdownCoordinator` with broadcast channel for graceful shutdown.
+- [ ] T071k [P] Implement `Application::shutdown()` with reverse-order cleanup and timeout handling.
+- [ ] T071l [P] Add shutdown logging and timing metrics.
+- [ ] T071m [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/health.rs` with health status types.
+- [ ] T071n [P] Implement `Application::health()` returning component status and degraded services.
+- [ ] T071o [P] Implement `Application::run()` with signal handling (SIGINT, SIGTERM) and main event loop.
+- [ ] T071p [P] Add unit tests for startup sequence in isolation (mock platform).
+- [ ] T071q [P] Add unit tests for shutdown coordination with timeout scenarios.
+- [ ] T071r [P] Add integration test for full Application lifecycle (start → run briefly → shutdown).
 
 ### HTTP Request/Response Logging (NFR-011, NFR-012)
 
@@ -811,8 +832,8 @@
 
 ### Build & Deployment
 
-- [ ] T537 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/scripts/build.sh` build script for cross-compilation.
-- [ ] T538 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/scripts/verify_binary.sh` for binary verification (architecture, size, dependencies).
+- [X] T537 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/scripts/build.sh` build script for cross-compilation.
+- [X] T538 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/scripts/verify_binary.sh` for binary verification (architecture, size, dependencies).
 - [ ] T539 [P] Verify binary runs on target ARMv5TE hardware.
 - [ ] T540 [P] Verify binary size is comparable to C implementation.
 
