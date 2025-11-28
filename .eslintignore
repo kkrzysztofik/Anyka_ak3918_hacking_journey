@@ -1,0 +1,17 @@
+# -----------------------------------------------------------------------------
+# ESLint exclusions for web assets in this repo
+# -----------------------------------------------------------------------------
+node_modules/
+dist/
+build/
+coverage/
+out/
+*.min.js
+*.bundle.js
+*.log
+.env
+.env.*
+cross-compile/onvif-rust/target/
+cross-compile/onvif-rust/debug/
+cross-compile/onvif-rust/release/
+toolchain/

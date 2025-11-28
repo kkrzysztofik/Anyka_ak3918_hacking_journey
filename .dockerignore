@@ -1,0 +1,34 @@
+# -----------------------------------------------------------------------------
+# Global Docker build context exclusions
+# -----------------------------------------------------------------------------
+.git/
+.gitignore
+.dockerignore
+Dockerfile*
+node_modules/
+dist/
+build/
+coverage/
+target/
+debug/
+release/
+*.log
+*.tmp
+*.swp
+.env
+.env.*
+.vscode/
+.idea/
+# Exclude specific toolchain files/directories, but allow arm-anykav200-crosstool-ng
+toolchain/arm-anykav200-crosstool/
+toolchain/arm-anykav200-crosstool.zip
+toolchain/arm-anykav200-gdb-7.12.tar.gz
+toolchain/build-new/
+toolchain/go-source/
+# Note: toolchain/arm-anykav200-crosstool-ng/ is included for Docker builds
+cross-compile/onvif/out/
+cross-compile/onvif/tests/out/
+cross-compile/onvif-rust/target/
+cross-compile/onvif-rust/debug/
+cross-compile/onvif-rust/release/
+SD_card_contents/

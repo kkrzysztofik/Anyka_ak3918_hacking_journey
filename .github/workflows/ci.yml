@@ -123,7 +123,7 @@ jobs:
       - name: Generate Coverage Report
         working-directory: cross-compile/onvif-rust
         run: |
-          cargo tarpaulin --out Html --out Lcov --out Cobertura --output-dir coverage
+          cargo tarpaulin --out Html --out Lcov --out Xml --output-dir coverage
 
       - name: Upload Coverage HTML
         uses: actions/upload-artifact@v4
