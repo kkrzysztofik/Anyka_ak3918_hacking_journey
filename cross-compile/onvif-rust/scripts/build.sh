@@ -136,6 +136,12 @@ if command -v file &> /dev/null; then
   log_info "Binary type: $(file "${BINARY_PATH}")"
 fi
 
+# Copy binary to deployment directory
+DEPLOY_DIR="/home/kmk/anyka-dev/SD_card_contents/anyka_hack/onvif"
+cp "${BINARY_PATH}" "${DEPLOY_DIR}/onvif-rust"
+chmod 755 "${DEPLOY_DIR}/onvif-rust"
+log_success "Binary copied to deployment directory: ${DEPLOY_DIR}/onvif-rust"
+
 echo ""
 log_info "To verify the binary, run:"
 log_info "  ${SCRIPT_DIR}/verify_binary.sh"

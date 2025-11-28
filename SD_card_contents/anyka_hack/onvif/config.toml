@@ -1,0 +1,47 @@
+# ONVIF Rust Configuration
+# This is a TOML configuration file for the ONVIF Rust server
+
+[onvif]
+enabled = true
+http_port = 8080
+auth_enabled = false
+
+[network]
+rtsp_port = 554
+snapshot_port = 8554
+ws_discovery_port = 3702
+
+[device]
+manufacturer = "Anyka"
+model = "AK3918"
+firmware_version = "1.0.0"
+serial_number = "0000000000000000"
+hardware_id = "AK3918-ONVIF"
+
+[logging]
+enabled = true
+use_colors = true
+use_timestamps = true
+min_level = 2
+tag = "ONVIF"
+http_verbose = true
+
+[server]
+worker_threads = 4
+max_connections = 100
+connection_timeout = 30
+keepalive_timeout = 60
+epoll_timeout = 1000
+cleanup_interval = 300
+
+[imaging]
+brightness = 0
+contrast = 0
+saturation = 0
+sharpness = 0
+hue = 0
+
+[ptz]
+invert_directions = false
+max_pan_speed = 1.0
+max_tilt_speed = 1.0

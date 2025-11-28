@@ -37,35 +37,15 @@
 pub mod app;
 pub mod lifecycle;
 
-pub mod config {
-    //! Configuration system placeholder.
-    //!
-    //! Will be implemented in tasks T051-T065.
-}
+pub mod config;
 
-pub mod logging {
-    //! Logging subsystem placeholder.
-    //!
-    //! Will be implemented in tasks T066-T071.
-}
+pub mod logging;
 
-pub mod platform {
-    //! Platform abstraction placeholder.
-    //!
-    //! Will be implemented in tasks T034-T050.
-}
+pub mod platform;
 
-pub mod onvif {
-    //! HTTP/SOAP server placeholder.
-    //!
-    //! Will be implemented in tasks T072-T088 and Phases 6-9.
-}
+pub mod onvif;
 
-pub mod utils {
-    //! Utilities placeholder.
-    //!
-    //! Will be implemented in tasks T100-T111.
-}
+pub mod utils;
 
 pub mod auth {
     //! Authentication placeholder.
@@ -91,11 +71,7 @@ pub mod security {
     //! Will be implemented in tasks T131-T154.
 }
 
-pub mod ffi {
-    //! Anyka SDK FFI placeholder.
-    //!
-    //! Will be implemented in tasks T023-T033.
-}
+pub mod ffi;
 
 // Re-export main types for convenience
 pub use app::Application;

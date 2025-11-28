@@ -49,142 +49,165 @@
 
 ### FFI Bindings to Anyka SDK
 
-- [ ] T023 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/build.rs` build script skeleton with bindgen configuration.
-- [ ] T024 [P] Add bindgen generation for `ak_common.h` header (common types and error codes) in build.rs.
-- [ ] T025 [P] Add bindgen generation for `ak_vi.h` header (video input) in build.rs.
-- [ ] T026 [P] Add bindgen generation for `ak_venc.h` header (video encoder) in build.rs.
-- [ ] T027 [P] Add bindgen generation for `ak_ai.h` header (audio input) in build.rs.
-- [ ] T028 [P] Add bindgen generation for `ak_aenc.h` header (audio encoder) in build.rs.
-- [ ] T029 [P] Add bindgen generation for `ak_drv_ptz.h` header (PTZ control) in build.rs.
-- [ ] T030 [P] Add bindgen generation for `ak_vpss.h` header (video processing) in build.rs.
-- [ ] T031 [P] Add bindgen generation for `ak_drv_irled.h` header (IR LED control) in build.rs.
-- [ ] T032 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/ffi/mod.rs` with module exports for generated bindings.
-- [ ] T033 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/ffi/anyka_sdk.rs` to host generated bindings with safe wrapper functions.
+- [X] T023 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/build.rs` build script skeleton with bindgen configuration.
+- [X] T024 [P] Add bindgen generation for `ak_common.h` header (common types and error codes) in build.rs.
+- [X] T025 [P] Add bindgen generation for `ak_vi.h` header (video input) in build.rs.
+- [X] T026 [P] Add bindgen generation for `ak_venc.h` header (video encoder) in build.rs.
+- [X] T027 [P] Add bindgen generation for `ak_ai.h` header (audio input) in build.rs.
+- [X] T028 [P] Add bindgen generation for `ak_aenc.h` header (audio encoder) in build.rs.
+- [X] T029 [P] Add bindgen generation for `ak_drv_ptz.h` header (PTZ control) in build.rs.
+- [X] T030 [P] Add bindgen generation for `ak_vpss.h` header (video processing) in build.rs.
+- [X] T031 [P] Add bindgen generation for `ak_drv_irled.h` header (IR LED control) in build.rs.
+- [X] T032 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/ffi/mod.rs` with module exports for generated bindings.
+- [X] T033 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/ffi/anyka_sdk.rs` to host generated bindings with safe wrapper functions.
 
 ### Platform Abstraction Traits
 
-- [ ] T034 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/platform/mod.rs` with module declarations for traits, stubs, and anyka submodule.
-- [ ] T035 [P] Define `VideoInput` trait in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/platform/traits.rs` with methods: `open()`, `close()`, `get_resolution()`.
-- [ ] T036 [P] Define `VideoEncoder` trait in traits.rs with methods: `init()`, `get_stream()`, `get_configuration()`.
-- [ ] T037 [P] Define `AudioInput` trait in traits.rs with methods: `open()`, `close()`, `get_configuration()`.
-- [ ] T038 [P] Define `AudioEncoder` trait in traits.rs with methods: `init()`, `get_stream()`, `get_configuration()`.
-- [ ] T039 [P] Define `PTZControl` trait in traits.rs with methods: `move_to_position()`, `get_position()`, `continuous_move()`, `stop()`, `get_presets()`, `set_preset()`, `goto_preset()`, `remove_preset()`.
-- [ ] T040 [P] Define `ImagingControl` trait in traits.rs with methods: `get_settings()`, `set_settings()`, `get_options()`, `set_brightness()`, `set_contrast()`, `set_saturation()`, `set_sharpness()`.
-- [ ] T041 [P] Define `Platform` super-trait in traits.rs combining all hardware traits with `get_device_info()` method.
-- [ ] T042 [P] Add `#[mockall::automock]` attribute to all platform traits for test mocking support.
+- [X] T034 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/platform/mod.rs` with module declarations for traits, stubs, and anyka submodule.
+- [X] T035 [P] Define `VideoInput` trait in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/platform/traits.rs` with methods: `open()`, `close()`, `get_resolution()`.
+- [X] T036 [P] Define `VideoEncoder` trait in traits.rs with methods: `init()`, `get_stream()`, `get_configuration()`.
+- [X] T037 [P] Define `AudioInput` trait in traits.rs with methods: `open()`, `close()`, `get_configuration()`.
+- [X] T038 [P] Define `AudioEncoder` trait in traits.rs with methods: `init()`, `get_stream()`, `get_configuration()`.
+- [X] T039 [P] Define `PTZControl` trait in traits.rs with methods: `move_to_position()`, `get_position()`, `continuous_move()`, `stop()`, `get_presets()`, `set_preset()`, `goto_preset()`, `remove_preset()`.
+- [X] T040 [P] Define `ImagingControl` trait in traits.rs with methods: `get_settings()`, `set_settings()`, `get_options()`, `set_brightness()`, `set_contrast()`, `set_saturation()`, `set_sharpness()`.
+- [X] T041 [P] Define `Platform` super-trait in traits.rs combining all hardware traits with `get_device_info()` method.
+- [X] T042 [P] Add `#[mockall::automock]` attribute to all platform traits for test mocking support.
 
 ### Hardware Stubs
 
-- [ ] T043 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/platform/stubs.rs` with `StubPlatform` struct implementing `Platform` trait.
-- [ ] T044 [P] Implement `StubVideoInput` in stubs.rs returning configurable mock resolution data.
-- [ ] T045 [P] Implement `StubVideoEncoder` in stubs.rs returning configurable mock encoder configurations.
-- [ ] T046 [P] Implement `StubAudioInput` in stubs.rs returning configurable mock audio configurations.
-- [ ] T047 [P] Implement `StubAudioEncoder` in stubs.rs returning configurable mock audio encoder configurations.
-- [ ] T048 [P] Implement `StubPTZControl` in stubs.rs with in-memory position state and preset storage.
-- [ ] T049 [P] Implement `StubImagingControl` in stubs.rs with in-memory imaging settings state.
-- [ ] T050 [P] Add `StubPlatformBuilder` for configuring stub behavior (success/failure scenarios) in tests.
+- [X] T043 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/platform/stubs.rs` with `StubPlatform` struct implementing `Platform` trait.
+- [X] T044 [P] Implement `StubVideoInput` in stubs.rs returning configurable mock resolution data.
+- [X] T045 [P] Implement `StubVideoEncoder` in stubs.rs returning configurable mock encoder configurations.
+- [X] T046 [P] Implement `StubAudioInput` in stubs.rs returning configurable mock audio configurations.
+- [X] T047 [P] Implement `StubAudioEncoder` in stubs.rs returning configurable mock audio encoder configurations.
+- [X] T048 [P] Implement `StubPTZControl` in stubs.rs with in-memory position state and preset storage.
+- [X] T049 [P] Implement `StubImagingControl` in stubs.rs with in-memory imaging settings state.
+- [X] T050 [P] Add `StubPlatformBuilder` for configuring stub behavior (success/failure scenarios) in tests.
 
 ### Configuration System
 
-- [ ] T051 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/config/mod.rs` with module declarations for schema, runtime, storage.
-- [ ] T052 [P] Define `ConfigValueType` enum in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/config/schema.rs` with variants: Int, String, Bool, Float.
-- [ ] T053 [P] Define `ConfigParameter` struct in schema.rs with fields: key, value_type, default, min, max, required.
-- [ ] T054 [P] Define `ConfigSection` struct in schema.rs with fields: name, parameters.
-- [ ] T055 [P] Define `ConfigSchema` struct in schema.rs with method to validate configuration against schema.
-- [ ] T056 [P] Define configuration sections in schema.rs: `[onvif]`, `[network]`, `[device]`, `[server]`, `[logging]`, `[media]`, `[ptz]`, `[imaging]`.
-- [ ] T057 [P] Define `[stream_profile_N]` sections (1-4) in schema.rs with resolution, framerate, bitrate parameters.
-- [ ] T058 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/config/runtime.rs` with `ConfigRuntime` struct containing `Arc<RwLock<ApplicationConfig>>`.
-- [ ] T059 [P] Implement thread-safe `get_int()`, `set_int()` methods in ConfigRuntime.
-- [ ] T060 [P] Implement thread-safe `get_string()`, `set_string()` methods in ConfigRuntime.
-- [ ] T061 [P] Implement thread-safe `get_bool()`, `set_bool()` methods in ConfigRuntime.
-- [ ] T062 [P] Implement `generation` counter in ConfigRuntime for change detection using `AtomicU64`.
-- [ ] T063 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/config/storage.rs` with TOML file loading using `toml` crate.
-- [ ] T064 [P] Implement atomic TOML file saving in storage.rs (temp file + rename pattern).
-- [ ] T065 [P] Implement default value fallback when loading configuration in storage.rs.
+- [X] T051 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/config/mod.rs` with module declarations for schema, runtime, storage.
+- [X] T052 [P] Define `ConfigValueType` enum in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/config/schema.rs` with variants: Int, String, Bool, Float.
+- [X] T053 [P] Define `ConfigParameter` struct in schema.rs with fields: key, value_type, default, min, max, required.
+- [X] T054 [P] Define `ConfigSection` struct in schema.rs with fields: name, parameters.
+- [X] T055 [P] Define `ConfigSchema` struct in schema.rs with method to validate configuration against schema.
+- [X] T056 [P] Define configuration sections in schema.rs: `[onvif]`, `[network]`, `[device]`, `[server]`, `[logging]`, `[media]`, `[ptz]`, `[imaging]`.
+- [X] T057 [P] Define `[stream_profile_N]` sections (1-4) in schema.rs with resolution, framerate, bitrate parameters.
+- [X] T058 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/config/runtime.rs` with `ConfigRuntime` struct containing `Arc<RwLock<ApplicationConfig>>`.
+- [X] T059 [P] Implement thread-safe `get_int()`, `set_int()` methods in ConfigRuntime.
+- [X] T060 [P] Implement thread-safe `get_string()`, `set_string()` methods in ConfigRuntime.
+- [X] T061 [P] Implement thread-safe `get_bool()`, `set_bool()` methods in ConfigRuntime.
+- [X] T062 [P] Implement `generation` counter in ConfigRuntime for change detection using `AtomicU64`.
+- [X] T063 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/config/storage.rs` with TOML file loading using `toml` crate.
+- [X] T064 [P] Implement atomic TOML file saving in storage.rs (temp file + rename pattern).
+- [X] T065 [P] Implement default value fallback when loading configuration in storage.rs.
 
 ### Logging System
 
-- [ ] T066 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/logging/mod.rs` with `init_logging()` function.
-- [ ] T067 [P] Configure tracing-subscriber with env-filter support in init_logging().
-- [ ] T068 [P] Initialize tracing-log bridge (`LogTracer`) to capture `log` crate messages from dependencies.
-- [ ] T069 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/logging/platform.rs` with `ak_print_wrapper` FFI function.
-- [ ] T070 [P] Implement C string to Rust string conversion in ak_print_wrapper with level mapping (ERROR, WARNING, INFO, DEBUG).
-- [ ] T071 [P] Add configurable log level filtering based on `[logging]` configuration section.
+- [X] T066 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/logging/mod.rs` with `init_logging()` function.
+- [X] T067 [P] Configure tracing-subscriber with env-filter support in init_logging().
+- [X] T068 [P] Initialize tracing-log bridge (`LogTracer`) to capture `log` crate messages from dependencies.
+- [X] T069 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/logging/platform.rs` with `ak_print_wrapper` FFI function.
+- [X] T070 [P] Implement C string to Rust string conversion in ak_print_wrapper with level mapping (ERROR, WARNING, INFO, DEBUG).
+- [X] T071 [P] Add configurable log level filtering based on `[logging]` configuration section.
 
 ### Application Lifecycle
 
-- [ ] T071a [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/app.rs` with `Application` struct definition.
-- [ ] T071b [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/mod.rs` with module exports.
-- [ ] T071c [P] Define `StartupError` enum in lifecycle/mod.rs with variants for each initialization phase.
-- [ ] T071d [P] Define `ShutdownReport` struct with timing, errors, and component status.
-- [ ] T071e [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/startup.rs` with startup sequence.
-- [ ] T071f [P] Implement `Application::start()` with ordered initialization: Config → Platform → Services → Network.
-- [ ] T071g [P] Add startup logging at each phase for debugging.
-- [ ] T071h [P] Implement optional service initialization with degraded mode fallback.
-- [ ] T071i [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/shutdown.rs` with shutdown coordinator.
-- [ ] T071j [P] Implement `ShutdownCoordinator` with broadcast channel for graceful shutdown.
-- [ ] T071k [P] Implement `Application::shutdown()` with reverse-order cleanup and timeout handling.
-- [ ] T071l [P] Add shutdown logging and timing metrics.
-- [ ] T071m [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/health.rs` with health status types.
-- [ ] T071n [P] Implement `Application::health()` returning component status and degraded services.
-- [ ] T071o [P] Implement `Application::run()` with signal handling (SIGINT, SIGTERM) and main event loop.
-- [ ] T071p [P] Add unit tests for startup sequence in isolation (mock platform).
-- [ ] T071q [P] Add unit tests for shutdown coordination with timeout scenarios.
-- [ ] T071r [P] Add integration test for full Application lifecycle (start → run briefly → shutdown).
+- [X] T071a [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/app.rs` with `Application` struct definition.
+- [X] T071b [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/mod.rs` with module exports.
+- [X] T071c [P] Define `StartupError` enum in lifecycle/mod.rs with variants for each initialization phase.
+- [X] T071d [P] Define `ShutdownReport` struct with timing, errors, and component status.
+- [X] T071e [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/startup.rs` with startup sequence.
+- [X] T071f [P] Implement `Application::start()` with ordered initialization: Config → Platform → Services → Network.
+- [X] T071g [P] Add startup logging at each phase for debugging.
+- [X] T071h [P] Implement optional service initialization with degraded mode fallback.
+- [X] T071i [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/shutdown.rs` with shutdown coordinator.
+- [X] T071j [P] Implement `ShutdownCoordinator` with broadcast channel for graceful shutdown.
+- [X] T071k [P] Implement `Application::shutdown()` with reverse-order cleanup and timeout handling.
+- [X] T071l [P] Add shutdown logging and timing metrics.
+- [X] T071m [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/lifecycle/health.rs` with health status types.
+- [X] T071n [P] Implement `Application::health()` returning component status and degraded services.
+- [X] T071o [P] Implement `Application::run()` with signal handling (SIGINT, SIGTERM) and main event loop.
+- [X] T071p [P] Add unit tests for startup sequence in isolation (mock platform).
+- [X] T071q [P] Add unit tests for shutdown coordination with timeout scenarios.
+- [X] T071r [P] Add integration test for full Application lifecycle (start → run briefly → shutdown).
 
 ### HTTP Request/Response Logging (NFR-011, NFR-012)
 
 - [ ] T552 [P] Implement HTTP request/response logging middleware in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/server.rs` (or `src/logging/http.rs`) that logs method, path, status code, latency, and optionally truncated, sanitized SOAP payloads when `[logging] http_verbose = true` (implements NFR-012).
 - [ ] T553 [P] Add integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/integration/logging_http.rs` verifying that verbose mode emits HTTP request/response metadata and that disabling `[logging] http_verbose` suppresses HTTP logging.
 
+### WSDL-Based Type Generation
+
+**WSDL Source Files** (located in `/home/kmk/anyka-dev/cross-compile/onvif/wsdl/`):
+- `devicemgmt.wsdl` - Device Service operations and types
+- `media.wsdl` - Media Service operations and types
+- `ptz.wsdl` - PTZ Service operations and types
+- `imaging.wsdl` - Imaging Service operations and types
+- `onvif.xsd` - Common ONVIF schema types
+- `common.xsd` - Common XSD types
+
+**Requirement**: All ONVIF request/response structs MUST be generated from these WSDL/XSD files to ensure protocol compliance.
+
+- [ ] T072a [P] Evaluate and select WSDL-to-Rust code generation approach: Option A: `yaserde` with manual struct definitions validated against WSDL; Option B: Build script using `quick-xml` to parse WSDL and generate structs; Option C: Use `xsd-parser-rs` or similar XSD-to-Rust tool.
+- [ ] T072b [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/build.rs` additions (or separate `codegen/` module) to generate Rust structs from WSDL files at build time or via script.
+- [ ] T072c [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/mod.rs` as the root module for all WSDL-generated types.
+- [ ] T072d [P] Generate Device Service types from `devicemgmt.wsdl` into `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/device_types.rs`.
+- [ ] T072e [P] Generate Media Service types from `media.wsdl` into `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/media_types.rs`.
+- [ ] T072f [P] Generate PTZ Service types from `ptz.wsdl` into `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/ptz_types.rs`.
+- [ ] T072g [P] Generate Imaging Service types from `imaging.wsdl` into `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/imaging_types.rs`.
+- [ ] T072h [P] Generate common ONVIF types from `onvif.xsd` into `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/common_types.rs`.
+- [ ] T072i [P] Add unit tests validating generated types can serialize/deserialize sample SOAP payloads from `/home/kmk/anyka-dev/cap/requests/` and `/home/kmk/anyka-dev/cap/responses/`.
+- [ ] T072j [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/scripts/regenerate_types.sh` script to regenerate types when WSDL files change.
+
 ### HTTP/SOAP Server Foundation
 
-- [ ] T072 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/mod.rs` with module declarations for server, dispatcher, soap, error, device, media, ptz, imaging.
-- [ ] T073 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/server.rs` with `OnvifServer` struct containing Router, ConfigRuntime, Platform references.
-- [ ] T074 [P] Implement `OnvifServer::new()` constructor in server.rs.
-- [ ] T075 [P] Implement `OnvifServer::start()` async method with tokio TcpListener binding.
-- [ ] T076 [P] Configure axum Router with service endpoint routes: `/onvif/device_service`, `/onvif/media_service`, `/onvif/ptz_service`, `/onvif/imaging_service`.
-- [ ] T077 [P] Add tower-http TimeoutLayer middleware for request timeouts.
-- [ ] T078 [P] Add axum DefaultBodyLimit middleware for payload size limiting (configurable, default 1MB).
-- [ ] T079 [P] Implement graceful shutdown signal handler in server.rs.
-- [ ] T080 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/soap.rs` with `SoapEnvelope<T>` generic struct using serde.
-- [ ] T081 [P] Define `SoapBody<T>` struct in soap.rs with `#[serde(flatten)]` content field.
-- [ ] T082 [P] Define `SoapHeader` struct in soap.rs for WS-Security header parsing.
-- [ ] T083 [P] Implement `parse_soap_request()` function in soap.rs using quick-xml deserializer.
-- [ ] T084 [P] Implement `build_soap_response()` function in soap.rs using quick-xml serializer.
-- [ ] T085 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/dispatcher.rs` with `ServiceDispatcher` struct.
-- [ ] T086 [P] Define `ServiceHandler` trait in dispatcher.rs with `handle_operation()` method signature.
-- [ ] T087 [P] Implement SOAP action header parsing in dispatcher.rs to extract operation name.
-- [ ] T088 [P] Implement service routing logic in dispatcher.rs mapping actions to handlers.
+- [X] T072 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/mod.rs` with module declarations for server, dispatcher, soap, error, device, media, ptz, imaging, generated.
+- [X] T073 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/server.rs` with `OnvifServer` struct containing Router, ConfigRuntime, Platform references.
+- [X] T074 [P] Implement `OnvifServer::new()` constructor in server.rs.
+- [X] T075 [P] Implement `OnvifServer::start()` async method with tokio TcpListener binding.
+- [X] T076 [P] Configure axum Router with service endpoint routes: `/onvif/device_service`, `/onvif/media_service`, `/onvif/ptz_service`, `/onvif/imaging_service`.
+- [X] T077 [P] Add tower-http TimeoutLayer middleware for request timeouts.
+- [X] T078 [P] Add axum DefaultBodyLimit middleware for payload size limiting (configurable, default 1MB).
+- [X] T079 [P] Implement graceful shutdown signal handler in server.rs.
+- [X] T080 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/soap.rs` with `SoapEnvelope<T>` generic struct using serde.
+- [X] T081 [P] Define `SoapBody<T>` struct in soap.rs with `#[serde(flatten)]` content field.
+- [X] T082 [P] Define `SoapHeader` struct in soap.rs for WS-Security header parsing.
+- [X] T083 [P] Implement `parse_soap_request()` function in soap.rs using quick-xml deserializer.
+- [X] T084 [P] Implement `build_soap_response()` function in soap.rs using quick-xml serializer.
+- [X] T085 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/dispatcher.rs` with `ServiceDispatcher` struct.
+- [X] T086 [P] Define `ServiceHandler` trait in dispatcher.rs with `handle_operation()` method signature.
+- [X] T087 [P] Implement SOAP action header parsing in dispatcher.rs to extract operation name.
+- [X] T088 [P] Implement service routing logic in dispatcher.rs mapping actions to handlers.
 
 ### Error Handling
 
-- [ ] T089 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/error.rs` with `OnvifError` enum using thiserror.
-- [ ] T090 [P] Add `OnvifError::ActionNotSupported(String)` variant for EC-001.
-- [ ] T091 [P] Add `OnvifError::WellFormed(String)` variant for EC-002.
-- [ ] T092 [P] Add `OnvifError::InvalidArgVal { subcode: String, reason: String }` variant for EC-003, EC-006.
-- [ ] T093 [P] Add `OnvifError::HardwareFailure(String)` variant for EC-005.
-- [ ] T094 [P] Add `OnvifError::NotAuthorized` variant for EC-011.
-- [ ] T095 [P] Add `OnvifError::MaxUsers` variant for EC-013.
-- [ ] T096 [P] Add `OnvifError::ConfigurationConflict(String)` variant for EC-015.
-- [ ] T097 [P] Implement `OnvifError::to_soap_fault()` method generating SOAP fault XML with proper codes.
-- [ ] T098 [P] Implement `OnvifError::http_status()` method returning appropriate HTTP status codes.
-- [ ] T099 [P] Implement `soap_fault()` helper function generating full SOAP fault envelope XML.
+- [X] T089 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/error.rs` with `OnvifError` enum using thiserror.
+- [X] T090 [P] Add `OnvifError::ActionNotSupported(String)` variant for EC-001.
+- [X] T091 [P] Add `OnvifError::WellFormed(String)` variant for EC-002.
+- [X] T092 [P] Add `OnvifError::InvalidArgVal { subcode: String, reason: String }` variant for EC-003, EC-006.
+- [X] T093 [P] Add `OnvifError::HardwareFailure(String)` variant for EC-005.
+- [X] T094 [P] Add `OnvifError::NotAuthorized` variant for EC-011.
+- [X] T095 [P] Add `OnvifError::MaxUsers` variant for EC-013.
+- [X] T096 [P] Add `OnvifError::ConfigurationConflict(String)` variant for EC-015.
+- [X] T097 [P] Implement `OnvifError::to_soap_fault()` method generating SOAP fault XML with proper codes.
+- [X] T098 [P] Implement `OnvifError::http_status()` method returning appropriate HTTP status codes.
+- [X] T099 [P] Implement `soap_fault()` helper function generating full SOAP fault envelope XML.
 
 ### Input Validation
 
-- [ ] T100 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/utils/mod.rs` with module declarations for validation, memory.
-- [ ] T101 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/utils/validation.rs` with `ValidationError` enum.
-- [ ] T102 [P] Add `ValidationError::InvalidHttpMethod` variant.
-- [ ] T103 [P] Add `ValidationError::InvalidContentType` variant.
-- [ ] T104 [P] Add `ValidationError::InvalidSoapEnvelope` variant.
-- [ ] T105 [P] Add `ValidationError::MissingSoapAction` variant.
-- [ ] T106 [P] Add `ValidationError::InvalidCharacters(String)` variant.
-- [ ] T107 [P] Add `ValidationError::InputTooLong(usize)` variant.
-- [ ] T108 [P] Create `InputValidator` struct in validation.rs with configurable `max_string_length`.
-- [ ] T109 [P] Implement `InputValidator::validate_http_request()` checking method is POST and content-type is text/xml or application/soap+xml.
-- [ ] T110 [P] Implement `InputValidator::validate_soap_envelope()` checking for Envelope and Body elements.
-- [ ] T111 [P] Implement `InputValidator::sanitize_string()` removing control characters and detecting dangerous patterns (<!ENTITY, javascript:).
+- [X] T100 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/utils/mod.rs` with module declarations for validation, memory.
+- [X] T101 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/utils/validation.rs` with `ValidationError` enum.
+- [X] T102 [P] Add `ValidationError::InvalidHttpMethod` variant.
+- [X] T103 [P] Add `ValidationError::InvalidContentType` variant.
+- [X] T104 [P] Add `ValidationError::InvalidSoapEnvelope` variant.
+- [X] T105 [P] Add `ValidationError::MissingSoapAction` variant.
+- [X] T106 [P] Add `ValidationError::InvalidCharacters(String)` variant.
+- [X] T107 [P] Add `ValidationError::InputTooLong(usize)` variant.
+- [X] T108 [P] Create `InputValidator` struct in validation.rs with configurable `max_string_length`.
+- [X] T109 [P] Implement `InputValidator::validate_http_request()` checking method is POST and content-type is text/xml or application/soap+xml.
+- [X] T110 [P] Implement `InputValidator::validate_soap_envelope()` checking for Envelope and Body elements.
+- [X] T111 [P] Implement `InputValidator::sanitize_string()` removing control characters and detecting dangerous patterns (<!ENTITY, javascript:).
 
 **Checkpoint**: Platform abstraction, configuration, logging, and SOAP routing operational.
 
@@ -314,10 +337,14 @@
 
 ### Implementation for User Story 5
 
-- [ ] T177 [P] [US5] Define GetUsersRequest/Response types in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/user_types.rs`.
-- [ ] T178 [P] [US5] Define CreateUsersRequest/Response types in user_types.rs.
-- [ ] T179 [P] [US5] Define DeleteUsersRequest/Response types in user_types.rs.
-- [ ] T180 [P] [US5] Define SetUserRequest/Response types in user_types.rs.
+**WSDL Source**: `/home/kmk/anyka-dev/cross-compile/onvif/wsdl/devicemgmt.wsdl` (User management operations are part of Device Service)
+
+**Requirement**: User management types MUST match the WSDL definitions. Use generated types from `src/onvif/generated/device_types.rs`.
+
+- [ ] T177 [P] [US5] Verify GetUsersRequest/Response matches `devicemgmt.wsdl` definition; re-export in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/user_types.rs`.
+- [ ] T178 [P] [US5] Verify CreateUsersRequest/Response matches `devicemgmt.wsdl` definition (elements: User array with Username, Password, UserLevel).
+- [ ] T179 [P] [US5] Verify DeleteUsersRequest/Response matches `devicemgmt.wsdl` definition (elements: Username array).
+- [ ] T180 [P] [US5] Verify SetUserRequest/Response matches `devicemgmt.wsdl` definition (elements: User array).
 - [ ] T181 [US5] Implement `handle_get_users()` in device service returning list of usernames and levels.
 - [ ] T182 [US5] Implement `handle_create_users()` in device service validating admin privileges and creating accounts.
 - [ ] T183 [US5] Implement `handle_delete_users()` in device service removing specified users.
@@ -387,29 +414,33 @@
 
 ### Implementation for User Story 1 - Types
 
-- [ ] T218 [P] [US1] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/mod.rs` with DeviceService struct.
-- [ ] T219 [P] [US1] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/types.rs` with SOAP request/response structs.
-- [ ] T220 [P] [US1] Define GetDeviceInformationRequest/Response in types.rs with Manufacturer, Model, FirmwareVersion, SerialNumber, HardwareId.
-- [ ] T221 [P] [US1] Define GetCapabilitiesRequest/Response in types.rs with Analytics, Device, Events, Imaging, Media, PTZ capabilities.
-- [ ] T222 [P] [US1] Define GetServicesRequest/Response in types.rs with Service array containing Namespace, XAddr, Version.
-- [ ] T223 [P] [US1] Define GetSystemDateAndTimeRequest/Response in types.rs with DateTimeType, DaylightSavings, TimeZone, UTCDateTime, LocalDateTime.
-- [ ] T224 [P] [US1] Define SystemRebootRequest/Response in types.rs with Message field.
-- [ ] T225 [P] [US1] Define GetHostnameRequest/Response in types.rs with FromDHCP, Name fields.
-- [ ] T226 [P] [US1] Define SetHostnameRequest/Response in types.rs with Name field.
-- [ ] T227 [P] [US1] Define GetNetworkInterfacesRequest/Response in types.rs with NetworkInterface array.
-- [ ] T228 [P] [US1] Define GetScopesRequest/Response in types.rs with Scopes array.
-- [ ] T229 [P] [US1] Define SetScopesRequest/Response in types.rs with Scopes array.
-- [ ] T230 [P] [US1] Define AddScopesRequest/Response in types.rs with ScopeItem field.
-- [ ] T231 [P] [US1] Define GetDiscoveryModeRequest/Response in types.rs with DiscoveryMode enum.
-- [ ] T232 [P] [US1] Define SetDiscoveryModeRequest/Response in types.rs with DiscoveryMode field.
-- [ ] T233 [P] [US1] Define SetSystemDateAndTimeRequest/Response in types.rs.
-- [ ] T234 [P] [US1] Define GetDNSRequest/Response in types.rs (conditional).
-- [ ] T235 [P] [US1] Define SetDNSRequest/Response in types.rs (conditional).
-- [ ] T236 [P] [US1] Define GetNTPRequest/Response in types.rs (conditional).
-- [ ] T237 [P] [US1] Define SetNTPRequest/Response in types.rs (conditional).
-- [ ] T238 [P] [US1] Define SetNetworkInterfacesRequest/Response in types.rs.
-- [ ] T239 [P] [US1] Define SetSystemFactoryDefaultRequest/Response in types.rs (conditional).
-- [ ] T240 [P] [US1] Define GetServiceCapabilitiesRequest/Response in types.rs.
+**WSDL Source**: `/home/kmk/anyka-dev/cross-compile/onvif/wsdl/devicemgmt.wsdl`
+
+**Requirement**: All Device Service types MUST be generated from or validated against `devicemgmt.wsdl`. Use the generated types from `src/onvif/generated/device_types.rs` (created in T072d) and re-export or extend them in the device module.
+
+- [ ] T218 [P] [US1] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/mod.rs` with DeviceService struct, re-exporting generated types from `super::generated::device_types`.
+- [ ] T219 [P] [US1] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/types.rs` re-exporting and extending WSDL-generated types with any implementation-specific additions.
+- [ ] T220 [P] [US1] Verify GetDeviceInformationRequest/Response matches `devicemgmt.wsdl` definition (elements: Manufacturer, Model, FirmwareVersion, SerialNumber, HardwareId).
+- [ ] T221 [P] [US1] Verify GetCapabilitiesRequest/Response matches `devicemgmt.wsdl` definition (elements: Analytics, Device, Events, Imaging, Media, PTZ capabilities).
+- [ ] T222 [P] [US1] Verify GetServicesRequest/Response matches `devicemgmt.wsdl` definition (elements: Service array with Namespace, XAddr, Version, Capabilities).
+- [ ] T223 [P] [US1] Verify GetSystemDateAndTimeRequest/Response matches `devicemgmt.wsdl` definition (elements: DateTimeType, DaylightSavings, TimeZone, UTCDateTime, LocalDateTime).
+- [ ] T224 [P] [US1] Verify SystemRebootRequest/Response matches `devicemgmt.wsdl` definition (elements: Message).
+- [ ] T225 [P] [US1] Verify GetHostnameRequest/Response matches `devicemgmt.wsdl` definition (elements: FromDHCP, Name).
+- [ ] T226 [P] [US1] Verify SetHostnameRequest/Response matches `devicemgmt.wsdl` definition (elements: Name).
+- [ ] T227 [P] [US1] Verify GetNetworkInterfacesRequest/Response matches `devicemgmt.wsdl` definition (elements: NetworkInterface array per tt:NetworkInterface).
+- [ ] T228 [P] [US1] Verify GetScopesRequest/Response matches `devicemgmt.wsdl` definition (elements: Scopes array per tt:Scope).
+- [ ] T229 [P] [US1] Verify SetScopesRequest/Response matches `devicemgmt.wsdl` definition (elements: Scopes array).
+- [ ] T230 [P] [US1] Verify AddScopesRequest/Response matches `devicemgmt.wsdl` definition (elements: ScopeItem).
+- [ ] T231 [P] [US1] Verify GetDiscoveryModeRequest/Response matches `devicemgmt.wsdl` definition (elements: DiscoveryMode enum - Discoverable/NonDiscoverable).
+- [ ] T232 [P] [US1] Verify SetDiscoveryModeRequest/Response matches `devicemgmt.wsdl` definition (elements: DiscoveryMode).
+- [ ] T233 [P] [US1] Verify SetSystemDateAndTimeRequest/Response matches `devicemgmt.wsdl` definition.
+- [ ] T234 [P] [US1] Verify GetDNSRequest/Response matches `devicemgmt.wsdl` definition (conditional).
+- [ ] T235 [P] [US1] Verify SetDNSRequest/Response matches `devicemgmt.wsdl` definition (conditional).
+- [ ] T236 [P] [US1] Verify GetNTPRequest/Response matches `devicemgmt.wsdl` definition (conditional).
+- [ ] T237 [P] [US1] Verify SetNTPRequest/Response matches `devicemgmt.wsdl` definition (conditional).
+- [ ] T238 [P] [US1] Verify SetNetworkInterfacesRequest/Response matches `devicemgmt.wsdl` definition.
+- [ ] T239 [P] [US1] Verify SetSystemFactoryDefaultRequest/Response matches `devicemgmt.wsdl` definition (conditional).
+- [ ] T240 [P] [US1] Verify GetServiceCapabilitiesRequest/Response matches `devicemgmt.wsdl` definition (elements: DeviceServiceCapabilities).
 
 ### Implementation for User Story 1 - Handlers
 
@@ -478,53 +509,62 @@
 
 ### Implementation for User Story 2 - Types
 
-- [ ] T284 [P] [US2] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/media/mod.rs` with MediaService struct.
-- [ ] T285 [P] [US2] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/media/types.rs` with media profile structs.
-- [ ] T286 [P] [US2] Define `MediaProfile` struct with token, Name, VideoSourceConfiguration, VideoEncoderConfiguration, AudioSourceConfiguration, AudioEncoderConfiguration.
-- [ ] T287 [P] [US2] Define `VideoSourceConfiguration` struct with token, SourceToken, Bounds.
-- [ ] T288 [P] [US2] Define `VideoEncoderConfiguration` struct with token, Name, Encoding, Resolution, Quality, RateControl, H264, MPEG4.
-- [ ] T289 [P] [US2] Define `AudioSourceConfiguration` struct with token, SourceToken.
-- [ ] T290 [P] [US2] Define `AudioEncoderConfiguration` struct with token, Name, Encoding, Bitrate, SampleRate.
-- [ ] T291 [P] [US2] Define `VideoSource` struct with token, Framerate, Resolution.
-- [ ] T292 [P] [US2] Define `AudioSource` struct with token, Channels.
-- [ ] T293 [P] [US2] Define GetProfilesRequest/Response in types.rs.
-- [ ] T294 [P] [US2] Define GetProfileRequest/Response in types.rs with ProfileToken.
-- [ ] T295 [P] [US2] Define CreateProfileRequest/Response in types.rs.
-- [ ] T296 [P] [US2] Define DeleteProfileRequest/Response in types.rs.
-- [ ] T297 [P] [US2] Define GetStreamUriRequest/Response in types.rs with StreamSetup, ProfileToken, Uri.
-- [ ] T298 [P] [US2] Define GetSnapshotUriRequest/Response in types.rs with ProfileToken, Uri.
-- [ ] T299 [P] [US2] Define GetVideoSourcesRequest/Response in types.rs.
-- [ ] T300 [P] [US2] Define GetAudioSourcesRequest/Response in types.rs.
-- [ ] T301 [P] [US2] Define GetVideoSourceConfigurationsRequest/Response in types.rs.
-- [ ] T302 [P] [US2] Define GetVideoSourceConfigurationRequest/Response in types.rs.
-- [ ] T303 [P] [US2] Define SetVideoSourceConfigurationRequest/Response in types.rs.
-- [ ] T304 [P] [US2] Define GetVideoEncoderConfigurationsRequest/Response in types.rs.
-- [ ] T305 [P] [US2] Define GetVideoEncoderConfigurationRequest/Response in types.rs.
-- [ ] T306 [P] [US2] Define SetVideoEncoderConfigurationRequest/Response in types.rs.
+**WSDL Source**: `/home/kmk/anyka-dev/cross-compile/onvif/wsdl/media.wsdl`
+**Schema Source**: `/home/kmk/anyka-dev/cross-compile/onvif/wsdl/onvif.xsd` (for tt:* types)
+
+**Requirement**: All Media Service types MUST be generated from or validated against `media.wsdl` and `onvif.xsd`. Use the generated types from `src/onvif/generated/media_types.rs` (created in T072e) and re-export or extend them in the media module.
+
+- [ ] T284 [P] [US2] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/media/mod.rs` with MediaService struct, re-exporting generated types from `super::generated::media_types`.
+- [ ] T285 [P] [US2] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/media/types.rs` re-exporting and extending WSDL-generated types.
+- [ ] T286 [P] [US2] Verify `MediaProfile` struct matches `media.wsdl` tt:Profile definition (elements: token, Name, VideoSourceConfiguration, VideoEncoderConfiguration, AudioSourceConfiguration, AudioEncoderConfiguration, PTZConfiguration).
+- [ ] T287 [P] [US2] Verify `VideoSourceConfiguration` struct matches `onvif.xsd` tt:VideoSourceConfiguration (elements: token, SourceToken, Bounds).
+- [ ] T288 [P] [US2] Verify `VideoEncoderConfiguration` struct matches `onvif.xsd` tt:VideoEncoderConfiguration (elements: token, Name, Encoding, Resolution, Quality, RateControl, H264, MPEG4).
+- [ ] T289 [P] [US2] Verify `AudioSourceConfiguration` struct matches `onvif.xsd` tt:AudioSourceConfiguration (elements: token, SourceToken).
+- [ ] T290 [P] [US2] Verify `AudioEncoderConfiguration` struct matches `onvif.xsd` tt:AudioEncoderConfiguration (elements: token, Name, Encoding, Bitrate, SampleRate).
+- [ ] T291 [P] [US2] Verify `VideoSource` struct matches `onvif.xsd` tt:VideoSource (elements: token, Framerate, Resolution).
+- [ ] T292 [P] [US2] Verify `AudioSource` struct matches `onvif.xsd` tt:AudioSource (elements: token, Channels).
+- [ ] T293 [P] [US2] Verify GetProfilesRequest/Response matches `media.wsdl` definition.
+- [ ] T294 [P] [US2] Verify GetProfileRequest/Response matches `media.wsdl` definition (elements: ProfileToken).
+- [ ] T295 [P] [US2] Verify CreateProfileRequest/Response matches `media.wsdl` definition.
+- [ ] T296 [P] [US2] Verify DeleteProfileRequest/Response matches `media.wsdl` definition.
+- [ ] T297 [P] [US2] Verify GetStreamUriRequest/Response matches `media.wsdl` definition (elements: StreamSetup, ProfileToken, MediaUri).
+- [ ] T298 [P] [US2] Verify GetSnapshotUriRequest/Response matches `media.wsdl` definition (elements: ProfileToken, MediaUri).
+- [ ] T299 [P] [US2] Verify GetVideoSourcesRequest/Response matches `media.wsdl` definition.
+- [ ] T300 [P] [US2] Verify GetAudioSourcesRequest/Response matches `media.wsdl` definition.
+- [ ] T301 [P] [US2] Verify GetVideoSourceConfigurationsRequest/Response matches `media.wsdl` definition.
+- [ ] T302 [P] [US2] Verify GetVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T303 [P] [US2] Verify SetVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T304 [P] [US2] Verify GetVideoEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
+- [ ] T305 [P] [US2] Verify GetVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T306 [P] [US2] Verify SetVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
 - [ ] T307 [P] [US2] Define GetVideoEncoderConfigurationOptionsRequest/Response in types.rs.
 - [ ] T308 [P] [US2] Define GetAudioSourceConfigurationsRequest/Response in types.rs.
 - [ ] T309 [P] [US2] Define GetAudioSourceConfigurationRequest/Response in types.rs.
 - [ ] T310 [P] [US2] Define SetAudioSourceConfigurationRequest/Response in types.rs.
-- [ ] T311 [P] [US2] Define GetAudioEncoderConfigurationsRequest/Response in types.rs.
-- [ ] T312 [P] [US2] Define GetAudioEncoderConfigurationRequest/Response in types.rs.
-- [ ] T313 [P] [US2] Define SetAudioEncoderConfigurationRequest/Response in types.rs.
-- [ ] T314 [P] [US2] Define AddVideoSourceConfigurationRequest/Response in types.rs.
-- [ ] T315 [P] [US2] Define RemoveVideoSourceConfigurationRequest/Response in types.rs.
-- [ ] T316 [P] [US2] Define AddVideoEncoderConfigurationRequest/Response in types.rs.
-- [ ] T317 [P] [US2] Define RemoveVideoEncoderConfigurationRequest/Response in types.rs.
-- [ ] T318 [P] [US2] Define AddAudioSourceConfigurationRequest/Response in types.rs.
-- [ ] T319 [P] [US2] Define RemoveAudioSourceConfigurationRequest/Response in types.rs.
-- [ ] T320 [P] [US2] Define AddAudioEncoderConfigurationRequest/Response in types.rs.
-- [ ] T321 [P] [US2] Define RemoveAudioEncoderConfigurationRequest/Response in types.rs.
-- [ ] T322 [P] [US2] Define GetCompatibleVideoSourceConfigurationsRequest/Response in types.rs.
-- [ ] T323 [P] [US2] Define GetCompatibleVideoEncoderConfigurationsRequest/Response in types.rs.
-- [ ] T324 [P] [US2] Define GetCompatibleAudioSourceConfigurationsRequest/Response in types.rs.
-- [ ] T325 [P] [US2] Define GetCompatibleAudioEncoderConfigurationsRequest/Response in types.rs.
-- [ ] T326 [P] [US2] Define GetMetadataConfigurationsRequest/Response in types.rs.
-- [ ] T327 [P] [US2] Define SetMetadataConfigurationRequest/Response in types.rs.
-- [ ] T328 [P] [US2] Define StartMulticastStreamingRequest/Response in types.rs.
-- [ ] T329 [P] [US2] Define StopMulticastStreamingRequest/Response in types.rs.
-- [ ] T330 [P] [US2] Define GetServiceCapabilitiesRequest/Response in types.rs.
+- [ ] T307 [P] [US2] Verify GetVideoEncoderConfigurationOptionsRequest/Response matches `media.wsdl` definition.
+- [ ] T308 [P] [US2] Verify GetAudioSourceConfigurationsRequest/Response matches `media.wsdl` definition.
+- [ ] T309 [P] [US2] Verify GetAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T310 [P] [US2] Verify SetAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T311 [P] [US2] Verify GetAudioEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
+- [ ] T312 [P] [US2] Verify GetAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T313 [P] [US2] Verify SetAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T314 [P] [US2] Verify AddVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T315 [P] [US2] Verify RemoveVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T316 [P] [US2] Verify AddVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T317 [P] [US2] Verify RemoveVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T318 [P] [US2] Verify AddAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T319 [P] [US2] Verify RemoveAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T320 [P] [US2] Verify AddAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T321 [P] [US2] Verify RemoveAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T322 [P] [US2] Verify GetCompatibleVideoSourceConfigurationsRequest/Response matches `media.wsdl` definition.
+- [ ] T323 [P] [US2] Verify GetCompatibleVideoEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
+- [ ] T324 [P] [US2] Verify GetCompatibleAudioSourceConfigurationsRequest/Response matches `media.wsdl` definition.
+- [ ] T325 [P] [US2] Verify GetCompatibleAudioEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
+- [ ] T326 [P] [US2] Verify GetMetadataConfigurationsRequest/Response matches `media.wsdl` definition.
+- [ ] T327 [P] [US2] Verify SetMetadataConfigurationRequest/Response matches `media.wsdl` definition.
+- [ ] T328 [P] [US2] Verify StartMulticastStreamingRequest/Response matches `media.wsdl` definition.
+- [ ] T329 [P] [US2] Verify StopMulticastStreamingRequest/Response matches `media.wsdl` definition.
+- [ ] T330 [P] [US2] Verify GetServiceCapabilitiesRequest/Response matches `media.wsdl` definition (elements: trt:Capabilities).
 
 ### Implementation for User Story 2 - Profile Manager
 
@@ -616,32 +656,37 @@
 
 ### Implementation for User Story 3 - Types
 
-- [ ] T397 [P] [US3] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/ptz/mod.rs` with PTZService struct.
-- [ ] T398 [P] [US3] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/ptz/types.rs` with PTZ structs.
-- [ ] T399 [P] [US3] Define `PTZNode` struct with token, Name, SupportedPTZSpaces, MaximumNumberOfPresets.
-- [ ] T400 [P] [US3] Define `PTZConfiguration` struct with token, Name, NodeToken, DefaultPTZSpeed, DefaultPTZTimeout, PanTiltLimits, ZoomLimits.
-- [ ] T401 [P] [US3] Define `PTZPreset` struct with token, Name, PTZPosition.
-- [ ] T402 [P] [US3] Define `PTZPosition` struct with PanTilt, Zoom.
-- [ ] T403 [P] [US3] Define `PTZSpeed` struct with PanTilt, Zoom.
-- [ ] T404 [P] [US3] Define `PTZStatus` struct with Position, MoveStatus, Error, UtcTime.
-- [ ] T405 [P] [US3] Define GetNodesRequest/Response in types.rs.
-- [ ] T406 [P] [US3] Define GetNodeRequest/Response in types.rs.
-- [ ] T407 [P] [US3] Define GetConfigurationsRequest/Response in types.rs.
-- [ ] T408 [P] [US3] Define GetConfigurationRequest/Response in types.rs.
-- [ ] T409 [P] [US3] Define SetConfigurationRequest/Response in types.rs.
-- [ ] T410 [P] [US3] Define GetConfigurationOptionsRequest/Response in types.rs.
-- [ ] T411 [P] [US3] Define AbsoluteMoveRequest/Response in types.rs with ProfileToken, Position, Speed.
-- [ ] T412 [P] [US3] Define RelativeMoveRequest/Response in types.rs with ProfileToken, Translation, Speed.
-- [ ] T413 [P] [US3] Define ContinuousMoveRequest/Response in types.rs with ProfileToken, Velocity, Timeout.
-- [ ] T414 [P] [US3] Define StopRequest/Response in types.rs with ProfileToken, PanTilt, Zoom.
-- [ ] T415 [P] [US3] Define GetStatusRequest/Response in types.rs with ProfileToken.
-- [ ] T416 [P] [US3] Define GetPresetsRequest/Response in types.rs with ProfileToken.
-- [ ] T417 [P] [US3] Define SetPresetRequest/Response in types.rs with ProfileToken, PresetName, PresetToken.
-- [ ] T418 [P] [US3] Define GotoPresetRequest/Response in types.rs with ProfileToken, PresetToken, Speed.
-- [ ] T419 [P] [US3] Define RemovePresetRequest/Response in types.rs with ProfileToken, PresetToken.
-- [ ] T420 [P] [US3] Define GotoHomePositionRequest/Response in types.rs with ProfileToken, Speed.
-- [ ] T421 [P] [US3] Define SetHomePositionRequest/Response in types.rs with ProfileToken.
-- [ ] T422 [P] [US3] Define GetCompatibleConfigurationsRequest/Response in types.rs.
+**WSDL Source**: `/home/kmk/anyka-dev/cross-compile/onvif/wsdl/ptz.wsdl`
+**Schema Source**: `/home/kmk/anyka-dev/cross-compile/onvif/wsdl/onvif.xsd` (for tt:* types)
+
+**Requirement**: All PTZ Service types MUST be generated from or validated against `ptz.wsdl` and `onvif.xsd`. Use the generated types from `src/onvif/generated/ptz_types.rs` (created in T072f) and re-export or extend them in the ptz module.
+
+- [ ] T397 [P] [US3] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/ptz/mod.rs` with PTZService struct, re-exporting generated types from `super::generated::ptz_types`.
+- [ ] T398 [P] [US3] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/ptz/types.rs` re-exporting and extending WSDL-generated types.
+- [ ] T399 [P] [US3] Verify `PTZNode` struct matches `onvif.xsd` tt:PTZNode definition (elements: token, Name, SupportedPTZSpaces, MaximumNumberOfPresets, HomeSupported, AuxiliaryCommands).
+- [ ] T400 [P] [US3] Verify `PTZConfiguration` struct matches `onvif.xsd` tt:PTZConfiguration (elements: token, Name, NodeToken, DefaultPTZSpeed, DefaultPTZTimeout, PanTiltLimits, ZoomLimits).
+- [ ] T401 [P] [US3] Verify `PTZPreset` struct matches `onvif.xsd` tt:PTZPreset (elements: token, Name, PTZPosition).
+- [ ] T402 [P] [US3] Verify `PTZPosition` struct matches `onvif.xsd` tt:PTZVector (elements: PanTilt, Zoom).
+- [ ] T403 [P] [US3] Verify `PTZSpeed` struct matches `onvif.xsd` tt:PTZSpeed (elements: PanTilt, Zoom).
+- [ ] T404 [P] [US3] Verify `PTZStatus` struct matches `onvif.xsd` tt:PTZStatus (elements: Position, MoveStatus, Error, UtcTime).
+- [ ] T405 [P] [US3] Verify GetNodesRequest/Response matches `ptz.wsdl` definition.
+- [ ] T406 [P] [US3] Verify GetNodeRequest/Response matches `ptz.wsdl` definition (elements: NodeToken).
+- [ ] T407 [P] [US3] Verify GetConfigurationsRequest/Response matches `ptz.wsdl` definition.
+- [ ] T408 [P] [US3] Verify GetConfigurationRequest/Response matches `ptz.wsdl` definition (elements: PTZConfigurationToken).
+- [ ] T409 [P] [US3] Verify SetConfigurationRequest/Response matches `ptz.wsdl` definition (elements: PTZConfiguration, ForcePersistence).
+- [ ] T410 [P] [US3] Verify GetConfigurationOptionsRequest/Response matches `ptz.wsdl` definition (elements: ConfigurationToken).
+- [ ] T411 [P] [US3] Verify AbsoluteMoveRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Position, Speed).
+- [ ] T412 [P] [US3] Verify RelativeMoveRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Translation, Speed).
+- [ ] T413 [P] [US3] Verify ContinuousMoveRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Velocity, Timeout).
+- [ ] T414 [P] [US3] Verify StopRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PanTilt, Zoom).
+- [ ] T415 [P] [US3] Verify GetStatusRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PTZStatus).
+- [ ] T416 [P] [US3] Verify GetPresetsRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Preset array).
+- [ ] T417 [P] [US3] Verify SetPresetRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PresetName, PresetToken).
+- [ ] T418 [P] [US3] Verify GotoPresetRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PresetToken, Speed).
+- [ ] T419 [P] [US3] Verify RemovePresetRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PresetToken).
+- [ ] T420 [P] [US3] Verify GotoHomePositionRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Speed).
+- [ ] T421 [P] [US3] Verify SetHomePositionRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken).
+- [ ] T422 [P] [US3] Verify GetCompatibleConfigurationsRequest/Response matches `ptz.wsdl` definition.
 - [ ] T423 [P] [US3] Define SendAuxiliaryCommandRequest/Response in types.rs (conditional).
 - [ ] T424 [P] [US3] Define GetServiceCapabilitiesRequest/Response in types.rs.
 
@@ -714,23 +759,28 @@
 
 ### Implementation for User Story 4 - Types
 
-- [ ] T470 [P] [US4] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/imaging/mod.rs` with ImagingService struct.
-- [ ] T471 [P] [US4] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/imaging/types.rs` with imaging structs.
-- [ ] T472 [P] [US4] Define `ImagingSettings` struct with Brightness, Contrast, ColorSaturation, Sharpness, BacklightCompensation, Exposure, Focus, IrCutFilter, WhiteBalance.
-- [ ] T473 [P] [US4] Define `ImagingOptions` struct with Brightness, Contrast, ColorSaturation, Sharpness ranges.
-- [ ] T474 [P] [US4] Define `ImagingStatus` struct with FocusStatus, Position.
-- [ ] T475 [P] [US4] Define `IrCutFilterMode` enum with ON, OFF, AUTO variants.
-- [ ] T476 [P] [US4] Define `BacklightCompensation` struct with Mode, Level fields.
-- [ ] T477 [P] [US4] Define `Exposure` struct with Mode, Priority, MinExposureTime, MaxExposureTime, MinGain, MaxGain fields.
-- [ ] T478 [P] [US4] Define `WhiteBalance` struct with Mode, CrGain, CbGain fields.
-- [ ] T479 [P] [US4] Define GetImagingSettingsRequest/Response in types.rs with VideoSourceToken.
-- [ ] T480 [P] [US4] Define SetImagingSettingsRequest/Response in types.rs with VideoSourceToken, ImagingSettings.
-- [ ] T481 [P] [US4] Define GetOptionsRequest/Response in types.rs with VideoSourceToken.
-- [ ] T482 [P] [US4] Define GetStatusRequest/Response in types.rs with VideoSourceToken.
-- [ ] T483 [P] [US4] Define GetMoveOptionsRequest/Response in types.rs (conditional).
-- [ ] T484 [P] [US4] Define MoveRequest/Response in types.rs (conditional).
-- [ ] T485 [P] [US4] Define StopRequest/Response in types.rs (conditional).
-- [ ] T486 [P] [US4] Define GetServiceCapabilitiesRequest/Response in types.rs.
+**WSDL Source**: `/home/kmk/anyka-dev/cross-compile/onvif/wsdl/imaging.wsdl`
+**Schema Source**: `/home/kmk/anyka-dev/cross-compile/onvif/wsdl/onvif.xsd` (for tt:* types like ImagingSettings20)
+
+**Requirement**: All Imaging Service types MUST be generated from or validated against `imaging.wsdl` and `onvif.xsd`. Use the generated types from `src/onvif/generated/imaging_types.rs` (created in T072g) and re-export or extend them in the imaging module.
+
+- [ ] T470 [P] [US4] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/imaging/mod.rs` with ImagingService struct, re-exporting generated types from `super::generated::imaging_types`.
+- [ ] T471 [P] [US4] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/imaging/types.rs` re-exporting and extending WSDL-generated types.
+- [ ] T472 [P] [US4] Verify `ImagingSettings` struct matches `onvif.xsd` tt:ImagingSettings20 definition (elements: Brightness, Contrast, ColorSaturation, Sharpness, BacklightCompensation, Exposure, Focus, IrCutFilter, WhiteBalance, WideDynamicRange, Extension).
+- [ ] T473 [P] [US4] Verify `ImagingOptions` struct matches `onvif.xsd` tt:ImagingOptions20 definition (elements: Brightness, Contrast, ColorSaturation, Sharpness ranges, etc.).
+- [ ] T474 [P] [US4] Verify `ImagingStatus` struct matches `onvif.xsd` tt:ImagingStatus20 definition (elements: FocusStatus20, Extension).
+- [ ] T475 [P] [US4] Verify `IrCutFilterMode` enum matches `onvif.xsd` tt:IrCutFilterMode (values: ON, OFF, AUTO).
+- [ ] T476 [P] [US4] Verify `BacklightCompensation` struct matches `onvif.xsd` tt:BacklightCompensation20 (elements: Mode, Level).
+- [ ] T477 [P] [US4] Verify `Exposure` struct matches `onvif.xsd` tt:Exposure20 (elements: Mode, Priority, Window, MinExposureTime, MaxExposureTime, MinGain, MaxGain, MinIris, MaxIris, ExposureTime, Gain, Iris).
+- [ ] T478 [P] [US4] Verify `WhiteBalance` struct matches `onvif.xsd` tt:WhiteBalance20 (elements: Mode, CrGain, CbGain, Extension).
+- [ ] T479 [P] [US4] Verify GetImagingSettingsRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingSettings).
+- [ ] T480 [P] [US4] Verify SetImagingSettingsRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingSettings, ForcePersistence).
+- [ ] T481 [P] [US4] Verify GetOptionsRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingOptions).
+- [ ] T482 [P] [US4] Verify GetStatusRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingStatus).
+- [ ] T483 [P] [US4] Verify GetMoveOptionsRequest/Response matches `imaging.wsdl` definition (conditional).
+- [ ] T484 [P] [US4] Verify MoveRequest/Response matches `imaging.wsdl` definition (conditional).
+- [ ] T485 [P] [US4] Verify StopRequest/Response matches `imaging.wsdl` definition (conditional).
+- [ ] T486 [P] [US4] Verify GetServiceCapabilitiesRequest/Response matches `imaging.wsdl` definition (elements: timg:Capabilities).
 
 ### Implementation for User Story 4 - Settings Store
 
@@ -905,4 +955,5 @@ Phase 11 (Polish & Validation)
 - Each user story includes independent tests, implementation tasks, and checkpoints.
 - Tasks align with plan.md architecture and spec.md functional requirements.
 - Task granularity is atomic - one task per function/operation for LLM implementation.
-- Total tasks: 565
+- **WSDL Compliance**: All ONVIF types MUST be generated from or validated against WSDL files in `/home/kmk/anyka-dev/cross-compile/onvif/wsdl/`.
+- Total tasks: 575
