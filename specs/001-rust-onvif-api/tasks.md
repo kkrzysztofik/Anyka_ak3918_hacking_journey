@@ -397,20 +397,20 @@
 
 ### Tests for User Story 1
 
-- [ ] T204 [P] [US1] Add unit test for GetDeviceInformation handler in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/mod.rs`.
-- [ ] T205 [P] [US1] Add unit test for GetCapabilities handler returning all service endpoints.
-- [ ] T206 [P] [US1] Add unit test for GetServices handler with namespace URIs and XAddr URLs.
-- [ ] T207 [P] [US1] Add unit test for GetSystemDateAndTime handler with UTC and local timezone.
-- [ ] T208 [P] [US1] Add unit test for SystemReboot handler.
-- [ ] T209 [P] [US1] Add unit test for GetHostname handler.
-- [ ] T210 [P] [US1] Add unit test for SetHostname handler with validation.
-- [ ] T211 [P] [US1] Add unit test for GetNetworkInterfaces handler.
-- [ ] T212 [P] [US1] Add unit test for GetScopes handler.
-- [ ] T213 [P] [US1] Add unit test for SetScopes handler.
-- [ ] T214 [P] [US1] Add unit test for AddScopes handler.
-- [ ] T215 [P] [US1] Add unit test for GetDiscoveryMode handler.
-- [ ] T216 [P] [US1] Add unit test for SetDiscoveryMode handler.
-- [ ] T217 [P] [US1] Create ONVIF Base Device integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/device_service.rs`.
+- [X] T204 [P] [US1] Add unit test for GetDeviceInformation handler in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/mod.rs`.
+- [X] T205 [P] [US1] Add unit test for GetCapabilities handler returning all service endpoints.
+- [X] T206 [P] [US1] Add unit test for GetServices handler with namespace URIs and XAddr URLs.
+- [X] T207 [P] [US1] Add unit test for GetSystemDateAndTime handler with UTC and local timezone.
+- [X] T208 [P] [US1] Add unit test for SystemReboot handler.
+- [X] T209 [P] [US1] Add unit test for GetHostname handler.
+- [X] T210 [P] [US1] Add unit test for SetHostname handler with validation.
+- [X] T211 [P] [US1] Add unit test for GetNetworkInterfaces handler.
+- [X] T212 [P] [US1] Add unit test for GetScopes handler.
+- [X] T213 [P] [US1] Add unit test for SetScopes handler.
+- [X] T214 [P] [US1] Add unit test for AddScopes handler.
+- [X] T215 [P] [US1] Add unit test for GetDiscoveryMode handler.
+- [X] T216 [P] [US1] Add unit test for SetDiscoveryMode handler.
+- [X] T217 [P] [US1] Create ONVIF Base Device integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/device_service.rs`.
 
 ### Implementation for User Story 1 - Types
 
@@ -418,68 +418,68 @@
 
 **Requirement**: All Device Service types MUST be generated from or validated against `devicemgmt.wsdl`. Use the generated types from `src/onvif/generated/device_types.rs` (created in T072d) and re-export or extend them in the device module.
 
-- [ ] T218 [P] [US1] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/mod.rs` with DeviceService struct, re-exporting generated types from `super::generated::device_types`.
-- [ ] T219 [P] [US1] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/types.rs` re-exporting and extending WSDL-generated types with any implementation-specific additions.
-- [ ] T220 [P] [US1] Verify GetDeviceInformationRequest/Response matches `devicemgmt.wsdl` definition (elements: Manufacturer, Model, FirmwareVersion, SerialNumber, HardwareId).
-- [ ] T221 [P] [US1] Verify GetCapabilitiesRequest/Response matches `devicemgmt.wsdl` definition (elements: Analytics, Device, Events, Imaging, Media, PTZ capabilities).
-- [ ] T222 [P] [US1] Verify GetServicesRequest/Response matches `devicemgmt.wsdl` definition (elements: Service array with Namespace, XAddr, Version, Capabilities).
-- [ ] T223 [P] [US1] Verify GetSystemDateAndTimeRequest/Response matches `devicemgmt.wsdl` definition (elements: DateTimeType, DaylightSavings, TimeZone, UTCDateTime, LocalDateTime).
-- [ ] T224 [P] [US1] Verify SystemRebootRequest/Response matches `devicemgmt.wsdl` definition (elements: Message).
-- [ ] T225 [P] [US1] Verify GetHostnameRequest/Response matches `devicemgmt.wsdl` definition (elements: FromDHCP, Name).
-- [ ] T226 [P] [US1] Verify SetHostnameRequest/Response matches `devicemgmt.wsdl` definition (elements: Name).
-- [ ] T227 [P] [US1] Verify GetNetworkInterfacesRequest/Response matches `devicemgmt.wsdl` definition (elements: NetworkInterface array per tt:NetworkInterface).
-- [ ] T228 [P] [US1] Verify GetScopesRequest/Response matches `devicemgmt.wsdl` definition (elements: Scopes array per tt:Scope).
-- [ ] T229 [P] [US1] Verify SetScopesRequest/Response matches `devicemgmt.wsdl` definition (elements: Scopes array).
-- [ ] T230 [P] [US1] Verify AddScopesRequest/Response matches `devicemgmt.wsdl` definition (elements: ScopeItem).
-- [ ] T231 [P] [US1] Verify GetDiscoveryModeRequest/Response matches `devicemgmt.wsdl` definition (elements: DiscoveryMode enum - Discoverable/NonDiscoverable).
-- [ ] T232 [P] [US1] Verify SetDiscoveryModeRequest/Response matches `devicemgmt.wsdl` definition (elements: DiscoveryMode).
-- [ ] T233 [P] [US1] Verify SetSystemDateAndTimeRequest/Response matches `devicemgmt.wsdl` definition.
-- [ ] T234 [P] [US1] Verify GetDNSRequest/Response matches `devicemgmt.wsdl` definition (conditional).
-- [ ] T235 [P] [US1] Verify SetDNSRequest/Response matches `devicemgmt.wsdl` definition (conditional).
-- [ ] T236 [P] [US1] Verify GetNTPRequest/Response matches `devicemgmt.wsdl` definition (conditional).
-- [ ] T237 [P] [US1] Verify SetNTPRequest/Response matches `devicemgmt.wsdl` definition (conditional).
-- [ ] T238 [P] [US1] Verify SetNetworkInterfacesRequest/Response matches `devicemgmt.wsdl` definition.
-- [ ] T239 [P] [US1] Verify SetSystemFactoryDefaultRequest/Response matches `devicemgmt.wsdl` definition (conditional).
-- [ ] T240 [P] [US1] Verify GetServiceCapabilitiesRequest/Response matches `devicemgmt.wsdl` definition (elements: DeviceServiceCapabilities).
+- [X] T218 [P] [US1] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/mod.rs` with DeviceService struct, re-exporting generated types from `super::generated::device_types`.
+- [X] T219 [P] [US1] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/types.rs` re-exporting and extending WSDL-generated types with any implementation-specific additions.
+- [X] T220 [P] [US1] Verify GetDeviceInformationRequest/Response matches `devicemgmt.wsdl` definition (elements: Manufacturer, Model, FirmwareVersion, SerialNumber, HardwareId).
+- [X] T221 [P] [US1] Verify GetCapabilitiesRequest/Response matches `devicemgmt.wsdl` definition (elements: Analytics, Device, Events, Imaging, Media, PTZ capabilities).
+- [X] T222 [P] [US1] Verify GetServicesRequest/Response matches `devicemgmt.wsdl` definition (elements: Service array with Namespace, XAddr, Version, Capabilities).
+- [X] T223 [P] [US1] Verify GetSystemDateAndTimeRequest/Response matches `devicemgmt.wsdl` definition (elements: DateTimeType, DaylightSavings, TimeZone, UTCDateTime, LocalDateTime).
+- [X] T224 [P] [US1] Verify SystemRebootRequest/Response matches `devicemgmt.wsdl` definition (elements: Message).
+- [X] T225 [P] [US1] Verify GetHostnameRequest/Response matches `devicemgmt.wsdl` definition (elements: FromDHCP, Name).
+- [X] T226 [P] [US1] Verify SetHostnameRequest/Response matches `devicemgmt.wsdl` definition (elements: Name).
+- [X] T227 [P] [US1] Verify GetNetworkInterfacesRequest/Response matches `devicemgmt.wsdl` definition (elements: NetworkInterface array per tt:NetworkInterface).
+- [X] T228 [P] [US1] Verify GetScopesRequest/Response matches `devicemgmt.wsdl` definition (elements: Scopes array per tt:Scope).
+- [X] T229 [P] [US1] Verify SetScopesRequest/Response matches `devicemgmt.wsdl` definition (elements: Scopes array).
+- [X] T230 [P] [US1] Verify AddScopesRequest/Response matches `devicemgmt.wsdl` definition (elements: ScopeItem).
+- [X] T231 [P] [US1] Verify GetDiscoveryModeRequest/Response matches `devicemgmt.wsdl` definition (elements: DiscoveryMode enum - Discoverable/NonDiscoverable).
+- [X] T232 [P] [US1] Verify SetDiscoveryModeRequest/Response matches `devicemgmt.wsdl` definition (elements: DiscoveryMode).
+- [X] T233 [P] [US1] Verify SetSystemDateAndTimeRequest/Response matches `devicemgmt.wsdl` definition.
+- [X] T234 [P] [US1] Verify GetDNSRequest/Response matches `devicemgmt.wsdl` definition (conditional).
+- [X] T235 [P] [US1] Verify SetDNSRequest/Response matches `devicemgmt.wsdl` definition (conditional).
+- [X] T236 [P] [US1] Verify GetNTPRequest/Response matches `devicemgmt.wsdl` definition (conditional).
+- [X] T237 [P] [US1] Verify SetNTPRequest/Response matches `devicemgmt.wsdl` definition (conditional).
+- [X] T238 [P] [US1] Verify SetNetworkInterfacesRequest/Response matches `devicemgmt.wsdl` definition.
+- [X] T239 [P] [US1] Verify SetSystemFactoryDefaultRequest/Response matches `devicemgmt.wsdl` definition (conditional).
+- [X] T240 [P] [US1] Verify GetServiceCapabilitiesRequest/Response matches `devicemgmt.wsdl` definition (elements: DeviceServiceCapabilities).
 
 ### Implementation for User Story 1 - Handlers
 
-- [ ] T241 [US1] Implement `DeviceService::new()` constructor with ConfigRuntime and Platform references.
-- [ ] T242 [US1] Implement `handle_get_device_information()` returning device info from platform and configuration.
-- [ ] T243 [US1] Implement `handle_get_capabilities()` returning all service endpoints and feature flags.
-- [ ] T244 [US1] Implement `handle_get_services()` returning namespace URIs and XAddr URLs for Device, Media, PTZ, Imaging.
-- [ ] T245 [US1] Implement `handle_get_system_date_and_time()` returning UTC and local time from system clock.
-- [ ] T246 [US1] Implement `handle_set_system_date_and_time()` updating system time.
-- [ ] T247 [US1] Implement `handle_system_reboot()` initiating system reboot via platform.
-- [ ] T248 [US1] Implement `handle_get_hostname()` returning current hostname from configuration.
-- [ ] T249 [US1] Implement `handle_set_hostname()` updating hostname in configuration.
-- [ ] T250 [US1] Implement `handle_get_network_interfaces()` returning network interface configurations.
-- [ ] T251 [US1] Implement `handle_set_network_interfaces()` updating network configuration.
-- [ ] T252 [US1] Implement `handle_get_scopes()` returning device scopes from configuration.
-- [ ] T253 [US1] Implement `handle_set_scopes()` replacing device scopes in configuration.
-- [ ] T254 [US1] Implement `handle_add_scopes()` appending scope to existing scopes.
-- [ ] T255 [US1] Implement `handle_get_discovery_mode()` returning current discovery mode.
-- [ ] T256 [US1] Implement `handle_set_discovery_mode()` updating discovery mode (Discoverable/NonDiscoverable).
-- [ ] T257 [US1] Implement `handle_get_dns()` returning DNS configuration (conditional).
-- [ ] T258 [US1] Implement `handle_set_dns()` updating DNS configuration (conditional).
-- [ ] T259 [US1] Implement `handle_get_ntp()` returning NTP configuration (conditional).
-- [ ] T260 [US1] Implement `handle_set_ntp()` updating NTP configuration (conditional).
-- [ ] T261 [US1] Implement `handle_set_system_factory_default()` resetting to factory defaults (conditional).
-- [ ] T262 [US1] Implement `handle_get_service_capabilities()` returning device service capabilities.
+- [X] T241 [US1] Implement `DeviceService::new()` constructor with ConfigRuntime and Platform references.
+- [X] T242 [US1] Implement `handle_get_device_information()` returning device info from platform and configuration.
+- [X] T243 [US1] Implement `handle_get_capabilities()` returning all service endpoints and feature flags.
+- [X] T244 [US1] Implement `handle_get_services()` returning namespace URIs and XAddr URLs for Device, Media, PTZ, Imaging.
+- [X] T245 [US1] Implement `handle_get_system_date_and_time()` returning UTC and local time from system clock.
+- [X] T246 [US1] Implement `handle_set_system_date_and_time()` updating system time.
+- [X] T247 [US1] Implement `handle_system_reboot()` initiating system reboot via platform.
+- [X] T248 [US1] Implement `handle_get_hostname()` returning current hostname from configuration.
+- [X] T249 [US1] Implement `handle_set_hostname()` updating hostname in configuration.
+- [X] T250 [US1] Implement `handle_get_network_interfaces()` returning network interface configurations.
+- [X] T251 [US1] Implement `handle_set_network_interfaces()` updating network configuration.
+- [X] T252 [US1] Implement `handle_get_scopes()` returning device scopes from configuration.
+- [X] T253 [US1] Implement `handle_set_scopes()` replacing device scopes in configuration.
+- [X] T254 [US1] Implement `handle_add_scopes()` appending scope to existing scopes.
+- [X] T255 [US1] Implement `handle_get_discovery_mode()` returning current discovery mode.
+- [X] T256 [US1] Implement `handle_set_discovery_mode()` updating discovery mode (Discoverable/NonDiscoverable).
+- [N/A] T257 [US1] Implement `handle_get_dns()` returning DNS configuration (conditional - not in MVP).
+- [N/A] T258 [US1] Implement `handle_set_dns()` updating DNS configuration (conditional - not in MVP).
+- [N/A] T259 [US1] Implement `handle_get_ntp()` returning NTP configuration (conditional - not in MVP).
+- [N/A] T260 [US1] Implement `handle_set_ntp()` updating NTP configuration (conditional - not in MVP).
+- [N/A] T261 [US1] Implement `handle_set_system_factory_default()` resetting to factory defaults (conditional - not in MVP).
+- [X] T262 [US1] Implement `handle_get_service_capabilities()` returning device service capabilities.
 
 ### Implementation for User Story 1 - Faults
 
-- [ ] T263 [P] [US1] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/faults.rs` with device-specific fault mappings.
-- [ ] T264 [US1] Implement fault for invalid hostname format.
-- [ ] T265 [US1] Implement fault for unsupported network configuration.
-- [ ] T266 [US1] Implement fault for invalid scope format.
+- [X] T263 [P] [US1] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/faults.rs` with device-specific fault mappings.
+- [X] T264 [US1] Implement fault for invalid hostname format.
+- [X] T265 [US1] Implement fault for unsupported network configuration.
+- [X] T266 [US1] Implement fault for invalid scope format.
 
 ### Implementation for User Story 1 - Registration
 
-- [ ] T267 [US1] Register DeviceService routes in server.rs for `/onvif/device_service`.
-- [ ] T268 [US1] Implement SOAPAction dispatch for all Device Service operations.
+- [X] T267 [US1] Register DeviceService routes in server.rs for `/onvif/device_service`.
+- [X] T268 [US1] Implement SOAPAction dispatch for all Device Service operations.
 
-**Checkpoint**: Device discovery works end-to-end (MVP scope).
+**Checkpoint**: Device discovery works end-to-end (MVP scope). ✅ COMPLETED
 
 ---
 

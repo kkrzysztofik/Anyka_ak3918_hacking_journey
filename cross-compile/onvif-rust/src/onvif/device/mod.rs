@@ -1,10 +1,13 @@
 //! ONVIF Device Service implementation.
 //!
 //! This module implements the ONVIF Device Service (tds namespace) providing:
-//! - Device information and capabilities
+//! - Device information and capabilities (GetDeviceInformation, GetCapabilities, GetServices)
+//! - System date/time management (GetSystemDateAndTime, SetSystemDateAndTime)
+//! - System operations (SystemReboot, SetSystemFactoryDefault)
+//! - Hostname management (GetHostname, SetHostname)
+//! - Network configuration (GetNetworkInterfaces, SetNetworkInterfaces)
+//! - Discovery configuration (GetScopes, SetScopes, AddScopes, GetDiscoveryMode, SetDiscoveryMode)
 //! - User management (GetUsers, CreateUsers, DeleteUsers, SetUser)
-//! - Network configuration
-//! - System management
 //!
 //! # User Management
 //!
@@ -16,16 +19,23 @@
 //!
 //! # Error Handling
 //!
-//! User management operations return ONVIF-compliant SOAP faults:
+//! Device Service operations return ONVIF-compliant SOAP faults:
 //! - `ter:NotAuthorized` - Insufficient privileges
 //! - `ter:MaxUsers` - Maximum 8 users reached
 //! - `ter:UsernameExists` - Duplicate username
 //! - `ter:UserNotFound` - Unknown username
+//! - `ter:InvalidHostname` - Invalid hostname format
+//! - `ter:InvalidScope` - Invalid scope URI format
+//! - `ter:FixedScope` - Cannot modify fixed scope
+//! - `ter:InvalidNetworkInterface` - Network interface not found
 
+pub mod faults;
 mod handlers;
+pub mod types;
 pub mod user_types;
 
 pub use handlers::DeviceService;
+pub use types::*;
 pub use user_types::*;
 
 // Re-export WSDL types for user management
