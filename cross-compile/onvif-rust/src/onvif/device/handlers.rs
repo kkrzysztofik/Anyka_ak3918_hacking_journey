@@ -174,7 +174,7 @@ impl DeviceService {
             model: self
                 .config
                 .get_string("device.model")
-                .unwrap_or_else(|_| "AK3918".to_string()),
+                .unwrap_or_else(|_| "AK3918 Camera".to_string()),
             firmware_version: self
                 .config
                 .get_string("device.firmware_version")

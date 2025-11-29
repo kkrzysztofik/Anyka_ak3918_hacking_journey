@@ -58,5 +58,5 @@ pub mod security;
 pub mod ffi;
 
 // Re-export main types for convenience
-pub use app::Application;
+pub use app::{AppState, AppStateBuilder, AppStateError, Application};
 pub use lifecycle::{RuntimeError, ShutdownReport, ShutdownStatus, StartupError};

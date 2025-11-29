@@ -1174,6 +1174,220 @@ pub struct StreamingCapabilities {
 }
 
 // ============================================================================
+// Compatible Configurations (FR-002)
+// ============================================================================
+
+/// GetCompatibleVideoSourceConfigurations request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCompatibleVideoSourceConfigurations")]
+pub struct GetCompatibleVideoSourceConfigurations {
+    /// Profile token.
+    #[serde(rename = "ProfileToken")]
+    pub profile_token: ReferenceToken,
+}
+
+/// GetCompatibleVideoSourceConfigurations response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCompatibleVideoSourceConfigurationsResponse")]
+pub struct GetCompatibleVideoSourceConfigurationsResponse {
+    /// Compatible configurations.
+    #[serde(rename = "Configurations", default)]
+    pub configurations: Vec<VideoSourceConfiguration>,
+}
+
+/// GetCompatibleVideoEncoderConfigurations request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCompatibleVideoEncoderConfigurations")]
+pub struct GetCompatibleVideoEncoderConfigurations {
+    /// Profile token.
+    #[serde(rename = "ProfileToken")]
+    pub profile_token: ReferenceToken,
+}
+
+/// GetCompatibleVideoEncoderConfigurations response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCompatibleVideoEncoderConfigurationsResponse")]
+pub struct GetCompatibleVideoEncoderConfigurationsResponse {
+    /// Compatible configurations.
+    #[serde(rename = "Configurations", default)]
+    pub configurations: Vec<VideoEncoderConfiguration>,
+}
+
+/// GetCompatibleAudioSourceConfigurations request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCompatibleAudioSourceConfigurations")]
+pub struct GetCompatibleAudioSourceConfigurations {
+    /// Profile token.
+    #[serde(rename = "ProfileToken")]
+    pub profile_token: ReferenceToken,
+}
+
+/// GetCompatibleAudioSourceConfigurations response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCompatibleAudioSourceConfigurationsResponse")]
+pub struct GetCompatibleAudioSourceConfigurationsResponse {
+    /// Compatible configurations.
+    #[serde(rename = "Configurations", default)]
+    pub configurations: Vec<AudioSourceConfiguration>,
+}
+
+/// GetCompatibleAudioEncoderConfigurations request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCompatibleAudioEncoderConfigurations")]
+pub struct GetCompatibleAudioEncoderConfigurations {
+    /// Profile token.
+    #[serde(rename = "ProfileToken")]
+    pub profile_token: ReferenceToken,
+}
+
+/// GetCompatibleAudioEncoderConfigurations response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCompatibleAudioEncoderConfigurationsResponse")]
+pub struct GetCompatibleAudioEncoderConfigurationsResponse {
+    /// Compatible configurations.
+    #[serde(rename = "Configurations", default)]
+    pub configurations: Vec<AudioEncoderConfiguration>,
+}
+
+// ============================================================================
+// Metadata Configurations (FR-002)
+// ============================================================================
+
+/// GetMetadataConfigurations request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetMetadataConfigurations")]
+pub struct GetMetadataConfigurations {}
+
+/// GetMetadataConfigurations response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetMetadataConfigurationsResponse")]
+pub struct GetMetadataConfigurationsResponse {
+    /// Metadata configurations.
+    #[serde(rename = "Configurations", default)]
+    pub configurations: Vec<MetadataConfiguration>,
+}
+
+/// Metadata configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MetadataConfiguration {
+    /// Configuration token.
+    #[serde(rename = "@token")]
+    pub token: ReferenceToken,
+
+    /// User readable name.
+    #[serde(rename = "Name")]
+    pub name: Name,
+
+    /// Number of references using this configuration.
+    #[serde(rename = "UseCount")]
+    pub use_count: i32,
+
+    /// PTZ status filter.
+    #[serde(rename = "PTZStatus", default, skip_serializing_if = "Option::is_none")]
+    pub ptz_status: Option<PtzFilter>,
+
+    /// Analytics.
+    #[serde(rename = "Analytics", default, skip_serializing_if = "Option::is_none")]
+    pub analytics: Option<bool>,
+
+    /// Multicast configuration.
+    #[serde(rename = "Multicast", default, skip_serializing_if = "Option::is_none")]
+    pub multicast: Option<super::common::MulticastConfiguration>,
+
+    /// Session timeout.
+    #[serde(rename = "SessionTimeout")]
+    pub session_timeout: String,
+}
+
+/// PTZ filter for metadata.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PtzFilter {
+    /// Enable PTZ status.
+    #[serde(rename = "Status")]
+    pub status: bool,
+
+    /// Enable PTZ position.
+    #[serde(rename = "Position")]
+    pub position: bool,
+}
+
+/// SetMetadataConfiguration request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "SetMetadataConfiguration")]
+pub struct SetMetadataConfiguration {
+    /// Configuration to set.
+    #[serde(rename = "Configuration")]
+    pub configuration: MetadataConfiguration,
+
+    /// Force persistence.
+    #[serde(
+        rename = "ForcePersistence",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub force_persistence: Option<bool>,
+}
+
+/// SetMetadataConfiguration response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "SetMetadataConfigurationResponse")]
+pub struct SetMetadataConfigurationResponse {}
+
+// ============================================================================
+// Multicast Streaming (FR-002)
+// ============================================================================
+
+/// StartMulticastStreaming request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "StartMulticastStreaming")]
+pub struct StartMulticastStreaming {
+    /// Profile token.
+    #[serde(rename = "ProfileToken")]
+    pub profile_token: ReferenceToken,
+}
+
+/// StartMulticastStreaming response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "StartMulticastStreamingResponse")]
+pub struct StartMulticastStreamingResponse {}
+
+/// StopMulticastStreaming request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "StopMulticastStreaming")]
+pub struct StopMulticastStreaming {
+    /// Profile token.
+    #[serde(rename = "ProfileToken")]
+    pub profile_token: ReferenceToken,
+}
+
+/// StopMulticastStreaming response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "StopMulticastStreamingResponse")]
+pub struct StopMulticastStreamingResponse {}
+
+/// SetAudioSourceConfiguration request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "SetAudioSourceConfiguration")]
+pub struct SetAudioSourceConfiguration {
+    /// Configuration to set.
+    #[serde(rename = "Configuration")]
+    pub configuration: AudioSourceConfiguration,
+
+    /// Force persistence.
+    #[serde(
+        rename = "ForcePersistence",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub force_persistence: Option<bool>,
+}
+
+/// SetAudioSourceConfiguration response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "SetAudioSourceConfigurationResponse")]
+pub struct SetAudioSourceConfigurationResponse {}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

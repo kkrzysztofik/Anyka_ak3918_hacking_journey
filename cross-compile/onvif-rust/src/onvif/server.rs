@@ -23,6 +23,7 @@
 //!
 //! ```ignore
 //! use onvif_rust::onvif::server::{OnvifServer, OnvifServerConfig};
+//! use onvif_rust::app::AppState;
 //!
 //! let config = OnvifServerConfig {
 //!     bind_address: "0.0.0.0".to_string(),
@@ -30,10 +31,17 @@
 //!     request_timeout_secs: 30,
 //!     max_body_size: 1024 * 1024, // 1MB
 //!     enable_cors: false,
-//!     http_verbose: false,        // Enable for detailed HTTP logging
+//!     http_verbose: false,
 //! };
 //!
-//! let server = OnvifServer::new(config)?;
+//! let app_state = AppState::builder()
+//!     .user_storage(Arc::new(UserStorage::new()))
+//!     .password_manager(Arc::new(PasswordManager::new()))
+//!     .ptz_state(Arc::new(PTZStateManager::new()))
+//!     .config(Arc::new(ConfigRuntime::new(Default::default())))
+//!     .build()?;
+//!
+//! let server = OnvifServer::with_app_state(config, app_state)?;
 //! server.start().await?;
 //! ```
 
@@ -57,6 +65,7 @@ use tower_http::timeout::TimeoutLayer;
 
 use super::dispatcher::ServiceDispatcher;
 use super::error::OnvifError;
+use crate::app::AppState;
 use crate::logging::{HttpLogConfig, HttpLoggingMiddleware};
 
 /// Configuration for the ONVIF HTTP server.
@@ -114,6 +123,10 @@ pub struct OnvifServer {
 impl OnvifServer {
     /// Create a new ONVIF server with the given configuration.
     ///
+    /// This constructor creates a server with Media and Imaging services only.
+    /// For full service registration including Device and PTZ services, use
+    /// [`OnvifServer::with_app_state`] instead.
+    ///
     /// # Arguments
     ///
     /// * `config` - Server configuration
@@ -138,6 +151,10 @@ impl OnvifServer {
         }
 
         let dispatcher = Arc::new(ServiceDispatcher::new());
+
+        // Register built-in services (minimal set for backward compatibility)
+        Self::register_minimal_services(&dispatcher);
+
         let (shutdown_tx, _) = broadcast::channel(1);
 
         Ok(Self {
@@ -145,6 +162,136 @@ impl OnvifServer {
             dispatcher,
             shutdown_tx,
         })
+    }
+
+    /// Create a new ONVIF server with full dependency injection via AppState.
+    ///
+    /// This constructor creates a server with all four ONVIF services:
+    /// - Device Service (requires UserStorage, PasswordManager, ConfigRuntime, Platform)
+    /// - Media Service
+    /// - PTZ Service (requires PTZStateManager, ConfigRuntime, Platform)
+    /// - Imaging Service
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Server configuration
+    /// * `app_state` - Shared application state containing all service dependencies
+    ///
+    /// # Returns
+    ///
+    /// A new `OnvifServer` instance, or an error if configuration is invalid.
+    pub fn with_app_state(
+        config: OnvifServerConfig,
+        app_state: AppState,
+    ) -> Result<Self, OnvifError> {
+        // Validate configuration
+        if config.port == 0 {
+            return Err(OnvifError::InvalidArgVal {
+                subcode: "InvalidPort".to_string(),
+                reason: "Port cannot be 0".to_string(),
+            });
+        }
+
+        if config.max_body_size == 0 {
+            return Err(OnvifError::InvalidArgVal {
+                subcode: "InvalidBodySize".to_string(),
+                reason: "Max body size cannot be 0".to_string(),
+            });
+        }
+
+        let dispatcher = Arc::new(ServiceDispatcher::new());
+
+        // Register all services with dependencies from AppState
+        Self::register_all_services(&dispatcher, &app_state);
+
+        let (shutdown_tx, _) = broadcast::channel(1);
+
+        Ok(Self {
+            config,
+            dispatcher,
+            shutdown_tx,
+        })
+    }
+
+    /// Register minimal ONVIF services (Media and Imaging only).
+    ///
+    /// This is used by the default `new()` constructor for backward compatibility.
+    fn register_minimal_services(dispatcher: &ServiceDispatcher) {
+        use super::imaging::ImagingService;
+        use super::media::MediaService;
+
+        // Register Imaging Service
+        tracing::debug!("Registering Imaging Service");
+        dispatcher.register_service("imaging", Arc::new(ImagingService::new()));
+
+        // Register Media Service
+        tracing::debug!("Registering Media Service");
+        dispatcher.register_service("media", Arc::new(MediaService::new()));
+
+        tracing::info!(
+            "Registered {} ONVIF service(s) (minimal mode)",
+            dispatcher.services().len()
+        );
+    }
+
+    /// Register all built-in ONVIF services with the dispatcher.
+    ///
+    /// This method registers all four services using dependencies from AppState:
+    /// - Device Service
+    /// - Media Service
+    /// - PTZ Service
+    /// - Imaging Service
+    fn register_all_services(dispatcher: &ServiceDispatcher, app_state: &AppState) {
+        use super::device::DeviceService;
+        use super::imaging::ImagingService;
+        use super::media::MediaService;
+        use super::ptz::PTZService;
+
+        // Register Device Service
+        tracing::debug!("Registering Device Service");
+        let device_service = if let Some(platform) = app_state.platform() {
+            DeviceService::with_config_and_platform(
+                Arc::clone(app_state.user_storage()),
+                Arc::clone(app_state.password_manager()),
+                Arc::clone(app_state.config()),
+                Arc::clone(platform),
+            )
+        } else {
+            DeviceService::new(
+                Arc::clone(app_state.user_storage()),
+                Arc::clone(app_state.password_manager()),
+            )
+        };
+        dispatcher.register_service("device", Arc::new(device_service));
+
+        // Register Media Service
+        tracing::debug!("Registering Media Service");
+        dispatcher.register_service("media", Arc::new(MediaService::new()));
+
+        // Register PTZ Service
+        tracing::debug!("Registering PTZ Service");
+        let ptz_service = if let Some(platform) = app_state.platform() {
+            PTZService::with_platform(
+                Arc::clone(app_state.ptz_state()),
+                Arc::clone(app_state.config()),
+                Arc::clone(platform),
+            )
+        } else {
+            PTZService::new(
+                Arc::clone(app_state.ptz_state()),
+                Arc::clone(app_state.config()),
+            )
+        };
+        dispatcher.register_service("ptz", Arc::new(ptz_service));
+
+        // Register Imaging Service
+        tracing::debug!("Registering Imaging Service");
+        dispatcher.register_service("imaging", Arc::new(ImagingService::new()));
+
+        tracing::info!(
+            "Registered {} ONVIF service(s) (full mode)",
+            dispatcher.services().len()
+        );
     }
 
     /// Start the HTTP server and begin accepting connections.
@@ -536,5 +683,76 @@ mod tests {
 
         // Should be able to clone state
         assert!(Arc::ptr_eq(&state.dispatcher, &cloned.dispatcher));
+    }
+
+    #[test]
+    fn test_server_with_app_state_registers_all_services() {
+        use crate::config::ConfigRuntime;
+        use crate::onvif::ptz::PTZStateManager;
+        use crate::users::password::PasswordManager;
+        use crate::users::storage::UserStorage;
+
+        let app_state = AppState::builder()
+            .user_storage(Arc::new(UserStorage::new()))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .build()
+            .unwrap();
+
+        let config = OnvifServerConfig::default();
+        let server = OnvifServer::with_app_state(config, app_state).unwrap();
+
+        // Should have all 4 services registered
+        let services = server.dispatcher.services();
+        assert_eq!(
+            services.len(),
+            4,
+            "Expected 4 services, got: {:?}",
+            services
+        );
+
+        // Verify each service is registered
+        assert!(
+            services.contains(&"device".to_string()),
+            "Device service not registered"
+        );
+        assert!(
+            services.contains(&"media".to_string()),
+            "Media service not registered"
+        );
+        assert!(
+            services.contains(&"ptz".to_string()),
+            "PTZ service not registered"
+        );
+        assert!(
+            services.contains(&"imaging".to_string()),
+            "Imaging service not registered"
+        );
+    }
+
+    #[test]
+    fn test_server_new_registers_minimal_services() {
+        let config = OnvifServerConfig::default();
+        let server = OnvifServer::new(config).unwrap();
+
+        // Should have only 2 services registered (Media and Imaging)
+        let services = server.dispatcher.services();
+        assert_eq!(
+            services.len(),
+            2,
+            "Expected 2 services, got: {:?}",
+            services
+        );
+
+        // Verify minimal services are registered
+        assert!(
+            services.contains(&"media".to_string()),
+            "Media service not registered"
+        );
+        assert!(
+            services.contains(&"imaging".to_string()),
+            "Imaging service not registered"
+        );
     }
 }

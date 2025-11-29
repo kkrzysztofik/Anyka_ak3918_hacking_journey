@@ -208,6 +208,19 @@ impl OnvifError {
             reason: format!("'{}' must be between {} and {}", name, min, max),
         }
     }
+
+    /// Alias for `invalid_arg` - creates an InvalidArgVal error.
+    ///
+    /// This is an alias for `invalid_arg` for naming consistency with
+    /// the enum variant `InvalidArgVal`.
+    ///
+    /// # Arguments
+    ///
+    /// * `subcode` - The specific error subcode
+    /// * `reason` - Human-readable reason
+    pub fn invalid_arg_val(subcode: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::invalid_arg(subcode, reason)
+    }
 }
 
 /// Generate a complete SOAP fault envelope XML.

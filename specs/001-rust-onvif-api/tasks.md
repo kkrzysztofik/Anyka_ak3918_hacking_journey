@@ -491,20 +491,20 @@
 
 ### Tests for User Story 2
 
-- [ ] T269 [P] [US2] Add unit test for GetProfiles handler.
-- [ ] T270 [P] [US2] Add unit test for GetProfile handler with specific token.
-- [ ] T271 [P] [US2] Add unit test for CreateProfile handler.
-- [ ] T272 [P] [US2] Add unit test for DeleteProfile handler.
-- [ ] T273 [P] [US2] Add unit test for GetStreamUri handler with RTSP URI composition.
-- [ ] T274 [P] [US2] Add unit test for GetSnapshotUri handler.
-- [ ] T275 [P] [US2] Add unit test for GetVideoSources handler.
-- [ ] T276 [P] [US2] Add unit test for GetAudioSources handler.
-- [ ] T277 [P] [US2] Add unit test for GetVideoSourceConfigurations handler.
-- [ ] T278 [P] [US2] Add unit test for GetVideoEncoderConfigurations handler.
-- [ ] T279 [P] [US2] Add unit test for GetVideoEncoderConfigurationOptions handler.
-- [ ] T280 [P] [US2] Add unit test for GetAudioSourceConfigurations handler.
-- [ ] T281 [P] [US2] Add unit test for GetAudioEncoderConfigurations handler.
-- [ ] T282 [P] [US2] Add unit test for invalid profile token returning ter:NoProfile fault.
+- [X] T269 [P] [US2] Add unit test for GetProfiles handler.
+- [X] T270 [P] [US2] Add unit test for GetProfile handler with specific token.
+- [X] T271 [P] [US2] Add unit test for CreateProfile handler.
+- [X] T272 [P] [US2] Add unit test for DeleteProfile handler.
+- [X] T273 [P] [US2] Add unit test for GetStreamUri handler with RTSP URI composition.
+- [X] T274 [P] [US2] Add unit test for GetSnapshotUri handler.
+- [X] T275 [P] [US2] Add unit test for GetVideoSources handler.
+- [X] T276 [P] [US2] Add unit test for GetAudioSources handler.
+- [X] T277 [P] [US2] Add unit test for GetVideoSourceConfigurations handler.
+- [X] T278 [P] [US2] Add unit test for GetVideoEncoderConfigurations handler.
+- [X] T279 [P] [US2] Add unit test for GetVideoEncoderConfigurationOptions handler.
+- [X] T280 [P] [US2] Add unit test for GetAudioSourceConfigurations handler.
+- [X] T281 [P] [US2] Add unit test for GetAudioEncoderConfigurations handler.
+- [X] T282 [P] [US2] Add unit test for invalid profile token returning ter:NoProfile fault.
 - [ ] T283 [P] [US2] Create Media Device integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/media_service.rs`.
 
 ### Implementation for User Story 2 - Types
@@ -514,114 +514,114 @@
 
 **Requirement**: All Media Service types MUST be generated from or validated against `media.wsdl` and `onvif.xsd`. Use the generated types from `src/onvif/generated/media_types.rs` (created in T072e) and re-export or extend them in the media module.
 
-- [ ] T284 [P] [US2] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/media/mod.rs` with MediaService struct, re-exporting generated types from `super::generated::media_types`.
-- [ ] T285 [P] [US2] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/media/types.rs` re-exporting and extending WSDL-generated types.
-- [ ] T286 [P] [US2] Verify `MediaProfile` struct matches `media.wsdl` tt:Profile definition (elements: token, Name, VideoSourceConfiguration, VideoEncoderConfiguration, AudioSourceConfiguration, AudioEncoderConfiguration, PTZConfiguration).
-- [ ] T287 [P] [US2] Verify `VideoSourceConfiguration` struct matches `onvif.xsd` tt:VideoSourceConfiguration (elements: token, SourceToken, Bounds).
-- [ ] T288 [P] [US2] Verify `VideoEncoderConfiguration` struct matches `onvif.xsd` tt:VideoEncoderConfiguration (elements: token, Name, Encoding, Resolution, Quality, RateControl, H264, MPEG4).
-- [ ] T289 [P] [US2] Verify `AudioSourceConfiguration` struct matches `onvif.xsd` tt:AudioSourceConfiguration (elements: token, SourceToken).
-- [ ] T290 [P] [US2] Verify `AudioEncoderConfiguration` struct matches `onvif.xsd` tt:AudioEncoderConfiguration (elements: token, Name, Encoding, Bitrate, SampleRate).
-- [ ] T291 [P] [US2] Verify `VideoSource` struct matches `onvif.xsd` tt:VideoSource (elements: token, Framerate, Resolution).
-- [ ] T292 [P] [US2] Verify `AudioSource` struct matches `onvif.xsd` tt:AudioSource (elements: token, Channels).
-- [ ] T293 [P] [US2] Verify GetProfilesRequest/Response matches `media.wsdl` definition.
-- [ ] T294 [P] [US2] Verify GetProfileRequest/Response matches `media.wsdl` definition (elements: ProfileToken).
-- [ ] T295 [P] [US2] Verify CreateProfileRequest/Response matches `media.wsdl` definition.
-- [ ] T296 [P] [US2] Verify DeleteProfileRequest/Response matches `media.wsdl` definition.
-- [ ] T297 [P] [US2] Verify GetStreamUriRequest/Response matches `media.wsdl` definition (elements: StreamSetup, ProfileToken, MediaUri).
-- [ ] T298 [P] [US2] Verify GetSnapshotUriRequest/Response matches `media.wsdl` definition (elements: ProfileToken, MediaUri).
-- [ ] T299 [P] [US2] Verify GetVideoSourcesRequest/Response matches `media.wsdl` definition.
-- [ ] T300 [P] [US2] Verify GetAudioSourcesRequest/Response matches `media.wsdl` definition.
-- [ ] T301 [P] [US2] Verify GetVideoSourceConfigurationsRequest/Response matches `media.wsdl` definition.
-- [ ] T302 [P] [US2] Verify GetVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T303 [P] [US2] Verify SetVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T304 [P] [US2] Verify GetVideoEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
-- [ ] T305 [P] [US2] Verify GetVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T306 [P] [US2] Verify SetVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T307 [P] [US2] Define GetVideoEncoderConfigurationOptionsRequest/Response in types.rs.
-- [ ] T308 [P] [US2] Define GetAudioSourceConfigurationsRequest/Response in types.rs.
-- [ ] T309 [P] [US2] Define GetAudioSourceConfigurationRequest/Response in types.rs.
-- [ ] T310 [P] [US2] Define SetAudioSourceConfigurationRequest/Response in types.rs.
-- [ ] T307 [P] [US2] Verify GetVideoEncoderConfigurationOptionsRequest/Response matches `media.wsdl` definition.
-- [ ] T308 [P] [US2] Verify GetAudioSourceConfigurationsRequest/Response matches `media.wsdl` definition.
-- [ ] T309 [P] [US2] Verify GetAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T310 [P] [US2] Verify SetAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T311 [P] [US2] Verify GetAudioEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
-- [ ] T312 [P] [US2] Verify GetAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T313 [P] [US2] Verify SetAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T314 [P] [US2] Verify AddVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T315 [P] [US2] Verify RemoveVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T316 [P] [US2] Verify AddVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T317 [P] [US2] Verify RemoveVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T318 [P] [US2] Verify AddAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T319 [P] [US2] Verify RemoveAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T320 [P] [US2] Verify AddAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T321 [P] [US2] Verify RemoveAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T322 [P] [US2] Verify GetCompatibleVideoSourceConfigurationsRequest/Response matches `media.wsdl` definition.
-- [ ] T323 [P] [US2] Verify GetCompatibleVideoEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
-- [ ] T324 [P] [US2] Verify GetCompatibleAudioSourceConfigurationsRequest/Response matches `media.wsdl` definition.
-- [ ] T325 [P] [US2] Verify GetCompatibleAudioEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
-- [ ] T326 [P] [US2] Verify GetMetadataConfigurationsRequest/Response matches `media.wsdl` definition.
-- [ ] T327 [P] [US2] Verify SetMetadataConfigurationRequest/Response matches `media.wsdl` definition.
-- [ ] T328 [P] [US2] Verify StartMulticastStreamingRequest/Response matches `media.wsdl` definition.
-- [ ] T329 [P] [US2] Verify StopMulticastStreamingRequest/Response matches `media.wsdl` definition.
-- [ ] T330 [P] [US2] Verify GetServiceCapabilitiesRequest/Response matches `media.wsdl` definition (elements: trt:Capabilities).
+- [x] T284 [P] [US2] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/media/mod.rs` with MediaService struct, re-exporting generated types from `super::generated::media_types`.
+- [x] T285 [P] [US2] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/media/types.rs` re-exporting and extending WSDL-generated types.
+- [X] T286 [P] [US2] Verify `MediaProfile` struct matches `media.wsdl` tt:Profile definition (elements: token, Name, VideoSourceConfiguration, VideoEncoderConfiguration, AudioSourceConfiguration, AudioEncoderConfiguration, PTZConfiguration).
+- [X] T287 [P] [US2] Verify `VideoSourceConfiguration` struct matches `onvif.xsd` tt:VideoSourceConfiguration (elements: token, SourceToken, Bounds).
+- [X] T288 [P] [US2] Verify `VideoEncoderConfiguration` struct matches `onvif.xsd` tt:VideoEncoderConfiguration (elements: token, Name, Encoding, Resolution, Quality, RateControl, H264, MPEG4).
+- [X] T289 [P] [US2] Verify `AudioSourceConfiguration` struct matches `onvif.xsd` tt:AudioSourceConfiguration (elements: token, SourceToken).
+- [X] T290 [P] [US2] Verify `AudioEncoderConfiguration` struct matches `onvif.xsd` tt:AudioEncoderConfiguration (elements: token, Name, Encoding, Bitrate, SampleRate).
+- [X] T291 [P] [US2] Verify `VideoSource` struct matches `onvif.xsd` tt:VideoSource (elements: token, Framerate, Resolution).
+- [X] T292 [P] [US2] Verify `AudioSource` struct matches `onvif.xsd` tt:AudioSource (elements: token, Channels).
+- [X] T293 [P] [US2] Verify GetProfilesRequest/Response matches `media.wsdl` definition.
+- [X] T294 [P] [US2] Verify GetProfileRequest/Response matches `media.wsdl` definition (elements: ProfileToken).
+- [X] T295 [P] [US2] Verify CreateProfileRequest/Response matches `media.wsdl` definition.
+- [X] T296 [P] [US2] Verify DeleteProfileRequest/Response matches `media.wsdl` definition.
+- [X] T297 [P] [US2] Verify GetStreamUriRequest/Response matches `media.wsdl` definition (elements: StreamSetup, ProfileToken, MediaUri).
+- [X] T298 [P] [US2] Verify GetSnapshotUriRequest/Response matches `media.wsdl` definition (elements: ProfileToken, MediaUri).
+- [X] T299 [P] [US2] Verify GetVideoSourcesRequest/Response matches `media.wsdl` definition.
+- [X] T300 [P] [US2] Verify GetAudioSourcesRequest/Response matches `media.wsdl` definition.
+- [X] T301 [P] [US2] Verify GetVideoSourceConfigurationsRequest/Response matches `media.wsdl` definition.
+- [X] T302 [P] [US2] Verify GetVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T303 [P] [US2] Verify SetVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T304 [P] [US2] Verify GetVideoEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
+- [X] T305 [P] [US2] Verify GetVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T306 [P] [US2] Verify SetVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T307 [P] [US2] Define GetVideoEncoderConfigurationOptionsRequest/Response in types.rs.
+- [X] T308 [P] [US2] Define GetAudioSourceConfigurationsRequest/Response in types.rs.
+- [X] T309 [P] [US2] Define GetAudioSourceConfigurationRequest/Response in types.rs.
+- [X] T310 [P] [US2] Define SetAudioSourceConfigurationRequest/Response in types.rs.
+- [X] T307 [P] [US2] Verify GetVideoEncoderConfigurationOptionsRequest/Response matches `media.wsdl` definition.
+- [X] T308 [P] [US2] Verify GetAudioSourceConfigurationsRequest/Response matches `media.wsdl` definition.
+- [X] T309 [P] [US2] Verify GetAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T310 [P] [US2] Verify SetAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T311 [P] [US2] Verify GetAudioEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
+- [X] T312 [P] [US2] Verify GetAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T313 [P] [US2] Verify SetAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T314 [P] [US2] Verify AddVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T315 [P] [US2] Verify RemoveVideoSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T316 [P] [US2] Verify AddVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T317 [P] [US2] Verify RemoveVideoEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T318 [P] [US2] Verify AddAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T319 [P] [US2] Verify RemoveAudioSourceConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T320 [P] [US2] Verify AddAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T321 [P] [US2] Verify RemoveAudioEncoderConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T322 [P] [US2] Verify GetCompatibleVideoSourceConfigurationsRequest/Response matches `media.wsdl` definition.
+- [X] T323 [P] [US2] Verify GetCompatibleVideoEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
+- [X] T324 [P] [US2] Verify GetCompatibleAudioSourceConfigurationsRequest/Response matches `media.wsdl` definition.
+- [X] T325 [P] [US2] Verify GetCompatibleAudioEncoderConfigurationsRequest/Response matches `media.wsdl` definition.
+- [X] T326 [P] [US2] Verify GetMetadataConfigurationsRequest/Response matches `media.wsdl` definition.
+- [X] T327 [P] [US2] Verify SetMetadataConfigurationRequest/Response matches `media.wsdl` definition.
+- [X] T328 [P] [US2] Verify StartMulticastStreamingRequest/Response matches `media.wsdl` definition.
+- [X] T329 [P] [US2] Verify StopMulticastStreamingRequest/Response matches `media.wsdl` definition.
+- [X] T330 [P] [US2] Verify GetServiceCapabilitiesRequest/Response matches `media.wsdl` definition (elements: trt:Capabilities).
 
 ### Implementation for User Story 2 - Profile Manager
 
-- [ ] T331 [P] [US2] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/media/profile_manager.rs` with ProfileManager struct.
-- [ ] T332 [US2] Implement `ProfileManager::new()` loading profiles from configuration.
-- [ ] T333 [US2] Implement `ProfileManager::get_profiles()` returning all media profiles.
-- [ ] T334 [US2] Implement `ProfileManager::get_profile()` returning profile by token.
-- [ ] T335 [US2] Implement `ProfileManager::create_profile()` adding new profile with validation.
-- [ ] T336 [US2] Implement `ProfileManager::delete_profile()` removing profile by token.
-- [ ] T337 [US2] Implement profile token validation with ter:NoProfile fault.
+- [x] T331 [P] [US2] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/media/profile_manager.rs` with ProfileManager struct.
+- [x] T332 [US2] Implement `ProfileManager::new()` loading profiles from configuration.
+- [x] T333 [US2] Implement `ProfileManager::get_profiles()` returning all media profiles.
+- [x] T334 [US2] Implement `ProfileManager::get_profile()` returning profile by token.
+- [x] T335 [US2] Implement `ProfileManager::create_profile()` adding new profile with validation.
+- [x] T336 [US2] Implement `ProfileManager::delete_profile()` removing profile by token.
+- [x] T337 [US2] Implement profile token validation with ter:NoProfile fault.
 
 ### Implementation for User Story 2 - Handlers
 
-- [ ] T338 [US2] Implement `MediaService::new()` constructor.
-- [ ] T339 [US2] Implement `handle_get_profiles()` returning all configured profiles.
-- [ ] T340 [US2] Implement `handle_get_profile()` returning specific profile by token.
-- [ ] T341 [US2] Implement `handle_create_profile()` creating new profile.
-- [ ] T342 [US2] Implement `handle_delete_profile()` deleting profile by token.
-- [ ] T343 [US2] Implement `handle_get_stream_uri()` composing RTSP URI for profile.
-- [ ] T344 [US2] Implement `handle_get_snapshot_uri()` returning HTTP URI for JPEG snapshot (FR-053).
-- [ ] T345 [US2] Implement `handle_get_video_sources()` returning video sources from platform.
-- [ ] T346 [US2] Implement `handle_get_audio_sources()` returning audio sources from platform.
-- [ ] T347 [US2] Implement `handle_get_video_source_configurations()` returning video source configs.
-- [ ] T348 [US2] Implement `handle_get_video_source_configuration()` returning specific config.
-- [ ] T349 [US2] Implement `handle_set_video_source_configuration()` updating config.
-- [ ] T350 [US2] Implement `handle_get_video_encoder_configurations()` returning encoder configs.
-- [ ] T351 [US2] Implement `handle_get_video_encoder_configuration()` returning specific encoder config.
-- [ ] T352 [US2] Implement `handle_set_video_encoder_configuration()` updating encoder config.
-- [ ] T353 [US2] Implement `handle_get_video_encoder_configuration_options()` returning valid ranges.
-- [ ] T354 [US2] Implement `handle_get_audio_source_configurations()` returning audio source configs.
-- [ ] T355 [US2] Implement `handle_get_audio_source_configuration()` returning specific audio config.
-- [ ] T356 [US2] Implement `handle_set_audio_source_configuration()` updating audio config.
-- [ ] T357 [US2] Implement `handle_get_audio_encoder_configurations()` returning audio encoder configs.
-- [ ] T358 [US2] Implement `handle_get_audio_encoder_configuration()` returning specific audio encoder.
-- [ ] T359 [US2] Implement `handle_set_audio_encoder_configuration()` updating audio encoder config.
-- [ ] T360 [US2] Implement `handle_add_video_source_configuration()` adding config to profile.
-- [ ] T361 [US2] Implement `handle_remove_video_source_configuration()` removing config from profile.
-- [ ] T362 [US2] Implement `handle_add_video_encoder_configuration()` adding encoder to profile.
-- [ ] T363 [US2] Implement `handle_remove_video_encoder_configuration()` removing encoder from profile.
-- [ ] T364 [US2] Implement `handle_add_audio_source_configuration()` adding audio config to profile.
-- [ ] T365 [US2] Implement `handle_remove_audio_source_configuration()` removing audio config from profile.
-- [ ] T366 [US2] Implement `handle_add_audio_encoder_configuration()` adding audio encoder to profile.
-- [ ] T367 [US2] Implement `handle_remove_audio_encoder_configuration()` removing audio encoder from profile.
-- [ ] T368 [US2] Implement `handle_get_compatible_video_source_configurations()`.
-- [ ] T369 [US2] Implement `handle_get_compatible_video_encoder_configurations()`.
-- [ ] T370 [US2] Implement `handle_get_compatible_audio_source_configurations()`.
-- [ ] T371 [US2] Implement `handle_get_compatible_audio_encoder_configurations()`.
-- [ ] T372 [US2] Implement `handle_get_metadata_configurations()`.
-- [ ] T373 [US2] Implement `handle_set_metadata_configuration()`.
-- [ ] T374 [US2] Implement `handle_start_multicast_streaming()`.
-- [ ] T375 [US2] Implement `handle_stop_multicast_streaming()`.
-- [ ] T376 [US2] Implement `handle_get_service_capabilities()` for media service.
+- [x] T338 [US2] Implement `MediaService::new()` constructor.
+- [x] T339 [US2] Implement `handle_get_profiles()` returning all configured profiles.
+- [x] T340 [US2] Implement `handle_get_profile()` returning specific profile by token.
+- [x] T341 [US2] Implement `handle_create_profile()` creating new profile.
+- [x] T342 [US2] Implement `handle_delete_profile()` deleting profile by token.
+- [x] T343 [US2] Implement `handle_get_stream_uri()` composing RTSP URI for profile.
+- [x] T344 [US2] Implement `handle_get_snapshot_uri()` returning HTTP URI for JPEG snapshot (FR-053).
+- [x] T345 [US2] Implement `handle_get_video_sources()` returning video sources from platform.
+- [x] T346 [US2] Implement `handle_get_audio_sources()` returning audio sources from platform.
+- [x] T347 [US2] Implement `handle_get_video_source_configurations()` returning video source configs.
+- [x] T348 [US2] Implement `handle_get_video_source_configuration()` returning specific config.
+- [x] T349 [US2] Implement `handle_set_video_source_configuration()` updating config.
+- [x] T350 [US2] Implement `handle_get_video_encoder_configurations()` returning encoder configs.
+- [x] T351 [US2] Implement `handle_get_video_encoder_configuration()` returning specific encoder config.
+- [x] T352 [US2] Implement `handle_set_video_encoder_configuration()` updating encoder config.
+- [x] T353 [US2] Implement `handle_get_video_encoder_configuration_options()` returning valid ranges.
+- [x] T354 [US2] Implement `handle_get_audio_source_configurations()` returning audio source configs.
+- [x] T355 [US2] Implement `handle_get_audio_source_configuration()` returning specific audio config.
+- [x] T356 [US2] Implement `handle_set_audio_source_configuration()` updating audio config.
+- [x] T357 [US2] Implement `handle_get_audio_encoder_configurations()` returning audio encoder configs.
+- [x] T358 [US2] Implement `handle_get_audio_encoder_configuration()` returning specific audio encoder.
+- [x] T359 [US2] Implement `handle_set_audio_encoder_configuration()` updating audio encoder config.
+- [x] T360 [US2] Implement `handle_add_video_source_configuration()` adding config to profile.
+- [x] T361 [US2] Implement `handle_remove_video_source_configuration()` removing config from profile.
+- [x] T362 [US2] Implement `handle_add_video_encoder_configuration()` adding encoder to profile.
+- [x] T363 [US2] Implement `handle_remove_video_encoder_configuration()` removing encoder from profile.
+- [x] T364 [US2] Implement `handle_add_audio_source_configuration()` adding audio config to profile.
+- [x] T365 [US2] Implement `handle_remove_audio_source_configuration()` removing audio config from profile.
+- [x] T366 [US2] Implement `handle_add_audio_encoder_configuration()` adding audio encoder to profile.
+- [x] T367 [US2] Implement `handle_remove_audio_encoder_configuration()` removing audio encoder from profile.
+- [x] T368 [US2] Implement `handle_get_compatible_video_source_configurations()`.
+- [x] T369 [US2] Implement `handle_get_compatible_video_encoder_configurations()`.
+- [x] T370 [US2] Implement `handle_get_compatible_audio_source_configurations()`.
+- [x] T371 [US2] Implement `handle_get_compatible_audio_encoder_configurations()`.
+- [x] T372 [US2] Implement `handle_get_metadata_configurations()`.
+- [x] T373 [US2] Implement `handle_set_metadata_configuration()`.
+- [x] T374 [US2] Implement `handle_start_multicast_streaming()`.
+- [x] T375 [US2] Implement `handle_stop_multicast_streaming()`.
+- [x] T376 [US2] Implement `handle_get_service_capabilities()` for media service.
 
 ### Implementation for User Story 2 - Registration
 
-- [ ] T377 [US2] Register MediaService routes in server.rs for `/onvif/media_service`.
-- [ ] T378 [US2] Implement SOAPAction dispatch for all Media Service operations.
+- [x] T377 [US2] Register MediaService routes in server.rs for `/onvif/media_service`.
+- [x] T378 [US2] Implement SOAPAction dispatch for all Media Service operations.
 
 **Checkpoint**: Media profiles discoverable and stream URIs retrievable.
 
@@ -635,24 +635,24 @@
 
 ### Tests for User Story 3
 
-- [ ] T379 [P] [US3] Add unit test for GetNodes handler.
-- [ ] T380 [P] [US3] Add unit test for GetNode handler.
-- [ ] T381 [P] [US3] Add unit test for GetConfigurations handler.
-- [ ] T382 [P] [US3] Add unit test for GetConfiguration handler.
-- [ ] T383 [P] [US3] Add unit test for SetConfiguration handler.
-- [ ] T384 [P] [US3] Add unit test for GetConfigurationOptions handler.
-- [ ] T385 [P] [US3] Add unit test for AbsoluteMove handler with pan/tilt/zoom coordinates.
-- [ ] T386 [P] [US3] Add unit test for RelativeMove handler with deltas.
-- [ ] T387 [P] [US3] Add unit test for ContinuousMove handler with speed parameters.
-- [ ] T388 [P] [US3] Add unit test for Stop handler.
-- [ ] T389 [P] [US3] Add unit test for GetStatus handler returning position and movement status.
-- [ ] T390 [P] [US3] Add unit test for GetPresets handler.
-- [ ] T391 [P] [US3] Add unit test for SetPreset handler.
-- [ ] T392 [P] [US3] Add unit test for GotoPreset handler.
-- [ ] T393 [P] [US3] Add unit test for RemovePreset handler.
-- [ ] T394 [P] [US3] Add unit test for GotoHomePosition handler.
-- [ ] T395 [P] [US3] Add unit test for SetHomePosition handler.
-- [ ] T396 [P] [US3] Create PTZ integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/ptz_service.rs`.
+- [x] T379 [P] [US3] Add unit test for GetNodes handler.
+- [x] T380 [P] [US3] Add unit test for GetNode handler.
+- [x] T381 [P] [US3] Add unit test for GetConfigurations handler.
+- [x] T382 [P] [US3] Add unit test for GetConfiguration handler.
+- [x] T383 [P] [US3] Add unit test for SetConfiguration handler.
+- [x] T384 [P] [US3] Add unit test for GetConfigurationOptions handler.
+- [x] T385 [P] [US3] Add unit test for AbsoluteMove handler with pan/tilt/zoom coordinates.
+- [x] T386 [P] [US3] Add unit test for RelativeMove handler with deltas.
+- [x] T387 [P] [US3] Add unit test for ContinuousMove handler with speed parameters.
+- [x] T388 [P] [US3] Add unit test for Stop handler.
+- [x] T389 [P] [US3] Add unit test for GetStatus handler returning position and movement status.
+- [x] T390 [P] [US3] Add unit test for GetPresets handler.
+- [x] T391 [P] [US3] Add unit test for SetPreset handler.
+- [x] T392 [P] [US3] Add unit test for GotoPreset handler.
+- [x] T393 [P] [US3] Add unit test for RemovePreset handler.
+- [x] T394 [P] [US3] Add unit test for GotoHomePosition handler.
+- [x] T395 [P] [US3] Add unit test for SetHomePosition handler.
+- [x] T396 [P] [US3] Create PTZ integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/ptz_service.rs`.
 
 ### Implementation for User Story 3 - Types
 
@@ -661,76 +661,76 @@
 
 **Requirement**: All PTZ Service types MUST be generated from or validated against `ptz.wsdl` and `onvif.xsd`. Use the generated types from `src/onvif/generated/ptz_types.rs` (created in T072f) and re-export or extend them in the ptz module.
 
-- [ ] T397 [P] [US3] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/ptz/mod.rs` with PTZService struct, re-exporting generated types from `super::generated::ptz_types`.
-- [ ] T398 [P] [US3] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/ptz/types.rs` re-exporting and extending WSDL-generated types.
-- [ ] T399 [P] [US3] Verify `PTZNode` struct matches `onvif.xsd` tt:PTZNode definition (elements: token, Name, SupportedPTZSpaces, MaximumNumberOfPresets, HomeSupported, AuxiliaryCommands).
-- [ ] T400 [P] [US3] Verify `PTZConfiguration` struct matches `onvif.xsd` tt:PTZConfiguration (elements: token, Name, NodeToken, DefaultPTZSpeed, DefaultPTZTimeout, PanTiltLimits, ZoomLimits).
-- [ ] T401 [P] [US3] Verify `PTZPreset` struct matches `onvif.xsd` tt:PTZPreset (elements: token, Name, PTZPosition).
-- [ ] T402 [P] [US3] Verify `PTZPosition` struct matches `onvif.xsd` tt:PTZVector (elements: PanTilt, Zoom).
-- [ ] T403 [P] [US3] Verify `PTZSpeed` struct matches `onvif.xsd` tt:PTZSpeed (elements: PanTilt, Zoom).
-- [ ] T404 [P] [US3] Verify `PTZStatus` struct matches `onvif.xsd` tt:PTZStatus (elements: Position, MoveStatus, Error, UtcTime).
-- [ ] T405 [P] [US3] Verify GetNodesRequest/Response matches `ptz.wsdl` definition.
-- [ ] T406 [P] [US3] Verify GetNodeRequest/Response matches `ptz.wsdl` definition (elements: NodeToken).
-- [ ] T407 [P] [US3] Verify GetConfigurationsRequest/Response matches `ptz.wsdl` definition.
-- [ ] T408 [P] [US3] Verify GetConfigurationRequest/Response matches `ptz.wsdl` definition (elements: PTZConfigurationToken).
-- [ ] T409 [P] [US3] Verify SetConfigurationRequest/Response matches `ptz.wsdl` definition (elements: PTZConfiguration, ForcePersistence).
-- [ ] T410 [P] [US3] Verify GetConfigurationOptionsRequest/Response matches `ptz.wsdl` definition (elements: ConfigurationToken).
-- [ ] T411 [P] [US3] Verify AbsoluteMoveRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Position, Speed).
-- [ ] T412 [P] [US3] Verify RelativeMoveRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Translation, Speed).
-- [ ] T413 [P] [US3] Verify ContinuousMoveRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Velocity, Timeout).
-- [ ] T414 [P] [US3] Verify StopRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PanTilt, Zoom).
-- [ ] T415 [P] [US3] Verify GetStatusRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PTZStatus).
-- [ ] T416 [P] [US3] Verify GetPresetsRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Preset array).
-- [ ] T417 [P] [US3] Verify SetPresetRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PresetName, PresetToken).
-- [ ] T418 [P] [US3] Verify GotoPresetRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PresetToken, Speed).
-- [ ] T419 [P] [US3] Verify RemovePresetRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PresetToken).
-- [ ] T420 [P] [US3] Verify GotoHomePositionRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Speed).
-- [ ] T421 [P] [US3] Verify SetHomePositionRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken).
-- [ ] T422 [P] [US3] Verify GetCompatibleConfigurationsRequest/Response matches `ptz.wsdl` definition.
-- [ ] T423 [P] [US3] Define SendAuxiliaryCommandRequest/Response in types.rs (conditional).
-- [ ] T424 [P] [US3] Define GetServiceCapabilitiesRequest/Response in types.rs.
+- [x] T397 [P] [US3] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/ptz/mod.rs` with PTZService struct, re-exporting generated types from `super::generated::ptz_types`.
+- [x] T398 [P] [US3] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/ptz/types.rs` re-exporting and extending WSDL-generated types.
+- [x] T399 [P] [US3] Verify `PTZNode` struct matches `onvif.xsd` tt:PTZNode definition (elements: token, Name, SupportedPTZSpaces, MaximumNumberOfPresets, HomeSupported, AuxiliaryCommands).
+- [x] T400 [P] [US3] Verify `PTZConfiguration` struct matches `onvif.xsd` tt:PTZConfiguration (elements: token, Name, NodeToken, DefaultPTZSpeed, DefaultPTZTimeout, PanTiltLimits, ZoomLimits).
+- [x] T401 [P] [US3] Verify `PTZPreset` struct matches `onvif.xsd` tt:PTZPreset (elements: token, Name, PTZPosition).
+- [x] T402 [P] [US3] Verify `PTZPosition` struct matches `onvif.xsd` tt:PTZVector (elements: PanTilt, Zoom).
+- [x] T403 [P] [US3] Verify `PTZSpeed` struct matches `onvif.xsd` tt:PTZSpeed (elements: PanTilt, Zoom).
+- [x] T404 [P] [US3] Verify `PTZStatus` struct matches `onvif.xsd` tt:PTZStatus (elements: Position, MoveStatus, Error, UtcTime).
+- [x] T405 [P] [US3] Verify GetNodesRequest/Response matches `ptz.wsdl` definition.
+- [x] T406 [P] [US3] Verify GetNodeRequest/Response matches `ptz.wsdl` definition (elements: NodeToken).
+- [x] T407 [P] [US3] Verify GetConfigurationsRequest/Response matches `ptz.wsdl` definition.
+- [x] T408 [P] [US3] Verify GetConfigurationRequest/Response matches `ptz.wsdl` definition (elements: PTZConfigurationToken).
+- [x] T409 [P] [US3] Verify SetConfigurationRequest/Response matches `ptz.wsdl` definition (elements: PTZConfiguration, ForcePersistence).
+- [x] T410 [P] [US3] Verify GetConfigurationOptionsRequest/Response matches `ptz.wsdl` definition (elements: ConfigurationToken).
+- [x] T411 [P] [US3] Verify AbsoluteMoveRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Position, Speed).
+- [x] T412 [P] [US3] Verify RelativeMoveRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Translation, Speed).
+- [x] T413 [P] [US3] Verify ContinuousMoveRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Velocity, Timeout).
+- [x] T414 [P] [US3] Verify StopRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PanTilt, Zoom).
+- [x] T415 [P] [US3] Verify GetStatusRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PTZStatus).
+- [x] T416 [P] [US3] Verify GetPresetsRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Preset array).
+- [x] T417 [P] [US3] Verify SetPresetRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PresetName, PresetToken).
+- [x] T418 [P] [US3] Verify GotoPresetRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PresetToken, Speed).
+- [x] T419 [P] [US3] Verify RemovePresetRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, PresetToken).
+- [x] T420 [P] [US3] Verify GotoHomePositionRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken, Speed).
+- [x] T421 [P] [US3] Verify SetHomePositionRequest/Response matches `ptz.wsdl` definition (elements: ProfileToken).
+- [x] T422 [P] [US3] Verify GetCompatibleConfigurationsRequest/Response matches `ptz.wsdl` definition.
+- [x] T423 [P] [US3] Define SendAuxiliaryCommandRequest/Response in types.rs (conditional).
+- [x] T424 [P] [US3] Define GetServiceCapabilitiesRequest/Response in types.rs.
 
 ### Implementation for User Story 3 - State Manager
 
-- [ ] T425 [P] [US3] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/ptz/state.rs` with PTZStateManager struct.
-- [ ] T426 [US3] Implement `PTZStateManager::new()` with RwLock for concurrent access.
-- [ ] T427 [US3] Implement `PTZStateManager::get_position()` returning current PTZ position.
-- [ ] T428 [US3] Implement `PTZStateManager::set_position()` updating position atomically.
-- [ ] T429 [US3] Implement `PTZStateManager::get_presets()` returning all saved presets.
-- [ ] T430 [US3] Implement `PTZStateManager::set_preset()` saving current position as preset.
-- [ ] T431 [US3] Implement `PTZStateManager::remove_preset()` deleting preset by token.
-- [ ] T432 [US3] Implement `PTZStateManager::get_home_position()` returning home position.
-- [ ] T433 [US3] Implement `PTZStateManager::set_home_position()` saving home position.
-- [ ] T434 [US3] Implement preset persistence to configuration file.
+- [x] T425 [P] [US3] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/ptz/state.rs` with PTZStateManager struct.
+- [x] T426 [US3] Implement `PTZStateManager::new()` with RwLock for concurrent access.
+- [x] T427 [US3] Implement `PTZStateManager::get_position()` returning current PTZ position.
+- [x] T428 [US3] Implement `PTZStateManager::set_position()` updating position atomically.
+- [x] T429 [US3] Implement `PTZStateManager::get_presets()` returning all saved presets.
+- [x] T430 [US3] Implement `PTZStateManager::set_preset()` saving current position as preset.
+- [x] T431 [US3] Implement `PTZStateManager::remove_preset()` deleting preset by token.
+- [x] T432 [US3] Implement `PTZStateManager::get_home_position()` returning home position.
+- [x] T433 [US3] Implement `PTZStateManager::set_home_position()` saving home position.
+- [x] T434 [US3] Implement preset persistence to configuration file.
 
 ### Implementation for User Story 3 - Handlers
 
-- [ ] T435 [US3] Implement `PTZService::new()` constructor with platform PTZControl reference.
-- [ ] T436 [US3] Implement `handle_get_nodes()` returning PTZ nodes from platform.
-- [ ] T437 [US3] Implement `handle_get_node()` returning specific PTZ node.
-- [ ] T438 [US3] Implement `handle_get_configurations()` returning PTZ configurations.
-- [ ] T439 [US3] Implement `handle_get_configuration()` returning specific configuration.
-- [ ] T440 [US3] Implement `handle_set_configuration()` updating PTZ configuration.
-- [ ] T441 [US3] Implement `handle_get_configuration_options()` returning valid ranges.
-- [ ] T442 [US3] Implement `handle_absolute_move()` calling platform PTZControl::move_to_position().
-- [ ] T443 [US3] Implement `handle_relative_move()` calling platform with delta calculations.
-- [ ] T444 [US3] Implement `handle_continuous_move()` calling platform PTZControl::continuous_move().
-- [ ] T445 [US3] Implement `handle_stop()` calling platform PTZControl::stop().
-- [ ] T446 [US3] Implement `handle_get_status()` returning current position and movement status.
-- [ ] T447 [US3] Implement `handle_get_presets()` returning saved presets from state manager.
-- [ ] T448 [US3] Implement `handle_set_preset()` saving current position as preset.
-- [ ] T449 [US3] Implement `handle_goto_preset()` moving to saved preset position.
-- [ ] T450 [US3] Implement `handle_remove_preset()` deleting preset.
-- [ ] T451 [US3] Implement `handle_goto_home_position()` moving to home position.
-- [ ] T452 [US3] Implement `handle_set_home_position()` saving current position as home.
-- [ ] T453 [US3] Implement `handle_get_compatible_configurations()`.
-- [ ] T454 [US3] Implement `handle_send_auxiliary_command()` (conditional).
-- [ ] T455 [US3] Implement `handle_get_service_capabilities()` for PTZ service.
+- [x] T435 [US3] Implement `PTZService::new()` constructor with platform PTZControl reference.
+- [x] T436 [US3] Implement `handle_get_nodes()` returning PTZ nodes from platform.
+- [x] T437 [US3] Implement `handle_get_node()` returning specific PTZ node.
+- [x] T438 [US3] Implement `handle_get_configurations()` returning PTZ configurations.
+- [x] T439 [US3] Implement `handle_get_configuration()` returning specific configuration.
+- [x] T440 [US3] Implement `handle_set_configuration()` updating PTZ configuration.
+- [x] T441 [US3] Implement `handle_get_configuration_options()` returning valid ranges.
+- [x] T442 [US3] Implement `handle_absolute_move()` calling platform PTZControl::move_to_position().
+- [x] T443 [US3] Implement `handle_relative_move()` calling platform with delta calculations.
+- [x] T444 [US3] Implement `handle_continuous_move()` calling platform PTZControl::continuous_move().
+- [x] T445 [US3] Implement `handle_stop()` calling platform PTZControl::stop().
+- [x] T446 [US3] Implement `handle_get_status()` returning current position and movement status.
+- [x] T447 [US3] Implement `handle_get_presets()` returning saved presets from state manager.
+- [x] T448 [US3] Implement `handle_set_preset()` saving current position as preset.
+- [x] T449 [US3] Implement `handle_goto_preset()` moving to saved preset position.
+- [x] T450 [US3] Implement `handle_remove_preset()` deleting preset.
+- [x] T451 [US3] Implement `handle_goto_home_position()` moving to home position.
+- [x] T452 [US3] Implement `handle_set_home_position()` saving current position as home.
+- [x] T453 [US3] Implement `handle_get_compatible_configurations()`.
+- [x] T454 [US3] Implement `handle_send_auxiliary_command()` (conditional).
+- [x] T455 [US3] Implement `handle_get_service_capabilities()` for PTZ service.
 
 ### Implementation for User Story 3 - Registration
 
-- [ ] T456 [US3] Register PTZService routes in server.rs for `/onvif/ptz_service`.
-- [ ] T457 [US3] Implement SOAPAction dispatch for all PTZ Service operations.
+- [x] T456 [US3] Register PTZService routes in server.rs for `/onvif/ptz_service`.
+- [x] T457 [US3] Implement SOAPAction dispatch for all PTZ Service operations.
 
 **Checkpoint**: PTZ controls operate independently against stub hardware.
 
@@ -744,17 +744,17 @@
 
 ### Tests for User Story 4
 
-- [ ] T458 [P] [US4] Add unit test for GetImagingSettings handler.
-- [ ] T459 [P] [US4] Add unit test for SetImagingSettings handler with validation.
-- [ ] T460 [P] [US4] Add unit test for GetOptions handler returning valid ranges.
-- [ ] T461 [P] [US4] Add unit test for GetStatus handler.
-- [ ] T462 [P] [US4] Add unit test for GetMoveOptions handler (conditional).
-- [ ] T463 [P] [US4] Add unit test for Move handler (conditional).
-- [ ] T464 [P] [US4] Add unit test for Stop handler (conditional).
-- [ ] T465 [P] [US4] Add unit test for brightness parameter validation.
-- [ ] T466 [P] [US4] Add unit test for contrast parameter validation.
-- [ ] T467 [P] [US4] Add unit test for saturation parameter validation.
-- [ ] T468 [P] [US4] Add unit test for day/night mode switching.
+- [X] T458 [P] [US4] Add unit test for GetImagingSettings handler.
+- [X] T459 [P] [US4] Add unit test for SetImagingSettings handler with validation.
+- [X] T460 [P] [US4] Add unit test for GetOptions handler returning valid ranges.
+- [X] T461 [P] [US4] Add unit test for GetStatus handler.
+- [X] T462 [P] [US4] Add unit test for GetMoveOptions handler (conditional).
+- [X] T463 [P] [US4] Add unit test for Move handler (conditional).
+- [X] T464 [P] [US4] Add unit test for Stop handler (conditional).
+- [X] T465 [P] [US4] Add unit test for brightness parameter validation.
+- [X] T466 [P] [US4] Add unit test for contrast parameter validation.
+- [X] T467 [P] [US4] Add unit test for saturation parameter validation.
+- [X] T468 [P] [US4] Add unit test for day/night mode switching.
 - [ ] T469 [P] [US4] Create Imaging integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/imaging_service.rs`.
 
 ### Implementation for User Story 4 - Types
@@ -764,54 +764,54 @@
 
 **Requirement**: All Imaging Service types MUST be generated from or validated against `imaging.wsdl` and `onvif.xsd`. Use the generated types from `src/onvif/generated/imaging_types.rs` (created in T072g) and re-export or extend them in the imaging module.
 
-- [ ] T470 [P] [US4] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/imaging/mod.rs` with ImagingService struct, re-exporting generated types from `super::generated::imaging_types`.
-- [ ] T471 [P] [US4] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/imaging/types.rs` re-exporting and extending WSDL-generated types.
-- [ ] T472 [P] [US4] Verify `ImagingSettings` struct matches `onvif.xsd` tt:ImagingSettings20 definition (elements: Brightness, Contrast, ColorSaturation, Sharpness, BacklightCompensation, Exposure, Focus, IrCutFilter, WhiteBalance, WideDynamicRange, Extension).
-- [ ] T473 [P] [US4] Verify `ImagingOptions` struct matches `onvif.xsd` tt:ImagingOptions20 definition (elements: Brightness, Contrast, ColorSaturation, Sharpness ranges, etc.).
-- [ ] T474 [P] [US4] Verify `ImagingStatus` struct matches `onvif.xsd` tt:ImagingStatus20 definition (elements: FocusStatus20, Extension).
-- [ ] T475 [P] [US4] Verify `IrCutFilterMode` enum matches `onvif.xsd` tt:IrCutFilterMode (values: ON, OFF, AUTO).
-- [ ] T476 [P] [US4] Verify `BacklightCompensation` struct matches `onvif.xsd` tt:BacklightCompensation20 (elements: Mode, Level).
-- [ ] T477 [P] [US4] Verify `Exposure` struct matches `onvif.xsd` tt:Exposure20 (elements: Mode, Priority, Window, MinExposureTime, MaxExposureTime, MinGain, MaxGain, MinIris, MaxIris, ExposureTime, Gain, Iris).
-- [ ] T478 [P] [US4] Verify `WhiteBalance` struct matches `onvif.xsd` tt:WhiteBalance20 (elements: Mode, CrGain, CbGain, Extension).
-- [ ] T479 [P] [US4] Verify GetImagingSettingsRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingSettings).
-- [ ] T480 [P] [US4] Verify SetImagingSettingsRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingSettings, ForcePersistence).
-- [ ] T481 [P] [US4] Verify GetOptionsRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingOptions).
-- [ ] T482 [P] [US4] Verify GetStatusRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingStatus).
-- [ ] T483 [P] [US4] Verify GetMoveOptionsRequest/Response matches `imaging.wsdl` definition (conditional).
-- [ ] T484 [P] [US4] Verify MoveRequest/Response matches `imaging.wsdl` definition (conditional).
-- [ ] T485 [P] [US4] Verify StopRequest/Response matches `imaging.wsdl` definition (conditional).
-- [ ] T486 [P] [US4] Verify GetServiceCapabilitiesRequest/Response matches `imaging.wsdl` definition (elements: timg:Capabilities).
+- [X] T470 [P] [US4] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/imaging/mod.rs` with ImagingService struct, re-exporting generated types from `super::generated::imaging_types`.
+- [X] T471 [P] [US4] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/imaging/types.rs` re-exporting and extending WSDL-generated types.
+- [X] T472 [P] [US4] Verify `ImagingSettings` struct matches `onvif.xsd` tt:ImagingSettings20 definition (elements: Brightness, Contrast, ColorSaturation, Sharpness, BacklightCompensation, Exposure, Focus, IrCutFilter, WhiteBalance, WideDynamicRange, Extension).
+- [X] T473 [P] [US4] Verify `ImagingOptions` struct matches `onvif.xsd` tt:ImagingOptions20 definition (elements: Brightness, Contrast, ColorSaturation, Sharpness ranges, etc.).
+- [X] T474 [P] [US4] Verify `ImagingStatus` struct matches `onvif.xsd` tt:ImagingStatus20 definition (elements: FocusStatus20, Extension).
+- [X] T475 [P] [US4] Verify `IrCutFilterMode` enum matches `onvif.xsd` tt:IrCutFilterMode (values: ON, OFF, AUTO).
+- [X] T476 [P] [US4] Verify `BacklightCompensation` struct matches `onvif.xsd` tt:BacklightCompensation20 (elements: Mode, Level).
+- [X] T477 [P] [US4] Verify `Exposure` struct matches `onvif.xsd` tt:Exposure20 (elements: Mode, Priority, Window, MinExposureTime, MaxExposureTime, MinGain, MaxGain, MinIris, MaxIris, ExposureTime, Gain, Iris).
+- [X] T478 [P] [US4] Verify `WhiteBalance` struct matches `onvif.xsd` tt:WhiteBalance20 (elements: Mode, CrGain, CbGain, Extension).
+- [X] T479 [P] [US4] Verify GetImagingSettingsRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingSettings).
+- [X] T480 [P] [US4] Verify SetImagingSettingsRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingSettings, ForcePersistence).
+- [X] T481 [P] [US4] Verify GetOptionsRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingOptions).
+- [X] T482 [P] [US4] Verify GetStatusRequest/Response matches `imaging.wsdl` definition (elements: VideoSourceToken, ImagingStatus).
+- [X] T483 [P] [US4] Verify GetMoveOptionsRequest/Response matches `imaging.wsdl` definition (conditional).
+- [X] T484 [P] [US4] Verify MoveRequest/Response matches `imaging.wsdl` definition (conditional).
+- [X] T485 [P] [US4] Verify StopRequest/Response matches `imaging.wsdl` definition (conditional).
+- [X] T486 [P] [US4] Verify GetServiceCapabilitiesRequest/Response matches `imaging.wsdl` definition (elements: timg:Capabilities).
 
 ### Implementation for User Story 4 - Settings Store
 
-- [ ] T487 [P] [US4] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/imaging/settings_store.rs` with ImagingSettingsStore struct.
-- [ ] T488 [US4] Implement `ImagingSettingsStore::new()` with RwLock for concurrent access.
-- [ ] T489 [US4] Implement `ImagingSettingsStore::get_settings()` returning current imaging settings.
-- [ ] T490 [US4] Implement `ImagingSettingsStore::set_settings()` with schema validation.
-- [ ] T491 [US4] Implement `ImagingSettingsStore::validate_parameter()` checking min/max ranges.
+- [X] T487 [P] [US4] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/imaging/settings_store.rs` with ImagingSettingsStore struct.
+- [X] T488 [US4] Implement `ImagingSettingsStore::new()` with RwLock for concurrent access.
+- [X] T489 [US4] Implement `ImagingSettingsStore::get_settings()` returning current imaging settings.
+- [X] T490 [US4] Implement `ImagingSettingsStore::set_settings()` with schema validation.
+- [X] T491 [US4] Implement `ImagingSettingsStore::validate_parameter()` checking min/max ranges.
 - [ ] T492 [US4] Implement settings persistence to configuration file.
 
 ### Implementation for User Story 4 - Handlers
 
-- [ ] T493 [US4] Implement `ImagingService::new()` constructor with platform ImagingControl reference.
-- [ ] T494 [US4] Implement `handle_get_imaging_settings()` returning current settings from platform.
-- [ ] T495 [US4] Implement `handle_set_imaging_settings()` validating and applying settings to platform.
-- [ ] T496 [US4] Implement `handle_get_options()` returning valid parameter ranges from platform.
-- [ ] T497 [US4] Implement `handle_get_status()` returning current imaging status.
-- [ ] T498 [US4] Implement `handle_get_move_options()` returning focus move options (conditional).
-- [ ] T499 [US4] Implement `handle_move()` executing focus move command (conditional).
-- [ ] T500 [US4] Implement `handle_stop()` stopping focus movement (conditional).
-- [ ] T501 [US4] Implement `handle_get_service_capabilities()` for imaging service.
-- [ ] T502 [US4] Implement brightness setting via platform ImagingControl::set_brightness().
-- [ ] T503 [US4] Implement contrast setting via platform ImagingControl::set_contrast().
-- [ ] T504 [US4] Implement saturation setting via platform ImagingControl::set_saturation().
-- [ ] T505 [US4] Implement sharpness setting via platform ImagingControl::set_sharpness().
-- [ ] T506 [US4] Implement day/night mode setting via platform.
+- [X] T493 [US4] Implement `ImagingService::new()` constructor with platform ImagingControl reference.
+- [X] T494 [US4] Implement `handle_get_imaging_settings()` returning current settings from platform.
+- [X] T495 [US4] Implement `handle_set_imaging_settings()` validating and applying settings to platform.
+- [X] T496 [US4] Implement `handle_get_options()` returning valid parameter ranges from platform.
+- [X] T497 [US4] Implement `handle_get_status()` returning current imaging status.
+- [X] T498 [US4] Implement `handle_get_move_options()` returning focus move options (conditional).
+- [X] T499 [US4] Implement `handle_move()` executing focus move command (conditional).
+- [X] T500 [US4] Implement `handle_stop()` stopping focus movement (conditional).
+- [X] T501 [US4] Implement `handle_get_service_capabilities()` for imaging service.
+- [X] T502 [US4] Implement brightness setting via platform ImagingControl::set_brightness().
+- [X] T503 [US4] Implement contrast setting via platform ImagingControl::set_contrast().
+- [X] T504 [US4] Implement saturation setting via platform ImagingControl::set_saturation().
+- [X] T505 [US4] Implement sharpness setting via platform ImagingControl::set_sharpness().
+- [X] T506 [US4] Implement day/night mode setting via platform.
 
 ### Implementation for User Story 4 - Registration
 
-- [ ] T507 [US4] Register ImagingService routes in server.rs for `/onvif/imaging_service`.
-- [ ] T508 [US4] Implement SOAPAction dispatch for all Imaging Service operations.
+- [X] T507 [US4] Register ImagingService routes in server.rs for `/onvif/imaging_service`.
+- [X] T508 [US4] Implement SOAPAction dispatch for all Imaging Service operations.
 
 **Checkpoint**: Imaging adjustments independently testable with stub hardware.
 

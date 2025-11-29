@@ -13,13 +13,290 @@
 //! - **Dependency injection**: Components receive dependencies via constructors
 //! - **Graceful degradation**: Optional components can fail without stopping the app
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 
+use crate::config::ConfigRuntime;
 use crate::lifecycle::health::{ComponentHealth, HealthStatus};
 use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
 use crate::lifecycle::startup::{StartupPhase, StartupProgress};
 use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
+use crate::onvif::ptz::PTZStateManager;
+use crate::onvif::server::{OnvifServer, OnvifServerConfig};
+use crate::platform::Platform;
+use crate::users::password::PasswordManager;
+use crate::users::storage::UserStorage;
+
+// ============================================================================
+// AppState - Shared application state for dependency injection
+// ============================================================================
+
+/// Shared application state for dependency injection.
+///
+/// This struct holds all shared dependencies that services need. It is designed
+/// to be passed to the ONVIF server and used to construct service instances.
+///
+/// # Design
+///
+/// - All fields are `Arc`-wrapped for cheap cloning and shared ownership
+/// - Optional `platform` field allows running without hardware access (testing)
+/// - Builder pattern available via [`AppStateBuilder`] for flexible construction
+///
+/// # Example
+///
+/// ```ignore
+/// use onvif_rust::app::AppState;
+/// use std::sync::Arc;
+///
+/// let state = AppState::builder()
+///     .user_storage(Arc::new(UserStorage::new("/tmp/users.json")?))
+///     .password_manager(Arc::new(PasswordManager::new(10)?))
+///     .ptz_state(Arc::new(PTZStateManager::new()))
+///     .config(Arc::new(ConfigRuntime::new(Default::default())))
+///     .build()?;
+/// ```
+#[derive(Clone)]
+pub struct AppState {
+    /// User storage for authentication.
+    user_storage: Arc<UserStorage>,
+    /// Password manager for credential handling.
+    password_manager: Arc<PasswordManager>,
+    /// PTZ state manager for PTZ operations.
+    ptz_state: Arc<PTZStateManager>,
+    /// Configuration runtime.
+    config: Arc<ConfigRuntime>,
+    /// Platform abstraction (optional for testing without hardware).
+    platform: Option<Arc<dyn Platform>>,
+}
+
+impl AppState {
+    /// Create a new builder for constructing `AppState`.
+    pub fn builder() -> AppStateBuilder {
+        AppStateBuilder::default()
+    }
+
+    /// Get a reference to the user storage.
+    pub fn user_storage(&self) -> &Arc<UserStorage> {
+        &self.user_storage
+    }
+
+    /// Get a reference to the password manager.
+    pub fn password_manager(&self) -> &Arc<PasswordManager> {
+        &self.password_manager
+    }
+
+    /// Get a reference to the PTZ state manager.
+    pub fn ptz_state(&self) -> &Arc<PTZStateManager> {
+        &self.ptz_state
+    }
+
+    /// Get a reference to the configuration runtime.
+    pub fn config(&self) -> &Arc<ConfigRuntime> {
+        &self.config
+    }
+
+    /// Get a reference to the platform abstraction, if available.
+    pub fn platform(&self) -> Option<&Arc<dyn Platform>> {
+        self.platform.as_ref()
+    }
+}
+
+impl std::fmt::Debug for AppState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppState")
+            .field("user_storage", &"Arc<UserStorage>")
+            .field("password_manager", &"Arc<PasswordManager>")
+            .field("ptz_state", &"Arc<PTZStateManager>")
+            .field("config", &"Arc<ConfigRuntime>")
+            .field(
+                "platform",
+                &self.platform.as_ref().map(|_| "Some(Arc<dyn Platform>)"),
+            )
+            .finish()
+    }
+}
+
+// ============================================================================
+// AppStateBuilder - Builder pattern for AppState construction
+// ============================================================================
+
+/// Builder for constructing [`AppState`] with optional components.
+///
+/// This builder allows flexible construction of application state, supporting
+/// both full production configurations and minimal test configurations.
+#[derive(Default)]
+pub struct AppStateBuilder {
+    user_storage: Option<Arc<UserStorage>>,
+    password_manager: Option<Arc<PasswordManager>>,
+    ptz_state: Option<Arc<PTZStateManager>>,
+    config: Option<Arc<ConfigRuntime>>,
+    platform: Option<Arc<dyn Platform>>,
+}
+
+/// Error type for AppState construction failures.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppStateError {
+    /// Missing required component.
+    MissingComponent(String),
+}
+
+impl std::fmt::Display for AppStateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppStateError::MissingComponent(name) => {
+                write!(f, "Missing required component: {}", name)
+            }
+        }
+    }
+}
+
+impl std::error::Error for AppStateError {}
+
+impl AppStateBuilder {
+    /// Set the user storage.
+    pub fn user_storage(mut self, storage: Arc<UserStorage>) -> Self {
+        self.user_storage = Some(storage);
+        self
+    }
+
+    /// Set the password manager.
+    pub fn password_manager(mut self, manager: Arc<PasswordManager>) -> Self {
+        self.password_manager = Some(manager);
+        self
+    }
+
+    /// Set the PTZ state manager.
+    pub fn ptz_state(mut self, state: Arc<PTZStateManager>) -> Self {
+        self.ptz_state = Some(state);
+        self
+    }
+
+    /// Set the configuration runtime.
+    pub fn config(mut self, config: Arc<ConfigRuntime>) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Set the platform abstraction.
+    pub fn platform(mut self, platform: Arc<dyn Platform>) -> Self {
+        self.platform = Some(platform);
+        self
+    }
+
+    /// Build the `AppState`, returning an error if required components are missing.
+    pub fn build(self) -> Result<AppState, AppStateError> {
+        Ok(AppState {
+            user_storage: self
+                .user_storage
+                .ok_or_else(|| AppStateError::MissingComponent("user_storage".to_string()))?,
+            password_manager: self
+                .password_manager
+                .ok_or_else(|| AppStateError::MissingComponent("password_manager".to_string()))?,
+            ptz_state: self
+                .ptz_state
+                .ok_or_else(|| AppStateError::MissingComponent("ptz_state".to_string()))?,
+            config: self
+                .config
+                .ok_or_else(|| AppStateError::MissingComponent("config".to_string()))?,
+            platform: self.platform,
+        })
+    }
+}
+
+// ============================================================================
+// Unit Tests for AppState
+// ============================================================================
+
+#[cfg(test)]
+mod app_state_tests {
+    use super::*;
+
+    #[test]
+    fn test_app_state_builder_missing_user_storage() {
+        let result = AppState::builder()
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .build();
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            AppStateError::MissingComponent("user_storage".to_string())
+        );
+    }
+
+    #[test]
+    fn test_app_state_builder_missing_password_manager() {
+        let storage = UserStorage::new();
+        let result = AppState::builder()
+            .user_storage(Arc::new(storage))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .build();
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            AppStateError::MissingComponent("password_manager".to_string())
+        );
+    }
+
+    #[test]
+    fn test_app_state_builder_success_without_platform() {
+        let storage = UserStorage::new();
+        let result = AppState::builder()
+            .user_storage(Arc::new(storage))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .build();
+
+        assert!(result.is_ok());
+        let state = result.unwrap();
+        assert!(state.platform().is_none());
+    }
+
+    #[test]
+    fn test_app_state_clone() {
+        let storage = UserStorage::new();
+        let state = AppState::builder()
+            .user_storage(Arc::new(storage))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .build()
+            .unwrap();
+
+        let cloned = state.clone();
+        // Arc::ptr_eq checks they point to the same allocation
+        assert!(Arc::ptr_eq(state.user_storage(), cloned.user_storage()));
+        assert!(Arc::ptr_eq(
+            state.password_manager(),
+            cloned.password_manager()
+        ));
+        assert!(Arc::ptr_eq(state.ptz_state(), cloned.ptz_state()));
+        assert!(Arc::ptr_eq(state.config(), cloned.config()));
+    }
+
+    #[test]
+    fn test_app_state_debug() {
+        let storage = UserStorage::new();
+        let state = AppState::builder()
+            .user_storage(Arc::new(storage))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .build()
+            .unwrap();
+
+        let debug_str = format!("{:?}", state);
+        assert!(debug_str.contains("AppState"));
+        assert!(debug_str.contains("user_storage"));
+    }
+}
 
 /// Default configuration file path.
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/onvif/config.toml";
@@ -64,6 +341,15 @@ pub struct Application {
 
     /// Configuration path used to start the application.
     config_path: String,
+
+    /// Application state with shared dependencies.
+    app_state: Option<AppState>,
+
+    /// HTTP server instance for controlled shutdown.
+    server: Option<Arc<OnvifServer>>,
+
+    /// Handle to the server task.
+    server_task: Option<JoinHandle<()>>,
 }
 
 impl Application {
@@ -99,35 +385,88 @@ impl Application {
 
         // Phase 1: Configuration
         progress.begin_phase(StartupPhase::Configuration);
-        // TODO: Load actual configuration when config module is implemented
-        // For now, just validate the path exists or use defaults
-        tracing::debug!("Configuration loading placeholder - will be implemented in T051-T065");
+        // Load configuration from file or use defaults
+        let app_config = crate::config::ConfigStorage::load_or_default(config_path)
+            .map_err(|e| StartupError::Config(e.to_string()))?;
+        let config_runtime = Arc::new(ConfigRuntime::new(app_config));
         progress.complete_phase();
 
         // Phase 2: Platform
         progress.begin_phase(StartupPhase::Platform);
-        // TODO: Initialize platform when platform module is implemented
+        // Platform initialization is optional - we continue without it for testing
         tracing::debug!("Platform initialization placeholder - will be implemented in T034-T050");
         progress.complete_phase();
 
-        // Phase 3: Services
+        // Phase 3: Services - Build AppState
         progress.begin_phase(StartupPhase::Services);
-        // TODO: Initialize services when service modules are implemented
-        tracing::debug!("Service initialization placeholder - will be implemented in Phase 6-9");
+        tracing::debug!("Initializing ONVIF services...");
 
-        // Simulate optional service failures for demonstration
-        // In real implementation, this would attempt actual initialization
-        #[cfg(test)]
-        {
-            // In tests, we can simulate degraded services
+        // Create user storage with optional persistence
+        let user_storage = UserStorage::new();
+        // Try to load existing users from TOML file
+        let users_path = std::path::Path::new(config_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("/etc/onvif"))
+            .join("users.toml");
+        if users_path.exists() {
+            if let Err(e) =
+                user_storage.load_from_toml(users_path.to_str().unwrap_or("/etc/onvif/users.toml"))
+            {
+                tracing::warn!("Failed to load users from {}: {}", users_path.display(), e);
+            } else {
+                tracing::info!("Loaded users from {}", users_path.display());
+            }
         }
+
+        let app_state = AppState::builder()
+            .user_storage(Arc::new(user_storage))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::clone(&config_runtime))
+            .build()
+            .map_err(|e| StartupError::Services(e.to_string()))?;
 
         progress.complete_phase();
 
-        // Phase 4: Network
+        // Phase 4: Network - Start HTTP Server
         progress.begin_phase(StartupPhase::Network);
-        // TODO: Initialize HTTP server when network module is implemented
-        tracing::debug!("Network initialization placeholder - will be implemented in T072-T088");
+        tracing::debug!("Starting HTTP server...");
+
+        // Get HTTP settings from config or use defaults
+        let bind_address = config_runtime
+            .get_string("server.bind_address")
+            .unwrap_or_else(|_| "0.0.0.0".to_string());
+        let port = config_runtime.get_int("server.port").unwrap_or(8080) as u16;
+        let request_timeout = config_runtime
+            .get_int("server.request_timeout")
+            .unwrap_or(30) as u64;
+        let max_body_size = config_runtime
+            .get_int("server.max_body_size")
+            .unwrap_or(1024 * 1024) as usize;
+        let http_verbose = config_runtime.get_bool("server.verbose").unwrap_or(false);
+
+        let server_config = OnvifServerConfig {
+            bind_address,
+            port,
+            request_timeout_secs: request_timeout,
+            max_body_size,
+            enable_cors: false,
+            http_verbose,
+        };
+
+        let server = Arc::new(
+            OnvifServer::with_app_state(server_config, app_state.clone())
+                .map_err(|e| StartupError::Network(e.to_string()))?,
+        );
+
+        // Start the server in a background task
+        let server_clone: Arc<OnvifServer> = Arc::clone(&server);
+        let server_task = tokio::spawn(async move {
+            if let Err(e) = server_clone.start().await {
+                tracing::error!("HTTP server error: {}", e);
+            }
+        });
+
         progress.complete_phase();
 
         // Phase 5: Discovery
@@ -153,6 +492,9 @@ impl Application {
             shutdown_tx,
             degraded_services: progress.degraded_services().to_vec(),
             config_path: config_path.to_string(),
+            app_state: Some(app_state),
+            server: Some(server),
+            server_task: Some(server_task),
         })
     }
 
@@ -213,7 +555,7 @@ impl Application {
     /// # Returns
     ///
     /// A `ShutdownReport` containing details about the shutdown process.
-    pub async fn shutdown(self) -> ShutdownReport {
+    pub async fn shutdown(mut self) -> ShutdownReport {
         tracing::info!("Beginning graceful shutdown...");
 
         let mut report = self.shutdown_coordinator.initiate_shutdown().await;
@@ -225,8 +567,15 @@ impl Application {
         tracing::debug!("Sending WS-Discovery Bye...");
         report.record_success("discovery");
 
-        // Phase 2: Network shutdown
+        // Phase 2: Network shutdown - Stop HTTP server
         tracing::debug!("Shutting down network services...");
+        if let Some(server) = self.server.take() {
+            server.shutdown();
+            // Wait for server task to complete
+            if let Some(task) = self.server_task.take() {
+                let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
+            }
+        }
         report.record_success("network");
 
         // Phase 3: Services shutdown (reverse order)
