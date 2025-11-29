@@ -284,6 +284,7 @@ pub struct PtzPreset {
 #[cfg(not(use_stubs))]
 mod ffi_impl {
     use super::*;
+    use std::ffi::{c_char, c_int, c_void};
 
     // External C functions from Anyka SDK
     unsafe extern "C" {

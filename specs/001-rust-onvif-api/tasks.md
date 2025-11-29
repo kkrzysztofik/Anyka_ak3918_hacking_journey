@@ -361,27 +361,27 @@
 
 ### Tests for WS-Discovery
 
-- [ ] T186 [P] Add unit tests for Hello message generation in ws_discovery.rs.
-- [ ] T187 [P] Add unit tests for Bye message generation in ws_discovery.rs.
-- [ ] T188 [P] Add unit tests for ProbeMatch response generation in ws_discovery.rs.
-- [ ] T189 [P] Add unit tests for discovery mode filtering (NonDiscoverable silently ignores probes).
+- [X] T186 [P] Add unit tests for Hello message generation in ws_discovery.rs.
+- [X] T187 [P] Add unit tests for Bye message generation in ws_discovery.rs.
+- [X] T188 [P] Add unit tests for ProbeMatch response generation in ws_discovery.rs.
+- [X] T189 [P] Add unit tests for discovery mode filtering (NonDiscoverable silently ignores probes).
 
 ### Implementation for WS-Discovery
 
-- [ ] T190 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/discovery/mod.rs` with module declarations.
-- [ ] T191 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/discovery/ws_discovery.rs` with `WsDiscovery` struct.
-- [ ] T192 [P] Define constants: `WS_DISCOVERY_MULTICAST` (239.255.255.250), `WS_DISCOVERY_PORT` (3702).
-- [ ] T193 [P] Implement `WsDiscovery::new()` creating UDP socket with multicast support using socket2.
-- [ ] T194 [P] Implement socket binding and multicast group joining in WsDiscovery::new().
-- [ ] T195 [P] Implement `WsDiscovery::build_hello_message()` generating WS-Discovery Hello SOAP envelope.
-- [ ] T196 [P] Implement `WsDiscovery::build_bye_message()` generating WS-Discovery Bye SOAP envelope.
-- [ ] T197 [P] Implement `WsDiscovery::build_probe_match()` generating ProbeMatch response with device UUID, scopes, XAddrs.
-- [ ] T198 [P] Implement `WsDiscovery::is_probe_message()` checking for Probe action in incoming message.
-- [ ] T199 [P] Implement `WsDiscovery::send_hello()` async method sending Hello on startup.
-- [ ] T200 [P] Implement `WsDiscovery::send_bye()` async method sending Bye on shutdown.
-- [ ] T201 [P] Implement `WsDiscovery::run()` async loop receiving Probe messages and sending ProbeMatch responses.
-- [ ] T202 [P] Add discoverable flag to WsDiscovery with `set_discovery_mode()` method for NonDiscoverable support (EC-014).
-- [ ] T203 [P] Implement scopes configuration from device configuration.
+- [X] T190 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/discovery/mod.rs` with module declarations.
+- [X] T191 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/discovery/ws_discovery.rs` with `WsDiscovery` struct.
+- [X] T192 [P] Define constants: `WS_DISCOVERY_MULTICAST` (239.255.255.250), `WS_DISCOVERY_PORT` (3702).
+- [X] T193 [P] Implement `WsDiscovery::new()` creating UDP socket with multicast support using socket2.
+- [X] T194 [P] Implement socket binding and multicast group joining in WsDiscovery::new().
+- [X] T195 [P] Implement `WsDiscovery::build_hello_message()` generating WS-Discovery Hello SOAP envelope.
+- [X] T196 [P] Implement `WsDiscovery::build_bye_message()` generating WS-Discovery Bye SOAP envelope.
+- [X] T197 [P] Implement `WsDiscovery::build_probe_match()` generating ProbeMatch response with device UUID, scopes, XAddrs.
+- [X] T198 [P] Implement `WsDiscovery::is_probe_message()` checking for Probe action in incoming message.
+- [X] T199 [P] Implement `WsDiscovery::send_hello()` async method sending Hello on startup.
+- [X] T200 [P] Implement `WsDiscovery::send_bye()` async method sending Bye on shutdown.
+- [X] T201 [P] Implement `WsDiscovery::run()` async loop receiving Probe messages and sending ProbeMatch responses.
+- [X] T202 [P] Add discoverable flag to WsDiscovery with `set_discovery_mode()` method for NonDiscoverable support (EC-014).
+- [X] T203 [P] Implement scopes configuration from device configuration.
 
 **Checkpoint**: WS-Discovery operational with Hello/Bye/Probe handling.
 

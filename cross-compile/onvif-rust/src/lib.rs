@@ -51,11 +51,7 @@ pub mod auth;
 
 pub mod users;
 
-pub mod discovery {
-    //! WS-Discovery placeholder.
-    //!
-    //! Will be implemented in tasks T190-T203.
-}
+pub mod discovery;
 
 pub mod security;
 
