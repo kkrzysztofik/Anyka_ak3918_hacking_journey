@@ -27,6 +27,7 @@
 //! assert!(validator.check_xml_security(safe).is_ok());
 //! ```
 
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 /// Default maximum XML payload size (1MB).
@@ -57,6 +58,10 @@ pub enum SecurityError {
     /// Invalid characters in input.
     #[error("Invalid characters: {0}")]
     InvalidCharacters(String),
+
+    /// Path traversal attack detected.
+    #[error("Path traversal detected: {0}")]
+    PathTraversal(String),
 }
 
 /// Security validator for XML/SOAP content.
@@ -236,6 +241,158 @@ impl SecurityValidator {
 impl Default for SecurityValidator {
     fn default() -> Self {
         Self::new(DEFAULT_MAX_PAYLOAD_SIZE)
+    }
+}
+
+/// Path traversal validator for HTTP request paths.
+///
+/// Validates that request paths do not contain path traversal sequences
+/// that could escape the configured root directory.
+///
+/// # Example
+///
+/// ```
+/// use onvif_rust::utils::validation::{PathValidator, SecurityError};
+///
+/// let validator = PathValidator::new("/onvif");
+///
+/// // Safe paths pass
+/// assert!(validator.validate_path("/onvif/device_service").is_ok());
+///
+/// // Path traversal is rejected
+/// assert!(validator.validate_path("/onvif/../../../etc/passwd").is_err());
+/// ```
+#[derive(Debug, Clone)]
+pub struct PathValidator {
+    /// The root path that requests must be confined to.
+    root: PathBuf,
+}
+
+impl PathValidator {
+    /// Create a new path validator with the given root.
+    ///
+    /// # Arguments
+    ///
+    /// * `root` - The root path that all requests must be within
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    /// Validate that a request path is safe and within the root.
+    ///
+    /// Checks for:
+    /// - `..` path traversal sequences
+    /// - Null bytes (used in some bypass techniques)
+    /// - Path normalization escapes
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The request path to validate
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if safe, or `SecurityError::PathTraversal` if attack detected.
+    pub fn validate_path(&self, path: &str) -> Result<(), SecurityError> {
+        // Check for null bytes
+        if path.contains('\0') {
+            return Err(SecurityError::PathTraversal(
+                "Null byte in path".to_string(),
+            ));
+        }
+
+        // Check for explicit traversal sequences
+        if self.contains_traversal_sequence(path) {
+            return Err(SecurityError::PathTraversal(
+                "Path traversal sequence detected".to_string(),
+            ));
+        }
+
+        // Normalize and verify path stays within root
+        let normalized = self.normalize_path(path);
+        if !self.is_within_root(&normalized) {
+            return Err(SecurityError::PathTraversal(
+                "Path escapes root directory".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Check for common path traversal sequences.
+    fn contains_traversal_sequence(&self, path: &str) -> bool {
+        // Check for ../ and ..\
+        if path.contains("../") || path.contains("..\\") {
+            return true;
+        }
+
+        // Check for URL-encoded variants
+        let decoded = path.to_lowercase();
+        if decoded.contains("%2e%2e") {
+            return true;
+        }
+
+        // Check for double URL-encoding
+        if decoded.contains("%252e") {
+            return true;
+        }
+
+        // Check for trailing ..
+        if path.ends_with("..") {
+            return true;
+        }
+
+        false
+    }
+
+    /// Normalize a path by resolving . and .. segments.
+    fn normalize_path(&self, path: &str) -> PathBuf {
+        let mut normalized = PathBuf::new();
+
+        for segment in path.split('/').filter(|s| !s.is_empty() && *s != ".") {
+            if segment == ".." {
+                normalized.pop();
+            } else {
+                normalized.push(segment);
+            }
+        }
+
+        // Prepend root
+        self.root.join(normalized)
+    }
+
+    /// Check if a normalized path is within the root directory.
+    fn is_within_root(&self, path: &Path) -> bool {
+        // Use starts_with to check containment
+        path.starts_with(&self.root)
+    }
+
+    /// Get the configured root path.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Canonicalize and validate a path.
+    ///
+    /// This method normalizes the path and returns the canonical form
+    /// if it's within the root. Use this to get a safe path for further
+    /// processing.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The request path to validate and normalize
+    ///
+    /// # Returns
+    ///
+    /// The normalized path if safe, or `SecurityError` if attack detected.
+    pub fn canonicalize(&self, path: &str) -> Result<PathBuf, SecurityError> {
+        self.validate_path(path)?;
+        Ok(self.normalize_path(path))
+    }
+}
+
+impl Default for PathValidator {
+    fn default() -> Self {
+        Self::new("/onvif")
     }
 }
 
@@ -683,5 +840,92 @@ mod tests {
         let over_limit = "&1;&2;&3;&4;&5;&6;&7;&8;&9;&a;&b;";
         let result = validator.check_xml_security(over_limit);
         assert!(matches!(result, Err(SecurityError::XmlBombDetected)));
+    }
+
+    // === Path Traversal Tests ===
+
+    #[test]
+    fn test_path_validator_safe_path() {
+        let validator = PathValidator::new("/onvif");
+        assert!(validator.validate_path("/onvif/device_service").is_ok());
+        assert!(validator.validate_path("/onvif/media_service").is_ok());
+    }
+
+    #[test]
+    fn test_path_validator_traversal_detected() {
+        let validator = PathValidator::new("/onvif");
+
+        let result = validator.validate_path("/onvif/../../../etc/passwd");
+        assert!(matches!(result, Err(SecurityError::PathTraversal(_))));
+    }
+
+    #[test]
+    fn test_path_validator_null_byte() {
+        let validator = PathValidator::new("/onvif");
+
+        let result = validator.validate_path("/onvif/device\0.txt");
+        assert!(matches!(result, Err(SecurityError::PathTraversal(_))));
+    }
+
+    #[test]
+    fn test_path_validator_url_encoded() {
+        let validator = PathValidator::new("/onvif");
+
+        // URL-encoded ..
+        let result = validator.validate_path("/onvif/%2e%2e/etc/passwd");
+        assert!(matches!(result, Err(SecurityError::PathTraversal(_))));
+    }
+
+    #[test]
+    fn test_path_validator_double_encoded() {
+        let validator = PathValidator::new("/onvif");
+
+        // Double URL-encoded
+        let result = validator.validate_path("/onvif/%252e%252e/etc/passwd");
+        assert!(matches!(result, Err(SecurityError::PathTraversal(_))));
+    }
+
+    #[test]
+    fn test_path_validator_windows_style() {
+        let validator = PathValidator::new("/onvif");
+
+        let result = validator.validate_path("/onvif/..\\..\\etc\\passwd");
+        assert!(matches!(result, Err(SecurityError::PathTraversal(_))));
+    }
+
+    #[test]
+    fn test_path_validator_trailing_dots() {
+        let validator = PathValidator::new("/onvif");
+
+        let result = validator.validate_path("/onvif/..");
+        assert!(matches!(result, Err(SecurityError::PathTraversal(_))));
+    }
+
+    #[test]
+    fn test_path_validator_canonicalize() {
+        let validator = PathValidator::new("/onvif");
+
+        let result = validator.canonicalize("/onvif/device_service");
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.starts_with("/onvif"));
+    }
+
+    #[test]
+    fn test_path_validator_root() {
+        let validator = PathValidator::new("/api");
+        assert_eq!(validator.root().to_str().unwrap(), "/api");
+    }
+
+    #[test]
+    fn test_path_validator_default() {
+        let validator = PathValidator::default();
+        assert_eq!(validator.root().to_str().unwrap(), "/onvif");
+    }
+
+    #[test]
+    fn test_path_traversal_error_display() {
+        let err = SecurityError::PathTraversal("test".to_string());
+        assert_eq!(format!("{}", err), "Path traversal detected: test");
     }
 }

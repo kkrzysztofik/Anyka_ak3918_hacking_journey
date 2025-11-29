@@ -47,11 +47,7 @@ pub mod onvif;
 
 pub mod utils;
 
-pub mod auth {
-    //! Authentication placeholder.
-    //!
-    //! Will be implemented in tasks T112-T130.
-}
+pub mod auth;
 
 pub mod users {
     //! User management placeholder.
@@ -65,11 +61,7 @@ pub mod discovery {
     //! Will be implemented in tasks T190-T203.
 }
 
-pub mod security {
-    //! Security hardening placeholder.
-    //!
-    //! Will be implemented in tasks T131-T154.
-}
+pub mod security;
 
 pub mod ffi;
 

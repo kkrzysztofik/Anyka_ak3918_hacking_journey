@@ -3,6 +3,7 @@
 //! This module provides common utilities used throughout the codebase:
 //!
 //! - [`validation`] - XML security validation (XXE, XML bombs, XSS prevention)
+//!   and path traversal prevention
 //! - [`memory`] - Memory management utilities (planned)
 //!
 //! # Example
@@ -17,4 +18,4 @@
 pub mod validation;
 
 // Re-exports for security validation
-pub use validation::{SecurityError, SecurityValidator};
+pub use validation::{PathValidator, SecurityError, SecurityValidator};

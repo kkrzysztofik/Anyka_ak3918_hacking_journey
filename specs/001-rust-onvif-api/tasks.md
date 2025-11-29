@@ -219,81 +219,81 @@
 
 ### WS-Security UsernameToken
 
-- [ ] T112 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/auth/mod.rs` with module declarations for ws_security, http_digest, credentials.
-- [ ] T113 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/auth/ws_security.rs` with `WsSecurityValidator` struct.
-- [ ] T114 [P] Implement `WsSecurityValidator::new()` with configurable `max_timestamp_age_seconds`.
-- [ ] T115 [P] Implement `WsSecurityValidator::validate_digest()` computing SHA1(Nonce + Created + Password) and comparing with timing-safe comparison.
-- [ ] T116 [P] Implement `WsSecurityValidator::validate_timestamp()` checking Created timestamp is within acceptable window.
-- [ ] T117 [P] Implement `WsSecurityValidator::parse_username_token()` extracting Username, Nonce, Created, PasswordDigest from SOAP header.
-- [ ] T118 [P] Define `AuthError` enum in ws_security.rs with variants: InvalidNonce, InvalidTimestamp, InvalidDigest, ExpiredTimestamp.
+- [X] T112 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/auth/mod.rs` with module declarations for ws_security, http_digest, credentials.
+- [X] T113 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/auth/ws_security.rs` with `WsSecurityValidator` struct.
+- [X] T114 [P] Implement `WsSecurityValidator::new()` with configurable `max_timestamp_age_seconds`.
+- [X] T115 [P] Implement `WsSecurityValidator::validate_digest()` computing SHA1(Nonce + Created + Password) and comparing with timing-safe comparison.
+- [X] T116 [P] Implement `WsSecurityValidator::validate_timestamp()` checking Created timestamp is within acceptable window.
+- [X] T117 [P] Implement `WsSecurityValidator::parse_username_token()` extracting Username, Nonce, Created, PasswordDigest from SOAP header.
+- [X] T118 [P] Define `AuthError` enum in ws_security.rs with variants: InvalidNonce, InvalidTimestamp, InvalidDigest, ExpiredTimestamp.
 
 ### HTTP Digest Authentication
 
-- [ ] T119 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/auth/http_digest.rs` with `HttpDigestAuth` struct.
-- [ ] T120 [P] Implement `HttpDigestAuth::new()` with configurable realm and nonce_validity_seconds.
-- [ ] T121 [P] Implement `HttpDigestAuth::generate_challenge()` creating WWW-Authenticate header with realm, nonce, qop, algorithm.
-- [ ] T122 [P] Implement `HttpDigestAuth::generate_nonce()` using cryptographically secure random bytes.
-- [ ] T123 [P] Implement `HttpDigestAuth::validate_response()` computing HA1=MD5(username:realm:password), HA2=MD5(method:uri), response=MD5(HA1:nonce:nc:cnonce:qop:HA2).
-- [ ] T124 [P] Implement `HttpDigestAuth::parse_authorization_header()` extracting all digest parameters from Authorization header.
-- [ ] T125 [P] Implement nonce storage and expiration checking in http_digest.rs.
+- [X] T119 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/auth/http_digest.rs` with `HttpDigestAuth` struct.
+- [X] T120 [P] Implement `HttpDigestAuth::new()` with configurable realm and nonce_validity_seconds.
+- [X] T121 [P] Implement `HttpDigestAuth::generate_challenge()` creating WWW-Authenticate header with realm, nonce, qop, algorithm.
+- [X] T122 [P] Implement `HttpDigestAuth::generate_nonce()` using cryptographically secure random bytes.
+- [X] T123 [P] Implement `HttpDigestAuth::validate_response()` computing HA1=MD5(username:realm:password), HA2=MD5(method:uri), response=MD5(HA1:nonce:nc:cnonce:qop:HA2).
+- [X] T124 [P] Implement `HttpDigestAuth::parse_authorization_header()` extracting all digest parameters from Authorization header.
+- [X] T125 [P] Implement nonce storage and expiration checking in http_digest.rs.
 
 ### Authentication Configuration
 
-- [ ] T126 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/auth/credentials.rs` with `AuthConfig` struct.
-- [ ] T127 [P] Implement `AuthConfig::should_authenticate()` returning `self.enabled` for auth bypass support (FR-048a).
-- [ ] T128 [P] Implement `AuthConfig::from_config()` loading `[server] auth_enabled` from configuration.
-- [ ] T129 [P] Create authentication middleware function for axum extracting and validating credentials.
-- [ ] T130 [P] Implement credential validation against user storage in middleware.
+- [X] T126 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/auth/credentials.rs` with `AuthConfig` struct.
+- [X] T127 [P] Implement `AuthConfig::should_authenticate()` returning `self.enabled` for auth bypass support (FR-048a).
+- [X] T128 [P] Implement `AuthConfig::from_config()` loading `[server] auth_enabled` from configuration.
+- [X] T129 [P] Create authentication middleware function for axum extracting and validating credentials.
+- [X] T130 [P] Implement credential validation against user storage in middleware.
 
 ### Rate Limiting
 
-- [ ] T131 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/security/mod.rs` with module declarations for rate_limit, brute_force, xml_security, audit.
-- [ ] T132 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/security/rate_limit.rs` with `RateLimiter` struct using DashMap.
-- [ ] T133 [P] Define `RequestCount` struct in rate_limit.rs with count and window_start fields.
-- [ ] T134 [P] Implement `RateLimiter::new()` with configurable `max_requests_per_minute`.
-- [ ] T135 [P] Implement `RateLimiter::check_rate_limit()` incrementing count and checking against threshold.
-- [ ] T136 [P] Implement window reset logic when `window_start.elapsed() > window_duration`.
-- [ ] T137 [P] Create rate limiting middleware for axum returning HTTP 429 when limit exceeded.
+- [X] T131 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/security/mod.rs` with module declarations for rate_limit, brute_force, xml_security, audit.
+- [X] T132 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/security/rate_limit.rs` with `RateLimiter` struct using DashMap.
+- [X] T133 [P] Define `RequestCount` struct in rate_limit.rs with count and window_start fields.
+- [X] T134 [P] Implement `RateLimiter::new()` with configurable `max_requests_per_minute`.
+- [X] T135 [P] Implement `RateLimiter::check_rate_limit()` incrementing count and checking against threshold.
+- [X] T136 [P] Implement window reset logic when `window_start.elapsed() > window_duration`.
+- [X] T137 [P] Create rate limiting middleware for axum returning HTTP 429 when limit exceeded.
 
 ### Brute Force Protection
 
-- [ ] T138 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/security/brute_force.rs` with `BruteForceProtection` struct.
-- [ ] T139 [P] Define `FailureRecord` struct with count, first_failure, blocked_until fields.
-- [ ] T140 [P] Implement `BruteForceProtection::new()` with configurable max_failures (default 5), failure_window (default 60s), block_duration (default 300s).
-- [ ] T141 [P] Implement `BruteForceProtection::record_failure()` incrementing failure count and setting blocked_until when threshold exceeded.
-- [ ] T142 [P] Implement `BruteForceProtection::is_blocked()` checking if current time is before blocked_until.
-- [ ] T143 [P] Implement `BruteForceProtection::clear_failures()` for successful authentication.
-- [ ] T143a [P] Add integration test verifying brute force threshold blocks IP after 5 failures in 60 seconds (EC-012).
-- [ ] T143b [P] Add integration test verifying blocked IP receives HTTP 429 response.
-- [ ] T143c [P] Add integration test verifying block expires after configured duration (default 300s).
+- [X] T138 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/security/brute_force.rs` with `BruteForceProtection` struct.
+- [X] T139 [P] Define `FailureRecord` struct with count, first_failure, blocked_until fields.
+- [X] T140 [P] Implement `BruteForceProtection::new()` with configurable max_failures (default 5), failure_window (default 60s), block_duration (default 300s).
+- [X] T141 [P] Implement `BruteForceProtection::record_failure()` incrementing failure count and setting blocked_until when threshold exceeded.
+- [X] T142 [P] Implement `BruteForceProtection::is_blocked()` checking if current time is before blocked_until.
+- [X] T143 [P] Implement `BruteForceProtection::clear_failures()` for successful authentication.
+- [X] T143a [P] Add integration test verifying brute force threshold blocks IP after 5 failures in 60 seconds (EC-012).
+- [X] T143b [P] Add integration test verifying blocked IP receives HTTP 429 response.
+- [X] T143c [P] Add integration test verifying block expires after configured duration (default 300s).
 
 ### XML Security
 
-- [ ] T144 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/security/xml_security.rs` with `XmlSecurityValidator` struct.
-- [ ] T145 [P] Define `XmlSecurityError` enum with variants: PayloadTooLarge, XxeDetected, XmlBombDetected.
-- [ ] T146 [P] Implement `XmlSecurityValidator::new()` with configurable max_entity_expansions and max_payload_size (default 1MB).
-- [ ] T147 [P] Implement `XmlSecurityValidator::validate()` checking payload size.
-- [ ] T148 [P] Implement XXE detection in validate() checking for `<!ENTITY`, `SYSTEM`, `PUBLIC` patterns.
-- [ ] T149 [P] Implement XML bomb detection in validate() counting entity declarations.
-- [ ] T149a [P] Add integration test detecting XXE injection attempts with <!ENTITY patterns (EC-017).
-- [ ] T149b [P] Add integration test detecting XML bomb (billion laughs) attack patterns (EC-017).
-- [ ] T149c [P] Add integration test verifying HTTP 400 response and connection termination on attack detection (EC-017).
+- [X] T144 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/security/xml_security.rs` with `XmlSecurityValidator` struct.
+- [X] T145 [P] Define `XmlSecurityError` enum with variants: PayloadTooLarge, XxeDetected, XmlBombDetected.
+- [X] T146 [P] Implement `XmlSecurityValidator::new()` with configurable max_entity_expansions and max_payload_size (default 1MB).
+- [X] T147 [P] Implement `XmlSecurityValidator::validate()` checking payload size.
+- [X] T148 [P] Implement XXE detection in validate() checking for `<!ENTITY`, `SYSTEM`, `PUBLIC` patterns.
+- [X] T149 [P] Implement XML bomb detection in validate() counting entity declarations.
+- [X] T149a [P] Add integration test detecting XXE injection attempts with <!ENTITY patterns (EC-017).
+- [X] T149b [P] Add integration test detecting XML bomb (billion laughs) attack patterns (EC-017).
+- [X] T149c [P] Add integration test verifying HTTP 400 response and connection termination on attack detection (EC-017).
 
 ### Security Audit Logging
 
-- [ ] T150 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/security/audit.rs` with security event logging functions.
-- [ ] T151 [P] Implement `log_auth_failure()` with structured logging: client_ip, username, reason.
-- [ ] T152 [P] Implement `log_ip_blocked()` with structured logging: client_ip, duration_secs.
-- [ ] T153 [P] Implement `log_attack_detected()` with structured logging: client_ip, attack_type.
-- [ ] T154 [P] Implement `log_rate_limit_exceeded()` with structured logging: client_ip, request_count.
+- [X] T150 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/security/audit.rs` with security event logging functions.
+- [X] T151 [P] Implement `log_auth_failure()` with structured logging: client_ip, username, reason.
+- [X] T152 [P] Implement `log_ip_blocked()` with structured logging: client_ip, duration_secs.
+- [X] T153 [P] Implement `log_attack_detected()` with structured logging: client_ip, attack_type.
+- [X] T154 [P] Implement `log_rate_limit_exceeded()` with structured logging: client_ip, request_count.
 
 **Checkpoint**: Authentication and security hardening operational.
 
 ### HTTP/SOAP Input Hardening (NFR-006)
 
-- [ ] T549 [P] Add path traversal validation helper in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/utils/validation.rs` that canonicalizes request paths, rejects `..` segments, and enforces confinement to a configured root; integrate this into HTTP/SOAP routing (fulfills NFR-006 path traversal).
-- [ ] T550 [P] Extend `InputValidator::sanitize_string()` in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/utils/validation.rs` to detect and reject common XSS-style payload patterns in SOAP headers and bodies, with unit tests (fulfills NFR-006 XSS).
-- [ ] T551 [P] Add integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/integration/security_inputs.rs` that exercise XSS and path traversal scenarios and assert correct HTTP error responses and security log entries (maps to NFR-006 and EC-017).
+- [X] T549 [P] Add path traversal validation helper in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/utils/validation.rs` that canonicalizes request paths, rejects `..` segments, and enforces confinement to a configured root; integrate this into HTTP/SOAP routing (fulfills NFR-006 path traversal).
+- [X] T550 [P] Extend `InputValidator::sanitize_string()` in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/utils/validation.rs` to detect and reject common XSS-style payload patterns in SOAP headers and bodies, with unit tests (fulfills NFR-006 XSS).
+- [X] T551 [P] Add integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/integration/security_inputs.rs` that exercise XSS and path traversal scenarios and assert correct HTTP error responses and security log entries (maps to NFR-006 and EC-017).
 
 ---
 
