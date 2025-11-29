@@ -48,7 +48,9 @@ fn generate_anyka_bindings() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let wrapper_path = out_dir.join("anyka_wrapper.h");
 
-    std::fs::write(&wrapper_path, r#"
+    std::fs::write(
+        &wrapper_path,
+        r#"
 // Wrapper header for all Anyka SDK headers
 #include "ak_common.h"
 #include "ak_vi.h"
@@ -58,9 +60,14 @@ fn generate_anyka_bindings() {
 #include "ak_drv_ptz.h"
 #include "ak_vpss.h"
 #include "ak_drv_irled.h"
-"#).expect("Failed to write wrapper header");
+"#,
+    )
+    .expect("Failed to write wrapper header");
 
-    println!("cargo:rerun-if-changed={}", vendor_include.join("ak_common.h").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        vendor_include.join("ak_common.h").display()
+    );
 
     // Get sysroot from environment or use default toolchain path
     let toolchain_base = env::var("TOOLCHAIN_PATH")

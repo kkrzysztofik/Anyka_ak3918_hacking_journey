@@ -49,11 +49,7 @@ impl<T> OptionalInitResult<T> {
         match self {
             OptionalInitResult::Success(value) => Some(value),
             OptionalInitResult::Failed { component, error } => {
-                tracing::warn!(
-                    "Optional component '{}' unavailable: {}",
-                    component,
-                    error
-                );
+                tracing::warn!("Optional component '{}' unavailable: {}", component, error);
                 None
             }
             OptionalInitResult::Disabled => None,

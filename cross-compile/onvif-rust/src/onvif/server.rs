@@ -29,6 +29,8 @@
 //!     port: 8080,
 //!     request_timeout_secs: 30,
 //!     max_body_size: 1024 * 1024, // 1MB
+//!     enable_cors: false,
+//!     http_verbose: false,        // Enable for detailed HTTP logging
 //! };
 //!
 //! let server = OnvifServer::new(config)?;
@@ -40,13 +42,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{
+    Router,
     body::Body,
     extract::{Request, State},
-    http::{header, Method, StatusCode},
+    http::{Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::post,
-    Router,
 };
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -55,6 +57,7 @@ use tower_http::timeout::TimeoutLayer;
 
 use super::dispatcher::ServiceDispatcher;
 use super::error::OnvifError;
+use crate::logging::{HttpLogConfig, HttpLoggingMiddleware};
 
 /// Configuration for the ONVIF HTTP server.
 #[derive(Debug, Clone)]
@@ -69,6 +72,8 @@ pub struct OnvifServerConfig {
     pub max_body_size: usize,
     /// Enable CORS for browser-based clients.
     pub enable_cors: bool,
+    /// Enable verbose HTTP request/response logging.
+    pub http_verbose: bool,
 }
 
 impl Default for OnvifServerConfig {
@@ -79,6 +84,7 @@ impl Default for OnvifServerConfig {
             request_timeout_secs: 30,
             max_body_size: 1024 * 1024, // 1MB
             enable_cors: false,
+            http_verbose: false,
         }
     }
 }
@@ -200,6 +206,14 @@ impl OnvifServer {
             .route("/ptz_service", post(handle_ptz_service))
             .route("/imaging_service", post(handle_imaging_service));
 
+        // Configure HTTP logging middleware
+        let http_log_config = HttpLogConfig {
+            verbose: self.config.http_verbose,
+            max_body_log_size: 4096,
+            sanitize_passwords: true,
+        };
+        let http_logging = HttpLoggingMiddleware::new(http_log_config);
+
         // Build the main router with middleware
         let app = Router::new()
             .nest("/onvif", service_routes)
@@ -212,10 +226,13 @@ impl OnvifServer {
                     ))
                     // Add middleware for logging and validation
                     .layer(middleware::from_fn(validate_content_type))
-                    .layer(middleware::from_fn(log_request)),
+                    // Add HTTP logging middleware (replaces basic log_request)
+                    .layer(http_logging.layer()),
             )
             // Add body limit extractor configuration
-            .layer(axum::extract::DefaultBodyLimit::max(self.config.max_body_size))
+            .layer(axum::extract::DefaultBodyLimit::max(
+                self.config.max_body_size,
+            ))
             .with_state(state);
 
         app
@@ -276,30 +293,6 @@ async fn validate_content_type(request: Request, next: Next) -> Response {
         fault.to_soap_fault(),
     )
         .into_response()
-}
-
-/// Middleware to log incoming requests.
-async fn log_request(request: Request, next: Next) -> Response {
-    let method = request.method().clone();
-    let uri = request.uri().clone();
-    let start = std::time::Instant::now();
-
-    tracing::debug!("→ {} {}", method, uri);
-
-    let response = next.run(request).await;
-
-    let duration = start.elapsed();
-    let status = response.status();
-
-    tracing::info!(
-        "← {} {} {} {:?}",
-        method,
-        uri,
-        status.as_u16(),
-        duration
-    );
-
-    response
 }
 
 /// Handler for Device Service requests.
@@ -425,6 +418,7 @@ mod tests {
             request_timeout_secs: 60,
             max_body_size: 2 * 1024 * 1024,
             enable_cors: true,
+            http_verbose: true,
         };
 
         assert_eq!(config.bind_address, "127.0.0.1");
@@ -432,6 +426,7 @@ mod tests {
         assert_eq!(config.request_timeout_secs, 60);
         assert_eq!(config.max_body_size, 2 * 1024 * 1024);
         assert!(config.enable_cors);
+        assert!(config.http_verbose);
     }
 
     #[test]
@@ -444,6 +439,7 @@ mod tests {
         assert_eq!(config.request_timeout_secs, cloned.request_timeout_secs);
         assert_eq!(config.max_body_size, cloned.max_body_size);
         assert_eq!(config.enable_cors, cloned.enable_cors);
+        assert_eq!(config.http_verbose, cloned.http_verbose);
     }
 
     #[test]
@@ -495,7 +491,9 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         // Will return 400 because no handler registered, but route exists
-        assert!(response.status() == StatusCode::BAD_REQUEST || response.status() == StatusCode::OK);
+        assert!(
+            response.status() == StatusCode::BAD_REQUEST || response.status() == StatusCode::OK
+        );
     }
 
     #[tokio::test]

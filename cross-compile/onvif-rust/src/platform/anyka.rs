@@ -6,18 +6,17 @@
 //! This implementation is only compiled when cross-compiling for ARM
 //! (i.e., when `use_stubs` is not defined).
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
 use super::traits::{
-    AudioEncoder, AudioEncoderConfig, AudioInput, AudioSourceConfig, DeviceInfo,
-    ImagingControl, ImagingOptions, ImagingSettings, Platform, PlatformError, PlatformResult,
-    PTZControl, PtzLimits, PtzPosition, PtzPreset, PtzVelocity, Resolution,
-    VideoEncoder, VideoEncoderConfig, VideoEncoderOptions, VideoEncoding,
-    VideoInput, VideoSourceConfig,
+    AudioEncoder, AudioEncoderConfig, AudioInput, AudioSourceConfig, DeviceInfo, ImagingControl,
+    ImagingOptions, ImagingSettings, PTZControl, Platform, PlatformError, PlatformResult,
+    PtzLimits, PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoEncoder, VideoEncoderConfig,
+    VideoEncoderOptions, VideoEncoding, VideoInput, VideoSourceConfig,
 };
 
 /// Anyka platform implementation using the actual SDK.

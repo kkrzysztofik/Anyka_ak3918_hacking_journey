@@ -47,6 +47,7 @@ pub mod dispatcher;
 pub mod error;
 pub mod server;
 pub mod soap;
+pub mod types;
 
 // Service modules (to be implemented in later phases)
 pub mod device;

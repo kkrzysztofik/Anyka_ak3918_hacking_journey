@@ -134,8 +134,8 @@
 
 ### HTTP Request/Response Logging (NFR-011, NFR-012)
 
-- [ ] T552 [P] Implement HTTP request/response logging middleware in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/server.rs` (or `src/logging/http.rs`) that logs method, path, status code, latency, and optionally truncated, sanitized SOAP payloads when `[logging] http_verbose = true` (implements NFR-012).
-- [ ] T553 [P] Add integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/integration/logging_http.rs` verifying that verbose mode emits HTTP request/response metadata and that disabling `[logging] http_verbose` suppresses HTTP logging.
+- [X] T552 [P] Implement HTTP request/response logging middleware in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/server.rs` (or `src/logging/http.rs`) that logs method, path, status code, latency, and optionally truncated, sanitized SOAP payloads when `[logging] http_verbose = true` (implements NFR-012). **Implemented in `src/logging/http.rs` with `HttpLoggingMiddleware` using Tower Layer pattern. Includes password/token sanitization and body truncation.**
+- [X] T553 [P] Add integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/integration/logging_http.rs` verifying that verbose mode emits HTTP request/response metadata and that disabling `[logging] http_verbose` suppresses HTTP logging. **Implemented in `tests/logging_http.rs` with 8 integration tests covering verbose/non-verbose modes, password sanitization, error responses, body truncation, and response preservation.**
 
 ### WSDL-Based Type Generation
 
@@ -149,16 +149,16 @@
 
 **Requirement**: All ONVIF request/response structs MUST be generated from these WSDL/XSD files to ensure protocol compliance.
 
-- [ ] T072a [P] Evaluate and select WSDL-to-Rust code generation approach: Option A: `yaserde` with manual struct definitions validated against WSDL; Option B: Build script using `quick-xml` to parse WSDL and generate structs; Option C: Use `xsd-parser-rs` or similar XSD-to-Rust tool.
-- [ ] T072b [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/build.rs` additions (or separate `codegen/` module) to generate Rust structs from WSDL files at build time or via script.
-- [ ] T072c [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/mod.rs` as the root module for all WSDL-generated types.
-- [ ] T072d [P] Generate Device Service types from `devicemgmt.wsdl` into `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/device_types.rs`.
-- [ ] T072e [P] Generate Media Service types from `media.wsdl` into `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/media_types.rs`.
-- [ ] T072f [P] Generate PTZ Service types from `ptz.wsdl` into `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/ptz_types.rs`.
-- [ ] T072g [P] Generate Imaging Service types from `imaging.wsdl` into `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/imaging_types.rs`.
-- [ ] T072h [P] Generate common ONVIF types from `onvif.xsd` into `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/generated/common_types.rs`.
-- [ ] T072i [P] Add unit tests validating generated types can serialize/deserialize sample SOAP payloads from `/home/kmk/anyka-dev/cap/requests/` and `/home/kmk/anyka-dev/cap/responses/`.
-- [ ] T072j [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/scripts/regenerate_types.sh` script to regenerate types when WSDL files change.
+- [X] T072a [P] Evaluate and select WSDL-to-Rust code generation approach: Option A: `yaserde` with manual struct definitions validated against WSDL; Option B: Build script using `quick-xml` to parse WSDL and generate structs; Option C: Use `xsd-parser-rs` or similar XSD-to-Rust tool. **Decision: Hand-crafted types using `serde` + `quick-xml`, static and checked-in (Option A variant).**
+- [N/A] T072b [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/build.rs` additions (or separate `codegen/` module) to generate Rust structs from WSDL files at build time or via script. **Skipped: Using hand-crafted static types instead.**
+- [X] T072c [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/types/mod.rs` as the root module for all WSDL-derived types. **Note: Renamed from `generated/` to `types/` per design decision.**
+- [X] T072d [P] Create Device Service types from `devicemgmt.wsdl` in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/types/device.rs`.
+- [X] T072e [P] Create Media Service types from `media.wsdl` in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/types/media.rs`.
+- [X] T072f [P] Create PTZ Service types from `ptz.wsdl` in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/types/ptz.rs`.
+- [X] T072g [P] Create Imaging Service types from `imaging.wsdl` in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/types/imaging.rs`.
+- [X] T072h [P] Create common ONVIF types from `onvif.xsd` in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/types/common.rs`.
+- [X] T072i [P] Add unit tests validating types can serialize/deserialize sample SOAP payloads from `/home/kmk/anyka-dev/cap/requests/` and `/home/kmk/anyka-dev/cap/responses/`. **Implemented in `tests/types_serialization.rs` with 28 tests covering Device, Media, PTZ, Imaging types, enumerations, edge cases, and roundtrip serialization.**
+- [N/A] T072j [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/scripts/regenerate_types.sh` script to regenerate types when WSDL files change. **Skipped: Types are hand-crafted and static.**
 
 ### HTTP/SOAP Server Foundation
 

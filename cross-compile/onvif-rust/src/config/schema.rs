@@ -215,11 +215,13 @@ impl ConfigSchema {
 
         match param.value_type {
             ConfigValueType::Int => {
-                let val: i64 = value.parse().map_err(|_| ConfigValidationError::InvalidType {
-                    key: key.to_string(),
-                    expected: "integer".to_string(),
-                    actual: "non-integer".to_string(),
-                })?;
+                let val: i64 = value
+                    .parse()
+                    .map_err(|_| ConfigValidationError::InvalidType {
+                        key: key.to_string(),
+                        expected: "integer".to_string(),
+                        actual: "non-integer".to_string(),
+                    })?;
 
                 if let (Some(min), Some(max)) = (param.min, param.max) {
                     if (val as f64) < min || (val as f64) > max {
@@ -233,11 +235,13 @@ impl ConfigSchema {
                 }
             }
             ConfigValueType::Float => {
-                let val: f64 = value.parse().map_err(|_| ConfigValidationError::InvalidType {
-                    key: key.to_string(),
-                    expected: "float".to_string(),
-                    actual: "non-float".to_string(),
-                })?;
+                let val: f64 = value
+                    .parse()
+                    .map_err(|_| ConfigValidationError::InvalidType {
+                        key: key.to_string(),
+                        expected: "float".to_string(),
+                        actual: "non-float".to_string(),
+                    })?;
 
                 if let (Some(min), Some(max)) = (param.min, param.max) {
                     if val < min || val > max {
@@ -251,13 +255,13 @@ impl ConfigSchema {
                 }
             }
             ConfigValueType::Bool => {
-                let _ = value.parse::<bool>().map_err(|_| {
-                    ConfigValidationError::InvalidType {
+                let _ = value
+                    .parse::<bool>()
+                    .map_err(|_| ConfigValidationError::InvalidType {
                         key: key.to_string(),
                         expected: "boolean".to_string(),
                         actual: "non-boolean".to_string(),
-                    }
-                })?;
+                    })?;
             }
             ConfigValueType::String => {
                 // No validation needed for strings
@@ -310,31 +314,26 @@ impl ConfigSchema {
                 "eth0",
                 "Network interface name",
             ))
-            .param(ConfigParameter::string(
-                "network.ip_address",
-                "",
-                "Static IP address (empty for DHCP)",
-            ).optional())
-            .param(ConfigParameter::string(
-                "network.netmask",
-                "255.255.255.0",
-                "Network mask",
-            ).optional())
-            .param(ConfigParameter::string(
-                "network.gateway",
-                "",
-                "Default gateway",
-            ).optional())
-            .param(ConfigParameter::string(
-                "network.dns_primary",
-                "",
-                "Primary DNS server",
-            ).optional())
-            .param(ConfigParameter::string(
-                "network.dns_secondary",
-                "",
-                "Secondary DNS server",
-            ).optional())
+            .param(
+                ConfigParameter::string(
+                    "network.ip_address",
+                    "",
+                    "Static IP address (empty for DHCP)",
+                )
+                .optional(),
+            )
+            .param(
+                ConfigParameter::string("network.netmask", "255.255.255.0", "Network mask")
+                    .optional(),
+            )
+            .param(ConfigParameter::string("network.gateway", "", "Default gateway").optional())
+            .param(
+                ConfigParameter::string("network.dns_primary", "", "Primary DNS server").optional(),
+            )
+            .param(
+                ConfigParameter::string("network.dns_secondary", "", "Secondary DNS server")
+                    .optional(),
+            )
             .param(ConfigParameter::bool(
                 "network.dhcp_enabled",
                 true,
@@ -359,11 +358,14 @@ impl ConfigSchema {
                 "1.0.0",
                 "Firmware version",
             ))
-            .param(ConfigParameter::string(
-                "device.serial_number",
-                "",
-                "Serial number (empty to auto-generate)",
-            ).optional())
+            .param(
+                ConfigParameter::string(
+                    "device.serial_number",
+                    "",
+                    "Serial number (empty to auto-generate)",
+                )
+                .optional(),
+            )
             .param(ConfigParameter::string(
                 "device.hardware_id",
                 "ak3918",
@@ -374,11 +376,10 @@ impl ConfigSchema {
                 "ipcam",
                 "Device hostname",
             ))
-            .param(ConfigParameter::string(
-                "device.uuid",
-                "",
-                "Device UUID (empty to auto-generate)",
-            ).optional())
+            .param(
+                ConfigParameter::string("device.uuid", "", "Device UUID (empty to auto-generate)")
+                    .optional(),
+            )
     }
 
     fn server_section() -> ConfigSection {
@@ -445,11 +446,14 @@ impl ConfigSchema {
                 true,
                 "Enable console logging",
             ))
-            .param(ConfigParameter::string(
-                "logging.file_path",
-                "",
-                "Log file path (empty to disable)",
-            ).optional())
+            .param(
+                ConfigParameter::string(
+                    "logging.file_path",
+                    "",
+                    "Log file path (empty to disable)",
+                )
+                .optional(),
+            )
     }
 
     fn media_section() -> ConfigSection {
@@ -691,10 +695,7 @@ mod tests {
     fn test_config_schema_default_value() {
         let schema = ConfigSchema::new();
         assert_eq!(schema.default_value("server.port"), Some("80"));
-        assert_eq!(
-            schema.default_value("device.manufacturer"),
-            Some("Anyka")
-        );
+        assert_eq!(schema.default_value("device.manufacturer"), Some("Anyka"));
     }
 
     #[test]

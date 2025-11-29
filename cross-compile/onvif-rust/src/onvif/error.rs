@@ -198,7 +198,11 @@ impl OnvifError {
     }
 
     /// Create an error for out-of-range value.
-    pub fn out_of_range(name: &str, min: impl std::fmt::Display, max: impl std::fmt::Display) -> Self {
+    pub fn out_of_range(
+        name: &str,
+        min: impl std::fmt::Display,
+        max: impl std::fmt::Display,
+    ) -> Self {
         OnvifError::InvalidArgVal {
             subcode: "OutOfRange".to_string(),
             reason: format!("'{}' must be between {} and {}", name, min, max),

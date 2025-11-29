@@ -1,3 +1,6 @@
+// Test utilities module
+mod test_utils;
+
 #[cfg(test)]
 mod tests {
     #[test]

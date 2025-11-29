@@ -33,7 +33,7 @@ use async_trait::async_trait;
 use axum::{
     body::Body,
     extract::Request,
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use parking_lot::RwLock;
@@ -168,9 +168,7 @@ impl ServiceDispatcher {
         };
 
         // Determine action (prefer header, fallback to body)
-        let action = soap_action
-            .or(envelope.action.clone())
-            .unwrap_or_default();
+        let action = soap_action.or(envelope.action.clone()).unwrap_or_default();
 
         if action.is_empty() {
             tracing::warn!("Missing SOAP action in request");
@@ -344,7 +342,10 @@ mod tests {
     fn test_extract_soap_action_from_header() {
         let request = HttpRequest::builder()
             .method("POST")
-            .header("SOAPAction", "\"http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation\"")
+            .header(
+                "SOAPAction",
+                "\"http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation\"",
+            )
             .body(Body::empty())
             .unwrap();
 
@@ -397,7 +398,10 @@ mod tests {
         // Full URI should extract just the action name
         let request = HttpRequest::builder()
             .method("POST")
-            .header("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/GetCapabilities")
+            .header(
+                "SOAPAction",
+                "http://www.onvif.org/ver10/device/wsdl/GetCapabilities",
+            )
             .body(Body::empty())
             .unwrap();
 

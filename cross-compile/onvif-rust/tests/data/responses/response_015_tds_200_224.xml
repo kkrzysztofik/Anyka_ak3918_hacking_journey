@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+  xmlns:e="http://www.w3.org/2003/05/soap-encoding" xmlns:wsa="http://www.w3.org/2005/08/addressing"
+  xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:wsaw="http://www.w3.org/2006/05/addressing/wsdl"
+  xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2" xmlns:wstop="http://docs.oasis-open.org/wsn/t-1"
+  xmlns:wsntw="http://docs.oasis-open.org/wsn/bw-2"
+  xmlns:wsrf-rw="http://docs.oasis-open.org/wsrf/rw-2"
+  xmlns:wsrf-r="http://docs.oasis-open.org/wsrf/r-2"
+  xmlns:wsrf-bf="http://docs.oasis-open.org/wsrf/bf-2" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl"
+  xmlns:wsoap12="http://schemas.xmlsoap.org/wsdl/soap12"
+  xmlns:http="http://schemas.xmlsoap.org/wsdl/http"
+  xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery"
+  xmlns:wsadis="http://schemas.xmlsoap.org/ws/2004/08/addressing"
+  xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:tns1="http://www.onvif.org/ver10/topics"
+  xmlns:tds="http://www.onvif.org/ver10/device/wsdl"
+  xmlns:trt="http://www.onvif.org/ver10/media/wsdl"
+  xmlns:tev="http://www.onvif.org/ver10/events/wsdl"
+  xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl"
+  xmlns:tst="http://www.onvif.org/ver10/storage/wsdl"
+  xmlns:dn="http://www.onvif.org/ver10/network/wsdl"
+  xmlns:tr2="http://www.onvif.org/ver20/media/wsdl" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"
+  xmlns:tan="http://www.onvif.org/ver20/analytics/wsdl"
+  xmlns:axt="http://www.onvif.org/ver20/analytics"
+  xmlns:tmd="http://www.onvif.org/ver10/deviceIO/wsdl" xmlns:ter="http://www.onvif.org/ver10/error">
+  <s:Body>
+    <tds:GetNetworkInterfacesResponse>
+      <tds:NetworkInterfaces token="eth0">
+        <tt:Enabled>true</tt:Enabled>
+        <tt:Info>
+          <tt:Name>eth0</tt:Name>
+          <tt:HwAddress>00:12:34:70:DF:D2</tt:HwAddress>
+          <tt:MTU>1500</tt:MTU>
+        </tt:Info>
+        <tt:Link>
+          <tt:AdminSettings>
+            <tt:AutoNegotiation>true</tt:AutoNegotiation>
+            <tt:Speed>0</tt:Speed>
+            <tt:Duplex>Full</tt:Duplex>
+          </tt:AdminSettings>
+          <tt:OperSettings>
+            <tt:AutoNegotiation>false</tt:AutoNegotiation>
+            <tt:Speed>0</tt:Speed>
+            <tt:Duplex>Full</tt:Duplex>
+          </tt:OperSettings>
+          <tt:InterfaceType>0</tt:InterfaceType>
+        </tt:Link>
+        <tt:IPv4>
+          <tt:Enabled>true</tt:Enabled>
+          <tt:Config>
+            <tt:FromDHCP>
+              <tt:Address>192.168.1.10</tt:Address>
+              <tt:PrefixLength>24</tt:PrefixLength>
+            </tt:FromDHCP>
+            <tt:DHCP>true</tt:DHCP>
+          </tt:Config>
+        </tt:IPv4>
+      </tds:NetworkInterfaces>
+    </tds:GetNetworkInterfacesResponse>
+  </s:Body>
+</s:Envelope>

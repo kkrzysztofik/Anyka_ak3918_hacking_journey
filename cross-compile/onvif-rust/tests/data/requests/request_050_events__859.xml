@@ -1,0 +1,18 @@
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+  xmlns:a="http://www.w3.org/2005/08/addressing">
+  <s:Header>
+    <a:Action s:mustUnderstand="1">
+      http://www.onvif.org/ver10/events/wsdl/EventPortType/CreatePullPointSubscriptionRequest</a:Action>
+    <a:MessageID>urn:uuid:60960941-c42f-4c92-ac65-941c6896fef0</a:MessageID>
+    <a:ReplyTo>
+      <a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
+    </a:ReplyTo>
+    <a:To s:mustUnderstand="1">http://192.168.2.194:8899/onvif/event_service</a:To>
+  </s:Header>
+  <s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <CreatePullPointSubscription xmlns="http://www.onvif.org/ver10/events/wsdl">
+      <InitialTerminationTime>PT600S</InitialTerminationTime>
+    </CreatePullPointSubscription>
+  </s:Body>
+</s:Envelope>

@@ -52,10 +52,7 @@ async fn main() -> Result<()> {
     // Log shutdown report
     match report.status {
         onvif_rust::ShutdownStatus::Success => {
-            tracing::info!(
-                "Shutdown completed successfully in {:?}",
-                report.duration
-            );
+            tracing::info!("Shutdown completed successfully in {:?}", report.duration);
         }
         onvif_rust::ShutdownStatus::Timeout => {
             tracing::warn!(
@@ -64,10 +61,7 @@ async fn main() -> Result<()> {
             );
         }
         onvif_rust::ShutdownStatus::Error => {
-            tracing::error!(
-                "Shutdown encountered errors: {:?}",
-                report.errors
-            );
+            tracing::error!("Shutdown encountered errors: {:?}", report.errors);
         }
     }
 

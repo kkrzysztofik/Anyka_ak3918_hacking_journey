@@ -31,10 +31,10 @@
 //! runtime.set_int("server.port", 8080)?;
 //! ```
 
-mod schema;
 mod runtime;
+mod schema;
 mod storage;
 
-pub use schema::*;
 pub use runtime::*;
+pub use schema::*;
 pub use storage::*;

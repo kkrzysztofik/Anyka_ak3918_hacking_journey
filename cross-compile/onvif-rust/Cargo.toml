@@ -31,6 +31,7 @@ uuid = { version = "1.18", features = ["v4"] }
 parking_lot = "0.12"
 dashmap = "6.1"
 bytes = "1.11"
+http-body-util = "0.1"
 libc = "0.2"
 anyhow = "1.0"
 thiserror = "2.0"
@@ -45,6 +46,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 wiremock = "0.6"
 criterion = "0.7"
 tempfile = "3.23.0"
+regex = "1.11"
 
 [build-dependencies]
 cc = "1.2"

@@ -285,9 +285,7 @@ mod tests {
     #[test]
     fn test_platform_log_context_logging_methods() {
         // Initialize test logging to avoid panics
-        let _ = tracing_subscriber::fmt()
-            .with_test_writer()
-            .try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let ctx = PlatformLogContext::new("test_module").with_device("dev0");
 

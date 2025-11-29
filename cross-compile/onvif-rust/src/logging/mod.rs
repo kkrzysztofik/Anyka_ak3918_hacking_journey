@@ -21,18 +21,20 @@
 //! ```
 
 mod platform;
+pub mod http;
 
 pub use platform::*;
+pub use http::{HttpLogConfig, HttpLoggingMiddleware};
 
 use std::sync::Once;
 
 use thiserror::Error;
 use tracing::Level;
 use tracing_subscriber::{
+    EnvFilter,
     fmt::{self, format::FmtSpan},
     layer::SubscriberExt,
     util::SubscriberInitExt,
-    EnvFilter,
 };
 
 use crate::config::ConfigRuntime;
@@ -309,8 +311,7 @@ mod tests {
 
     #[test]
     fn test_onvif_log_fields_clone() {
-        let fields = OnvifLogFields::new("PTZ", "ContinuousMove")
-            .with_request_id("uuid-456");
+        let fields = OnvifLogFields::new("PTZ", "ContinuousMove").with_request_id("uuid-456");
 
         let cloned = fields.clone();
         assert_eq!(fields.service, cloned.service);
@@ -358,9 +359,7 @@ mod tests {
     #[test]
     fn test_onvif_log_fields_info_method() {
         // Initialize test logging
-        let _ = tracing_subscriber::fmt()
-            .with_test_writer()
-            .try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let fields = OnvifLogFields::new("Device", "GetDeviceInformation")
             .with_request_id("req-123")
@@ -372,9 +371,7 @@ mod tests {
 
     #[test]
     fn test_onvif_log_fields_debug_method() {
-        let _ = tracing_subscriber::fmt()
-            .with_test_writer()
-            .try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let fields = OnvifLogFields::new("Media", "GetProfiles");
         fields.debug("Test debug message");
@@ -382,12 +379,9 @@ mod tests {
 
     #[test]
     fn test_onvif_log_fields_error_method() {
-        let _ = tracing_subscriber::fmt()
-            .with_test_writer()
-            .try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
-        let fields = OnvifLogFields::new("PTZ", "ContinuousMove")
-            .with_request_id("req-456");
+        let fields = OnvifLogFields::new("PTZ", "ContinuousMove").with_request_id("req-456");
         fields.error("Test error message");
     }
 
@@ -426,7 +420,8 @@ mod tests {
     #[test]
     fn test_logging_error_is_error_trait() {
         // Verify LoggingError implements std::error::Error
-        let err: Box<dyn std::error::Error> = Box::new(LoggingError::InvalidLevel("test".to_string()));
+        let err: Box<dyn std::error::Error> =
+            Box::new(LoggingError::InvalidLevel("test".to_string()));
         assert!(err.to_string().contains("test"));
     }
 }

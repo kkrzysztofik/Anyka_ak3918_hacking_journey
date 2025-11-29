@@ -29,15 +29,15 @@
 //! let device_info = platform.get_device_info().await?;
 //! ```
 
-mod traits;
 mod stubs;
+mod traits;
 
 // Conditional compilation for Anyka implementation
 #[cfg(not(use_stubs))]
 mod anyka;
 
-pub use traits::*;
 pub use stubs::*;
+pub use traits::*;
 
 #[cfg(not(use_stubs))]
 pub use anyka::*;

@@ -260,7 +260,9 @@ pub fn generate_sample_config() -> String {
 
         for param in &section.parameters {
             // Remove section prefix from key for display
-            let param_name = param.key.strip_prefix(&format!("{}.", section.name))
+            let param_name = param
+                .key
+                .strip_prefix(&format!("{}.", section.name))
                 .unwrap_or(&param.key);
 
             output.push_str(&format!("# {}\n", param.description));

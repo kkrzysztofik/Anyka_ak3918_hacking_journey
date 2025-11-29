@@ -176,7 +176,10 @@ mod tests {
     fn test_health_status_add_degraded_component() {
         let mut status = HealthStatus::new(Duration::from_secs(60));
         status.add_component("config", ComponentHealth::healthy("Configuration"));
-        status.add_component("ptz", ComponentHealth::degraded("PTZ", "hardware unavailable"));
+        status.add_component(
+            "ptz",
+            ComponentHealth::degraded("PTZ", "hardware unavailable"),
+        );
 
         assert_eq!(status.status, HealthState::Degraded);
     }
@@ -185,7 +188,10 @@ mod tests {
     fn test_health_status_add_unhealthy_component() {
         let mut status = HealthStatus::new(Duration::from_secs(60));
         status.add_component("config", ComponentHealth::healthy("Configuration"));
-        status.add_component("platform", ComponentHealth::unhealthy("Platform", "init failed"));
+        status.add_component(
+            "platform",
+            ComponentHealth::unhealthy("Platform", "init failed"),
+        );
 
         assert_eq!(status.status, HealthState::Unhealthy);
     }

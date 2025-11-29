@@ -126,7 +126,11 @@ pub struct SoapHeader {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WsSecurity {
     /// Username token for authentication.
-    #[serde(rename = "UsernameToken", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "UsernameToken",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub username_token: Option<UsernameToken>,
 }
 
@@ -218,8 +222,8 @@ pub struct RawSoapEnvelope {
 /// println!("Body: {}", envelope.body_xml);
 /// ```
 pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> {
-    use quick_xml::events::Event;
     use quick_xml::Reader;
+    use quick_xml::events::Event;
 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);

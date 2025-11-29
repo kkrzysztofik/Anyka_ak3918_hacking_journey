@@ -660,7 +660,10 @@ mod tests {
 
         let over = "x".repeat(101);
         let result = validator.check_xml_security(&over);
-        assert!(matches!(result, Err(SecurityError::PayloadTooLarge(101, 100))));
+        assert!(matches!(
+            result,
+            Err(SecurityError::PayloadTooLarge(101, 100))
+        ));
     }
 
     #[test]

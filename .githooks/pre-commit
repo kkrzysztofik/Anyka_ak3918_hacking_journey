@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-commit hook: Run Rust formatter for onvif-rust only when relevant files are staged
+# This script will run cargo fmt --check and if formatting is needed, run cargo fmt to auto-format and restage changes.
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+STAGED_FILES=$(git diff --cached --name-only)
+if printf "%s" "$STAGED_FILES" | grep -q '^cross-compile/onvif-rust/'; then
+  echo "🔧 Running cargo fmt for cross-compile/onvif-rust..."
+  if [ -f cross-compile/onvif-rust/Cargo.toml ]; then
+    pushd cross-compile/onvif-rust >/dev/null || exit 1
+    # Optional setup script for toolchain / cross compilation configs (idempotent)
+    if [ -x ./scripts/setup-cargo-config.sh ]; then
+      ./scripts/setup-cargo-config.sh || true
+    fi
+
+    # Check formatting; if check fails, auto-format and stage changes
+    if ! cargo fmt -- --check; then
+      echo "⚙️  Formatting Rust sources (cargo fmt) and restaging changes..."
+      cargo fmt || true
+      # Stage only modified or new files under cross-compile/onvif-rust
+      MODIFIED_FILES=$(git status --porcelain | awk '{print $2}' | grep '^cross-compile/onvif-rust/' || true)
+      if [ -n "$MODIFIED_FILES" ]; then
+        echo "Restaging formatted files:"
+        echo "$MODIFIED_FILES"
+        echo "$MODIFIED_FILES" | xargs -r git add --
+      else
+        echo "No formatted files to restage"
+      fi
+    else
+      echo "✅ Rust sources are formatted"
+    fi
+
+    popd >/dev/null || exit 1
+  else
+    echo "⚠️  cross-compile/onvif-rust/Cargo.toml not found; skipping cargo fmt"
+  fi
+fi
+
+exit 0

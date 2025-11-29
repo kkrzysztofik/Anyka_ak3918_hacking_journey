@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 use crate::lifecycle::health::{ComponentHealth, HealthStatus};
-use crate::lifecycle::shutdown::{ShutdownCoordinator, DEFAULT_SHUTDOWN_TIMEOUT};
+use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
 use crate::lifecycle::startup::{StartupPhase, StartupProgress};
 use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
 
@@ -144,10 +144,7 @@ impl Application {
                 progress.degraded_services()
             );
         } else {
-            tracing::info!(
-                "Application started successfully in {:?}",
-                startup_duration
-            );
+            tracing::info!("Application started successfully in {:?}", startup_duration);
         }
 
         Ok(Self {
@@ -349,10 +346,7 @@ mod tests {
         let app = Application::start("/test/config.toml").await.unwrap();
         let report = app.shutdown().await;
 
-        assert_eq!(
-            report.status,
-            crate::lifecycle::ShutdownStatus::Success
-        );
+        assert_eq!(report.status, crate::lifecycle::ShutdownStatus::Success);
         assert!(!report.successful_components.is_empty());
     }
 
@@ -380,7 +374,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_application_config_path() {
-        let app = Application::start("/custom/path/config.toml").await.unwrap();
+        let app = Application::start("/custom/path/config.toml")
+            .await
+            .unwrap();
         assert_eq!(app.config_path(), "/custom/path/config.toml");
     }
 

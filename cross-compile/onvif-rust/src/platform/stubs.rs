@@ -5,8 +5,8 @@
 //! and can be configured to succeed or fail specific operations.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use parking_lot::RwLock;
@@ -428,7 +428,11 @@ impl VideoEncoder for StubVideoEncoder {
                 Resolution::new(640, 480),
                 Resolution::new(320, 240),
             ],
-            encodings: vec![VideoEncoding::H264, VideoEncoding::H265, VideoEncoding::Mjpeg],
+            encodings: vec![
+                VideoEncoding::H264,
+                VideoEncoding::H265,
+                VideoEncoding::Mjpeg,
+            ],
             framerate_range: (1, 30),
             bitrate_range: (64, 8192),
             gop_range: (1, 300),
@@ -917,7 +921,7 @@ mod tests {
         let custom_position = PtzPosition::new(45.0, -20.0, 2.0);
 
         let platform = StubPlatformBuilder::new()
-            .ptz_supported(true)  // Need to enable PTZ support
+            .ptz_supported(true) // Need to enable PTZ support
             .ptz_position(custom_position)
             .build();
 
@@ -942,7 +946,7 @@ mod tests {
         };
 
         let platform = StubPlatformBuilder::new()
-            .ptz_supported(true)  // Need to enable PTZ support
+            .ptz_supported(true) // Need to enable PTZ support
             .ptz_preset(preset1)
             .ptz_preset(preset2)
             .build();
@@ -968,7 +972,7 @@ mod tests {
         };
 
         let platform = StubPlatformBuilder::new()
-            .ptz_supported(true)  // Need to enable PTZ support
+            .ptz_supported(true) // Need to enable PTZ support
             .ptz_limits(custom_limits)
             .build();
 
@@ -992,7 +996,7 @@ mod tests {
         };
 
         let platform = StubPlatformBuilder::new()
-            .imaging_supported(true)  // Need to enable imaging support
+            .imaging_supported(true) // Need to enable imaging support
             .imaging_settings(custom_settings)
             .build();
 
@@ -1004,27 +1008,21 @@ mod tests {
 
     #[test]
     fn test_stub_platform_builder_ptz_supported() {
-        let platform = StubPlatformBuilder::new()
-            .ptz_supported(false)
-            .build();
+        let platform = StubPlatformBuilder::new().ptz_supported(false).build();
 
         assert!(platform.ptz_control().is_none());
     }
 
     #[test]
     fn test_stub_platform_builder_imaging_supported() {
-        let platform = StubPlatformBuilder::new()
-            .imaging_supported(false)
-            .build();
+        let platform = StubPlatformBuilder::new().imaging_supported(false).build();
 
         assert!(platform.imaging_control().is_none());
     }
 
     #[tokio::test]
     async fn test_stub_platform_builder_fail_init() {
-        let platform = StubPlatformBuilder::new()
-            .fail_init(true)
-            .build();
+        let platform = StubPlatformBuilder::new().fail_init(true).build();
 
         let result = platform.initialize().await;
         assert!(result.is_err());
