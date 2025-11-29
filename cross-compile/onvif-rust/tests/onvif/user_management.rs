@@ -2,7 +2,7 @@
 //!
 //! Tests the complete user management workflow including:
 //! - User storage and persistence
-//! - Password hashing and verification
+//! - Password validation and verification
 //! - Device service handlers
 //! - Authorization checks
 
@@ -21,10 +21,9 @@ fn create_service_with_admin() -> DeviceService {
     let users = Arc::new(UserStorage::new());
     let password_manager = Arc::new(PasswordManager::new());
 
-    // Create initial admin user
-    let admin_hash = password_manager.hash_password("admin123").unwrap();
+    // Create initial admin user with plaintext password
     users
-        .create_user("admin", &admin_hash, UserLevel::Administrator)
+        .create_user("admin", "admin123", UserLevel::Administrator)
         .unwrap();
 
     DeviceService::new(users, password_manager)
@@ -40,16 +39,14 @@ fn test_user_storage_persistence_roundtrip() {
     let file_path = dir.path().join("users.toml");
     let password_manager = PasswordManager::new();
 
-    // Create and populate storage
+    // Create and populate storage with plaintext passwords
     let storage1 = UserStorage::new();
-    let admin_hash = password_manager.hash_password("admin_secret").unwrap();
-    let user_hash = password_manager.hash_password("user_secret").unwrap();
 
     storage1
-        .create_user("admin", &admin_hash, UserLevel::Administrator)
+        .create_user("admin", "admin_secret", UserLevel::Administrator)
         .unwrap();
     storage1
-        .create_user("operator", &user_hash, UserLevel::Operator)
+        .create_user("operator", "user_secret", UserLevel::Operator)
         .unwrap();
 
     // Save to file
@@ -64,11 +61,7 @@ fn test_user_storage_persistence_roundtrip() {
 
     let admin = storage2.get_user("admin").unwrap();
     assert_eq!(admin.level, UserLevel::Administrator);
-    assert!(
-        password_manager
-            .verify_password("admin_secret", &admin.password_hash)
-            .unwrap()
-    );
+    assert!(password_manager.verify_password("admin_secret", &admin.password));
 
     let operator = storage2.get_user("operator").unwrap();
     assert_eq!(operator.level, UserLevel::Operator);
@@ -77,21 +70,19 @@ fn test_user_storage_persistence_roundtrip() {
 #[test]
 fn test_user_storage_default_admin_creation() {
     let storage = UserStorage::new();
-    let password_manager = PasswordManager::new();
 
     // Storage is empty
     assert!(storage.is_empty());
 
-    // Ensure default admin creates a user
-    let default_hash = password_manager.hash_password("default").unwrap();
-    let result = storage.ensure_default_admin(&default_hash).unwrap();
+    // Ensure default admin creates a user with plaintext password
+    let result = storage.ensure_default_admin("default").unwrap();
 
     assert!(result.is_some());
     assert_eq!(storage.len(), 1);
     assert_eq!(storage.admin_count(), 1);
 
     // Calling again should not create another admin
-    let result2 = storage.ensure_default_admin(&default_hash).unwrap();
+    let result2 = storage.ensure_default_admin("default").unwrap();
     assert!(result2.is_none());
     assert_eq!(storage.len(), 1);
 }
@@ -99,17 +90,15 @@ fn test_user_storage_default_admin_creation() {
 #[test]
 fn test_max_users_limit() {
     let storage = UserStorage::new();
-    let password_manager = PasswordManager::new();
-    let hash = password_manager.hash_password("test").unwrap();
 
-    // Create MAX_USERS users
+    // Create MAX_USERS users with plaintext passwords
     for i in 0..MAX_USERS {
-        let result = storage.create_user(&format!("user{}", i), &hash, UserLevel::User);
+        let result = storage.create_user(&format!("user{}", i), "test_password", UserLevel::User);
         assert!(result.is_ok(), "Failed to create user {}", i);
     }
 
     // Attempt to create one more should fail
-    let result = storage.create_user("overflow", &hash, UserLevel::User);
+    let result = storage.create_user("overflow", "test_password", UserLevel::User);
     assert!(result.is_err());
 }
 
@@ -118,10 +107,10 @@ fn test_max_users_limit() {
 // ============================================================================
 
 #[test]
-fn test_password_hash_verify_integration() {
+fn test_password_verify_integration() {
     let manager = PasswordManager::new();
 
-    // Test various password types
+    // Test various password types with timing-safe verification
     let passwords = vec![
         "simple",
         "Complex123!@#",
@@ -133,14 +122,15 @@ fn test_password_hash_verify_integration() {
     ];
 
     for password in passwords {
-        let hash = manager.hash_password(password).unwrap();
+        // Verify correct password matches
         assert!(
-            manager.verify_password(password, &hash).unwrap(),
+            manager.verify_password(password, password),
             "Failed for password: {:?}",
             password
         );
+        // Verify wrong password doesn't match
         assert!(
-            !manager.verify_password("wrong", &hash).unwrap(),
+            !manager.verify_password("wrong", password),
             "False positive for password: {:?}",
             password
         );
@@ -148,26 +138,19 @@ fn test_password_hash_verify_integration() {
 }
 
 #[test]
-fn test_password_hashes_are_unique() {
+fn test_password_validation() {
     let manager = PasswordManager::new();
-    let password = "same_password";
 
-    // Hash the same password multiple times
-    let hashes: Vec<String> = (0..10)
-        .map(|_| manager.hash_password(password).unwrap())
-        .collect();
+    // Valid passwords
+    assert!(manager.validate_password("simple").is_ok());
+    assert!(manager.validate_password("a").is_ok());
+    assert!(manager.validate_password(&"a".repeat(128)).is_ok());
 
-    // All hashes should be unique (different salts)
-    for i in 0..hashes.len() {
-        for j in i + 1..hashes.len() {
-            assert_ne!(hashes[i], hashes[j], "Duplicate hash detected");
-        }
-    }
+    // Invalid: empty
+    assert!(manager.validate_password("").is_err());
 
-    // But all should verify correctly
-    for hash in &hashes {
-        assert!(manager.verify_password(password, hash).unwrap());
-    }
+    // Invalid: too long
+    assert!(manager.validate_password(&"a".repeat(129)).is_err());
 }
 
 // ============================================================================

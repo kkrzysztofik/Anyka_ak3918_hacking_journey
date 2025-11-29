@@ -234,6 +234,13 @@ pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> 
     let mut body_depth = 0;
     let mut action: Option<String> = None;
 
+    // WS-Security parsing state
+    let mut in_header = false;
+    let mut in_security = false;
+    let mut in_username_token = false;
+    let mut current_element: Option<String> = None;
+    let mut security_data = WsSecurityParseData::default();
+
     loop {
         match reader.read_event() {
             Ok(Event::Start(e)) => {
@@ -241,7 +248,39 @@ pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> 
 
                 if name == "Body" && !in_body {
                     in_body = true;
+                    in_header = false;
                     body_depth = 0;
+                } else if name == "Header" && !in_body {
+                    in_header = true;
+                    header = Some(SoapHeader::default());
+                } else if name == "Security" && in_header {
+                    in_security = true;
+                } else if name == "UsernameToken" && in_security {
+                    in_username_token = true;
+                } else if in_username_token {
+                    current_element = Some(name.clone());
+                    // Capture Password Type attribute
+                    if name == "Password" {
+                        for attr in e.attributes().flatten() {
+                            let key =
+                                String::from_utf8_lossy(attr.key.local_name().as_ref()).to_string();
+                            if key == "Type" {
+                                security_data.password_type =
+                                    Some(String::from_utf8_lossy(&attr.value).to_string());
+                            }
+                        }
+                    }
+                    // Capture Nonce EncodingType attribute
+                    if name == "Nonce" {
+                        for attr in e.attributes().flatten() {
+                            let key =
+                                String::from_utf8_lossy(attr.key.local_name().as_ref()).to_string();
+                            if key == "EncodingType" {
+                                security_data.nonce_encoding =
+                                    Some(String::from_utf8_lossy(&attr.value).to_string());
+                            }
+                        }
+                    }
                 } else if in_body {
                     body_depth += 1;
                     // Capture start tag
@@ -265,9 +304,6 @@ pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> 
                     if body_depth == 1 && action.is_none() {
                         action = Some(name);
                     }
-                } else if name == "Header" {
-                    // Skip header parsing for now, just mark presence
-                    header = Some(SoapHeader::default());
                 }
             }
             Ok(Event::End(e)) => {
@@ -275,6 +311,31 @@ pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> 
 
                 if name == "Body" && in_body && body_depth == 0 {
                     in_body = false;
+                } else if name == "Header" && in_header {
+                    in_header = false;
+                } else if name == "Security" && in_security {
+                    in_security = false;
+                } else if name == "UsernameToken" && in_username_token {
+                    in_username_token = false;
+                    // Build the UsernameToken from collected data
+                    if let Some(ref mut h) = header {
+                        h.security = Some(WsSecurity {
+                            username_token: Some(UsernameToken {
+                                username: security_data.username.take().unwrap_or_default(),
+                                password: PasswordElement {
+                                    password_type: security_data.password_type.take(),
+                                    value: security_data.password.take().unwrap_or_default(),
+                                },
+                                nonce: security_data.nonce.take().map(|v| NonceElement {
+                                    encoding_type: security_data.nonce_encoding.take(),
+                                    value: v,
+                                }),
+                                created: security_data.created.take(),
+                            }),
+                        });
+                    }
+                } else if in_username_token {
+                    current_element = None;
                 } else if in_body {
                     body_xml.push_str("</");
                     body_xml.push_str(&name);
@@ -311,6 +372,18 @@ pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> 
                     // Use xml_content() for unescaping XML entities in quick-xml 0.38+
                     let text = e.xml_content().unwrap_or_default();
                     body_xml.push_str(&text);
+                } else if in_username_token {
+                    // Capture text content for UsernameToken elements
+                    let text = e.xml_content().unwrap_or_default().to_string();
+                    if let Some(ref elem) = current_element {
+                        match elem.as_str() {
+                            "Username" => security_data.username = Some(text),
+                            "Password" => security_data.password = Some(text),
+                            "Nonce" => security_data.nonce = Some(text),
+                            "Created" => security_data.created = Some(text),
+                            _ => {}
+                        }
+                    }
                 }
             }
             Ok(Event::Eof) => break,
@@ -334,6 +407,17 @@ pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> 
         body_xml,
         action,
     })
+}
+
+/// Helper struct for collecting WS-Security data during parsing.
+#[derive(Default)]
+struct WsSecurityParseData {
+    username: Option<String>,
+    password: Option<String>,
+    password_type: Option<String>,
+    nonce: Option<String>,
+    nonce_encoding: Option<String>,
+    created: Option<String>,
 }
 
 /// Build a SOAP response envelope with the given body content.
@@ -488,6 +572,104 @@ mod tests {
 
         let envelope = result.unwrap();
         assert!(envelope.header.is_some());
+    }
+
+    #[test]
+    fn test_parse_ws_security_username_token() {
+        // Real WS-Security UsernameToken with digest authentication
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+            xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
+            xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
+    <s:Header>
+        <wsse:Security s:mustUnderstand="1">
+            <wsse:UsernameToken wsu:Id="UsernameToken-1">
+                <wsse:Username>admin</wsse:Username>
+                <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">YkMvwPj4ZPVPLbK8QBWdYGs+3JE=</wsse:Password>
+                <wsse:Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">MTIzNDU2Nzg5MGFiY2RlZg==</wsse:Nonce>
+                <wsu:Created>2024-01-15T10:30:00Z</wsu:Created>
+            </wsse:UsernameToken>
+        </wsse:Security>
+    </s:Header>
+    <s:Body>
+        <GetDeviceInformation/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(result.is_ok());
+
+        let envelope = result.unwrap();
+        assert!(envelope.header.is_some());
+
+        let header = envelope.header.unwrap();
+        assert!(header.security.is_some());
+
+        let security = header.security.unwrap();
+        assert!(security.username_token.is_some());
+
+        let token = security.username_token.unwrap();
+        assert_eq!(token.username, "admin");
+        assert_eq!(token.password.value, "YkMvwPj4ZPVPLbK8QBWdYGs+3JE=");
+        assert!(token.password.password_type.is_some());
+        assert!(
+            token
+                .password
+                .password_type
+                .as_ref()
+                .unwrap()
+                .contains("PasswordDigest")
+        );
+
+        assert!(token.nonce.is_some());
+        let nonce = token.nonce.unwrap();
+        assert_eq!(nonce.value, "MTIzNDU2Nzg5MGFiY2RlZg==");
+        assert!(nonce.encoding_type.is_some());
+
+        assert!(token.created.is_some());
+        assert_eq!(token.created.unwrap(), "2024-01-15T10:30:00Z");
+    }
+
+    #[test]
+    fn test_parse_ws_security_plaintext_password() {
+        // WS-Security with plaintext password (less secure but valid)
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+            xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+    <s:Header>
+        <wsse:Security>
+            <wsse:UsernameToken>
+                <wsse:Username>operator</wsse:Username>
+                <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText">secretpass</wsse:Password>
+            </wsse:UsernameToken>
+        </wsse:Security>
+    </s:Header>
+    <s:Body>
+        <GetProfiles/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(result.is_ok());
+
+        let envelope = result.unwrap();
+        let header = envelope.header.unwrap();
+        let security = header.security.unwrap();
+        let token = security.username_token.unwrap();
+
+        assert_eq!(token.username, "operator");
+        assert_eq!(token.password.value, "secretpass");
+        assert!(
+            token
+                .password
+                .password_type
+                .as_ref()
+                .unwrap()
+                .contains("PasswordText")
+        );
+        // No nonce or created for plaintext
+        assert!(token.nonce.is_none());
+        assert!(token.created.is_none());
     }
 
     #[test]

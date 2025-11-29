@@ -118,38 +118,35 @@ fn generate_anyka_bindings() {
 
     // Link against Anyka libraries from vendor directory
     // These match the C ONVIF Makefile's LINKERFLAG
+    // Using static linking for all Anyka libraries to avoid uClibc version mismatch
     let lib_path_abs = vendor_lib.canonicalize().unwrap_or(vendor_lib);
     println!("cargo:rustc-link-search=native={}", lib_path_abs.display());
 
-    // Platform libraries (from libplat)
-    println!("cargo:rustc-link-lib=plat_common");
-    println!("cargo:rustc-link-lib=plat_thread");
-    println!("cargo:rustc-link-lib=plat_vi");
-    println!("cargo:rustc-link-lib=plat_vpss");
-    println!("cargo:rustc-link-lib=plat_ipcsrv");
-    println!("cargo:rustc-link-lib=plat_venc_cb");
-    println!("cargo:rustc-link-lib=plat_ai");
-    println!("cargo:rustc-link-lib=plat_drv");
+    // Platform libraries (from libplat) - static linking
+    println!("cargo:rustc-link-lib=static=plat_common");
+    println!("cargo:rustc-link-lib=static=plat_thread");
+    println!("cargo:rustc-link-lib=static=plat_vi");
+    println!("cargo:rustc-link-lib=static=plat_vpss");
+    println!("cargo:rustc-link-lib=static=plat_ipcsrv");
+    println!("cargo:rustc-link-lib=static=plat_venc_cb");
+    println!("cargo:rustc-link-lib=static=plat_ai");
+    println!("cargo:rustc-link-lib=static=plat_drv");
 
-    // MPI libraries (from libmpi)
-    println!("cargo:rustc-link-lib=mpi_venc");
-    println!("cargo:rustc-link-lib=mpi_aenc");
-    println!("cargo:rustc-link-lib=mpi_aed");
+    // MPI libraries (from libmpi) - static linking
+    println!("cargo:rustc-link-lib=static=mpi_venc");
+    println!("cargo:rustc-link-lib=static=mpi_aenc");
+    println!("cargo:rustc-link-lib=static=mpi_aed");
 
-    // SDK component libraries
-    println!("cargo:rustc-link-lib=akuio");
-    println!("cargo:rustc-link-lib=akispsdk");
-    println!("cargo:rustc-link-lib=akv_encode");
-    println!("cargo:rustc-link-lib=akstreamenc");
-    println!("cargo:rustc-link-lib=akaudiocodec");
-    println!("cargo:rustc-link-lib=akmedia");
-    println!("cargo:rustc-link-lib=akae");
+    // SDK component libraries - static linking
+    println!("cargo:rustc-link-lib=static=akuio");
+    println!("cargo:rustc-link-lib=static=akispsdk");
+    println!("cargo:rustc-link-lib=static=akv_encode");
+    println!("cargo:rustc-link-lib=static=akstreamenc");
+    println!("cargo:rustc-link-lib=static=akaudiocodec");
+    println!("cargo:rustc-link-lib=static=akmedialib");
+    println!("cargo:rustc-link-lib=static=akae");
 
-    // Application libraries
-    println!("cargo:rustc-link-lib=app_net");
-    println!("cargo:rustc-link-lib=app_rtsp");
-
-    // System libraries
+    // System libraries - dynamic linking (from toolchain sysroot)
     println!("cargo:rustc-link-lib=pthread");
     println!("cargo:rustc-link-lib=m");
     println!("cargo:rustc-link-lib=dl");

@@ -62,5 +62,7 @@ pub use credentials::{
     AuthConfig, AuthError as CredentialError, AuthState, AuthenticatedUser, UserLevel,
 };
 pub use http_basic::{BasicAuth, BasicAuthError, OptionalBasicAuth};
-pub use http_digest::{HttpDigestAuth, HttpDigestError};
+pub use http_digest::{
+    DigestParams, HttpDigestAuth, HttpDigestError, HttpDigestState, http_digest_middleware,
+};
 pub use ws_security::{AuthError, UsernameToken, WsSecurityValidator};

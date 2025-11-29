@@ -63,10 +63,12 @@ use tokio::sync::broadcast;
 use tower::ServiceBuilder;
 use tower_http::timeout::TimeoutLayer;
 
-use super::dispatcher::ServiceDispatcher;
+use super::dispatcher::{AuthContext, ServiceDispatcher};
 use super::error::OnvifError;
+use super::ws_security::{WsSecurityConfig, WsSecurityValidator};
 use crate::app::AppState;
 use crate::logging::{HttpLogConfig, HttpLoggingMiddleware};
+use crate::users::{PasswordManager, UserStorage};
 
 /// Configuration for the ONVIF HTTP server.
 #[derive(Debug, Clone)]
@@ -105,6 +107,29 @@ pub struct OnvifServerState {
     pub dispatcher: Arc<ServiceDispatcher>,
     /// Shutdown signal sender.
     pub shutdown_tx: broadcast::Sender<()>,
+    /// WS-Security validator for authentication.
+    pub ws_security: Arc<WsSecurityValidator>,
+    /// User storage for looking up credentials.
+    pub user_storage: Arc<UserStorage>,
+    /// Password manager for credential verification.
+    pub password_manager: Arc<PasswordManager>,
+    /// Whether authentication is enabled.
+    pub auth_enabled: bool,
+}
+
+impl OnvifServerState {
+    /// Create an AuthContext from the server state.
+    ///
+    /// This is used by service handlers to pass authentication
+    /// context to the dispatcher.
+    pub fn auth_context(&self) -> AuthContext {
+        AuthContext {
+            auth_enabled: self.auth_enabled,
+            ws_security: Arc::clone(&self.ws_security),
+            user_storage: Arc::clone(&self.user_storage),
+            password_manager: Arc::clone(&self.password_manager),
+        }
+    }
 }
 
 /// ONVIF HTTP Server.
@@ -118,13 +143,22 @@ pub struct OnvifServer {
     dispatcher: Arc<ServiceDispatcher>,
     /// Shutdown signal sender.
     shutdown_tx: broadcast::Sender<()>,
+    /// WS-Security validator.
+    ws_security: Arc<WsSecurityValidator>,
+    /// User storage for authentication.
+    user_storage: Arc<UserStorage>,
+    /// Password manager.
+    password_manager: Arc<PasswordManager>,
+    /// Whether authentication is enabled.
+    auth_enabled: bool,
 }
 
 impl OnvifServer {
     /// Create a new ONVIF server with the given configuration.
     ///
-    /// This constructor creates a server with Media and Imaging services only.
-    /// For full service registration including Device and PTZ services, use
+    /// This constructor creates a server with Media and Imaging services only,
+    /// with authentication disabled. For full service registration including
+    /// Device and PTZ services with authentication, use
     /// [`OnvifServer::with_app_state`] instead.
     ///
     /// # Arguments
@@ -157,10 +191,21 @@ impl OnvifServer {
 
         let (shutdown_tx, _) = broadcast::channel(1);
 
+        // Create default user storage and password manager (auth disabled in this mode)
+        let user_storage = Arc::new(UserStorage::new());
+        let password_manager = Arc::new(PasswordManager::new());
+
+        // WS-Security validator with default config
+        let ws_security = Arc::new(WsSecurityValidator::new(WsSecurityConfig::default()));
+
         Ok(Self {
             config,
             dispatcher,
             shutdown_tx,
+            ws_security,
+            user_storage,
+            password_manager,
+            auth_enabled: false, // Authentication disabled in minimal mode
         })
     }
 
@@ -171,6 +216,8 @@ impl OnvifServer {
     /// - Media Service
     /// - PTZ Service (requires PTZStateManager, ConfigRuntime, Platform)
     /// - Imaging Service
+    ///
+    /// Authentication is enabled based on the configuration in AppState.
     ///
     /// # Arguments
     ///
@@ -206,10 +253,29 @@ impl OnvifServer {
 
         let (shutdown_tx, _) = broadcast::channel(1);
 
+        // Extract auth configuration from ConfigRuntime
+        let auth_enabled = app_state
+            .config()
+            .get_bool("server.auth_enabled")
+            .unwrap_or(true);
+
+        // Configure WS-Security based on app config
+        let ws_config = WsSecurityConfig {
+            clock_skew_seconds: 300, // 5 minutes
+            nonce_ttl_seconds: 300,  // 5 minutes
+            max_nonce_cache_size: 10000,
+            require_digest: true, // Require digest auth in production
+        };
+        let ws_security = Arc::new(WsSecurityValidator::new(ws_config));
+
         Ok(Self {
             config,
             dispatcher,
             shutdown_tx,
+            ws_security,
+            user_storage: Arc::clone(app_state.user_storage()),
+            password_manager: Arc::clone(app_state.password_manager()),
+            auth_enabled,
         })
     }
 
@@ -312,10 +378,22 @@ impl OnvifServer {
             })?;
 
         tracing::info!("Starting ONVIF server on {}", addr);
+        tracing::info!(
+            "Authentication: {}",
+            if self.auth_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
 
         let state = OnvifServerState {
             dispatcher: Arc::clone(&self.dispatcher),
             shutdown_tx: self.shutdown_tx.clone(),
+            ws_security: Arc::clone(&self.ws_security),
+            user_storage: Arc::clone(&self.user_storage),
+            password_manager: Arc::clone(&self.password_manager),
+            auth_enabled: self.auth_enabled,
         };
 
         let app = self.build_router(state);
@@ -441,49 +519,67 @@ async fn validate_content_type(request: Request, next: Next) -> Response {
 }
 
 /// Handler for Device Service requests.
+///
+/// Device service operations have varying auth requirements:
+/// - GetDeviceInformation, GetCapabilities: No auth required
+/// - GetUsers, GetScopes: User level required
+/// - CreateUsers, DeleteUsers, SetUser: Administrator required
 async fn handle_device_service(
     State(state): State<OnvifServerState>,
     request: Request<Body>,
 ) -> Response {
+    let auth_ctx = state.auth_context();
     state
         .dispatcher
-        .dispatch("device", request)
+        .dispatch_with_auth("device", request, &auth_ctx)
         .await
         .into_response()
 }
 
 /// Handler for Media Service requests.
+///
+/// Most Media operations require User level authentication.
+/// Configuration changes require Operator or Administrator level.
 async fn handle_media_service(
     State(state): State<OnvifServerState>,
     request: Request<Body>,
 ) -> Response {
+    let auth_ctx = state.auth_context();
     state
         .dispatcher
-        .dispatch("media", request)
+        .dispatch_with_auth("media", request, &auth_ctx)
         .await
         .into_response()
 }
 
 /// Handler for PTZ Service requests.
+///
+/// PTZ operations generally require Operator level authentication.
+/// Preset management may require Administrator level.
 async fn handle_ptz_service(
     State(state): State<OnvifServerState>,
     request: Request<Body>,
 ) -> Response {
+    let auth_ctx = state.auth_context();
     state
         .dispatcher
-        .dispatch("ptz", request)
+        .dispatch_with_auth("ptz", request, &auth_ctx)
         .await
         .into_response()
 }
 
 /// Handler for Imaging Service requests.
+///
+/// Imaging operations require Operator level authentication
+/// as they affect camera image settings.
 async fn handle_imaging_service(
     State(state): State<OnvifServerState>,
     request: Request<Body>,
 ) -> Response {
+    let auth_ctx = state.auth_context();
     state
         .dispatcher
-        .dispatch("imaging", request)
+        .dispatch_with_auth("imaging", request, &auth_ctx)
         .await
         .into_response()
 }
@@ -622,6 +718,10 @@ mod tests {
         let state = OnvifServerState {
             dispatcher: Arc::clone(&server.dispatcher),
             shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: server.auth_enabled,
         };
 
         let app = server.build_router(state);
@@ -653,6 +753,10 @@ mod tests {
         let state = OnvifServerState {
             dispatcher: Arc::clone(&server.dispatcher),
             shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: server.auth_enabled,
         };
 
         let app = server.build_router(state);
@@ -677,12 +781,19 @@ mod tests {
         let state = OnvifServerState {
             dispatcher: Arc::clone(&server.dispatcher),
             shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: server.auth_enabled,
         };
 
         let cloned = state.clone();
 
         // Should be able to clone state
         assert!(Arc::ptr_eq(&state.dispatcher, &cloned.dispatcher));
+        assert!(Arc::ptr_eq(&state.ws_security, &cloned.ws_security));
+        assert!(Arc::ptr_eq(&state.user_storage, &cloned.user_storage));
+        assert_eq!(state.auth_enabled, cloned.auth_enabled);
     }
 
     #[test]

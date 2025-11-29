@@ -4,6 +4,7 @@
 //! framework that:
 //!
 //! - Configures log levels from application configuration
+//! - Supports runtime log level changes via `set_log_level()`
 //! - Bridges the `log` crate to `tracing` for dependency logging
 //! - Integrates with platform logging (Anyka SDK's ak_print)
 //! - Supports console and file output
@@ -11,13 +12,16 @@
 //! # Example
 //!
 //! ```ignore
-//! use onvif_rust::logging::init_logging;
+//! use onvif_rust::logging::{init_logging, set_log_level};
 //! use onvif_rust::config::ConfigRuntime;
 //!
 //! let config = ConfigRuntime::new(...);
 //! init_logging(&config)?;
 //!
 //! tracing::info!("Application started");
+//!
+//! // Change log level at runtime
+//! set_log_level("debug")?;
 //! ```
 
 pub mod http;
@@ -26,7 +30,8 @@ mod platform;
 pub use http::{HttpLogConfig, HttpLoggingMiddleware};
 pub use platform::*;
 
-use std::sync::Once;
+use std::path::Path;
+use std::sync::{Once, OnceLock};
 
 use thiserror::Error;
 use tracing::Level;
@@ -34,6 +39,7 @@ use tracing_subscriber::{
     EnvFilter,
     fmt::{self, format::FmtSpan},
     layer::SubscriberExt,
+    reload::{self, Handle},
     util::SubscriberInitExt,
 };
 
@@ -53,6 +59,10 @@ pub enum LoggingError {
     /// Invalid log level.
     #[error("Invalid log level: {0}")]
     InvalidLevel(String),
+
+    /// Failed to reload log level.
+    #[error("Failed to reload log level: {0}")]
+    ReloadFailed(String),
 }
 
 /// Result type for logging operations.
@@ -60,6 +70,43 @@ pub type LoggingResult<T> = Result<T, LoggingError>;
 
 /// Ensure logging is only initialized once.
 static INIT: Once = Once::new();
+
+/// Global handle for reloading the log filter at runtime.
+static RELOAD_HANDLE: OnceLock<Handle<EnvFilter, tracing_subscriber::Registry>> = OnceLock::new();
+
+/// Set the log level at runtime.
+///
+/// This function can be called at any time after `init_logging()` to change
+/// the log level without restarting the application.
+///
+/// # Arguments
+///
+/// * `level` - Log level string: "error", "warn", "info", "debug", or "trace"
+///
+/// # Example
+///
+/// ```ignore
+/// set_log_level("debug")?;
+/// tracing::debug!("This will now be logged");
+/// ```
+pub fn set_log_level(level: &str) -> LoggingResult<()> {
+    let level = parse_log_level(level)?;
+    let filter = EnvFilter::builder()
+        .with_default_directive(level.into())
+        .from_env_lossy();
+
+    if let Some(handle) = RELOAD_HANDLE.get() {
+        handle
+            .reload(filter)
+            .map_err(|e| LoggingError::ReloadFailed(e.to_string()))?;
+        tracing::info!("Log level changed to {}", level);
+        Ok(())
+    } else {
+        Err(LoggingError::ReloadFailed(
+            "Logging not initialized with reload support".to_string(),
+        ))
+    }
+}
 
 /// Initialize the logging system.
 ///
@@ -104,10 +151,18 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
         .with_default_directive(level.into())
         .from_env_lossy();
 
-    // Create console layer
-    let console_enabled = config.get_bool("logging.console_enabled").unwrap_or(true);
+    // Create reloadable filter layer
+    let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
 
-    let fmt_layer = fmt::layer()
+    // Store the reload handle for runtime log level changes
+    let _ = RELOAD_HANDLE.set(reload_handle);
+
+    // Get logging configuration
+    let console_enabled = config.get_bool("logging.console_enabled").unwrap_or(true);
+    let file_path = config.get_string("logging.file_path").unwrap_or_default();
+
+    // Create console layer
+    let console_layer = fmt::layer()
         .with_target(true)
         .with_thread_ids(false)
         .with_thread_names(false)
@@ -115,29 +170,96 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
         .with_line_number(true)
         .with_span_events(FmtSpan::NONE);
 
-    // Initialize the subscriber
-    if console_enabled {
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(fmt_layer)
-            .try_init()
-            .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
-    } else {
-        // Minimal subscriber without console output
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .try_init()
-            .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
+    // Initialize the subscriber based on configuration
+    let registry = tracing_subscriber::registry().with(filter_layer);
+
+    // Check if file logging is enabled
+    let file_enabled = !file_path.is_empty();
+
+    match (console_enabled, file_enabled) {
+        (true, true) => {
+            // Both console and file logging
+            let file_path = Path::new(&file_path);
+            let parent_dir = file_path.parent().unwrap_or(Path::new("."));
+            let file_name = file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("onvif.log");
+
+            let file_appender = tracing_appender::rolling::daily(parent_dir, file_name);
+            let file_layer = fmt::layer()
+                .with_target(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_ansi(false) // No ANSI colors in file
+                .with_writer(file_appender);
+
+            registry
+                .with(console_layer)
+                .with(file_layer)
+                .try_init()
+                .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
+
+            tracing::info!(
+                level = %level_str,
+                console_enabled = console_enabled,
+                file_path = %file_path.display(),
+                "Logging system initialized with console and file output"
+            );
+        }
+        (true, false) => {
+            // Console only
+            registry
+                .with(console_layer)
+                .try_init()
+                .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
+
+            tracing::info!(
+                level = %level_str,
+                console_enabled = console_enabled,
+                "Logging system initialized with console output"
+            );
+        }
+        (false, true) => {
+            // File only
+            let file_path = Path::new(&file_path);
+            let parent_dir = file_path.parent().unwrap_or(Path::new("."));
+            let file_name = file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("onvif.log");
+
+            let file_appender = tracing_appender::rolling::daily(parent_dir, file_name);
+            let file_layer = fmt::layer()
+                .with_target(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_ansi(false)
+                .with_writer(file_appender);
+
+            registry
+                .with(file_layer)
+                .try_init()
+                .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
+
+            // Can't log here since console is disabled, but file will capture it
+            tracing::info!(
+                level = %level_str,
+                file_path = %file_path.display(),
+                "Logging system initialized with file output only"
+            );
+        }
+        (false, false) => {
+            // No logging output configured - just init with filter
+            registry
+                .try_init()
+                .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
+        }
     }
 
     // Initialize log bridge to capture `log` crate messages from dependencies
-    tracing_log::LogTracer::init().map_err(|e| LoggingError::LogBridge(e.to_string()))?;
-
-    tracing::info!(
-        level = %level_str,
-        console_enabled = console_enabled,
-        "Logging system initialized"
-    );
+    // Use try_init to handle case where log is already initialized by a dependency
+    let _ = tracing_log::LogTracer::init();
 
     Ok(())
 }
@@ -159,18 +281,26 @@ fn init_logging_default_impl() -> LoggingResult<()> {
         .with_default_directive(Level::INFO.into())
         .from_env_lossy();
 
+    // Create reloadable filter layer
+    let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
+
+    // Store the reload handle for runtime log level changes
+    let _ = RELOAD_HANDLE.set(reload_handle);
+
     let fmt_layer = fmt::layer()
         .with_target(true)
         .with_file(true)
         .with_line_number(true);
 
     tracing_subscriber::registry()
-        .with(env_filter)
+        .with(filter_layer)
         .with(fmt_layer)
         .try_init()
         .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
 
-    tracing_log::LogTracer::init().map_err(|e| LoggingError::LogBridge(e.to_string()))?;
+    // Initialize log bridge to capture `log` crate messages from dependencies
+    // Use try_init to handle case where log is already initialized by a dependency
+    let _ = tracing_log::LogTracer::init();
 
     Ok(())
 }

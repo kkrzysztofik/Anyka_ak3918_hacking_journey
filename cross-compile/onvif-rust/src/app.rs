@@ -19,13 +19,14 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use crate::config::ConfigRuntime;
+use crate::discovery::{DiscoveryConfig, WsDiscovery};
 use crate::lifecycle::health::{ComponentHealth, HealthStatus};
 use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
 use crate::lifecycle::startup::{StartupPhase, StartupProgress};
 use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
 use crate::onvif::ptz::PTZStateManager;
 use crate::onvif::server::{OnvifServer, OnvifServerConfig};
-use crate::platform::Platform;
+use crate::platform::{Platform, StubPlatformBuilder};
 use crate::users::password::PasswordManager;
 use crate::users::storage::UserStorage;
 
@@ -299,7 +300,7 @@ mod app_state_tests {
 }
 
 /// Default configuration file path.
-pub const DEFAULT_CONFIG_PATH: &str = "/etc/onvif/config.toml";
+pub const DEFAULT_CONFIG_PATH: &str = "/mnt/anyka_hack/onvif/config.toml";
 
 /// Capacity of the shutdown broadcast channel.
 const SHUTDOWN_CHANNEL_CAPACITY: usize = 1;
@@ -350,6 +351,12 @@ pub struct Application {
 
     /// Handle to the server task.
     server_task: Option<JoinHandle<()>>,
+
+    /// WS-Discovery service instance for device discovery.
+    discovery: Option<WsDiscovery>,
+
+    /// Handle to the WS-Discovery background task.
+    discovery_task: Option<JoinHandle<()>>,
 }
 
 impl Application {
@@ -389,12 +396,41 @@ impl Application {
         let app_config = crate::config::ConfigStorage::load_or_default(config_path)
             .map_err(|e| StartupError::Config(e.to_string()))?;
         let config_runtime = Arc::new(ConfigRuntime::new(app_config));
+
+        // Apply configured log level (supports runtime changes)
+        if let Ok(level) = config_runtime.get_string("logging.level") {
+            if let Err(e) = crate::logging::set_log_level(&level) {
+                tracing::warn!("Failed to set log level to '{}': {}", level, e);
+            }
+        }
+
+        // Log loaded configuration for debugging
+        config_runtime.log_loaded_config();
+
         progress.complete_phase();
 
         // Phase 2: Platform
         progress.begin_phase(StartupPhase::Platform);
         // Platform initialization is optional - we continue without it for testing
-        tracing::debug!("Platform initialization placeholder - will be implemented in T034-T050");
+        let stub_platform = StubPlatformBuilder::new()
+            .ptz_supported(true)
+            .imaging_supported(true)
+            .build();
+
+        let platform: Option<Arc<dyn Platform>> = match stub_platform.initialize().await {
+            Ok(()) => {
+                tracing::info!("Platform initialized successfully (using stub)");
+                Some(Arc::new(stub_platform) as Arc<dyn Platform>)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Platform initialization failed, continuing in degraded mode: {}",
+                    e
+                );
+                progress.record_degraded("platform", e.to_string());
+                None
+            }
+        };
         progress.complete_phase();
 
         // Phase 3: Services - Build AppState
@@ -418,11 +454,18 @@ impl Application {
             }
         }
 
-        let app_state = AppState::builder()
+        let mut app_state_builder = AppState::builder()
             .user_storage(Arc::new(user_storage))
             .password_manager(Arc::new(PasswordManager::new()))
             .ptz_state(Arc::new(PTZStateManager::new()))
-            .config(Arc::clone(&config_runtime))
+            .config(Arc::clone(&config_runtime));
+
+        // Add platform if available
+        if let Some(ref p) = platform {
+            app_state_builder = app_state_builder.platform(Arc::clone(p));
+        }
+
+        let app_state = app_state_builder
             .build()
             .map_err(|e| StartupError::Services(e.to_string()))?;
 
@@ -471,8 +514,30 @@ impl Application {
 
         // Phase 5: Discovery
         progress.begin_phase(StartupPhase::Discovery);
-        // TODO: Send WS-Discovery Hello when discovery module is implemented
-        tracing::debug!("Discovery placeholder - will be implemented in T190-T203");
+        let discovery_enabled = config_runtime.get_bool("discovery.enabled").unwrap_or(true);
+
+        let (discovery, discovery_task) = if discovery_enabled {
+            // Build discovery configuration
+            let discovery_config = Self::make_discovery_config(&config_runtime, port);
+
+            match Self::start_discovery(discovery_config).await {
+                Ok((disc, task)) => {
+                    tracing::info!("WS-Discovery service started successfully");
+                    (Some(disc), Some(task))
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "WS-Discovery failed to start, continuing in degraded mode: {}",
+                        e
+                    );
+                    progress.record_degraded("discovery", e.to_string());
+                    (None, None)
+                }
+            }
+        } else {
+            tracing::info!("WS-Discovery is disabled in configuration");
+            (None, None)
+        };
         progress.complete_phase();
 
         let startup_duration = started_at.elapsed();
@@ -495,6 +560,8 @@ impl Application {
             app_state: Some(app_state),
             server: Some(server),
             server_task: Some(server_task),
+            discovery,
+            discovery_task,
         })
     }
 
@@ -565,7 +632,20 @@ impl Application {
 
         // Phase 1: Discovery Bye (non-fatal)
         tracing::debug!("Sending WS-Discovery Bye...");
-        report.record_success("discovery");
+        if let Some(discovery) = self.discovery.take() {
+            if let Err(e) = discovery.stop().await {
+                tracing::warn!("Failed to stop WS-Discovery gracefully: {}", e);
+                report.record_failure("discovery", &e.to_string());
+            } else {
+                report.record_success("discovery");
+            }
+            // Wait for discovery task to complete
+            if let Some(task) = self.discovery_task.take() {
+                let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+            }
+        } else {
+            report.record_success("discovery");
+        }
 
         // Phase 2: Network shutdown - Stop HTTP server
         tracing::debug!("Shutting down network services...");
@@ -653,6 +733,117 @@ impl Application {
     /// Get the configuration path used to start the application.
     pub fn config_path(&self) -> &str {
         &self.config_path
+    }
+
+    // ========================================================================
+    // Private Helper Methods
+    // ========================================================================
+
+    /// Build a DiscoveryConfig from runtime configuration.
+    ///
+    /// This method:
+    /// - Loads endpoint_uuid from config or generates a new one
+    /// - Detects local IP from config or uses a reasonable default
+    /// - Sets up scopes based on device capabilities
+    fn make_discovery_config(config: &Arc<ConfigRuntime>, http_port: u16) -> DiscoveryConfig {
+        // Get or generate endpoint UUID
+        let endpoint_uuid = config
+            .get_string("discovery.endpoint_uuid")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("urn:uuid:{}", uuid::Uuid::new_v4()));
+
+        // Get local IP - "auto" means we should try to detect, otherwise use specified value
+        let local_ip_config = config
+            .get_string("discovery.local_ip")
+            .unwrap_or_else(|_| "auto".to_string());
+
+        let device_ip = if local_ip_config == "auto" {
+            // Try to detect local IP, fallback to localhost for testing
+            Self::detect_local_ip().unwrap_or_else(|| "127.0.0.1".to_string())
+        } else {
+            local_ip_config
+        };
+
+        // Get hello interval from config
+        let hello_interval_secs = config.get_int("discovery.hello_interval").unwrap_or(300) as u64;
+
+        tracing::debug!(
+            endpoint_uuid = %endpoint_uuid,
+            device_ip = %device_ip,
+            http_port = http_port,
+            hello_interval_secs = hello_interval_secs,
+            "Building WS-Discovery configuration"
+        );
+
+        DiscoveryConfig {
+            endpoint_uuid,
+            http_port,
+            device_ip,
+            hello_interval: Duration::from_secs(hello_interval_secs),
+            ..Default::default()
+        }
+    }
+
+    /// Start the WS-Discovery service and return the instance and background task.
+    async fn start_discovery(
+        config: DiscoveryConfig,
+    ) -> Result<(WsDiscovery, JoinHandle<()>), crate::discovery::DiscoveryError> {
+        let mut discovery = WsDiscovery::new(config);
+
+        // Initialize the multicast socket
+        discovery.init_socket().await?;
+
+        // Clone what we need for the background task
+        // Note: WsDiscovery::run() takes &mut self, so we need to move it into the task
+        // For now, we'll just send Hello and not run the continuous listener
+        // A full implementation would need Arc<Mutex<WsDiscovery>> or redesign
+
+        // Send initial Hello announcement
+        discovery.send_hello().await?;
+
+        // For now, we don't spawn a background task since run() needs &mut self
+        // This is a limitation that could be addressed by refactoring WsDiscovery to use interior mutability
+        // The discovery instance is still useful for stop() which sends Bye
+        let task = tokio::spawn(async {
+            // Placeholder task - in a full implementation, this would run the discovery listener
+            // discovery.run().await would handle incoming Probe requests
+            tracing::debug!("WS-Discovery task started (Hello-only mode)");
+        });
+
+        Ok((discovery, task))
+    }
+
+    /// Attempt to detect the local IP address.
+    ///
+    /// This is a best-effort function that tries common approaches:
+    /// 1. Check for non-loopback IPv4 addresses
+    /// 2. Fall back to 127.0.0.1 if detection fails
+    fn detect_local_ip() -> Option<String> {
+        // Try to get local IP using a UDP socket trick
+        // This doesn't actually send any packets, just uses the OS routing table
+        use std::net::UdpSocket;
+
+        match UdpSocket::bind("0.0.0.0:0") {
+            Ok(socket) => {
+                // Connect to a public DNS server (doesn't actually send anything)
+                if socket.connect("8.8.8.8:80").is_ok() {
+                    if let Ok(addr) = socket.local_addr() {
+                        let ip = addr.ip().to_string();
+                        if ip != "0.0.0.0" {
+                            tracing::debug!(detected_ip = %ip, "Auto-detected local IP");
+                            return Some(ip);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "Failed to create socket for IP detection");
+            }
+        }
+
+        tracing::debug!("Could not auto-detect local IP, will use fallback");
+        None
     }
 }
 

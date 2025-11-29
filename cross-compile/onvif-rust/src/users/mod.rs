@@ -2,16 +2,22 @@
 //!
 //! This module implements ONVIF user management functionality including:
 //! - User storage with CRUD operations
-//! - Secure password hashing using Argon2id
+//! - Password validation and verification
 //! - TOML file persistence
 //!
 //! # Architecture
 //!
 //! The user management system follows these principles:
 //! - **Thread-safe**: All operations use `RwLock` for concurrent access
-//! - **Secure passwords**: Argon2id hashing with timing-safe comparison
+//! - **WS-Security compatible**: Passwords stored in plaintext for digest auth
 //! - **Atomic persistence**: TOML file writes use temp file + rename pattern
 //! - **ONVIF compliance**: User levels match ONVIF specification
+//!
+//! # Security Note
+//!
+//! Passwords are stored in plaintext because WS-Security UsernameToken
+//! digest authentication requires computing SHA1(Nonce + Created + Password).
+//! File permissions should be restricted (`chmod 600`).
 //!
 //! # Example
 //!
@@ -21,13 +27,13 @@
 //! let password_mgr = PasswordManager::new();
 //! let storage = UserStorage::new();
 //!
-//! // Create admin user
-//! let hash = password_mgr.hash_password("admin123")?;
-//! storage.create_user("admin", &hash, UserLevel::Administrator)?;
+//! // Validate and create admin user
+//! password_mgr.validate_password("admin123")?;
+//! storage.create_user("admin", "admin123", UserLevel::Administrator)?;
 //!
 //! // Verify password
 //! let user = storage.get_user("admin").unwrap();
-//! assert!(password_mgr.verify_password("admin123", &user.password_hash)?);
+//! assert!(password_mgr.verify_password("admin123", &user.password));
 //! ```
 //!
 //! # ONVIF Operations
@@ -53,6 +59,6 @@ mod tests {
         // Verify all public types are accessible
         let _ = UserLevel::Administrator;
         let _ = UserError::MaxUsersReached;
-        let _ = PasswordError::HashingFailed;
+        let _ = PasswordError::EmptyPassword;
     }
 }

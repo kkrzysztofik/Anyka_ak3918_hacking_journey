@@ -67,8 +67,8 @@ pub enum OnvifError {
     HardwareFailure(String),
 
     /// EC-011: Authentication required but not provided or invalid.
-    #[error("Not authorized")]
-    NotAuthorized,
+    #[error("Not authorized: {0}")]
+    NotAuthorized(String),
 
     /// EC-013: Maximum number of users exceeded.
     #[error("Maximum users exceeded")]
@@ -99,7 +99,7 @@ impl OnvifError {
             OnvifError::WellFormed(_) => StatusCode::BAD_REQUEST,
             OnvifError::InvalidArgVal { .. } => StatusCode::BAD_REQUEST,
             OnvifError::HardwareFailure(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            OnvifError::NotAuthorized => StatusCode::UNAUTHORIZED,
+            OnvifError::NotAuthorized(_) => StatusCode::UNAUTHORIZED,
             OnvifError::MaxUsers => StatusCode::FORBIDDEN,
             OnvifError::ConfigurationConflict(_) => StatusCode::CONFLICT,
             OnvifError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -140,10 +140,14 @@ impl OnvifError {
                 "ter:HardwareFailure".to_string(),
                 msg.clone(),
             ),
-            OnvifError::NotAuthorized => (
+            OnvifError::NotAuthorized(reason) => (
                 "s:Sender".to_string(),
                 "ter:NotAuthorized".to_string(),
-                "The action requires authentication".to_string(),
+                if reason.is_empty() {
+                    "The action requires authentication".to_string()
+                } else {
+                    reason.clone()
+                },
             ),
             OnvifError::MaxUsers => (
                 "s:Sender".to_string(),
@@ -303,12 +307,13 @@ mod tests {
 
     #[test]
     fn test_not_authorized() {
-        let error = OnvifError::NotAuthorized;
+        let error = OnvifError::NotAuthorized("Missing credentials".to_string());
 
         assert_eq!(error.http_status(), StatusCode::UNAUTHORIZED);
 
         let fault = error.to_soap_fault();
         assert!(fault.contains("NotAuthorized"));
+        assert!(fault.contains("Missing credentials"));
     }
 
     #[test]
@@ -390,7 +395,7 @@ mod tests {
         let display = format!("{}", error);
         assert!(display.contains("GetTest"));
 
-        let error = OnvifError::NotAuthorized;
+        let error = OnvifError::NotAuthorized(String::new());
         let display = format!("{}", error);
         assert!(display.contains("authorized"));
     }

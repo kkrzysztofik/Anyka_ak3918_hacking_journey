@@ -26,6 +26,13 @@
 //! // let result = auth.validate_response(...);
 //! ```
 
+use axum::{
+    body::Body,
+    extract::Request,
+    http::{StatusCode, header},
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use constant_time_eq::constant_time_eq;
 use dashmap::DashMap;
@@ -34,6 +41,8 @@ use rand::Rng;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
+
+use crate::users::{PasswordManager, UserStorage};
 
 /// Default nonce validity period in seconds (5 minutes).
 #[allow(dead_code)]
@@ -429,6 +438,140 @@ fn md5_hex(input: &str) -> String {
 /// Encode bytes as lowercase hex string.
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// State for HTTP Digest authentication middleware.
+///
+/// This struct holds the dependencies needed for HTTP Digest authentication
+/// and can be passed to the middleware.
+#[derive(Clone)]
+pub struct HttpDigestState {
+    /// HTTP Digest authenticator.
+    pub digest_auth: Arc<HttpDigestAuth>,
+    /// User storage for looking up users.
+    pub user_storage: Arc<UserStorage>,
+    /// Password manager for retrieving passwords.
+    pub password_manager: Arc<PasswordManager>,
+    /// Whether authentication is enabled.
+    pub auth_enabled: bool,
+}
+
+impl HttpDigestState {
+    /// Create a new HTTP Digest state.
+    pub fn new(
+        digest_auth: Arc<HttpDigestAuth>,
+        user_storage: Arc<UserStorage>,
+        password_manager: Arc<PasswordManager>,
+        auth_enabled: bool,
+    ) -> Self {
+        Self {
+            digest_auth,
+            user_storage,
+            password_manager,
+            auth_enabled,
+        }
+    }
+}
+
+/// HTTP Digest authentication middleware for axum.
+///
+/// This middleware checks for HTTP Digest authentication on incoming requests.
+/// If authentication is enabled and the request lacks valid credentials,
+/// it returns a 401 Unauthorized response with a WWW-Authenticate challenge.
+///
+/// # Usage
+///
+/// ```ignore
+/// use axum::{Router, routing::get, middleware};
+/// use onvif_rust::auth::http_digest::{http_digest_middleware, HttpDigestState};
+///
+/// let state = HttpDigestState::new(
+///     Arc::new(HttpDigestAuth::new("ONVIF", 300)),
+///     user_storage,
+///     password_manager,
+///     true,
+/// );
+///
+/// let app = Router::new()
+///     .route("/snapshot", get(handle_snapshot))
+///     .layer(middleware::from_fn_with_state(state, http_digest_middleware));
+/// ```
+pub async fn http_digest_middleware(
+    axum::extract::State(state): axum::extract::State<HttpDigestState>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    // If auth is disabled, pass through
+    if !state.auth_enabled {
+        return next.run(request).await;
+    }
+
+    // Extract Authorization header
+    let auth_header = request
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok());
+
+    match auth_header {
+        Some(header) if header.starts_with("Digest ") || header.starts_with("digest ") => {
+            // Parse and validate digest auth
+            match validate_digest_request(&state, header, request.method().as_str()) {
+                Ok(_username) => {
+                    // Authentication successful, continue to handler
+                    next.run(request).await
+                }
+                Err(e) => {
+                    // Authentication failed
+                    tracing::warn!("HTTP Digest auth failed: {}", e);
+                    unauthorized_response(&state.digest_auth)
+                }
+            }
+        }
+        _ => {
+            // No auth header or not Digest - send challenge
+            tracing::debug!("No HTTP Digest credentials provided, sending challenge");
+            unauthorized_response(&state.digest_auth)
+        }
+    }
+}
+
+/// Validate an HTTP Digest request.
+fn validate_digest_request(
+    state: &HttpDigestState,
+    auth_header: &str,
+    method: &str,
+) -> Result<String, HttpDigestError> {
+    // Parse the digest parameters
+    let params = DigestParams::parse(auth_header)?;
+
+    // Look up the user
+    let user = state
+        .user_storage
+        .get_user(&params.username)
+        .ok_or_else(|| HttpDigestError::InvalidDigest)?;
+
+    // Get the password for verification
+    let password = state
+        .password_manager
+        .get_password_for_digest(&user.password);
+
+    // Validate the digest response
+    state
+        .digest_auth
+        .validate_response(&params, method, password)?;
+
+    Ok(params.username)
+}
+
+/// Create a 401 Unauthorized response with WWW-Authenticate challenge.
+fn unauthorized_response(digest_auth: &HttpDigestAuth) -> Response {
+    let challenge = digest_auth.generate_challenge();
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::WWW_AUTHENTICATE, challenge)],
+        "Unauthorized",
+    )
+        .into_response()
 }
 
 #[cfg(test)]

@@ -505,7 +505,7 @@
 - [X] T280 [P] [US2] Add unit test for GetAudioSourceConfigurations handler.
 - [X] T281 [P] [US2] Add unit test for GetAudioEncoderConfigurations handler.
 - [X] T282 [P] [US2] Add unit test for invalid profile token returning ter:NoProfile fault.
-- [ ] T283 [P] [US2] Create Media Device integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/media_service.rs`.
+- [X] T283 [P] [US2] Create Media Device integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/media_service.rs`.
 
 ### Implementation for User Story 2 - Types
 
@@ -755,7 +755,7 @@
 - [X] T466 [P] [US4] Add unit test for contrast parameter validation.
 - [X] T467 [P] [US4] Add unit test for saturation parameter validation.
 - [X] T468 [P] [US4] Add unit test for day/night mode switching.
-- [ ] T469 [P] [US4] Create Imaging integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/imaging_service.rs`.
+- [X] T469 [P] [US4] Create Imaging integration tests in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/imaging_service.rs`.
 
 ### Implementation for User Story 4 - Types
 
@@ -789,7 +789,7 @@
 - [X] T489 [US4] Implement `ImagingSettingsStore::get_settings()` returning current imaging settings.
 - [X] T490 [US4] Implement `ImagingSettingsStore::set_settings()` with schema validation.
 - [X] T491 [US4] Implement `ImagingSettingsStore::validate_parameter()` checking min/max ranges.
-- [ ] T492 [US4] Implement settings persistence to configuration file.
+- [X] T492 [US4] Implement settings persistence to configuration file.
 
 ### Implementation for User Story 4 - Handlers
 

@@ -1,22 +1,24 @@
-//! Password hashing and verification using Argon2id.
+//! Password storage and verification.
 //!
-//! This module provides secure password hashing following OWASP recommendations:
-//! - Argon2id algorithm (memory-hard, resistant to GPU attacks)
-//! - Per-password random salt
-//! - Timing-safe comparison
+//! This module provides password management for ONVIF authentication.
+//! Passwords are stored in plaintext because WS-Security UsernameToken
+//! digest authentication requires the server to compute:
+//!
+//! ```text
+//! SHA1(Nonce + Created + Password)
+//! ```
+//!
+//! This computation requires access to the original password, making
+//! one-way hashes (like Argon2) incompatible with ONVIF's authentication model.
 //!
 //! # Security Notes
 //!
-//! - Passwords are NEVER stored in plaintext
-//! - Each password gets a unique random salt
-//! - Verification uses constant-time comparison
-//! - Hash format is PHC string format (portable)
+//! - Passwords are stored in plaintext (required for WS-Security)
+//! - File permissions should be restricted (`chmod 600`)
+//! - Consider encryption-at-rest for production deployments
+//! - Timing-safe comparison is used to prevent timing attacks
 
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-};
-use rand::Rng;
+use constant_time_eq::constant_time_eq;
 use thiserror::Error;
 
 // ============================================================================
@@ -26,146 +28,115 @@ use thiserror::Error;
 /// Errors that can occur during password operations.
 #[derive(Debug, Clone, Error, PartialEq)]
 pub enum PasswordError {
-    /// Password hashing failed.
-    #[error("Password hashing failed: {0}")]
-    HashingFailed(String),
+    /// Password is empty.
+    #[error("Password cannot be empty")]
+    EmptyPassword,
 
-    /// Password verification failed.
-    #[error("Password verification failed: {0}")]
-    VerificationFailed(String),
+    /// Password is too long.
+    #[error("Password too long (max {0} characters)")]
+    TooLong(usize),
 
-    /// Invalid hash format.
-    #[error("Invalid password hash format: {0}")]
-    InvalidHash(String),
+    /// Password contains invalid characters.
+    #[error("Password contains invalid characters")]
+    InvalidCharacters,
 }
+
+/// Maximum password length.
+pub const MAX_PASSWORD_LENGTH: usize = 128;
 
 // ============================================================================
 // PasswordManager
 // ============================================================================
 
-/// Secure password hashing and verification manager.
+/// Password storage and verification manager.
 ///
-/// Uses Argon2id with the following parameters:
-/// - Memory cost: 19456 KiB (19 MiB) - reduced for embedded systems
-/// - Time cost: 2 iterations
-/// - Parallelism: 1 thread
+/// Stores passwords in plaintext to support WS-Security UsernameToken
+/// digest authentication, which requires computing SHA1(Nonce + Created + Password).
 ///
 /// # Example
 ///
 /// ```ignore
 /// let manager = PasswordManager::new();
 ///
-/// // Hash a password
-/// let hash = manager.hash_password("secret123")?;
+/// // Validate password format
+/// manager.validate_password("secret123")?;
 ///
-/// // Verify the password
-/// assert!(manager.verify_password("secret123", &hash)?);
-/// assert!(!manager.verify_password("wrong", &hash)?);
+/// // Verify password (timing-safe)
+/// assert!(manager.verify_password("secret123", "secret123"));
+/// assert!(!manager.verify_password("wrong", "secret123"));
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PasswordManager {
-    /// Argon2 hasher instance.
-    argon2: Argon2<'static>,
+    // No internal state needed for plaintext storage
 }
 
 impl PasswordManager {
-    /// Create a new password manager with default settings.
-    ///
-    /// Uses Argon2id with parameters suitable for embedded systems:
-    /// - Memory: 19 MiB (reduced from 64 MiB default)
-    /// - Iterations: 2
-    /// - Parallelism: 1
+    /// Create a new password manager.
     pub fn new() -> Self {
-        // Use default Argon2id parameters (suitable for most cases)
-        // For embedded systems, we could customize with:
-        // Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
-        Self {
-            argon2: Argon2::default(),
-        }
+        Self {}
     }
 
-    /// Hash a password using Argon2id.
+    /// Validate a password meets requirements.
     ///
-    /// Generates a random salt and returns the hash in PHC string format.
-    /// The returned string contains all information needed for verification.
+    /// # Requirements
+    ///
+    /// - Not empty
+    /// - Maximum 128 characters
+    /// - Valid UTF-8 (implicit in Rust strings)
     ///
     /// # Arguments
     ///
-    /// * `password` - The plaintext password to hash
+    /// * `password` - The password to validate
     ///
     /// # Returns
     ///
-    /// The password hash in PHC format: `$argon2id$v=19$m=19456,t=2,p=1$salt$hash`
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if hashing fails (rare, usually system issues).
-    pub fn hash_password(&self, password: &str) -> Result<String, PasswordError> {
-        // Generate a random salt (16 bytes = 128 bits, standard for Argon2)
-        let mut salt_bytes = [0u8; 16];
-        rand::rng().fill(&mut salt_bytes);
+    /// `Ok(())` if valid, or `PasswordError` describing the issue.
+    pub fn validate_password(&self, password: &str) -> Result<(), PasswordError> {
+        if password.is_empty() {
+            return Err(PasswordError::EmptyPassword);
+        }
 
-        let salt = SaltString::encode_b64(&salt_bytes)
-            .map_err(|e| PasswordError::HashingFailed(e.to_string()))?;
+        if password.len() > MAX_PASSWORD_LENGTH {
+            return Err(PasswordError::TooLong(MAX_PASSWORD_LENGTH));
+        }
 
-        // Hash the password
-        let hash = self
-            .argon2
-            .hash_password(password.as_bytes(), &salt)
-            .map_err(|e| PasswordError::HashingFailed(e.to_string()))?;
+        // Check for null bytes or other problematic characters
+        if password.contains('\0') {
+            return Err(PasswordError::InvalidCharacters);
+        }
 
-        Ok(hash.to_string())
+        Ok(())
     }
 
-    /// Verify a password against a stored hash.
-    ///
-    /// Uses timing-safe comparison to prevent timing attacks.
+    /// Verify a password against a stored password using timing-safe comparison.
     ///
     /// # Arguments
     ///
-    /// * `password` - The plaintext password to verify
-    /// * `hash` - The stored password hash in PHC format
+    /// * `provided` - The password provided by the user
+    /// * `stored` - The stored password to compare against
     ///
     /// # Returns
     ///
-    /// `true` if the password matches, `false` otherwise.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the hash format is invalid.
-    pub fn verify_password(&self, password: &str, hash: &str) -> Result<bool, PasswordError> {
-        // Parse the stored hash
-        let parsed_hash =
-            PasswordHash::new(hash).map_err(|e| PasswordError::InvalidHash(e.to_string()))?;
-
-        // Verify using timing-safe comparison
-        match self
-            .argon2
-            .verify_password(password.as_bytes(), &parsed_hash)
-        {
-            Ok(()) => Ok(true),
-            Err(argon2::password_hash::Error::Password) => Ok(false),
-            Err(e) => Err(PasswordError::VerificationFailed(e.to_string())),
-        }
+    /// `true` if the passwords match, `false` otherwise.
+    pub fn verify_password(&self, provided: &str, stored: &str) -> bool {
+        constant_time_eq(provided.as_bytes(), stored.as_bytes())
     }
 
-    /// Check if a string looks like a valid Argon2 hash.
+    /// Get the password for WS-Security digest computation.
     ///
-    /// This doesn't verify the hash is correct, just that it's properly formatted.
-    pub fn is_valid_hash_format(hash: &str) -> bool {
-        // Argon2 hashes start with $argon2
-        if !hash.starts_with("$argon2") {
-            return false;
-        }
-
-        // Try to parse it
-        PasswordHash::new(hash).is_ok()
-    }
-}
-
-impl Default for PasswordManager {
-    fn default() -> Self {
-        Self::new()
+    /// Since passwords are stored in plaintext, this simply returns
+    /// the stored password. This method exists to make the intent clear
+    /// when used in WS-Security validation.
+    ///
+    /// # Arguments
+    ///
+    /// * `stored_password` - The stored password
+    ///
+    /// # Returns
+    ///
+    /// The password for digest computation.
+    pub fn get_password_for_digest<'a>(&self, stored_password: &'a str) -> &'a str {
+        stored_password
     }
 }
 
@@ -178,126 +149,101 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_hash_password() {
+    fn test_validate_password_valid() {
         let manager = PasswordManager::new();
 
-        let hash = manager.hash_password("test_password").unwrap();
-
-        // Hash should be in PHC format
-        assert!(hash.starts_with("$argon2"));
-        assert!(hash.contains("$v="));
-        assert!(hash.contains("$m="));
+        assert!(manager.validate_password("test_password").is_ok());
+        assert!(manager.validate_password("a").is_ok());
+        assert!(manager.validate_password(&"a".repeat(128)).is_ok());
     }
 
     #[test]
-    fn test_different_passwords_different_hashes() {
+    fn test_validate_password_empty() {
         let manager = PasswordManager::new();
 
-        let hash1 = manager.hash_password("password1").unwrap();
-        let hash2 = manager.hash_password("password2").unwrap();
-
-        // Different passwords should produce different hashes
-        assert_ne!(hash1, hash2);
+        let result = manager.validate_password("");
+        assert!(matches!(result, Err(PasswordError::EmptyPassword)));
     }
 
     #[test]
-    fn test_same_password_different_salts() {
+    fn test_validate_password_too_long() {
         let manager = PasswordManager::new();
 
-        let hash1 = manager.hash_password("same_password").unwrap();
-        let hash2 = manager.hash_password("same_password").unwrap();
-
-        // Same password should produce different hashes (different salts)
-        assert_ne!(hash1, hash2);
+        let long_password = "a".repeat(129);
+        let result = manager.validate_password(&long_password);
+        assert!(matches!(result, Err(PasswordError::TooLong(_))));
     }
 
     #[test]
-    fn test_verify_correct_password() {
+    fn test_validate_password_null_byte() {
         let manager = PasswordManager::new();
 
-        let password = "correct_password";
-        let hash = manager.hash_password(password).unwrap();
-
-        assert!(manager.verify_password(password, &hash).unwrap());
+        let result = manager.validate_password("pass\0word");
+        assert!(matches!(result, Err(PasswordError::InvalidCharacters)));
     }
 
     #[test]
-    fn test_verify_wrong_password() {
+    fn test_verify_password_correct() {
         let manager = PasswordManager::new();
 
-        let hash = manager.hash_password("correct").unwrap();
-
-        assert!(!manager.verify_password("wrong", &hash).unwrap());
+        assert!(manager.verify_password("correct", "correct"));
     }
 
     #[test]
-    fn test_verify_empty_password() {
+    fn test_verify_password_wrong() {
         let manager = PasswordManager::new();
 
-        let hash = manager.hash_password("").unwrap();
-
-        assert!(manager.verify_password("", &hash).unwrap());
-        assert!(!manager.verify_password("not_empty", &hash).unwrap());
+        assert!(!manager.verify_password("wrong", "correct"));
     }
 
     #[test]
-    fn test_verify_invalid_hash_format() {
+    fn test_verify_password_empty() {
         let manager = PasswordManager::new();
 
-        let result = manager.verify_password("password", "not_a_valid_hash");
-
-        assert!(matches!(result, Err(PasswordError::InvalidHash(_))));
+        assert!(manager.verify_password("", ""));
+        assert!(!manager.verify_password("", "not_empty"));
+        assert!(!manager.verify_password("not_empty", ""));
     }
 
     #[test]
-    fn test_is_valid_hash_format() {
-        let manager = PasswordManager::new();
-        let hash = manager.hash_password("test").unwrap();
-
-        assert!(PasswordManager::is_valid_hash_format(&hash));
-        assert!(!PasswordManager::is_valid_hash_format("not_a_hash"));
-        assert!(!PasswordManager::is_valid_hash_format("plaintext_password"));
-        assert!(!PasswordManager::is_valid_hash_format(""));
-    }
-
-    #[test]
-    fn test_hash_special_characters() {
+    fn test_verify_password_special_characters() {
         let manager = PasswordManager::new();
 
         let password = "p@ssw0rd!#$%^&*()_+-=[]{}|;':\",./<>?";
-        let hash = manager.hash_password(password).unwrap();
-
-        assert!(manager.verify_password(password, &hash).unwrap());
+        assert!(manager.verify_password(password, password));
     }
 
     #[test]
-    fn test_hash_unicode_password() {
+    fn test_verify_password_unicode() {
         let manager = PasswordManager::new();
 
         let password = "пароль密码🔐";
-        let hash = manager.hash_password(password).unwrap();
-
-        assert!(manager.verify_password(password, &hash).unwrap());
+        assert!(manager.verify_password(password, password));
     }
 
     #[test]
-    fn test_hash_long_password() {
+    fn test_verify_password_long() {
         let manager = PasswordManager::new();
 
-        // 256 character password
-        let password = "a".repeat(256);
-        let hash = manager.hash_password(&password).unwrap();
-
-        assert!(manager.verify_password(&password, &hash).unwrap());
+        let password = "a".repeat(128);
+        assert!(manager.verify_password(&password, &password));
     }
 
     #[test]
-    fn test_default_creates_same_as_new() {
+    fn test_get_password_for_digest() {
+        let manager = PasswordManager::new();
+
+        let stored = "my_secret_password";
+        assert_eq!(manager.get_password_for_digest(stored), stored);
+    }
+
+    #[test]
+    fn test_default() {
         let manager1 = PasswordManager::new();
         let manager2 = PasswordManager::default();
 
-        // Both should be able to verify each other's hashes
-        let hash1 = manager1.hash_password("test").unwrap();
-        assert!(manager2.verify_password("test", &hash1).unwrap());
+        // Both should work identically
+        assert!(manager1.verify_password("test", "test"));
+        assert!(manager2.verify_password("test", "test"));
     }
 }

@@ -626,7 +626,9 @@ impl DeviceService {
                 "CreateUsers: unauthorized (caller level: {:?})",
                 caller_level
             );
-            return Err(OnvifError::NotAuthorized);
+            return Err(OnvifError::NotAuthorized(
+                "Administrator privileges required".to_string(),
+            ));
         }
 
         for user in &request.users {
@@ -644,20 +646,15 @@ impl DeviceService {
                 }
             })?;
 
-            // Hash the password
-            let password_hash = self
-                .password_manager
-                .hash_password(user.password.as_deref().unwrap())
-                .map_err(|e| {
-                    OnvifError::HardwareFailure(format!("Password hashing failed: {}", e))
-                })?;
+            // Get the password (already validated as present)
+            let password = user.password.as_deref().unwrap();
 
             // Convert ONVIF user level to internal level
             let level: UserLevel = user.user_level.clone().into();
 
             // Create the user
             self.users
-                .create_user(&user.username, &password_hash, level)
+                .create_user(&user.username, password, level)
                 .map_err(|e| match e {
                     crate::users::UserError::MaxUsersReached => OnvifError::MaxUsers,
                     crate::users::UserError::UserExists(name) => OnvifError::InvalidArgVal {
@@ -706,7 +703,9 @@ impl DeviceService {
                 "DeleteUsers: unauthorized (caller level: {:?})",
                 caller_level
             );
-            return Err(OnvifError::NotAuthorized);
+            return Err(OnvifError::NotAuthorized(
+                "Administrator privileges required".to_string(),
+            ));
         }
 
         for username in &request.usernames {
@@ -755,7 +754,9 @@ impl DeviceService {
         // Authorization check
         if !caller_level.is_admin() {
             tracing::warn!("SetUser: unauthorized (caller level: {:?})", caller_level);
-            return Err(OnvifError::NotAuthorized);
+            return Err(OnvifError::NotAuthorized(
+                "Administrator privileges required".to_string(),
+            ));
         }
 
         for user in &request.users {
@@ -767,23 +768,15 @@ impl DeviceService {
                 }
             })?;
 
-            // Hash password if provided
-            let password_hash = user
-                .password
-                .as_deref()
-                .map(|pwd| {
-                    self.password_manager.hash_password(pwd).map_err(|e| {
-                        OnvifError::HardwareFailure(format!("Password hashing failed: {}", e))
-                    })
-                })
-                .transpose()?;
+            // Get password if provided
+            let password = user.password.as_deref();
 
             // Convert level
             let level: UserLevel = user.user_level.clone().into();
 
             // Update the user
             self.users
-                .update_user(&user.username, password_hash.as_deref(), Some(level))
+                .update_user(&user.username, password, Some(level))
                 .map_err(|e| match e {
                     crate::users::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
                         subcode: "ter:UserNotFound".to_string(),
@@ -1069,10 +1062,9 @@ mod tests {
         let users = Arc::new(UserStorage::new());
         let password_manager = Arc::new(PasswordManager::new());
 
-        // Create initial admin user
-        let admin_hash = password_manager.hash_password("admin123").unwrap();
+        // Create initial admin user with plaintext password
         users
-            .create_user("admin", &admin_hash, UserLevel::Administrator)
+            .create_user("admin", "admin123", UserLevel::Administrator)
             .unwrap();
 
         DeviceService::new(users, password_manager)
@@ -1590,7 +1582,7 @@ mod tests {
         };
 
         let result = service.handle_create_users(request, UserLevel::Operator);
-        assert!(matches!(result, Err(OnvifError::NotAuthorized)));
+        assert!(matches!(result, Err(OnvifError::NotAuthorized(_))));
     }
 
     #[test]
@@ -1684,7 +1676,7 @@ mod tests {
         };
 
         let result = service.handle_delete_users(request, UserLevel::User);
-        assert!(matches!(result, Err(OnvifError::NotAuthorized)));
+        assert!(matches!(result, Err(OnvifError::NotAuthorized(_))));
     }
 
     #[test]
@@ -1733,7 +1725,7 @@ mod tests {
         };
 
         let result = service.handle_set_user(request, UserLevel::Operator);
-        assert!(matches!(result, Err(OnvifError::NotAuthorized)));
+        assert!(matches!(result, Err(OnvifError::NotAuthorized(_))));
     }
 
     #[test]

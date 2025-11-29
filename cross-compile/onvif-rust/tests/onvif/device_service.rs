@@ -25,10 +25,9 @@ fn create_test_service() -> DeviceService {
     let users = Arc::new(UserStorage::new());
     let password_manager = Arc::new(PasswordManager::new());
 
-    // Create initial admin user
-    let admin_hash = password_manager.hash_password("admin123").unwrap();
+    // Create initial admin user with plaintext password
     users
-        .create_user("admin", &admin_hash, UserLevel::Administrator)
+        .create_user("admin", "admin123", UserLevel::Administrator)
         .unwrap();
 
     DeviceService::new(users, password_manager)

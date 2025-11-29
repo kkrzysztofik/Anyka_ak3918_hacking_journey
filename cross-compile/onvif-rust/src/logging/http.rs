@@ -243,14 +243,14 @@ fn log_request_verbose(
     let body_preview =
         sanitize_and_truncate_body(body, config.max_body_log_size, config.sanitize_passwords);
 
-    tracing::debug!(
+    tracing::info!(
         method = %method,
         path = %path,
         soap_action = ?soap_action,
         body_size = body.len(),
-        body = %body_preview,
-        "→ HTTP request (verbose)"
+        "→ HTTP request"
     );
+    tracing::info!("→ Request body: {}", body_preview);
 }
 
 /// Log verbose response details including sanitized body.
@@ -272,9 +272,9 @@ fn log_response_verbose(
             status = %status.as_u16(),
             latency_ms = latency_ms,
             body_size = body.len(),
-            body = %body_preview,
-            "← HTTP response (verbose)"
+            "← HTTP response"
         );
+        tracing::info!("← Response body: {}", body_preview);
     } else {
         tracing::warn!(
             method = %method,
@@ -282,9 +282,9 @@ fn log_response_verbose(
             status = %status.as_u16(),
             latency_ms = latency_ms,
             body_size = body.len(),
-            body = %body_preview,
-            "← HTTP response error (verbose)"
+            "← HTTP response error"
         );
+        tracing::warn!("← Response body: {}", body_preview);
     }
 }
 

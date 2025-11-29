@@ -309,6 +309,46 @@ impl ConfigRuntime {
     pub fn schema(&self) -> &ConfigSchema {
         &self.schema
     }
+
+    /// Log the loaded configuration values.
+    ///
+    /// This logs all configuration sections and their values at info level,
+    /// showing which values are from the config file vs defaults.
+    /// Sensitive values (like passwords) are masked.
+    pub fn log_loaded_config(&self) {
+        tracing::info!("=== Loaded Configuration ===");
+
+        let config = self.config.read();
+        let sensitive_keys = ["password", "secret", "token", "key", "nonce"];
+
+        for section in self.schema.sections() {
+            tracing::info!("[{}] - {}", section.name, section.description);
+
+            for param in &section.parameters {
+                let is_sensitive = sensitive_keys
+                    .iter()
+                    .any(|s| param.key.to_lowercase().contains(s));
+
+                // Get the actual value (from config or default)
+                let (value, source) = if let Some(v) = config.get(&param.key) {
+                    (v.clone(), "config")
+                } else {
+                    (param.default.clone(), "default")
+                };
+
+                // Mask sensitive values
+                let display_value = if is_sensitive && !value.is_empty() {
+                    "***".to_string()
+                } else {
+                    value
+                };
+
+                tracing::info!("  {} = {} ({})", param.key, display_value, source);
+            }
+        }
+
+        tracing::info!("=== End Configuration ===");
+    }
 }
 
 impl Clone for ConfigRuntime {

@@ -71,17 +71,23 @@ impl std::fmt::Display for UserLevel {
 
 /// A user account in the system.
 ///
-/// Stores the username, hashed password, and privilege level.
-/// The password is stored as an Argon2id hash, never in plaintext.
+/// Stores the username, password (plaintext), and privilege level.
+/// Plaintext storage is required for WS-Security UsernameToken digest
+/// authentication which computes SHA1(Nonce + Created + Password).
+///
+/// # Security
+///
+/// - File permissions should be restricted (`chmod 600`)
+/// - Consider encryption-at-rest for production deployments
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UserAccount {
     /// The unique username.
     pub username: String,
 
-    /// The Argon2id password hash.
+    /// The plaintext password.
     ///
-    /// Format: `$argon2id$v=19$m=65536,t=3,p=4$...`
-    pub password_hash: String,
+    /// Required for WS-Security digest authentication.
+    pub password: String,
 
     /// The user's privilege level.
     pub level: UserLevel,
@@ -89,14 +95,10 @@ pub struct UserAccount {
 
 impl UserAccount {
     /// Create a new user account.
-    pub fn new(
-        username: impl Into<String>,
-        password_hash: impl Into<String>,
-        level: UserLevel,
-    ) -> Self {
+    pub fn new(username: impl Into<String>, password: impl Into<String>, level: UserLevel) -> Self {
         Self {
             username: username.into(),
-            password_hash: password_hash.into(),
+            password: password.into(),
             level,
         }
     }
@@ -252,7 +254,7 @@ impl UserStorage {
     pub fn create_user(
         &self,
         username: &str,
-        password_hash: &str,
+        password: &str,
         level: UserLevel,
     ) -> Result<(), UserError> {
         // Validate username
@@ -280,7 +282,7 @@ impl UserStorage {
         }
 
         // Create account
-        let account = UserAccount::new(username, password_hash, level);
+        let account = UserAccount::new(username, password, level);
         users.insert(username.to_string(), account);
 
         Ok(())
@@ -316,12 +318,12 @@ impl UserStorage {
         Ok(())
     }
 
-    /// Update an existing user's password hash and/or level.
+    /// Update an existing user's password and/or level.
     ///
     /// # Arguments
     ///
     /// * `username` - The user to update
-    /// * `password_hash` - New password hash (if Some)
+    /// * `password` - New password (if Some)
     /// * `level` - New user level (if Some)
     ///
     /// # Errors
@@ -332,7 +334,7 @@ impl UserStorage {
     pub fn update_user(
         &self,
         username: &str,
-        password_hash: Option<&str>,
+        password: Option<&str>,
         level: Option<UserLevel>,
     ) -> Result<(), UserError> {
         let mut users = self.users.write();
@@ -364,8 +366,8 @@ impl UserStorage {
             user.level = new_level;
         }
 
-        if let Some(hash) = password_hash {
-            user.password_hash = hash.to_string();
+        if let Some(pwd) = password {
+            user.password = pwd.to_string();
         }
 
         Ok(())
@@ -452,10 +454,10 @@ impl UserStorage {
     /// Ensure at least one admin user exists.
     ///
     /// If no admin user exists, creates a default admin account.
-    /// Returns the password hash used if a new admin was created.
+    /// Returns the username if a new admin was created.
     pub fn ensure_default_admin(
         &self,
-        default_password_hash: &str,
+        default_password: &str,
     ) -> Result<Option<String>, UserError> {
         let has_admin = self
             .users
@@ -470,7 +472,7 @@ impl UserStorage {
         tracing::info!("Creating default admin user '{}'", DEFAULT_ADMIN_USERNAME);
         self.create_user(
             DEFAULT_ADMIN_USERNAME,
-            default_password_hash,
+            default_password,
             UserLevel::Administrator,
         )?;
 
@@ -532,13 +534,13 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "hash123", UserLevel::Administrator)
+            .create_user("admin", "secret123", UserLevel::Administrator)
             .unwrap();
 
         assert_eq!(storage.len(), 1);
         let user = storage.get_user("admin").unwrap();
         assert_eq!(user.username, "admin");
-        assert_eq!(user.password_hash, "hash123");
+        assert_eq!(user.password, "secret123");
         assert_eq!(user.level, UserLevel::Administrator);
     }
 
@@ -547,10 +549,10 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "hash123", UserLevel::Administrator)
+            .create_user("admin", "secret123", UserLevel::Administrator)
             .unwrap();
 
-        let result = storage.create_user("admin", "other_hash", UserLevel::Operator);
+        let result = storage.create_user("admin", "other_pwd", UserLevel::Operator);
         assert!(matches!(result, Err(UserError::UserExists(_))));
     }
 
@@ -560,11 +562,11 @@ mod tests {
 
         for i in 0..MAX_USERS {
             storage
-                .create_user(&format!("user{}", i), "hash", UserLevel::User)
+                .create_user(&format!("user{}", i), "password", UserLevel::User)
                 .unwrap();
         }
 
-        let result = storage.create_user("overflow", "hash", UserLevel::User);
+        let result = storage.create_user("overflow", "password", UserLevel::User);
         assert!(matches!(result, Err(UserError::MaxUsersReached)));
     }
 
@@ -590,10 +592,10 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "hash", UserLevel::Administrator)
+            .create_user("admin", "password", UserLevel::Administrator)
             .unwrap();
         storage
-            .create_user("user1", "hash", UserLevel::User)
+            .create_user("user1", "password", UserLevel::User)
             .unwrap();
 
         storage.delete_user("user1").unwrap();
@@ -615,7 +617,7 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "hash", UserLevel::Administrator)
+            .create_user("admin", "password", UserLevel::Administrator)
             .unwrap();
 
         let result = storage.delete_user("admin");
@@ -627,10 +629,10 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin1", "hash", UserLevel::Administrator)
+            .create_user("admin1", "password", UserLevel::Administrator)
             .unwrap();
         storage
-            .create_user("admin2", "hash", UserLevel::Administrator)
+            .create_user("admin2", "password", UserLevel::Administrator)
             .unwrap();
 
         storage.delete_user("admin1").unwrap();
@@ -644,14 +646,14 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("user1", "old_hash", UserLevel::User)
+            .create_user("user1", "old_password", UserLevel::User)
             .unwrap();
         storage
-            .update_user("user1", Some("new_hash"), None)
+            .update_user("user1", Some("new_password"), None)
             .unwrap();
 
         let user = storage.get_user("user1").unwrap();
-        assert_eq!(user.password_hash, "new_hash");
+        assert_eq!(user.password, "new_password");
         assert_eq!(user.level, UserLevel::User);
     }
 
@@ -660,10 +662,10 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "hash", UserLevel::Administrator)
+            .create_user("admin", "password", UserLevel::Administrator)
             .unwrap();
         storage
-            .create_user("user1", "hash", UserLevel::User)
+            .create_user("user1", "password", UserLevel::User)
             .unwrap();
         storage
             .update_user("user1", None, Some(UserLevel::Operator))
@@ -677,7 +679,7 @@ mod tests {
     fn test_update_nonexistent_user() {
         let storage = UserStorage::new();
 
-        let result = storage.update_user("nobody", Some("hash"), None);
+        let result = storage.update_user("nobody", Some("password"), None);
         assert!(matches!(result, Err(UserError::UserNotFound(_))));
     }
 
@@ -686,7 +688,7 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "hash", UserLevel::Administrator)
+            .create_user("admin", "password", UserLevel::Administrator)
             .unwrap();
 
         let result = storage.update_user("admin", None, Some(UserLevel::Operator));
@@ -698,13 +700,13 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "hash1", UserLevel::Administrator)
+            .create_user("admin", "pwd1", UserLevel::Administrator)
             .unwrap();
         storage
-            .create_user("user1", "hash2", UserLevel::User)
+            .create_user("user1", "pwd2", UserLevel::User)
             .unwrap();
         storage
-            .create_user("operator", "hash3", UserLevel::Operator)
+            .create_user("operator", "pwd3", UserLevel::Operator)
             .unwrap();
 
         let users = storage.list_users();
@@ -715,7 +717,7 @@ mod tests {
     fn test_ensure_default_admin_when_empty() {
         let storage = UserStorage::new();
 
-        let result = storage.ensure_default_admin("default_hash").unwrap();
+        let result = storage.ensure_default_admin("default_password").unwrap();
 
         assert!(result.is_some());
         assert_eq!(storage.len(), 1);
@@ -728,10 +730,10 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("other_admin", "hash", UserLevel::Administrator)
+            .create_user("other_admin", "password", UserLevel::Administrator)
             .unwrap();
 
-        let result = storage.ensure_default_admin("default_hash").unwrap();
+        let result = storage.ensure_default_admin("default_password").unwrap();
 
         assert!(result.is_none());
         assert_eq!(storage.len(), 1);
@@ -745,10 +747,10 @@ mod tests {
         // Create and save
         let storage1 = UserStorage::new();
         storage1
-            .create_user("admin", "hash1", UserLevel::Administrator)
+            .create_user("admin", "pwd1", UserLevel::Administrator)
             .unwrap();
         storage1
-            .create_user("user1", "hash2", UserLevel::User)
+            .create_user("user1", "pwd2", UserLevel::User)
             .unwrap();
         storage1.save_to_toml(&file_path).unwrap();
 
@@ -779,17 +781,17 @@ mod tests {
         assert_eq!(storage.admin_count(), 0);
 
         storage
-            .create_user("admin1", "hash", UserLevel::Administrator)
+            .create_user("admin1", "password", UserLevel::Administrator)
             .unwrap();
         assert_eq!(storage.admin_count(), 1);
 
         storage
-            .create_user("user1", "hash", UserLevel::User)
+            .create_user("user1", "password", UserLevel::User)
             .unwrap();
         assert_eq!(storage.admin_count(), 1);
 
         storage
-            .create_user("admin2", "hash", UserLevel::Administrator)
+            .create_user("admin2", "password", UserLevel::Administrator)
             .unwrap();
         assert_eq!(storage.admin_count(), 2);
     }

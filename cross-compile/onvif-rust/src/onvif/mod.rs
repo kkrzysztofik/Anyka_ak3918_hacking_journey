@@ -43,11 +43,13 @@
 //! }
 //! ```
 
+pub mod auth_requirements;
 pub mod dispatcher;
 pub mod error;
 pub mod server;
 pub mod soap;
 pub mod types;
+pub mod ws_security;
 
 // Service modules (to be implemented in later phases)
 pub mod device;
@@ -56,7 +58,9 @@ pub mod media;
 pub mod ptz;
 
 // Re-exports for convenience
+pub use auth_requirements::{AuthLevel, get_required_level, requires_auth};
 pub use dispatcher::{ServiceDispatcher, ServiceHandler};
 pub use error::{OnvifError, OnvifResult};
 pub use server::{OnvifServer, OnvifServerConfig};
 pub use soap::{SoapBody, SoapEnvelope, SoapHeader};
+pub use ws_security::{WsSecurityConfig, WsSecurityError, WsSecurityValidator};

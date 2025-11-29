@@ -177,6 +177,7 @@ impl ConfigSchema {
             Self::media_section(),
             Self::ptz_section(),
             Self::imaging_section(),
+            Self::discovery_section(),
             Self::stream_profile_section(1),
             Self::stream_profile_section(2),
             Self::stream_profile_section(3),
@@ -624,6 +625,35 @@ impl ConfigSchema {
                 1,
                 100,
                 "Quality level",
+            ))
+    }
+
+    fn discovery_section() -> ConfigSection {
+        ConfigSection::new("discovery", "WS-Discovery settings")
+            .param(
+                ConfigParameter::string(
+                    "discovery.endpoint_uuid",
+                    "",
+                    "Device endpoint UUID for WS-Discovery (empty to auto-generate and persist)",
+                )
+                .optional(),
+            )
+            .param(ConfigParameter::string(
+                "discovery.local_ip",
+                "auto",
+                "Local IP address for XAddrs ('auto' for automatic detection)",
+            ))
+            .param(ConfigParameter::bool(
+                "discovery.enabled",
+                true,
+                "Enable WS-Discovery service",
+            ))
+            .param(ConfigParameter::int(
+                "discovery.hello_interval",
+                300,
+                30,
+                3600,
+                "Hello announcement interval in seconds",
             ))
     }
 }

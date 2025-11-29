@@ -5,16 +5,15 @@
 
 use anyhow::Result;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
+use onvif_rust::logging::init_logging_default;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging first (before any other operations)
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
-        )
-        .init();
+    // Initialize logging with default INFO level first
+    // The Application will apply the configured level from config file at startup
+    if let Err(e) = init_logging_default() {
+        eprintln!("Failed to initialize logging: {}", e);
+    }
 
     // Get config path from command line or use default
     let config_path = std::env::args()

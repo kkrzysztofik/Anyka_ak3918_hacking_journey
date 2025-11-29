@@ -11,8 +11,8 @@ LOG_FILE=onvif_rust.log
 start_onvif_rust() {
   log INFO 'Starting ONVIF Rust server (onvif-rust)'
 
-  # Set library path for shared libraries
-  export LD_LIBRARY_PATH=/mnt/anyka_hack/lib:$LD_LIBRARY_PATH
+  # Set library path for shared libraries (common lib + onvif-specific lib)
+  export LD_LIBRARY_PATH=/mnt/anyka_hack/lib:/mnt/anyka_hack/onvif/lib:$LD_LIBRARY_PATH
 
   # Check if configuration file exists
   if [ ! -f /mnt/anyka_hack/onvif/config.toml ]; then
