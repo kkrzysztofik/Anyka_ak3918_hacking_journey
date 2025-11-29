@@ -8,10 +8,10 @@
 
 use std::time::Duration;
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Response, StatusCode};
 use axum::routing::post;
-use axum::Router;
 use bytes::Bytes;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -57,15 +57,14 @@ fn build_test_app(config: HttpLogConfig) -> Router {
 }
 
 /// Helper to make a request to the test server.
-async fn make_request(
-    client: &reqwest::Client,
-    url: &str,
-    body: &str,
-) -> reqwest::Response {
+async fn make_request(client: &reqwest::Client, url: &str, body: &str) -> reqwest::Response {
     client
         .post(url)
         .header("Content-Type", "application/soap+xml")
-        .header("SOAPAction", "\"http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation\"")
+        .header(
+            "SOAPAction",
+            "\"http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation\"",
+        )
         .body(body.to_string())
         .send()
         .await
@@ -282,7 +281,10 @@ async fn test_soap_action_header_logged() {
     let response = client
         .post(&url)
         .header("Content-Type", "application/soap+xml")
-        .header("SOAPAction", "\"http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation\"")
+        .header(
+            "SOAPAction",
+            "\"http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation\"",
+        )
         .body(body.to_string())
         .send()
         .await

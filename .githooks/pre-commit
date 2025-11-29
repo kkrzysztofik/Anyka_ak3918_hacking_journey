@@ -21,7 +21,9 @@ if printf "%s" "$STAGED_FILES" | grep -q '^cross-compile/onvif-rust/'; then
     if ! cargo fmt -- --check; then
       echo "⚙️  Formatting Rust sources (cargo fmt) and restaging changes..."
       cargo fmt || true
+      popd >/dev/null || exit 1
       # Stage only modified or new files under cross-compile/onvif-rust
+      # Run from repo root to ensure paths work correctly
       MODIFIED_FILES=$(git status --porcelain | awk '{print $2}' | grep '^cross-compile/onvif-rust/' || true)
       if [ -n "$MODIFIED_FILES" ]; then
         echo "Restaging formatted files:"
@@ -32,9 +34,8 @@ if printf "%s" "$STAGED_FILES" | grep -q '^cross-compile/onvif-rust/'; then
       fi
     else
       echo "✅ Rust sources are formatted"
+      popd >/dev/null || exit 1
     fi
-
-    popd >/dev/null || exit 1
   else
     echo "⚠️  cross-compile/onvif-rust/Cargo.toml not found; skipping cargo fmt"
   fi

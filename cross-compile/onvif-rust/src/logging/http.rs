@@ -240,7 +240,8 @@ fn log_request_verbose(
     body: &Bytes,
     config: &HttpLogConfig,
 ) {
-    let body_preview = sanitize_and_truncate_body(body, config.max_body_log_size, config.sanitize_passwords);
+    let body_preview =
+        sanitize_and_truncate_body(body, config.max_body_log_size, config.sanitize_passwords);
 
     tracing::debug!(
         method = %method,
@@ -261,7 +262,8 @@ fn log_response_verbose(
     body: &Bytes,
     config: &HttpLogConfig,
 ) {
-    let body_preview = sanitize_and_truncate_body(body, config.max_body_log_size, config.sanitize_passwords);
+    let body_preview =
+        sanitize_and_truncate_body(body, config.max_body_log_size, config.sanitize_passwords);
 
     if status.is_success() {
         tracing::info!(
@@ -521,6 +523,9 @@ mod tests {
     fn test_multiple_passwords() {
         let input = r#"<Password>first</Password><Password>second</Password>"#;
         let result = sanitize_soap_body(input);
-        assert_eq!(result, r#"<Password>***</Password><Password>***</Password>"#);
+        assert_eq!(
+            result,
+            r#"<Password>***</Password><Password>***</Password>"#
+        );
     }
 }

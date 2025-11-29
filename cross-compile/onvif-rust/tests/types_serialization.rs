@@ -6,12 +6,11 @@
 mod test_utils;
 
 use onvif_rust::onvif::types::common::{
-    BacklightCompensation20, BacklightCompensationMode, DiscoveryMode, ExposureMode,
-    ExposurePriority, Exposure20, FloatRange, H264Configuration, H264Profile, ImagingSettings20,
-    IntRange, IntRectangle, IrCutFilterMode, MoveStatus, PTZPreset, PTZSpeed, PTZVector, Profile,
-    Rectangle, SetDateTimeType, SoapFault, Vector1D, Vector2D, VideoEncoding,
-    VideoEncoderConfiguration, VideoRateControl, VideoResolution, VideoSourceConfiguration,
-    WhiteBalanceMode, WideDynamicMode,
+    BacklightCompensation20, BacklightCompensationMode, DiscoveryMode, Exposure20, ExposureMode,
+    ExposurePriority, FloatRange, H264Configuration, H264Profile, ImagingSettings20, IntRange,
+    IntRectangle, IrCutFilterMode, MoveStatus, PTZPreset, PTZSpeed, PTZVector, Profile, Rectangle,
+    SetDateTimeType, SoapFault, Vector1D, Vector2D, VideoEncoderConfiguration, VideoEncoding,
+    VideoRateControl, VideoResolution, VideoSourceConfiguration, WhiteBalanceMode, WideDynamicMode,
 };
 use onvif_rust::onvif::types::device::{
     GetCapabilitiesResponse, GetDeviceInformation, GetDeviceInformationResponse,
@@ -139,10 +138,7 @@ fn test_int_range_serialize() {
 
 #[test]
 fn test_float_range_serialize() {
-    let range = FloatRange {
-        min: 0.0,
-        max: 1.0,
-    };
+    let range = FloatRange { min: 0.0, max: 1.0 };
 
     let xml = to_string(&range).expect("Failed to serialize");
     assert!(xml.contains("0"));
@@ -154,7 +150,9 @@ fn test_vector2d_serialize() {
     let vector = Vector2D {
         x: 0.5,
         y: -0.5,
-        space: Some("http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace".to_string()),
+        space: Some(
+            "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace".to_string(),
+        ),
     };
 
     let xml = to_string(&vector).expect("Failed to serialize");
@@ -245,7 +243,10 @@ fn test_ptz_vector_serialize() {
             y: 0.25,
             space: None,
         }),
-        zoom: Some(Vector1D { x: 0.1, space: None }),
+        zoom: Some(Vector1D {
+            x: 0.1,
+            space: None,
+        }),
     };
 
     let xml = to_string(&ptz_vector).expect("Failed to serialize");
@@ -262,7 +263,10 @@ fn test_ptz_speed_serialize() {
             y: 0.5,
             space: None,
         }),
-        zoom: Some(Vector1D { x: 0.5, space: None }),
+        zoom: Some(Vector1D {
+            x: 0.5,
+            space: None,
+        }),
     };
 
     let xml = to_string(&speed).expect("Failed to serialize");
@@ -281,7 +285,10 @@ fn test_ptz_preset_serialize() {
                 y: 0.0,
                 space: None,
             }),
-            zoom: Some(Vector1D { x: 0.0, space: None }),
+            zoom: Some(Vector1D {
+                x: 0.0,
+                space: None,
+            }),
         }),
     };
 
@@ -555,7 +562,10 @@ fn test_imaging_real_get_imaging_settings() {
     assert_eq!(settings.contrast, Some(50.0));
 
     // Verify exposure settings
-    let exposure = settings.exposure.as_ref().expect("Exposure should be present");
+    let exposure = settings
+        .exposure
+        .as_ref()
+        .expect("Exposure should be present");
     assert_eq!(exposure.mode, ExposureMode::AUTO);
     assert_eq!(exposure.priority, Some(ExposurePriority::LowNoise));
     assert_eq!(exposure.min_exposure_time, Some(10.0));
@@ -671,7 +681,10 @@ fn test_ptz_real_get_node() {
     assert_eq!(speed.x_range.max, 8.0);
 
     // Verify extension with preset tour support
-    let ext = node.extension.as_ref().expect("Extension should be present");
+    let ext = node
+        .extension
+        .as_ref()
+        .expect("Extension should be present");
     let tour = ext
         .supported_preset_tour
         .as_ref()
@@ -695,9 +708,15 @@ fn test_ptz_real_get_status() {
     let status = &response.ptz_status;
 
     // Verify position
-    let position = status.position.as_ref().expect("Position should be present");
+    let position = status
+        .position
+        .as_ref()
+        .expect("Position should be present");
 
-    let pan_tilt = position.pan_tilt.as_ref().expect("PanTilt should be present");
+    let pan_tilt = position
+        .pan_tilt
+        .as_ref()
+        .expect("PanTilt should be present");
     assert_eq!(pan_tilt.x, -1.0);
     assert_eq!(pan_tilt.y, -1.0);
     assert_eq!(
@@ -761,7 +780,10 @@ fn test_media_real_get_video_sources() {
     assert_eq!(blc.mode, BacklightCompensationMode::OFF);
 
     // Verify exposure in imaging
-    let exposure = imaging.exposure.as_ref().expect("Exposure should be present");
+    let exposure = imaging
+        .exposure
+        .as_ref()
+        .expect("Exposure should be present");
     assert_eq!(exposure.mode, ExposureMode::AUTO);
 
     // Verify brightness, contrast, saturation
@@ -820,7 +842,10 @@ fn test_media_real_get_profiles() {
     assert_eq!(vec.session_timeout, "PT10S");
 
     // Verify rate control
-    let rc = vec.rate_control.as_ref().expect("RateControl should be present");
+    let rc = vec
+        .rate_control
+        .as_ref()
+        .expect("RateControl should be present");
     assert_eq!(rc.frame_rate_limit, 12);
     assert_eq!(rc.encoding_interval, 0);
     assert_eq!(rc.bitrate_limit, 1536);
@@ -883,9 +908,10 @@ fn test_device_real_get_scopes() {
 
     assert!(!response.scopes.is_empty());
     // Check that we have video_encoder scope
-    let has_video_encoder = response.scopes.iter().any(|s| {
-        s.scope_item.contains("video_encoder")
-    });
+    let has_video_encoder = response
+        .scopes
+        .iter()
+        .any(|s| s.scope_item.contains("video_encoder"));
     assert!(has_video_encoder, "Should have video_encoder scope");
 }
 
@@ -906,7 +932,10 @@ fn test_device_real_get_capabilities() {
     let caps = &response.capabilities;
 
     // Verify analytics capability
-    let analytics = caps.analytics.as_ref().expect("Analytics should be present");
+    let analytics = caps
+        .analytics
+        .as_ref()
+        .expect("Analytics should be present");
     assert!(analytics.x_addr.contains("analytics_service"));
     assert!(analytics.rule_support);
     assert!(analytics.analytics_module_support);
@@ -938,15 +967,17 @@ fn test_device_real_get_services() {
     assert!(!response.services.is_empty());
 
     // Find device service
-    let device_service = response.services.iter().find(|s| {
-        s.namespace.contains("device/wsdl")
-    });
+    let device_service = response
+        .services
+        .iter()
+        .find(|s| s.namespace.contains("device/wsdl"));
     assert!(device_service.is_some(), "Should have device service");
 
     // Find media service
-    let media_service = response.services.iter().find(|s| {
-        s.namespace.contains("media/wsdl")
-    });
+    let media_service = response
+        .services
+        .iter()
+        .find(|s| s.namespace.contains("media/wsdl"));
     assert!(media_service.is_some(), "Should have media service");
 }
 
@@ -970,7 +1001,10 @@ fn test_device_real_get_system_date_time() {
     assert!(tz.tz.contains("CET"));
 
     // Verify UTC datetime
-    let utc = sdt.utc_date_time.as_ref().expect("UTCDateTime should be present");
+    let utc = sdt
+        .utc_date_time
+        .as_ref()
+        .expect("UTCDateTime should be present");
     assert_eq!(utc.date.year, 2025);
     assert_eq!(utc.date.month, 10);
     assert_eq!(utc.date.day, 13);
@@ -1112,8 +1146,8 @@ fn test_media_real_get_video_encoder_configuration_options() {
     let cleaned = extract_response_element(raw_xml, "GetVideoEncoderConfigurationOptionsResponse")
         .expect("Failed to extract GetVideoEncoderConfigurationOptionsResponse");
 
-    let response: GetVideoEncoderConfigurationOptionsResponse =
-        from_str(&cleaned).expect("Failed to deserialize GetVideoEncoderConfigurationOptionsResponse");
+    let response: GetVideoEncoderConfigurationOptionsResponse = from_str(&cleaned)
+        .expect("Failed to deserialize GetVideoEncoderConfigurationOptionsResponse");
 
     let options = &response.options;
     // Quality range is a required field (IntRange struct)
@@ -1195,12 +1229,11 @@ fn test_ptz_real_continuous_move_response() {
 #[test]
 fn test_ptz_real_stop_response() {
     let raw_xml = include_str!("data/responses/response_061_tptz_200_1017.xml");
-    let cleaned = extract_response_element(raw_xml, "StopResponse")
-        .expect("Failed to extract StopResponse");
+    let cleaned =
+        extract_response_element(raw_xml, "StopResponse").expect("Failed to extract StopResponse");
 
     // StopResponse is an empty struct - just verify it parses
-    let _response: StopResponse =
-        from_str(&cleaned).expect("Failed to deserialize StopResponse");
+    let _response: StopResponse = from_str(&cleaned).expect("Failed to deserialize StopResponse");
 }
 
 // ============================================================================
@@ -1212,8 +1245,7 @@ fn test_ptz_real_stop_response() {
 #[test]
 fn test_soap_fault_action_not_supported() {
     let raw_xml = include_str!("data/responses/response_026_s_400_379.xml");
-    let cleaned = extract_response_element(raw_xml, "Fault")
-        .expect("Failed to extract Fault");
+    let cleaned = extract_response_element(raw_xml, "Fault").expect("Failed to extract Fault");
 
     let fault: SoapFault = from_str(&cleaned).expect("Failed to deserialize SoapFault");
 
@@ -1253,11 +1285,10 @@ fn test_request_get_device_information() {
 #[test]
 fn test_request_get_profiles() {
     let raw_xml = include_str!("data/requests/request_010_media__135.xml");
-    let cleaned = extract_response_element(raw_xml, "GetProfiles")
-        .expect("Failed to extract GetProfiles");
+    let cleaned =
+        extract_response_element(raw_xml, "GetProfiles").expect("Failed to extract GetProfiles");
 
-    let _request: GetProfiles =
-        from_str(&cleaned).expect("Failed to deserialize GetProfiles");
+    let _request: GetProfiles = from_str(&cleaned).expect("Failed to deserialize GetProfiles");
 }
 
 /// Test GetImagingSettings request parsing.
@@ -1280,11 +1311,10 @@ fn test_request_get_imaging_settings() {
 #[test]
 fn test_request_get_presets() {
     let raw_xml = include_str!("data/requests/request_056_GetPresets_946.xml");
-    let cleaned = extract_response_element(raw_xml, "GetPresets")
-        .expect("Failed to extract GetPresets");
+    let cleaned =
+        extract_response_element(raw_xml, "GetPresets").expect("Failed to extract GetPresets");
 
-    let request: GetPresets =
-        from_str(&cleaned).expect("Failed to deserialize GetPresets");
+    let request: GetPresets = from_str(&cleaned).expect("Failed to deserialize GetPresets");
 
     // Should have profile token
     assert!(!request.profile_token.is_empty());
@@ -1295,11 +1325,9 @@ fn test_request_get_presets() {
 #[test]
 fn test_request_stop() {
     let raw_xml = include_str!("data/requests/request_061_Stop_1013.xml");
-    let cleaned = extract_response_element(raw_xml, "Stop")
-        .expect("Failed to extract Stop");
+    let cleaned = extract_response_element(raw_xml, "Stop").expect("Failed to extract Stop");
 
-    let request: Stop =
-        from_str(&cleaned).expect("Failed to deserialize Stop");
+    let request: Stop = from_str(&cleaned).expect("Failed to deserialize Stop");
 
     // Should have profile token
     assert!(!request.profile_token.is_empty());

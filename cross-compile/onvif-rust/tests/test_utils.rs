@@ -52,7 +52,9 @@ pub fn extract_soap_body(xml: &str) -> String {
 pub fn strip_namespace_prefixes(xml: &str) -> String {
     // List of prefixes to remove (order matters - longer prefixes first)
     // Include SOAP s: and ter: prefixes for fault parsing
-    let prefixes = ["timg:", "tptz:", "tds:", "trt:", "tan:", "ter:", "tt:", "s:"];
+    let prefixes = [
+        "timg:", "tptz:", "tds:", "trt:", "tan:", "ter:", "tt:", "s:",
+    ];
 
     let mut result = xml.to_string();
 

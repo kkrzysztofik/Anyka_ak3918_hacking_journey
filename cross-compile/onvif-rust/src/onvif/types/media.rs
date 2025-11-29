@@ -596,7 +596,8 @@ impl<'de> Deserialize<'de> for H264Profile {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Self::from_str(&s).ok_or_else(|| serde::de::Error::custom(format!("unknown H264Profile: {}", s)))
+        Self::from_str(&s)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown H264Profile: {}", s)))
     }
 }
 
@@ -628,8 +629,9 @@ mod h264_profiles_vec {
         wrappers
             .into_iter()
             .map(|w| {
-                H264Profile::from_str(&w.value)
-                    .ok_or_else(|| serde::de::Error::custom(format!("unknown H264Profile: {}", w.value)))
+                H264Profile::from_str(&w.value).ok_or_else(|| {
+                    serde::de::Error::custom(format!("unknown H264Profile: {}", w.value))
+                })
             })
             .collect()
     }

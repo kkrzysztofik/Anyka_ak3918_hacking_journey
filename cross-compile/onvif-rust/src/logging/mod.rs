@@ -20,11 +20,11 @@
 //! tracing::info!("Application started");
 //! ```
 
-mod platform;
 pub mod http;
+mod platform;
 
-pub use platform::*;
 pub use http::{HttpLogConfig, HttpLoggingMiddleware};
+pub use platform::*;
 
 use std::sync::Once;
 
