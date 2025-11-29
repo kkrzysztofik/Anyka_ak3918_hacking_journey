@@ -303,53 +303,53 @@
 
 ### User Storage
 
-- [ ] T155 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/users/mod.rs` with module declarations for storage, password.
-- [ ] T156 [P] Define `UserLevel` enum in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/users/storage.rs` with variants: Administrator, Operator, User.
-- [ ] T157 [P] Define `UserAccount` struct in storage.rs with fields: username, password_hash, level.
-- [ ] T158 [P] Define `UserError` enum in storage.rs with variants: MaxUsersReached, UserExists, UserNotFound, InvalidCredentials.
-- [ ] T159 [P] Create `UserStorage` struct with `RwLock<HashMap<String, UserAccount>>`.
-- [ ] T160 [P] Implement `UserStorage::new()` with `MAX_USERS` constant set to 8.
-- [ ] T161 [P] Implement `UserStorage::get_user()` returning Option<UserAccount>.
-- [ ] T162 [P] Implement `UserStorage::create_user()` checking max users and duplicate username.
-- [ ] T163 [P] Implement `UserStorage::delete_user()` removing user by username.
-- [ ] T164 [P] Implement `UserStorage::update_user()` modifying existing user's password_hash or level.
-- [ ] T165 [P] Implement `UserStorage::list_users()` returning Vec<UserAccount>.
+- [X] T155 Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/users/mod.rs` with module declarations for storage, password.
+- [X] T156 [P] Define `UserLevel` enum in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/users/storage.rs` with variants: Administrator, Operator, User.
+- [X] T157 [P] Define `UserAccount` struct in storage.rs with fields: username, password_hash, level.
+- [X] T158 [P] Define `UserError` enum in storage.rs with variants: MaxUsersReached, UserExists, UserNotFound, InvalidCredentials.
+- [X] T159 [P] Create `UserStorage` struct with `RwLock<HashMap<String, UserAccount>>`.
+- [X] T160 [P] Implement `UserStorage::new()` with `MAX_USERS` constant set to 8.
+- [X] T161 [P] Implement `UserStorage::get_user()` returning Option<UserAccount>.
+- [X] T162 [P] Implement `UserStorage::create_user()` checking max users and duplicate username.
+- [X] T163 [P] Implement `UserStorage::delete_user()` removing user by username.
+- [X] T164 [P] Implement `UserStorage::update_user()` modifying existing user's password_hash or level.
+- [X] T165 [P] Implement `UserStorage::list_users()` returning Vec<UserAccount>.
 
 ### Password Security
 
-- [ ] T166 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/users/password.rs` with `PasswordManager` struct.
-- [ ] T167 [P] Define `PasswordError` enum with variants: HashingFailed, VerificationFailed, InvalidHash.
-- [ ] T168 [P] Implement `PasswordManager::hash_password()` using Argon2id with SaltString from OsRng.
-- [ ] T169 [P] Implement `PasswordManager::verify_password()` using Argon2::verify_password() for timing-safe comparison.
+- [X] T166 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/users/password.rs` with `PasswordManager` struct.
+- [X] T167 [P] Define `PasswordError` enum with variants: HashingFailed, VerificationFailed, InvalidHash.
+- [X] T168 [P] Implement `PasswordManager::hash_password()` using Argon2id with SaltString from OsRng.
+- [X] T169 [P] Implement `PasswordManager::verify_password()` using Argon2::verify_password() for timing-safe comparison.
 
 ### User Persistence
 
-- [ ] T170 [P] Implement `UserStorage::load_from_toml()` reading `[[users]]` array from users.toml file.
-- [ ] T171 [P] Implement `UserStorage::save_to_toml()` writing users to TOML file with atomic write pattern.
-- [ ] T172 [P] Add default admin user creation if users.toml doesn't exist.
+- [X] T170 [P] Implement `UserStorage::load_from_toml()` reading `[[users]]` array from users.toml file.
+- [X] T171 [P] Implement `UserStorage::save_to_toml()` writing users to TOML file with atomic write pattern.
+- [X] T172 [P] Add default admin user creation if users.toml doesn't exist.
 
 ### Tests for User Story 5
 
-- [ ] T173 [P] [US5] Add unit tests for UserStorage CRUD operations in storage.rs.
-- [ ] T174 [P] [US5] Add unit tests for PasswordManager hash/verify in password.rs.
-- [ ] T175 [P] [US5] Add unit tests for max users limit enforcement (8 users).
-- [ ] T176 [P] [US5] Create integration tests for user management in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/user_management.rs`.
+- [X] T173 [P] [US5] Add unit tests for UserStorage CRUD operations in storage.rs.
+- [X] T174 [P] [US5] Add unit tests for PasswordManager hash/verify in password.rs.
+- [X] T175 [P] [US5] Add unit tests for max users limit enforcement (8 users).
+- [X] T176 [P] [US5] Create integration tests for user management in `/home/kmk/anyka-dev/cross-compile/onvif-rust/tests/onvif/user_management.rs`.
 
 ### Implementation for User Story 5
 
 **WSDL Source**: `/home/kmk/anyka-dev/cross-compile/onvif/wsdl/devicemgmt.wsdl` (User management operations are part of Device Service)
 
-**Requirement**: User management types MUST match the WSDL definitions. Use generated types from `src/onvif/generated/device_types.rs`.
+**Requirement**: User management types MUST match the WSDL definitions. Use generated types from `src/onvif/types/device.rs`.
 
-- [ ] T177 [P] [US5] Verify GetUsersRequest/Response matches `devicemgmt.wsdl` definition; re-export in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/user_types.rs`.
-- [ ] T178 [P] [US5] Verify CreateUsersRequest/Response matches `devicemgmt.wsdl` definition (elements: User array with Username, Password, UserLevel).
-- [ ] T179 [P] [US5] Verify DeleteUsersRequest/Response matches `devicemgmt.wsdl` definition (elements: Username array).
-- [ ] T180 [P] [US5] Verify SetUserRequest/Response matches `devicemgmt.wsdl` definition (elements: User array).
-- [ ] T181 [US5] Implement `handle_get_users()` in device service returning list of usernames and levels.
-- [ ] T182 [US5] Implement `handle_create_users()` in device service validating admin privileges and creating accounts.
-- [ ] T183 [US5] Implement `handle_delete_users()` in device service removing specified users.
-- [ ] T184 [US5] Implement `handle_set_user()` in device service updating password or level.
-- [ ] T185 [US5] Add authorization check for admin-only operations returning ter:NotAuthorized fault.
+- [X] T177 [P] [US5] Verify GetUsersRequest/Response matches `devicemgmt.wsdl` definition; re-export in `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/onvif/device/user_types.rs`.
+- [X] T178 [P] [US5] Verify CreateUsersRequest/Response matches `devicemgmt.wsdl` definition (elements: User array with Username, Password, UserLevel).
+- [X] T179 [P] [US5] Verify DeleteUsersRequest/Response matches `devicemgmt.wsdl` definition (elements: Username array).
+- [X] T180 [P] [US5] Verify SetUserRequest/Response matches `devicemgmt.wsdl` definition (elements: User array).
+- [X] T181 [US5] Implement `handle_get_users()` in device service returning list of usernames and levels.
+- [X] T182 [US5] Implement `handle_create_users()` in device service validating admin privileges and creating accounts.
+- [X] T183 [US5] Implement `handle_delete_users()` in device service removing specified users.
+- [X] T184 [US5] Implement `handle_set_user()` in device service updating password or level.
+- [X] T185 [US5] Add authorization check for admin-only operations returning ter:NotAuthorized fault.
 
 **Checkpoint**: User management fully operational with secure password storage.
 

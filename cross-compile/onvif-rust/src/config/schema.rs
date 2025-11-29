@@ -223,15 +223,15 @@ impl ConfigSchema {
                         actual: "non-integer".to_string(),
                     })?;
 
-                if let (Some(min), Some(max)) = (param.min, param.max) {
-                    if (val as f64) < min || (val as f64) > max {
-                        return Err(ConfigValidationError::OutOfRange {
-                            key: key.to_string(),
-                            value: val as f64,
-                            min,
-                            max,
-                        });
-                    }
+                if let (Some(min), Some(max)) = (param.min, param.max)
+                    && ((val as f64) < min || (val as f64) > max)
+                {
+                    return Err(ConfigValidationError::OutOfRange {
+                        key: key.to_string(),
+                        value: val as f64,
+                        min,
+                        max,
+                    });
                 }
             }
             ConfigValueType::Float => {
@@ -243,15 +243,15 @@ impl ConfigSchema {
                         actual: "non-float".to_string(),
                     })?;
 
-                if let (Some(min), Some(max)) = (param.min, param.max) {
-                    if val < min || val > max {
-                        return Err(ConfigValidationError::OutOfRange {
-                            key: key.to_string(),
-                            value: val,
-                            min,
-                            max,
-                        });
-                    }
+                if let (Some(min), Some(max)) = (param.min, param.max)
+                    && (val < min || val > max)
+                {
+                    return Err(ConfigValidationError::OutOfRange {
+                        key: key.to_string(),
+                        value: val,
+                        min,
+                        max,
+                    });
                 }
             }
             ConfigValueType::Bool => {

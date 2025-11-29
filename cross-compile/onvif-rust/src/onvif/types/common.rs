@@ -294,18 +294,13 @@ impl Default for TimeZone {
 }
 
 /// Date/time type enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum SetDateTimeType {
     /// Manual date/time setting.
+    #[default]
     Manual,
     /// NTP synchronized.
     NTP,
-}
-
-impl Default for SetDateTimeType {
-    fn default() -> Self {
-        Self::Manual
-    }
 }
 
 /// System date and time information.
@@ -489,35 +484,25 @@ pub struct AudioSourceConfiguration {
 // ============================================================================
 
 /// Video encoding enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum VideoEncoding {
     /// JPEG encoding.
     JPEG,
     /// MPEG4 encoding.
     MPEG4,
     /// H.264 encoding.
+    #[default]
     H264,
 }
 
-impl Default for VideoEncoding {
-    fn default() -> Self {
-        Self::H264
-    }
-}
-
 /// H.264 profile enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum H264Profile {
     Baseline,
+    #[default]
     Main,
     Extended,
     High,
-}
-
-impl Default for H264Profile {
-    fn default() -> Self {
-        Self::Main
-    }
 }
 
 /// MPEG4 profile enumeration.
@@ -631,16 +616,11 @@ pub struct IpAddress {
 }
 
 /// IP address type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum IpType {
+    #[default]
     IPv4,
     IPv6,
-}
-
-impl Default for IpType {
-    fn default() -> Self {
-        Self::IPv4
-    }
 }
 
 /// Video encoder configuration.
@@ -700,17 +680,12 @@ pub struct VideoEncoderConfiguration {
 // ============================================================================
 
 /// Audio encoding enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum AudioEncoding {
+    #[default]
     G711,
     G726,
     AAC,
-}
-
-impl Default for AudioEncoding {
-    fn default() -> Self {
-        Self::G711
-    }
 }
 
 /// Audio encoder configuration.
@@ -926,32 +901,22 @@ pub struct Reverse {
 }
 
 /// EFlip mode enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum EFlipMode {
+    #[default]
     OFF,
     ON,
     Extended,
 }
 
-impl Default for EFlipMode {
-    fn default() -> Self {
-        Self::OFF
-    }
-}
-
 /// Reverse mode enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum ReverseMode {
+    #[default]
     OFF,
     ON,
     AUTO,
     Extended,
-}
-
-impl Default for ReverseMode {
-    fn default() -> Self {
-        Self::OFF
-    }
 }
 
 /// PTZ speed.
@@ -1059,17 +1024,12 @@ pub struct PTZMoveStatus {
 }
 
 /// Move status enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum MoveStatus {
+    #[default]
     IDLE,
     MOVING,
     UNKNOWN,
-}
-
-impl Default for MoveStatus {
-    fn default() -> Self {
-        Self::IDLE
-    }
 }
 
 /// PTZ preset.
@@ -1342,16 +1302,11 @@ pub struct BacklightCompensation20 {
 }
 
 /// Backlight compensation mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum BacklightCompensationMode {
+    #[default]
     OFF,
     ON,
-}
-
-impl Default for BacklightCompensationMode {
-    fn default() -> Self {
-        Self::OFF
-    }
 }
 
 /// Exposure settings.
@@ -1471,29 +1426,19 @@ pub struct Exposure20 {
 }
 
 /// Exposure mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum ExposureMode {
+    #[default]
     AUTO,
     MANUAL,
 }
 
-impl Default for ExposureMode {
-    fn default() -> Self {
-        Self::AUTO
-    }
-}
-
 /// Exposure priority.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum ExposurePriority {
+    #[default]
     LowNoise,
     FrameRate,
-}
-
-impl Default for ExposurePriority {
-    fn default() -> Self {
-        Self::LowNoise
-    }
 }
 
 /// Rectangle for exposure window.
@@ -1576,30 +1521,20 @@ pub struct FocusConfiguration20 {
 }
 
 /// Auto-focus mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum AutoFocusMode {
+    #[default]
     AUTO,
     MANUAL,
 }
 
-impl Default for AutoFocusMode {
-    fn default() -> Self {
-        Self::AUTO
-    }
-}
-
 /// IR cut filter mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum IrCutFilterMode {
     ON,
     OFF,
+    #[default]
     AUTO,
-}
-
-impl Default for IrCutFilterMode {
-    fn default() -> Self {
-        Self::AUTO
-    }
 }
 
 /// Wide dynamic range.
@@ -1627,16 +1562,11 @@ pub struct WideDynamicRange20 {
 }
 
 /// Wide dynamic mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum WideDynamicMode {
+    #[default]
     OFF,
     ON,
-}
-
-impl Default for WideDynamicMode {
-    fn default() -> Self {
-        Self::OFF
-    }
 }
 
 /// White balance settings.
@@ -1676,16 +1606,11 @@ pub struct WhiteBalance20 {
 }
 
 /// White balance mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum WhiteBalanceMode {
+    #[default]
     AUTO,
     MANUAL,
-}
-
-impl Default for WhiteBalanceMode {
-    fn default() -> Self {
-        Self::AUTO
-    }
 }
 
 // ============================================================================
@@ -1884,18 +1809,13 @@ pub struct AudioDecoderConfiguration {
 // ============================================================================
 
 /// Transport protocol enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum TransportProtocol {
     UDP,
     TCP,
+    #[default]
     RTSP,
     HTTP,
-}
-
-impl Default for TransportProtocol {
-    fn default() -> Self {
-        Self::RTSP
-    }
 }
 
 /// Transport configuration.
@@ -1923,18 +1843,13 @@ pub struct StreamSetup {
 }
 
 /// Stream type enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum StreamType {
     #[serde(rename = "RTP-Unicast")]
+    #[default]
     RtpUnicast,
     #[serde(rename = "RTP-Multicast")]
     RtpMulticast,
-}
-
-impl Default for StreamType {
-    fn default() -> Self {
-        Self::RtpUnicast
-    }
 }
 
 /// Media URI information.
@@ -1962,19 +1877,14 @@ pub struct MediaUri {
 // ============================================================================
 
 /// User level enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum UserLevel {
     Administrator,
     Operator,
+    #[default]
     User,
     Anonymous,
     Extended,
-}
-
-impl Default for UserLevel {
-    fn default() -> Self {
-        Self::User
-    }
 }
 
 /// User account information.
@@ -2002,16 +1912,11 @@ pub struct User {
 // ============================================================================
 
 /// Discovery mode enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum DiscoveryMode {
+    #[default]
     Discoverable,
     NonDiscoverable,
-}
-
-impl Default for DiscoveryMode {
-    fn default() -> Self {
-        Self::Discoverable
-    }
 }
 
 /// Scope definition.
@@ -2027,16 +1932,11 @@ pub struct Scope {
 }
 
 /// Scope definition type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum ScopeDefinition {
     Fixed,
+    #[default]
     Configurable,
-}
-
-impl Default for ScopeDefinition {
-    fn default() -> Self {
-        Self::Configurable
-    }
 }
 
 // ============================================================================
@@ -2044,16 +1944,11 @@ impl Default for ScopeDefinition {
 // ============================================================================
 
 /// Factory default type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum FactoryDefaultType {
     Hard,
+    #[default]
     Soft,
-}
-
-impl Default for FactoryDefaultType {
-    fn default() -> Self {
-        Self::Soft
-    }
 }
 
 // ============================================================================

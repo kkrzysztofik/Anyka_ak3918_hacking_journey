@@ -49,11 +49,7 @@ pub mod utils;
 
 pub mod auth;
 
-pub mod users {
-    //! User management placeholder.
-    //!
-    //! Will be implemented in tasks T155-T185.
-}
+pub mod users;
 
 pub mod discovery {
     //! WS-Discovery placeholder.

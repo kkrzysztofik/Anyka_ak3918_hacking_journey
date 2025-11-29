@@ -42,32 +42,11 @@ pub mod stubs {
     pub const AK_FALSE: i32 = 0;
     pub const AK_TRUE: i32 = 1;
 
-    /// Log levels matching Anyka SDK
-    #[repr(C)]
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum LogLevel {
-        Reserved = 0,
-        Error = 1,
-        Warning = 2,
-        Notice = 3,
-        Normal = 4,
-        Info = 5,
-        Debug = 6,
-    }
-
     /// Video device type
     #[repr(C)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum VideoDevType {
         Dev0 = 0,
-    }
-
-    /// Video channel
-    #[repr(C)]
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum VideoChannel {
-        Main = 0,
-        Sub = 1,
     }
 
     /// Video resolution

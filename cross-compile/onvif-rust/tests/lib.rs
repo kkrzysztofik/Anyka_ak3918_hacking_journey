@@ -1,6 +1,9 @@
 // Test utilities module
 mod test_utils;
 
+// ONVIF integration tests
+mod onvif;
+
 #[cfg(test)]
 mod tests {
     #[test]

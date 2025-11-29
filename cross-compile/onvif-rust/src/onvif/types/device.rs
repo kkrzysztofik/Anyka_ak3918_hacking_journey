@@ -87,20 +87,12 @@ impl Default for GetDeviceInformationResponse {
 // ============================================================================
 
 /// GetServices request.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "GetServices")]
 pub struct GetServices {
     /// Include service capabilities in response.
     #[serde(rename = "IncludeCapability")]
     pub include_capability: bool,
-}
-
-impl Default for GetServices {
-    fn default() -> Self {
-        Self {
-            include_capability: false,
-        }
-    }
 }
 
 /// GetServices response.
@@ -483,8 +475,9 @@ pub struct MiscCapabilities {
 // ============================================================================
 
 /// Capability category enumeration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum CapabilityCategory {
+    #[default]
     All,
     Analytics,
     Device,
@@ -492,12 +485,6 @@ pub enum CapabilityCategory {
     Imaging,
     Media,
     PTZ,
-}
-
-impl Default for CapabilityCategory {
-    fn default() -> Self {
-        Self::All
-    }
 }
 
 /// GetCapabilities request.
@@ -1233,16 +1220,11 @@ pub struct NetworkInterfaceConnectionSetting {
 }
 
 /// Duplex mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum Duplex {
+    #[default]
     Full,
     Half,
-}
-
-impl Default for Duplex {
-    fn default() -> Self {
-        Self::Full
-    }
 }
 
 /// IPv4 network interface.
@@ -1338,18 +1320,13 @@ pub struct IPv6Configuration {
 }
 
 /// IPv6 DHCP configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum IPv6DHCPConfiguration {
     Auto,
     Stateful,
     Stateless,
+    #[default]
     Off,
-}
-
-impl Default for IPv6DHCPConfiguration {
-    fn default() -> Self {
-        Self::Off
-    }
 }
 
 /// Prefixed IPv6 address.

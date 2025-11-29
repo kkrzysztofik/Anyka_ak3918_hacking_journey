@@ -234,16 +234,11 @@ pub struct BacklightCompensationOptions20 {
 }
 
 /// Backlight compensation mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum BacklightCompensationMode {
+    #[default]
     OFF,
     ON,
-}
-
-impl Default for BacklightCompensationMode {
-    fn default() -> Self {
-        Self::OFF
-    }
 }
 
 /// Exposure options (version 2.0).
@@ -307,29 +302,19 @@ pub struct ExposureOptions20 {
 }
 
 /// Exposure mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum ExposureMode {
+    #[default]
     AUTO,
     MANUAL,
 }
 
-impl Default for ExposureMode {
-    fn default() -> Self {
-        Self::AUTO
-    }
-}
-
 /// Exposure priority.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum ExposurePriority {
     LowNoise,
+    #[default]
     FrameRate,
-}
-
-impl Default for ExposurePriority {
-    fn default() -> Self {
-        Self::FrameRate
-    }
 }
 
 /// Focus options (version 2.0).
@@ -369,30 +354,20 @@ pub struct FocusOptions20Extension {
 }
 
 /// Auto focus mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum AutoFocusMode {
+    #[default]
     AUTO,
     MANUAL,
 }
 
-impl Default for AutoFocusMode {
-    fn default() -> Self {
-        Self::AUTO
-    }
-}
-
 /// IR cut filter mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum IrCutFilterMode {
     ON,
     OFF,
+    #[default]
     AUTO,
-}
-
-impl Default for IrCutFilterMode {
-    fn default() -> Self {
-        Self::AUTO
-    }
 }
 
 /// Wide dynamic range options (version 2.0).
@@ -408,16 +383,11 @@ pub struct WideDynamicRangeOptions20 {
 }
 
 /// Wide dynamic range mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum WideDynamicMode {
+    #[default]
     OFF,
     ON,
-}
-
-impl Default for WideDynamicMode {
-    fn default() -> Self {
-        Self::OFF
-    }
 }
 
 /// White balance options (version 2.0).
@@ -441,16 +411,11 @@ pub struct WhiteBalanceOptions20 {
 }
 
 /// White balance mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum WhiteBalanceMode {
+    #[default]
     AUTO,
     MANUAL,
-}
-
-impl Default for WhiteBalanceMode {
-    fn default() -> Self {
-        Self::AUTO
-    }
 }
 
 /// Image stabilization options.
@@ -470,18 +435,13 @@ pub struct ImageStabilizationOptions {
 }
 
 /// Image stabilization mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum ImageStabilizationMode {
+    #[default]
     OFF,
     ON,
     AUTO,
     Extended,
-}
-
-impl Default for ImageStabilizationMode {
-    fn default() -> Self {
-        Self::OFF
-    }
 }
 
 /// IR cut filter auto adjustment options.

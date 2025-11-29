@@ -3,8 +3,6 @@
 //! This module provides safe Rust interfaces to the low-level FFI bindings.
 //! All unsafe FFI calls are wrapped with proper error handling and type conversions.
 
-use std::os::raw::{c_char, c_int, c_void};
-
 use thiserror::Error;
 
 /// Errors that can occur when calling Anyka SDK functions.
@@ -414,7 +412,7 @@ mod stub_impl {
     /// Open video input device (stub).
     pub fn video_input_open(_device: VideoDevice) -> AnykaResult<*mut std::ffi::c_void> {
         // Return a non-null pointer for stub
-        Ok(1 as *mut std::ffi::c_void)
+        Ok(std::ptr::dangling_mut::<std::ffi::c_void>())
     }
 
     /// Close video input device (stub).

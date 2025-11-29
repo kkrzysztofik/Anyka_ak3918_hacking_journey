@@ -129,7 +129,7 @@ pub fn is_none<T>(opt: &Option<T>) -> bool {
 }
 
 /// Helper to skip serializing empty Vec fields.
-pub fn is_empty_vec<T>(vec: &Vec<T>) -> bool {
+pub fn is_empty_vec<T>(vec: &[T]) -> bool {
     vec.is_empty()
 }
 

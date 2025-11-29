@@ -96,6 +96,7 @@ impl ConfigStorage {
     }
 
     /// Parse a TOML table recursively.
+    #[allow(clippy::only_used_in_recursion)]
     fn parse_table(
         &self,
         config: &mut ApplicationConfig,

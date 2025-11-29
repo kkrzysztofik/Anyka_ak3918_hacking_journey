@@ -233,17 +233,12 @@ pub struct EFlipOptions {
 }
 
 /// EFlip mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum EFlipMode {
+    #[default]
     OFF,
     ON,
     Extended,
-}
-
-impl Default for EFlipMode {
-    fn default() -> Self {
-        Self::OFF
-    }
 }
 
 /// Reverse options.
@@ -259,18 +254,13 @@ pub struct ReverseOptions {
 }
 
 /// Reverse mode.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum ReverseMode {
+    #[default]
     OFF,
     ON,
     AUTO,
     Extended,
-}
-
-impl Default for ReverseMode {
-    fn default() -> Self {
-        Self::OFF
-    }
 }
 
 // ============================================================================
@@ -630,18 +620,13 @@ pub struct PTZPresetTourSupported {
 }
 
 /// PTZ preset tour operation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum PTZPresetTourOperation {
+    #[default]
     Start,
     Stop,
     Pause,
     Extended,
-}
-
-impl Default for PTZPresetTourOperation {
-    fn default() -> Self {
-        Self::Start
-    }
 }
 
 // ============================================================================

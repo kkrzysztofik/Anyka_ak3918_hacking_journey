@@ -167,7 +167,7 @@ where
 
                 // Log request with body
                 log_request_verbose(
-                    &method.to_string(),
+                    method.as_ref(),
                     &path,
                     soap_action.as_deref(),
                     &body_bytes,
@@ -192,7 +192,7 @@ where
 
                 // Log response with body
                 log_response_verbose(
-                    &method.to_string(),
+                    method.as_ref(),
                     &path,
                     status,
                     duration.as_millis(),

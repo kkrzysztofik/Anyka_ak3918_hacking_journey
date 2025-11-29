@@ -95,6 +95,7 @@ pub fn log_rate_limit_exceeded(client_ip: &IpAddr, request_count: u32) {
 ///
 /// * `client_ip` - The IP address of the client
 /// * `username` - The authenticated username
+#[allow(dead_code)]
 pub fn log_auth_success(client_ip: &IpAddr, username: &str) {
     info!(
         event = "auth_success",
@@ -110,6 +111,7 @@ pub fn log_auth_success(client_ip: &IpAddr, username: &str) {
 ///
 /// * `client_ip` - The IP address being unblocked
 /// * `reason` - Why the IP was unblocked (e.g., "timeout", "manual")
+#[allow(dead_code)]
 pub fn log_ip_unblocked(client_ip: &IpAddr, reason: &str) {
     info!(
         event = "ip_unblocked",
@@ -126,6 +128,7 @@ pub fn log_ip_unblocked(client_ip: &IpAddr, reason: &str) {
 /// * `setting` - The setting that was changed
 /// * `old_value` - The previous value
 /// * `new_value` - The new value
+#[allow(dead_code)]
 pub fn log_security_config_change(setting: &str, old_value: &str, new_value: &str) {
     info!(
         event = "security_config_change",

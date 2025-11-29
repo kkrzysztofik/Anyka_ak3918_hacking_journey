@@ -36,6 +36,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 /// Default nonce validity period in seconds (5 minutes).
+#[allow(dead_code)]
 pub const DEFAULT_NONCE_VALIDITY: u64 = 300;
 
 /// HTTP Digest authentication errors.

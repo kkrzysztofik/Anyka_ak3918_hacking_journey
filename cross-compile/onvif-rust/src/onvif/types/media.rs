@@ -29,6 +29,8 @@
 //! - `GetStreamUri` - Get RTSP stream URI
 //! - `GetSnapshotUri` - Get snapshot URI
 
+use std::str::FromStr;
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::Extension;
@@ -481,16 +483,11 @@ pub struct Mpeg4Options2 {
 }
 
 /// MPEG4 profile.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum Mpeg4Profile {
+    #[default]
     SP,
     ASP,
-}
-
-impl Default for Mpeg4Profile {
-    fn default() -> Self {
-        Self::SP
-    }
 }
 
 /// H.264 encoder options.
@@ -550,26 +547,42 @@ pub struct H264Options2 {
 }
 
 /// H.264 profile.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub enum H264Profile {
+    #[default]
     Baseline,
     Main,
     Extended,
     High,
 }
 
-impl H264Profile {
-    /// Convert from string representation.
-    pub fn from_str(s: &str) -> Option<Self> {
+/// Error type for H264Profile parsing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParseH264ProfileError(String);
+
+impl std::fmt::Display for ParseH264ProfileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unknown H264Profile: {}", self.0)
+    }
+}
+
+impl std::error::Error for ParseH264ProfileError {}
+
+impl FromStr for H264Profile {
+    type Err = ParseH264ProfileError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "Baseline" => Some(Self::Baseline),
-            "Main" => Some(Self::Main),
-            "Extended" => Some(Self::Extended),
-            "High" => Some(Self::High),
-            _ => None,
+            "Baseline" => Ok(Self::Baseline),
+            "Main" => Ok(Self::Main),
+            "Extended" => Ok(Self::Extended),
+            "High" => Ok(Self::High),
+            _ => Err(ParseH264ProfileError(s.to_string())),
         }
     }
+}
 
+impl H264Profile {
     /// Convert to string representation.
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -596,14 +609,8 @@ impl<'de> Deserialize<'de> for H264Profile {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Self::from_str(&s)
-            .ok_or_else(|| serde::de::Error::custom(format!("unknown H264Profile: {}", s)))
-    }
-}
-
-impl Default for H264Profile {
-    fn default() -> Self {
-        Self::Baseline
+        s.parse()
+            .map_err(|e: ParseH264ProfileError| serde::de::Error::custom(e.to_string()))
     }
 }
 
@@ -620,6 +627,7 @@ struct H264ProfileWrapper {
 mod h264_profiles_vec {
     use super::{H264Profile, H264ProfileWrapper};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::str::FromStr;
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<H264Profile>, D::Error>
     where
@@ -629,14 +637,12 @@ mod h264_profiles_vec {
         wrappers
             .into_iter()
             .map(|w| {
-                H264Profile::from_str(&w.value).ok_or_else(|| {
-                    serde::de::Error::custom(format!("unknown H264Profile: {}", w.value))
-                })
+                H264Profile::from_str(&w.value).map_err(|e| serde::de::Error::custom(e.to_string()))
             })
             .collect()
     }
 
-    pub fn serialize<S>(profiles: &Vec<H264Profile>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(profiles: &[H264Profile], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -809,17 +815,12 @@ pub struct AudioEncoderConfigurationOption {
 }
 
 /// Audio encoding type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum AudioEncoding {
+    #[default]
     G711,
     G726,
     AAC,
-}
-
-impl Default for AudioEncoding {
-    fn default() -> Self {
-        Self::G711
-    }
 }
 
 /// Integer list.

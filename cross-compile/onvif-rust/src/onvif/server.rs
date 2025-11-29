@@ -215,7 +215,7 @@ impl OnvifServer {
         let http_logging = HttpLoggingMiddleware::new(http_log_config);
 
         // Build the main router with middleware
-        let app = Router::new()
+        Router::new()
             .nest("/onvif", service_routes)
             .layer(
                 ServiceBuilder::new()
@@ -233,9 +233,7 @@ impl OnvifServer {
             .layer(axum::extract::DefaultBodyLimit::max(
                 self.config.max_body_size,
             ))
-            .with_state(state);
-
-        app
+            .with_state(state)
     }
 
     /// Signal the server to shut down gracefully.

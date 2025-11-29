@@ -239,31 +239,31 @@ impl Default for ServiceDispatcher {
 /// `action` parameter of the `Content-Type` header.
 fn extract_soap_action(request: &Request<Body>) -> Option<String> {
     // Try SOAPAction header first
-    if let Some(action) = request.headers().get("SOAPAction") {
-        if let Ok(action_str) = action.to_str() {
-            // Remove quotes if present
-            let action = action_str.trim_matches('"');
-            // Extract action name from URI if needed
-            if let Some(pos) = action.rfind('/') {
-                return Some(action[pos + 1..].to_string());
-            }
-            return Some(action.to_string());
+    if let Some(action) = request.headers().get("SOAPAction")
+        && let Ok(action_str) = action.to_str()
+    {
+        // Remove quotes if present
+        let action = action_str.trim_matches('"');
+        // Extract action name from URI if needed
+        if let Some(pos) = action.rfind('/') {
+            return Some(action[pos + 1..].to_string());
         }
+        return Some(action.to_string());
     }
 
     // Try Content-Type header with action parameter
-    if let Some(content_type) = request.headers().get(header::CONTENT_TYPE) {
-        if let Ok(ct_str) = content_type.to_str() {
-            // Look for action= parameter
-            for part in ct_str.split(';') {
-                let part = part.trim();
-                if let Some(action) = part.strip_prefix("action=") {
-                    let action = action.trim_matches('"');
-                    if let Some(pos) = action.rfind('/') {
-                        return Some(action[pos + 1..].to_string());
-                    }
-                    return Some(action.to_string());
+    if let Some(content_type) = request.headers().get(header::CONTENT_TYPE)
+        && let Ok(ct_str) = content_type.to_str()
+    {
+        // Look for action= parameter
+        for part in ct_str.split(';') {
+            let part = part.trim();
+            if let Some(action) = part.strip_prefix("action=") {
+                let action = action.trim_matches('"');
+                if let Some(pos) = action.rfind('/') {
+                    return Some(action[pos + 1..].to_string());
                 }
+                return Some(action.to_string());
             }
         }
     }

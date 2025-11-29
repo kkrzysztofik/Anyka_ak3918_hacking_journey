@@ -213,7 +213,7 @@ impl BruteForceProtection {
         let block_duration = duration.unwrap_or(self.block_duration);
         let until = Instant::now() + block_duration;
 
-        let mut entry = self.records.entry(*ip).or_insert_with(FailureRecord::new);
+        let mut entry = self.records.entry(*ip).or_default();
         entry.blocked_until = Some(until);
     }
 

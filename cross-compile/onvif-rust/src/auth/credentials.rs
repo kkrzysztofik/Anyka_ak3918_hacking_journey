@@ -158,6 +158,7 @@ impl AuthenticatedUser {
 /// This is a placeholder that will be extended to support both
 /// WS-Security (SOAP) and HTTP Digest (HTTP) authentication.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum AuthCredentials {
     /// WS-Security UsernameToken from SOAP header.
     WsSecurity {
