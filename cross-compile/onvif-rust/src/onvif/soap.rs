@@ -445,7 +445,7 @@ struct WsSecurityParseData {
 pub fn build_soap_response(body_xml: &str) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
-<s:Envelope xmlns:s="{}" xmlns:tt="{}" xmlns:tds="{}" xmlns:trt="{}" xmlns:ptz="{}" xmlns:img="{}">
+<s:Envelope xmlns:s="{}" xmlns:tt="{}" xmlns:tds="{}" xmlns:trt="{}" xmlns:tptz="{}" xmlns:timg="{}">
     <s:Body>
         {}
     </s:Body>

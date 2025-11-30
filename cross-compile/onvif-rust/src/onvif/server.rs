@@ -512,7 +512,7 @@ async fn validate_content_type(request: Request, next: Next) -> Response {
 
     (
         StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        [(header::CONTENT_TYPE, "text/xml; charset=utf-8")],
+        [(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")],
         fault.to_soap_fault(),
     )
         .into_response()

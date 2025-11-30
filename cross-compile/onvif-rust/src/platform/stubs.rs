@@ -38,6 +38,8 @@ pub struct StubPlatformBuilder {
     ptz_supported: bool,
     /// Whether imaging control is supported.
     imaging_supported: bool,
+    /// Whether network info is supported.
+    network_info_supported: bool,
     /// Force initialization failure.
     fail_init: bool,
 }
@@ -111,6 +113,12 @@ impl StubPlatformBuilder {
     /// Enable or disable imaging control support.
     pub fn imaging_supported(mut self, supported: bool) -> Self {
         self.imaging_supported = supported;
+        self
+    }
+
+    /// Enable or disable network info support.
+    pub fn network_info_supported(mut self, supported: bool) -> Self {
+        self.network_info_supported = supported;
         self
     }
 
@@ -252,6 +260,12 @@ impl StubPlatformBuilder {
             None
         };
 
+        let network_info = if self.network_info_supported {
+            Some(Arc::new(StubNetworkInfo::new()) as Arc<dyn NetworkInfo>)
+        } else {
+            None
+        };
+
         StubPlatform {
             initialized: AtomicBool::new(false),
             fail_init: self.fail_init,
@@ -262,6 +276,7 @@ impl StubPlatformBuilder {
             audio_encoder,
             ptz_control,
             imaging_control,
+            network_info,
         }
     }
 }
@@ -277,6 +292,7 @@ pub struct StubPlatform {
     audio_encoder: Arc<StubAudioEncoder>,
     ptz_control: Option<Arc<dyn PTZControl>>,
     imaging_control: Option<Arc<dyn ImagingControl>>,
+    network_info: Option<Arc<dyn NetworkInfo>>,
 }
 
 impl StubPlatform {
@@ -323,6 +339,10 @@ impl Platform for StubPlatform {
 
     fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>> {
         self.imaging_control.clone()
+    }
+
+    fn network_info(&self) -> Option<Arc<dyn NetworkInfo>> {
+        self.network_info.clone()
     }
 
     fn is_initialized(&self) -> bool {
@@ -670,6 +690,47 @@ impl ImagingControl for StubImagingControl {
         }
         self.settings.write().sharpness = value;
         Ok(())
+    }
+}
+
+/// Stub network information implementation.
+///
+/// Returns empty data for all queries. Used when real network info is not needed.
+pub struct StubNetworkInfo;
+
+impl StubNetworkInfo {
+    /// Create a new stub network info.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for StubNetworkInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl NetworkInfo for StubNetworkInfo {
+    async fn get_network_interfaces(&self) -> PlatformResult<Vec<NetworkInterfaceInfo>> {
+        // Return empty list - no interfaces available in stub
+        Ok(vec![])
+    }
+
+    async fn get_dns_info(&self) -> PlatformResult<DnsInfo> {
+        // Return default empty DNS info
+        Ok(DnsInfo::default())
+    }
+
+    async fn get_ntp_info(&self) -> PlatformResult<NtpInfo> {
+        // Return default empty NTP info
+        Ok(NtpInfo::default())
+    }
+
+    async fn get_network_protocols(&self) -> PlatformResult<Vec<NetworkProtocolInfo>> {
+        // Return empty list - no protocols in stub
+        Ok(vec![])
     }
 }
 

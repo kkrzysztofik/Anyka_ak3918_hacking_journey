@@ -271,7 +271,7 @@ impl ServiceDispatcher {
                 let response_xml = super::soap::build_soap_response(&response_body);
                 (
                     StatusCode::OK,
-                    [(header::CONTENT_TYPE, "text/xml; charset=utf-8")],
+                    [(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")],
                     response_xml,
                 )
                     .into_response()
@@ -409,7 +409,7 @@ impl ServiceDispatcher {
                 let response_xml = super::soap::build_soap_response(&response_body);
                 (
                     StatusCode::OK,
-                    [(header::CONTENT_TYPE, "text/xml; charset=utf-8")],
+                    [(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")],
                     response_xml,
                 )
                     .into_response()
@@ -584,7 +584,7 @@ fn error_response(error: OnvifError) -> Response {
 
     (
         status,
-        [(header::CONTENT_TYPE, "text/xml; charset=utf-8")],
+        [(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")],
         fault_xml,
     )
         .into_response()

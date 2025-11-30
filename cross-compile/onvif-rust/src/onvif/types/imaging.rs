@@ -38,10 +38,10 @@ pub struct GetImagingSettings {
 
 /// GetImagingSettings response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetImagingSettingsResponse")]
+#[serde(rename = "timg:GetImagingSettingsResponse")]
 pub struct GetImagingSettingsResponse {
     /// Current imaging settings.
-    #[serde(rename = "ImagingSettings")]
+    #[serde(rename = "timg:ImagingSettings")]
     pub imaging_settings: ImagingSettings20,
 }
 
@@ -68,7 +68,7 @@ pub struct SetImagingSettings {
 
 /// SetImagingSettings response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetImagingSettingsResponse")]
+#[serde(rename = "timg:SetImagingSettingsResponse")]
 pub struct SetImagingSettingsResponse {}
 
 /// GetOptions request.
@@ -82,10 +82,10 @@ pub struct GetOptions {
 
 /// GetOptions response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetOptionsResponse")]
+#[serde(rename = "timg:GetOptionsResponse")]
 pub struct GetOptionsResponse {
     /// Imaging options.
-    #[serde(rename = "ImagingOptions")]
+    #[serde(rename = "timg:ImagingOptions")]
     pub imaging_options: ImagingOptions20,
 }
 
@@ -523,7 +523,7 @@ pub struct Move {
 
 /// Move response (focus).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "MoveResponse")]
+#[serde(rename = "timg:MoveResponse")]
 pub struct MoveResponse {}
 
 /// Focus move parameters.
@@ -589,7 +589,7 @@ pub struct Stop {
 
 /// Stop response (focus).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "StopResponse")]
+#[serde(rename = "timg:StopResponse")]
 pub struct StopResponse {}
 
 /// GetMoveOptions request.
@@ -603,10 +603,10 @@ pub struct GetMoveOptions {
 
 /// GetMoveOptions response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetMoveOptionsResponse")]
+#[serde(rename = "timg:GetMoveOptionsResponse")]
 pub struct GetMoveOptionsResponse {
     /// Focus move options.
-    #[serde(rename = "MoveOptions")]
+    #[serde(rename = "timg:MoveOptions")]
     pub move_options: MoveOptions20,
 }
 
@@ -677,10 +677,10 @@ pub struct GetStatus {
 
 /// GetStatus response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetStatusResponse")]
+#[serde(rename = "timg:GetStatusResponse")]
 pub struct GetStatusResponse {
     /// Imaging status.
-    #[serde(rename = "Status")]
+    #[serde(rename = "timg:Status")]
     pub status: ImagingStatus20,
 }
 
@@ -699,10 +699,10 @@ pub struct GetPresets {
 
 /// GetPresets response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetPresetsResponse")]
+#[serde(rename = "timg:GetPresetsResponse")]
 pub struct GetPresetsResponse {
     /// List of imaging presets.
-    #[serde(rename = "Preset", default)]
+    #[serde(rename = "timg:Preset", default)]
     pub presets: Vec<ImagingPreset>,
 }
 
@@ -733,10 +733,14 @@ pub struct GetCurrentPreset {
 
 /// GetCurrentPreset response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetCurrentPresetResponse")]
+#[serde(rename = "timg:GetCurrentPresetResponse")]
 pub struct GetCurrentPresetResponse {
     /// Current imaging preset.
-    #[serde(rename = "Preset", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "timg:Preset",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub preset: Option<ImagingPreset>,
 }
 
@@ -755,7 +759,7 @@ pub struct SetCurrentPreset {
 
 /// SetCurrentPreset response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetCurrentPresetResponse")]
+#[serde(rename = "timg:SetCurrentPresetResponse")]
 pub struct SetCurrentPresetResponse {}
 
 // ============================================================================
@@ -769,10 +773,10 @@ pub struct GetServiceCapabilities {}
 
 /// GetServiceCapabilities response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetServiceCapabilitiesResponse")]
+#[serde(rename = "timg:GetServiceCapabilitiesResponse")]
 pub struct GetServiceCapabilitiesResponse {
     /// Imaging service capabilities.
-    #[serde(rename = "Capabilities")]
+    #[serde(rename = "timg:Capabilities")]
     pub capabilities: ImagingServiceCapabilities,
 }
 

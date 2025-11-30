@@ -46,3 +46,9 @@ pub const AUDIO_SOURCE_CONFIG_PREFIX: &str = "AudioSourceConfig_";
 
 /// Configuration token prefix for audio encoder configurations.
 pub const AUDIO_ENCODER_CONFIG_PREFIX: &str = "AudioEncoderConfig_";
+
+/// Configuration token prefix for PTZ configurations.
+pub const PTZ_CONFIG_PREFIX: &str = "PTZConfig_";
+
+/// Default PTZ node token.
+pub const DEFAULT_PTZ_NODE_TOKEN: &str = "PTZNode_0";

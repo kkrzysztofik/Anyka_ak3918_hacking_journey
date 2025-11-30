@@ -36,11 +36,11 @@ pub type Name = String;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OnvifVersion {
     /// Major version number.
-    #[serde(rename = "Major")]
+    #[serde(rename = "tt:Major")]
     pub major: i32,
 
     /// Minor version number.
-    #[serde(rename = "Minor")]
+    #[serde(rename = "tt:Minor")]
     pub minor: i32,
 }
 
@@ -237,15 +237,15 @@ impl Default for Vector1D {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Time {
     /// Hour (0-23).
-    #[serde(rename = "Hour")]
+    #[serde(rename = "tt:Hour")]
     pub hour: i32,
 
     /// Minute (0-59).
-    #[serde(rename = "Minute")]
+    #[serde(rename = "tt:Minute")]
     pub minute: i32,
 
     /// Second (0-59).
-    #[serde(rename = "Second")]
+    #[serde(rename = "tt:Second")]
     pub second: i32,
 }
 
@@ -253,15 +253,15 @@ pub struct Time {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Date {
     /// Year.
-    #[serde(rename = "Year")]
+    #[serde(rename = "tt:Year")]
     pub year: i32,
 
     /// Month (1-12).
-    #[serde(rename = "Month")]
+    #[serde(rename = "tt:Month")]
     pub month: i32,
 
     /// Day (1-31).
-    #[serde(rename = "Day")]
+    #[serde(rename = "tt:Day")]
     pub day: i32,
 }
 
@@ -269,11 +269,11 @@ pub struct Date {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DateTime {
     /// Time component.
-    #[serde(rename = "Time")]
+    #[serde(rename = "tt:Time")]
     pub time: Time,
 
     /// Date component.
-    #[serde(rename = "Date")]
+    #[serde(rename = "tt:Date")]
     pub date: Date,
 }
 
@@ -281,7 +281,7 @@ pub struct DateTime {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TimeZone {
     /// Timezone string in POSIX 1003.1 format.
-    #[serde(rename = "TZ")]
+    #[serde(rename = "tt:TZ")]
     pub tz: String,
 }
 
@@ -307,20 +307,24 @@ pub enum SetDateTimeType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SystemDateTime {
     /// How date/time is set (Manual or NTP).
-    #[serde(rename = "DateTimeType")]
+    #[serde(rename = "tt:DateTimeType")]
     pub date_time_type: SetDateTimeType,
 
     /// Daylight savings enabled.
-    #[serde(rename = "DaylightSavings")]
+    #[serde(rename = "tt:DaylightSavings")]
     pub daylight_savings: bool,
 
     /// Timezone information.
-    #[serde(rename = "TimeZone", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:TimeZone",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub time_zone: Option<TimeZone>,
 
     /// UTC date and time.
     #[serde(
-        rename = "UTCDateTime",
+        rename = "tt:UTCDateTime",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -328,14 +332,18 @@ pub struct SystemDateTime {
 
     /// Local date and time.
     #[serde(
-        rename = "LocalDateTime",
+        rename = "tt:LocalDateTime",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub local_date_time: Option<DateTime>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1923,11 +1931,11 @@ pub enum DiscoveryMode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scope {
     /// Scope definition type.
-    #[serde(rename = "ScopeDef")]
+    #[serde(rename = "tt:ScopeDef")]
     pub scope_def: ScopeDefinition,
 
     /// Scope item URI.
-    #[serde(rename = "ScopeItem")]
+    #[serde(rename = "tt:ScopeItem")]
     pub scope_item: String,
 }
 

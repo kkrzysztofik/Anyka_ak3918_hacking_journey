@@ -474,6 +474,83 @@ pub trait ImagingControl: Send + Sync {
     async fn set_sharpness(&self, value: f32) -> PlatformResult<()>;
 }
 
+// ============================================================================
+// Network Information
+// ============================================================================
+
+/// Network interface information.
+#[derive(Debug, Clone, Default)]
+pub struct NetworkInterfaceInfo {
+    /// Interface token (e.g., "eth0").
+    pub token: String,
+    /// Interface name.
+    pub name: String,
+    /// Whether the interface is enabled.
+    pub enabled: bool,
+    /// IPv4 address (if configured).
+    pub ipv4_address: Option<String>,
+    /// IPv4 prefix length (subnet mask).
+    pub ipv4_prefix_length: Option<u8>,
+    /// Whether DHCP is enabled for IPv4.
+    pub ipv4_dhcp: bool,
+    /// MAC address.
+    pub mac_address: Option<String>,
+    /// Link speed in Mbps (if available).
+    pub link_speed: Option<u32>,
+}
+
+/// DNS configuration information.
+#[derive(Debug, Clone, Default)]
+pub struct DnsInfo {
+    /// Whether DNS is obtained from DHCP.
+    pub from_dhcp: bool,
+    /// DNS search domains.
+    pub search_domains: Vec<String>,
+    /// DNS server addresses (obtained via DHCP).
+    pub dns_from_dhcp: Vec<String>,
+    /// Manually configured DNS server addresses.
+    pub dns_manual: Vec<String>,
+}
+
+/// NTP configuration information.
+#[derive(Debug, Clone, Default)]
+pub struct NtpInfo {
+    /// Whether NTP is obtained from DHCP.
+    pub from_dhcp: bool,
+    /// NTP servers obtained via DHCP.
+    pub ntp_from_dhcp: Vec<String>,
+    /// Manually configured NTP servers.
+    pub ntp_manual: Vec<String>,
+}
+
+/// Network protocol information.
+#[derive(Debug, Clone)]
+pub struct NetworkProtocolInfo {
+    /// Protocol name (HTTP, HTTPS, RTSP).
+    pub name: String,
+    /// Whether the protocol is enabled.
+    pub enabled: bool,
+    /// Port numbers.
+    pub ports: Vec<u16>,
+}
+
+/// Network information trait for querying system network configuration.
+#[cfg_attr(test, automock)]
+#[async_trait]
+pub trait NetworkInfo: Send + Sync {
+    /// Get all network interfaces.
+    async fn get_network_interfaces(&self) -> PlatformResult<Vec<NetworkInterfaceInfo>>;
+
+    /// Get DNS configuration.
+    async fn get_dns_info(&self) -> PlatformResult<DnsInfo>;
+
+    /// Get NTP configuration.
+    async fn get_ntp_info(&self) -> PlatformResult<NtpInfo>;
+
+    /// Get enabled network protocols.
+    async fn get_network_protocols(&self) -> PlatformResult<Vec<NetworkProtocolInfo>>;
+}
+
 /// Main platform trait combining all hardware abstractions.
 #[async_trait]
 pub trait Platform: Send + Sync {
@@ -497,6 +574,9 @@ pub trait Platform: Send + Sync {
 
     /// Get imaging control interface (optional).
     fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>>;
+
+    /// Get network information interface (optional).
+    fn network_info(&self) -> Option<Arc<dyn NetworkInfo>>;
 
     /// Check if the platform is initialized.
     fn is_initialized(&self) -> bool;

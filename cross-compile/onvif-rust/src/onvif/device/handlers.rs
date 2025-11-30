@@ -18,16 +18,23 @@ use crate::onvif::types::common::{
     TimeZone, User as OnvifUser,
 };
 use crate::onvif::types::device::{
-    AddScopes, AddScopesResponse, Capabilities, CreateUsers, CreateUsersResponse, DeleteUsers,
-    DeleteUsersResponse, GetCapabilities, GetCapabilitiesResponse, GetDeviceInformation,
-    GetDeviceInformationResponse, GetDiscoveryMode, GetDiscoveryModeResponse, GetHostname,
-    GetHostnameResponse, GetNetworkInterfaces, GetNetworkInterfacesResponse, GetScopes,
+    AddScopes, AddScopesResponse, Capabilities, CreateUsers, CreateUsersResponse, DNSInformation,
+    DeleteUsers, DeleteUsersResponse, Duplex, GetCapabilities, GetCapabilitiesResponse,
+    GetCertificates, GetCertificatesResponse, GetCertificatesStatus, GetCertificatesStatusResponse,
+    GetDNS, GetDNSResponse, GetDeviceInformation, GetDeviceInformationResponse, GetDiscoveryMode,
+    GetDiscoveryModeResponse, GetHostname, GetHostnameResponse, GetNTP, GetNTPResponse,
+    GetNetworkInterfaces, GetNetworkInterfacesResponse, GetNetworkProtocols,
+    GetNetworkProtocolsResponse, GetRelayOutputs, GetRelayOutputsResponse, GetScopes,
     GetScopesResponse, GetServiceCapabilities, GetServiceCapabilitiesResponse, GetServices,
     GetServicesResponse, GetSystemDateAndTime, GetSystemDateAndTimeResponse, GetUsers,
-    GetUsersResponse, HostnameInformation, RemoveScopes, RemoveScopesResponse, SetDiscoveryMode,
-    SetDiscoveryModeResponse, SetHostname, SetHostnameResponse, SetScopes, SetScopesResponse,
-    SetSystemDateAndTime, SetSystemDateAndTimeResponse, SetUser, SetUserResponse, SystemReboot,
-    SystemRebootResponse,
+    GetUsersResponse, HostnameInformation, IPAddress, IPv4Configuration, IPv4NetworkInterface,
+    NTPInformation, NetworkHost, NetworkHostType, NetworkInterface,
+    NetworkInterfaceConnectionSetting, NetworkInterfaceInfo, NetworkInterfaceLink, NetworkProtocol,
+    NetworkProtocolType, PrefixedIPv4Address, RemoveScopes, RemoveScopesResponse, SetDNS,
+    SetDNSResponse, SetDiscoveryMode, SetDiscoveryModeResponse, SetHostname, SetHostnameResponse,
+    SetNTP, SetNTPResponse, SetNetworkProtocols, SetNetworkProtocolsResponse, SetScopes,
+    SetScopesResponse, SetSystemDateAndTime, SetSystemDateAndTimeResponse, SetSystemFactoryDefault,
+    SetSystemFactoryDefaultResponse, SetUser, SetUserResponse, SystemReboot, SystemRebootResponse,
 };
 use crate::platform::{DeviceInfo, Platform};
 use crate::users::{PasswordManager, UserLevel, UserStorage};
@@ -98,13 +105,45 @@ impl DeviceService {
     }
 
     /// Get the base URL for service addresses.
+    /// Uses detected IP address for proper XAddr values in capabilities.
     fn base_url(&self) -> String {
+        // Try to get the detected IP first, then fall back to config
         let address = self
             .config
-            .get_string("server.address")
-            .unwrap_or_else(|_| "0.0.0.0".to_string());
+            .get_string("network.detected_ip")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                self.config
+                    .get_string("network.ip_address")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or_else(|| {
+                // Auto-detect IP as fallback
+                Self::detect_local_ip().unwrap_or_else(|| "127.0.0.1".to_string())
+            });
         let port = self.config.get_int("server.port").unwrap_or(80) as u16;
         format!("http://{}:{}", address, port)
+    }
+
+    /// Detect local IP address using UDP socket trick.
+    fn detect_local_ip() -> Option<String> {
+        use std::net::UdpSocket;
+        match UdpSocket::bind("0.0.0.0:0") {
+            Ok(socket) => {
+                if socket.connect("8.8.8.8:80").is_ok() {
+                    if let Ok(addr) = socket.local_addr() {
+                        let ip = addr.ip().to_string();
+                        if ip != "0.0.0.0" {
+                            return Some(ip);
+                        }
+                    }
+                }
+                None
+            }
+            Err(_) => None,
+        }
     }
 
     /// Get default scopes.
@@ -365,6 +404,72 @@ impl DeviceService {
         })
     }
 
+    /// Handle SetSystemFactoryDefault request.
+    ///
+    /// Resets the device to factory defaults (stub implementation).
+    pub fn handle_set_system_factory_default(
+        &self,
+        request: SetSystemFactoryDefault,
+    ) -> OnvifResult<SetSystemFactoryDefaultResponse> {
+        tracing::info!(
+            "SetSystemFactoryDefault request - factory_default={:?}",
+            request.factory_default
+        );
+
+        // Stub implementation - just log and return success
+        // In a real implementation, this would:
+        // - Hard: Reset all settings including network config
+        // - Soft: Reset settings but keep network config
+        tracing::warn!("Factory default reset requested but not implemented (stub)");
+
+        Ok(SetSystemFactoryDefaultResponse {})
+    }
+
+    /// Handle GetCertificates request.
+    ///
+    /// Returns installed certificates (empty list - no certificates supported).
+    pub fn handle_get_certificates(
+        &self,
+        _request: GetCertificates,
+    ) -> OnvifResult<GetCertificatesResponse> {
+        tracing::debug!("GetCertificates request");
+
+        // Return empty list - no certificates installed
+        Ok(GetCertificatesResponse {
+            nvt_certificates: vec![],
+        })
+    }
+
+    /// Handle GetCertificatesStatus request.
+    ///
+    /// Returns certificate statuses (empty list - no certificates supported).
+    pub fn handle_get_certificates_status(
+        &self,
+        _request: GetCertificatesStatus,
+    ) -> OnvifResult<GetCertificatesStatusResponse> {
+        tracing::debug!("GetCertificatesStatus request");
+
+        // Return empty list - no certificates installed
+        Ok(GetCertificatesStatusResponse {
+            certificate_status: vec![],
+        })
+    }
+
+    /// Handle GetRelayOutputs request.
+    ///
+    /// Returns relay outputs (empty list - no relay outputs supported).
+    pub fn handle_get_relay_outputs(
+        &self,
+        _request: GetRelayOutputs,
+    ) -> OnvifResult<GetRelayOutputsResponse> {
+        tracing::debug!("GetRelayOutputs request");
+
+        // Return empty list - no relay outputs on this device
+        Ok(GetRelayOutputsResponse {
+            relay_outputs: vec![],
+        })
+    }
+
     // ========================================================================
     // Hostname Handlers
     // ========================================================================
@@ -421,10 +526,304 @@ impl DeviceService {
     ) -> OnvifResult<GetNetworkInterfacesResponse> {
         tracing::debug!("GetNetworkInterfaces request");
 
-        // For now, return an empty list (would require system integration to get real interfaces)
+        // Get detected IP address
+        let ip_address = self
+            .config
+            .get_string("network.detected_ip")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| Self::detect_local_ip())
+            .unwrap_or_else(|| "192.168.1.100".to_string());
+
+        // Check if DHCP is enabled from config
+        let dhcp_enabled = self.config.get_bool("network.dhcp_enabled").unwrap_or(true);
+
+        // Create network interface with hardcoded stub data
+        let network_interface = NetworkInterface {
+            token: "eth0".to_string(),
+            enabled: true,
+            info: Some(NetworkInterfaceInfo {
+                name: Some("eth0".to_string()),
+                hw_address: "00:11:22:33:44:55".to_string(), // Stub MAC address
+                mtu: Some(1500),
+            }),
+            link: Some(NetworkInterfaceLink {
+                admin_settings: NetworkInterfaceConnectionSetting {
+                    auto_negotiation: true,
+                    speed: 100,
+                    duplex: Duplex::Full,
+                },
+                oper_settings: NetworkInterfaceConnectionSetting {
+                    auto_negotiation: true,
+                    speed: 100,
+                    duplex: Duplex::Full,
+                },
+                interface_type: 6, // ethernetCsmacd
+            }),
+            ipv4: Some(IPv4NetworkInterface {
+                enabled: true,
+                config: IPv4Configuration {
+                    manual: if !dhcp_enabled {
+                        vec![PrefixedIPv4Address {
+                            address: ip_address.clone(),
+                            prefix_length: 24,
+                        }]
+                    } else {
+                        vec![]
+                    },
+                    link_local: None,
+                    from_dhcp: if dhcp_enabled {
+                        Some(PrefixedIPv4Address {
+                            address: ip_address,
+                            prefix_length: 24,
+                        })
+                    } else {
+                        None
+                    },
+                    dhcp: dhcp_enabled,
+                },
+            }),
+            ipv6: None,
+            extension: None,
+        };
+
         Ok(GetNetworkInterfacesResponse {
-            network_interfaces: vec![],
+            network_interfaces: vec![network_interface],
         })
+    }
+
+    // ========================================================================
+    // DNS Handlers
+    // ========================================================================
+
+    /// Handle GetDNS request.
+    ///
+    /// Returns DNS configuration.
+    pub async fn handle_get_dns(&self, _request: GetDNS) -> OnvifResult<GetDNSResponse> {
+        tracing::debug!("GetDNS request");
+
+        // Try to get DNS info from platform
+        if let Some(platform) = &self.platform {
+            if let Some(network_info) = platform.network_info() {
+                if let Ok(dns_info) = network_info.get_dns_info().await {
+                    // Convert platform DNS info to ONVIF types
+                    let dns_from_dhcp: Vec<IPAddress> = dns_info
+                        .dns_from_dhcp
+                        .iter()
+                        .map(|addr| IPAddress::ipv4(addr))
+                        .collect();
+
+                    let dns_manual: Vec<IPAddress> = dns_info
+                        .dns_manual
+                        .iter()
+                        .map(|addr| IPAddress::ipv4(addr))
+                        .collect();
+
+                    return Ok(GetDNSResponse {
+                        dns_information: DNSInformation {
+                            from_dhcp: dns_info.from_dhcp,
+                            search_domain: dns_info.search_domains,
+                            dns_from_dhcp,
+                            dns_manual,
+                        },
+                    });
+                }
+            }
+        }
+
+        // Return empty DNS info if no platform available
+        Ok(GetDNSResponse {
+            dns_information: DNSInformation::default(),
+        })
+    }
+
+    /// Handle SetDNS request.
+    ///
+    /// Sets DNS configuration.
+    pub async fn handle_set_dns(&self, request: SetDNS) -> OnvifResult<SetDNSResponse> {
+        tracing::debug!(
+            "SetDNS request: from_dhcp={}, {} manual servers",
+            request.from_dhcp,
+            request.dns_manual.len()
+        );
+
+        // TODO: Implement actual DNS setting via platform
+        // For now, just log and return success
+        tracing::info!(
+            "SetDNS: from_dhcp={}, manual_servers={:?}, search_domains={:?}",
+            request.from_dhcp,
+            request
+                .dns_manual
+                .iter()
+                .filter_map(|ip| ip.ipv4_address.as_ref())
+                .collect::<Vec<_>>(),
+            request.search_domain
+        );
+
+        Ok(SetDNSResponse {})
+    }
+
+    // ========================================================================
+    // NTP Handlers
+    // ========================================================================
+
+    /// Handle GetNTP request.
+    ///
+    /// Returns NTP configuration.
+    pub async fn handle_get_ntp(&self, _request: GetNTP) -> OnvifResult<GetNTPResponse> {
+        tracing::debug!("GetNTP request");
+
+        // Try to get NTP info from platform
+        if let Some(platform) = &self.platform {
+            if let Some(network_info) = platform.network_info() {
+                if let Ok(ntp_info) = network_info.get_ntp_info().await {
+                    // Convert platform NTP info to ONVIF NetworkHost types
+                    let to_network_host = |addr: &String| {
+                        // Check if it's an IP address or DNS name
+                        if addr.parse::<std::net::IpAddr>().is_ok() {
+                            NetworkHost::ipv4(addr)
+                        } else {
+                            NetworkHost::dns(addr)
+                        }
+                    };
+
+                    let ntp_from_dhcp: Vec<NetworkHost> =
+                        ntp_info.ntp_from_dhcp.iter().map(to_network_host).collect();
+
+                    let ntp_manual: Vec<NetworkHost> =
+                        ntp_info.ntp_manual.iter().map(to_network_host).collect();
+
+                    return Ok(GetNTPResponse {
+                        ntp_information: NTPInformation {
+                            from_dhcp: ntp_info.from_dhcp,
+                            ntp_from_dhcp,
+                            ntp_manual,
+                        },
+                    });
+                }
+            }
+        }
+
+        // Return empty NTP info if no platform available
+        Ok(GetNTPResponse {
+            ntp_information: NTPInformation::default(),
+        })
+    }
+
+    /// Handle SetNTP request.
+    ///
+    /// Sets NTP configuration.
+    pub async fn handle_set_ntp(&self, request: SetNTP) -> OnvifResult<SetNTPResponse> {
+        tracing::debug!(
+            "SetNTP request: from_dhcp={}, {} manual servers",
+            request.from_dhcp,
+            request.ntp_manual.len()
+        );
+
+        // TODO: Implement actual NTP setting via platform
+        // For now, just log and return success
+        let servers: Vec<String> = request
+            .ntp_manual
+            .iter()
+            .filter_map(|host| match host.host_type {
+                NetworkHostType::IPv4 => host.ipv4_address.clone(),
+                NetworkHostType::IPv6 => host.ipv6_address.clone(),
+                NetworkHostType::DNS => host.dns_name.clone(),
+            })
+            .collect();
+
+        tracing::info!(
+            "SetNTP: from_dhcp={}, manual_servers={:?}",
+            request.from_dhcp,
+            servers
+        );
+
+        Ok(SetNTPResponse {})
+    }
+
+    // ========================================================================
+    // Network Protocols Handlers
+    // ========================================================================
+
+    /// Handle GetNetworkProtocols request.
+    ///
+    /// Returns network protocol configurations.
+    pub async fn handle_get_network_protocols(
+        &self,
+        _request: GetNetworkProtocols,
+    ) -> OnvifResult<GetNetworkProtocolsResponse> {
+        tracing::debug!("GetNetworkProtocols request");
+
+        // Try to get protocol info from platform
+        if let Some(platform) = &self.platform {
+            if let Some(network_info) = platform.network_info() {
+                if let Ok(protocols) = network_info.get_network_protocols().await {
+                    // Convert platform protocol info to ONVIF types
+                    let network_protocols: Vec<NetworkProtocol> = protocols
+                        .iter()
+                        .map(|p| {
+                            let name = match p.name.to_uppercase().as_str() {
+                                "HTTP" => NetworkProtocolType::HTTP,
+                                "HTTPS" => NetworkProtocolType::HTTPS,
+                                "RTSP" => NetworkProtocolType::RTSP,
+                                _ => NetworkProtocolType::HTTP, // Default fallback
+                            };
+                            NetworkProtocol {
+                                name,
+                                enabled: p.enabled,
+                                port: p.ports.iter().map(|&p| p as i32).collect(),
+                            }
+                        })
+                        .collect();
+
+                    return Ok(GetNetworkProtocolsResponse { network_protocols });
+                }
+            }
+        }
+
+        // Return default protocol info from config if no platform
+        let http_port = self.config.get_int("server.port").unwrap_or(80) as i32;
+
+        Ok(GetNetworkProtocolsResponse {
+            network_protocols: vec![
+                NetworkProtocol {
+                    name: NetworkProtocolType::HTTP,
+                    enabled: true,
+                    port: vec![http_port],
+                },
+                NetworkProtocol {
+                    name: NetworkProtocolType::RTSP,
+                    enabled: true,
+                    port: vec![554],
+                },
+            ],
+        })
+    }
+
+    /// Handle SetNetworkProtocols request.
+    ///
+    /// Sets network protocol configurations.
+    pub async fn handle_set_network_protocols(
+        &self,
+        request: SetNetworkProtocols,
+    ) -> OnvifResult<SetNetworkProtocolsResponse> {
+        tracing::debug!(
+            "SetNetworkProtocols request: {} protocols",
+            request.network_protocols.len()
+        );
+
+        // TODO: Implement actual protocol setting via platform
+        // For now, just log and return success
+        for protocol in &request.network_protocols {
+            tracing::info!(
+                "SetNetworkProtocols: {:?} enabled={} ports={:?}",
+                protocol.name,
+                protocol.enabled,
+                protocol.port
+            );
+        }
+
+        Ok(SetNetworkProtocolsResponse {})
     }
 
     // ========================================================================
@@ -883,6 +1282,44 @@ impl ServiceHandler for DeviceService {
                 })
             }
 
+            "SetSystemFactoryDefault" => {
+                let request: SetSystemFactoryDefault = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_set_system_factory_default(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            // Certificate Operations
+            "GetCertificates" => {
+                let request: GetCertificates = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_certificates(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "GetCertificatesStatus" => {
+                let request: GetCertificatesStatus = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_certificates_status(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            // Relay Operations
+            "GetRelayOutputs" => {
+                let request: GetRelayOutputs = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_relay_outputs(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
             // Hostname Operations
             "GetHostname" => {
                 let request: GetHostname = quick_xml::de::from_str(body_xml)
@@ -907,6 +1344,63 @@ impl ServiceHandler for DeviceService {
                 let request: GetNetworkInterfaces = quick_xml::de::from_str(body_xml)
                     .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
                 let response = self.handle_get_network_interfaces(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            // DNS Operations
+            "GetDNS" => {
+                let request: GetDNS = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_dns(request).await?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "SetDNS" => {
+                let request: SetDNS = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_set_dns(request).await?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            // NTP Operations
+            "GetNTP" => {
+                let request: GetNTP = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_ntp(request).await?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "SetNTP" => {
+                let request: SetNTP = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_set_ntp(request).await?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            // Network Protocol Operations
+            "GetNetworkProtocols" => {
+                let request: GetNetworkProtocols = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_network_protocols(request).await?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "SetNetworkProtocols" => {
+                let request: SetNetworkProtocols = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_set_network_protocols(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })
@@ -1032,9 +1526,19 @@ impl ServiceHandler for DeviceService {
             "GetSystemDateAndTime",
             "SetSystemDateAndTime",
             "SystemReboot",
+            "SetSystemFactoryDefault",
+            "GetCertificates",
+            "GetCertificatesStatus",
+            "GetRelayOutputs",
             "GetHostname",
             "SetHostname",
             "GetNetworkInterfaces",
+            "GetDNS",
+            "SetDNS",
+            "GetNTP",
+            "SetNTP",
+            "GetNetworkProtocols",
+            "SetNetworkProtocols",
             "GetScopes",
             "SetScopes",
             "AddScopes",

@@ -13,9 +13,10 @@ use async_trait::async_trait;
 use parking_lot::RwLock;
 
 use super::traits::{
-    AudioEncoder, AudioEncoderConfig, AudioInput, AudioSourceConfig, DeviceInfo, ImagingControl,
-    ImagingOptions, ImagingSettings, PTZControl, Platform, PlatformError, PlatformResult,
-    PtzLimits, PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoEncoder, VideoEncoderConfig,
+    AudioEncoder, AudioEncoderConfig, AudioInput, AudioSourceConfig, DeviceInfo, DnsInfo,
+    ImagingControl, ImagingOptions, ImagingSettings, NetworkInfo, NetworkInterfaceInfo,
+    NetworkProtocolInfo, NtpInfo, PTZControl, Platform, PlatformError, PlatformResult, PtzLimits,
+    PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoEncoder, VideoEncoderConfig,
     VideoEncoderOptions, VideoEncoding, VideoInput, VideoSourceConfig,
 };
 
@@ -37,6 +38,7 @@ pub struct AnykaPlatform {
     audio_encoder: Arc<AnykaAudioEncoder>,
     ptz_control: Option<Arc<dyn PTZControl>>,
     imaging_control: Option<Arc<dyn ImagingControl>>,
+    network_info: Option<Arc<dyn NetworkInfo>>,
 }
 
 impl AnykaPlatform {
@@ -56,6 +58,7 @@ impl AnykaPlatform {
         let audio_encoder = Arc::new(AnykaAudioEncoder::new());
         let ptz_control = Some(Arc::new(AnykaPTZControl::new()) as Arc<dyn PTZControl>);
         let imaging_control = Some(Arc::new(AnykaImagingControl::new()) as Arc<dyn ImagingControl>);
+        let network_info = Some(Arc::new(AnykaNetworkInfo::new()) as Arc<dyn NetworkInfo>);
 
         Ok(Self {
             initialized: AtomicBool::new(false),
@@ -66,6 +69,7 @@ impl AnykaPlatform {
             audio_encoder,
             ptz_control,
             imaging_control,
+            network_info,
         })
     }
 }
@@ -105,6 +109,10 @@ impl Platform for AnykaPlatform {
 
     fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>> {
         self.imaging_control.clone()
+    }
+
+    fn network_info(&self) -> Option<Arc<dyn NetworkInfo>> {
+        self.network_info.clone()
     }
 
     fn is_initialized(&self) -> bool {
@@ -555,5 +563,224 @@ impl ImagingControl for AnykaImagingControl {
         // TODO: Call Anyka imaging SDK
         self.settings.write().sharpness = value;
         Ok(())
+    }
+}
+
+// =============================================================================
+// Network Info Implementation
+// =============================================================================
+
+/// Anyka network information implementation.
+///
+/// Reads network configuration from the Linux system. Falls back to empty
+/// values if system files cannot be read.
+struct AnykaNetworkInfo;
+
+impl AnykaNetworkInfo {
+    fn new() -> Self {
+        Self
+    }
+
+    /// Read network interfaces from /sys/class/net and /proc/net/route.
+    fn read_interfaces() -> Vec<NetworkInterfaceInfo> {
+        use std::fs;
+        use std::path::Path;
+
+        let net_dir = Path::new("/sys/class/net");
+        let mut interfaces = Vec::new();
+
+        // Try to read available interfaces
+        if let Ok(entries) = fs::read_dir(net_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+
+                // Skip loopback
+                if name == "lo" {
+                    continue;
+                }
+
+                // Read MAC address
+                let mac_path = entry.path().join("address");
+                let mac_address = fs::read_to_string(&mac_path)
+                    .ok()
+                    .map(|s| s.trim().to_uppercase());
+
+                // Read operational state
+                let operstate_path = entry.path().join("operstate");
+                let enabled = fs::read_to_string(&operstate_path)
+                    .map(|s| s.trim() == "up")
+                    .unwrap_or(false);
+
+                // Read link speed (in Mbps)
+                let speed_path = entry.path().join("speed");
+                let link_speed = fs::read_to_string(&speed_path)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<u32>().ok());
+
+                // Try to get IP address via ip command output parsing
+                // This is a simplified approach - real implementation might use netlink
+                let (ipv4_address, ipv4_prefix_length, ipv4_dhcp) = Self::read_interface_ip(&name);
+
+                interfaces.push(NetworkInterfaceInfo {
+                    token: name.clone(),
+                    name,
+                    enabled,
+                    ipv4_address,
+                    ipv4_prefix_length,
+                    ipv4_dhcp,
+                    mac_address,
+                    link_speed,
+                });
+            }
+        }
+
+        interfaces
+    }
+
+    /// Read IP address for an interface.
+    fn read_interface_ip(interface: &str) -> (Option<String>, Option<u8>, bool) {
+        use std::fs;
+
+        // Try to read from /etc/network/interfaces or similar
+        // This is a simplified check - in real embedded Linux, DHCP state
+        // might be determined differently
+
+        // Check if DHCP is used (look for dhclient lease)
+        let dhcp_lease_path = format!("/var/lib/dhcp/dhclient.{}.leases", interface);
+        let from_dhcp = std::path::Path::new(&dhcp_lease_path).exists();
+
+        // Try reading from /proc/net/fib_trie or parsing ip addr output
+        // For now, try a simple approach via /proc/net/route
+        if let Ok(route_content) = fs::read_to_string("/proc/net/route") {
+            for line in route_content.lines().skip(1) {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                if fields.len() >= 8 && fields[0] == interface {
+                    // Parse gateway destination to find interface IP
+                    // This is a simplified approach
+                    if fields[1] == "00000000" {
+                        // Default route - interface has connectivity
+                        // Would need more sophisticated parsing for actual IP
+                    }
+                }
+            }
+        }
+
+        // For a more complete implementation, we'd use netlink or parse
+        // /proc/net/fib_trie, but for now return None (empty will be reported)
+        (None, None, from_dhcp)
+    }
+
+    /// Read DNS configuration from /etc/resolv.conf.
+    fn read_dns_config() -> DnsInfo {
+        use std::fs;
+
+        let mut dns_info = DnsInfo::default();
+
+        if let Ok(content) = fs::read_to_string("/etc/resolv.conf") {
+            for line in content.lines() {
+                let line = line.trim();
+
+                // Skip comments
+                if line.starts_with('#') {
+                    continue;
+                }
+
+                if let Some(domain) = line.strip_prefix("search ") {
+                    dns_info
+                        .search_domains
+                        .extend(domain.split_whitespace().map(String::from));
+                } else if let Some(domain) = line.strip_prefix("domain ") {
+                    dns_info.search_domains.push(domain.trim().to_string());
+                } else if let Some(nameserver) = line.strip_prefix("nameserver ") {
+                    let ns = nameserver.trim().to_string();
+                    // Assume manual unless we detect DHCP
+                    dns_info.dns_manual.push(ns);
+                }
+            }
+        }
+
+        // Check if DNS was obtained via DHCP
+        // Simple heuristic: if /etc/resolv.conf was modified by dhclient
+        if std::path::Path::new("/var/lib/dhcp/dhclient.leases").exists() {
+            dns_info.from_dhcp = true;
+            // Move servers to dhcp list
+            dns_info.dns_from_dhcp = std::mem::take(&mut dns_info.dns_manual);
+        }
+
+        dns_info
+    }
+
+    /// Read NTP configuration from /etc/ntp.conf or similar.
+    fn read_ntp_config() -> NtpInfo {
+        use std::fs;
+
+        let mut ntp_info = NtpInfo::default();
+
+        // Try /etc/ntp.conf
+        if let Ok(content) = fs::read_to_string("/etc/ntp.conf") {
+            for line in content.lines() {
+                let line = line.trim();
+
+                if line.starts_with('#') {
+                    continue;
+                }
+
+                if let Some(server) = line.strip_prefix("server ") {
+                    let server = server.split_whitespace().next().unwrap_or("").to_string();
+                    if !server.is_empty() {
+                        ntp_info.ntp_manual.push(server);
+                    }
+                }
+            }
+        }
+
+        // Try /etc/systemd/timesyncd.conf for systemd-based systems
+        if ntp_info.ntp_manual.is_empty() {
+            if let Ok(content) = fs::read_to_string("/etc/systemd/timesyncd.conf") {
+                for line in content.lines() {
+                    let line = line.trim();
+
+                    if let Some(servers) = line.strip_prefix("NTP=") {
+                        ntp_info
+                            .ntp_manual
+                            .extend(servers.split_whitespace().map(String::from));
+                    }
+                }
+            }
+        }
+
+        ntp_info
+    }
+}
+
+#[async_trait]
+impl NetworkInfo for AnykaNetworkInfo {
+    async fn get_network_interfaces(&self) -> PlatformResult<Vec<NetworkInterfaceInfo>> {
+        Ok(Self::read_interfaces())
+    }
+
+    async fn get_dns_info(&self) -> PlatformResult<DnsInfo> {
+        Ok(Self::read_dns_config())
+    }
+
+    async fn get_ntp_info(&self) -> PlatformResult<NtpInfo> {
+        Ok(Self::read_ntp_config())
+    }
+
+    async fn get_network_protocols(&self) -> PlatformResult<Vec<NetworkProtocolInfo>> {
+        // Return the protocols this ONVIF server supports
+        // These are typically configured at build/runtime, not read from system
+        Ok(vec![
+            NetworkProtocolInfo {
+                name: "HTTP".to_string(),
+                enabled: true,
+                ports: vec![80],
+            },
+            NetworkProtocolInfo {
+                name: "RTSP".to_string(),
+                enabled: true,
+                ports: vec![554],
+            },
+        ])
     }
 }

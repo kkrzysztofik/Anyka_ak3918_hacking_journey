@@ -13,9 +13,11 @@ use parking_lot::RwLock;
 
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
-    AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, IntRange, IntRectangle,
-    MulticastConfiguration, Name, Profile, ReferenceToken, VideoEncoderConfiguration,
-    VideoRateControl, VideoResolution, VideoSource, VideoSourceConfiguration,
+    AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, FloatRange, IntRange,
+    IntRectangle, MulticastConfiguration, Name, PTZConfiguration, PTZSpeed, PanTiltLimits, Profile,
+    ReferenceToken, Space1DDescription, Space2DDescription, Vector1D, Vector2D,
+    VideoEncoderConfiguration, VideoRateControl, VideoResolution, VideoSource,
+    VideoSourceConfiguration, ZoomLimits,
 };
 use crate::onvif::types::media::{
     AudioEncoderConfigurationOptions, H264Options, H264Profile, JpegOptions,
@@ -27,8 +29,8 @@ use super::faults::{
 };
 use super::types::{
     AUDIO_ENCODER_CONFIG_PREFIX, AUDIO_SOURCE_CONFIG_PREFIX, DEFAULT_AUDIO_SOURCE_TOKEN,
-    DEFAULT_VIDEO_SOURCE_TOKEN, MAX_PROFILES, PROFILE_TOKEN_PREFIX, VIDEO_ENCODER_CONFIG_PREFIX,
-    VIDEO_SOURCE_CONFIG_PREFIX,
+    DEFAULT_PTZ_NODE_TOKEN, DEFAULT_VIDEO_SOURCE_TOKEN, MAX_PROFILES, PROFILE_TOKEN_PREFIX,
+    PTZ_CONFIG_PREFIX, VIDEO_ENCODER_CONFIG_PREFIX, VIDEO_SOURCE_CONFIG_PREFIX,
 };
 
 /// Profile Manager for managing media profiles.
@@ -72,6 +74,9 @@ impl ProfileManager {
 
     /// Initialize default sources, configurations, and profiles.
     fn initialize_defaults(&self) {
+        // Create default PTZ configuration used by all profiles
+        let default_ptz_config = Self::create_default_ptz_configuration();
+
         // Create default video source
         let video_source = VideoSource {
             token: DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
@@ -305,7 +310,7 @@ impl ProfileManager {
                 }),
                 session_timeout: "PT60S".to_string(),
             }),
-            ptz_configuration: None,
+            ptz_configuration: Some(default_ptz_config.clone()),
             metadata_configuration: None,
             extension: None,
         };
@@ -389,7 +394,7 @@ impl ProfileManager {
                 }),
                 session_timeout: "PT60S".to_string(),
             }),
-            ptz_configuration: None,
+            ptz_configuration: Some(default_ptz_config),
             metadata_configuration: None,
             extension: None,
         };
@@ -913,6 +918,74 @@ impl ProfileManager {
     ) -> Vec<AudioEncoderConfiguration> {
         // All audio encoder configurations are compatible
         self.get_audio_encoder_configurations()
+    }
+
+    /// Create default PTZ configuration for profiles.
+    ///
+    /// This provides a standard PTZ configuration that ODM and other clients expect
+    /// to see in profiles for PTZ-capable devices.
+    fn create_default_ptz_configuration() -> PTZConfiguration {
+        PTZConfiguration {
+            token: format!("{}0", PTZ_CONFIG_PREFIX),
+            name: "DefaultPTZConfig".to_string(),
+            use_count: 2, // Used by both MainStream and SubStream
+            move_ramp: None,
+            preset_ramp: None,
+            preset_tour_ramp: None,
+            node_token: DEFAULT_PTZ_NODE_TOKEN.to_string(),
+            default_absolute_pan_tilt_position_space: Some(
+                "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace".to_string(),
+            ),
+            default_absolute_zoom_position_space: Some(
+                "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace".to_string(),
+            ),
+            default_relative_pan_tilt_translation_space: Some(
+                "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace".to_string(),
+            ),
+            default_relative_zoom_translation_space: Some(
+                "http://www.onvif.org/ver10/tptz/ZoomSpaces/TranslationGenericSpace".to_string(),
+            ),
+            default_continuous_pan_tilt_velocity_space: Some(
+                "http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace".to_string(),
+            ),
+            default_continuous_zoom_velocity_space: Some(
+                "http://www.onvif.org/ver10/tptz/ZoomSpaces/VelocityGenericSpace".to_string(),
+            ),
+            default_ptz_speed: Some(PTZSpeed {
+                pan_tilt: Some(Vector2D {
+                    x: 0.5,
+                    y: 0.5,
+                    space: None,
+                }),
+                zoom: Some(Vector1D {
+                    x: 0.5,
+                    space: None,
+                }),
+            }),
+            default_ptz_timeout: Some("PT5S".to_string()),
+            pan_tilt_limits: Some(PanTiltLimits {
+                range: Space2DDescription {
+                    uri: "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace"
+                        .to_string(),
+                    x_range: FloatRange {
+                        min: -1.0,
+                        max: 1.0,
+                    },
+                    y_range: FloatRange {
+                        min: -1.0,
+                        max: 1.0,
+                    },
+                },
+            }),
+            zoom_limits: Some(ZoomLimits {
+                range: Space1DDescription {
+                    uri: "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace"
+                        .to_string(),
+                    x_range: FloatRange { min: 0.0, max: 1.0 },
+                },
+            }),
+            extension: None,
+        }
     }
 }
 

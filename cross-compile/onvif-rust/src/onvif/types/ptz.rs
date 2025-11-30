@@ -47,10 +47,10 @@ pub struct GetConfigurations {}
 
 /// GetConfigurations response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetConfigurationsResponse")]
+#[serde(rename = "tptz:GetConfigurationsResponse")]
 pub struct GetConfigurationsResponse {
     /// List of PTZ configurations.
-    #[serde(rename = "PTZConfiguration", default)]
+    #[serde(rename = "tptz:PTZConfiguration", default)]
     pub ptz_configurations: Vec<PTZConfiguration>,
 }
 
@@ -65,10 +65,10 @@ pub struct GetConfiguration {
 
 /// GetConfiguration response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetConfigurationResponse")]
+#[serde(rename = "tptz:GetConfigurationResponse")]
 pub struct GetConfigurationResponse {
     /// The requested PTZ configuration.
-    #[serde(rename = "PTZConfiguration")]
+    #[serde(rename = "tptz:PTZConfiguration")]
     pub ptz_configuration: PTZConfiguration,
 }
 
@@ -87,7 +87,7 @@ pub struct SetConfiguration {
 
 /// SetConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetConfigurationResponse")]
+#[serde(rename = "tptz:SetConfigurationResponse")]
 pub struct SetConfigurationResponse {}
 
 /// GetConfigurationOptions request.
@@ -101,10 +101,10 @@ pub struct GetConfigurationOptions {
 
 /// GetConfigurationOptions response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetConfigurationOptionsResponse")]
+#[serde(rename = "tptz:GetConfigurationOptionsResponse")]
 pub struct GetConfigurationOptionsResponse {
     /// PTZ configuration options.
-    #[serde(rename = "PTZConfigurationOptions")]
+    #[serde(rename = "tptz:PTZConfigurationOptions")]
     pub ptz_configuration_options: PTZConfigurationOptions,
 }
 
@@ -286,7 +286,7 @@ pub struct AbsoluteMove {
 
 /// AbsoluteMove response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "AbsoluteMoveResponse")]
+#[serde(rename = "tptz:AbsoluteMoveResponse")]
 pub struct AbsoluteMoveResponse {}
 
 /// RelativeMove request.
@@ -308,7 +308,7 @@ pub struct RelativeMove {
 
 /// RelativeMove response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "RelativeMoveResponse")]
+#[serde(rename = "tptz:RelativeMoveResponse")]
 pub struct RelativeMoveResponse {}
 
 /// ContinuousMove request.
@@ -330,7 +330,7 @@ pub struct ContinuousMove {
 
 /// ContinuousMove response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "ContinuousMoveResponse")]
+#[serde(rename = "tptz:ContinuousMoveResponse")]
 pub struct ContinuousMoveResponse {}
 
 /// Stop request.
@@ -352,7 +352,7 @@ pub struct Stop {
 
 /// Stop response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "StopResponse")]
+#[serde(rename = "tptz:StopResponse")]
 pub struct StopResponse {}
 
 /// GotoHomePosition request.
@@ -370,7 +370,7 @@ pub struct GotoHomePosition {
 
 /// GotoHomePosition response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GotoHomePositionResponse")]
+#[serde(rename = "tptz:GotoHomePositionResponse")]
 pub struct GotoHomePositionResponse {}
 
 /// SetHomePosition request.
@@ -384,7 +384,7 @@ pub struct SetHomePosition {
 
 /// SetHomePosition response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetHomePositionResponse")]
+#[serde(rename = "tptz:SetHomePositionResponse")]
 pub struct SetHomePositionResponse {}
 
 // ============================================================================
@@ -402,10 +402,10 @@ pub struct GetPresets {
 
 /// GetPresets response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetPresetsResponse")]
+#[serde(rename = "tptz:GetPresetsResponse")]
 pub struct GetPresetsResponse {
     /// List of presets.
-    #[serde(rename = "Preset", default)]
+    #[serde(rename = "tptz:Preset", default)]
     pub presets: Vec<PTZPreset>,
 }
 
@@ -436,10 +436,10 @@ pub struct SetPreset {
 
 /// SetPreset response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetPresetResponse")]
+#[serde(rename = "tptz:SetPresetResponse")]
 pub struct SetPresetResponse {
     /// Token of the created/updated preset.
-    #[serde(rename = "PresetToken")]
+    #[serde(rename = "tptz:PresetToken")]
     pub preset_token: ReferenceToken,
 }
 
@@ -462,7 +462,7 @@ pub struct GotoPreset {
 
 /// GotoPreset response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GotoPresetResponse")]
+#[serde(rename = "tptz:GotoPresetResponse")]
 pub struct GotoPresetResponse {}
 
 /// RemovePreset request.
@@ -480,7 +480,7 @@ pub struct RemovePreset {
 
 /// RemovePreset response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "RemovePresetResponse")]
+#[serde(rename = "tptz:RemovePresetResponse")]
 pub struct RemovePresetResponse {}
 
 // ============================================================================
@@ -498,10 +498,10 @@ pub struct GetStatus {
 
 /// GetStatus response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetStatusResponse")]
+#[serde(rename = "tptz:GetStatusResponse")]
 pub struct GetStatusResponse {
     /// PTZ status.
-    #[serde(rename = "PTZStatus")]
+    #[serde(rename = "tptz:PTZStatus")]
     pub ptz_status: PTZStatus,
 }
 
@@ -516,10 +516,10 @@ pub struct GetNodes {}
 
 /// GetNodes response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetNodesResponse")]
+#[serde(rename = "tptz:GetNodesResponse")]
 pub struct GetNodesResponse {
     /// List of PTZ nodes.
-    #[serde(rename = "PTZNode", default)]
+    #[serde(rename = "tptz:PTZNode", default)]
     pub ptz_nodes: Vec<PTZNode>,
 }
 
@@ -534,10 +534,10 @@ pub struct GetNode {
 
 /// GetNode response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetNodeResponse")]
+#[serde(rename = "tptz:GetNodeResponse")]
 pub struct GetNodeResponse {
     /// The requested PTZ node.
-    #[serde(rename = "PTZNode")]
+    #[serde(rename = "tptz:PTZNode")]
     pub ptz_node: PTZNode,
 }
 
@@ -640,10 +640,10 @@ pub struct GetServiceCapabilities {}
 
 /// GetServiceCapabilities response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetServiceCapabilitiesResponse")]
+#[serde(rename = "tptz:GetServiceCapabilitiesResponse")]
 pub struct GetServiceCapabilitiesResponse {
     /// PTZ service capabilities.
-    #[serde(rename = "Capabilities")]
+    #[serde(rename = "tptz:Capabilities")]
     pub capabilities: PTZServiceCapabilities,
 }
 
@@ -702,11 +702,11 @@ pub struct SendAuxiliaryCommand {
 
 /// SendAuxiliaryCommand response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SendAuxiliaryCommandResponse")]
+#[serde(rename = "tptz:SendAuxiliaryCommandResponse")]
 pub struct SendAuxiliaryCommandResponse {
     /// Auxiliary response.
     #[serde(
-        rename = "AuxiliaryResponse",
+        rename = "tptz:AuxiliaryResponse",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -728,10 +728,10 @@ pub struct GetCompatibleConfigurations {
 
 /// GetCompatibleConfigurations response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetCompatibleConfigurationsResponse")]
+#[serde(rename = "tptz:GetCompatibleConfigurationsResponse")]
 pub struct GetCompatibleConfigurationsResponse {
     /// List of compatible PTZ configurations.
-    #[serde(rename = "PTZConfiguration", default)]
+    #[serde(rename = "tptz:PTZConfiguration", default)]
     pub ptz_configurations: Vec<PTZConfiguration>,
 }
 

@@ -47,26 +47,26 @@ pub struct GetDeviceInformation {}
 
 /// GetDeviceInformation response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetDeviceInformationResponse")]
+#[serde(rename = "tds:GetDeviceInformationResponse")]
 pub struct GetDeviceInformationResponse {
     /// Device manufacturer.
-    #[serde(rename = "Manufacturer")]
+    #[serde(rename = "tds:Manufacturer")]
     pub manufacturer: String,
 
     /// Device model.
-    #[serde(rename = "Model")]
+    #[serde(rename = "tds:Model")]
     pub model: String,
 
     /// Firmware version.
-    #[serde(rename = "FirmwareVersion")]
+    #[serde(rename = "tds:FirmwareVersion")]
     pub firmware_version: String,
 
     /// Serial number.
-    #[serde(rename = "SerialNumber")]
+    #[serde(rename = "tds:SerialNumber")]
     pub serial_number: String,
 
     /// Hardware ID.
-    #[serde(rename = "HardwareId")]
+    #[serde(rename = "tds:HardwareId")]
     pub hardware_id: String,
 }
 
@@ -97,10 +97,10 @@ pub struct GetServices {
 
 /// GetServices response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetServicesResponse")]
+#[serde(rename = "tds:GetServicesResponse")]
 pub struct GetServicesResponse {
     /// List of available services.
-    #[serde(rename = "Service", default)]
+    #[serde(rename = "tds:Service", default)]
     pub services: Vec<Service>,
 }
 
@@ -108,23 +108,23 @@ pub struct GetServicesResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Service {
     /// Service namespace URI.
-    #[serde(rename = "Namespace")]
+    #[serde(rename = "tds:Namespace")]
     pub namespace: String,
 
     /// Service endpoint address.
-    #[serde(rename = "XAddr")]
+    #[serde(rename = "tds:XAddr")]
     pub x_addr: String,
 
     /// Service capabilities (optional, included if requested).
     #[serde(
-        rename = "Capabilities",
+        rename = "tds:Capabilities",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub capabilities: Option<ServiceCapabilities>,
 
     /// Service version.
-    #[serde(rename = "Version")]
+    #[serde(rename = "tds:Version")]
     pub version: OnvifVersion,
 }
 
@@ -147,10 +147,10 @@ pub struct GetServiceCapabilities {}
 
 /// GetServiceCapabilities response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetServiceCapabilitiesResponse")]
+#[serde(rename = "tds:GetServiceCapabilitiesResponse")]
 pub struct GetServiceCapabilitiesResponse {
     /// Device service capabilities.
-    #[serde(rename = "Capabilities")]
+    #[serde(rename = "tds:Capabilities")]
     pub capabilities: DeviceServiceCapabilities,
 }
 
@@ -487,21 +487,34 @@ pub enum CapabilityCategory {
     PTZ,
 }
 
+/// Wrapper for Category element to extract enum value from text content.
+///
+/// quick-xml deserializes `<Category>All</Category>` by matching the element name
+/// against enum variants. Using `$text` rename tells it to extract the text content
+/// instead, which is the actual enum value (e.g., "All", "Device", "Media").
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "Category")]
+pub struct CategoryElement {
+    /// The category value extracted from element text content.
+    #[serde(rename = "$text")]
+    pub value: CapabilityCategory,
+}
+
 /// GetCapabilities request.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "GetCapabilities")]
 pub struct GetCapabilities {
     /// Capability categories to retrieve.
     #[serde(rename = "Category", default)]
-    pub category: Vec<CapabilityCategory>,
+    pub category: Vec<CategoryElement>,
 }
 
 /// GetCapabilities response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetCapabilitiesResponse")]
+#[serde(rename = "tds:GetCapabilitiesResponse")]
 pub struct GetCapabilitiesResponse {
     /// Device capabilities.
-    #[serde(rename = "Capabilities")]
+    #[serde(rename = "tds:Capabilities")]
     pub capabilities: Capabilities,
 }
 
@@ -992,10 +1005,10 @@ pub struct GetSystemDateAndTime {}
 
 /// GetSystemDateAndTime response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetSystemDateAndTimeResponse")]
+#[serde(rename = "tds:GetSystemDateAndTimeResponse")]
 pub struct GetSystemDateAndTimeResponse {
     /// System date and time information.
-    #[serde(rename = "SystemDateAndTime")]
+    #[serde(rename = "tds:SystemDateAndTime")]
     pub system_date_and_time: SystemDateTime,
 }
 
@@ -1026,7 +1039,7 @@ pub struct SetSystemDateAndTime {
 
 /// SetSystemDateAndTime response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetSystemDateAndTimeResponse")]
+#[serde(rename = "tds:SetSystemDateAndTimeResponse")]
 pub struct SetSystemDateAndTimeResponse {}
 
 // ============================================================================
@@ -1040,10 +1053,10 @@ pub struct SystemReboot {}
 
 /// SystemReboot response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SystemRebootResponse")]
+#[serde(rename = "tds:SystemRebootResponse")]
 pub struct SystemRebootResponse {
     /// Message indicating reboot status.
-    #[serde(rename = "Message")]
+    #[serde(rename = "tds:Message")]
     pub message: String,
 }
 
@@ -1070,7 +1083,7 @@ pub struct SetSystemFactoryDefault {
 
 /// SetSystemFactoryDefault response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetSystemFactoryDefaultResponse")]
+#[serde(rename = "tds:SetSystemFactoryDefaultResponse")]
 pub struct SetSystemFactoryDefaultResponse {}
 
 // ============================================================================
@@ -1084,10 +1097,10 @@ pub struct GetHostname {}
 
 /// GetHostname response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetHostnameResponse")]
+#[serde(rename = "tds:GetHostnameResponse")]
 pub struct GetHostnameResponse {
     /// Hostname information.
-    #[serde(rename = "HostnameInformation")]
+    #[serde(rename = "tds:HostnameInformation")]
     pub hostname_information: HostnameInformation,
 }
 
@@ -1118,7 +1131,7 @@ pub struct SetHostname {
 
 /// SetHostname response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetHostnameResponse")]
+#[serde(rename = "tds:SetHostnameResponse")]
 pub struct SetHostnameResponse {}
 
 // ============================================================================
@@ -1132,10 +1145,10 @@ pub struct GetNetworkInterfaces {}
 
 /// GetNetworkInterfaces response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetNetworkInterfacesResponse")]
+#[serde(rename = "tds:GetNetworkInterfacesResponse")]
 pub struct GetNetworkInterfacesResponse {
     /// List of network interfaces.
-    #[serde(rename = "NetworkInterfaces", default)]
+    #[serde(rename = "tds:NetworkInterfaces", default)]
     pub network_interfaces: Vec<NetworkInterface>,
 }
 
@@ -1342,6 +1355,335 @@ pub struct PrefixedIPv6Address {
 }
 
 // ============================================================================
+// DNS Configuration
+// ============================================================================
+
+/// GetDNS request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetDNS")]
+pub struct GetDNS {}
+
+/// GetDNS response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:GetDNSResponse")]
+pub struct GetDNSResponse {
+    /// DNS configuration information.
+    #[serde(rename = "tds:DNSInformation")]
+    pub dns_information: DNSInformation,
+}
+
+/// SetDNS request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "SetDNS")]
+pub struct SetDNS {
+    /// Whether to get DNS from DHCP.
+    #[serde(rename = "FromDHCP")]
+    pub from_dhcp: bool,
+
+    /// Search domain.
+    #[serde(
+        rename = "SearchDomain",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub search_domain: Vec<String>,
+
+    /// Manual DNS server addresses.
+    #[serde(rename = "DNSManual", default, skip_serializing_if = "Vec::is_empty")]
+    pub dns_manual: Vec<IPAddress>,
+}
+
+/// SetDNS response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:SetDNSResponse")]
+pub struct SetDNSResponse {}
+
+/// DNS configuration information.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DNSInformation {
+    /// Whether DNS information is retrieved from DHCP.
+    #[serde(rename = "FromDHCP")]
+    pub from_dhcp: bool,
+
+    /// Search domains.
+    #[serde(
+        rename = "SearchDomain",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub search_domain: Vec<String>,
+
+    /// DNS addresses from DHCP.
+    #[serde(rename = "DNSFromDHCP", default, skip_serializing_if = "Vec::is_empty")]
+    pub dns_from_dhcp: Vec<IPAddress>,
+
+    /// Manually configured DNS addresses.
+    #[serde(rename = "DNSManual", default, skip_serializing_if = "Vec::is_empty")]
+    pub dns_manual: Vec<IPAddress>,
+}
+
+/// IP address type.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum IPType {
+    #[default]
+    IPv4,
+    IPv6,
+}
+
+/// IP address (IPv4 or IPv6).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IPAddress {
+    /// Address type (IPv4 or IPv6).
+    #[serde(rename = "Type")]
+    pub address_type: IPType,
+
+    /// IPv4 address (when Type is IPv4).
+    #[serde(
+        rename = "IPv4Address",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub ipv4_address: Option<String>,
+
+    /// IPv6 address (when Type is IPv6).
+    #[serde(
+        rename = "IPv6Address",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub ipv6_address: Option<String>,
+}
+
+impl Default for IPAddress {
+    fn default() -> Self {
+        Self {
+            address_type: IPType::IPv4,
+            ipv4_address: Some("0.0.0.0".to_string()),
+            ipv6_address: None,
+        }
+    }
+}
+
+impl IPAddress {
+    /// Create a new IPv4 address.
+    pub fn ipv4(addr: &str) -> Self {
+        Self {
+            address_type: IPType::IPv4,
+            ipv4_address: Some(addr.to_string()),
+            ipv6_address: None,
+        }
+    }
+
+    /// Create a new IPv6 address.
+    pub fn ipv6(addr: &str) -> Self {
+        Self {
+            address_type: IPType::IPv6,
+            ipv4_address: None,
+            ipv6_address: Some(addr.to_string()),
+        }
+    }
+}
+
+// ============================================================================
+// NTP Configuration
+// ============================================================================
+
+/// GetNTP request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetNTP")]
+pub struct GetNTP {}
+
+/// GetNTP response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:GetNTPResponse")]
+pub struct GetNTPResponse {
+    /// NTP configuration information.
+    #[serde(rename = "tds:NTPInformation")]
+    pub ntp_information: NTPInformation,
+}
+
+/// SetNTP request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "SetNTP")]
+pub struct SetNTP {
+    /// Whether to get NTP from DHCP.
+    #[serde(rename = "FromDHCP")]
+    pub from_dhcp: bool,
+
+    /// Manual NTP server addresses.
+    #[serde(rename = "NTPManual", default, skip_serializing_if = "Vec::is_empty")]
+    pub ntp_manual: Vec<NetworkHost>,
+}
+
+/// SetNTP response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:SetNTPResponse")]
+pub struct SetNTPResponse {}
+
+/// NTP configuration information.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct NTPInformation {
+    /// Whether NTP information is retrieved from DHCP.
+    #[serde(rename = "FromDHCP")]
+    pub from_dhcp: bool,
+
+    /// NTP servers from DHCP.
+    #[serde(rename = "NTPFromDHCP", default, skip_serializing_if = "Vec::is_empty")]
+    pub ntp_from_dhcp: Vec<NetworkHost>,
+
+    /// Manually configured NTP servers.
+    #[serde(rename = "NTPManual", default, skip_serializing_if = "Vec::is_empty")]
+    pub ntp_manual: Vec<NetworkHost>,
+}
+
+/// Network host type.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum NetworkHostType {
+    #[default]
+    IPv4,
+    IPv6,
+    DNS,
+}
+
+/// Network host (IPv4, IPv6, or DNS name).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NetworkHost {
+    /// Host type.
+    #[serde(rename = "Type")]
+    pub host_type: NetworkHostType,
+
+    /// IPv4 address (when Type is IPv4).
+    #[serde(
+        rename = "IPv4Address",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub ipv4_address: Option<String>,
+
+    /// IPv6 address (when Type is IPv6).
+    #[serde(
+        rename = "IPv6Address",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub ipv6_address: Option<String>,
+
+    /// DNS name (when Type is DNS).
+    #[serde(rename = "DNSname", default, skip_serializing_if = "Option::is_none")]
+    pub dns_name: Option<String>,
+}
+
+impl Default for NetworkHost {
+    fn default() -> Self {
+        Self {
+            host_type: NetworkHostType::IPv4,
+            ipv4_address: Some("0.0.0.0".to_string()),
+            ipv6_address: None,
+            dns_name: None,
+        }
+    }
+}
+
+impl NetworkHost {
+    /// Create a new IPv4 network host.
+    pub fn ipv4(addr: &str) -> Self {
+        Self {
+            host_type: NetworkHostType::IPv4,
+            ipv4_address: Some(addr.to_string()),
+            ipv6_address: None,
+            dns_name: None,
+        }
+    }
+
+    /// Create a new IPv6 network host.
+    pub fn ipv6(addr: &str) -> Self {
+        Self {
+            host_type: NetworkHostType::IPv6,
+            ipv4_address: None,
+            ipv6_address: Some(addr.to_string()),
+            dns_name: None,
+        }
+    }
+
+    /// Create a new DNS network host.
+    pub fn dns(name: &str) -> Self {
+        Self {
+            host_type: NetworkHostType::DNS,
+            ipv4_address: None,
+            ipv6_address: None,
+            dns_name: Some(name.to_string()),
+        }
+    }
+}
+
+// ============================================================================
+// Network Protocols
+// ============================================================================
+
+/// GetNetworkProtocols request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetNetworkProtocols")]
+pub struct GetNetworkProtocols {}
+
+/// GetNetworkProtocols response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:GetNetworkProtocolsResponse")]
+pub struct GetNetworkProtocolsResponse {
+    /// List of network protocols.
+    #[serde(rename = "tds:NetworkProtocols", default)]
+    pub network_protocols: Vec<NetworkProtocol>,
+}
+
+/// SetNetworkProtocols request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "SetNetworkProtocols")]
+pub struct SetNetworkProtocols {
+    /// Network protocols to configure.
+    #[serde(rename = "NetworkProtocols", default)]
+    pub network_protocols: Vec<NetworkProtocol>,
+}
+
+/// SetNetworkProtocols response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:SetNetworkProtocolsResponse")]
+pub struct SetNetworkProtocolsResponse {}
+
+/// Network protocol type.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum NetworkProtocolType {
+    #[default]
+    HTTP,
+    HTTPS,
+    RTSP,
+}
+
+/// Network protocol configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NetworkProtocol {
+    /// Protocol name (HTTP, HTTPS, RTSP).
+    #[serde(rename = "Name")]
+    pub name: NetworkProtocolType,
+
+    /// Whether the protocol is enabled.
+    #[serde(rename = "Enabled")]
+    pub enabled: bool,
+
+    /// Ports used by the protocol.
+    #[serde(rename = "Port", default)]
+    pub port: Vec<i32>,
+}
+
+impl Default for NetworkProtocol {
+    fn default() -> Self {
+        Self {
+            name: NetworkProtocolType::HTTP,
+            enabled: true,
+            port: vec![80],
+        }
+    }
+}
+
+// ============================================================================
 // Scopes
 // ============================================================================
 
@@ -1352,10 +1694,10 @@ pub struct GetScopes {}
 
 /// GetScopes response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetScopesResponse")]
+#[serde(rename = "tds:GetScopesResponse")]
 pub struct GetScopesResponse {
     /// List of scopes.
-    #[serde(rename = "Scopes", default)]
+    #[serde(rename = "tds:Scopes", default)]
     pub scopes: Vec<Scope>,
 }
 
@@ -1370,7 +1712,7 @@ pub struct SetScopes {
 
 /// SetScopes response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetScopesResponse")]
+#[serde(rename = "tds:SetScopesResponse")]
 pub struct SetScopesResponse {}
 
 /// AddScopes request.
@@ -1384,7 +1726,7 @@ pub struct AddScopes {
 
 /// AddScopes response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "AddScopesResponse")]
+#[serde(rename = "tds:AddScopesResponse")]
 pub struct AddScopesResponse {}
 
 /// RemoveScopes request.
@@ -1398,10 +1740,10 @@ pub struct RemoveScopes {
 
 /// RemoveScopes response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "RemoveScopesResponse")]
+#[serde(rename = "tds:RemoveScopesResponse")]
 pub struct RemoveScopesResponse {
     /// Remaining scopes.
-    #[serde(rename = "ScopeItem", default)]
+    #[serde(rename = "tds:ScopeItem", default)]
     pub scope_item: Vec<String>,
 }
 
@@ -1416,10 +1758,10 @@ pub struct GetDiscoveryMode {}
 
 /// GetDiscoveryMode response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetDiscoveryModeResponse")]
+#[serde(rename = "tds:GetDiscoveryModeResponse")]
 pub struct GetDiscoveryModeResponse {
     /// Current discovery mode.
-    #[serde(rename = "DiscoveryMode")]
+    #[serde(rename = "tds:DiscoveryMode")]
     pub discovery_mode: DiscoveryMode,
 }
 
@@ -1442,7 +1784,7 @@ pub struct SetDiscoveryMode {
 
 /// SetDiscoveryMode response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetDiscoveryModeResponse")]
+#[serde(rename = "tds:SetDiscoveryModeResponse")]
 pub struct SetDiscoveryModeResponse {}
 
 // ============================================================================
@@ -1456,10 +1798,10 @@ pub struct GetUsers {}
 
 /// GetUsers response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetUsersResponse")]
+#[serde(rename = "tds:GetUsersResponse")]
 pub struct GetUsersResponse {
     /// List of users.
-    #[serde(rename = "User", default)]
+    #[serde(rename = "tds:User", default)]
     pub users: Vec<User>,
 }
 
@@ -1474,7 +1816,7 @@ pub struct CreateUsers {
 
 /// CreateUsers response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "CreateUsersResponse")]
+#[serde(rename = "tds:CreateUsersResponse")]
 pub struct CreateUsersResponse {}
 
 /// DeleteUsers request.
@@ -1488,7 +1830,7 @@ pub struct DeleteUsers {
 
 /// DeleteUsers response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "DeleteUsersResponse")]
+#[serde(rename = "tds:DeleteUsersResponse")]
 pub struct DeleteUsersResponse {}
 
 /// SetUser request.
@@ -1502,8 +1844,148 @@ pub struct SetUser {
 
 /// SetUser response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetUserResponse")]
+#[serde(rename = "tds:SetUserResponse")]
 pub struct SetUserResponse {}
+
+// ============================================================================
+// Certificates
+// ============================================================================
+
+/// GetCertificates request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCertificates")]
+pub struct GetCertificates {}
+
+/// GetCertificates response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:GetCertificatesResponse")]
+pub struct GetCertificatesResponse {
+    /// List of certificates (empty if none installed).
+    #[serde(rename = "tds:NvtCertificate", default)]
+    pub nvt_certificates: Vec<Certificate>,
+}
+
+/// Certificate information.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Certificate {
+    /// Certificate ID.
+    #[serde(rename = "CertificateID")]
+    pub certificate_id: String,
+
+    /// Certificate data.
+    #[serde(
+        rename = "Certificate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub certificate: Option<BinaryData>,
+}
+
+/// Binary data container.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BinaryData {
+    /// Content type.
+    #[serde(
+        rename = "@contentType",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub content_type: Option<String>,
+
+    /// Base64-encoded data.
+    #[serde(rename = "$value", default)]
+    pub data: String,
+}
+
+/// GetCertificatesStatus request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCertificatesStatus")]
+pub struct GetCertificatesStatus {}
+
+/// GetCertificatesStatus response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:GetCertificatesStatusResponse")]
+pub struct GetCertificatesStatusResponse {
+    /// List of certificate statuses.
+    #[serde(rename = "tds:CertificateStatus", default)]
+    pub certificate_status: Vec<CertificateStatus>,
+}
+
+/// Certificate status.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CertificateStatus {
+    /// Certificate ID.
+    #[serde(rename = "CertificateID")]
+    pub certificate_id: String,
+
+    /// Whether certificate is enabled.
+    #[serde(rename = "Status")]
+    pub status: bool,
+}
+
+// ============================================================================
+// Relay Outputs
+// ============================================================================
+
+/// GetRelayOutputs request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetRelayOutputs")]
+pub struct GetRelayOutputs {}
+
+/// GetRelayOutputs response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:GetRelayOutputsResponse")]
+pub struct GetRelayOutputsResponse {
+    /// List of relay outputs.
+    #[serde(rename = "tds:RelayOutputs", default)]
+    pub relay_outputs: Vec<RelayOutput>,
+}
+
+/// Relay output information.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RelayOutput {
+    /// Relay output token.
+    #[serde(rename = "@token")]
+    pub token: ReferenceToken,
+
+    /// Relay output properties.
+    #[serde(rename = "Properties")]
+    pub properties: RelayOutputSettings,
+}
+
+/// Relay output settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RelayOutputSettings {
+    /// Relay mode (Monostable or Bistable).
+    #[serde(rename = "Mode")]
+    pub mode: RelayMode,
+
+    /// Delay time for Monostable mode.
+    #[serde(rename = "DelayTime", default, skip_serializing_if = "Option::is_none")]
+    pub delay_time: Option<String>,
+
+    /// Idle state (open or closed).
+    #[serde(rename = "IdleState")]
+    pub idle_state: RelayIdleState,
+}
+
+/// Relay mode.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum RelayMode {
+    #[default]
+    Monostable,
+    Bistable,
+}
+
+/// Relay idle state.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum RelayIdleState {
+    #[default]
+    #[serde(rename = "closed")]
+    Closed,
+    #[serde(rename = "open")]
+    Open,
+}
 
 // ============================================================================
 // Tests
@@ -1536,5 +2018,61 @@ mod tests {
     fn test_system_reboot_response_default() {
         let response = SystemRebootResponse::default();
         assert_eq!(response.message, "Rebooting");
+    }
+
+    #[test]
+    fn test_get_capabilities_parsing_with_category_element() {
+        // This is the exact XML that ODM sends - Category is an element containing the enum value
+        let xml = r#"<GetCapabilities xmlns="http://www.onvif.org/ver10/device/wsdl">
+            <Category>All</Category>
+        </GetCapabilities>"#;
+
+        let result: Result<GetCapabilities, _> = quick_xml::de::from_str(xml);
+        assert!(
+            result.is_ok(),
+            "Failed to parse GetCapabilities: {:?}",
+            result.err()
+        );
+
+        let request = result.unwrap();
+        assert_eq!(request.category.len(), 1);
+        assert_eq!(request.category[0].value, CapabilityCategory::All);
+    }
+
+    #[test]
+    fn test_get_capabilities_parsing_multiple_categories() {
+        let xml = r#"<GetCapabilities xmlns="http://www.onvif.org/ver10/device/wsdl">
+            <Category>Device</Category>
+            <Category>Media</Category>
+            <Category>PTZ</Category>
+        </GetCapabilities>"#;
+
+        let result: Result<GetCapabilities, _> = quick_xml::de::from_str(xml);
+        assert!(
+            result.is_ok(),
+            "Failed to parse GetCapabilities: {:?}",
+            result.err()
+        );
+
+        let request = result.unwrap();
+        assert_eq!(request.category.len(), 3);
+        assert_eq!(request.category[0].value, CapabilityCategory::Device);
+        assert_eq!(request.category[1].value, CapabilityCategory::Media);
+        assert_eq!(request.category[2].value, CapabilityCategory::PTZ);
+    }
+
+    #[test]
+    fn test_get_capabilities_parsing_empty() {
+        let xml = r#"<GetCapabilities xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#;
+
+        let result: Result<GetCapabilities, _> = quick_xml::de::from_str(xml);
+        assert!(
+            result.is_ok(),
+            "Failed to parse empty GetCapabilities: {:?}",
+            result.err()
+        );
+
+        let request = result.unwrap();
+        assert!(request.category.is_empty());
     }
 }

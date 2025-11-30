@@ -51,10 +51,10 @@ pub struct GetProfiles {}
 
 /// GetProfiles response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetProfilesResponse")]
+#[serde(rename = "trt:GetProfilesResponse")]
 pub struct GetProfilesResponse {
     /// List of profiles.
-    #[serde(rename = "Profiles", default)]
+    #[serde(rename = "trt:Profiles", default)]
     pub profiles: Vec<Profile>,
 }
 
@@ -69,10 +69,10 @@ pub struct GetProfile {
 
 /// GetProfile response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetProfileResponse")]
+#[serde(rename = "trt:GetProfileResponse")]
 pub struct GetProfileResponse {
     /// The requested profile.
-    #[serde(rename = "Profile")]
+    #[serde(rename = "trt:Profile")]
     pub profile: Profile,
 }
 
@@ -91,10 +91,10 @@ pub struct CreateProfile {
 
 /// CreateProfile response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "CreateProfileResponse")]
+#[serde(rename = "trt:CreateProfileResponse")]
 pub struct CreateProfileResponse {
     /// The created profile.
-    #[serde(rename = "Profile")]
+    #[serde(rename = "trt:Profile")]
     pub profile: Profile,
 }
 
@@ -109,7 +109,7 @@ pub struct DeleteProfile {
 
 /// DeleteProfile response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "DeleteProfileResponse")]
+#[serde(rename = "trt:DeleteProfileResponse")]
 pub struct DeleteProfileResponse {}
 
 // ============================================================================
@@ -123,10 +123,10 @@ pub struct GetVideoSources {}
 
 /// GetVideoSources response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetVideoSourcesResponse")]
+#[serde(rename = "trt:GetVideoSourcesResponse")]
 pub struct GetVideoSourcesResponse {
     /// List of video sources.
-    #[serde(rename = "VideoSources", default)]
+    #[serde(rename = "trt:VideoSources", default)]
     pub video_sources: Vec<VideoSource>,
 }
 
@@ -137,10 +137,10 @@ pub struct GetVideoSourceConfigurations {}
 
 /// GetVideoSourceConfigurations response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetVideoSourceConfigurationsResponse")]
+#[serde(rename = "trt:GetVideoSourceConfigurationsResponse")]
 pub struct GetVideoSourceConfigurationsResponse {
     /// List of video source configurations.
-    #[serde(rename = "Configurations", default)]
+    #[serde(rename = "trt:Configurations", default)]
     pub configurations: Vec<VideoSourceConfiguration>,
 }
 
@@ -155,10 +155,10 @@ pub struct GetVideoSourceConfiguration {
 
 /// GetVideoSourceConfiguration response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetVideoSourceConfigurationResponse")]
+#[serde(rename = "trt:GetVideoSourceConfigurationResponse")]
 pub struct GetVideoSourceConfigurationResponse {
     /// The requested configuration.
-    #[serde(rename = "Configuration")]
+    #[serde(rename = "trt:Configuration")]
     pub configuration: VideoSourceConfiguration,
 }
 
@@ -177,7 +177,7 @@ pub struct SetVideoSourceConfiguration {
 
 /// SetVideoSourceConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetVideoSourceConfigurationResponse")]
+#[serde(rename = "trt:SetVideoSourceConfigurationResponse")]
 pub struct SetVideoSourceConfigurationResponse {}
 
 /// GetVideoSourceConfigurationOptions request.
@@ -203,10 +203,10 @@ pub struct GetVideoSourceConfigurationOptions {
 
 /// GetVideoSourceConfigurationOptions response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetVideoSourceConfigurationOptionsResponse")]
+#[serde(rename = "trt:GetVideoSourceConfigurationOptionsResponse")]
 pub struct GetVideoSourceConfigurationOptionsResponse {
     /// Video source configuration options.
-    #[serde(rename = "Options")]
+    #[serde(rename = "trt:Options")]
     pub options: VideoSourceConfigurationOptions,
 }
 
@@ -269,10 +269,10 @@ pub struct GetVideoEncoderConfigurations {}
 
 /// GetVideoEncoderConfigurations response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetVideoEncoderConfigurationsResponse")]
+#[serde(rename = "trt:GetVideoEncoderConfigurationsResponse")]
 pub struct GetVideoEncoderConfigurationsResponse {
     /// List of video encoder configurations.
-    #[serde(rename = "Configurations", default)]
+    #[serde(rename = "trt:Configurations", default)]
     pub configurations: Vec<VideoEncoderConfiguration>,
 }
 
@@ -287,10 +287,10 @@ pub struct GetVideoEncoderConfiguration {
 
 /// GetVideoEncoderConfiguration response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetVideoEncoderConfigurationResponse")]
+#[serde(rename = "trt:GetVideoEncoderConfigurationResponse")]
 pub struct GetVideoEncoderConfigurationResponse {
     /// The requested configuration.
-    #[serde(rename = "Configuration")]
+    #[serde(rename = "trt:Configuration")]
     pub configuration: VideoEncoderConfiguration,
 }
 
@@ -309,7 +309,7 @@ pub struct SetVideoEncoderConfiguration {
 
 /// SetVideoEncoderConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetVideoEncoderConfigurationResponse")]
+#[serde(rename = "trt:SetVideoEncoderConfigurationResponse")]
 pub struct SetVideoEncoderConfigurationResponse {}
 
 /// GetVideoEncoderConfigurationOptions request.
@@ -335,10 +335,10 @@ pub struct GetVideoEncoderConfigurationOptions {
 
 /// GetVideoEncoderConfigurationOptions response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetVideoEncoderConfigurationOptionsResponse")]
+#[serde(rename = "trt:GetVideoEncoderConfigurationOptionsResponse")]
 pub struct GetVideoEncoderConfigurationOptionsResponse {
     /// Video encoder configuration options.
-    #[serde(rename = "Options")]
+    #[serde(rename = "trt:Options")]
     pub options: VideoEncoderConfigurationOptions,
 }
 
@@ -667,10 +667,10 @@ pub struct GetAudioSources {}
 
 /// GetAudioSources response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetAudioSourcesResponse")]
+#[serde(rename = "trt:GetAudioSourcesResponse")]
 pub struct GetAudioSourcesResponse {
     /// List of audio sources.
-    #[serde(rename = "AudioSources", default)]
+    #[serde(rename = "trt:AudioSources", default)]
     pub audio_sources: Vec<AudioSource>,
 }
 
@@ -681,10 +681,10 @@ pub struct GetAudioSourceConfigurations {}
 
 /// GetAudioSourceConfigurations response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetAudioSourceConfigurationsResponse")]
+#[serde(rename = "trt:GetAudioSourceConfigurationsResponse")]
 pub struct GetAudioSourceConfigurationsResponse {
     /// List of audio source configurations.
-    #[serde(rename = "Configurations", default)]
+    #[serde(rename = "trt:Configurations", default)]
     pub configurations: Vec<AudioSourceConfiguration>,
 }
 
@@ -699,10 +699,10 @@ pub struct GetAudioSourceConfiguration {
 
 /// GetAudioSourceConfiguration response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetAudioSourceConfigurationResponse")]
+#[serde(rename = "trt:GetAudioSourceConfigurationResponse")]
 pub struct GetAudioSourceConfigurationResponse {
     /// The requested configuration.
-    #[serde(rename = "Configuration")]
+    #[serde(rename = "trt:Configuration")]
     pub configuration: AudioSourceConfiguration,
 }
 
@@ -717,10 +717,10 @@ pub struct GetAudioEncoderConfigurations {}
 
 /// GetAudioEncoderConfigurations response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetAudioEncoderConfigurationsResponse")]
+#[serde(rename = "trt:GetAudioEncoderConfigurationsResponse")]
 pub struct GetAudioEncoderConfigurationsResponse {
     /// List of audio encoder configurations.
-    #[serde(rename = "Configurations", default)]
+    #[serde(rename = "trt:Configurations", default)]
     pub configurations: Vec<AudioEncoderConfiguration>,
 }
 
@@ -735,10 +735,10 @@ pub struct GetAudioEncoderConfiguration {
 
 /// GetAudioEncoderConfiguration response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetAudioEncoderConfigurationResponse")]
+#[serde(rename = "trt:GetAudioEncoderConfigurationResponse")]
 pub struct GetAudioEncoderConfigurationResponse {
     /// The requested configuration.
-    #[serde(rename = "Configuration")]
+    #[serde(rename = "trt:Configuration")]
     pub configuration: AudioEncoderConfiguration,
 }
 
@@ -757,7 +757,7 @@ pub struct SetAudioEncoderConfiguration {
 
 /// SetAudioEncoderConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetAudioEncoderConfigurationResponse")]
+#[serde(rename = "trt:SetAudioEncoderConfigurationResponse")]
 pub struct SetAudioEncoderConfigurationResponse {}
 
 /// GetAudioEncoderConfigurationOptions request.
@@ -783,10 +783,10 @@ pub struct GetAudioEncoderConfigurationOptions {
 
 /// GetAudioEncoderConfigurationOptions response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetAudioEncoderConfigurationOptionsResponse")]
+#[serde(rename = "trt:GetAudioEncoderConfigurationOptionsResponse")]
 pub struct GetAudioEncoderConfigurationOptionsResponse {
     /// Audio encoder configuration options.
-    #[serde(rename = "Options")]
+    #[serde(rename = "trt:Options")]
     pub options: AudioEncoderConfigurationOptions,
 }
 
@@ -850,10 +850,10 @@ pub struct GetStreamUri {
 
 /// GetStreamUri response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetStreamUriResponse")]
+#[serde(rename = "trt:GetStreamUriResponse")]
 pub struct GetStreamUriResponse {
     /// Media URI.
-    #[serde(rename = "MediaUri")]
+    #[serde(rename = "trt:MediaUri")]
     pub media_uri: MediaUri,
 }
 
@@ -872,10 +872,10 @@ pub struct GetSnapshotUri {
 
 /// GetSnapshotUri response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetSnapshotUriResponse")]
+#[serde(rename = "trt:GetSnapshotUriResponse")]
 pub struct GetSnapshotUriResponse {
     /// Media URI.
-    #[serde(rename = "MediaUri")]
+    #[serde(rename = "trt:MediaUri")]
     pub media_uri: MediaUri,
 }
 
@@ -898,7 +898,7 @@ pub struct AddVideoEncoderConfiguration {
 
 /// AddVideoEncoderConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "AddVideoEncoderConfigurationResponse")]
+#[serde(rename = "trt:AddVideoEncoderConfigurationResponse")]
 pub struct AddVideoEncoderConfigurationResponse {}
 
 /// RemoveVideoEncoderConfiguration request.
@@ -912,7 +912,7 @@ pub struct RemoveVideoEncoderConfiguration {
 
 /// RemoveVideoEncoderConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "RemoveVideoEncoderConfigurationResponse")]
+#[serde(rename = "trt:RemoveVideoEncoderConfigurationResponse")]
 pub struct RemoveVideoEncoderConfigurationResponse {}
 
 /// AddVideoSourceConfiguration request.
@@ -930,7 +930,7 @@ pub struct AddVideoSourceConfiguration {
 
 /// AddVideoSourceConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "AddVideoSourceConfigurationResponse")]
+#[serde(rename = "trt:AddVideoSourceConfigurationResponse")]
 pub struct AddVideoSourceConfigurationResponse {}
 
 /// RemoveVideoSourceConfiguration request.
@@ -944,7 +944,7 @@ pub struct RemoveVideoSourceConfiguration {
 
 /// RemoveVideoSourceConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "RemoveVideoSourceConfigurationResponse")]
+#[serde(rename = "trt:RemoveVideoSourceConfigurationResponse")]
 pub struct RemoveVideoSourceConfigurationResponse {}
 
 /// AddAudioEncoderConfiguration request.
@@ -962,7 +962,7 @@ pub struct AddAudioEncoderConfiguration {
 
 /// AddAudioEncoderConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "AddAudioEncoderConfigurationResponse")]
+#[serde(rename = "trt:AddAudioEncoderConfigurationResponse")]
 pub struct AddAudioEncoderConfigurationResponse {}
 
 /// RemoveAudioEncoderConfiguration request.
@@ -976,7 +976,7 @@ pub struct RemoveAudioEncoderConfiguration {
 
 /// RemoveAudioEncoderConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "RemoveAudioEncoderConfigurationResponse")]
+#[serde(rename = "trt:RemoveAudioEncoderConfigurationResponse")]
 pub struct RemoveAudioEncoderConfigurationResponse {}
 
 /// AddAudioSourceConfiguration request.
@@ -994,7 +994,7 @@ pub struct AddAudioSourceConfiguration {
 
 /// AddAudioSourceConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "AddAudioSourceConfigurationResponse")]
+#[serde(rename = "trt:AddAudioSourceConfigurationResponse")]
 pub struct AddAudioSourceConfigurationResponse {}
 
 /// RemoveAudioSourceConfiguration request.
@@ -1008,7 +1008,7 @@ pub struct RemoveAudioSourceConfiguration {
 
 /// RemoveAudioSourceConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "RemoveAudioSourceConfigurationResponse")]
+#[serde(rename = "trt:RemoveAudioSourceConfigurationResponse")]
 pub struct RemoveAudioSourceConfigurationResponse {}
 
 /// AddPTZConfiguration request.
@@ -1026,7 +1026,7 @@ pub struct AddPTZConfiguration {
 
 /// AddPTZConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "AddPTZConfigurationResponse")]
+#[serde(rename = "trt:AddPTZConfigurationResponse")]
 pub struct AddPTZConfigurationResponse {}
 
 /// RemovePTZConfiguration request.
@@ -1040,7 +1040,7 @@ pub struct RemovePTZConfiguration {
 
 /// RemovePTZConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "RemovePTZConfigurationResponse")]
+#[serde(rename = "trt:RemovePTZConfigurationResponse")]
 pub struct RemovePTZConfigurationResponse {}
 
 // ============================================================================
@@ -1054,10 +1054,10 @@ pub struct GetServiceCapabilities {}
 
 /// GetServiceCapabilities response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetServiceCapabilitiesResponse")]
+#[serde(rename = "trt:GetServiceCapabilitiesResponse")]
 pub struct GetServiceCapabilitiesResponse {
     /// Media service capabilities.
-    #[serde(rename = "Capabilities")]
+    #[serde(rename = "trt:Capabilities")]
     pub capabilities: MediaServiceCapabilities,
 }
 
@@ -1188,10 +1188,10 @@ pub struct GetCompatibleVideoSourceConfigurations {
 
 /// GetCompatibleVideoSourceConfigurations response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetCompatibleVideoSourceConfigurationsResponse")]
+#[serde(rename = "trt:GetCompatibleVideoSourceConfigurationsResponse")]
 pub struct GetCompatibleVideoSourceConfigurationsResponse {
     /// Compatible configurations.
-    #[serde(rename = "Configurations", default)]
+    #[serde(rename = "trt:Configurations", default)]
     pub configurations: Vec<VideoSourceConfiguration>,
 }
 
@@ -1206,10 +1206,10 @@ pub struct GetCompatibleVideoEncoderConfigurations {
 
 /// GetCompatibleVideoEncoderConfigurations response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetCompatibleVideoEncoderConfigurationsResponse")]
+#[serde(rename = "trt:GetCompatibleVideoEncoderConfigurationsResponse")]
 pub struct GetCompatibleVideoEncoderConfigurationsResponse {
     /// Compatible configurations.
-    #[serde(rename = "Configurations", default)]
+    #[serde(rename = "trt:Configurations", default)]
     pub configurations: Vec<VideoEncoderConfiguration>,
 }
 
@@ -1224,10 +1224,10 @@ pub struct GetCompatibleAudioSourceConfigurations {
 
 /// GetCompatibleAudioSourceConfigurations response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetCompatibleAudioSourceConfigurationsResponse")]
+#[serde(rename = "trt:GetCompatibleAudioSourceConfigurationsResponse")]
 pub struct GetCompatibleAudioSourceConfigurationsResponse {
     /// Compatible configurations.
-    #[serde(rename = "Configurations", default)]
+    #[serde(rename = "trt:Configurations", default)]
     pub configurations: Vec<AudioSourceConfiguration>,
 }
 
@@ -1242,10 +1242,10 @@ pub struct GetCompatibleAudioEncoderConfigurations {
 
 /// GetCompatibleAudioEncoderConfigurations response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetCompatibleAudioEncoderConfigurationsResponse")]
+#[serde(rename = "trt:GetCompatibleAudioEncoderConfigurationsResponse")]
 pub struct GetCompatibleAudioEncoderConfigurationsResponse {
     /// Compatible configurations.
-    #[serde(rename = "Configurations", default)]
+    #[serde(rename = "trt:Configurations", default)]
     pub configurations: Vec<AudioEncoderConfiguration>,
 }
 
@@ -1260,10 +1260,10 @@ pub struct GetMetadataConfigurations {}
 
 /// GetMetadataConfigurations response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetMetadataConfigurationsResponse")]
+#[serde(rename = "trt:GetMetadataConfigurationsResponse")]
 pub struct GetMetadataConfigurationsResponse {
     /// Metadata configurations.
-    #[serde(rename = "Configurations", default)]
+    #[serde(rename = "trt:Configurations", default)]
     pub configurations: Vec<MetadataConfiguration>,
 }
 
@@ -1330,7 +1330,7 @@ pub struct SetMetadataConfiguration {
 
 /// SetMetadataConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetMetadataConfigurationResponse")]
+#[serde(rename = "trt:SetMetadataConfigurationResponse")]
 pub struct SetMetadataConfigurationResponse {}
 
 // ============================================================================
@@ -1348,7 +1348,7 @@ pub struct StartMulticastStreaming {
 
 /// StartMulticastStreaming response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "StartMulticastStreamingResponse")]
+#[serde(rename = "trt:StartMulticastStreamingResponse")]
 pub struct StartMulticastStreamingResponse {}
 
 /// StopMulticastStreaming request.
@@ -1362,7 +1362,7 @@ pub struct StopMulticastStreaming {
 
 /// StopMulticastStreaming response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "StopMulticastStreamingResponse")]
+#[serde(rename = "trt:StopMulticastStreamingResponse")]
 pub struct StopMulticastStreamingResponse {}
 
 /// SetAudioSourceConfiguration request.
@@ -1384,7 +1384,7 @@ pub struct SetAudioSourceConfiguration {
 
 /// SetAudioSourceConfiguration response.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "SetAudioSourceConfigurationResponse")]
+#[serde(rename = "trt:SetAudioSourceConfigurationResponse")]
 pub struct SetAudioSourceConfigurationResponse {}
 
 // ============================================================================
