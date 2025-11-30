@@ -19,7 +19,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use crate::config::ConfigRuntime;
-use crate::discovery::{DiscoveryConfig, WsDiscovery};
+use crate::discovery::{DiscoveryConfig, WsDiscovery, WsDiscoveryHandle};
 use crate::lifecycle::health::{ComponentHealth, HealthStatus};
 use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
 use crate::lifecycle::startup::{StartupPhase, StartupProgress};
@@ -352,8 +352,8 @@ pub struct Application {
     /// Handle to the server task.
     server_task: Option<JoinHandle<()>>,
 
-    /// WS-Discovery service instance for device discovery.
-    discovery: Option<WsDiscovery>,
+    /// WS-Discovery service handle for device discovery control.
+    discovery: Option<WsDiscoveryHandle>,
 
     /// Handle to the WS-Discovery background task.
     discovery_task: Option<JoinHandle<()>>,
@@ -397,11 +397,10 @@ impl Application {
             .map_err(|e| StartupError::Config(e.to_string()))?;
         let config_runtime = Arc::new(ConfigRuntime::new(app_config));
 
-        // Apply configured log level (supports runtime changes)
-        if let Ok(level) = config_runtime.get_string("logging.level") {
-            if let Err(e) = crate::logging::set_log_level(&level) {
-                tracing::warn!("Failed to set log level to '{}': {}", level, e);
-            }
+        // Initialize logging with full configuration (console + file if configured)
+        if let Err(e) = crate::logging::init_logging(&config_runtime) {
+            // Fall back to eprintln since logging may not be available
+            eprintln!("Failed to initialize logging: {}", e);
         }
 
         // Log loaded configuration for debugging
@@ -486,7 +485,9 @@ impl Application {
         let max_body_size = config_runtime
             .get_int("server.max_body_size")
             .unwrap_or(1024 * 1024) as usize;
-        let http_verbose = config_runtime.get_bool("server.verbose").unwrap_or(false);
+        let http_verbose = config_runtime
+            .get_bool("logging.http_verbose")
+            .unwrap_or(false);
 
         let server_config = OnvifServerConfig {
             bind_address,
@@ -785,33 +786,19 @@ impl Application {
         }
     }
 
-    /// Start the WS-Discovery service and return the instance and background task.
+    /// Start the WS-Discovery service and return the handle and background task.
     async fn start_discovery(
         config: DiscoveryConfig,
-    ) -> Result<(WsDiscovery, JoinHandle<()>), crate::discovery::DiscoveryError> {
-        let mut discovery = WsDiscovery::new(config);
+    ) -> Result<(WsDiscoveryHandle, JoinHandle<()>), crate::discovery::DiscoveryError> {
+        let discovery = WsDiscovery::new(config);
 
-        // Initialize the multicast socket
-        discovery.init_socket().await?;
+        // Start the discovery service - this spawns a background task
+        // that listens for Probe requests and sends ProbeMatch responses
+        let (handle, task) = discovery.run_service().await?;
 
-        // Clone what we need for the background task
-        // Note: WsDiscovery::run() takes &mut self, so we need to move it into the task
-        // For now, we'll just send Hello and not run the continuous listener
-        // A full implementation would need Arc<Mutex<WsDiscovery>> or redesign
+        tracing::debug!("WS-Discovery task started (full discovery mode)");
 
-        // Send initial Hello announcement
-        discovery.send_hello().await?;
-
-        // For now, we don't spawn a background task since run() needs &mut self
-        // This is a limitation that could be addressed by refactoring WsDiscovery to use interior mutability
-        // The discovery instance is still useful for stop() which sends Bye
-        let task = tokio::spawn(async {
-            // Placeholder task - in a full implementation, this would run the discovery listener
-            // discovery.run().await would handle incoming Probe requests
-            tracing::debug!("WS-Discovery task started (Hello-only mode)");
-        });
-
-        Ok((discovery, task))
+        Ok((handle, task))
     }
 
     /// Attempt to detect the local IP address.

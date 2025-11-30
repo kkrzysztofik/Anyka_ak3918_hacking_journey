@@ -31,5 +31,5 @@ mod ws_discovery;
 
 pub use ws_discovery::{
     APP_MAX_DELAY_MS, DiscoveryConfig, DiscoveryError, DiscoveryMode, HELLO_INTERVAL_SECONDS,
-    WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT, WsDiscovery, WsDiscoveryMessage,
+    WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT, WsDiscovery, WsDiscoveryHandle, WsDiscoveryMessage,
 };
