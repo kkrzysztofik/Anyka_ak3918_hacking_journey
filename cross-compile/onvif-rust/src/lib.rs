@@ -34,6 +34,24 @@
 //! - [`auth`] - Authentication (WS-Security, HTTP Digest)
 //! - [`security`] - Security hardening (rate limiting, brute force protection)
 
+use cap::Cap;
+use std::alloc::System;
+
+/// Global allocator with hard memory limit (24MB) for embedded target constraints.
+///
+/// The `cap` crate provides allocation tracking and hard-limit enforcement.
+/// This is configured at crate root to ensure all allocations are tracked.
+#[global_allocator]
+static ALLOCATOR: Cap<System> = Cap::new(System, 24 * 1024 * 1024);
+
+/// Get the current memory allocation in bytes.
+///
+/// This provides read-only access to the allocator's tracked usage.
+/// Used by [`utils::MemoryMonitor`] for soft/hard limit checking.
+pub fn allocated() -> usize {
+    ALLOCATOR.allocated()
+}
+
 pub mod app;
 pub mod lifecycle;
 

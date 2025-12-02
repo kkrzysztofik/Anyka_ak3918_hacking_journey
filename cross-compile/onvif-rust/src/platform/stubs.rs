@@ -38,8 +38,12 @@ pub struct StubPlatformBuilder {
     ptz_supported: bool,
     /// Whether imaging control is supported.
     imaging_supported: bool,
-    /// Whether network info is supported.
+    /// Whether network info is supported (default: true).
     network_info_supported: bool,
+    /// MAC address for stub network info.
+    mac_address: Option<String>,
+    /// IP address for stub network info (None = auto-detect).
+    ip_address: Option<String>,
     /// Force initialization failure.
     fail_init: bool,
 }
@@ -47,7 +51,10 @@ pub struct StubPlatformBuilder {
 impl StubPlatformBuilder {
     /// Create a new builder with default settings.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            network_info_supported: true, // Enable by default
+            ..Self::default()
+        }
     }
 
     /// Set device information.
@@ -119,6 +126,18 @@ impl StubPlatformBuilder {
     /// Enable or disable network info support.
     pub fn network_info_supported(mut self, supported: bool) -> Self {
         self.network_info_supported = supported;
+        self
+    }
+
+    /// Set the MAC address for stub network info.
+    pub fn mac_address(mut self, mac: impl Into<String>) -> Self {
+        self.mac_address = Some(mac.into());
+        self
+    }
+
+    /// Set the IP address for stub network info (None = auto-detect).
+    pub fn ip_address(mut self, ip: Option<String>) -> Self {
+        self.ip_address = ip;
         self
     }
 
@@ -261,7 +280,15 @@ impl StubPlatformBuilder {
         };
 
         let network_info = if self.network_info_supported {
-            Some(Arc::new(StubNetworkInfo::new()) as Arc<dyn NetworkInfo>)
+            let stub = match (self.mac_address, self.ip_address) {
+                (Some(mac), ip) => StubNetworkInfo::with_mac_and_ip(mac, ip),
+                (None, Some(ip)) => StubNetworkInfo::with_mac_and_ip(
+                    "AA:BB:CC:DD:EE:FF".to_string(),
+                    Some(ip),
+                ),
+                (None, None) => StubNetworkInfo::new(),
+            };
+            Some(Arc::new(stub) as Arc<dyn NetworkInfo>)
         } else {
             None
         };
@@ -695,13 +722,51 @@ impl ImagingControl for StubImagingControl {
 
 /// Stub network information implementation.
 ///
-/// Returns empty data for all queries. Used when real network info is not needed.
-pub struct StubNetworkInfo;
+/// Returns configurable network data for testing. By default returns
+/// a mock MAC address and detects real IP using UDP socket trick.
+pub struct StubNetworkInfo {
+    /// MAC address to return (default: "AA:BB:CC:DD:EE:FF").
+    mac_address: String,
+    /// IP address override (None = auto-detect).
+    ip_address: Option<String>,
+    /// Network settings storage (for stub set operations).
+    settings: parking_lot::RwLock<NetworkSettings>,
+}
+
+/// Internal storage for network settings stubs.
+#[derive(Debug, Clone, Default)]
+struct NetworkSettings {
+    dns_servers: Vec<String>,
+    search_domains: Vec<String>,
+    gateway: Option<String>,
+}
 
 impl StubNetworkInfo {
-    /// Create a new stub network info.
+    /// Create a new stub network info with defaults.
     pub fn new() -> Self {
-        Self
+        Self {
+            mac_address: "AA:BB:CC:DD:EE:FF".to_string(),
+            ip_address: None,
+            settings: parking_lot::RwLock::new(NetworkSettings::default()),
+        }
+    }
+
+    /// Create with custom MAC address.
+    pub fn with_mac(mac_address: String) -> Self {
+        Self {
+            mac_address,
+            ip_address: None,
+            settings: parking_lot::RwLock::new(NetworkSettings::default()),
+        }
+    }
+
+    /// Create with custom MAC and IP addresses.
+    pub fn with_mac_and_ip(mac_address: String, ip_address: Option<String>) -> Self {
+        Self {
+            mac_address,
+            ip_address,
+            settings: parking_lot::RwLock::new(NetworkSettings::default()),
+        }
     }
 }
 
@@ -714,23 +779,80 @@ impl Default for StubNetworkInfo {
 #[async_trait]
 impl NetworkInfo for StubNetworkInfo {
     async fn get_network_interfaces(&self) -> PlatformResult<Vec<NetworkInterfaceInfo>> {
-        // Return empty list - no interfaces available in stub
-        Ok(vec![])
+        // Use configured IP or detect real IP
+        let ip = self.ip_address.clone().or_else(|| self.detect_local_ip());
+
+        Ok(vec![NetworkInterfaceInfo {
+            token: "eth0".to_string(),
+            name: "eth0".to_string(),
+            enabled: true,
+            ipv4_address: ip,
+            ipv4_prefix_length: Some(24),
+            ipv4_dhcp: true,
+            mac_address: Some(self.mac_address.clone()),
+            link_speed: Some(100),
+        }])
     }
 
     async fn get_dns_info(&self) -> PlatformResult<DnsInfo> {
-        // Return default empty DNS info
-        Ok(DnsInfo::default())
+        let settings = self.settings.read();
+        Ok(DnsInfo {
+            from_dhcp: settings.dns_servers.is_empty(),
+            search_domains: settings.search_domains.clone(),
+            dns_from_dhcp: if settings.dns_servers.is_empty() {
+                vec!["8.8.8.8".to_string(), "8.8.4.4".to_string()]
+            } else {
+                vec![]
+            },
+            dns_manual: settings.dns_servers.clone(),
+        })
     }
 
     async fn get_ntp_info(&self) -> PlatformResult<NtpInfo> {
-        // Return default empty NTP info
-        Ok(NtpInfo::default())
+        Ok(NtpInfo {
+            from_dhcp: true,
+            ntp_from_dhcp: vec!["pool.ntp.org".to_string()],
+            ntp_manual: vec![],
+        })
     }
 
     async fn get_network_protocols(&self) -> PlatformResult<Vec<NetworkProtocolInfo>> {
-        // Return empty list - no protocols in stub
-        Ok(vec![])
+        Ok(vec![
+            NetworkProtocolInfo {
+                name: "HTTP".to_string(),
+                enabled: true,
+                ports: vec![80],
+            },
+            NetworkProtocolInfo {
+                name: "RTSP".to_string(),
+                enabled: true,
+                ports: vec![554],
+            },
+        ])
+    }
+
+    async fn set_network_interface(
+        &self,
+        _token: &str,
+        _ipv4_address: Option<String>,
+        _ipv4_prefix_length: Option<u8>,
+        _ipv4_dhcp: bool,
+    ) -> PlatformResult<()> {
+        // Stub: accept but don't persist (in-memory only for testing)
+        Ok(())
+    }
+
+    async fn set_dns(&self, dns_servers: &[String], search_domains: &[String]) -> PlatformResult<()> {
+        let mut settings = self.settings.write();
+        settings.dns_servers = dns_servers.to_vec();
+        settings.search_domains = search_domains.to_vec();
+        Ok(())
+    }
+
+    async fn set_gateway(&self, gateway: &str) -> PlatformResult<()> {
+        let mut settings = self.settings.write();
+        settings.gateway = Some(gateway.to_string());
+        Ok(())
     }
 }
 

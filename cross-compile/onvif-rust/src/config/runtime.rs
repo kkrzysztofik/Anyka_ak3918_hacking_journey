@@ -349,6 +349,78 @@ impl ConfigRuntime {
 
         tracing::info!("=== End Configuration ===");
     }
+
+    /// Serialize configuration to TOML string for backup.
+    pub fn to_toml_string(&self) -> ConfigResult<String> {
+        let config = self.config.read();
+        let mut toml_content = String::new();
+
+        // Group by section
+        let mut sections: HashMap<&str, Vec<(&str, &String)>> = HashMap::new();
+
+        for (key, value) in config.values() {
+            let parts: Vec<&str> = key.splitn(2, '.').collect();
+            if parts.len() == 2 {
+                sections.entry(parts[0]).or_default().push((parts[1], value));
+            } else {
+                sections.entry("general").or_default().push((key.as_str(), value));
+            }
+        }
+
+        // Write sections
+        for (section, values) in sections {
+            toml_content.push_str(&format!("[{}]\n", section));
+            for (key, value) in values {
+                // Quote strings, leave numbers/bools unquoted
+                if value.parse::<i64>().is_ok()
+                    || value.parse::<f64>().is_ok()
+                    || value == "true"
+                    || value == "false"
+                {
+                    toml_content.push_str(&format!("{} = {}\n", key, value));
+                } else {
+                    toml_content.push_str(&format!("{} = \"{}\"\n", key, value));
+                }
+            }
+            toml_content.push('\n');
+        }
+
+        Ok(toml_content)
+    }
+
+    /// Load configuration from TOML string (for restore).
+    pub fn load_from_toml_string(&self, toml_str: &str) -> ConfigResult<()> {
+        let toml_value: toml::Value = toml::from_str(toml_str)
+            .map_err(|e| ConfigError::ParseError {
+                key: "config".to_string(),
+                message: format!("Invalid TOML: {}", e),
+            })?;
+
+        let mut new_config = ApplicationConfig::new();
+
+        if let toml::Value::Table(table) = toml_value {
+            for (section, section_value) in table {
+                if let toml::Value::Table(section_table) = section_value {
+                    for (key, value) in section_table {
+                        let full_key = format!("{}.{}", section, key);
+                        let str_value = match value {
+                            toml::Value::String(s) => s,
+                            toml::Value::Integer(i) => i.to_string(),
+                            toml::Value::Float(f) => f.to_string(),
+                            toml::Value::Boolean(b) => b.to_string(),
+                            _ => continue, // Skip arrays and nested tables
+                        };
+                        new_config.set(&full_key, str_value);
+                    }
+                }
+            }
+        }
+
+        // Replace configuration
+        self.replace(new_config);
+        tracing::info!("Configuration restored from TOML string");
+        Ok(())
+    }
 }
 
 impl Clone for ConfigRuntime {

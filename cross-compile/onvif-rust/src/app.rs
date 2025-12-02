@@ -68,6 +68,8 @@ pub struct AppState {
     ptz_state: Arc<PTZStateManager>,
     /// Configuration runtime.
     config: Arc<ConfigRuntime>,
+    /// Memory monitor for resource enforcement.
+    memory_monitor: Arc<crate::utils::MemoryMonitor>,
     /// Platform abstraction (optional for testing without hardware).
     platform: Option<Arc<dyn Platform>>,
 }
@@ -98,6 +100,11 @@ impl AppState {
         &self.config
     }
 
+    /// Get a reference to the memory monitor.
+    pub fn memory_monitor(&self) -> &Arc<crate::utils::MemoryMonitor> {
+        &self.memory_monitor
+    }
+
     /// Get a reference to the platform abstraction, if available.
     pub fn platform(&self) -> Option<&Arc<dyn Platform>> {
         self.platform.as_ref()
@@ -111,6 +118,7 @@ impl std::fmt::Debug for AppState {
             .field("password_manager", &"Arc<PasswordManager>")
             .field("ptz_state", &"Arc<PTZStateManager>")
             .field("config", &"Arc<ConfigRuntime>")
+            .field("memory_monitor", &"Arc<MemoryMonitor>")
             .field(
                 "platform",
                 &self.platform.as_ref().map(|_| "Some(Arc<dyn Platform>)"),
@@ -133,6 +141,7 @@ pub struct AppStateBuilder {
     password_manager: Option<Arc<PasswordManager>>,
     ptz_state: Option<Arc<PTZStateManager>>,
     config: Option<Arc<ConfigRuntime>>,
+    memory_monitor: Option<Arc<crate::utils::MemoryMonitor>>,
     platform: Option<Arc<dyn Platform>>,
 }
 
@@ -180,6 +189,12 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the memory monitor.
+    pub fn memory_monitor(mut self, monitor: Arc<crate::utils::MemoryMonitor>) -> Self {
+        self.memory_monitor = Some(monitor);
+        self
+    }
+
     /// Set the platform abstraction.
     pub fn platform(mut self, platform: Arc<dyn Platform>) -> Self {
         self.platform = Some(platform);
@@ -201,6 +216,9 @@ impl AppStateBuilder {
             config: self
                 .config
                 .ok_or_else(|| AppStateError::MissingComponent("config".to_string()))?,
+            memory_monitor: self
+                .memory_monitor
+                .ok_or_else(|| AppStateError::MissingComponent("memory_monitor".to_string()))?,
             platform: self.platform,
         })
     }
@@ -220,6 +238,7 @@ mod app_state_tests {
             .password_manager(Arc::new(PasswordManager::new()))
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .build();
 
         assert!(result.is_err());
@@ -236,6 +255,7 @@ mod app_state_tests {
             .user_storage(Arc::new(storage))
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .build();
 
         assert!(result.is_err());
@@ -253,6 +273,7 @@ mod app_state_tests {
             .password_manager(Arc::new(PasswordManager::new()))
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .build();
 
         assert!(result.is_ok());
@@ -268,6 +289,7 @@ mod app_state_tests {
             .password_manager(Arc::new(PasswordManager::new()))
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .build()
             .unwrap();
 
@@ -280,6 +302,10 @@ mod app_state_tests {
         ));
         assert!(Arc::ptr_eq(state.ptz_state(), cloned.ptz_state()));
         assert!(Arc::ptr_eq(state.config(), cloned.config()));
+        assert!(Arc::ptr_eq(
+            state.memory_monitor(),
+            cloned.memory_monitor()
+        ));
     }
 
     #[test]
@@ -290,6 +316,7 @@ mod app_state_tests {
             .password_manager(Arc::new(PasswordManager::new()))
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .build()
             .unwrap();
 
@@ -457,7 +484,9 @@ impl Application {
             .user_storage(Arc::new(user_storage))
             .password_manager(Arc::new(PasswordManager::new()))
             .ptz_state(Arc::new(PTZStateManager::new()))
-            .config(Arc::clone(&config_runtime));
+            .config(Arc::clone(&config_runtime))
+            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::from_config(&config_runtime)
+                .map_err(|e| StartupError::Services(format!("Failed to initialize memory monitor: {}", e)))?));
 
         // Add platform if available
         if let Some(ref p) = platform {

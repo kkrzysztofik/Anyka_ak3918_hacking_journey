@@ -1087,6 +1087,166 @@ pub struct SetSystemFactoryDefault {
 pub struct SetSystemFactoryDefaultResponse {}
 
 // ============================================================================
+// System Backup/Restore
+// ============================================================================
+
+/// GetSystemBackup request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetSystemBackup")]
+pub struct GetSystemBackup {}
+
+/// Backup file structure.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BackupFile {
+    /// Filename.
+    #[serde(rename = "tds:Name")]
+    pub name: String,
+    /// Base64-encoded content.
+    #[serde(rename = "tds:Data")]
+    pub data: String,
+}
+
+/// GetSystemBackup response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:GetSystemBackupResponse")]
+pub struct GetSystemBackupResponse {
+    /// Backup files.
+    #[serde(rename = "tds:BackupFiles", default)]
+    pub backup_files: Vec<BackupFile>,
+}
+
+impl Default for GetSystemBackupResponse {
+    fn default() -> Self {
+        Self {
+            backup_files: vec![],
+        }
+    }
+}
+
+/// RestoreSystem request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "RestoreSystem")]
+pub struct RestoreSystem {
+    /// Backup files to restore.
+    #[serde(rename = "BackupFiles", alias = "tds:BackupFiles", default)]
+    pub backup_files: Vec<BackupFile>,
+}
+
+/// RestoreSystem response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:RestoreSystemResponse")]
+pub struct RestoreSystemResponse {}
+
+// ============================================================================
+// Certificates (Stubs)
+// ============================================================================
+
+/// GetCertificates request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCertificates")]
+pub struct GetCertificates {}
+
+/// Certificate structure.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Certificate {
+    /// Certificate ID.
+    #[serde(rename = "tds:CertificateID")]
+    pub certificate_id: String,
+    /// Certificate data (base64 PEM or DER).
+    #[serde(rename = "tds:Certificate", default, skip_serializing_if = "Option::is_none")]
+    pub certificate: Option<String>,
+}
+
+/// GetCertificates response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:GetCertificatesResponse")]
+pub struct GetCertificatesResponse {
+    /// List of certificates (empty for stub).
+    #[serde(rename = "tds:NvtCertificate", default)]
+    pub nvt_certificate: Vec<Certificate>,
+}
+
+/// GetCertificatesStatus request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetCertificatesStatus")]
+pub struct GetCertificatesStatus {}
+
+/// Certificate status.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CertificateStatus {
+    /// Certificate ID.
+    #[serde(rename = "tds:CertificateID")]
+    pub certificate_id: String,
+    /// Whether certificate is enabled.
+    #[serde(rename = "tds:Status")]
+    pub status: bool,
+}
+
+/// GetCertificatesStatus response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:GetCertificatesStatusResponse")]
+pub struct GetCertificatesStatusResponse {
+    /// List of certificate statuses (empty for stub).
+    #[serde(rename = "tds:CertificateStatus", default)]
+    pub certificate_status: Vec<CertificateStatus>,
+}
+
+/// CreateCertificate request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "CreateCertificate")]
+pub struct CreateCertificate {
+    /// Certificate ID (optional).
+    #[serde(rename = "CertificateID", default, skip_serializing_if = "Option::is_none")]
+    pub certificate_id: Option<String>,
+    /// Subject (optional).
+    #[serde(rename = "Subject", default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    /// Valid not before (optional).
+    #[serde(rename = "ValidNotBefore", default, skip_serializing_if = "Option::is_none")]
+    pub valid_not_before: Option<String>,
+    /// Valid not after (optional).
+    #[serde(rename = "ValidNotAfter", default, skip_serializing_if = "Option::is_none")]
+    pub valid_not_after: Option<String>,
+}
+
+/// CreateCertificate response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:CreateCertificateResponse")]
+pub struct CreateCertificateResponse {
+    /// Created certificate (optional for stub).
+    #[serde(rename = "tds:NvtCertificate", default, skip_serializing_if = "Option::is_none")]
+    pub nvt_certificate: Option<Certificate>,
+}
+
+/// LoadCertificates request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "LoadCertificates")]
+pub struct LoadCertificates {
+    /// Certificates to load.
+    #[serde(rename = "NVTCertificate", alias = "tds:NVTCertificate", default)]
+    pub nvt_certificate: Vec<Certificate>,
+}
+
+/// LoadCertificates response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:LoadCertificatesResponse")]
+pub struct LoadCertificatesResponse {}
+
+/// DeleteCertificates request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "DeleteCertificates")]
+pub struct DeleteCertificates {
+    /// Certificate IDs to delete.
+    #[serde(rename = "CertificateID", alias = "tds:CertificateID", default)]
+    pub certificate_id: Vec<String>,
+}
+
+/// DeleteCertificates response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:DeleteCertificatesResponse")]
+pub struct DeleteCertificatesResponse {}
+
+// ============================================================================
 // Hostname
 // ============================================================================
 
@@ -1846,82 +2006,6 @@ pub struct SetUser {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "tds:SetUserResponse")]
 pub struct SetUserResponse {}
-
-// ============================================================================
-// Certificates
-// ============================================================================
-
-/// GetCertificates request.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetCertificates")]
-pub struct GetCertificates {}
-
-/// GetCertificates response.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "tds:GetCertificatesResponse")]
-pub struct GetCertificatesResponse {
-    /// List of certificates (empty if none installed).
-    #[serde(rename = "tds:NvtCertificate", default)]
-    pub nvt_certificates: Vec<Certificate>,
-}
-
-/// Certificate information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Certificate {
-    /// Certificate ID.
-    #[serde(rename = "CertificateID")]
-    pub certificate_id: String,
-
-    /// Certificate data.
-    #[serde(
-        rename = "Certificate",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub certificate: Option<BinaryData>,
-}
-
-/// Binary data container.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BinaryData {
-    /// Content type.
-    #[serde(
-        rename = "@contentType",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub content_type: Option<String>,
-
-    /// Base64-encoded data.
-    #[serde(rename = "$value", default)]
-    pub data: String,
-}
-
-/// GetCertificatesStatus request.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetCertificatesStatus")]
-pub struct GetCertificatesStatus {}
-
-/// GetCertificatesStatus response.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "tds:GetCertificatesStatusResponse")]
-pub struct GetCertificatesStatusResponse {
-    /// List of certificate statuses.
-    #[serde(rename = "tds:CertificateStatus", default)]
-    pub certificate_status: Vec<CertificateStatus>,
-}
-
-/// Certificate status.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CertificateStatus {
-    /// Certificate ID.
-    #[serde(rename = "CertificateID")]
-    pub certificate_id: String,
-
-    /// Whether certificate is enabled.
-    #[serde(rename = "Status")]
-    pub status: bool,
-}
 
 // ============================================================================
 // Relay Outputs

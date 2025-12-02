@@ -38,6 +38,7 @@ http-body-util = "0.1"
 libc = "0.2"
 anyhow = "1.0"
 thiserror = "2.0"
+cap = "0.1"  # Memory allocation tracking and hard-limit enforcement for embedded targets
 async-trait = "0.1"
 portable-atomic = { version = "1.11", features = ["std", "serde", "float"] }
 validator = { version = "0.20", features = ["derive"] }

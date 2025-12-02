@@ -25,9 +25,11 @@
 //! ```
 
 pub mod http;
+pub mod http_memory;
 mod platform;
 
 pub use http::{HttpLogConfig, HttpLoggingMiddleware};
+pub use http_memory::memory_check_middleware;
 pub use platform::*;
 
 use std::path::Path;

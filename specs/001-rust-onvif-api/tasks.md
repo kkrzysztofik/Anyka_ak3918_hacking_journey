@@ -823,34 +823,34 @@
 
 ### Memory Monitoring
 
-- [ ] T509 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/utils/memory.rs` with memory constants.
-- [ ] T510 [P] Define `MEMORY_SOFT_LIMIT` constant as 16MB (16 * 1024 * 1024).
-- [ ] T511 [P] Define `MEMORY_HARD_LIMIT` constant as 24MB (24 * 1024 * 1024).
-- [ ] T512 [P] Create `MemoryMonitor` struct with `AtomicUsize` for current_usage tracking.
-- [ ] T513 [P] Define `MemoryError` enum with variants: HardLimitExceeded, WouldExceedLimit.
-- [ ] T514 [P] Implement `MemoryMonitor::new()` constructor.
-- [ ] T515 [P] Implement `MemoryMonitor::check_available()` validating request can be processed within limits.
-- [ ] T516 [P] Implement `MemoryMonitor::record_allocation()` updating current usage.
-- [ ] T517 [P] Implement `MemoryMonitor::record_deallocation()` decrementing usage.
-- [ ] T518 [P] Add soft limit warning logging when usage exceeds 16MB.
+- [X] T509 [P] Create `/home/kmk/anyka-dev/cross-compile/onvif-rust/src/utils/memory.rs` with memory constants.
+- [X] T510 [P] Define `MEMORY_SOFT_LIMIT` constant as 16MB (16 * 1024 * 1024).
+- [X] T511 [P] Define `MEMORY_HARD_LIMIT` constant as 24MB (24 * 1024 * 1024).
+- [X] T512 [P] Create `MemoryMonitor` struct with `AtomicUsize` for current_usage tracking. (Implemented using `cap` crate)
+- [X] T513 [P] Define `MemoryError` enum with variants: HardLimitExceeded, WouldExceedLimit. (Using Result<(), Error> pattern)
+- [X] T514 [P] Implement `MemoryMonitor::new()` constructor.
+- [X] T515 [P] Implement `MemoryMonitor::check_available()` validating request can be processed within limits.
+- [X] T516 [P] Implement `MemoryMonitor::record_allocation()` updating current usage. (Delegated to cap crate)
+- [X] T517 [P] Implement `MemoryMonitor::record_deallocation()` decrementing usage. (Delegated to cap crate)
+- [X] T518 [P] Add soft limit warning logging when usage exceeds 16MB.
 
 ### Memory Profiling (Feature-Gated)
 
-- [ ] T519 [P] Create `AllocationTracker` struct with `#[cfg(feature = "memory-profiling")]` attribute.
-- [ ] T520 [P] Define `AllocationInfo` struct with size, file, line fields.
-- [ ] T521 [P] Implement `AllocationTracker::new()` with DashMap for concurrent tracking.
-- [ ] T522 [P] Implement `AllocationTracker::track_allocation()` recording allocation with source location.
-- [ ] T523 [P] Implement `AllocationTracker::track_deallocation()` removing tracking entry.
-- [ ] T524 [P] Implement `AllocationTracker::log_stats()` outputting current and peak memory usage.
-- [ ] T525 [P] Implement `AllocationTracker::get_peak_usage()` returning maximum recorded usage.
+- [ ] T519 [P] Create `AllocationTracker` struct with `#[cfg(feature = "memory-profiling")]` attribute. (Deferred to Phase 11, optional enhancement)
+- [ ] T520 [P] Define `AllocationInfo` struct with size, file, line fields. (Deferred to Phase 11, optional enhancement)
+- [ ] T521 [P] Implement `AllocationTracker::new()` with DashMap for concurrent tracking. (Deferred to Phase 11, optional enhancement)
+- [ ] T522 [P] Implement `AllocationTracker::track_allocation()` recording allocation with source location. (Deferred to Phase 11, optional enhancement)
+- [ ] T523 [P] Implement `AllocationTracker::track_deallocation()` removing tracking entry. (Deferred to Phase 11, optional enhancement)
+- [ ] T524 [P] Implement `AllocationTracker::log_stats()` outputting current and peak memory usage. (Deferred to Phase 11, optional enhancement)
+- [ ] T525 [P] Implement `AllocationTracker::get_peak_usage()` returning maximum recorded usage. (Deferred to Phase 11, optional enhancement)
 
 ### Memory Integration
 
-- [ ] T526 [P] Add memory check middleware to axum server returning HTTP 503 when hard limit exceeded (EC-016).
-- [ ] T527 [P] Integrate memory monitoring with request handling.
-- [ ] T527a [P] Add integration test simulating memory pressure approaching 24MB hard limit (EC-016).
-- [ ] T527b [P] Add integration test verifying HTTP 503 Service Unavailable when memory limit would be exceeded (EC-016).
-- [ ] T527c [P] Add integration test verifying existing connections maintained during memory pressure (EC-016).
+- [X] T526 [P] Add memory check middleware to axum server returning HTTP 503 when hard limit exceeded (EC-016).
+- [X] T527 [P] Integrate memory monitoring with request handling.
+- [X] T527a [P] Add integration test simulating memory pressure approaching 24MB hard limit (EC-016).
+- [X] T527b [P] Add integration test verifying HTTP 503 Service Unavailable when memory limit would be exceeded (EC-016).
+- [X] T527c [P] Add integration test verifying existing connections maintained during memory pressure (EC-016).
 
 **Checkpoint**: Memory monitoring operational with soft/hard limit enforcement.
 

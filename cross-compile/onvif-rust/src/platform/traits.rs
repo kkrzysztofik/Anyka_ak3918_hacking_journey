@@ -549,6 +549,52 @@ pub trait NetworkInfo: Send + Sync {
 
     /// Get enabled network protocols.
     async fn get_network_protocols(&self) -> PlatformResult<Vec<NetworkProtocolInfo>>;
+
+    /// Detect the local IP address.
+    ///
+    /// Uses UDP socket trick to determine the outbound IP address without
+    /// actually sending any packets. Falls back to first interface IP if
+    /// socket method fails.
+    fn detect_local_ip(&self) -> Option<String> {
+        use std::net::UdpSocket;
+        match UdpSocket::bind("0.0.0.0:0") {
+            Ok(socket) => {
+                if socket.connect("8.8.8.8:80").is_ok() {
+                    if let Ok(addr) = socket.local_addr() {
+                        let ip = addr.ip().to_string();
+                        if ip != "0.0.0.0" {
+                            return Some(ip);
+                        }
+                    }
+                }
+                None
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Set network interface configuration (stub - platform may not support).
+    async fn set_network_interface(
+        &self,
+        _token: &str,
+        _ipv4_address: Option<String>,
+        _ipv4_prefix_length: Option<u8>,
+        _ipv4_dhcp: bool,
+    ) -> PlatformResult<()> {
+        Err(PlatformError::NotSupported(
+            "set_network_interface".to_string(),
+        ))
+    }
+
+    /// Set DNS configuration (stub - platform may not support).
+    async fn set_dns(&self, _dns_servers: &[String], _search_domains: &[String]) -> PlatformResult<()> {
+        Err(PlatformError::NotSupported("set_dns".to_string()))
+    }
+
+    /// Set default gateway (stub - platform may not support).
+    async fn set_gateway(&self, _gateway: &str) -> PlatformResult<()> {
+        Err(PlatformError::NotSupported("set_gateway".to_string()))
+    }
 }
 
 /// Main platform trait combining all hardware abstractions.

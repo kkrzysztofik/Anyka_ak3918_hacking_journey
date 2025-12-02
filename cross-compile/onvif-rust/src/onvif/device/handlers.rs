@@ -18,22 +18,25 @@ use crate::onvif::types::common::{
     TimeZone, User as OnvifUser,
 };
 use crate::onvif::types::device::{
-    AddScopes, AddScopesResponse, Capabilities, CreateUsers, CreateUsersResponse, DNSInformation,
-    DeleteUsers, DeleteUsersResponse, Duplex, GetCapabilities, GetCapabilitiesResponse,
-    GetCertificates, GetCertificatesResponse, GetCertificatesStatus, GetCertificatesStatusResponse,
-    GetDNS, GetDNSResponse, GetDeviceInformation, GetDeviceInformationResponse, GetDiscoveryMode,
-    GetDiscoveryModeResponse, GetHostname, GetHostnameResponse, GetNTP, GetNTPResponse,
-    GetNetworkInterfaces, GetNetworkInterfacesResponse, GetNetworkProtocols,
-    GetNetworkProtocolsResponse, GetRelayOutputs, GetRelayOutputsResponse, GetScopes,
-    GetScopesResponse, GetServiceCapabilities, GetServiceCapabilitiesResponse, GetServices,
-    GetServicesResponse, GetSystemDateAndTime, GetSystemDateAndTimeResponse, GetUsers,
+    AddScopes, AddScopesResponse, BackupFile, Capabilities, CreateCertificate,
+    CreateCertificateResponse, CreateUsers, CreateUsersResponse, DNSInformation,
+    DeleteCertificates, DeleteCertificatesResponse, DeleteUsers, DeleteUsersResponse, Duplex,
+    GetCapabilities, GetCapabilitiesResponse, GetCertificates, GetCertificatesResponse,
+    GetCertificatesStatus, GetCertificatesStatusResponse, GetDNS, GetDNSResponse,
+    GetDeviceInformation, GetDeviceInformationResponse, GetDiscoveryMode, GetDiscoveryModeResponse,
+    GetHostname, GetHostnameResponse, GetNTP, GetNTPResponse, GetNetworkInterfaces,
+    GetNetworkInterfacesResponse, GetNetworkProtocols, GetNetworkProtocolsResponse, GetRelayOutputs,
+    GetRelayOutputsResponse, GetScopes, GetScopesResponse, GetServiceCapabilities,
+    GetServiceCapabilitiesResponse, GetServices, GetServicesResponse, GetSystemBackup,
+    GetSystemBackupResponse, GetSystemDateAndTime, GetSystemDateAndTimeResponse, GetUsers,
     GetUsersResponse, HostnameInformation, IPAddress, IPv4Configuration, IPv4NetworkInterface,
-    NTPInformation, NetworkHost, NetworkHostType, NetworkInterface,
-    NetworkInterfaceConnectionSetting, NetworkInterfaceInfo, NetworkInterfaceLink, NetworkProtocol,
-    NetworkProtocolType, PrefixedIPv4Address, RemoveScopes, RemoveScopesResponse, SetDNS,
-    SetDNSResponse, SetDiscoveryMode, SetDiscoveryModeResponse, SetHostname, SetHostnameResponse,
-    SetNTP, SetNTPResponse, SetNetworkProtocols, SetNetworkProtocolsResponse, SetScopes,
-    SetScopesResponse, SetSystemDateAndTime, SetSystemDateAndTimeResponse, SetSystemFactoryDefault,
+    LoadCertificates, LoadCertificatesResponse, NTPInformation, NetworkHost, NetworkHostType,
+    NetworkInterface, NetworkInterfaceConnectionSetting, NetworkInterfaceInfo, NetworkInterfaceLink,
+    NetworkProtocol, NetworkProtocolType, PrefixedIPv4Address, RemoveScopes, RemoveScopesResponse,
+    RestoreSystem, RestoreSystemResponse, SetDNS, SetDNSResponse, SetDiscoveryMode,
+    SetDiscoveryModeResponse, SetHostname, SetHostnameResponse, SetNTP, SetNTPResponse,
+    SetNetworkProtocols, SetNetworkProtocolsResponse, SetScopes, SetScopesResponse,
+    SetSystemDateAndTime, SetSystemDateAndTimeResponse, SetSystemFactoryDefault,
     SetSystemFactoryDefaultResponse, SetUser, SetUserResponse, SystemReboot, SystemRebootResponse,
 };
 use crate::platform::{DeviceInfo, Platform};
@@ -436,7 +439,7 @@ impl DeviceService {
 
         // Return empty list - no certificates installed
         Ok(GetCertificatesResponse {
-            nvt_certificates: vec![],
+            nvt_certificate: vec![],
         })
     }
 
@@ -453,6 +456,108 @@ impl DeviceService {
         Ok(GetCertificatesStatusResponse {
             certificate_status: vec![],
         })
+    }
+
+    /// Handle CreateCertificate request (stub - not supported).
+    pub fn handle_create_certificate(
+        &self,
+        _request: CreateCertificate,
+    ) -> OnvifResult<CreateCertificateResponse> {
+        tracing::debug!("CreateCertificate request (not supported)");
+        Err(OnvifError::ActionNotSupported(
+            "CreateCertificate".to_string(),
+        ))
+    }
+
+    /// Handle LoadCertificates request (stub - not supported).
+    pub fn handle_load_certificates(
+        &self,
+        _request: LoadCertificates,
+    ) -> OnvifResult<LoadCertificatesResponse> {
+        tracing::debug!("LoadCertificates request (not supported)");
+        Err(OnvifError::ActionNotSupported(
+            "LoadCertificates".to_string(),
+        ))
+    }
+
+    /// Handle DeleteCertificates request (stub - not supported).
+    pub fn handle_delete_certificates(
+        &self,
+        _request: DeleteCertificates,
+    ) -> OnvifResult<DeleteCertificatesResponse> {
+        tracing::debug!("DeleteCertificates request (not supported)");
+        Err(OnvifError::ActionNotSupported(
+            "DeleteCertificates".to_string(),
+        ))
+    }
+
+    // ========================================================================
+    // System Backup/Restore Handlers
+    // ========================================================================
+
+    /// Handle GetSystemBackup request.
+    ///
+    /// Returns a backup of the system configuration as a base64-encoded TOML file.
+    pub fn handle_get_system_backup(
+        &self,
+        _request: GetSystemBackup,
+    ) -> OnvifResult<GetSystemBackupResponse> {
+        tracing::debug!("GetSystemBackup request");
+
+        // Serialize current configuration to TOML
+        let config_toml = self
+            .config
+            .to_toml_string()
+            .map_err(|e| OnvifError::HardwareFailure(format!("Failed to serialize config: {}", e)))?;
+
+        // Encode as base64
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let encoded = STANDARD.encode(config_toml.as_bytes());
+
+        Ok(GetSystemBackupResponse {
+            backup_files: vec![BackupFile {
+                name: "config.toml".to_string(),
+                data: encoded,
+            }],
+        })
+    }
+
+    /// Handle RestoreSystem request.
+    ///
+    /// Restores system configuration from a backup file.
+    pub fn handle_restore_system(
+        &self,
+        request: RestoreSystem,
+    ) -> OnvifResult<RestoreSystemResponse> {
+        tracing::debug!("RestoreSystem request with {} files", request.backup_files.len());
+
+        // Find config.toml in backup files
+        let config_file = request
+            .backup_files
+            .iter()
+            .find(|f| f.name == "config.toml")
+            .ok_or_else(|| {
+                OnvifError::WellFormed("Backup must contain config.toml".to_string())
+            })?;
+
+        // Decode base64
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let decoded = STANDARD
+            .decode(&config_file.data)
+            .map_err(|e| OnvifError::WellFormed(format!("Invalid base64 data: {}", e)))?;
+
+        // Parse as TOML string
+        let toml_str = String::from_utf8(decoded)
+            .map_err(|e| OnvifError::WellFormed(format!("Invalid UTF-8 in config: {}", e)))?;
+
+        // Apply configuration
+        self.config
+            .load_from_toml_string(&toml_str)
+            .map_err(|e| OnvifError::HardwareFailure(format!("Failed to apply config: {}", e)))?;
+
+        tracing::info!("RestoreSystem: configuration restored successfully");
+
+        Ok(RestoreSystemResponse {})
     }
 
     /// Handle GetRelayOutputs request.
@@ -519,32 +624,46 @@ impl DeviceService {
 
     /// Handle GetNetworkInterfaces request.
     ///
-    /// Returns network interface configurations.
-    pub fn handle_get_network_interfaces(
+    /// Returns network interface configurations from platform or fallback to config.
+    pub async fn handle_get_network_interfaces(
         &self,
         _request: GetNetworkInterfaces,
     ) -> OnvifResult<GetNetworkInterfacesResponse> {
         tracing::debug!("GetNetworkInterfaces request");
 
-        // Get detected IP address
-        let ip_address = self
-            .config
-            .get_string("network.detected_ip")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(|| Self::detect_local_ip())
-            .unwrap_or_else(|| "192.168.1.100".to_string());
+        // Try to get network info from platform first
+        let (ip_address, mac_address, dhcp_enabled) = if let Some(platform) = &self.platform {
+            if let Some(network_info) = platform.network_info() {
+                if let Ok(interfaces) = network_info.get_network_interfaces().await {
+                    if let Some(iface) = interfaces.first() {
+                        let ip = iface.ipv4_address.clone()
+                            .or_else(|| network_info.detect_local_ip())
+                            .unwrap_or_else(|| "192.168.1.100".to_string());
+                        let mac = iface.mac_address.clone()
+                            .unwrap_or_else(|| "00:00:00:00:00:00".to_string());
+                        let dhcp = iface.ipv4_dhcp;
+                        (ip, mac, dhcp)
+                    } else {
+                        // No interfaces from platform, use fallback
+                        self.get_network_info_fallback()
+                    }
+                } else {
+                    self.get_network_info_fallback()
+                }
+            } else {
+                self.get_network_info_fallback()
+            }
+        } else {
+            self.get_network_info_fallback()
+        };
 
-        // Check if DHCP is enabled from config
-        let dhcp_enabled = self.config.get_bool("network.dhcp_enabled").unwrap_or(true);
-
-        // Create network interface with hardcoded stub data
+        // Create network interface
         let network_interface = NetworkInterface {
             token: "eth0".to_string(),
             enabled: true,
             info: Some(NetworkInterfaceInfo {
                 name: Some("eth0".to_string()),
-                hw_address: "00:11:22:33:44:55".to_string(), // Stub MAC address
+                hw_address: mac_address,
                 mtu: Some(1500),
             }),
             link: Some(NetworkInterfaceLink {
@@ -590,6 +709,26 @@ impl DeviceService {
         Ok(GetNetworkInterfacesResponse {
             network_interfaces: vec![network_interface],
         })
+    }
+
+    /// Fallback method to get network info from config when platform is unavailable.
+    fn get_network_info_fallback(&self) -> (String, String, bool) {
+        let ip_address = self
+            .config
+            .get_string("network.detected_ip")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| Self::detect_local_ip())
+            .unwrap_or_else(|| "192.168.1.100".to_string());
+
+        let mac_address = self
+            .config
+            .get_string("network.mac_address")
+            .unwrap_or_else(|_| "00:11:22:33:44:55".to_string());
+
+        let dhcp_enabled = self.config.get_bool("network.dhcp_enabled").unwrap_or(true);
+
+        (ip_address, mac_address, dhcp_enabled)
     }
 
     // ========================================================================
@@ -1310,6 +1449,52 @@ impl ServiceHandler for DeviceService {
                 })
             }
 
+            "CreateCertificate" => {
+                let request: CreateCertificate = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_create_certificate(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "LoadCertificates" => {
+                let request: LoadCertificates = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_load_certificates(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "DeleteCertificates" => {
+                let request: DeleteCertificates = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_delete_certificates(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            // Backup/Restore Operations
+            "GetSystemBackup" => {
+                let request: GetSystemBackup = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_system_backup(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
+            "RestoreSystem" => {
+                let request: RestoreSystem = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_restore_system(request)?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
             // Relay Operations
             "GetRelayOutputs" => {
                 let request: GetRelayOutputs = quick_xml::de::from_str(body_xml)
@@ -1343,7 +1528,7 @@ impl ServiceHandler for DeviceService {
             "GetNetworkInterfaces" => {
                 let request: GetNetworkInterfaces = quick_xml::de::from_str(body_xml)
                     .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
-                let response = self.handle_get_network_interfaces(request)?;
+                let response = self.handle_get_network_interfaces(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })
@@ -1527,8 +1712,13 @@ impl ServiceHandler for DeviceService {
             "SetSystemDateAndTime",
             "SystemReboot",
             "SetSystemFactoryDefault",
+            "GetSystemBackup",
+            "RestoreSystem",
             "GetCertificates",
             "GetCertificatesStatus",
+            "CreateCertificate",
+            "LoadCertificates",
+            "DeleteCertificates",
             "GetRelayOutputs",
             "GetHostname",
             "SetHostname",
@@ -1768,11 +1958,12 @@ mod tests {
     // GetNetworkInterfaces Tests (T211)
     // ========================================================================
 
-    #[test]
-    fn test_get_network_interfaces() {
+    #[tokio::test]
+    async fn test_get_network_interfaces() {
         let service = create_test_service();
         let response = service
             .handle_get_network_interfaces(GetNetworkInterfaces {})
+            .await
             .unwrap();
 
         // Currently returns empty list (requires platform integration)

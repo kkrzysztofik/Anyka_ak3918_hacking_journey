@@ -67,8 +67,9 @@ use super::dispatcher::{AuthContext, ServiceDispatcher};
 use super::error::OnvifError;
 use super::ws_security::{WsSecurityConfig, WsSecurityValidator};
 use crate::app::AppState;
-use crate::logging::{HttpLogConfig, HttpLoggingMiddleware};
+use crate::logging::{memory_check_middleware, HttpLogConfig, HttpLoggingMiddleware};
 use crate::users::{PasswordManager, UserStorage};
+use crate::utils::MemoryMonitor;
 
 /// Configuration for the ONVIF HTTP server.
 #[derive(Debug, Clone)]
@@ -115,6 +116,8 @@ pub struct OnvifServerState {
     pub password_manager: Arc<PasswordManager>,
     /// Whether authentication is enabled.
     pub auth_enabled: bool,
+    /// Memory monitor for resource enforcement.
+    pub memory_monitor: Arc<MemoryMonitor>,
 }
 
 impl OnvifServerState {
@@ -151,6 +154,8 @@ pub struct OnvifServer {
     password_manager: Arc<PasswordManager>,
     /// Whether authentication is enabled.
     auth_enabled: bool,
+    /// Memory monitor for resource enforcement.
+    memory_monitor: Arc<MemoryMonitor>,
 }
 
 impl OnvifServer {
@@ -198,6 +203,9 @@ impl OnvifServer {
         // WS-Security validator with default config
         let ws_security = Arc::new(WsSecurityValidator::new(WsSecurityConfig::default()));
 
+        // Default memory monitor
+        let memory_monitor = Arc::new(MemoryMonitor::new());
+
         Ok(Self {
             config,
             dispatcher,
@@ -206,6 +214,7 @@ impl OnvifServer {
             user_storage,
             password_manager,
             auth_enabled: false, // Authentication disabled in minimal mode
+            memory_monitor,
         })
     }
 
@@ -276,6 +285,7 @@ impl OnvifServer {
             user_storage: Arc::clone(app_state.user_storage()),
             password_manager: Arc::clone(app_state.password_manager()),
             auth_enabled,
+            memory_monitor: Arc::clone(app_state.memory_monitor()),
         })
     }
 
@@ -394,6 +404,7 @@ impl OnvifServer {
             user_storage: Arc::clone(&self.user_storage),
             password_manager: Arc::clone(&self.password_manager),
             auth_enabled: self.auth_enabled,
+            memory_monitor: Arc::clone(&self.memory_monitor),
         };
 
         let app = self.build_router(state);
@@ -439,7 +450,11 @@ impl OnvifServer {
         };
         let http_logging = HttpLoggingMiddleware::new(http_log_config);
 
+        // Clone memory monitor for the memory check middleware
+        let memory_monitor = Arc::clone(&state.memory_monitor);
+
         // Build the main router with middleware
+        // Layers are applied in reverse order: last added = first executed
         Router::new()
             .nest("/onvif", service_routes)
             .layer(
@@ -459,6 +474,10 @@ impl OnvifServer {
                 self.config.max_body_size,
             ))
             .with_state(state)
+            // Memory check middleware - runs FIRST (outermost layer)
+            // Order matters: first add the middleware, then the Extension it uses
+            .layer(middleware::from_fn(memory_check_middleware))
+            .layer(axum::Extension(memory_monitor))
     }
 
     /// Signal the server to shut down gracefully.
@@ -466,6 +485,7 @@ impl OnvifServer {
         tracing::info!("Initiating ONVIF server shutdown...");
         let _ = self.shutdown_tx.send(());
     }
+
 
     /// Get a receiver for shutdown signals.
     ///
@@ -722,6 +742,7 @@ mod tests {
             user_storage: Arc::clone(&server.user_storage),
             password_manager: Arc::clone(&server.password_manager),
             auth_enabled: server.auth_enabled,
+            memory_monitor: Arc::clone(&server.memory_monitor),
         };
 
         let app = server.build_router(state);
@@ -757,6 +778,7 @@ mod tests {
             user_storage: Arc::clone(&server.user_storage),
             password_manager: Arc::clone(&server.password_manager),
             auth_enabled: server.auth_enabled,
+            memory_monitor: Arc::clone(&server.memory_monitor),
         };
 
         let app = server.build_router(state);
@@ -785,6 +807,7 @@ mod tests {
             user_storage: Arc::clone(&server.user_storage),
             password_manager: Arc::clone(&server.password_manager),
             auth_enabled: server.auth_enabled,
+            memory_monitor: Arc::clone(&server.memory_monitor),
         };
 
         let cloned = state.clone();
@@ -802,12 +825,14 @@ mod tests {
         use crate::onvif::ptz::PTZStateManager;
         use crate::users::password::PasswordManager;
         use crate::users::storage::UserStorage;
+        use crate::utils::MemoryMonitor;
 
         let app_state = AppState::builder()
             .user_storage(Arc::new(UserStorage::new()))
             .password_manager(Arc::new(PasswordManager::new()))
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(MemoryMonitor::new()))
             .build()
             .unwrap();
 
