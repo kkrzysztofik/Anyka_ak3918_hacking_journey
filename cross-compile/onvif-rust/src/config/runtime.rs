@@ -361,9 +361,15 @@ impl ConfigRuntime {
         for (key, value) in config.values() {
             let parts: Vec<&str> = key.splitn(2, '.').collect();
             if parts.len() == 2 {
-                sections.entry(parts[0]).or_default().push((parts[1], value));
+                sections
+                    .entry(parts[0])
+                    .or_default()
+                    .push((parts[1], value));
             } else {
-                sections.entry("general").or_default().push((key.as_str(), value));
+                sections
+                    .entry("general")
+                    .or_default()
+                    .push((key.as_str(), value));
             }
         }
 
@@ -390,8 +396,8 @@ impl ConfigRuntime {
 
     /// Load configuration from TOML string (for restore).
     pub fn load_from_toml_string(&self, toml_str: &str) -> ConfigResult<()> {
-        let toml_value: toml::Value = toml::from_str(toml_str)
-            .map_err(|e| ConfigError::ParseError {
+        let toml_value: toml::Value =
+            toml::from_str(toml_str).map_err(|e| ConfigError::ParseError {
                 key: "config".to_string(),
                 message: format!("Invalid TOML: {}", e),
             })?;

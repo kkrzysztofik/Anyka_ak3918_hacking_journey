@@ -25,17 +25,17 @@ use crate::onvif::types::device::{
     GetCertificatesStatus, GetCertificatesStatusResponse, GetDNS, GetDNSResponse,
     GetDeviceInformation, GetDeviceInformationResponse, GetDiscoveryMode, GetDiscoveryModeResponse,
     GetHostname, GetHostnameResponse, GetNTP, GetNTPResponse, GetNetworkInterfaces,
-    GetNetworkInterfacesResponse, GetNetworkProtocols, GetNetworkProtocolsResponse, GetRelayOutputs,
-    GetRelayOutputsResponse, GetScopes, GetScopesResponse, GetServiceCapabilities,
+    GetNetworkInterfacesResponse, GetNetworkProtocols, GetNetworkProtocolsResponse,
+    GetRelayOutputs, GetRelayOutputsResponse, GetScopes, GetScopesResponse, GetServiceCapabilities,
     GetServiceCapabilitiesResponse, GetServices, GetServicesResponse, GetSystemBackup,
     GetSystemBackupResponse, GetSystemDateAndTime, GetSystemDateAndTimeResponse, GetUsers,
     GetUsersResponse, HostnameInformation, IPAddress, IPv4Configuration, IPv4NetworkInterface,
     LoadCertificates, LoadCertificatesResponse, NTPInformation, NetworkHost, NetworkHostType,
-    NetworkInterface, NetworkInterfaceConnectionSetting, NetworkInterfaceInfo, NetworkInterfaceLink,
-    NetworkProtocol, NetworkProtocolType, PrefixedIPv4Address, RemoveScopes, RemoveScopesResponse,
-    RestoreSystem, RestoreSystemResponse, SetDNS, SetDNSResponse, SetDiscoveryMode,
-    SetDiscoveryModeResponse, SetHostname, SetHostnameResponse, SetNTP, SetNTPResponse,
-    SetNetworkProtocols, SetNetworkProtocolsResponse, SetScopes, SetScopesResponse,
+    NetworkInterface, NetworkInterfaceConnectionSetting, NetworkInterfaceInfo,
+    NetworkInterfaceLink, NetworkProtocol, NetworkProtocolType, PrefixedIPv4Address, RemoveScopes,
+    RemoveScopesResponse, RestoreSystem, RestoreSystemResponse, SetDNS, SetDNSResponse,
+    SetDiscoveryMode, SetDiscoveryModeResponse, SetHostname, SetHostnameResponse, SetNTP,
+    SetNTPResponse, SetNetworkProtocols, SetNetworkProtocolsResponse, SetScopes, SetScopesResponse,
     SetSystemDateAndTime, SetSystemDateAndTimeResponse, SetSystemFactoryDefault,
     SetSystemFactoryDefaultResponse, SetUser, SetUserResponse, SystemReboot, SystemRebootResponse,
 };
@@ -505,10 +505,9 @@ impl DeviceService {
         tracing::debug!("GetSystemBackup request");
 
         // Serialize current configuration to TOML
-        let config_toml = self
-            .config
-            .to_toml_string()
-            .map_err(|e| OnvifError::HardwareFailure(format!("Failed to serialize config: {}", e)))?;
+        let config_toml = self.config.to_toml_string().map_err(|e| {
+            OnvifError::HardwareFailure(format!("Failed to serialize config: {}", e))
+        })?;
 
         // Encode as base64
         use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -529,16 +528,17 @@ impl DeviceService {
         &self,
         request: RestoreSystem,
     ) -> OnvifResult<RestoreSystemResponse> {
-        tracing::debug!("RestoreSystem request with {} files", request.backup_files.len());
+        tracing::debug!(
+            "RestoreSystem request with {} files",
+            request.backup_files.len()
+        );
 
         // Find config.toml in backup files
         let config_file = request
             .backup_files
             .iter()
             .find(|f| f.name == "config.toml")
-            .ok_or_else(|| {
-                OnvifError::WellFormed("Backup must contain config.toml".to_string())
-            })?;
+            .ok_or_else(|| OnvifError::WellFormed("Backup must contain config.toml".to_string()))?;
 
         // Decode base64
         use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -636,10 +636,14 @@ impl DeviceService {
             if let Some(network_info) = platform.network_info() {
                 if let Ok(interfaces) = network_info.get_network_interfaces().await {
                     if let Some(iface) = interfaces.first() {
-                        let ip = iface.ipv4_address.clone()
+                        let ip = iface
+                            .ipv4_address
+                            .clone()
                             .or_else(|| network_info.detect_local_ip())
                             .unwrap_or_else(|| "192.168.1.100".to_string());
-                        let mac = iface.mac_address.clone()
+                        let mac = iface
+                            .mac_address
+                            .clone()
                             .unwrap_or_else(|| "00:00:00:00:00:00".to_string());
                         let dhcp = iface.ipv4_dhcp;
                         (ip, mac, dhcp)

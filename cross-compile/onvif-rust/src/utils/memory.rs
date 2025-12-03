@@ -15,11 +15,11 @@
 //!
 //! See [MEMORY_MANAGEMENT.md](../../docs/MEMORY_MANAGEMENT.md) for full architectural rationale.
 
-use anyhow::{anyhow, Result};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tracing::{info, warn};
 use crate::config::ConfigRuntime;
+use anyhow::{Result, anyhow};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tracing::{info, warn};
 
 /// Memory limits for embedded target (ARMv5TE with ~32MB available to ONVIF services)
 pub struct MemoryLimits {
@@ -32,8 +32,8 @@ pub struct MemoryLimits {
 impl Default for MemoryLimits {
     fn default() -> Self {
         Self {
-            soft_limit: 16 * 1024 * 1024,  // 16 MB
-            hard_limit: 24 * 1024 * 1024,  // 24 MB
+            soft_limit: 16 * 1024 * 1024, // 16 MB
+            hard_limit: 24 * 1024 * 1024, // 24 MB
         }
     }
 }
@@ -85,8 +85,14 @@ impl MemoryMonitor {
     ///
     /// Falls back to defaults if not configured
     pub fn from_config(config: &ConfigRuntime) -> Result<Self> {
-        let soft_mb = config.get_int("memory.soft_limit_mb").ok().map(|v| v as usize);
-        let hard_mb = config.get_int("memory.hard_limit_mb").ok().map(|v| v as usize);
+        let soft_mb = config
+            .get_int("memory.soft_limit_mb")
+            .ok()
+            .map(|v| v as usize);
+        let hard_mb = config
+            .get_int("memory.hard_limit_mb")
+            .ok()
+            .map(|v| v as usize);
 
         let soft = soft_mb.unwrap_or(16) * 1024 * 1024;
         let hard = hard_mb.unwrap_or(24) * 1024 * 1024;
@@ -217,7 +223,8 @@ impl AllocationTracker {
     /// * `file` - Source file where allocation originated (use `file!()`)
     /// * `line` - Line number in source file (use `line!()`)
     pub fn track_allocation(&self, addr: usize, size: usize, file: &'static str, line: u32) {
-        self.allocations.insert(addr, AllocationInfo { size, file, line });
+        self.allocations
+            .insert(addr, AllocationInfo { size, file, line });
 
         // Update peak usage if necessary
         let current_total: usize = self.allocations.iter().map(|e| e.size).sum();

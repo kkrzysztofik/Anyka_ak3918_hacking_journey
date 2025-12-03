@@ -15,7 +15,7 @@ use tracing::{info, warn};
 use crate::utils::MemoryMonitor;
 
 /// Typical HTTP request body size (small to moderate)
-pub const TYPICAL_REQUEST_SIZE: usize = 64 * 1024;  // 64KB
+pub const TYPICAL_REQUEST_SIZE: usize = 64 * 1024; // 64KB
 
 /// Memory enforcement layer - checks hard limit before processing request
 ///

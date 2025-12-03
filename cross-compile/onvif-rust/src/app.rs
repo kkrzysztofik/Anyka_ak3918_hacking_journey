@@ -302,10 +302,7 @@ mod app_state_tests {
         ));
         assert!(Arc::ptr_eq(state.ptz_state(), cloned.ptz_state()));
         assert!(Arc::ptr_eq(state.config(), cloned.config()));
-        assert!(Arc::ptr_eq(
-            state.memory_monitor(),
-            cloned.memory_monitor()
-        ));
+        assert!(Arc::ptr_eq(state.memory_monitor(), cloned.memory_monitor()));
     }
 
     #[test]
@@ -485,8 +482,11 @@ impl Application {
             .password_manager(Arc::new(PasswordManager::new()))
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::clone(&config_runtime))
-            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::from_config(&config_runtime)
-                .map_err(|e| StartupError::Services(format!("Failed to initialize memory monitor: {}", e)))?));
+            .memory_monitor(Arc::new(
+                crate::utils::MemoryMonitor::from_config(&config_runtime).map_err(|e| {
+                    StartupError::Services(format!("Failed to initialize memory monitor: {}", e))
+                })?,
+            ));
 
         // Add platform if available
         if let Some(ref p) = platform {

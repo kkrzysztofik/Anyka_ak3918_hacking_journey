@@ -1153,7 +1153,11 @@ pub struct Certificate {
     #[serde(rename = "tds:CertificateID")]
     pub certificate_id: String,
     /// Certificate data (base64 PEM or DER).
-    #[serde(rename = "tds:Certificate", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tds:Certificate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub certificate: Option<String>,
 }
 
@@ -1196,16 +1200,28 @@ pub struct GetCertificatesStatusResponse {
 #[serde(rename = "CreateCertificate")]
 pub struct CreateCertificate {
     /// Certificate ID (optional).
-    #[serde(rename = "CertificateID", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "CertificateID",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub certificate_id: Option<String>,
     /// Subject (optional).
     #[serde(rename = "Subject", default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
     /// Valid not before (optional).
-    #[serde(rename = "ValidNotBefore", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "ValidNotBefore",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub valid_not_before: Option<String>,
     /// Valid not after (optional).
-    #[serde(rename = "ValidNotAfter", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "ValidNotAfter",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub valid_not_after: Option<String>,
 }
 
@@ -1214,7 +1230,11 @@ pub struct CreateCertificate {
 #[serde(rename = "tds:CreateCertificateResponse")]
 pub struct CreateCertificateResponse {
     /// Created certificate (optional for stub).
-    #[serde(rename = "tds:NvtCertificate", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tds:NvtCertificate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub nvt_certificate: Option<Certificate>,
 }
 

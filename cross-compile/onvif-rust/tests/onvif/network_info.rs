@@ -72,9 +72,7 @@ fn test_stub_platform_builder_network_supported_by_default() {
 fn test_stub_platform_builder_custom_mac() {
     let custom_mac = "DE:AD:BE:EF:CA:FE";
 
-    let platform = StubPlatformBuilder::new()
-        .mac_address(custom_mac)
-        .build();
+    let platform = StubPlatformBuilder::new().mac_address(custom_mac).build();
 
     // Verify platform was built successfully with custom MAC
     let _ = platform;
@@ -85,9 +83,7 @@ fn test_stub_platform_builder_custom_mac() {
 fn test_stub_platform_builder_custom_ip() {
     let custom_ip = Some("172.16.0.1".to_string());
 
-    let platform = StubPlatformBuilder::new()
-        .ip_address(custom_ip)
-        .build();
+    let platform = StubPlatformBuilder::new().ip_address(custom_ip).build();
 
     // Verify platform was built successfully with custom IP
     let _ = platform;

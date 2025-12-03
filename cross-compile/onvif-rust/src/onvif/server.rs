@@ -67,7 +67,7 @@ use super::dispatcher::{AuthContext, ServiceDispatcher};
 use super::error::OnvifError;
 use super::ws_security::{WsSecurityConfig, WsSecurityValidator};
 use crate::app::AppState;
-use crate::logging::{memory_check_middleware, HttpLogConfig, HttpLoggingMiddleware};
+use crate::logging::{HttpLogConfig, HttpLoggingMiddleware, memory_check_middleware};
 use crate::users::{PasswordManager, UserStorage};
 use crate::utils::MemoryMonitor;
 
@@ -485,7 +485,6 @@ impl OnvifServer {
         tracing::info!("Initiating ONVIF server shutdown...");
         let _ = self.shutdown_tx.send(());
     }
-
 
     /// Get a receiver for shutdown signals.
     ///

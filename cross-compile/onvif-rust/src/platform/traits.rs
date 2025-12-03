@@ -587,7 +587,11 @@ pub trait NetworkInfo: Send + Sync {
     }
 
     /// Set DNS configuration (stub - platform may not support).
-    async fn set_dns(&self, _dns_servers: &[String], _search_domains: &[String]) -> PlatformResult<()> {
+    async fn set_dns(
+        &self,
+        _dns_servers: &[String],
+        _search_domains: &[String],
+    ) -> PlatformResult<()> {
         Err(PlatformError::NotSupported("set_dns".to_string()))
     }
 

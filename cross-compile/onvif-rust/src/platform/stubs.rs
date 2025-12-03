@@ -282,10 +282,9 @@ impl StubPlatformBuilder {
         let network_info = if self.network_info_supported {
             let stub = match (self.mac_address, self.ip_address) {
                 (Some(mac), ip) => StubNetworkInfo::with_mac_and_ip(mac, ip),
-                (None, Some(ip)) => StubNetworkInfo::with_mac_and_ip(
-                    "AA:BB:CC:DD:EE:FF".to_string(),
-                    Some(ip),
-                ),
+                (None, Some(ip)) => {
+                    StubNetworkInfo::with_mac_and_ip("AA:BB:CC:DD:EE:FF".to_string(), Some(ip))
+                }
                 (None, None) => StubNetworkInfo::new(),
             };
             Some(Arc::new(stub) as Arc<dyn NetworkInfo>)
@@ -842,7 +841,11 @@ impl NetworkInfo for StubNetworkInfo {
         Ok(())
     }
 
-    async fn set_dns(&self, dns_servers: &[String], search_domains: &[String]) -> PlatformResult<()> {
+    async fn set_dns(
+        &self,
+        dns_servers: &[String],
+        search_domains: &[String],
+    ) -> PlatformResult<()> {
         let mut settings = self.settings.write();
         settings.dns_servers = dns_servers.to_vec();
         settings.search_domains = search_domains.to_vec();

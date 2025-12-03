@@ -78,7 +78,7 @@ fn test_config_toml_roundtrip() {
 /// Test that backup produces valid base64-encoded content
 #[test]
 fn test_backup_produces_base64() {
-    use base64::{engine::general_purpose::STANDARD, Engine};
+    use base64::{Engine, engine::general_purpose::STANDARD};
 
     let config = ConfigRuntime::new(Default::default());
     config.set_string("device.manufacturer", "Test").unwrap();
@@ -101,7 +101,7 @@ fn test_backup_produces_base64() {
 /// Test backup/restore roundtrip via base64
 #[test]
 fn test_backup_restore_roundtrip() {
-    use base64::{engine::general_purpose::STANDARD, Engine};
+    use base64::{Engine, engine::general_purpose::STANDARD};
 
     // Setup initial config
     let config = ConfigRuntime::new(Default::default());

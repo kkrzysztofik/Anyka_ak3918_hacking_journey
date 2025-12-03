@@ -20,8 +20,8 @@ async fn test_memory_monitor_default_limits() {
     let monitor = MemoryMonitor::new();
 
     // Verify defaults match spec (T510-T511)
-    assert_eq!(monitor.limits.soft_limit, 16 * 1024 * 1024);  // 16MB
-    assert_eq!(monitor.limits.hard_limit, 24 * 1024 * 1024);  // 24MB
+    assert_eq!(monitor.limits.soft_limit, 16 * 1024 * 1024); // 16MB
+    assert_eq!(monitor.limits.hard_limit, 24 * 1024 * 1024); // 24MB
 }
 
 /// Test that memory monitor rejects requests exceeding hard limit
@@ -37,7 +37,10 @@ async fn test_memory_hard_limit_rejection() {
 
     // Small request should succeed (current + 64KB < 24MB hard limit)
     let result = monitor_ok.check_available(64 * 1024);
-    assert!(result.is_ok(), "Small request should succeed with default limits");
+    assert!(
+        result.is_ok(),
+        "Small request should succeed with default limits"
+    );
 
     // Now create a monitor with artificially LOW hard limit (1KB)
     // This is below current process memory, so ANY request should fail
@@ -46,7 +49,10 @@ async fn test_memory_hard_limit_rejection() {
 
     // Any request should fail since current_usage() >> 1KB
     let result = monitor_fail.check_available(1);
-    assert!(result.is_err(), "Request should fail when current usage exceeds hard limit");
+    assert!(
+        result.is_err(),
+        "Request should fail when current usage exceeds hard limit"
+    );
 }
 
 /// Test memory soft limit warning behavior
@@ -61,12 +67,18 @@ async fn test_memory_soft_limit_warning() {
 
     // Request should succeed - current + 64KB is well below 24MB hard limit
     let result = monitor.check_available(64 * 1024);
-    assert!(result.is_ok(), "Request should succeed when below hard limit");
+    assert!(
+        result.is_ok(),
+        "Request should succeed when below hard limit"
+    );
 
     // Also verify that large requests near but below hard limit still succeed
     // Even if this triggers soft limit warning, the request should proceed
-    let result = monitor.check_available(1024 * 1024);  // 1MB request
-    assert!(result.is_ok(), "Large request below hard limit should succeed");
+    let result = monitor.check_available(1024 * 1024); // 1MB request
+    assert!(
+        result.is_ok(),
+        "Large request below hard limit should succeed"
+    );
 }
 
 /// Test memory monitor configuration loading
@@ -122,8 +134,10 @@ async fn test_memory_usage_string_format() {
 
     // Usage string should contain current and hard limit
     assert!(!usage_str.is_empty(), "Usage string should not be empty");
-    assert!(usage_str.contains("MB") || usage_str.contains("KB"),
-            "Usage string should include unit");
+    assert!(
+        usage_str.contains("MB") || usage_str.contains("KB"),
+        "Usage string should include unit"
+    );
 }
 
 /// Test limits validation during monitor creation
@@ -157,7 +171,7 @@ async fn test_http_503_response_on_hard_limit() {
     // Test that check_available fails when request would exceed hard limit
     // This is the core logic that the middleware uses
 
-    let limits = MemoryLimits::new(1024, 2048).expect("Valid limits");  // 1KB soft, 2KB hard
+    let limits = MemoryLimits::new(1024, 2048).expect("Valid limits"); // 1KB soft, 2KB hard
     let monitor = Arc::new(MemoryMonitor::with_limits(limits));
 
     // Middleware uses TYPICAL_REQUEST_SIZE = 64KB
@@ -167,12 +181,18 @@ async fn test_http_503_response_on_hard_limit() {
     let result = monitor.check_available(TYPICAL_REQUEST_SIZE);
 
     // Should fail - this is when middleware returns 503
-    assert!(result.is_err(), "Should fail when request exceeds hard limit");
+    assert!(
+        result.is_err(),
+        "Should fail when request exceeds hard limit"
+    );
 
     // Verify error message indicates limit exceeded
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("hard limit") || err_msg.contains("exceeded"),
-            "Error should mention hard limit: {}", err_msg);
+    assert!(
+        err_msg.contains("hard limit") || err_msg.contains("exceeded"),
+        "Error should mention hard limit: {}",
+        err_msg
+    );
 }
 
 /// Test connection persistence under memory pressure
@@ -182,31 +202,40 @@ async fn test_http_503_response_on_hard_limit() {
 /// if the system was briefly under pressure.
 #[tokio::test]
 async fn test_connection_persistence_under_pressure() {
-    let limits = MemoryLimits::new(16 * 1024 * 1024, 24 * 1024 * 1024).expect("Valid limits");  // 16MB soft, 24MB hard
+    let limits = MemoryLimits::new(16 * 1024 * 1024, 24 * 1024 * 1024).expect("Valid limits"); // 16MB soft, 24MB hard
     let monitor = Arc::new(MemoryMonitor::with_limits(limits));
 
     // Simulate multiple requests in sequence (like persistent connection)
     // Each should be checked independently
-    let request_size = 64 * 1024;  // 64KB typical request
+    let request_size = 64 * 1024; // 64KB typical request
 
     // First request should succeed
-    assert!(monitor.check_available(request_size).is_ok(),
-            "First request should succeed");
+    assert!(
+        monitor.check_available(request_size).is_ok(),
+        "First request should succeed"
+    );
 
     // Second request should also succeed (memory checks are stateless)
-    assert!(monitor.check_available(request_size).is_ok(),
-            "Second request should succeed");
+    assert!(
+        monitor.check_available(request_size).is_ok(),
+        "Second request should succeed"
+    );
 
     // Third request should also succeed
-    assert!(monitor.check_available(request_size).is_ok(),
-            "Third request should succeed");
+    assert!(
+        monitor.check_available(request_size).is_ok(),
+        "Third request should succeed"
+    );
 
     // Verify usage_string produces valid output (format check, not exact value)
     // Note: Exact values can vary due to live memory state changes
     let usage = monitor.usage_string();
     assert!(usage.contains("MB"), "Usage string should contain MB unit");
     assert!(usage.contains("/"), "Usage string should contain separator");
-    assert!(usage.contains("%"), "Usage string should contain percentage");
+    assert!(
+        usage.contains("%"),
+        "Usage string should contain percentage"
+    );
 }
 
 /// Test that memory profiling features work when enabled
