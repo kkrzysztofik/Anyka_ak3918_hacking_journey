@@ -50,23 +50,23 @@ pub struct GetDeviceInformation {}
 #[serde(rename = "tds:GetDeviceInformationResponse")]
 pub struct GetDeviceInformationResponse {
     /// Device manufacturer.
-    #[serde(rename = "tds:Manufacturer")]
+    #[serde(rename = "tds:Manufacturer", alias = "Manufacturer")]
     pub manufacturer: String,
 
     /// Device model.
-    #[serde(rename = "tds:Model")]
+    #[serde(rename = "tds:Model", alias = "Model")]
     pub model: String,
 
     /// Firmware version.
-    #[serde(rename = "tds:FirmwareVersion")]
+    #[serde(rename = "tds:FirmwareVersion", alias = "FirmwareVersion")]
     pub firmware_version: String,
 
     /// Serial number.
-    #[serde(rename = "tds:SerialNumber")]
+    #[serde(rename = "tds:SerialNumber", alias = "SerialNumber")]
     pub serial_number: String,
 
     /// Hardware ID.
-    #[serde(rename = "tds:HardwareId")]
+    #[serde(rename = "tds:HardwareId", alias = "HardwareId")]
     pub hardware_id: String,
 }
 
@@ -108,11 +108,11 @@ pub struct GetServicesResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Service {
     /// Service namespace URI.
-    #[serde(rename = "tds:Namespace")]
+    #[serde(rename = "tds:Namespace", alias = "Namespace")]
     pub namespace: String,
 
     /// Service endpoint address.
-    #[serde(rename = "tds:XAddr")]
+    #[serde(rename = "tds:XAddr", alias = "XAddr")]
     pub x_addr: String,
 
     /// Service capabilities (optional, included if requested).
@@ -124,7 +124,7 @@ pub struct Service {
     pub capabilities: Option<ServiceCapabilities>,
 
     /// Service version.
-    #[serde(rename = "tds:Version")]
+    #[serde(rename = "tds:Version", alias = "Version")]
     pub version: OnvifVersion,
 }
 
@@ -150,7 +150,7 @@ pub struct GetServiceCapabilities {}
 #[serde(rename = "tds:GetServiceCapabilitiesResponse")]
 pub struct GetServiceCapabilitiesResponse {
     /// Device service capabilities.
-    #[serde(rename = "tds:Capabilities")]
+    #[serde(rename = "tds:Capabilities", alias = "Capabilities")]
     pub capabilities: DeviceServiceCapabilities,
 }
 
@@ -158,19 +158,24 @@ pub struct GetServiceCapabilitiesResponse {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DeviceServiceCapabilities {
     /// Network capabilities.
-    #[serde(rename = "Network")]
+    #[serde(rename = "tds:Network", alias = "Network")]
     pub network: NetworkCapabilities,
 
     /// Security capabilities.
-    #[serde(rename = "Security")]
+    #[serde(rename = "tds:Security", alias = "Security")]
     pub security: SecurityCapabilities,
 
     /// System capabilities.
-    #[serde(rename = "System")]
+    #[serde(rename = "tds:System", alias = "System")]
     pub system: SystemCapabilities,
 
     /// Miscellaneous capabilities.
-    #[serde(rename = "Misc", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tds:Misc",
+        alias = "Misc",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub misc: Option<MiscCapabilities>,
 }
 
@@ -514,7 +519,7 @@ pub struct GetCapabilities {
 #[serde(rename = "tds:GetCapabilitiesResponse")]
 pub struct GetCapabilitiesResponse {
     /// Device capabilities.
-    #[serde(rename = "tds:Capabilities")]
+    #[serde(rename = "tds:Capabilities", alias = "Capabilities")]
     pub capabilities: Capabilities,
 }
 
@@ -522,31 +527,43 @@ pub struct GetCapabilitiesResponse {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Capabilities {
     /// Analytics capabilities.
-    #[serde(rename = "Analytics", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Analytics",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub analytics: Option<AnalyticsCapabilities>,
 
     /// Device capabilities.
-    #[serde(rename = "Device", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:Device", default, skip_serializing_if = "Option::is_none")]
     pub device: Option<DeviceCapabilities>,
 
     /// Events capabilities.
-    #[serde(rename = "Events", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:Events", default, skip_serializing_if = "Option::is_none")]
     pub events: Option<EventsCapabilities>,
 
     /// Imaging capabilities.
-    #[serde(rename = "Imaging", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Imaging",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub imaging: Option<ImagingCapabilities>,
 
     /// Media capabilities.
-    #[serde(rename = "Media", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:Media", default, skip_serializing_if = "Option::is_none")]
     pub media: Option<MediaCapabilities>,
 
     /// PTZ capabilities.
-    #[serde(rename = "PTZ", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:PTZ", default, skip_serializing_if = "Option::is_none")]
     pub ptz: Option<PTZCapabilities>,
 
     /// Extension with DeviceIO and other capabilities.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<CapabilitiesExtension>,
 }
 
@@ -554,7 +571,11 @@ pub struct Capabilities {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CapabilitiesExtension {
     /// Device IO capabilities.
-    #[serde(rename = "DeviceIO", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:DeviceIO",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub device_io: Option<DeviceIOCapabilities>,
 }
 
@@ -562,12 +583,12 @@ pub struct CapabilitiesExtension {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DeviceIOCapabilities {
     /// Device IO service address.
-    #[serde(rename = "XAddr")]
+    #[serde(rename = "tt:XAddr", alias = "XAddr")]
     pub x_addr: String,
 
     /// Number of video sources.
     #[serde(
-        rename = "VideoSources",
+        rename = "tt:VideoSources",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -575,7 +596,7 @@ pub struct DeviceIOCapabilities {
 
     /// Number of video outputs.
     #[serde(
-        rename = "VideoOutputs",
+        rename = "tt:VideoOutputs",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -583,7 +604,7 @@ pub struct DeviceIOCapabilities {
 
     /// Number of audio sources.
     #[serde(
-        rename = "AudioSources",
+        rename = "tt:AudioSources",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -591,7 +612,7 @@ pub struct DeviceIOCapabilities {
 
     /// Number of audio outputs.
     #[serde(
-        rename = "AudioOutputs",
+        rename = "tt:AudioOutputs",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -599,7 +620,7 @@ pub struct DeviceIOCapabilities {
 
     /// Number of relay outputs.
     #[serde(
-        rename = "RelayOutputs",
+        rename = "tt:RelayOutputs",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -610,15 +631,15 @@ pub struct DeviceIOCapabilities {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalyticsCapabilities {
     /// Analytics service address.
-    #[serde(rename = "XAddr")]
+    #[serde(rename = "tt:XAddr", alias = "XAddr")]
     pub x_addr: String,
 
     /// Rule support.
-    #[serde(rename = "RuleSupport")]
+    #[serde(rename = "tt:RuleSupport", alias = "RuleSupport")]
     pub rule_support: bool,
 
     /// Analytics module support.
-    #[serde(rename = "AnalyticsModuleSupport")]
+    #[serde(rename = "tt:AnalyticsModuleSupport", alias = "AnalyticsModuleSupport")]
     pub analytics_module_support: bool,
 }
 
@@ -626,27 +647,39 @@ pub struct AnalyticsCapabilities {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeviceCapabilities {
     /// Device service address.
-    #[serde(rename = "XAddr")]
+    #[serde(rename = "tt:XAddr", alias = "XAddr")]
     pub x_addr: String,
 
     /// Network capabilities.
-    #[serde(rename = "Network", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Network",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub network: Option<NetworkCapabilitiesLegacy>,
 
     /// System capabilities.
-    #[serde(rename = "System", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:System", default, skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemCapabilitiesLegacy>,
 
     /// IO capabilities.
-    #[serde(rename = "IO", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:IO", default, skip_serializing_if = "Option::is_none")]
     pub io: Option<IOCapabilities>,
 
     /// Security capabilities.
-    #[serde(rename = "Security", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Security",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub security: Option<SecurityCapabilitiesLegacy>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -654,12 +687,16 @@ pub struct DeviceCapabilities {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct NetworkCapabilitiesLegacy {
     /// IP filter support.
-    #[serde(rename = "IPFilter", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:IPFilter",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub ip_filter: Option<bool>,
 
     /// Zero configuration support.
     #[serde(
-        rename = "ZeroConfiguration",
+        rename = "tt:ZeroConfiguration",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -667,18 +704,22 @@ pub struct NetworkCapabilitiesLegacy {
 
     /// IPv6 support.
     #[serde(
-        rename = "IPVersion6",
+        rename = "tt:IPVersion6",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub ip_version6: Option<bool>,
 
     /// Dynamic DNS support.
-    #[serde(rename = "DynDNS", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:DynDNS", default, skip_serializing_if = "Option::is_none")]
     pub dyn_dns: Option<bool>,
 
     /// Extension containing Dot11Configuration and other network-specific extensions.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<NetworkCapabilitiesExtension>,
 }
 
@@ -687,7 +728,7 @@ pub struct NetworkCapabilitiesLegacy {
 pub struct NetworkCapabilitiesExtension {
     /// Dot11 (Wi-Fi) configuration support.
     #[serde(
-        rename = "Dot11Configuration",
+        rename = "tt:Dot11Configuration",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -698,39 +739,43 @@ pub struct NetworkCapabilitiesExtension {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SystemCapabilitiesLegacy {
     /// Discovery resolve support.
-    #[serde(rename = "DiscoveryResolve")]
+    #[serde(rename = "tt:DiscoveryResolve", alias = "DiscoveryResolve")]
     pub discovery_resolve: bool,
 
     /// Discovery bye support.
-    #[serde(rename = "DiscoveryBye")]
+    #[serde(rename = "tt:DiscoveryBye", alias = "DiscoveryBye")]
     pub discovery_bye: bool,
 
     /// Remote discovery support.
-    #[serde(rename = "RemoteDiscovery")]
+    #[serde(rename = "tt:RemoteDiscovery", alias = "RemoteDiscovery")]
     pub remote_discovery: bool,
 
     /// System backup support.
-    #[serde(rename = "SystemBackup")]
+    #[serde(rename = "tt:SystemBackup", alias = "SystemBackup")]
     pub system_backup: bool,
 
     /// System logging support.
     #[serde(
-        rename = "SystemLogging",
+        rename = "tt:SystemLogging",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub system_logging: Option<bool>,
 
     /// Firmware upgrade support.
-    #[serde(rename = "FirmwareUpgrade")]
+    #[serde(rename = "tt:FirmwareUpgrade", alias = "FirmwareUpgrade")]
     pub firmware_upgrade: bool,
 
     /// Supported ONVIF versions.
-    #[serde(rename = "SupportedVersions", default)]
+    #[serde(rename = "tt:SupportedVersions", default)]
     pub supported_versions: Vec<OnvifVersion>,
 
     /// Extension with HTTP firmware/system capabilities.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<SystemCapabilitiesExtension>,
 }
 
@@ -739,7 +784,7 @@ pub struct SystemCapabilitiesLegacy {
 pub struct SystemCapabilitiesExtension {
     /// HTTP firmware upgrade support.
     #[serde(
-        rename = "HttpFirmwareUpgrade",
+        rename = "tt:HttpFirmwareUpgrade",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -747,7 +792,7 @@ pub struct SystemCapabilitiesExtension {
 
     /// HTTP system backup support.
     #[serde(
-        rename = "HttpSystemBackup",
+        rename = "tt:HttpSystemBackup",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -755,7 +800,7 @@ pub struct SystemCapabilitiesExtension {
 
     /// HTTP system logging support.
     #[serde(
-        rename = "HttpSystemLogging",
+        rename = "tt:HttpSystemLogging",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -763,14 +808,18 @@ pub struct SystemCapabilitiesExtension {
 
     /// HTTP support information.
     #[serde(
-        rename = "HttpSupportInformation",
+        rename = "tt:HttpSupportInformation",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub http_support_information: Option<bool>,
 
     /// Further extension (nested).
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -779,7 +828,7 @@ pub struct SystemCapabilitiesExtension {
 pub struct IOCapabilities {
     /// Number of input connectors.
     #[serde(
-        rename = "InputConnectors",
+        rename = "tt:InputConnectors",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -787,14 +836,18 @@ pub struct IOCapabilities {
 
     /// Number of relay outputs.
     #[serde(
-        rename = "RelayOutputs",
+        rename = "tt:RelayOutputs",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub relay_outputs: Option<i32>,
 
     /// Extension with Auxiliary support.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<IOCapabilitiesExtension>,
 }
 
@@ -802,11 +855,19 @@ pub struct IOCapabilities {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct IOCapabilitiesExtension {
     /// Auxiliary output support.
-    #[serde(rename = "Auxiliary", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Auxiliary",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub auxiliary: Option<bool>,
 
     /// Further extension (nested).
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -814,39 +875,43 @@ pub struct IOCapabilitiesExtension {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SecurityCapabilitiesLegacy {
     /// TLS 1.1 support.
-    #[serde(rename = "TLS1.1")]
+    #[serde(rename = "tt:TLS1.1", alias = "TLS1.1")]
     pub tls1_1: bool,
 
     /// TLS 1.2 support.
-    #[serde(rename = "TLS1.2")]
+    #[serde(rename = "tt:TLS1.2", alias = "TLS1.2")]
     pub tls1_2: bool,
 
     /// Onboard key generation support.
-    #[serde(rename = "OnboardKeyGeneration")]
+    #[serde(rename = "tt:OnboardKeyGeneration", alias = "OnboardKeyGeneration")]
     pub onboard_key_generation: bool,
 
     /// Access policy configuration support.
-    #[serde(rename = "AccessPolicyConfig")]
+    #[serde(rename = "tt:AccessPolicyConfig", alias = "AccessPolicyConfig")]
     pub access_policy_config: bool,
 
     /// X.509 token support.
-    #[serde(rename = "X.509Token")]
+    #[serde(rename = "tt:X.509Token", alias = "X.509Token")]
     pub x509_token: bool,
 
     /// SAML token support.
-    #[serde(rename = "SAMLToken")]
+    #[serde(rename = "tt:SAMLToken", alias = "SAMLToken")]
     pub saml_token: bool,
 
     /// Kerberos token support.
-    #[serde(rename = "KerberosToken")]
+    #[serde(rename = "tt:KerberosToken", alias = "KerberosToken")]
     pub kerberos_token: bool,
 
     /// REL token support.
-    #[serde(rename = "RELToken")]
+    #[serde(rename = "tt:RELToken", alias = "RELToken")]
     pub rel_token: bool,
 
     /// Extension with TLS1.0 and other security extensions.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<SecurityCapabilitiesExtension>,
 }
 
@@ -854,11 +919,15 @@ pub struct SecurityCapabilitiesLegacy {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SecurityCapabilitiesExtension {
     /// TLS 1.0 support.
-    #[serde(rename = "TLS1.0", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:TLS1.0", default, skip_serializing_if = "Option::is_none")]
     pub tls1_0: Option<bool>,
 
     /// Further extension with Dot1X.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<SecurityCapabilitiesExtension2>,
 }
 
@@ -866,12 +935,12 @@ pub struct SecurityCapabilitiesExtension {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SecurityCapabilitiesExtension2 {
     /// IEEE 802.1X support.
-    #[serde(rename = "Dot1X", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:Dot1X", default, skip_serializing_if = "Option::is_none")]
     pub dot1x: Option<bool>,
 
     /// Supported EAP methods.
     #[serde(
-        rename = "SupportedEAPMethod",
+        rename = "tt:SupportedEAPMethod",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -879,7 +948,7 @@ pub struct SecurityCapabilitiesExtension2 {
 
     /// Remote user handling support.
     #[serde(
-        rename = "RemoteUserHandling",
+        rename = "tt:RemoteUserHandling",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -890,19 +959,25 @@ pub struct SecurityCapabilitiesExtension2 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventsCapabilities {
     /// Events service address.
-    #[serde(rename = "XAddr")]
+    #[serde(rename = "tt:XAddr", alias = "XAddr")]
     pub x_addr: String,
 
     /// WS-Subscription policy support.
-    #[serde(rename = "WSSubscriptionPolicySupport")]
+    #[serde(
+        rename = "tt:WSSubscriptionPolicySupport",
+        alias = "WSSubscriptionPolicySupport"
+    )]
     pub ws_subscription_policy_support: bool,
 
     /// WS-Pull point support.
-    #[serde(rename = "WSPullPointSupport")]
+    #[serde(rename = "tt:WSPullPointSupport", alias = "WSPullPointSupport")]
     pub ws_pull_point_support: bool,
 
     /// WS-Pausable subscription manager support.
-    #[serde(rename = "WSPausableSubscriptionManagerInterfaceSupport")]
+    #[serde(
+        rename = "tt:WSPausableSubscriptionManagerInterfaceSupport",
+        alias = "WSPausableSubscriptionManagerInterfaceSupport"
+    )]
     pub ws_pausable_subscription_manager_interface_support: bool,
 }
 
@@ -910,7 +985,7 @@ pub struct EventsCapabilities {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImagingCapabilities {
     /// Imaging service address.
-    #[serde(rename = "XAddr")]
+    #[serde(rename = "tt:XAddr", alias = "XAddr")]
     pub x_addr: String,
 }
 
@@ -918,19 +993,23 @@ pub struct ImagingCapabilities {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MediaCapabilities {
     /// Media service address.
-    #[serde(rename = "XAddr")]
+    #[serde(rename = "tt:XAddr", alias = "XAddr")]
     pub x_addr: String,
 
     /// Streaming capabilities.
     #[serde(
-        rename = "StreamingCapabilities",
+        rename = "tt:StreamingCapabilities",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub streaming_capabilities: Option<RealTimeStreamingCapabilities>,
 
     /// Extension with profile capabilities.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<MediaCapabilitiesExtension>,
 }
 
@@ -939,7 +1018,7 @@ pub struct MediaCapabilities {
 pub struct MediaCapabilitiesExtension {
     /// Profile capabilities.
     #[serde(
-        rename = "ProfileCapabilities",
+        rename = "tt:ProfileCapabilities",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -951,7 +1030,7 @@ pub struct MediaCapabilitiesExtension {
 pub struct ProfileCapabilities {
     /// Maximum number of profiles.
     #[serde(
-        rename = "MaximumNumberOfProfiles",
+        rename = "tt:MaximumNumberOfProfiles",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -963,26 +1042,34 @@ pub struct ProfileCapabilities {
 pub struct RealTimeStreamingCapabilities {
     /// RTP multicast support.
     #[serde(
-        rename = "RTPMulticast",
+        rename = "tt:RTPMulticast",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub rtp_multicast: Option<bool>,
 
     /// RTP over TCP support.
-    #[serde(rename = "RTP_TCP", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:RTP_TCP",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub rtp_tcp: Option<bool>,
 
     /// RTP/RTSP/TCP support.
     #[serde(
-        rename = "RTP_RTSP_TCP",
+        rename = "tt:RTP_RTSP_TCP",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub rtp_rtsp_tcp: Option<bool>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -990,7 +1077,7 @@ pub struct RealTimeStreamingCapabilities {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PTZCapabilities {
     /// PTZ service address.
-    #[serde(rename = "XAddr")]
+    #[serde(rename = "tt:XAddr", alias = "XAddr")]
     pub x_addr: String,
 }
 
@@ -1008,7 +1095,7 @@ pub struct GetSystemDateAndTime {}
 #[serde(rename = "tds:GetSystemDateAndTimeResponse")]
 pub struct GetSystemDateAndTimeResponse {
     /// System date and time information.
-    #[serde(rename = "tds:SystemDateAndTime")]
+    #[serde(rename = "tds:SystemDateAndTime", alias = "SystemDateAndTime")]
     pub system_date_and_time: SystemDateTime,
 }
 
@@ -1056,7 +1143,7 @@ pub struct SystemReboot {}
 #[serde(rename = "tds:SystemRebootResponse")]
 pub struct SystemRebootResponse {
     /// Message indicating reboot status.
-    #[serde(rename = "tds:Message")]
+    #[serde(rename = "tds:Message", alias = "Message")]
     pub message: String,
 }
 
@@ -1099,10 +1186,10 @@ pub struct GetSystemBackup {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BackupFile {
     /// Filename.
-    #[serde(rename = "tds:Name")]
+    #[serde(rename = "tds:Name", alias = "Name")]
     pub name: String,
     /// Base64-encoded content.
-    #[serde(rename = "tds:Data")]
+    #[serde(rename = "tds:Data", alias = "Data")]
     pub data: String,
 }
 
@@ -1150,7 +1237,7 @@ pub struct GetCertificates {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Certificate {
     /// Certificate ID.
-    #[serde(rename = "tds:CertificateID")]
+    #[serde(rename = "tds:CertificateID", alias = "CertificateID")]
     pub certificate_id: String,
     /// Certificate data (base64 PEM or DER).
     #[serde(
@@ -1179,10 +1266,10 @@ pub struct GetCertificatesStatus {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CertificateStatus {
     /// Certificate ID.
-    #[serde(rename = "tds:CertificateID")]
+    #[serde(rename = "tds:CertificateID", alias = "CertificateID")]
     pub certificate_id: String,
     /// Whether certificate is enabled.
-    #[serde(rename = "tds:Status")]
+    #[serde(rename = "tds:Status", alias = "Status")]
     pub status: bool,
 }
 
@@ -1280,7 +1367,7 @@ pub struct GetHostname {}
 #[serde(rename = "tds:GetHostnameResponse")]
 pub struct GetHostnameResponse {
     /// Hostname information.
-    #[serde(rename = "tds:HostnameInformation")]
+    #[serde(rename = "tds:HostnameInformation", alias = "HostnameInformation")]
     pub hostname_information: HostnameInformation,
 }
 
@@ -1288,15 +1375,25 @@ pub struct GetHostnameResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HostnameInformation {
     /// Whether hostname is obtained from DHCP.
-    #[serde(rename = "FromDHCP")]
+    #[serde(rename = "tt:FromDHCP", alias = "FromDHCP")]
     pub from_dhcp: bool,
 
     /// Hostname value.
-    #[serde(rename = "Name", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Name",
+        alias = "Name",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub name: Option<String>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1340,27 +1437,31 @@ pub struct NetworkInterface {
     pub token: ReferenceToken,
 
     /// Interface enabled.
-    #[serde(rename = "Enabled")]
+    #[serde(rename = "tt:Enabled", alias = "Enabled")]
     pub enabled: bool,
 
     /// Interface information.
-    #[serde(rename = "Info", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:Info", default, skip_serializing_if = "Option::is_none")]
     pub info: Option<NetworkInterfaceInfo>,
 
     /// Link configuration.
-    #[serde(rename = "Link", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:Link", default, skip_serializing_if = "Option::is_none")]
     pub link: Option<NetworkInterfaceLink>,
 
     /// IPv4 configuration.
-    #[serde(rename = "IPv4", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:IPv4", default, skip_serializing_if = "Option::is_none")]
     pub ipv4: Option<IPv4NetworkInterface>,
 
     /// IPv6 configuration.
-    #[serde(rename = "IPv6", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:IPv6", default, skip_serializing_if = "Option::is_none")]
     pub ipv6: Option<IPv6NetworkInterface>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1368,15 +1469,15 @@ pub struct NetworkInterface {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NetworkInterfaceInfo {
     /// Interface name.
-    #[serde(rename = "Name", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:Name", default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
     /// Hardware address (MAC).
-    #[serde(rename = "HwAddress")]
+    #[serde(rename = "tt:HwAddress", alias = "HwAddress")]
     pub hw_address: String,
 
     /// MTU.
-    #[serde(rename = "MTU", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:MTU", default, skip_serializing_if = "Option::is_none")]
     pub mtu: Option<i32>,
 }
 
@@ -1384,15 +1485,15 @@ pub struct NetworkInterfaceInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NetworkInterfaceLink {
     /// Admin settings.
-    #[serde(rename = "AdminSettings")]
+    #[serde(rename = "tt:AdminSettings", alias = "AdminSettings")]
     pub admin_settings: NetworkInterfaceConnectionSetting,
 
     /// Operational settings.
-    #[serde(rename = "OperSettings")]
+    #[serde(rename = "tt:OperSettings", alias = "OperSettings")]
     pub oper_settings: NetworkInterfaceConnectionSetting,
 
     /// Interface up/down status.
-    #[serde(rename = "InterfaceType")]
+    #[serde(rename = "tt:InterfaceType", alias = "InterfaceType")]
     pub interface_type: i32,
 }
 
@@ -1400,15 +1501,15 @@ pub struct NetworkInterfaceLink {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NetworkInterfaceConnectionSetting {
     /// Auto-negotiate.
-    #[serde(rename = "AutoNegotiation")]
+    #[serde(rename = "tt:AutoNegotiation", alias = "AutoNegotiation")]
     pub auto_negotiation: bool,
 
     /// Speed in Mbps.
-    #[serde(rename = "Speed")]
+    #[serde(rename = "tt:Speed", alias = "Speed")]
     pub speed: i32,
 
     /// Duplex mode.
-    #[serde(rename = "Duplex")]
+    #[serde(rename = "tt:Duplex", alias = "Duplex")]
     pub duplex: Duplex,
 }
 
@@ -1424,11 +1525,11 @@ pub enum Duplex {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IPv4NetworkInterface {
     /// IPv4 enabled.
-    #[serde(rename = "Enabled")]
+    #[serde(rename = "tt:Enabled", alias = "Enabled")]
     pub enabled: bool,
 
     /// IPv4 configuration.
-    #[serde(rename = "Config")]
+    #[serde(rename = "tt:Config", alias = "Config")]
     pub config: IPv4Configuration,
 }
 
@@ -1436,19 +1537,27 @@ pub struct IPv4NetworkInterface {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IPv4Configuration {
     /// Manual addresses.
-    #[serde(rename = "Manual", default)]
+    #[serde(rename = "tt:Manual", default)]
     pub manual: Vec<PrefixedIPv4Address>,
 
     /// Link-local address.
-    #[serde(rename = "LinkLocal", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:LinkLocal",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub link_local: Option<PrefixedIPv4Address>,
 
     /// Address from DHCP.
-    #[serde(rename = "FromDHCP", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:FromDHCP",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub from_dhcp: Option<PrefixedIPv4Address>,
 
     /// DHCP enabled.
-    #[serde(rename = "DHCP")]
+    #[serde(rename = "tt:DHCP", alias = "DHCP")]
     pub dhcp: bool,
 }
 
@@ -1456,11 +1565,11 @@ pub struct IPv4Configuration {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrefixedIPv4Address {
     /// IPv4 address.
-    #[serde(rename = "Address")]
+    #[serde(rename = "tt:Address", alias = "Address")]
     pub address: String,
 
     /// Prefix length.
-    #[serde(rename = "PrefixLength")]
+    #[serde(rename = "tt:PrefixLength", alias = "PrefixLength")]
     pub prefix_length: i32,
 }
 
@@ -1468,11 +1577,11 @@ pub struct PrefixedIPv4Address {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IPv6NetworkInterface {
     /// IPv6 enabled.
-    #[serde(rename = "Enabled")]
+    #[serde(rename = "tt:Enabled", alias = "Enabled")]
     pub enabled: bool,
 
     /// IPv6 configuration.
-    #[serde(rename = "Config", default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "tt:Config", default, skip_serializing_if = "Option::is_none")]
     pub config: Option<IPv6Configuration>,
 }
 
@@ -1481,34 +1590,38 @@ pub struct IPv6NetworkInterface {
 pub struct IPv6Configuration {
     /// Accept router advertisements.
     #[serde(
-        rename = "AcceptRouterAdvert",
+        rename = "tt:AcceptRouterAdvert",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub accept_router_advert: Option<bool>,
 
     /// DHCP configuration.
-    #[serde(rename = "DHCP")]
+    #[serde(rename = "tt:DHCP", alias = "DHCP")]
     pub dhcp: IPv6DHCPConfiguration,
 
     /// Manual addresses.
-    #[serde(rename = "Manual", default)]
+    #[serde(rename = "tt:Manual", default)]
     pub manual: Vec<PrefixedIPv6Address>,
 
     /// Link-local addresses.
-    #[serde(rename = "LinkLocal", default)]
+    #[serde(rename = "tt:LinkLocal", default)]
     pub link_local: Vec<PrefixedIPv6Address>,
 
     /// Addresses from DHCP.
-    #[serde(rename = "FromDHCP", default)]
+    #[serde(rename = "tt:FromDHCP", default)]
     pub from_dhcp: Vec<PrefixedIPv6Address>,
 
     /// Addresses from router advertisement.
-    #[serde(rename = "FromRA", default)]
+    #[serde(rename = "tt:FromRA", default)]
     pub from_ra: Vec<PrefixedIPv6Address>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1526,11 +1639,11 @@ pub enum IPv6DHCPConfiguration {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrefixedIPv6Address {
     /// IPv6 address.
-    #[serde(rename = "Address")]
+    #[serde(rename = "tt:Address", alias = "Address")]
     pub address: String,
 
     /// Prefix length.
-    #[serde(rename = "PrefixLength")]
+    #[serde(rename = "tt:PrefixLength", alias = "PrefixLength")]
     pub prefix_length: i32,
 }
 
@@ -1548,7 +1661,7 @@ pub struct GetDNS {}
 #[serde(rename = "tds:GetDNSResponse")]
 pub struct GetDNSResponse {
     /// DNS configuration information.
-    #[serde(rename = "tds:DNSInformation")]
+    #[serde(rename = "tds:DNSInformation", alias = "DNSInformation")]
     pub dns_information: DNSInformation,
 }
 
@@ -1582,23 +1695,31 @@ pub struct SetDNSResponse {}
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DNSInformation {
     /// Whether DNS information is retrieved from DHCP.
-    #[serde(rename = "FromDHCP")]
+    #[serde(rename = "tt:FromDHCP", alias = "FromDHCP")]
     pub from_dhcp: bool,
 
     /// Search domains.
     #[serde(
-        rename = "SearchDomain",
+        rename = "tt:SearchDomain",
         default,
         skip_serializing_if = "Vec::is_empty"
     )]
     pub search_domain: Vec<String>,
 
     /// DNS addresses from DHCP.
-    #[serde(rename = "DNSFromDHCP", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "tt:DNSFromDHCP",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub dns_from_dhcp: Vec<IPAddress>,
 
     /// Manually configured DNS addresses.
-    #[serde(rename = "DNSManual", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "tt:DNSManual",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub dns_manual: Vec<IPAddress>,
 }
 
@@ -1614,12 +1735,12 @@ pub enum IPType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IPAddress {
     /// Address type (IPv4 or IPv6).
-    #[serde(rename = "Type")]
+    #[serde(rename = "tt:Type", alias = "Type")]
     pub address_type: IPType,
 
     /// IPv4 address (when Type is IPv4).
     #[serde(
-        rename = "IPv4Address",
+        rename = "tt:IPv4Address",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1627,7 +1748,7 @@ pub struct IPAddress {
 
     /// IPv6 address (when Type is IPv6).
     #[serde(
-        rename = "IPv6Address",
+        rename = "tt:IPv6Address",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1678,7 +1799,7 @@ pub struct GetNTP {}
 #[serde(rename = "tds:GetNTPResponse")]
 pub struct GetNTPResponse {
     /// NTP configuration information.
-    #[serde(rename = "tds:NTPInformation")]
+    #[serde(rename = "tds:NTPInformation", alias = "NTPInformation")]
     pub ntp_information: NTPInformation,
 }
 
@@ -1704,15 +1825,25 @@ pub struct SetNTPResponse {}
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct NTPInformation {
     /// Whether NTP information is retrieved from DHCP.
-    #[serde(rename = "FromDHCP")]
+    #[serde(rename = "tt:FromDHCP", alias = "FromDHCP")]
     pub from_dhcp: bool,
 
     /// NTP servers from DHCP.
-    #[serde(rename = "NTPFromDHCP", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "tt:NTPFromDHCP",
+        alias = "NTPFromDHCP",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub ntp_from_dhcp: Vec<NetworkHost>,
 
     /// Manually configured NTP servers.
-    #[serde(rename = "NTPManual", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "tt:NTPManual",
+        alias = "NTPManual",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub ntp_manual: Vec<NetworkHost>,
 }
 
@@ -1729,12 +1860,13 @@ pub enum NetworkHostType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NetworkHost {
     /// Host type.
-    #[serde(rename = "Type")]
+    #[serde(rename = "tt:Type", alias = "Type")]
     pub host_type: NetworkHostType,
 
     /// IPv4 address (when Type is IPv4).
     #[serde(
-        rename = "IPv4Address",
+        rename = "tt:IPv4Address",
+        alias = "IPv4Address",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1742,14 +1874,20 @@ pub struct NetworkHost {
 
     /// IPv6 address (when Type is IPv6).
     #[serde(
-        rename = "IPv6Address",
+        rename = "tt:IPv6Address",
+        alias = "IPv6Address",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub ipv6_address: Option<String>,
 
     /// DNS name (when Type is DNS).
-    #[serde(rename = "DNSname", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:DNSname",
+        alias = "DNSname",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub dns_name: Option<String>,
 }
 
@@ -1841,15 +1979,15 @@ pub enum NetworkProtocolType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NetworkProtocol {
     /// Protocol name (HTTP, HTTPS, RTSP).
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: NetworkProtocolType,
 
     /// Whether the protocol is enabled.
-    #[serde(rename = "Enabled")]
+    #[serde(rename = "tt:Enabled", alias = "Enabled")]
     pub enabled: bool,
 
     /// Ports used by the protocol.
-    #[serde(rename = "Port", default)]
+    #[serde(rename = "tt:Port", alias = "Port", default)]
     pub port: Vec<i32>,
 }
 
@@ -1941,7 +2079,7 @@ pub struct GetDiscoveryMode {}
 #[serde(rename = "tds:GetDiscoveryModeResponse")]
 pub struct GetDiscoveryModeResponse {
     /// Current discovery mode.
-    #[serde(rename = "tds:DiscoveryMode")]
+    #[serde(rename = "tds:DiscoveryMode", alias = "DiscoveryMode")]
     pub discovery_mode: DiscoveryMode,
 }
 
@@ -2028,6 +2166,98 @@ pub struct SetUser {
 pub struct SetUserResponse {}
 
 // ============================================================================
+// Network Default Gateway
+// ============================================================================
+
+/// GetNetworkDefaultGateway request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetNetworkDefaultGateway")]
+pub struct GetNetworkDefaultGateway {}
+
+/// GetNetworkDefaultGateway response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:GetNetworkDefaultGatewayResponse")]
+pub struct GetNetworkDefaultGatewayResponse {
+    /// Network gateway configuration.
+    #[serde(rename = "tds:NetworkGateway", default)]
+    pub network_gateway: Vec<NetworkGateway>,
+}
+
+/// Network gateway information.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct NetworkGateway {
+    /// IPv4 gateway addresses.
+    #[serde(rename = "IPv4Address", default, skip_serializing_if = "Vec::is_empty")]
+    pub ipv4_address: Vec<String>,
+
+    /// IPv6 gateway addresses.
+    #[serde(rename = "IPv6Address", default, skip_serializing_if = "Vec::is_empty")]
+    pub ipv6_address: Vec<String>,
+
+    /// Extension.
+    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    pub extension: Option<Extension>,
+}
+
+/// SetNetworkDefaultGateway request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "SetNetworkDefaultGateway")]
+pub struct SetNetworkDefaultGateway {
+    /// Network gateway configuration to set.
+    #[serde(rename = "NetworkGateway", default)]
+    pub network_gateway: Vec<NetworkGateway>,
+}
+
+/// SetNetworkDefaultGateway response.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:SetNetworkDefaultGatewayResponse")]
+pub struct SetNetworkDefaultGatewayResponse {}
+
+// ============================================================================
+// Zero Configuration
+// ============================================================================
+
+/// GetZeroConfiguration request.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "GetZeroConfiguration")]
+pub struct GetZeroConfiguration {}
+
+/// GetZeroConfiguration response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename = "tds:GetZeroConfigurationResponse")]
+pub struct GetZeroConfigurationResponse {
+    /// Zero configuration settings.
+    #[serde(rename = "tds:ZeroConfiguration", alias = "ZeroConfiguration")]
+    pub zero_configuration: NetworkZeroConfiguration,
+}
+
+/// Zero configuration information.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct NetworkZeroConfiguration {
+    /// Whether zero configuration is enabled.
+    #[serde(rename = "tt:Enabled", alias = "Enabled")]
+    pub enabled: bool,
+
+    /// IPv4 addresses assigned by zero configuration.
+    #[serde(
+        rename = "tt:Addresses",
+        alias = "Addresses",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub addresses: Vec<String>,
+
+    /// Extension.
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub extension: Option<Extension>,
+}
+
+// ============================================================================
 // Relay Outputs
 // ============================================================================
 
@@ -2053,7 +2283,7 @@ pub struct RelayOutput {
     pub token: ReferenceToken,
 
     /// Relay output properties.
-    #[serde(rename = "Properties")]
+    #[serde(rename = "tt:Properties", alias = "Properties")]
     pub properties: RelayOutputSettings,
 }
 
@@ -2061,15 +2291,20 @@ pub struct RelayOutput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelayOutputSettings {
     /// Relay mode (Monostable or Bistable).
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: RelayMode,
 
     /// Delay time for Monostable mode.
-    #[serde(rename = "DelayTime", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:DelayTime",
+        alias = "DelayTime",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub delay_time: Option<String>,
 
     /// Idle state (open or closed).
-    #[serde(rename = "IdleState")]
+    #[serde(rename = "tt:IdleState", alias = "IdleState")]
     pub idle_state: RelayIdleState,
 }
 

@@ -50,7 +50,7 @@ pub struct GetConfigurations {}
 #[serde(rename = "tptz:GetConfigurationsResponse")]
 pub struct GetConfigurationsResponse {
     /// List of PTZ configurations.
-    #[serde(rename = "tptz:PTZConfiguration", default)]
+    #[serde(rename = "tptz:PTZConfiguration", alias = "PTZConfiguration", default)]
     pub ptz_configurations: Vec<PTZConfiguration>,
 }
 
@@ -68,7 +68,7 @@ pub struct GetConfiguration {
 #[serde(rename = "tptz:GetConfigurationResponse")]
 pub struct GetConfigurationResponse {
     /// The requested PTZ configuration.
-    #[serde(rename = "tptz:PTZConfiguration")]
+    #[serde(rename = "tptz:PTZConfiguration", alias = "PTZConfiguration")]
     pub ptz_configuration: PTZConfiguration,
 }
 
@@ -104,7 +104,10 @@ pub struct GetConfigurationOptions {
 #[serde(rename = "tptz:GetConfigurationOptionsResponse")]
 pub struct GetConfigurationOptionsResponse {
     /// PTZ configuration options.
-    #[serde(rename = "tptz:PTZConfigurationOptions")]
+    #[serde(
+        rename = "tptz:PTZConfigurationOptions",
+        alias = "PTZConfigurationOptions"
+    )]
     pub ptz_configuration_options: PTZConfigurationOptions,
 }
 
@@ -112,23 +115,29 @@ pub struct GetConfigurationOptionsResponse {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PTZConfigurationOptions {
     /// Supported PTZ spaces.
-    #[serde(rename = "Spaces")]
+    #[serde(rename = "tt:Spaces", alias = "Spaces")]
     pub spaces: PTZSpaces,
 
     /// PTZ timeout range.
-    #[serde(rename = "PTZTimeout")]
+    #[serde(rename = "tt:PTZTimeout", alias = "PTZTimeout")]
     pub ptz_timeout: DurationRange,
 
     /// PT control direction options.
     #[serde(
-        rename = "PTControlDirection",
+        rename = "tt:PTControlDirection",
+        alias = "PTControlDirection",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub pt_control_direction: Option<PTControlDirectionOptions>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<PTZConfigurationOptionsExtension>,
 
     /// PTZ ranges mode attribute.
@@ -141,14 +150,20 @@ pub struct PTZConfigurationOptions {
 pub struct PTZConfigurationOptionsExtension {
     /// Supported preset tour.
     #[serde(
-        rename = "PTControlDirection",
+        rename = "tt:PTControlDirection",
+        alias = "PTControlDirection",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub pt_control_direction: Option<PTControlDirectionOptions>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -156,39 +171,68 @@ pub struct PTZConfigurationOptionsExtension {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PTZSpaces {
     /// Absolute pan/tilt position space.
-    #[serde(rename = "AbsolutePanTiltPositionSpace", default)]
+    #[serde(
+        rename = "tt:AbsolutePanTiltPositionSpace",
+        alias = "AbsolutePanTiltPositionSpace",
+        default
+    )]
     pub absolute_pan_tilt_position_space: Vec<Space2DDescription>,
 
     /// Absolute zoom position space.
-    #[serde(rename = "AbsoluteZoomPositionSpace", default)]
+    #[serde(
+        rename = "tt:AbsoluteZoomPositionSpace",
+        alias = "AbsoluteZoomPositionSpace",
+        default
+    )]
     pub absolute_zoom_position_space: Vec<Space1DDescription>,
 
     /// Relative pan/tilt translation space.
-    #[serde(rename = "RelativePanTiltTranslationSpace", default)]
+    #[serde(
+        rename = "tt:RelativePanTiltTranslationSpace",
+        alias = "RelativePanTiltTranslationSpace",
+        default
+    )]
     pub relative_pan_tilt_translation_space: Vec<Space2DDescription>,
 
     /// Relative zoom translation space.
-    #[serde(rename = "RelativeZoomTranslationSpace", default)]
+    #[serde(
+        rename = "tt:RelativeZoomTranslationSpace",
+        alias = "RelativeZoomTranslationSpace",
+        default
+    )]
     pub relative_zoom_translation_space: Vec<Space1DDescription>,
 
     /// Continuous pan/tilt velocity space.
-    #[serde(rename = "ContinuousPanTiltVelocitySpace", default)]
+    #[serde(
+        rename = "tt:ContinuousPanTiltVelocitySpace",
+        alias = "ContinuousPanTiltVelocitySpace",
+        default
+    )]
     pub continuous_pan_tilt_velocity_space: Vec<Space2DDescription>,
 
     /// Continuous zoom velocity space.
-    #[serde(rename = "ContinuousZoomVelocitySpace", default)]
+    #[serde(
+        rename = "tt:ContinuousZoomVelocitySpace",
+        alias = "ContinuousZoomVelocitySpace",
+        default
+    )]
     pub continuous_zoom_velocity_space: Vec<Space1DDescription>,
 
     /// Pan/tilt speed space.
-    #[serde(rename = "PanTiltSpeedSpace", default)]
+    #[serde(rename = "tt:PanTiltSpeedSpace", alias = "PanTiltSpeedSpace", default)]
     pub pan_tilt_speed_space: Vec<Space1DDescription>,
 
     /// Zoom speed space.
-    #[serde(rename = "ZoomSpeedSpace", default)]
+    #[serde(rename = "tt:ZoomSpeedSpace", alias = "ZoomSpeedSpace", default)]
     pub zoom_speed_space: Vec<Space1DDescription>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -196,11 +240,11 @@ pub struct PTZSpaces {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DurationRange {
     /// Minimum duration.
-    #[serde(rename = "Min")]
+    #[serde(rename = "tt:Min", alias = "Min")]
     pub min: String,
 
     /// Maximum duration.
-    #[serde(rename = "Max")]
+    #[serde(rename = "tt:Max", alias = "Max")]
     pub max: String,
 }
 
@@ -208,15 +252,30 @@ pub struct DurationRange {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PTControlDirectionOptions {
     /// EFlip options.
-    #[serde(rename = "EFlip", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:EFlip",
+        alias = "EFlip",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub e_flip: Option<EFlipOptions>,
 
     /// Reverse options.
-    #[serde(rename = "Reverse", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Reverse",
+        alias = "Reverse",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub reverse: Option<ReverseOptions>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -224,11 +283,16 @@ pub struct PTControlDirectionOptions {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EFlipOptions {
     /// Supported EFlip modes.
-    #[serde(rename = "Mode", default)]
+    #[serde(rename = "tt:Mode", alias = "Mode", default)]
     pub mode: Vec<EFlipMode>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -245,11 +309,16 @@ pub enum EFlipMode {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ReverseOptions {
     /// Supported reverse modes.
-    #[serde(rename = "Mode", default)]
+    #[serde(rename = "tt:Mode", alias = "Mode", default)]
     pub mode: Vec<ReverseMode>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -405,7 +474,7 @@ pub struct GetPresets {
 #[serde(rename = "tptz:GetPresetsResponse")]
 pub struct GetPresetsResponse {
     /// List of presets.
-    #[serde(rename = "tptz:Preset", default)]
+    #[serde(rename = "tptz:Preset", alias = "Preset", default)]
     pub presets: Vec<PTZPreset>,
 }
 
@@ -439,7 +508,7 @@ pub struct SetPreset {
 #[serde(rename = "tptz:SetPresetResponse")]
 pub struct SetPresetResponse {
     /// Token of the created/updated preset.
-    #[serde(rename = "tptz:PresetToken")]
+    #[serde(rename = "tptz:PresetToken", alias = "PresetToken")]
     pub preset_token: ReferenceToken,
 }
 
@@ -501,7 +570,7 @@ pub struct GetStatus {
 #[serde(rename = "tptz:GetStatusResponse")]
 pub struct GetStatusResponse {
     /// PTZ status.
-    #[serde(rename = "tptz:PTZStatus")]
+    #[serde(rename = "tptz:PTZStatus", alias = "PTZStatus")]
     pub ptz_status: PTZStatus,
 }
 
@@ -519,7 +588,7 @@ pub struct GetNodes {}
 #[serde(rename = "tptz:GetNodesResponse")]
 pub struct GetNodesResponse {
     /// List of PTZ nodes.
-    #[serde(rename = "tptz:PTZNode", default)]
+    #[serde(rename = "tptz:PTZNode", alias = "PTZNode", default)]
     pub ptz_nodes: Vec<PTZNode>,
 }
 
@@ -537,7 +606,7 @@ pub struct GetNode {
 #[serde(rename = "tptz:GetNodeResponse")]
 pub struct GetNodeResponse {
     /// The requested PTZ node.
-    #[serde(rename = "tptz:PTZNode")]
+    #[serde(rename = "tptz:PTZNode", alias = "PTZNode")]
     pub ptz_node: PTZNode,
 }
 
@@ -561,27 +630,37 @@ pub struct PTZNode {
     pub geo_move: Option<bool>,
 
     /// Node name.
-    #[serde(rename = "Name", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Name",
+        alias = "Name",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub name: Option<Name>,
 
     /// Supported PTZ spaces.
-    #[serde(rename = "SupportedPTZSpaces")]
+    #[serde(rename = "tt:SupportedPTZSpaces", alias = "SupportedPTZSpaces")]
     pub supported_ptz_spaces: PTZSpaces,
 
     /// Maximum number of presets.
-    #[serde(rename = "MaximumNumberOfPresets")]
+    #[serde(rename = "tt:MaximumNumberOfPresets", alias = "MaximumNumberOfPresets")]
     pub maximum_number_of_presets: i32,
 
     /// Home position support.
-    #[serde(rename = "HomeSupported")]
+    #[serde(rename = "tt:HomeSupported", alias = "HomeSupported")]
     pub home_supported: bool,
 
     /// Auxiliary commands.
-    #[serde(rename = "AuxiliaryCommands", default)]
+    #[serde(rename = "tt:AuxiliaryCommands", alias = "AuxiliaryCommands", default)]
     pub auxiliary_commands: Vec<String>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<PTZNodeExtension>,
 }
 
@@ -590,14 +669,20 @@ pub struct PTZNode {
 pub struct PTZNodeExtension {
     /// Supported preset tour.
     #[serde(
-        rename = "SupportedPresetTour",
+        rename = "tt:SupportedPresetTour",
+        alias = "SupportedPresetTour",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub supported_preset_tour: Option<PTZPresetTourSupported>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -605,17 +690,29 @@ pub struct PTZNodeExtension {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PTZPresetTourSupported {
     /// Maximum number of preset tours.
-    #[serde(rename = "MaximumNumberOfPresetTours")]
+    #[serde(
+        rename = "tt:MaximumNumberOfPresetTours",
+        alias = "MaximumNumberOfPresetTours"
+    )]
     pub maximum_number_of_preset_tours: i32,
 
     /// Supported preset tour operations.
     /// Note: Uses String since ONVIF XML has repeated `<PTZPresetTourOperation>Value</PTZPresetTourOperation>`
     /// elements which quick-xml parses as text content.
-    #[serde(rename = "PTZPresetTourOperation", default)]
+    #[serde(
+        rename = "tt:PTZPresetTourOperation",
+        alias = "PTZPresetTourOperation",
+        default
+    )]
     pub ptz_preset_tour_operation: Vec<String>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -643,7 +740,7 @@ pub struct GetServiceCapabilities {}
 #[serde(rename = "tptz:GetServiceCapabilitiesResponse")]
 pub struct GetServiceCapabilitiesResponse {
     /// PTZ service capabilities.
-    #[serde(rename = "tptz:Capabilities")]
+    #[serde(rename = "tptz:Capabilities", alias = "Capabilities")]
     pub capabilities: PTZServiceCapabilities,
 }
 
@@ -707,6 +804,7 @@ pub struct SendAuxiliaryCommandResponse {
     /// Auxiliary response.
     #[serde(
         rename = "tptz:AuxiliaryResponse",
+        alias = "AuxiliaryResponse",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -731,7 +829,7 @@ pub struct GetCompatibleConfigurations {
 #[serde(rename = "tptz:GetCompatibleConfigurationsResponse")]
 pub struct GetCompatibleConfigurationsResponse {
     /// List of compatible PTZ configurations.
-    #[serde(rename = "tptz:PTZConfiguration", default)]
+    #[serde(rename = "tptz:PTZConfiguration", alias = "PTZConfiguration", default)]
     pub ptz_configurations: Vec<PTZConfiguration>,
 }
 

@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use crate::config::ConfigRuntime;
+use crate::net::ip_utils::external_ip;
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{MediaUri, StreamSetup, StreamType, TransportProtocol};
@@ -66,6 +67,7 @@ pub struct MediaService {
     /// Profile manager for media profiles.
     profile_manager: Arc<ProfileManager>,
     /// Configuration runtime.
+    #[allow(dead_code)]
     config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional).
     #[allow(dead_code)]
@@ -119,20 +121,14 @@ impl MediaService {
 
     /// Get the base URL for service addresses.
     fn base_url(&self) -> String {
-        let address = self
-            .config
-            .get_string("server.address")
-            .unwrap_or_else(|_| "0.0.0.0".to_string());
+        let address = external_ip(&self.config);
         let port = self.config.get_int("server.port").unwrap_or(80) as u16;
         format!("http://{}:{}", address, port)
     }
 
     /// Get the RTSP base URL.
     fn rtsp_url(&self) -> String {
-        let address = self
-            .config
-            .get_string("server.address")
-            .unwrap_or_else(|_| "0.0.0.0".to_string());
+        let address = external_ip(&self.config);
         let port = self
             .config
             .get_int("media.rtsp_port")

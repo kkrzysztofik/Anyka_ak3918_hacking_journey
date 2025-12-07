@@ -65,6 +65,8 @@ pub mod onvif;
 
 pub mod utils;
 
+pub mod net;
+
 pub mod auth;
 
 pub mod users;

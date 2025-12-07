@@ -783,14 +783,14 @@ impl Application {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| format!("urn:uuid:{}", uuid::Uuid::new_v4()));
 
-        // Get local IP - "auto" means we should try to detect, otherwise use specified value
+        // Get local IP - "auto" means we should try to detect, otherwise use external_ip helper
         let local_ip_config = config
             .get_string("discovery.local_ip")
             .unwrap_or_else(|_| "auto".to_string());
 
         let device_ip = if local_ip_config == "auto" {
-            // Try to detect local IP, fallback to localhost for testing
-            Self::detect_local_ip().unwrap_or_else(|| "127.0.0.1".to_string())
+            // Use shared external_ip helper so discovery matches HTTP/RTSP URLs
+            crate::net::ip_utils::external_ip(config)
         } else {
             local_ip_config
         };

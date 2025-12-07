@@ -36,6 +36,7 @@ pub struct ImagingService {
     /// Settings storage.
     settings_store: Arc<ImagingSettingsStore>,
     /// Configuration runtime.
+    #[allow(dead_code)]
     config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional).
     platform: Option<Arc<dyn Platform>>,

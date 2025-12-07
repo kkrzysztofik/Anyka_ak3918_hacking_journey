@@ -41,7 +41,7 @@ pub struct GetImagingSettings {
 #[serde(rename = "timg:GetImagingSettingsResponse")]
 pub struct GetImagingSettingsResponse {
     /// Current imaging settings.
-    #[serde(rename = "timg:ImagingSettings")]
+    #[serde(rename = "timg:ImagingSettings", alias = "ImagingSettings")]
     pub imaging_settings: ImagingSettings20,
 }
 
@@ -85,7 +85,7 @@ pub struct GetOptions {
 #[serde(rename = "timg:GetOptionsResponse")]
 pub struct GetOptionsResponse {
     /// Imaging options.
-    #[serde(rename = "timg:ImagingOptions")]
+    #[serde(rename = "timg:ImagingOptions", alias = "ImagingOptions")]
     pub imaging_options: ImagingOptions20,
 }
 
@@ -94,7 +94,8 @@ pub struct GetOptionsResponse {
 pub struct ImagingOptions20 {
     /// Backlight compensation options.
     #[serde(
-        rename = "BacklightCompensation",
+        rename = "tt:BacklightCompensation",
+        alias = "BacklightCompensation",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -102,7 +103,8 @@ pub struct ImagingOptions20 {
 
     /// Brightness options.
     #[serde(
-        rename = "Brightness",
+        rename = "tt:Brightness",
+        alias = "Brightness",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -110,35 +112,57 @@ pub struct ImagingOptions20 {
 
     /// Color saturation options.
     #[serde(
-        rename = "ColorSaturation",
+        rename = "tt:ColorSaturation",
+        alias = "ColorSaturation",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub color_saturation: Option<FloatRange>,
 
     /// Contrast options.
-    #[serde(rename = "Contrast", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Contrast",
+        alias = "Contrast",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub contrast: Option<FloatRange>,
 
     /// Exposure options.
-    #[serde(rename = "Exposure", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Exposure",
+        alias = "Exposure",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub exposure: Option<ExposureOptions20>,
 
     /// Focus options.
-    #[serde(rename = "Focus", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Focus",
+        alias = "Focus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub focus: Option<FocusOptions20>,
 
     /// IR cut filter options.
-    #[serde(rename = "IrCutFilterModes", default)]
+    #[serde(rename = "tt:IrCutFilterModes", alias = "IrCutFilterModes", default)]
     pub ir_cut_filter_modes: Vec<IrCutFilterMode>,
 
     /// Sharpness options.
-    #[serde(rename = "Sharpness", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Sharpness",
+        alias = "Sharpness",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub sharpness: Option<FloatRange>,
 
     /// Wide dynamic range options.
     #[serde(
-        rename = "WideDynamicRange",
+        rename = "tt:WideDynamicRange",
+        alias = "WideDynamicRange",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -146,14 +170,20 @@ pub struct ImagingOptions20 {
 
     /// White balance options.
     #[serde(
-        rename = "WhiteBalance",
+        rename = "tt:WhiteBalance",
+        alias = "WhiteBalance",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub white_balance: Option<WhiteBalanceOptions20>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<ImagingOptions20Extension>,
 }
 
@@ -162,14 +192,20 @@ pub struct ImagingOptions20 {
 pub struct ImagingOptions20Extension {
     /// Image stabilization options.
     #[serde(
-        rename = "ImageStabilization",
+        rename = "tt:ImageStabilization",
+        alias = "ImageStabilization",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub image_stabilization: Option<ImageStabilizationOptions>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<ImagingOptions20Extension2>,
 }
 
@@ -178,14 +214,20 @@ pub struct ImagingOptions20Extension {
 pub struct ImagingOptions20Extension2 {
     /// IR cut filter auto adjustment options.
     #[serde(
-        rename = "IrCutFilterAutoAdjustment",
+        rename = "tt:IrCutFilterAutoAdjustment",
+        alias = "IrCutFilterAutoAdjustment",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub ir_cut_filter_auto_adjustment: Option<IrCutFilterAutoAdjustmentOptions>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<ImagingOptions20Extension3>,
 }
 
@@ -194,7 +236,8 @@ pub struct ImagingOptions20Extension2 {
 pub struct ImagingOptions20Extension3 {
     /// Tone compensation options.
     #[serde(
-        rename = "ToneCompensationOptions",
+        rename = "tt:ToneCompensationOptions",
+        alias = "ToneCompensationOptions",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -202,7 +245,8 @@ pub struct ImagingOptions20Extension3 {
 
     /// Defogging options.
     #[serde(
-        rename = "DefoggingOptions",
+        rename = "tt:DefoggingOptions",
+        alias = "DefoggingOptions",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -210,14 +254,20 @@ pub struct ImagingOptions20Extension3 {
 
     /// Noise reduction options.
     #[serde(
-        rename = "NoiseReductionOptions",
+        rename = "tt:NoiseReductionOptions",
+        alias = "NoiseReductionOptions",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub noise_reduction_options: Option<NoiseReductionOptions>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -225,11 +275,16 @@ pub struct ImagingOptions20Extension3 {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct BacklightCompensationOptions20 {
     /// Supported modes.
-    #[serde(rename = "Mode", default)]
+    #[serde(rename = "tt:Mode", alias = "Mode", default)]
     pub mode: Vec<BacklightCompensationMode>,
 
     /// Level range.
-    #[serde(rename = "Level", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Level",
+        alias = "Level",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub level: Option<FloatRange>,
 }
 
@@ -245,16 +300,17 @@ pub enum BacklightCompensationMode {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ExposureOptions20 {
     /// Supported modes.
-    #[serde(rename = "Mode", default)]
+    #[serde(rename = "tt:Mode", alias = "Mode", default)]
     pub mode: Vec<ExposureMode>,
 
     /// Priority options.
-    #[serde(rename = "Priority", default)]
+    #[serde(rename = "tt:Priority", alias = "Priority", default)]
     pub priority: Vec<ExposurePriority>,
 
     /// Min exposure time range.
     #[serde(
-        rename = "MinExposureTime",
+        rename = "tt:MinExposureTime",
+        alias = "MinExposureTime",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -262,42 +318,74 @@ pub struct ExposureOptions20 {
 
     /// Max exposure time range.
     #[serde(
-        rename = "MaxExposureTime",
+        rename = "tt:MaxExposureTime",
+        alias = "MaxExposureTime",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub max_exposure_time: Option<FloatRange>,
 
     /// Min gain range.
-    #[serde(rename = "MinGain", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:MinGain",
+        alias = "MinGain",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub min_gain: Option<FloatRange>,
 
     /// Max gain range.
-    #[serde(rename = "MaxGain", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:MaxGain",
+        alias = "MaxGain",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_gain: Option<FloatRange>,
 
     /// Min iris range.
-    #[serde(rename = "MinIris", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:MinIris",
+        alias = "MinIris",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub min_iris: Option<FloatRange>,
 
     /// Max iris range.
-    #[serde(rename = "MaxIris", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:MaxIris",
+        alias = "MaxIris",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_iris: Option<FloatRange>,
 
     /// Exposure time range.
     #[serde(
-        rename = "ExposureTime",
+        rename = "tt:ExposureTime",
+        alias = "ExposureTime",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub exposure_time: Option<FloatRange>,
 
     /// Gain range.
-    #[serde(rename = "Gain", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Gain",
+        alias = "Gain",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub gain: Option<FloatRange>,
 
     /// Iris range.
-    #[serde(rename = "Iris", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Iris",
+        alias = "Iris",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub iris: Option<FloatRange>,
 }
 
@@ -321,27 +409,43 @@ pub enum ExposurePriority {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FocusOptions20 {
     /// Supported auto focus modes.
-    #[serde(rename = "AutoFocusModes", default)]
+    #[serde(rename = "tt:AutoFocusModes", alias = "AutoFocusModes", default)]
     pub auto_focus_modes: Vec<AutoFocusMode>,
 
     /// Default speed range.
     #[serde(
-        rename = "DefaultSpeed",
+        rename = "tt:DefaultSpeed",
+        alias = "DefaultSpeed",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub default_speed: Option<FloatRange>,
 
     /// Near limit range.
-    #[serde(rename = "NearLimit", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:NearLimit",
+        alias = "NearLimit",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub near_limit: Option<FloatRange>,
 
     /// Far limit range.
-    #[serde(rename = "FarLimit", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:FarLimit",
+        alias = "FarLimit",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub far_limit: Option<FloatRange>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<FocusOptions20Extension>,
 }
 
@@ -349,7 +453,7 @@ pub struct FocusOptions20 {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FocusOptions20Extension {
     /// AF modes.
-    #[serde(rename = "AFModes", default)]
+    #[serde(rename = "tt:AFModes", alias = "AFModes", default)]
     pub af_modes: Vec<String>,
 }
 
@@ -374,11 +478,16 @@ pub enum IrCutFilterMode {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WideDynamicRangeOptions20 {
     /// Supported modes.
-    #[serde(rename = "Mode", default)]
+    #[serde(rename = "tt:Mode", alias = "Mode", default)]
     pub mode: Vec<WideDynamicMode>,
 
     /// Level range.
-    #[serde(rename = "Level", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Level",
+        alias = "Level",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub level: Option<FloatRange>,
 }
 
@@ -394,19 +503,34 @@ pub enum WideDynamicMode {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WhiteBalanceOptions20 {
     /// Supported modes.
-    #[serde(rename = "Mode", default)]
+    #[serde(rename = "tt:Mode", alias = "Mode", default)]
     pub mode: Vec<WhiteBalanceMode>,
 
     /// Cr gain range.
-    #[serde(rename = "YrGain", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:YrGain",
+        alias = "YrGain",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub yr_gain: Option<FloatRange>,
 
     /// Cb gain range.
-    #[serde(rename = "YbGain", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:YbGain",
+        alias = "YbGain",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub yb_gain: Option<FloatRange>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -422,15 +546,25 @@ pub enum WhiteBalanceMode {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ImageStabilizationOptions {
     /// Supported modes.
-    #[serde(rename = "Mode", default)]
+    #[serde(rename = "tt:Mode", alias = "Mode", default)]
     pub mode: Vec<ImageStabilizationMode>,
 
     /// Level range.
-    #[serde(rename = "Level", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Level",
+        alias = "Level",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub level: Option<FloatRange>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -448,12 +582,13 @@ pub enum ImageStabilizationMode {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct IrCutFilterAutoAdjustmentOptions {
     /// Boundary type options.
-    #[serde(rename = "BoundaryType", default)]
+    #[serde(rename = "tt:BoundaryType", alias = "BoundaryType", default)]
     pub boundary_type: Vec<String>,
 
     /// Response time support.
     #[serde(
-        rename = "ResponseTimeSupported",
+        rename = "tt:ResponseTimeSupported",
+        alias = "ResponseTimeSupported",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -461,14 +596,20 @@ pub struct IrCutFilterAutoAdjustmentOptions {
 
     /// Boundary offset range.
     #[serde(
-        rename = "BoundaryOffset",
+        rename = "tt:BoundaryOffset",
+        alias = "BoundaryOffset",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub boundary_offset: Option<FloatRange>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -476,11 +617,16 @@ pub struct IrCutFilterAutoAdjustmentOptions {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ToneCompensationOptions {
     /// Supported modes.
-    #[serde(rename = "Mode", default)]
+    #[serde(rename = "tt:Mode", alias = "Mode", default)]
     pub mode: Vec<String>,
 
     /// Level support.
-    #[serde(rename = "Level", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Level",
+        alias = "Level",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub level: Option<bool>,
 }
 
@@ -488,11 +634,16 @@ pub struct ToneCompensationOptions {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DefoggingOptions {
     /// Supported modes.
-    #[serde(rename = "Mode", default)]
+    #[serde(rename = "tt:Mode", alias = "Mode", default)]
     pub mode: Vec<String>,
 
     /// Level support.
-    #[serde(rename = "Level", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Level",
+        alias = "Level",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub level: Option<bool>,
 }
 
@@ -500,7 +651,12 @@ pub struct DefoggingOptions {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct NoiseReductionOptions {
     /// Level support.
-    #[serde(rename = "Level", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Level",
+        alias = "Level",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub level: Option<bool>,
 }
 
@@ -530,16 +686,27 @@ pub struct MoveResponse {}
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FocusMove {
     /// Absolute move.
-    #[serde(rename = "Absolute", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Absolute",
+        alias = "Absolute",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub absolute: Option<AbsoluteFocus>,
 
     /// Relative move.
-    #[serde(rename = "Relative", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Relative",
+        alias = "Relative",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub relative: Option<RelativeFocus>,
 
     /// Continuous move.
     #[serde(
-        rename = "Continuous",
+        rename = "tt:Continuous",
+        alias = "Continuous",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -550,11 +717,16 @@ pub struct FocusMove {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AbsoluteFocus {
     /// Target position.
-    #[serde(rename = "Position")]
+    #[serde(rename = "tt:Position", alias = "Position")]
     pub position: f32,
 
     /// Move speed (optional).
-    #[serde(rename = "Speed", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Speed",
+        alias = "Speed",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub speed: Option<f32>,
 }
 
@@ -562,11 +734,16 @@ pub struct AbsoluteFocus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelativeFocus {
     /// Distance to move.
-    #[serde(rename = "Distance")]
+    #[serde(rename = "tt:Distance", alias = "Distance")]
     pub distance: f32,
 
     /// Move speed (optional).
-    #[serde(rename = "Speed", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Speed",
+        alias = "Speed",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub speed: Option<f32>,
 }
 
@@ -574,7 +751,7 @@ pub struct RelativeFocus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContinuousFocus {
     /// Move speed.
-    #[serde(rename = "Speed")]
+    #[serde(rename = "tt:Speed", alias = "Speed")]
     pub speed: f32,
 }
 
@@ -606,7 +783,7 @@ pub struct GetMoveOptions {
 #[serde(rename = "timg:GetMoveOptionsResponse")]
 pub struct GetMoveOptionsResponse {
     /// Focus move options.
-    #[serde(rename = "timg:MoveOptions")]
+    #[serde(rename = "timg:MoveOptions", alias = "MoveOptions")]
     pub move_options: MoveOptions20,
 }
 
@@ -614,16 +791,27 @@ pub struct GetMoveOptionsResponse {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MoveOptions20 {
     /// Absolute move options.
-    #[serde(rename = "Absolute", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Absolute",
+        alias = "Absolute",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub absolute: Option<AbsoluteFocusOptions>,
 
     /// Relative move options.
-    #[serde(rename = "Relative", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Relative",
+        alias = "Relative",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub relative: Option<RelativeFocusOptions20>,
 
     /// Continuous move options.
     #[serde(
-        rename = "Continuous",
+        rename = "tt:Continuous",
+        alias = "Continuous",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -634,11 +822,16 @@ pub struct MoveOptions20 {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AbsoluteFocusOptions {
     /// Position range.
-    #[serde(rename = "Position")]
+    #[serde(rename = "tt:Position", alias = "Position")]
     pub position: FloatRange,
 
     /// Speed range.
-    #[serde(rename = "Speed", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Speed",
+        alias = "Speed",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub speed: Option<FloatRange>,
 }
 
@@ -646,11 +839,16 @@ pub struct AbsoluteFocusOptions {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RelativeFocusOptions20 {
     /// Distance range.
-    #[serde(rename = "Distance")]
+    #[serde(rename = "tt:Distance", alias = "Distance")]
     pub distance: FloatRange,
 
     /// Speed range.
-    #[serde(rename = "Speed", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Speed",
+        alias = "Speed",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub speed: Option<FloatRange>,
 }
 
@@ -658,7 +856,7 @@ pub struct RelativeFocusOptions20 {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ContinuousFocusOptions {
     /// Speed range.
-    #[serde(rename = "Speed")]
+    #[serde(rename = "tt:Speed", alias = "Speed")]
     pub speed: FloatRange,
 }
 
@@ -680,7 +878,7 @@ pub struct GetStatus {
 #[serde(rename = "timg:GetStatusResponse")]
 pub struct GetStatusResponse {
     /// Imaging status.
-    #[serde(rename = "timg:Status")]
+    #[serde(rename = "timg:Status", alias = "Status")]
     pub status: ImagingStatus20,
 }
 
@@ -702,7 +900,7 @@ pub struct GetPresets {
 #[serde(rename = "timg:GetPresetsResponse")]
 pub struct GetPresetsResponse {
     /// List of imaging presets.
-    #[serde(rename = "timg:Preset", default)]
+    #[serde(rename = "timg:Preset", alias = "Preset", default)]
     pub presets: Vec<ImagingPreset>,
 }
 
@@ -718,7 +916,7 @@ pub struct ImagingPreset {
     pub preset_type: Option<String>,
 
     /// Preset name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: String,
 }
 
@@ -738,6 +936,7 @@ pub struct GetCurrentPresetResponse {
     /// Current imaging preset.
     #[serde(
         rename = "timg:Preset",
+        alias = "Preset",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -776,7 +975,7 @@ pub struct GetServiceCapabilities {}
 #[serde(rename = "timg:GetServiceCapabilitiesResponse")]
 pub struct GetServiceCapabilitiesResponse {
     /// Imaging service capabilities.
-    #[serde(rename = "timg:Capabilities")]
+    #[serde(rename = "timg:Capabilities", alias = "Capabilities")]
     pub capabilities: ImagingServiceCapabilities,
 }
 

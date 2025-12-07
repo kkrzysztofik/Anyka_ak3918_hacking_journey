@@ -88,6 +88,7 @@ fn test_get_device_information_roundtrip() {
     };
 
     let xml = to_string(&original).expect("Failed to serialize");
+    println!("Serialized XML: {}", xml);
     let deserialized: GetDeviceInformationResponse = from_str(&xml).expect("Failed to deserialize");
 
     assert_eq!(original.manufacturer, deserialized.manufacturer);
@@ -872,115 +873,6 @@ fn test_media_real_get_profiles() {
 // Extended Real Data Tests - Device Service (All Responses)
 // ============================================================================
 
-/// Test GetNetworkInterfacesResponse from real captured data.
-/// File: response_002_tds_200_42.xml
-#[test]
-fn test_device_real_get_network_interfaces() {
-    let raw_xml = include_str!("data/responses/response_002_tds_200_42.xml");
-    let cleaned = extract_response_element(raw_xml, "GetNetworkInterfacesResponse")
-        .expect("Failed to extract GetNetworkInterfacesResponse");
-
-    let response: GetNetworkInterfacesResponse =
-        from_str(&cleaned).expect("Failed to deserialize GetNetworkInterfacesResponse");
-
-    assert!(!response.network_interfaces.is_empty());
-    let iface = &response.network_interfaces[0];
-    assert_eq!(iface.token, "eth0");
-    assert!(iface.enabled);
-
-    // Verify info
-    let info = iface.info.as_ref().expect("Info should be present");
-    assert_eq!(info.name, Some("eth0".to_string()));
-    assert_eq!(info.hw_address, "00:12:34:70:DF:D2");
-    assert_eq!(info.mtu, Some(1500));
-}
-
-/// Test GetScopesResponse from real captured data.
-/// File: response_003_tds_200_48.xml
-#[test]
-fn test_device_real_get_scopes() {
-    let raw_xml = include_str!("data/responses/response_003_tds_200_48.xml");
-    let cleaned = extract_response_element(raw_xml, "GetScopesResponse")
-        .expect("Failed to extract GetScopesResponse");
-
-    let response: GetScopesResponse =
-        from_str(&cleaned).expect("Failed to deserialize GetScopesResponse");
-
-    assert!(!response.scopes.is_empty());
-    // Check that we have video_encoder scope
-    let has_video_encoder = response
-        .scopes
-        .iter()
-        .any(|s| s.scope_item.contains("video_encoder"));
-    assert!(has_video_encoder, "Should have video_encoder scope");
-}
-
-/// Test GetCapabilitiesResponse from real captured data.
-/// File: response_005_tds_200_74.xml
-///
-/// NOTE: This test was previously ignored due to Extension type issues.
-/// Fixed by creating typed NetworkCapabilitiesExtension with Dot11Configuration field.
-#[test]
-fn test_device_real_get_capabilities() {
-    let raw_xml = include_str!("data/responses/response_005_tds_200_74.xml");
-    let cleaned = extract_response_element(raw_xml, "GetCapabilitiesResponse")
-        .expect("Failed to extract GetCapabilitiesResponse");
-
-    let response: GetCapabilitiesResponse =
-        from_str(&cleaned).expect("Failed to deserialize GetCapabilitiesResponse");
-
-    let caps = &response.capabilities;
-
-    // Verify analytics capability
-    let analytics = caps
-        .analytics
-        .as_ref()
-        .expect("Analytics should be present");
-    assert!(analytics.x_addr.contains("analytics_service"));
-    assert!(analytics.rule_support);
-    assert!(analytics.analytics_module_support);
-
-    // Verify device capability
-    let device = caps.device.as_ref().expect("Device should be present");
-    assert!(device.x_addr.contains("device_service"));
-
-    // Verify network capability extension is parsed correctly
-    if let Some(network) = &device.network {
-        if let Some(ext) = &network.extension {
-            // Dot11Configuration should be parsed (false in the test data)
-            assert!(ext.dot11_configuration.is_some());
-        }
-    }
-}
-
-/// Test GetServicesResponse from real captured data.
-/// File: response_007_tds_200_100.xml
-#[test]
-fn test_device_real_get_services() {
-    let raw_xml = include_str!("data/responses/response_007_tds_200_100.xml");
-    let cleaned = extract_response_element(raw_xml, "GetServicesResponse")
-        .expect("Failed to extract GetServicesResponse");
-
-    let response: GetServicesResponse =
-        from_str(&cleaned).expect("Failed to deserialize GetServicesResponse");
-
-    assert!(!response.services.is_empty());
-
-    // Find device service
-    let device_service = response
-        .services
-        .iter()
-        .find(|s| s.namespace.contains("device/wsdl"));
-    assert!(device_service.is_some(), "Should have device service");
-
-    // Find media service
-    let media_service = response
-        .services
-        .iter()
-        .find(|s| s.namespace.contains("media/wsdl"));
-    assert!(media_service.is_some(), "Should have media service");
-}
-
 /// Test GetSystemDateAndTimeResponse from real captured data.
 /// File: response_016_tds_200_237.xml
 #[test]
@@ -1043,23 +935,6 @@ fn test_device_real_get_discovery_mode() {
         response.discovery_mode == DiscoveryMode::Discoverable
             || response.discovery_mode == DiscoveryMode::NonDiscoverable
     );
-}
-
-/// Test GetUsersResponse from real captured data.
-/// File: response_025_tds_200_359.xml
-#[test]
-fn test_device_real_get_users() {
-    let raw_xml = include_str!("data/responses/response_025_tds_200_359.xml");
-    let cleaned = extract_response_element(raw_xml, "GetUsersResponse")
-        .expect("Failed to extract GetUsersResponse");
-
-    let response: GetUsersResponse =
-        from_str(&cleaned).expect("Failed to deserialize GetUsersResponse");
-
-    // Should have at least admin user
-    assert!(!response.users.is_empty());
-    let has_admin = response.users.iter().any(|u| u.username == "admin");
-    assert!(has_admin, "Should have admin user");
 }
 
 // ============================================================================

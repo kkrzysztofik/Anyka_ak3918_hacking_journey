@@ -54,7 +54,7 @@ pub struct GetProfiles {}
 #[serde(rename = "trt:GetProfilesResponse")]
 pub struct GetProfilesResponse {
     /// List of profiles.
-    #[serde(rename = "trt:Profiles", default)]
+    #[serde(rename = "trt:Profiles", alias = "Profiles", default)]
     pub profiles: Vec<Profile>,
 }
 
@@ -72,7 +72,7 @@ pub struct GetProfile {
 #[serde(rename = "trt:GetProfileResponse")]
 pub struct GetProfileResponse {
     /// The requested profile.
-    #[serde(rename = "trt:Profile")]
+    #[serde(rename = "trt:Profile", alias = "Profile")]
     pub profile: Profile,
 }
 
@@ -94,7 +94,7 @@ pub struct CreateProfile {
 #[serde(rename = "trt:CreateProfileResponse")]
 pub struct CreateProfileResponse {
     /// The created profile.
-    #[serde(rename = "trt:Profile")]
+    #[serde(rename = "trt:Profile", alias = "Profile")]
     pub profile: Profile,
 }
 
@@ -126,7 +126,7 @@ pub struct GetVideoSources {}
 #[serde(rename = "trt:GetVideoSourcesResponse")]
 pub struct GetVideoSourcesResponse {
     /// List of video sources.
-    #[serde(rename = "trt:VideoSources", default)]
+    #[serde(rename = "trt:VideoSources", alias = "VideoSources", default)]
     pub video_sources: Vec<VideoSource>,
 }
 
@@ -140,7 +140,7 @@ pub struct GetVideoSourceConfigurations {}
 #[serde(rename = "trt:GetVideoSourceConfigurationsResponse")]
 pub struct GetVideoSourceConfigurationsResponse {
     /// List of video source configurations.
-    #[serde(rename = "trt:Configurations", default)]
+    #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
     pub configurations: Vec<VideoSourceConfiguration>,
 }
 
@@ -158,7 +158,7 @@ pub struct GetVideoSourceConfiguration {
 #[serde(rename = "trt:GetVideoSourceConfigurationResponse")]
 pub struct GetVideoSourceConfigurationResponse {
     /// The requested configuration.
-    #[serde(rename = "trt:Configuration")]
+    #[serde(rename = "trt:Configuration", alias = "Configuration")]
     pub configuration: VideoSourceConfiguration,
 }
 
@@ -206,7 +206,7 @@ pub struct GetVideoSourceConfigurationOptions {
 #[serde(rename = "trt:GetVideoSourceConfigurationOptionsResponse")]
 pub struct GetVideoSourceConfigurationOptionsResponse {
     /// Video source configuration options.
-    #[serde(rename = "trt:Options")]
+    #[serde(rename = "trt:Options", alias = "Options")]
     pub options: VideoSourceConfigurationOptions,
 }
 
@@ -215,7 +215,8 @@ pub struct GetVideoSourceConfigurationOptionsResponse {
 pub struct VideoSourceConfigurationOptions {
     /// Maximum instances of this configuration.
     #[serde(
-        rename = "MaximumNumberOfProfiles",
+        rename = "tt:MaximumNumberOfProfiles",
+        alias = "MaximumNumberOfProfiles",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -223,18 +224,28 @@ pub struct VideoSourceConfigurationOptions {
 
     /// Bounds range.
     #[serde(
-        rename = "BoundsRange",
+        rename = "tt:BoundsRange",
+        alias = "BoundsRange",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub bounds_range: Option<IntRectangleRange>,
 
     /// Available video source tokens.
-    #[serde(rename = "VideoSourceTokensAvailable", default)]
+    #[serde(
+        rename = "tt:VideoSourceTokensAvailable",
+        alias = "VideoSourceTokensAvailable",
+        default
+    )]
     pub video_source_tokens_available: Vec<ReferenceToken>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -242,19 +253,19 @@ pub struct VideoSourceConfigurationOptions {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct IntRectangleRange {
     /// X range.
-    #[serde(rename = "XRange")]
+    #[serde(rename = "tt:XRange", alias = "XRange")]
     pub x_range: IntRange,
 
     /// Y range.
-    #[serde(rename = "YRange")]
+    #[serde(rename = "tt:YRange", alias = "YRange")]
     pub y_range: IntRange,
 
     /// Width range.
-    #[serde(rename = "WidthRange")]
+    #[serde(rename = "tt:WidthRange", alias = "WidthRange")]
     pub width_range: IntRange,
 
     /// Height range.
-    #[serde(rename = "HeightRange")]
+    #[serde(rename = "tt:HeightRange", alias = "HeightRange")]
     pub height_range: IntRange,
 }
 
@@ -272,7 +283,7 @@ pub struct GetVideoEncoderConfigurations {}
 #[serde(rename = "trt:GetVideoEncoderConfigurationsResponse")]
 pub struct GetVideoEncoderConfigurationsResponse {
     /// List of video encoder configurations.
-    #[serde(rename = "trt:Configurations", default)]
+    #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
     pub configurations: Vec<VideoEncoderConfiguration>,
 }
 
@@ -290,7 +301,7 @@ pub struct GetVideoEncoderConfiguration {
 #[serde(rename = "trt:GetVideoEncoderConfigurationResponse")]
 pub struct GetVideoEncoderConfigurationResponse {
     /// The requested configuration.
-    #[serde(rename = "trt:Configuration")]
+    #[serde(rename = "trt:Configuration", alias = "Configuration")]
     pub configuration: VideoEncoderConfiguration,
 }
 
@@ -338,7 +349,7 @@ pub struct GetVideoEncoderConfigurationOptions {
 #[serde(rename = "trt:GetVideoEncoderConfigurationOptionsResponse")]
 pub struct GetVideoEncoderConfigurationOptionsResponse {
     /// Video encoder configuration options.
-    #[serde(rename = "trt:Options")]
+    #[serde(rename = "trt:Options", alias = "Options")]
     pub options: VideoEncoderConfigurationOptions,
 }
 
@@ -346,23 +357,43 @@ pub struct GetVideoEncoderConfigurationOptionsResponse {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VideoEncoderConfigurationOptions {
     /// Quality range.
-    #[serde(rename = "QualityRange")]
+    #[serde(rename = "tt:QualityRange", alias = "QualityRange")]
     pub quality_range: IntRange,
 
     /// JPEG options.
-    #[serde(rename = "JPEG", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:JPEG",
+        alias = "JPEG",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub jpeg: Option<JpegOptions>,
 
     /// MPEG4 options.
-    #[serde(rename = "MPEG4", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:MPEG4",
+        alias = "MPEG4",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub mpeg4: Option<Mpeg4Options>,
 
     /// H.264 options.
-    #[serde(rename = "H264", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:H264",
+        alias = "H264",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub h264: Option<H264Options>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<VideoEncoderConfigurationOptionsExtension>,
 }
 
@@ -370,19 +401,39 @@ pub struct VideoEncoderConfigurationOptions {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VideoEncoderConfigurationOptionsExtension {
     /// JPEG options (alternative).
-    #[serde(rename = "JPEG", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:JPEG",
+        alias = "JPEG",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub jpeg: Option<JpegOptions2>,
 
     /// MPEG4 options (alternative).
-    #[serde(rename = "MPEG4", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:MPEG4",
+        alias = "MPEG4",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub mpeg4: Option<Mpeg4Options2>,
 
     /// H.264 options (alternative).
-    #[serde(rename = "H264", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:H264",
+        alias = "H264",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub h264: Option<H264Options2>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -390,15 +441,19 @@ pub struct VideoEncoderConfigurationOptionsExtension {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct JpegOptions {
     /// Supported resolutions.
-    #[serde(rename = "ResolutionsAvailable", default)]
+    #[serde(
+        rename = "tt:ResolutionsAvailable",
+        alias = "ResolutionsAvailable",
+        default
+    )]
     pub resolutions_available: Vec<VideoResolution>,
 
     /// Frame rate range.
-    #[serde(rename = "FrameRateRange")]
+    #[serde(rename = "tt:FrameRateRange", alias = "FrameRateRange")]
     pub frame_rate_range: IntRange,
 
     /// Encoding interval range.
-    #[serde(rename = "EncodingIntervalRange")]
+    #[serde(rename = "tt:EncodingIntervalRange", alias = "EncodingIntervalRange")]
     pub encoding_interval_range: IntRange,
 }
 
@@ -406,20 +461,25 @@ pub struct JpegOptions {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct JpegOptions2 {
     /// Supported resolutions.
-    #[serde(rename = "ResolutionsAvailable", default)]
+    #[serde(
+        rename = "tt:ResolutionsAvailable",
+        alias = "ResolutionsAvailable",
+        default
+    )]
     pub resolutions_available: Vec<VideoResolution>,
 
     /// Frame rate range.
-    #[serde(rename = "FrameRateRange")]
+    #[serde(rename = "tt:FrameRateRange", alias = "FrameRateRange")]
     pub frame_rate_range: IntRange,
 
     /// Encoding interval range.
-    #[serde(rename = "EncodingIntervalRange")]
+    #[serde(rename = "tt:EncodingIntervalRange", alias = "EncodingIntervalRange")]
     pub encoding_interval_range: IntRange,
 
     /// Bitrate range.
     #[serde(
-        rename = "BitrateRange",
+        rename = "tt:BitrateRange",
+        alias = "BitrateRange",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -430,23 +490,31 @@ pub struct JpegOptions2 {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Mpeg4Options {
     /// Supported resolutions.
-    #[serde(rename = "ResolutionsAvailable", default)]
+    #[serde(
+        rename = "tt:ResolutionsAvailable",
+        alias = "ResolutionsAvailable",
+        default
+    )]
     pub resolutions_available: Vec<VideoResolution>,
 
     /// GOP length range.
-    #[serde(rename = "GovLengthRange")]
+    #[serde(rename = "tt:GovLengthRange", alias = "GovLengthRange")]
     pub gov_length_range: IntRange,
 
     /// Frame rate range.
-    #[serde(rename = "FrameRateRange")]
+    #[serde(rename = "tt:FrameRateRange", alias = "FrameRateRange")]
     pub frame_rate_range: IntRange,
 
     /// Encoding interval range.
-    #[serde(rename = "EncodingIntervalRange")]
+    #[serde(rename = "tt:EncodingIntervalRange", alias = "EncodingIntervalRange")]
     pub encoding_interval_range: IntRange,
 
     /// Supported MPEG4 profiles.
-    #[serde(rename = "Mpeg4ProfilesSupported", default)]
+    #[serde(
+        rename = "tt:Mpeg4ProfilesSupported",
+        alias = "Mpeg4ProfilesSupported",
+        default
+    )]
     pub mpeg4_profiles_supported: Vec<Mpeg4Profile>,
 }
 
@@ -454,28 +522,37 @@ pub struct Mpeg4Options {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Mpeg4Options2 {
     /// Supported resolutions.
-    #[serde(rename = "ResolutionsAvailable", default)]
+    #[serde(
+        rename = "tt:ResolutionsAvailable",
+        alias = "ResolutionsAvailable",
+        default
+    )]
     pub resolutions_available: Vec<VideoResolution>,
 
     /// GOP length range.
-    #[serde(rename = "GovLengthRange")]
+    #[serde(rename = "tt:GovLengthRange", alias = "GovLengthRange")]
     pub gov_length_range: IntRange,
 
     /// Frame rate range.
-    #[serde(rename = "FrameRateRange")]
+    #[serde(rename = "tt:FrameRateRange", alias = "FrameRateRange")]
     pub frame_rate_range: IntRange,
 
     /// Encoding interval range.
-    #[serde(rename = "EncodingIntervalRange")]
+    #[serde(rename = "tt:EncodingIntervalRange", alias = "EncodingIntervalRange")]
     pub encoding_interval_range: IntRange,
 
     /// Supported MPEG4 profiles.
-    #[serde(rename = "Mpeg4ProfilesSupported", default)]
+    #[serde(
+        rename = "tt:Mpeg4ProfilesSupported",
+        alias = "Mpeg4ProfilesSupported",
+        default
+    )]
     pub mpeg4_profiles_supported: Vec<Mpeg4Profile>,
 
     /// Bitrate range.
     #[serde(
-        rename = "BitrateRange",
+        rename = "tt:BitrateRange",
+        alias = "BitrateRange",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -494,23 +571,32 @@ pub enum Mpeg4Profile {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct H264Options {
     /// Supported resolutions.
-    #[serde(rename = "ResolutionsAvailable", default)]
+    #[serde(
+        rename = "tt:ResolutionsAvailable",
+        alias = "ResolutionsAvailable",
+        default
+    )]
     pub resolutions_available: Vec<VideoResolution>,
 
     /// GOP length range.
-    #[serde(rename = "GovLengthRange")]
+    #[serde(rename = "tt:GovLengthRange", alias = "GovLengthRange")]
     pub gov_length_range: IntRange,
 
     /// Frame rate range.
-    #[serde(rename = "FrameRateRange")]
+    #[serde(rename = "tt:FrameRateRange", alias = "FrameRateRange")]
     pub frame_rate_range: IntRange,
 
     /// Encoding interval range.
-    #[serde(rename = "EncodingIntervalRange")]
+    #[serde(rename = "tt:EncodingIntervalRange", alias = "EncodingIntervalRange")]
     pub encoding_interval_range: IntRange,
 
     /// Supported H.264 profiles.
-    #[serde(rename = "H264ProfilesSupported", default, with = "h264_profiles_vec")]
+    #[serde(
+        rename = "tt:H264ProfilesSupported",
+        alias = "H264ProfilesSupported",
+        default,
+        with = "h264_profiles_vec"
+    )]
     pub h264_profiles_supported: Vec<H264Profile>,
 }
 
@@ -518,28 +604,38 @@ pub struct H264Options {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct H264Options2 {
     /// Supported resolutions.
-    #[serde(rename = "ResolutionsAvailable", default)]
+    #[serde(
+        rename = "tt:ResolutionsAvailable",
+        alias = "ResolutionsAvailable",
+        default
+    )]
     pub resolutions_available: Vec<VideoResolution>,
 
     /// GOP length range.
-    #[serde(rename = "GovLengthRange")]
+    #[serde(rename = "tt:GovLengthRange", alias = "GovLengthRange")]
     pub gov_length_range: IntRange,
 
     /// Frame rate range.
-    #[serde(rename = "FrameRateRange")]
+    #[serde(rename = "tt:FrameRateRange", alias = "FrameRateRange")]
     pub frame_rate_range: IntRange,
 
     /// Encoding interval range.
-    #[serde(rename = "EncodingIntervalRange")]
+    #[serde(rename = "tt:EncodingIntervalRange", alias = "EncodingIntervalRange")]
     pub encoding_interval_range: IntRange,
 
     /// Supported H.264 profiles.
-    #[serde(rename = "H264ProfilesSupported", default, with = "h264_profiles_vec")]
+    #[serde(
+        rename = "tt:H264ProfilesSupported",
+        alias = "H264ProfilesSupported",
+        default,
+        with = "h264_profiles_vec"
+    )]
     pub h264_profiles_supported: Vec<H264Profile>,
 
     /// Bitrate range.
     #[serde(
-        rename = "BitrateRange",
+        rename = "tt:BitrateRange",
+        alias = "BitrateRange",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -670,7 +766,7 @@ pub struct GetAudioSources {}
 #[serde(rename = "trt:GetAudioSourcesResponse")]
 pub struct GetAudioSourcesResponse {
     /// List of audio sources.
-    #[serde(rename = "trt:AudioSources", default)]
+    #[serde(rename = "trt:AudioSources", alias = "AudioSources", default)]
     pub audio_sources: Vec<AudioSource>,
 }
 
@@ -684,7 +780,7 @@ pub struct GetAudioSourceConfigurations {}
 #[serde(rename = "trt:GetAudioSourceConfigurationsResponse")]
 pub struct GetAudioSourceConfigurationsResponse {
     /// List of audio source configurations.
-    #[serde(rename = "trt:Configurations", default)]
+    #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
     pub configurations: Vec<AudioSourceConfiguration>,
 }
 
@@ -702,7 +798,7 @@ pub struct GetAudioSourceConfiguration {
 #[serde(rename = "trt:GetAudioSourceConfigurationResponse")]
 pub struct GetAudioSourceConfigurationResponse {
     /// The requested configuration.
-    #[serde(rename = "trt:Configuration")]
+    #[serde(rename = "trt:Configuration", alias = "Configuration")]
     pub configuration: AudioSourceConfiguration,
 }
 
@@ -720,7 +816,7 @@ pub struct GetAudioEncoderConfigurations {}
 #[serde(rename = "trt:GetAudioEncoderConfigurationsResponse")]
 pub struct GetAudioEncoderConfigurationsResponse {
     /// List of audio encoder configurations.
-    #[serde(rename = "trt:Configurations", default)]
+    #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
     pub configurations: Vec<AudioEncoderConfiguration>,
 }
 
@@ -738,7 +834,7 @@ pub struct GetAudioEncoderConfiguration {
 #[serde(rename = "trt:GetAudioEncoderConfigurationResponse")]
 pub struct GetAudioEncoderConfigurationResponse {
     /// The requested configuration.
-    #[serde(rename = "trt:Configuration")]
+    #[serde(rename = "trt:Configuration", alias = "Configuration")]
     pub configuration: AudioEncoderConfiguration,
 }
 
@@ -786,7 +882,7 @@ pub struct GetAudioEncoderConfigurationOptions {
 #[serde(rename = "trt:GetAudioEncoderConfigurationOptionsResponse")]
 pub struct GetAudioEncoderConfigurationOptionsResponse {
     /// Audio encoder configuration options.
-    #[serde(rename = "trt:Options")]
+    #[serde(rename = "trt:Options", alias = "Options")]
     pub options: AudioEncoderConfigurationOptions,
 }
 
@@ -794,7 +890,7 @@ pub struct GetAudioEncoderConfigurationOptionsResponse {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AudioEncoderConfigurationOptions {
     /// Options for each encoding.
-    #[serde(rename = "Options", default)]
+    #[serde(rename = "tt:Options", alias = "Options", default)]
     pub options: Vec<AudioEncoderConfigurationOption>,
 }
 
@@ -802,15 +898,15 @@ pub struct AudioEncoderConfigurationOptions {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AudioEncoderConfigurationOption {
     /// Audio encoding type.
-    #[serde(rename = "Encoding")]
+    #[serde(rename = "tt:Encoding", alias = "Encoding")]
     pub encoding: AudioEncoding,
 
     /// Bitrate range.
-    #[serde(rename = "BitrateList")]
+    #[serde(rename = "tt:BitrateList", alias = "BitrateList")]
     pub bitrate_list: IntList,
 
     /// Sample rate range.
-    #[serde(rename = "SampleRateList")]
+    #[serde(rename = "tt:SampleRateList", alias = "SampleRateList")]
     pub sample_rate_list: IntList,
 }
 
@@ -827,7 +923,7 @@ pub enum AudioEncoding {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct IntList {
     /// List of integer items.
-    #[serde(rename = "Items", default)]
+    #[serde(rename = "tt:Items", alias = "Items", default)]
     pub items: Vec<i32>,
 }
 
@@ -853,7 +949,7 @@ pub struct GetStreamUri {
 #[serde(rename = "trt:GetStreamUriResponse")]
 pub struct GetStreamUriResponse {
     /// Media URI.
-    #[serde(rename = "trt:MediaUri")]
+    #[serde(rename = "trt:MediaUri", alias = "MediaUri")]
     pub media_uri: MediaUri,
 }
 
@@ -875,7 +971,7 @@ pub struct GetSnapshotUri {
 #[serde(rename = "trt:GetSnapshotUriResponse")]
 pub struct GetSnapshotUriResponse {
     /// Media URI.
-    #[serde(rename = "trt:MediaUri")]
+    #[serde(rename = "trt:MediaUri", alias = "MediaUri")]
     pub media_uri: MediaUri,
 }
 
@@ -1057,7 +1153,7 @@ pub struct GetServiceCapabilities {}
 #[serde(rename = "trt:GetServiceCapabilitiesResponse")]
 pub struct GetServiceCapabilitiesResponse {
     /// Media service capabilities.
-    #[serde(rename = "trt:Capabilities")]
+    #[serde(rename = "trt:Capabilities", alias = "Capabilities")]
     pub capabilities: MediaServiceCapabilities,
 }
 
@@ -1106,7 +1202,8 @@ pub struct MediaServiceCapabilities {
 
     /// Streaming capabilities.
     #[serde(
-        rename = "ProfileCapabilities",
+        rename = "tt:ProfileCapabilities",
+        alias = "ProfileCapabilities",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1114,7 +1211,8 @@ pub struct MediaServiceCapabilities {
 
     /// Streaming capabilities.
     #[serde(
-        rename = "StreamingCapabilities",
+        rename = "tt:StreamingCapabilities",
+        alias = "StreamingCapabilities",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1191,7 +1289,7 @@ pub struct GetCompatibleVideoSourceConfigurations {
 #[serde(rename = "trt:GetCompatibleVideoSourceConfigurationsResponse")]
 pub struct GetCompatibleVideoSourceConfigurationsResponse {
     /// Compatible configurations.
-    #[serde(rename = "trt:Configurations", default)]
+    #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
     pub configurations: Vec<VideoSourceConfiguration>,
 }
 
@@ -1209,7 +1307,7 @@ pub struct GetCompatibleVideoEncoderConfigurations {
 #[serde(rename = "trt:GetCompatibleVideoEncoderConfigurationsResponse")]
 pub struct GetCompatibleVideoEncoderConfigurationsResponse {
     /// Compatible configurations.
-    #[serde(rename = "trt:Configurations", default)]
+    #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
     pub configurations: Vec<VideoEncoderConfiguration>,
 }
 
@@ -1227,7 +1325,7 @@ pub struct GetCompatibleAudioSourceConfigurations {
 #[serde(rename = "trt:GetCompatibleAudioSourceConfigurationsResponse")]
 pub struct GetCompatibleAudioSourceConfigurationsResponse {
     /// Compatible configurations.
-    #[serde(rename = "trt:Configurations", default)]
+    #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
     pub configurations: Vec<AudioSourceConfiguration>,
 }
 
@@ -1245,7 +1343,7 @@ pub struct GetCompatibleAudioEncoderConfigurations {
 #[serde(rename = "trt:GetCompatibleAudioEncoderConfigurationsResponse")]
 pub struct GetCompatibleAudioEncoderConfigurationsResponse {
     /// Compatible configurations.
-    #[serde(rename = "trt:Configurations", default)]
+    #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
     pub configurations: Vec<AudioEncoderConfiguration>,
 }
 
@@ -1263,7 +1361,7 @@ pub struct GetMetadataConfigurations {}
 #[serde(rename = "trt:GetMetadataConfigurationsResponse")]
 pub struct GetMetadataConfigurationsResponse {
     /// Metadata configurations.
-    #[serde(rename = "trt:Configurations", default)]
+    #[serde(rename = "trt:Configurations", alias = "Configurations", default)]
     pub configurations: Vec<MetadataConfiguration>,
 }
 
@@ -1275,27 +1373,42 @@ pub struct MetadataConfiguration {
     pub token: ReferenceToken,
 
     /// User readable name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: Name,
 
     /// Number of references using this configuration.
-    #[serde(rename = "UseCount")]
+    #[serde(rename = "tt:UseCount", alias = "UseCount")]
     pub use_count: i32,
 
     /// PTZ status filter.
-    #[serde(rename = "PTZStatus", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:PTZStatus",
+        alias = "PTZStatus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub ptz_status: Option<PtzFilter>,
 
     /// Analytics.
-    #[serde(rename = "Analytics", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Analytics",
+        alias = "Analytics",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub analytics: Option<bool>,
 
     /// Multicast configuration.
-    #[serde(rename = "Multicast", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Multicast",
+        alias = "Multicast",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub multicast: Option<super::common::MulticastConfiguration>,
 
     /// Session timeout.
-    #[serde(rename = "SessionTimeout")]
+    #[serde(rename = "tt:SessionTimeout", alias = "SessionTimeout")]
     pub session_timeout: String,
 }
 
@@ -1303,11 +1416,11 @@ pub struct MetadataConfiguration {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PtzFilter {
     /// Enable PTZ status.
-    #[serde(rename = "Status")]
+    #[serde(rename = "tt:Status", alias = "Status")]
     pub status: bool,
 
     /// Enable PTZ position.
-    #[serde(rename = "Position")]
+    #[serde(rename = "tt:Position", alias = "Position")]
     pub position: bool,
 }
 

@@ -4,7 +4,7 @@ Reverse engineering and hacking journey for Chinese IP cameras based on Anyka AK
 
 ## Credits
 
-This project was originally developed by **Gerge** (https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey) and has been continued with additional improvements and fixes. The original work involved extensive reverse engineering of the Anyka AK3918 platform and development of custom firmware and applications.
+This project was originally developed by **Gerge** (<https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey>) and has been continued with additional improvements and fixes. The original work involved extensive reverse engineering of the Anyka AK3918 platform and development of custom firmware and applications.
 
 ## Recent Updates
 
@@ -16,11 +16,24 @@ This project was originally developed by **Gerge** (https://gitea.raspiweb.com/G
 - **Build System**: Streamlined build process with proper Makefiles and build scripts
 - **Web Interface Reorganization**: Separated ONVIF and legacy interfaces for better organization and user experience
 
+## ONVIF Rust Rewrite
+
+A significant effort is underway to rewrite the ONVIF application in Rust. This project, located in the `cross-compile/onvif-rust` directory, aims to create a modern, safe, and maintainable ONVIF-compliant IP camera firmware.
+
+For detailed information, please refer to the comprehensive developer documentation:
+
+- **[README](cross-compile/onvif-rust/README.md)**
+- **[Architecture](cross-compile/onvif-rust/docs/architecture.md)**
+- **[Development Guide](cross-compile/onvif-rust/docs/development-guide.md)**
+- **[Testing Strategy](cross-compile/onvif-rust/docs/testing.md)**
+- **[Memory Management](cross-compile/onvif-rust/docs/memory_management.md)**
+
 ## Summary
 
 This is a simplified README with the latest features. For detailed hacking process and development information, see the [hack process documentation](hack_process/README.md).
 
 ### Working Features
+
 - **Complete Platform Abstraction Layer** - Full hardware abstraction for Anyka AK3918
 - **ONVIF Server** - Complete implementation with Device, Media, PTZ, and Imaging services
 - **RTSP Streaming** - H.264 video and audio streaming with proper resource management
@@ -34,6 +47,7 @@ This is a simplified README with the latest features. For detailed hacking proce
 - **Docker Cross-Compilation** - Easy development environment for all platforms
 
 ### Key Technical Achievements
+
 - **Hardware Abstraction**: Clean, platform-agnostic interface for all hardware operations
 - **ONVIF Compliance**: Full implementation of ONVIF Device, Media, PTZ, and Imaging services
 - **RTSP Integration**: Robust streaming with proper video/audio synchronization
@@ -50,20 +64,24 @@ The project features a comprehensive platform abstraction layer (`cross-compile/
 ## Core Components
 
 ### Video Processing
+
 - **Video Input (VI)**: Device management, sensor resolution detection, day/night switching
 - **Video Processing Subsystem (VPSS)**: Real-time effects (brightness, contrast, saturation, sharpness, hue)
 - **Video Encoder**: H.264/H.265/MJPEG encoding with configurable parameters
 
 ### Audio Processing
+
 - **Audio Input (AI)**: Audio capture and device management
 - **Audio Encoder**: AAC, G.711, PCM encoding with synchronized streaming
 
 ### Control Systems
+
 - **PTZ Control**: Complete pan-tilt-zoom functionality with coordinate mapping
 - **IR LED Management**: Automatic night vision control and mode switching
 - **Configuration Management**: INI-style configuration with load/save functionality
 
 ### System Services
+
 - **Logging System**: Unified logging interface using Anyka's `ak_print()` function
 - **Resource Management**: Proper cleanup and resource handling
 - **Error Handling**: Standardized error codes and comprehensive error reporting
@@ -115,6 +133,7 @@ docker run -it --rm -v ${PWD}:/workspace anyka-cross-compile
 ```
 
 The Docker environment includes:
+
 - Ubuntu 16.04 base with 32-bit library support
 - Pre-installed Anyka ARM toolchain
 - All necessary build dependencies
@@ -161,6 +180,7 @@ www/cgi-bin/
 ## Interface Comparison
 
 ### ONVIF Interface (Recommended)
+
 - **Location**: `/cgi-bin/webui_onvif`
 - **Features**:
   - ONVIF protocol compliance
@@ -171,6 +191,7 @@ www/cgi-bin/
   - Better integration with surveillance software
 
 ### Legacy Interface
+
 - **Location**: `/cgi-bin/legacy/webui`
 - **Features**:
   - Original ptz_daemon integration
@@ -182,26 +203,31 @@ www/cgi-bin/
 ## Navigation
 
 ### Main Entry Point
+
 - **URL**: `http://[CAMERA_IP]/`
 - **Behavior**: Redirects to ONVIF interface by default
 - **Options**: Provides links to both interfaces
 
 ### ONVIF Interface Navigation
+
 - Home → Imaging → Presets → Settings → System → Events
 - Includes link to Legacy Interface
 
 ### Legacy Interface Navigation
+
 - Home → Settings → System → Events
 - Includes link to ONVIF Interface
 
 ## Access URLs
 
 ### ONVIF Interface
+
 - Main: `http://[CAMERA_IP]/cgi-bin/webui_onvif`
 - Imaging: `http://[CAMERA_IP]/cgi-bin/onvif_imaging`
 - Presets: `http://[CAMERA_IP]/cgi-bin/onvif_presets`
 
 ### Legacy Interface
+
 - Main: `http://[CAMERA_IP]/cgi-bin/legacy/webui`
 - Events: `http://[CAMERA_IP]/cgi-bin/legacy/events`
 - Settings: `http://[CAMERA_IP]/cgi-bin/legacy/settings`
@@ -214,23 +240,27 @@ A complete ONVIF server implementation with full platform abstraction integratio
 ## Features
 
 ### Device Management
+
 - Device information, capabilities, and discovery
 - WS-Discovery for automatic device discovery on the network
 - Hardware abstraction for device-specific operations
 
 ### Media Services
+
 - Video stream configuration and management
 - RTSP streaming with H.264 video and synchronized audio
 - Real-time stream generation using platform video encoder
 - Proper resource management and frame handling
 
 ### PTZ Services
+
 - Pan-tilt-zoom control with preset management
 - Relative and absolute movement commands
 - Preset storage and recall (up to 5 positions)
 - Hardware abstraction for PTZ operations
 
 ### Imaging Services
+
 - Brightness, contrast, saturation, sharpness, and hue adjustment
 - Real-time parameter adjustment using VPSS effects
 - Day/night mode switching with automatic IR LED control
@@ -282,6 +312,7 @@ Web Browser → CGI Script → HTTP POST → ONVIF Server → Platform Abstracti
 2. **Copy Web Interface**: The web interface files are already included in the SD card contents
 
 3. **Start Services**: Use the provided startup script:
+
    ```bash
    /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh
    ```
@@ -313,10 +344,12 @@ default_saturation = 0
 ```
 
 Both interfaces share the same configuration files:
+
 - `/data/gergesettings.txt`: Main settings
 - `/mnt/tmp/token.txt`: Authentication token
 
 ## Current Status
+
 - ✅ **Compilation**: All projects compile successfully with Docker environment
 - ✅ **Platform Abstraction**: Complete hardware abstraction layer implemented
 - ✅ **ONVIF Server**: Full implementation with Device, Media, PTZ, and Imaging services
@@ -351,16 +384,19 @@ Both interfaces share the same configuration files:
 ## Troubleshooting
 
 ### ONVIF Server Not Responding
+
 - Check if `onvifd` process is running: `ps | grep onvifd`
 - Verify port 8080 is not blocked: `netstat -ln | grep 8080`
 - Check configuration file: `/etc/jffs2/anyka_cfg.ini`
 
 ### PTZ Controls Not Working
+
 - Ensure PTZ hardware is properly initialized
 - Check ONVIF server logs for errors
 - Verify profile token is correct (default: "MainProfile")
 
 ### Imaging Controls Not Working
+
 - Check if imaging service is enabled in ONVIF server
 - Verify video source token is correct
 - Ensure camera supports imaging adjustments
@@ -384,12 +420,14 @@ With the most recent update of webui the interface is a lot nicer and has all se
 This is an app in development aimed to combine most features of the camera and make it small enough to run from flash without the SD card.
 
 Currently contains features:
+
 - JPEG snapshot
 - RTSP stream
 - Motion detection trigger
 - H264 `.str` file recording to SD card (ffmpeg converts this to mp4 in webUI)
 
 Does not have:
+
 - sound (only RTSP stream has sound)
 
 More info about the [app](SD_card_contents/anyka_hack/libre_anyka_app) and [source](cross-compile/libre_anyka_app).
@@ -412,7 +450,6 @@ More info about the [app](SD_card_contents/anyka_hack/ak_adec_demo)
 
 More info about the [app](SD_card_contents/anyka_hack/aenc_demo) and [source](cross-compile/aenc_demo).
 
-
 ## Setup without SD
 
 After the root and usr partitions are modified with the desired apps, the following steps are needed to get it working:
@@ -422,6 +459,7 @@ copy the webpage www folder to `/etc/jffs2/www` for httpd to serve from flash
 The latest `gergehack.sh` is already capable of running fully local files, so update if needed and check sensor module settings.
 
 This gives the following functions without SD card running on the camera:
+
 - webUI on port 80
 - usual ftp, telnet functions, and ntp time sync
 - RTSP stream and snapshots for UI with libre_anyka_app
@@ -431,17 +469,17 @@ This gives the following functions without SD card running on the camera:
 
 These are the most important links here (this is where 99% of the info and resources come from):
 
-https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey
+<https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey>
 
-https://github.com/helloworld-spec/qiwen/tree/main/anycloud39ev300 (explanation in chinese, good reference)
+<https://github.com/helloworld-spec/qiwen/tree/main/anycloud39ev300> (explanation in chinese, good reference)
 
-https://github.com/ricardojlrufino/anyka_v380ipcam_experiments/tree/master (ak_snapshot original)
+<https://github.com/ricardojlrufino/anyka_v380ipcam_experiments/tree/master> (ak_snapshot original)
 
-https://github.com/kuhnchris/IOT-ANYKA-PTZdaemon (ptz daemon original)
+<https://github.com/kuhnchris/IOT-ANYKA-PTZdaemon> (ptz daemon original)
 
-https://github.com/MuhammedKalkan/Anyka-Camera-Firmware (Muhammed's RTSP app + library, and more discussions)
+<https://github.com/MuhammedKalkan/Anyka-Camera-Firmware> (Muhammed's RTSP app + library, and more discussions)
 
-https://github.com/e27-camera-hack/E27-Camera-Hack/discussions/1 (discussion where most of this was worked on)
+<https://github.com/e27-camera-hack/E27-Camera-Hack/discussions/1> (discussion where most of this was worked on)
 
 # Development
 
@@ -459,16 +497,19 @@ The project includes comprehensive static analysis tools integrated into the Any
 ## Available Tools
 
 ### 1. Clang Static Analyzer
+
 - **Purpose**: Advanced symbolic execution and path-sensitive analysis
 - **Detects**: Memory leaks, buffer overflows, null pointer dereferences, uninitialized variables
 - **Output**: HTML reports with detailed analysis paths
 
 ### 2. Cppcheck
+
 - **Purpose**: Bug detection and code quality analysis
 - **Detects**: Undefined behavior, memory leaks, buffer overflows, style issues
 - **Output**: XML and HTML reports
 
 ### 3. Snyk Code
+
 - **Purpose**: Advanced security vulnerability scanning and code analysis
 - **Detects**: Security vulnerabilities, code quality issues, dependency vulnerabilities
 - **Output**: JSON and SARIF reports
@@ -552,16 +593,19 @@ analysis-results/
 ## Viewing Results
 
 ### Clang Static Analyzer
+
 - Open `analysis-results/clang/index.html` in your browser
 - Shows detailed analysis paths with source code highlighting
 - Click on issues to see the execution path that leads to the problem
 
 ### Cppcheck
+
 - Open `analysis-results/cppcheck-html/index.html` in your browser
 - Shows categorized issues with severity levels
 - Includes suggestions for fixes
 
 ### Snyk Code
+
 - Open `analysis-results/snyk-results.json` for programmatic analysis
 - Open `analysis-results/snyk-results.sarif` for SARIF-compatible tools
 - Shows security vulnerabilities with detailed remediation guidance
@@ -571,7 +615,7 @@ analysis-results/
 
 ### Getting Your Snyk API Token
 
-1. **Create a free Snyk account**: Visit https://app.snyk.io/
+1. **Create a free Snyk account**: Visit <https://app.snyk.io/>
 2. **Navigate to Account Settings**:
    - Click on your profile → Account Settings
    - Go to General Settings → API Token
@@ -581,6 +625,7 @@ analysis-results/
 ### Authentication Methods
 
 #### Method 1: Environment Variable (Recommended)
+
 ```powershell
 # Set environment variable for current session
 $env:SNYK_TOKEN = "your-api-token-here"
@@ -590,12 +635,14 @@ $env:SNYK_TOKEN = "your-api-token-here"
 ```
 
 #### Method 2: Script Parameter
+
 ```powershell
 # Pass token directly to script
 .\static-analysis.ps1 -Tool snyk -SnykToken "your-api-token-here"
 ```
 
 #### Method 3: Docker Environment Variable
+
 ```powershell
 # Pass token to Docker container
 docker run --rm -v ${PWD}:/workspace -e SNYK_TOKEN=your-token-here anyka-cross-compile make -C /workspace/onvif snyk-analyze
@@ -610,6 +657,7 @@ docker run --rm -v ${PWD}:/workspace -e SNYK_TOKEN=your-token-here anyka-cross-c
 ## Integration with Development Workflow
 
 ### Pre-commit Analysis
+
 Add to your development workflow:
 
 ```powershell
@@ -618,7 +666,20 @@ Add to your development workflow:
 # Review results and fix issues before committing
 ```
 
+To install repository-provided git hooks that run local validations (e.g., Rust `cargo fmt` for `onvif-rust`), run:
+
+```bash
+scripts/install-git-hooks.sh
+```
+
+To revert this change run:
+
+```bash
+git config --unset core.hooksPath
+```
+
 ### CI/CD Integration
+
 The tools can be integrated into CI/CD pipelines:
 
 ```yaml
@@ -629,6 +690,7 @@ The tools can be integrated into CI/CD pipelines:
 ```
 
 ### IDE Integration
+
 - **VS Code**: Install C/C++ extension for real-time analysis
 - **CLion**: Built-in static analysis support
 - **Vim/Neovim**: Use ALE or coc.nvim with clangd
@@ -636,19 +698,25 @@ The tools can be integrated into CI/CD pipelines:
 ## Common Issues and Solutions
 
 ### Missing Include Files
+
 If you see "missing include" warnings:
+
 - These are often false positives for system headers
 - Use `--suppress=missingIncludeSystem` flag for cppcheck
 - The tools focus on your source code, not system dependencies
 
 ### Memory Analysis
+
 For embedded systems like Anyka AK3918:
+
 - Pay attention to memory leak warnings
 - Check for buffer overflow vulnerabilities
 - Verify proper resource cleanup
 
 ### Security Analysis
+
 Focus on:
+
 - Input validation issues
 - Buffer overflow vulnerabilities
 - Unsafe string operations
@@ -657,6 +725,7 @@ Focus on:
 ## Customization
 
 ### Adding Custom Rules
+
 Snyk uses built-in security rules, but you can configure severity thresholds and exclusions:
 
 ```bash
@@ -668,6 +737,7 @@ snyk code test --exclude=test/,vendor/
 ```
 
 ### Suppressing False Positives
+
 Add comments to suppress specific warnings:
 
 ```c
@@ -689,6 +759,7 @@ strcpy(dest, src);  // Known safe in this context
 ## Troubleshooting
 
 ### Docker Issues
+
 ```powershell
 # Rebuild Docker image if tools are missing
 docker build -t anyka-cross-compile -f Dockerfile .
@@ -700,12 +771,14 @@ docker run --rm anyka-cross-compile semgrep --version
 ```
 
 ### Permission Issues
+
 ```powershell
 # Fix file permissions if needed
 Get-ChildItem -Path "analysis-results" -Recurse | ForEach-Object { $_.Attributes = "Normal" }
 ```
 
 ### Memory Issues
+
 ```powershell
 # Run analysis on smaller subsets if memory is limited
 .\static-analysis.ps1 -Tool cppcheck  # Start with cppcheck (lightest)

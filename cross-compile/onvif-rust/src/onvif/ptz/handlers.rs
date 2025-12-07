@@ -51,6 +51,7 @@ pub struct PTZService {
     /// PTZ state manager.
     state: Arc<PTZStateManager>,
     /// Configuration runtime.
+    #[allow(dead_code)]
     config: Arc<ConfigRuntime>,
     /// Platform PTZ control (optional for software-only mode).
     ptz_control: Option<Arc<dyn PTZControl>>,
@@ -198,6 +199,7 @@ impl PTZService {
     }
 
     /// Convert PTZVector to platform PtzPosition.
+    #[allow(dead_code)]
     fn vector_to_position(vector: &PTZVector) -> PtzPosition {
         let mut pos = PtzPosition::default();
         if let Some(pt) = &vector.pan_tilt {
@@ -213,6 +215,7 @@ impl PTZService {
     }
 
     /// Convert platform PtzPosition to PTZVector.
+    #[allow(dead_code)]
     fn position_to_vector(pos: &PtzPosition) -> PTZVector {
         PTZVector {
             pan_tilt: Some(Vector2D {

@@ -166,6 +166,7 @@ pub struct DiscoveryConfig {
     pub http_port: u16,
 
     /// Device's IP address for XAddrs (transport addresses)
+    /// Note: This may be overridden at runtime using external_ip() helper.
     pub device_ip: String,
 
     /// Device scopes for discovery matching (space-separated URIs)

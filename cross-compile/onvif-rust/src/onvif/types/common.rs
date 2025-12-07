@@ -58,11 +58,11 @@ impl Default for OnvifVersion {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct IntRange {
     /// Minimum value.
-    #[serde(rename = "Min")]
+    #[serde(rename = "tt:Min", alias = "Min")]
     pub min: i32,
 
     /// Maximum value.
-    #[serde(rename = "Max")]
+    #[serde(rename = "tt:Max", alias = "Max")]
     pub max: i32,
 }
 
@@ -70,11 +70,11 @@ pub struct IntRange {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FloatRange {
     /// Minimum value.
-    #[serde(rename = "Min")]
+    #[serde(rename = "tt:Min", alias = "Min")]
     pub min: f32,
 
     /// Maximum value.
-    #[serde(rename = "Max")]
+    #[serde(rename = "tt:Max", alias = "Max")]
     pub max: f32,
 }
 
@@ -82,11 +82,11 @@ pub struct FloatRange {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DurationRange {
     /// Minimum duration (ISO 8601 format).
-    #[serde(rename = "Min")]
+    #[serde(rename = "tt:Min", alias = "Min")]
     pub min: String,
 
     /// Maximum duration (ISO 8601 format).
-    #[serde(rename = "Max")]
+    #[serde(rename = "tt:Max", alias = "Max")]
     pub max: String,
 }
 
@@ -94,7 +94,7 @@ pub struct DurationRange {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct IntItems {
     /// Integer items.
-    #[serde(rename = "Items", default)]
+    #[serde(rename = "tt:Items", alias = "Items", default)]
     pub items: Vec<i32>,
 }
 
@@ -102,7 +102,7 @@ pub struct IntItems {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FloatItems {
     /// Float items.
-    #[serde(rename = "Items", default)]
+    #[serde(rename = "tt:Items", alias = "Items", default)]
     pub items: Vec<f32>,
 }
 
@@ -145,19 +145,19 @@ impl Default for IntRectangle {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IntRectangleRange {
     /// X-axis range.
-    #[serde(rename = "XRange")]
+    #[serde(rename = "tt:XRange", alias = "XRange")]
     pub x_range: IntRange,
 
     /// Y-axis range.
-    #[serde(rename = "YRange")]
+    #[serde(rename = "tt:YRange", alias = "YRange")]
     pub y_range: IntRange,
 
     /// Width range.
-    #[serde(rename = "WidthRange")]
+    #[serde(rename = "tt:WidthRange", alias = "WidthRange")]
     pub width_range: IntRange,
 
     /// Height range.
-    #[serde(rename = "HeightRange")]
+    #[serde(rename = "tt:HeightRange", alias = "HeightRange")]
     pub height_range: IntRange,
 }
 
@@ -165,11 +165,11 @@ pub struct IntRectangleRange {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VideoResolution {
     /// Horizontal resolution in pixels.
-    #[serde(rename = "Width")]
+    #[serde(rename = "tt:Width", alias = "Width")]
     pub width: i32,
 
     /// Vertical resolution in pixels.
-    #[serde(rename = "Height")]
+    #[serde(rename = "tt:Height", alias = "Height")]
     pub height: i32,
 }
 
@@ -375,19 +375,29 @@ pub struct VideoSource {
     pub token: ReferenceToken,
 
     /// Frame rate in frames per second.
-    #[serde(rename = "Framerate")]
+    #[serde(rename = "tt:Framerate", alias = "Framerate")]
     pub framerate: f32,
 
     /// Resolution.
-    #[serde(rename = "Resolution")]
+    #[serde(rename = "tt:Resolution", alias = "Resolution")]
     pub resolution: VideoResolution,
 
     /// Optional imaging settings.
-    #[serde(rename = "Imaging", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Imaging",
+        alias = "Imaging",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub imaging: Option<ImagingSettings>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<VideoSourceExtension>,
 }
 
@@ -395,11 +405,21 @@ pub struct VideoSource {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VideoSourceExtension {
     /// Imaging settings 2.0.
-    #[serde(rename = "Imaging", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Imaging",
+        alias = "Imaging",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub imaging: Option<ImagingSettings20>,
 
     /// Further extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -415,7 +435,7 @@ pub struct AudioSource {
     pub token: ReferenceToken,
 
     /// Number of audio channels (1=mono, 2=stereo).
-    #[serde(rename = "Channels")]
+    #[serde(rename = "tt:Channels", alias = "Channels")]
     pub channels: i32,
 }
 
@@ -431,11 +451,11 @@ pub struct ConfigurationEntity {
     pub token: ReferenceToken,
 
     /// User readable name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: Name,
 
     /// Number of references using this configuration.
-    #[serde(rename = "UseCount")]
+    #[serde(rename = "tt:UseCount", alias = "UseCount")]
     pub use_count: i32,
 }
 
@@ -447,11 +467,11 @@ pub struct VideoSourceConfiguration {
     pub token: ReferenceToken,
 
     /// User readable name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: Name,
 
     /// Number of references using this configuration.
-    #[serde(rename = "UseCount")]
+    #[serde(rename = "tt:UseCount", alias = "UseCount")]
     pub use_count: i32,
 
     /// View mode.
@@ -459,15 +479,20 @@ pub struct VideoSourceConfiguration {
     pub view_mode: Option<String>,
 
     /// Reference to the physical video source.
-    #[serde(rename = "SourceToken")]
+    #[serde(rename = "tt:SourceToken", alias = "SourceToken")]
     pub source_token: ReferenceToken,
 
     /// Capturing area bounds.
-    #[serde(rename = "Bounds")]
+    #[serde(rename = "tt:Bounds", alias = "Bounds")]
     pub bounds: IntRectangle,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -479,15 +504,15 @@ pub struct AudioSourceConfiguration {
     pub token: ReferenceToken,
 
     /// User readable name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: Name,
 
     /// Number of references using this configuration.
-    #[serde(rename = "UseCount")]
+    #[serde(rename = "tt:UseCount", alias = "UseCount")]
     pub use_count: i32,
 
     /// Reference to the physical audio source.
-    #[serde(rename = "SourceToken")]
+    #[serde(rename = "tt:SourceToken", alias = "SourceToken")]
     pub source_token: ReferenceToken,
 }
 
@@ -528,15 +553,15 @@ pub enum Mpeg4Profile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VideoRateControl {
     /// Maximum frame rate.
-    #[serde(rename = "FrameRateLimit")]
+    #[serde(rename = "tt:FrameRateLimit", alias = "FrameRateLimit")]
     pub frame_rate_limit: i32,
 
     /// Encoding interval (key frame interval).
-    #[serde(rename = "EncodingInterval")]
+    #[serde(rename = "tt:EncodingInterval", alias = "EncodingInterval")]
     pub encoding_interval: i32,
 
     /// Bitrate limit in kbps.
-    #[serde(rename = "BitrateLimit")]
+    #[serde(rename = "tt:BitrateLimit", alias = "BitrateLimit")]
     pub bitrate_limit: i32,
 }
 
@@ -554,11 +579,11 @@ impl Default for VideoRateControl {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct H264Configuration {
     /// GOP length.
-    #[serde(rename = "GovLength")]
+    #[serde(rename = "tt:GovLength", alias = "GovLength")]
     pub gov_length: i32,
 
     /// H.264 profile.
-    #[serde(rename = "H264Profile")]
+    #[serde(rename = "tt:H264Profile", alias = "H264Profile")]
     pub h264_profile: H264Profile,
 }
 
@@ -575,11 +600,11 @@ impl Default for H264Configuration {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Mpeg4Configuration {
     /// GOP length.
-    #[serde(rename = "GovLength")]
+    #[serde(rename = "tt:GovLength", alias = "GovLength")]
     pub gov_length: i32,
 
     /// MPEG4 profile.
-    #[serde(rename = "Mpeg4Profile")]
+    #[serde(rename = "tt:Mpeg4Profile", alias = "Mpeg4Profile")]
     pub mpeg4_profile: Mpeg4Profile,
 }
 
@@ -587,19 +612,19 @@ pub struct Mpeg4Configuration {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MulticastConfiguration {
     /// Multicast address.
-    #[serde(rename = "Address")]
+    #[serde(rename = "tt:Address", alias = "Address")]
     pub address: IpAddress,
 
     /// Port number.
-    #[serde(rename = "Port")]
+    #[serde(rename = "tt:Port", alias = "Port")]
     pub port: i32,
 
     /// TTL value.
-    #[serde(rename = "TTL")]
+    #[serde(rename = "tt:TTL", alias = "TTL")]
     pub ttl: i32,
 
     /// Auto-start multicast.
-    #[serde(rename = "AutoStart")]
+    #[serde(rename = "tt:AutoStart", alias = "AutoStart")]
     pub auto_start: bool,
 }
 
@@ -607,12 +632,13 @@ pub struct MulticastConfiguration {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IpAddress {
     /// Address type (IPv4 or IPv6).
-    #[serde(rename = "Type")]
+    #[serde(rename = "tt:Type", alias = "Type")]
     pub address_type: IpType,
 
     /// IPv4 address.
     #[serde(
-        rename = "IPv4Address",
+        rename = "tt:IPv4Address",
+        alias = "IPv4Address",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -620,7 +646,8 @@ pub struct IpAddress {
 
     /// IPv6 address.
     #[serde(
-        rename = "IPv6Address",
+        rename = "tt:IPv6Address",
+        alias = "IPv6Address",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -643,47 +670,63 @@ pub struct VideoEncoderConfiguration {
     pub token: ReferenceToken,
 
     /// User readable name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: Name,
 
     /// Number of references using this configuration.
-    #[serde(rename = "UseCount")]
+    #[serde(rename = "tt:UseCount", alias = "UseCount")]
     pub use_count: i32,
 
     /// Encoding type.
-    #[serde(rename = "Encoding")]
+    #[serde(rename = "tt:Encoding", alias = "Encoding")]
     pub encoding: VideoEncoding,
 
     /// Resolution.
-    #[serde(rename = "Resolution")]
+    #[serde(rename = "tt:Resolution", alias = "Resolution")]
     pub resolution: VideoResolution,
 
     /// Video quality (1-100).
-    #[serde(rename = "Quality")]
+    #[serde(rename = "tt:Quality", alias = "Quality")]
     pub quality: f32,
 
     /// Rate control settings.
     #[serde(
-        rename = "RateControl",
+        rename = "tt:RateControl",
+        alias = "RateControl",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub rate_control: Option<VideoRateControl>,
 
     /// MPEG4 configuration.
-    #[serde(rename = "MPEG4", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:MPEG4",
+        alias = "MPEG4",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub mpeg4: Option<Mpeg4Configuration>,
 
     /// H.264 configuration.
-    #[serde(rename = "H264", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:H264",
+        alias = "H264",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub h264: Option<H264Configuration>,
 
     /// Multicast settings.
-    #[serde(rename = "Multicast", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Multicast",
+        alias = "Multicast",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub multicast: Option<MulticastConfiguration>,
 
     /// Session timeout.
-    #[serde(rename = "SessionTimeout")]
+    #[serde(rename = "tt:SessionTimeout", alias = "SessionTimeout")]
     pub session_timeout: String,
 }
 
@@ -708,31 +751,36 @@ pub struct AudioEncoderConfiguration {
     pub token: ReferenceToken,
 
     /// User readable name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: Name,
 
     /// Number of references using this configuration.
-    #[serde(rename = "UseCount")]
+    #[serde(rename = "tt:UseCount", alias = "UseCount")]
     pub use_count: i32,
 
     /// Encoding type.
-    #[serde(rename = "Encoding")]
+    #[serde(rename = "tt:Encoding", alias = "Encoding")]
     pub encoding: AudioEncoding,
 
     /// Bitrate in kbps.
-    #[serde(rename = "Bitrate")]
+    #[serde(rename = "tt:Bitrate", alias = "Bitrate")]
     pub bitrate: i32,
 
     /// Sample rate in kHz.
-    #[serde(rename = "SampleRate")]
+    #[serde(rename = "tt:SampleRate", alias = "SampleRate")]
     pub sample_rate: i32,
 
     /// Multicast settings.
-    #[serde(rename = "Multicast", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Multicast",
+        alias = "Multicast",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub multicast: Option<MulticastConfiguration>,
 
     /// Session timeout.
-    #[serde(rename = "SessionTimeout")]
+    #[serde(rename = "tt:SessionTimeout", alias = "SessionTimeout")]
     pub session_timeout: String,
 }
 
@@ -748,11 +796,11 @@ pub struct PTZConfiguration {
     pub token: ReferenceToken,
 
     /// User readable name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: Name,
 
     /// Number of references using this configuration.
-    #[serde(rename = "UseCount")]
+    #[serde(rename = "tt:UseCount", alias = "UseCount")]
     pub use_count: i32,
 
     /// Move ramp (acceleration).
@@ -776,12 +824,13 @@ pub struct PTZConfiguration {
     pub preset_tour_ramp: Option<i32>,
 
     /// Reference to PTZ node.
-    #[serde(rename = "NodeToken")]
+    #[serde(rename = "tt:NodeToken", alias = "NodeToken")]
     pub node_token: ReferenceToken,
 
     /// Default absolute pan/tilt position space.
     #[serde(
-        rename = "DefaultAbsolutePantTiltPositionSpace",
+        rename = "tt:DefaultAbsolutePantTiltPositionSpace",
+        alias = "DefaultAbsolutePantTiltPositionSpace",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -789,7 +838,8 @@ pub struct PTZConfiguration {
 
     /// Default absolute zoom position space.
     #[serde(
-        rename = "DefaultAbsoluteZoomPositionSpace",
+        rename = "tt:DefaultAbsoluteZoomPositionSpace",
+        alias = "DefaultAbsoluteZoomPositionSpace",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -797,7 +847,8 @@ pub struct PTZConfiguration {
 
     /// Default relative pan/tilt translation space.
     #[serde(
-        rename = "DefaultRelativePanTiltTranslationSpace",
+        rename = "tt:DefaultRelativePanTiltTranslationSpace",
+        alias = "DefaultRelativePanTiltTranslationSpace",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -805,7 +856,8 @@ pub struct PTZConfiguration {
 
     /// Default relative zoom translation space.
     #[serde(
-        rename = "DefaultRelativeZoomTranslationSpace",
+        rename = "tt:DefaultRelativeZoomTranslationSpace",
+        alias = "DefaultRelativeZoomTranslationSpace",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -813,7 +865,8 @@ pub struct PTZConfiguration {
 
     /// Default continuous pan/tilt velocity space.
     #[serde(
-        rename = "DefaultContinuousPanTiltVelocitySpace",
+        rename = "tt:DefaultContinuousPanTiltVelocitySpace",
+        alias = "DefaultContinuousPanTiltVelocitySpace",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -821,7 +874,8 @@ pub struct PTZConfiguration {
 
     /// Default continuous zoom velocity space.
     #[serde(
-        rename = "DefaultContinuousZoomVelocitySpace",
+        rename = "tt:DefaultContinuousZoomVelocitySpace",
+        alias = "DefaultContinuousZoomVelocitySpace",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -829,7 +883,8 @@ pub struct PTZConfiguration {
 
     /// Default PTZ speed.
     #[serde(
-        rename = "DefaultPTZSpeed",
+        rename = "tt:DefaultPTZSpeed",
+        alias = "DefaultPTZSpeed",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -837,7 +892,8 @@ pub struct PTZConfiguration {
 
     /// Default PTZ timeout.
     #[serde(
-        rename = "DefaultPTZTimeout",
+        rename = "tt:DefaultPTZTimeout",
+        alias = "DefaultPTZTimeout",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -845,7 +901,8 @@ pub struct PTZConfiguration {
 
     /// Pan/tilt limits.
     #[serde(
-        rename = "PanTiltLimits",
+        rename = "tt:PanTiltLimits",
+        alias = "PanTiltLimits",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -853,14 +910,20 @@ pub struct PTZConfiguration {
 
     /// Zoom limits.
     #[serde(
-        rename = "ZoomLimits",
+        rename = "tt:ZoomLimits",
+        alias = "ZoomLimits",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub zoom_limits: Option<ZoomLimits>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<PTZConfigurationExtension>,
 }
 
@@ -869,14 +932,20 @@ pub struct PTZConfiguration {
 pub struct PTZConfigurationExtension {
     /// PT control direction settings.
     #[serde(
-        rename = "PTControlDirection",
+        rename = "tt:PTControlDirection",
+        alias = "PTControlDirection",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub pt_control_direction: Option<PTControlDirection>,
 
     /// Extension (for future use).
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -884,15 +953,30 @@ pub struct PTZConfigurationExtension {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PTControlDirection {
     /// EFlip mode.
-    #[serde(rename = "EFlip", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:EFlip",
+        alias = "EFlip",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub e_flip: Option<EFlip>,
 
     /// Reverse mode.
-    #[serde(rename = "Reverse", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Reverse",
+        alias = "Reverse",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub reverse: Option<Reverse>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -900,7 +984,7 @@ pub struct PTControlDirection {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EFlip {
     /// EFlip mode.
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: EFlipMode,
 }
 
@@ -908,7 +992,7 @@ pub struct EFlip {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Reverse {
     /// Reverse mode.
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: ReverseMode,
 }
 
@@ -935,11 +1019,21 @@ pub enum ReverseMode {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PTZSpeed {
     /// Pan/tilt speed.
-    #[serde(rename = "PanTilt", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:PanTilt",
+        alias = "PanTilt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pan_tilt: Option<Vector2D>,
 
     /// Zoom speed.
-    #[serde(rename = "Zoom", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Zoom",
+        alias = "Zoom",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub zoom: Option<Vector1D>,
 }
 
@@ -947,11 +1041,21 @@ pub struct PTZSpeed {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PTZVector {
     /// Pan/tilt position.
-    #[serde(rename = "PanTilt", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:PanTilt",
+        alias = "PanTilt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pan_tilt: Option<Vector2D>,
 
     /// Zoom position.
-    #[serde(rename = "Zoom", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Zoom",
+        alias = "Zoom",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub zoom: Option<Vector1D>,
 }
 
@@ -959,7 +1063,7 @@ pub struct PTZVector {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PanTiltLimits {
     /// Range of pan/tilt.
-    #[serde(rename = "Range")]
+    #[serde(rename = "tt:Range", alias = "Range")]
     pub range: Space2DDescription,
 }
 
@@ -967,7 +1071,7 @@ pub struct PanTiltLimits {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ZoomLimits {
     /// Range of zoom.
-    #[serde(rename = "Range")]
+    #[serde(rename = "tt:Range", alias = "Range")]
     pub range: Space1DDescription,
 }
 
@@ -975,15 +1079,15 @@ pub struct ZoomLimits {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Space2DDescription {
     /// Space URI.
-    #[serde(rename = "URI")]
+    #[serde(rename = "tt:URI", alias = "URI")]
     pub uri: String,
 
     /// X range.
-    #[serde(rename = "XRange")]
+    #[serde(rename = "tt:XRange", alias = "XRange")]
     pub x_range: FloatRange,
 
     /// Y range.
-    #[serde(rename = "YRange")]
+    #[serde(rename = "tt:YRange", alias = "YRange")]
     pub y_range: FloatRange,
 }
 
@@ -991,11 +1095,11 @@ pub struct Space2DDescription {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Space1DDescription {
     /// Space URI.
-    #[serde(rename = "URI")]
+    #[serde(rename = "tt:URI", alias = "URI")]
     pub uri: String,
 
     /// X range.
-    #[serde(rename = "XRange")]
+    #[serde(rename = "tt:XRange", alias = "XRange")]
     pub x_range: FloatRange,
 }
 
@@ -1003,23 +1107,34 @@ pub struct Space1DDescription {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PTZStatus {
     /// Current position.
-    #[serde(rename = "Position", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Position",
+        alias = "Position",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub position: Option<PTZVector>,
 
     /// Move status.
     #[serde(
-        rename = "MoveStatus",
+        rename = "tt:MoveStatus",
+        alias = "MoveStatus",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub move_status: Option<PTZMoveStatus>,
 
     /// Error message.
-    #[serde(rename = "Error", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Error",
+        alias = "Error",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub error: Option<String>,
 
     /// UTC time.
-    #[serde(rename = "UtcTime")]
+    #[serde(rename = "tt:UtcTime", alias = "UtcTime")]
     pub utc_time: String,
 }
 
@@ -1027,11 +1142,21 @@ pub struct PTZStatus {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PTZMoveStatus {
     /// Pan/tilt status.
-    #[serde(rename = "PanTilt", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:PanTilt",
+        alias = "PanTilt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pan_tilt: Option<MoveStatus>,
 
     /// Zoom status.
-    #[serde(rename = "Zoom", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Zoom",
+        alias = "Zoom",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub zoom: Option<MoveStatus>,
 }
 
@@ -1052,12 +1177,18 @@ pub struct PTZPreset {
     pub token: Option<ReferenceToken>,
 
     /// Preset name.
-    #[serde(rename = "Name", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Name",
+        alias = "Name",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub name: Option<Name>,
 
     /// Preset position.
     #[serde(
-        rename = "PTZPosition",
+        rename = "tt:PTZPosition",
+        alias = "PTZPosition",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1073,7 +1204,8 @@ pub struct PTZPreset {
 pub struct ImagingSettings {
     /// Backlight compensation.
     #[serde(
-        rename = "BacklightCompensation",
+        rename = "tt:BacklightCompensation",
+        alias = "BacklightCompensation",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1081,7 +1213,8 @@ pub struct ImagingSettings {
 
     /// Brightness (0-100).
     #[serde(
-        rename = "Brightness",
+        rename = "tt:Brightness",
+        alias = "Brightness",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1089,39 +1222,62 @@ pub struct ImagingSettings {
 
     /// Color saturation (0-100).
     #[serde(
-        rename = "ColorSaturation",
+        rename = "tt:ColorSaturation",
+        alias = "ColorSaturation",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub color_saturation: Option<f32>,
 
     /// Contrast (0-100).
-    #[serde(rename = "Contrast", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Contrast",
+        alias = "Contrast",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub contrast: Option<f32>,
 
     /// Exposure settings.
-    #[serde(rename = "Exposure", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Exposure",
+        alias = "Exposure",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub exposure: Option<Exposure>,
 
     /// Focus settings.
-    #[serde(rename = "Focus", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Focus",
+        alias = "Focus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub focus: Option<FocusConfiguration>,
 
     /// IR cut filter mode.
     #[serde(
-        rename = "IrCutFilter",
+        rename = "tt:IrCutFilter",
+        alias = "IrCutFilter",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub ir_cut_filter: Option<IrCutFilterMode>,
 
     /// Sharpness (0-100).
-    #[serde(rename = "Sharpness", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Sharpness",
+        alias = "Sharpness",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub sharpness: Option<f32>,
 
     /// Wide dynamic range.
     #[serde(
-        rename = "WideDynamicRange",
+        rename = "tt:WideDynamicRange",
+        alias = "WideDynamicRange",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1129,14 +1285,20 @@ pub struct ImagingSettings {
 
     /// White balance.
     #[serde(
-        rename = "WhiteBalance",
+        rename = "tt:WhiteBalance",
+        alias = "WhiteBalance",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub white_balance: Option<WhiteBalance>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1145,7 +1307,8 @@ pub struct ImagingSettings {
 pub struct ImagingSettings20 {
     /// Backlight compensation.
     #[serde(
-        rename = "BacklightCompensation",
+        rename = "tt:BacklightCompensation",
+        alias = "BacklightCompensation",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1153,7 +1316,8 @@ pub struct ImagingSettings20 {
 
     /// Brightness (0-100).
     #[serde(
-        rename = "Brightness",
+        rename = "tt:Brightness",
+        alias = "Brightness",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1161,39 +1325,62 @@ pub struct ImagingSettings20 {
 
     /// Color saturation (0-100).
     #[serde(
-        rename = "ColorSaturation",
+        rename = "tt:ColorSaturation",
+        alias = "ColorSaturation",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub color_saturation: Option<f32>,
 
     /// Contrast (0-100).
-    #[serde(rename = "Contrast", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Contrast",
+        alias = "Contrast",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub contrast: Option<f32>,
 
     /// Exposure settings.
-    #[serde(rename = "Exposure", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Exposure",
+        alias = "Exposure",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub exposure: Option<Exposure20>,
 
     /// Focus settings.
-    #[serde(rename = "Focus", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Focus",
+        alias = "Focus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub focus: Option<FocusConfiguration20>,
 
     /// IR cut filter mode.
     #[serde(
-        rename = "IrCutFilter",
+        rename = "tt:IrCutFilter",
+        alias = "IrCutFilter",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub ir_cut_filter: Option<IrCutFilterMode>,
 
     /// Sharpness (0-100).
-    #[serde(rename = "Sharpness", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Sharpness",
+        alias = "Sharpness",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub sharpness: Option<f32>,
 
     /// Wide dynamic range.
     #[serde(
-        rename = "WideDynamicRange",
+        rename = "tt:WideDynamicRange",
+        alias = "WideDynamicRange",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1201,14 +1388,20 @@ pub struct ImagingSettings20 {
 
     /// White balance.
     #[serde(
-        rename = "WhiteBalance",
+        rename = "tt:WhiteBalance",
+        alias = "WhiteBalance",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub white_balance: Option<WhiteBalance20>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<ImagingSettingsExtension20>,
 }
 
@@ -1217,14 +1410,20 @@ pub struct ImagingSettings20 {
 pub struct ImagingSettingsExtension20 {
     /// Image stabilization.
     #[serde(
-        rename = "ImageStabilization",
+        rename = "tt:ImageStabilization",
+        alias = "ImageStabilization",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub image_stabilization: Option<ImageStabilization>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1233,14 +1432,20 @@ pub struct ImagingSettingsExtension20 {
 pub struct ImagingStatus20 {
     /// Focus status.
     #[serde(
-        rename = "FocusStatus20",
+        rename = "tt:FocusStatus20",
+        alias = "FocusStatus20",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub focus_status20: Option<FocusStatus20>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1248,19 +1453,29 @@ pub struct ImagingStatus20 {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FocusStatus20 {
     /// Current focus position (normalized 0-1).
-    #[serde(rename = "Position")]
+    #[serde(rename = "tt:Position", alias = "Position")]
     pub position: f32,
 
     /// Move status.
-    #[serde(rename = "MoveStatus")]
+    #[serde(rename = "tt:MoveStatus", alias = "MoveStatus")]
     pub move_status: MoveStatus,
 
     /// Error description if any.
-    #[serde(rename = "Error", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Error",
+        alias = "Error",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub error: Option<String>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1268,15 +1483,25 @@ pub struct FocusStatus20 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImageStabilization {
     /// Mode (ON/OFF/AUTO).
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: ImageStabilizationMode,
 
     /// Level.
-    #[serde(rename = "Level", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Level",
+        alias = "Level",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub level: Option<f32>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1293,11 +1518,11 @@ pub enum ImageStabilizationMode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BacklightCompensation {
     /// Mode (ON/OFF).
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: BacklightCompensationMode,
 
     /// Level.
-    #[serde(rename = "Level")]
+    #[serde(rename = "tt:Level", alias = "Level")]
     pub level: f32,
 }
 
@@ -1305,11 +1530,16 @@ pub struct BacklightCompensation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BacklightCompensation20 {
     /// Mode.
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: BacklightCompensationMode,
 
     /// Level.
-    #[serde(rename = "Level", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Level",
+        alias = "Level",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub level: Option<f32>,
 }
 
@@ -1325,51 +1555,51 @@ pub enum BacklightCompensationMode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Exposure {
     /// Mode (AUTO/MANUAL).
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: ExposureMode,
 
     /// Priority.
-    #[serde(rename = "Priority")]
+    #[serde(rename = "tt:Priority", alias = "Priority")]
     pub priority: ExposurePriority,
 
     /// Exposure window.
-    #[serde(rename = "Window")]
+    #[serde(rename = "tt:Window", alias = "Window")]
     pub window: Rectangle,
 
     /// Minimum exposure time.
-    #[serde(rename = "MinExposureTime")]
+    #[serde(rename = "tt:MinExposureTime", alias = "MinExposureTime")]
     pub min_exposure_time: f32,
 
     /// Maximum exposure time.
-    #[serde(rename = "MaxExposureTime")]
+    #[serde(rename = "tt:MaxExposureTime", alias = "MaxExposureTime")]
     pub max_exposure_time: f32,
 
     /// Minimum gain.
-    #[serde(rename = "MinGain")]
+    #[serde(rename = "tt:MinGain", alias = "MinGain")]
     pub min_gain: f32,
 
     /// Maximum gain.
-    #[serde(rename = "MaxGain")]
+    #[serde(rename = "tt:MaxGain", alias = "MaxGain")]
     pub max_gain: f32,
 
     /// Minimum iris.
-    #[serde(rename = "MinIris")]
+    #[serde(rename = "tt:MinIris", alias = "MinIris")]
     pub min_iris: f32,
 
     /// Maximum iris.
-    #[serde(rename = "MaxIris")]
+    #[serde(rename = "tt:MaxIris", alias = "MaxIris")]
     pub max_iris: f32,
 
     /// Exposure time.
-    #[serde(rename = "ExposureTime")]
+    #[serde(rename = "tt:ExposureTime", alias = "ExposureTime")]
     pub exposure_time: f32,
 
     /// Gain.
-    #[serde(rename = "Gain")]
+    #[serde(rename = "tt:Gain", alias = "Gain")]
     pub gain: f32,
 
     /// Iris.
-    #[serde(rename = "Iris")]
+    #[serde(rename = "tt:Iris", alias = "Iris")]
     pub iris: f32,
 }
 
@@ -1377,20 +1607,31 @@ pub struct Exposure {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Exposure20 {
     /// Mode (AUTO/MANUAL).
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: ExposureMode,
 
     /// Priority.
-    #[serde(rename = "Priority", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Priority",
+        alias = "Priority",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub priority: Option<ExposurePriority>,
 
     /// Exposure window.
-    #[serde(rename = "Window", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Window",
+        alias = "Window",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub window: Option<Rectangle>,
 
     /// Minimum exposure time.
     #[serde(
-        rename = "MinExposureTime",
+        rename = "tt:MinExposureTime",
+        alias = "MinExposureTime",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1398,42 +1639,74 @@ pub struct Exposure20 {
 
     /// Maximum exposure time.
     #[serde(
-        rename = "MaxExposureTime",
+        rename = "tt:MaxExposureTime",
+        alias = "MaxExposureTime",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub max_exposure_time: Option<f32>,
 
     /// Minimum gain.
-    #[serde(rename = "MinGain", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:MinGain",
+        alias = "MinGain",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub min_gain: Option<f32>,
 
     /// Maximum gain.
-    #[serde(rename = "MaxGain", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:MaxGain",
+        alias = "MaxGain",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_gain: Option<f32>,
 
     /// Minimum iris.
-    #[serde(rename = "MinIris", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:MinIris",
+        alias = "MinIris",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub min_iris: Option<f32>,
 
     /// Maximum iris.
-    #[serde(rename = "MaxIris", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:MaxIris",
+        alias = "MaxIris",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_iris: Option<f32>,
 
     /// Exposure time.
     #[serde(
-        rename = "ExposureTime",
+        rename = "tt:ExposureTime",
+        alias = "ExposureTime",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub exposure_time: Option<f32>,
 
     /// Gain.
-    #[serde(rename = "Gain", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Gain",
+        alias = "Gain",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub gain: Option<f32>,
 
     /// Iris.
-    #[serde(rename = "Iris", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Iris",
+        alias = "Iris",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub iris: Option<f32>,
 }
 
@@ -1488,19 +1761,19 @@ impl Default for Rectangle {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FocusConfiguration {
     /// Auto-focus mode.
-    #[serde(rename = "AutoFocusMode")]
+    #[serde(rename = "tt:AutoFocusMode", alias = "AutoFocusMode")]
     pub auto_focus_mode: AutoFocusMode,
 
     /// Default speed.
-    #[serde(rename = "DefaultSpeed")]
+    #[serde(rename = "tt:DefaultSpeed", alias = "DefaultSpeed")]
     pub default_speed: f32,
 
     /// Near limit.
-    #[serde(rename = "NearLimit")]
+    #[serde(rename = "tt:NearLimit", alias = "NearLimit")]
     pub near_limit: f32,
 
     /// Far limit.
-    #[serde(rename = "FarLimit")]
+    #[serde(rename = "tt:FarLimit", alias = "FarLimit")]
     pub far_limit: f32,
 }
 
@@ -1508,27 +1781,43 @@ pub struct FocusConfiguration {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FocusConfiguration20 {
     /// Auto-focus mode.
-    #[serde(rename = "AutoFocusMode")]
+    #[serde(rename = "tt:AutoFocusMode", alias = "AutoFocusMode")]
     pub auto_focus_mode: AutoFocusMode,
 
     /// Default speed.
     #[serde(
-        rename = "DefaultSpeed",
+        rename = "tt:DefaultSpeed",
+        alias = "DefaultSpeed",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub default_speed: Option<f32>,
 
     /// Near limit.
-    #[serde(rename = "NearLimit", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:NearLimit",
+        alias = "NearLimit",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub near_limit: Option<f32>,
 
     /// Far limit.
-    #[serde(rename = "FarLimit", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:FarLimit",
+        alias = "FarLimit",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub far_limit: Option<f32>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1553,11 +1842,11 @@ pub enum IrCutFilterMode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WideDynamicRange {
     /// Mode (ON/OFF).
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: WideDynamicMode,
 
     /// Level.
-    #[serde(rename = "Level")]
+    #[serde(rename = "tt:Level", alias = "Level")]
     pub level: f32,
 }
 
@@ -1565,11 +1854,16 @@ pub struct WideDynamicRange {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WideDynamicRange20 {
     /// Mode.
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: WideDynamicMode,
 
     /// Level.
-    #[serde(rename = "Level", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Level",
+        alias = "Level",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub level: Option<f32>,
 }
 
@@ -1585,15 +1879,15 @@ pub enum WideDynamicMode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WhiteBalance {
     /// Mode (AUTO/MANUAL).
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: WhiteBalanceMode,
 
     /// Cr gain.
-    #[serde(rename = "CrGain")]
+    #[serde(rename = "tt:CrGain", alias = "CrGain")]
     pub cr_gain: f32,
 
     /// Cb gain.
-    #[serde(rename = "CbGain")]
+    #[serde(rename = "tt:CbGain", alias = "CbGain")]
     pub cb_gain: f32,
 }
 
@@ -1601,19 +1895,34 @@ pub struct WhiteBalance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WhiteBalance20 {
     /// Mode.
-    #[serde(rename = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode")]
     pub mode: WhiteBalanceMode,
 
     /// Cr gain.
-    #[serde(rename = "CrGain", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:CrGain",
+        alias = "CrGain",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cr_gain: Option<f32>,
 
     /// Cb gain.
-    #[serde(rename = "CbGain", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:CbGain",
+        alias = "CbGain",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cb_gain: Option<f32>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1644,12 +1953,13 @@ pub struct Profile {
     pub fixed: Option<bool>,
 
     /// Profile name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: Name,
 
     /// Video source configuration.
     #[serde(
-        rename = "VideoSourceConfiguration",
+        rename = "tt:VideoSourceConfiguration",
+        alias = "VideoSourceConfiguration",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1657,7 +1967,8 @@ pub struct Profile {
 
     /// Audio source configuration.
     #[serde(
-        rename = "AudioSourceConfiguration",
+        rename = "tt:AudioSourceConfiguration",
+        alias = "AudioSourceConfiguration",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1665,7 +1976,8 @@ pub struct Profile {
 
     /// Video encoder configuration.
     #[serde(
-        rename = "VideoEncoderConfiguration",
+        rename = "tt:VideoEncoderConfiguration",
+        alias = "VideoEncoderConfiguration",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1673,7 +1985,8 @@ pub struct Profile {
 
     /// Audio encoder configuration.
     #[serde(
-        rename = "AudioEncoderConfiguration",
+        rename = "tt:AudioEncoderConfiguration",
+        alias = "AudioEncoderConfiguration",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1681,7 +1994,8 @@ pub struct Profile {
 
     /// PTZ configuration.
     #[serde(
-        rename = "PTZConfiguration",
+        rename = "tt:PTZConfiguration",
+        alias = "PTZConfiguration",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1689,14 +2003,20 @@ pub struct Profile {
 
     /// Metadata configuration.
     #[serde(
-        rename = "MetadataConfiguration",
+        rename = "tt:MetadataConfiguration",
+        alias = "MetadataConfiguration",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub metadata_configuration: Option<MetadataConfiguration>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<ProfileExtension>,
 }
 
@@ -1708,31 +2028,51 @@ pub struct MetadataConfiguration {
     pub token: ReferenceToken,
 
     /// User readable name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: Name,
 
     /// Number of references using this configuration.
-    #[serde(rename = "UseCount")]
+    #[serde(rename = "tt:UseCount", alias = "UseCount")]
     pub use_count: i32,
 
     /// PTZ status filter.
-    #[serde(rename = "PTZStatus", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:PTZStatus",
+        alias = "PTZStatus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub ptz_status: Option<PTZFilter>,
 
     /// Analytics flag.
-    #[serde(rename = "Analytics", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Analytics",
+        alias = "Analytics",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub analytics: Option<bool>,
 
     /// Multicast configuration.
-    #[serde(rename = "Multicast", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Multicast",
+        alias = "Multicast",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub multicast: Option<MulticastConfiguration>,
 
     /// Session timeout.
-    #[serde(rename = "SessionTimeout")]
+    #[serde(rename = "tt:SessionTimeout", alias = "SessionTimeout")]
     pub session_timeout: String,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1740,11 +2080,11 @@ pub struct MetadataConfiguration {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PTZFilter {
     /// Include PTZ status.
-    #[serde(rename = "Status")]
+    #[serde(rename = "tt:Status", alias = "Status")]
     pub status: bool,
 
     /// Include PTZ position.
-    #[serde(rename = "Position")]
+    #[serde(rename = "tt:Position", alias = "Position")]
     pub position: bool,
 }
 
@@ -1753,7 +2093,8 @@ pub struct PTZFilter {
 pub struct ProfileExtension {
     /// Audio output configuration.
     #[serde(
-        rename = "AudioOutputConfiguration",
+        rename = "tt:AudioOutputConfiguration",
+        alias = "AudioOutputConfiguration",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1761,14 +2102,20 @@ pub struct ProfileExtension {
 
     /// Audio decoder configuration.
     #[serde(
-        rename = "AudioDecoderConfiguration",
+        rename = "tt:AudioDecoderConfiguration",
+        alias = "AudioDecoderConfiguration",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub audio_decoder_configuration: Option<AudioDecoderConfiguration>,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
@@ -1780,20 +2127,21 @@ pub struct AudioOutputConfiguration {
     pub token: ReferenceToken,
 
     /// User readable name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: Name,
 
     /// Number of references using this configuration.
-    #[serde(rename = "UseCount")]
+    #[serde(rename = "tt:UseCount", alias = "UseCount")]
     pub use_count: i32,
 
     /// Output token.
-    #[serde(rename = "OutputToken")]
+    #[serde(rename = "tt:OutputToken", alias = "OutputToken")]
     pub output_token: ReferenceToken,
 
     /// Output level.
     #[serde(
-        rename = "OutputLevel",
+        rename = "tt:OutputLevel",
+        alias = "OutputLevel",
         default,
         skip_serializing_if = "Option::is_none"
     )]
@@ -1808,11 +2156,11 @@ pub struct AudioDecoderConfiguration {
     pub token: ReferenceToken,
 
     /// User readable name.
-    #[serde(rename = "Name")]
+    #[serde(rename = "tt:Name", alias = "Name")]
     pub name: Name,
 
     /// Number of references using this configuration.
-    #[serde(rename = "UseCount")]
+    #[serde(rename = "tt:UseCount", alias = "UseCount")]
     pub use_count: i32,
 }
 
@@ -1834,11 +2182,16 @@ pub enum TransportProtocol {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transport {
     /// Protocol.
-    #[serde(rename = "Protocol")]
+    #[serde(rename = "tt:Protocol", alias = "Protocol")]
     pub protocol: TransportProtocol,
 
     /// Tunnel (for tunneling protocols).
-    #[serde(rename = "Tunnel", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Tunnel",
+        alias = "Tunnel",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub tunnel: Option<Box<Transport>>,
 }
 
@@ -1846,11 +2199,11 @@ pub struct Transport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StreamSetup {
     /// Stream type.
-    #[serde(rename = "Stream")]
+    #[serde(rename = "tt:Stream", alias = "Stream")]
     pub stream: StreamType,
 
     /// Transport configuration.
-    #[serde(rename = "Transport")]
+    #[serde(rename = "tt:Transport", alias = "Transport")]
     pub transport: Transport,
 }
 
@@ -1868,19 +2221,19 @@ pub enum StreamType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MediaUri {
     /// Stream URI.
-    #[serde(rename = "Uri")]
+    #[serde(rename = "tt:Uri", alias = "Uri")]
     pub uri: String,
 
     /// Invalid after connection flag.
-    #[serde(rename = "InvalidAfterConnect")]
+    #[serde(rename = "tt:InvalidAfterConnect", alias = "InvalidAfterConnect")]
     pub invalid_after_connect: bool,
 
     /// Invalid after reboot flag.
-    #[serde(rename = "InvalidAfterReboot")]
+    #[serde(rename = "tt:InvalidAfterReboot", alias = "InvalidAfterReboot")]
     pub invalid_after_reboot: bool,
 
     /// Timeout duration.
-    #[serde(rename = "Timeout")]
+    #[serde(rename = "tt:Timeout", alias = "Timeout")]
     pub timeout: String,
 }
 
@@ -1903,19 +2256,29 @@ pub enum UserLevel {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct User {
     /// Username.
-    #[serde(rename = "Username")]
+    #[serde(rename = "tt:Username", alias = "Username")]
     pub username: String,
 
     /// Password (for create/update operations).
-    #[serde(rename = "Password", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Password",
+        alias = "Password",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub password: Option<String>,
 
     /// User level.
-    #[serde(rename = "UserLevel")]
+    #[serde(rename = "tt:UserLevel", alias = "UserLevel")]
     pub user_level: UserLevel,
 
     /// Extension.
-    #[serde(rename = "Extension", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "tt:Extension",
+        alias = "Extension",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extension: Option<Extension>,
 }
 
