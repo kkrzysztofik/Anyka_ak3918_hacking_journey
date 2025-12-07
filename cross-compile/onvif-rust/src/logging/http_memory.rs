@@ -59,7 +59,6 @@ pub async fn memory_check_middleware(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::utils::MemoryLimits;
 
     #[test]

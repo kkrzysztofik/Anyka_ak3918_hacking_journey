@@ -237,10 +237,22 @@ impl ServiceDispatcher {
         };
 
         // Determine action (prefer header, fallback to body)
-        let action = soap_action.or(envelope.action.clone()).unwrap_or_default();
+        tracing::debug!(
+            "Action extraction: soap_action_header={:?}, envelope_action={:?}",
+            soap_action,
+            envelope.action
+        );
+        let action = soap_action
+            .clone()
+            .or(envelope.action.clone())
+            .unwrap_or_default();
 
         if action.is_empty() {
-            tracing::warn!("Missing SOAP action in request");
+            tracing::warn!(
+                "Missing SOAP action in request (header={:?}, body={:?})",
+                soap_action,
+                envelope.action
+            );
             return error_response(OnvifError::WellFormed(
                 "Missing SOAP action in request".to_string(),
             ));
@@ -342,10 +354,22 @@ impl ServiceDispatcher {
         };
 
         // Determine action (prefer header, fallback to body)
-        let action = soap_action.or(envelope.action.clone()).unwrap_or_default();
+        tracing::debug!(
+            "Action extraction (with auth): soap_action_header={:?}, envelope_action={:?}",
+            soap_action,
+            envelope.action
+        );
+        let action = soap_action
+            .clone()
+            .or(envelope.action.clone())
+            .unwrap_or_default();
 
         if action.is_empty() {
-            tracing::warn!("Missing SOAP action in request");
+            tracing::warn!(
+                "Missing SOAP action in request (header={:?}, body={:?})",
+                soap_action,
+                envelope.action
+            );
             return error_response(OnvifError::WellFormed(
                 "Missing SOAP action in request".to_string(),
             ));
@@ -552,9 +576,20 @@ fn extract_soap_action(request: &Request<Body>) -> Option<String> {
         let action = action_str.trim_matches('"');
         // Extract action name from URI if needed
         if let Some(pos) = action.rfind('/') {
-            return Some(action[pos + 1..].to_string());
+            let extracted = action[pos + 1..].to_string();
+            // Return None for empty strings
+            return if extracted.is_empty() {
+                None
+            } else {
+                Some(extracted)
+            };
         }
-        return Some(action.to_string());
+        // Return None for empty strings
+        return if action.is_empty() {
+            None
+        } else {
+            Some(action.to_string())
+        };
     }
 
     // Try Content-Type header with action parameter
@@ -567,9 +602,18 @@ fn extract_soap_action(request: &Request<Body>) -> Option<String> {
             if let Some(action) = part.strip_prefix("action=") {
                 let action = action.trim_matches('"');
                 if let Some(pos) = action.rfind('/') {
-                    return Some(action[pos + 1..].to_string());
+                    let extracted = action[pos + 1..].to_string();
+                    return if extracted.is_empty() {
+                        None
+                    } else {
+                        Some(extracted)
+                    };
                 }
-                return Some(action.to_string());
+                return if action.is_empty() {
+                    None
+                } else {
+                    Some(action.to_string())
+                };
             }
         }
     }

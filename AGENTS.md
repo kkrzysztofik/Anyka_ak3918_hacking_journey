@@ -6,6 +6,8 @@
 
 **CRITICAL MANDATE**: You MUST follow the project's established patterns, standards, and documentation. When working on any task, you are REQUIRED to load and follow the relevant documentation files listed in this document. Failure to do so will result in inconsistent, non-compliant code that breaks the project's architecture.
 
+**⚠️ TOOLCHAIN REQUIREMENT**: This project uses a **custom Rust toolchain** located at `/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/`. You MUST use the cargo binary from this toolchain for ALL cargo commands: `/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo`. Using system cargo will cause compilation errors due to version mismatches.
+
 ## Project Overview
 
 This repository contains comprehensive reverse-engineering work and custom firmware development for Anyka AK3918-based IP cameras. It includes cross-compilation tools, SD-card bootable payloads, root filesystem modifications, and detailed documentation for understanding and extending camera functionality.
@@ -28,19 +30,31 @@ The project focuses on creating a fully ONVIF 24.12 compliant implementation whi
 
 ### Essential Commands
 
+**⚠️ CRITICAL: Always use the custom toolchain's cargo binary**
+
 ```bash
+# Define custom cargo path (use this in all commands)
+export CARGO=/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo
+
 # Build & Test
-cd cross-compile/onvif-rust && cargo build --release  # Build
-cargo test                                            # All tests
-cargo test --lib                                      # Unit tests only
+cd cross-compile/onvif-rust && $CARGO build --release  # Build
+$CARGO test                                            # All tests
+$CARGO test --lib                                      # Unit tests only
 
 # Code Quality
-cargo clippy -- -D warnings                          # Linting
-cargo fmt --check                                     # Formatting check
-cargo fmt                                             # Format code
+$CARGO clippy -- -D warnings                          # Linting
+$CARGO fmt --check                                     # Formatting check
+$CARGO fmt                                             # Format code
 
 # Documentation
-cargo doc --no-deps --open                           # Generate docs
+$CARGO doc --no-deps --open                           # Generate docs
+```
+
+**Direct paths (alternative)**:
+```bash
+/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo build --release
+/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo clippy -- -D warnings
+/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo test
 ```
 
 ### Mock Pattern (mockall)

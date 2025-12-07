@@ -468,7 +468,7 @@ async fn test_complete_imaging_workflow() {
     let service = create_test_service();
 
     // 1. Get current settings
-    let initial = service
+    let _initial = service
         .handle_get_imaging_settings(GetImagingSettings {
             video_source_token: ReferenceToken::from(DEFAULT_VIDEO_SOURCE),
         })

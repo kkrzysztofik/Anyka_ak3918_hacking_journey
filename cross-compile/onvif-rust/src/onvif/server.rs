@@ -302,7 +302,8 @@ impl OnvifServer {
 
         // Register Media Service
         tracing::debug!("Registering Media Service");
-        dispatcher.register_service("media", Arc::new(MediaService::new()));
+        let media_service = MediaService::new();
+        dispatcher.register_service("media", Arc::new(media_service));
 
         tracing::info!(
             "Registered {} ONVIF service(s) (minimal mode)",

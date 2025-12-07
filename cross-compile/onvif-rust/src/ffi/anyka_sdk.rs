@@ -284,24 +284,28 @@ pub struct PtzPreset {
 #[cfg(not(use_stubs))]
 mod ffi_impl {
     use super::*;
+    use crate::ffi::generated::{
+        audio_param, encode_param, pcm_param, ptz_device, ptz_turn_direction, video_dev_type,
+    };
     use std::ffi::{c_char, c_int, c_void};
 
     // External C functions from Anyka SDK
+    #[allow(dead_code)]
     unsafe extern "C" {
         fn ak_print(level: c_int, fmt: *const c_char, ...) -> c_int;
-        fn ak_vi_open(dev: c_int) -> *mut c_void;
+        fn ak_vi_open(dev: video_dev_type) -> *mut c_void;
         fn ak_vi_close(handle: *mut c_void) -> c_int;
-        fn ak_venc_open(param: *const c_void) -> *mut c_void;
+        fn ak_venc_open(param: *const encode_param) -> *mut c_void;
         fn ak_venc_close(handle: *mut c_void) -> c_int;
-        fn ak_ai_open(param: *const c_void) -> *mut c_void;
+        fn ak_ai_open(param: *const pcm_param) -> *mut c_void;
         fn ak_ai_close(handle: *mut c_void) -> c_int;
-        fn ak_aenc_open(param: *const c_void) -> *mut c_void;
+        fn ak_aenc_open(param: *const audio_param) -> *mut c_void;
         fn ak_aenc_close(handle: *mut c_void) -> c_int;
         fn ak_drv_ptz_open() -> c_int;
         fn ak_drv_ptz_close() -> c_int;
-        fn ak_drv_ptz_turn(direction: c_int) -> c_int;
+        fn ak_drv_ptz_turn(direction: ptz_turn_direction, degree: c_int) -> c_int;
         fn ak_drv_ptz_stop() -> c_int;
-        fn ak_drv_ptz_get_step_pos(motor_no: c_int) -> c_int;
+        fn ak_drv_ptz_get_step_pos(motor_no: ptz_device) -> c_int;
     }
 
     /// Print a message using Anyka SDK logging.
@@ -319,7 +323,8 @@ mod ffi_impl {
     /// Open video input device.
     pub fn video_input_open(device: VideoDevice) -> AnykaResult<*mut c_void> {
         // SAFETY: Calling FFI function with valid device ID
-        let handle = unsafe { ak_vi_open(device.0 as c_int) };
+        let sdk_device: video_dev_type = unsafe { std::mem::transmute(device.0 as i32) };
+        let handle = unsafe { ak_vi_open(sdk_device) };
         if handle.is_null() {
             Err(AnykaError::ResourceUnavailable("Video input".to_string()))
         } else {
@@ -328,7 +333,12 @@ mod ffi_impl {
     }
 
     /// Close video input device.
-    pub fn video_input_close(handle: *mut c_void) -> AnykaResult<()> {
+    /// Close video input device.
+    ///
+    /// # Safety
+    /// Caller must ensure `handle` was obtained from `video_input_open` and is valid for the
+    /// underlying SDK. Passing an arbitrary or freed pointer is undefined behavior.
+    pub unsafe fn video_input_close(handle: *mut c_void) -> AnykaResult<()> {
         if handle.is_null() {
             return Err(AnykaError::InvalidParameter("Null handle".to_string()));
         }
@@ -366,7 +376,9 @@ mod ffi_impl {
     /// Turn PTZ motor in a direction.
     pub fn ptz_turn(direction: PtzDirection) -> AnykaResult<()> {
         // SAFETY: Calling FFI function with valid direction code
-        let result = unsafe { ak_drv_ptz_turn(direction.to_direction_code()) };
+        let sdk_direction: ptz_turn_direction =
+            unsafe { std::mem::transmute(direction.to_direction_code()) };
+        let result = unsafe { ak_drv_ptz_turn(sdk_direction, 0) };
         if result < 0 {
             Err(AnykaError::SdkError(result))
         } else {
@@ -388,7 +400,8 @@ mod ffi_impl {
     /// Get PTZ motor step position.
     pub fn ptz_get_position(motor: PtzMotor) -> AnykaResult<i32> {
         // SAFETY: Calling FFI function with valid motor ID
-        let result = unsafe { ak_drv_ptz_get_step_pos(motor.to_device_id()) };
+        let sdk_motor: ptz_device = unsafe { std::mem::transmute(motor.to_device_id()) };
+        let result = unsafe { ak_drv_ptz_get_step_pos(sdk_motor) };
         if result < 0 {
             Err(AnykaError::SdkError(result))
         } else {
@@ -417,7 +430,7 @@ mod stub_impl {
     }
 
     /// Close video input device (stub).
-    pub fn video_input_close(_handle: *mut std::ffi::c_void) -> AnykaResult<()> {
+    pub unsafe fn video_input_close(_handle: *mut std::ffi::c_void) -> AnykaResult<()> {
         Ok(())
     }
 

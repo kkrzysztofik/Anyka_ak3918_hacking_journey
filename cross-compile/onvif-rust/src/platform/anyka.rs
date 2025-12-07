@@ -735,16 +735,16 @@ impl AnykaNetworkInfo {
         }
 
         // Try /etc/systemd/timesyncd.conf for systemd-based systems
-        if ntp_info.ntp_manual.is_empty() {
-            if let Ok(content) = fs::read_to_string("/etc/systemd/timesyncd.conf") {
-                for line in content.lines() {
-                    let line = line.trim();
+        if ntp_info.ntp_manual.is_empty()
+            && let Ok(content) = fs::read_to_string("/etc/systemd/timesyncd.conf")
+        {
+            for line in content.lines() {
+                let line = line.trim();
 
-                    if let Some(servers) = line.strip_prefix("NTP=") {
-                        ntp_info
-                            .ntp_manual
-                            .extend(servers.split_whitespace().map(String::from));
-                    }
+                if let Some(servers) = line.strip_prefix("NTP=") {
+                    ntp_info
+                        .ntp_manual
+                        .extend(servers.split_whitespace().map(String::from));
                 }
             }
         }

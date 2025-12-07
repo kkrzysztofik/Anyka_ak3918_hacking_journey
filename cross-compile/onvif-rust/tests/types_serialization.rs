@@ -13,9 +13,8 @@ use onvif_rust::onvif::types::common::{
     VideoRateControl, VideoResolution, VideoSourceConfiguration, WhiteBalanceMode, WideDynamicMode,
 };
 use onvif_rust::onvif::types::device::{
-    GetCapabilitiesResponse, GetDeviceInformation, GetDeviceInformationResponse,
-    GetDiscoveryModeResponse, GetHostnameResponse, GetNetworkInterfacesResponse, GetScopesResponse,
-    GetServicesResponse, GetSystemDateAndTimeResponse, GetUsersResponse,
+    GetDeviceInformation, GetDeviceInformationResponse, GetDiscoveryModeResponse,
+    GetHostnameResponse, GetSystemDateAndTimeResponse,
 };
 use onvif_rust::onvif::types::imaging::{GetImagingSettings, GetImagingSettingsResponse};
 use onvif_rust::onvif::types::media::{

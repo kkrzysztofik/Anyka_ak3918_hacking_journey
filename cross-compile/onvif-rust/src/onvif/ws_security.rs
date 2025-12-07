@@ -145,6 +145,7 @@ struct NonceEntry {
     /// When the nonce was first seen.
     timestamp: DateTime<Utc>,
     /// Username associated with this nonce.
+    #[allow(dead_code)]
     username: String,
 }
 

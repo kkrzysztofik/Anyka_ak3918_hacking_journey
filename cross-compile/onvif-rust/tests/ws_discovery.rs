@@ -19,8 +19,7 @@ use tokio::time::timeout;
 
 // Import from the crate under test
 use onvif_rust::discovery::{
-    DiscoveryConfig, DiscoveryError, DiscoveryMode, WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT,
-    WsDiscovery, WsDiscoveryHandle,
+    DiscoveryConfig, DiscoveryMode, WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT, WsDiscovery,
 };
 
 /// Test configuration helper - creates a config with unique port to avoid conflicts
@@ -52,7 +51,7 @@ async fn create_discovery_client_socket() -> Result<UdpSocket, std::io::Error> {
     socket.set_nonblocking(true)?;
 
     let std_socket: std::net::UdpSocket = socket.into();
-    Ok(UdpSocket::from_std(std_socket)?)
+    UdpSocket::from_std(std_socket)
 }
 
 /// Build a WS-Discovery Probe message

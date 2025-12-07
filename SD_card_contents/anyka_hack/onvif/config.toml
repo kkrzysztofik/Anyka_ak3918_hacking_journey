@@ -196,6 +196,9 @@ hello_interval = 300
 # Stream Profile 1 (Main Stream - High Quality)
 # ============================================================================
 [stream_profile_1]
+# Enable this profile (required for profile to be loaded)
+enabled = true
+
 # Profile name
 name = "Profile1"
 
@@ -208,7 +211,7 @@ height = 1080
 # Frame rate (1-60)
 framerate = 25
 
-# Bitrate in kbps (64-16384)
+# Video bitrate in kbps (64-16384)
 bitrate = 4000
 
 # Video encoding (H264, H265, MJPEG)
@@ -217,13 +220,28 @@ encoding = "H264"
 # GOP length (1-300)
 gop_length = 50
 
-# Quality level (1-100)
+# Video quality level (1-100)
 quality = 80
+
+# Audio enabled for this profile (true/false)
+audio_enabled = true
+
+# Audio encoding (G711, G726, AAC)
+audio_encoding = "G711"
+
+# Audio bitrate in kbps (8-512)
+audio_bitrate = 64
+
+# Audio sample rate in Hz (8000-48000)
+audio_sample_rate = 8000
 
 # ============================================================================
 # Stream Profile 2 (Sub Stream - Lower Quality)
 # ============================================================================
 [stream_profile_2]
+# Enable this profile (required for profile to be loaded)
+enabled = true
+
 # Profile name
 name = "Profile2"
 
@@ -236,7 +254,7 @@ height = 480
 # Frame rate (1-60)
 framerate = 15
 
-# Bitrate in kbps (64-16384)
+# Video bitrate in kbps (64-16384)
 bitrate = 512
 
 # Video encoding (H264, H265, MJPEG)
@@ -245,13 +263,28 @@ encoding = "H264"
 # GOP length (1-300)
 gop_length = 30
 
-# Quality level (1-100)
+# Video quality level (1-100)
 quality = 80
+
+# Audio enabled for this profile (true/false)
+audio_enabled = false
+
+# Audio encoding (G711, G726, AAC)
+audio_encoding = "G711"
+
+# Audio bitrate in kbps (8-512)
+audio_bitrate = 64
+
+# Audio sample rate in Hz (8000-48000)
+audio_sample_rate = 8000
 
 # ============================================================================
 # Stream Profile 3 (Optional - Mobile/Low Bandwidth)
 # ============================================================================
 [stream_profile_3]
+# Enable this profile (required for profile to be loaded)
+enabled = false
+
 # Profile name
 name = "Profile3"
 
@@ -264,7 +297,7 @@ height = 480
 # Frame rate (1-60)
 framerate = 15
 
-# Bitrate in kbps (64-16384)
+# Video bitrate in kbps (64-16384)
 bitrate = 512
 
 # Video encoding (H264, H265, MJPEG)
@@ -273,13 +306,28 @@ encoding = "H264"
 # GOP length (1-300)
 gop_length = 30
 
-# Quality level (1-100)
+# Video quality level (1-100)
 quality = 80
+
+# Audio enabled for this profile (true/false)
+audio_enabled = false
+
+# Audio encoding (G711, G726, AAC)
+audio_encoding = "G711"
+
+# Audio bitrate in kbps (8-512)
+audio_bitrate = 64
+
+# Audio sample rate in Hz (8000-48000)
+audio_sample_rate = 8000
 
 # ============================================================================
 # Stream Profile 4 (Optional - Snapshot/MJPEG)
 # ============================================================================
 [stream_profile_4]
+# Enable this profile (required for profile to be loaded)
+enabled = false
+
 # Profile name
 name = "Profile4"
 
@@ -292,7 +340,7 @@ height = 480
 # Frame rate (1-60)
 framerate = 15
 
-# Bitrate in kbps (64-16384)
+# Video bitrate in kbps (64-16384)
 bitrate = 512
 
 # Video encoding (H264, H265, MJPEG)
@@ -301,5 +349,17 @@ encoding = "H264"
 # GOP length (1-300)
 gop_length = 30
 
-# Quality level (1-100)
+# Video quality level (1-100)
 quality = 80
+
+# Audio enabled for this profile (true/false)
+audio_enabled = false
+
+# Audio encoding (G711, G726, AAC)
+audio_encoding = "G711"
+
+# Audio bitrate in kbps (8-512)
+audio_bitrate = 64
+
+# Audio sample rate in Hz (8000-48000)
+audio_sample_rate = 8000

@@ -267,15 +267,15 @@ mod tests {
         let err: Result<(), &str> = Err("error");
 
         assert!(matches!(
-            require(err.clone(), StartupPhase::Platform, "test"),
+            require(err, StartupPhase::Platform, "test"),
             Err(StartupError::Platform(_))
         ));
         assert!(matches!(
-            require(err.clone(), StartupPhase::Services, "test"),
+            require(err, StartupPhase::Services, "test"),
             Err(StartupError::Services(_))
         ));
         assert!(matches!(
-            require(err.clone(), StartupPhase::Network, "test"),
+            require(err, StartupPhase::Network, "test"),
             Err(StartupError::Network(_))
         ));
     }

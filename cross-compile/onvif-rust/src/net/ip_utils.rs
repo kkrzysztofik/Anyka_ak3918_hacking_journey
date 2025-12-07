@@ -10,16 +10,17 @@ use crate::config::ConfigRuntime;
 /// 3. Autodetect using UDP socket trick
 /// 4. Fallback to "127.0.0.1"
 pub fn external_ip(config: &ConfigRuntime) -> String {
-    if let Ok(ip) = config.get_string("network.detected_ip") {
-        if !ip.is_empty() {
-            return ip;
-        }
+    if let Ok(ip) = config.get_string("network.detected_ip")
+        && !ip.is_empty()
+    {
+        return ip;
     }
 
-    if let Ok(ip) = config.get_string("server.address") {
-        if !ip.is_empty() && ip != "0.0.0.0" {
-            return ip;
-        }
+    if let Ok(ip) = config.get_string("server.address")
+        && !ip.is_empty()
+        && ip != "0.0.0.0"
+    {
+        return ip;
     }
 
     if let Some(ip) = detect_local_ip() {
@@ -31,10 +32,10 @@ pub fn external_ip(config: &ConfigRuntime) -> String {
 
 fn detect_local_ip() -> Option<String> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
-    if socket.connect("8.8.8.8:80").is_ok() {
-        if let Ok(addr) = socket.local_addr() {
-            return Some(addr.ip().to_string());
-        }
+    if socket.connect("8.8.8.8:80").is_ok()
+        && let Ok(addr) = socket.local_addr()
+    {
+        return Some(addr.ip().to_string());
     }
     None
 }

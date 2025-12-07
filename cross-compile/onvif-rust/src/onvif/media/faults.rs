@@ -156,7 +156,7 @@ pub fn validate_profile_name(name: &str) -> Result<(), OnvifError> {
 pub fn no_profile_error(token: &str) -> OnvifError {
     OnvifError::invalid_arg_val(
         "ter:NoProfile",
-        &format!("Profile with token '{}' not found", token),
+        format!("Profile with token '{}' not found", token),
     )
 }
 
@@ -164,7 +164,7 @@ pub fn no_profile_error(token: &str) -> OnvifError {
 pub fn no_config_error(token: &str) -> OnvifError {
     OnvifError::invalid_arg_val(
         "ter:NoConfig",
-        &format!("Configuration with token '{}' not found", token),
+        format!("Configuration with token '{}' not found", token),
     )
 }
 
@@ -172,7 +172,7 @@ pub fn no_config_error(token: &str) -> OnvifError {
 pub fn no_source_error(token: &str) -> OnvifError {
     OnvifError::invalid_arg_val(
         "ter:NoSource",
-        &format!("Source with token '{}' not found", token),
+        format!("Source with token '{}' not found", token),
     )
 }
 

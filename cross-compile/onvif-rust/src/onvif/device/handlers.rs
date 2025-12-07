@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 //! Device Service request handlers.
 //!
 //! This module implements the ONVIF Device Service operation handlers including:
@@ -24,13 +25,14 @@ use crate::onvif::types::device::{
     GetCapabilities, GetCapabilitiesResponse, GetCertificates, GetCertificatesResponse,
     GetCertificatesStatus, GetCertificatesStatusResponse, GetDNS, GetDNSResponse,
     GetDeviceInformation, GetDeviceInformationResponse, GetDiscoveryMode, GetDiscoveryModeResponse,
-    GetHostname, GetHostnameResponse, GetNTP, GetNTPResponse, GetNetworkInterfaces,
-    GetNetworkInterfacesResponse, GetNetworkProtocols, GetNetworkProtocolsResponse,
-    GetRelayOutputs, GetRelayOutputsResponse, GetScopes, GetScopesResponse, GetServiceCapabilities,
-    GetServiceCapabilitiesResponse, GetServices, GetServicesResponse, GetSystemBackup,
-    GetSystemBackupResponse, GetSystemDateAndTime, GetSystemDateAndTimeResponse, GetUsers,
-    GetUsersResponse, HostnameInformation, IPAddress, IPv4Configuration, IPv4NetworkInterface,
-    LoadCertificates, LoadCertificatesResponse, NTPInformation, NetworkHost, NetworkHostType,
+    GetHostname, GetHostnameResponse, GetNTP, GetNTPResponse, GetNetworkDefaultGateway,
+    GetNetworkDefaultGatewayResponse, GetNetworkInterfaces, GetNetworkInterfacesResponse,
+    GetNetworkProtocols, GetNetworkProtocolsResponse, GetRelayOutputs, GetRelayOutputsResponse,
+    GetScopes, GetScopesResponse, GetServiceCapabilities, GetServiceCapabilitiesResponse,
+    GetServices, GetServicesResponse, GetSystemBackup, GetSystemBackupResponse,
+    GetSystemDateAndTime, GetSystemDateAndTimeResponse, GetUsers, GetUsersResponse,
+    HostnameInformation, IPAddress, IPv4Configuration, IPv4NetworkInterface, LoadCertificates,
+    LoadCertificatesResponse, NTPInformation, NetworkGateway, NetworkHost, NetworkHostType,
     NetworkInterface, NetworkInterfaceConnectionSetting, NetworkInterfaceInfo,
     NetworkInterfaceLink, NetworkProtocol, NetworkProtocolType, PrefixedIPv4Address, RemoveScopes,
     RemoveScopesResponse, RestoreSystem, RestoreSystemResponse, SetDNS, SetDNSResponse,
@@ -66,6 +68,7 @@ pub struct DeviceService {
     /// User storage.
     users: Arc<UserStorage>,
     /// Password manager for hashing.
+    #[allow(dead_code)]
     password_manager: Arc<PasswordManager>,
     /// Configuration runtime.
     config: Arc<ConfigRuntime>,
@@ -722,7 +725,7 @@ impl DeviceService {
             .get_string("network.detected_ip")
             .ok()
             .filter(|s| !s.is_empty())
-            .or_else(|| Self::detect_local_ip())
+            .or_else(Self::detect_local_ip)
             .unwrap_or_else(|| "192.168.1.100".to_string());
 
         let mac_address = self
@@ -882,6 +885,38 @@ impl DeviceService {
         );
 
         Ok(SetNTPResponse {})
+    }
+
+    // ========================================================================
+    // Network Gateway Handlers
+    // ========================================================================
+
+    /// Handle GetNetworkDefaultGateway request.
+    ///
+    /// Returns default gateway configuration.
+    pub async fn handle_get_network_default_gateway(
+        &self,
+        _request: GetNetworkDefaultGateway,
+    ) -> OnvifResult<GetNetworkDefaultGatewayResponse> {
+        tracing::debug!("GetNetworkDefaultGateway request");
+
+        // Get gateway from config (platform doesn't expose gateway info)
+        let gateway = self
+            .config
+            .get_string("network.gateway")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "192.168.1.1".to_string());
+
+        let network_gateway = NetworkGateway {
+            ipv4_address: vec![gateway],
+            ipv6_address: vec![],
+            extension: None,
+        };
+
+        Ok(GetNetworkDefaultGatewayResponse {
+            network_gateway: vec![network_gateway],
+        })
     }
 
     // ========================================================================
@@ -1216,6 +1251,11 @@ impl DeviceService {
             );
         }
 
+        // Persist users to config file
+        if let Err(e) = self.users.save_to_toml("/mnt/anyka_hack/onvif/users.toml") {
+            tracing::warn!("Failed to save users to file: {}", e);
+        }
+
         Ok(CreateUsersResponse {})
     }
 
@@ -1267,6 +1307,11 @@ impl DeviceService {
             })?;
 
             tracing::info!("DeleteUsers: deleted user '{}'", username);
+        }
+
+        // Persist users to config file
+        if let Err(e) = self.users.save_to_toml("/mnt/anyka_hack/onvif/users.toml") {
+            tracing::warn!("Failed to save users to file: {}", e);
         }
 
         Ok(DeleteUsersResponse {})
@@ -1335,6 +1380,11 @@ impl DeviceService {
                 })?;
 
             tracing::info!("SetUser: updated user '{}'", user.username);
+        }
+
+        // Persist users to config file
+        if let Err(e) = self.users.save_to_toml("/mnt/anyka_hack/onvif/users.toml") {
+            tracing::warn!("Failed to save users to file: {}", e);
         }
 
         Ok(SetUserResponse {})
@@ -1538,6 +1588,15 @@ impl ServiceHandler for DeviceService {
                 })
             }
 
+            "GetNetworkDefaultGateway" => {
+                let request: GetNetworkDefaultGateway = quick_xml::de::from_str(body_xml)
+                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let response = self.handle_get_network_default_gateway(request).await?;
+                quick_xml::se::to_string(&response).map_err(|e| {
+                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                })
+            }
+
             // DNS Operations
             "GetDNS" => {
                 let request: GetDNS = quick_xml::de::from_str(body_xml)
@@ -1727,6 +1786,7 @@ impl ServiceHandler for DeviceService {
             "GetHostname",
             "SetHostname",
             "GetNetworkInterfaces",
+            "GetNetworkDefaultGateway",
             "GetDNS",
             "SetDNS",
             "GetNTP",

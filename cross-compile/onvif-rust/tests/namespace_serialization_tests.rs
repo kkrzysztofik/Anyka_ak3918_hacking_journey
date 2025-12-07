@@ -126,11 +126,13 @@ fn test_imaging_options20_namespace_prefix() {
     use onvif_rust::onvif::types::imaging::ImagingOptions20;
 
     // Use Default to get a valid instance
-    let mut options = ImagingOptions20::default();
-    options.brightness = Some(FloatRange {
-        min: 0.0,
-        max: 100.0,
-    });
+    let options = ImagingOptions20 {
+        brightness: Some(FloatRange {
+            min: 0.0,
+            max: 100.0,
+        }),
+        ..Default::default()
+    };
 
     let xml = to_string(&options).expect("Failed to serialize ImagingOptions20");
 

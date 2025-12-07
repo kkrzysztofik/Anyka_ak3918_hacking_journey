@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use crate::config::ConfigRuntime;
+use crate::config::{ConfigPersistenceHandle, ConfigRuntime};
 use crate::net::ip_utils::external_ip;
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
@@ -67,29 +67,34 @@ pub struct MediaService {
     /// Profile manager for media profiles.
     profile_manager: Arc<ProfileManager>,
     /// Configuration runtime.
-    #[allow(dead_code)]
     config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional).
     #[allow(dead_code)]
     platform: Option<Arc<dyn Platform>>,
+    /// Optional config persistence handle for save requests.
+    #[allow(dead_code)]
+    persistence: Option<ConfigPersistenceHandle>,
 }
 
 impl MediaService {
     /// Create a new Media Service.
     pub fn new() -> Self {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
         Self {
-            profile_manager: Arc::new(ProfileManager::new()),
-            config: Arc::new(ConfigRuntime::new(Default::default())),
+            profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
+            config,
             platform: None,
+            persistence: None,
         }
     }
 
     /// Create a new Media Service with configuration.
     pub fn with_config(config: Arc<ConfigRuntime>) -> Self {
         Self {
-            profile_manager: Arc::new(ProfileManager::new()),
+            profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: None,
+            persistence: None,
         }
     }
 
@@ -99,9 +104,26 @@ impl MediaService {
         platform: Arc<dyn Platform>,
     ) -> Self {
         Self {
-            profile_manager: Arc::new(ProfileManager::new()),
+            profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: Some(platform),
+            persistence: None,
+        }
+    }
+
+    /// Create a Media Service wired with config persistence.
+    pub fn with_config_and_persistence(
+        config: Arc<ConfigRuntime>,
+        persistence: ConfigPersistenceHandle,
+    ) -> Self {
+        Self {
+            profile_manager: Arc::new(ProfileManager::with_config_and_persistence(
+                Arc::clone(&config),
+                Some(persistence.clone()),
+            )),
+            config,
+            platform: None,
+            persistence: Some(persistence),
         }
     }
 
@@ -111,6 +133,7 @@ impl MediaService {
             profile_manager,
             config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: None,
+            persistence: None,
         }
     }
 
@@ -851,7 +874,7 @@ impl MediaService {
         // Metadata configurations not supported - return fault
         Err(OnvifError::invalid_arg_val(
             "ter:NoConfig",
-            &format!(
+            format!(
                 "Metadata configuration '{}' not found",
                 request.configuration.token
             ),

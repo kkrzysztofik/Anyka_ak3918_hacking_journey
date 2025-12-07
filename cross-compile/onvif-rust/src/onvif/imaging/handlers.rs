@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 //! Imaging Service request handlers.
 //!
 //! This module implements the ONVIF Imaging Service operation handlers including:

@@ -18,7 +18,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use crate::config::ConfigRuntime;
+use crate::config::{
+    ConfigPersistenceHandle, ConfigPersistenceService, ConfigRuntime, ConfigStorage,
+};
 use crate::discovery::{DiscoveryConfig, WsDiscovery, WsDiscoveryHandle};
 use crate::lifecycle::health::{ComponentHealth, HealthStatus};
 use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
@@ -72,6 +74,8 @@ pub struct AppState {
     memory_monitor: Arc<crate::utils::MemoryMonitor>,
     /// Platform abstraction (optional for testing without hardware).
     platform: Option<Arc<dyn Platform>>,
+    /// Optional config persistence handle.
+    config_persistence: Option<ConfigPersistenceHandle>,
 }
 
 impl AppState {
@@ -109,6 +113,11 @@ impl AppState {
     pub fn platform(&self) -> Option<&Arc<dyn Platform>> {
         self.platform.as_ref()
     }
+
+    /// Get the config persistence handle, if available.
+    pub fn config_persistence(&self) -> Option<&ConfigPersistenceHandle> {
+        self.config_persistence.as_ref()
+    }
 }
 
 impl std::fmt::Debug for AppState {
@@ -122,6 +131,13 @@ impl std::fmt::Debug for AppState {
             .field(
                 "platform",
                 &self.platform.as_ref().map(|_| "Some(Arc<dyn Platform>)"),
+            )
+            .field(
+                "config_persistence",
+                &self
+                    .config_persistence
+                    .as_ref()
+                    .map(|_| "Some(ConfigPersistenceHandle)"),
             )
             .finish()
     }
@@ -143,6 +159,7 @@ pub struct AppStateBuilder {
     config: Option<Arc<ConfigRuntime>>,
     memory_monitor: Option<Arc<crate::utils::MemoryMonitor>>,
     platform: Option<Arc<dyn Platform>>,
+    config_persistence: Option<ConfigPersistenceHandle>,
 }
 
 /// Error type for AppState construction failures.
@@ -201,6 +218,12 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the config persistence handle.
+    pub fn config_persistence(mut self, handle: ConfigPersistenceHandle) -> Self {
+        self.config_persistence = Some(handle);
+        self
+    }
+
     /// Build the `AppState`, returning an error if required components are missing.
     pub fn build(self) -> Result<AppState, AppStateError> {
         Ok(AppState {
@@ -220,6 +243,7 @@ impl AppStateBuilder {
                 .memory_monitor
                 .ok_or_else(|| AppStateError::MissingComponent("memory_monitor".to_string()))?,
             platform: self.platform,
+            config_persistence: self.config_persistence,
         })
     }
 }
@@ -368,6 +392,7 @@ pub struct Application {
     config_path: String,
 
     /// Application state with shared dependencies.
+    #[allow(dead_code)]
     app_state: Option<AppState>,
 
     /// HTTP server instance for controlled shutdown.
@@ -375,6 +400,9 @@ pub struct Application {
 
     /// Handle to the server task.
     server_task: Option<JoinHandle<()>>,
+
+    /// Handle to the config persistence task.
+    config_persistence_task: Option<JoinHandle<()>>,
 
     /// WS-Discovery service handle for device discovery control.
     discovery: Option<WsDiscoveryHandle>,
@@ -417,9 +445,20 @@ impl Application {
         // Phase 1: Configuration
         progress.begin_phase(StartupPhase::Configuration);
         // Load configuration from file or use defaults
-        let app_config = crate::config::ConfigStorage::load_or_default(config_path)
+        let app_config = ConfigStorage::load_or_default(config_path)
             .map_err(|e| StartupError::Config(e.to_string()))?;
         let config_runtime = Arc::new(ConfigRuntime::new(app_config));
+
+        // Set up config persistence service (debounced save)
+        let storage = ConfigStorage::new(config_path);
+        let save_delay = config_runtime
+            .get_int("server.config_save_delay_ms")
+            .unwrap_or(500) as u64;
+        let (persistence_service, persistence_handle) =
+            ConfigPersistenceService::new(Arc::clone(&config_runtime), storage, save_delay);
+        let config_persistence_task = Some(tokio::spawn(
+            persistence_service.run(shutdown_coordinator.subscribe()),
+        ));
 
         // Initialize logging with full configuration (console + file if configured)
         if let Err(e) = crate::logging::init_logging(&config_runtime) {
@@ -487,6 +526,9 @@ impl Application {
                     StartupError::Services(format!("Failed to initialize memory monitor: {}", e))
                 })?,
             ));
+
+        // Wire config persistence handle
+        app_state_builder = app_state_builder.config_persistence(persistence_handle.clone());
 
         // Add platform if available
         if let Some(ref p) = platform {
@@ -592,6 +634,7 @@ impl Application {
             server_task: Some(server_task),
             discovery,
             discovery_task,
+            config_persistence_task,
         })
     }
 
@@ -665,7 +708,7 @@ impl Application {
         if let Some(discovery) = self.discovery.take() {
             if let Err(e) = discovery.stop().await {
                 tracing::warn!("Failed to stop WS-Discovery gracefully: {}", e);
-                report.record_failure("discovery", &e.to_string());
+                report.record_failure("discovery", e.to_string());
             } else {
                 report.record_success("discovery");
             }
@@ -687,6 +730,11 @@ impl Application {
             }
         }
         report.record_success("network");
+
+        // Phase 3a: Config persistence task
+        if let Some(task) = self.config_persistence_task.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        }
 
         // Phase 3: Services shutdown (reverse order)
         tracing::debug!("Shutting down ONVIF services...");
@@ -835,6 +883,7 @@ impl Application {
     /// This is a best-effort function that tries common approaches:
     /// 1. Check for non-loopback IPv4 addresses
     /// 2. Fall back to 127.0.0.1 if detection fails
+    #[allow(dead_code)]
     fn detect_local_ip() -> Option<String> {
         // Try to get local IP using a UDP socket trick
         // This doesn't actually send any packets, just uses the OS routing table
@@ -843,13 +892,13 @@ impl Application {
         match UdpSocket::bind("0.0.0.0:0") {
             Ok(socket) => {
                 // Connect to a public DNS server (doesn't actually send anything)
-                if socket.connect("8.8.8.8:80").is_ok() {
-                    if let Ok(addr) = socket.local_addr() {
-                        let ip = addr.ip().to_string();
-                        if ip != "0.0.0.0" {
-                            tracing::debug!(detected_ip = %ip, "Auto-detected local IP");
-                            return Some(ip);
-                        }
+                if socket.connect("8.8.8.8:80").is_ok()
+                    && let Ok(addr) = socket.local_addr()
+                {
+                    let ip = addr.ip().to_string();
+                    if ip != "0.0.0.0" {
+                        tracing::debug!(detected_ip = %ip, "Auto-detected local IP");
+                        return Some(ip);
                     }
                 }
             }

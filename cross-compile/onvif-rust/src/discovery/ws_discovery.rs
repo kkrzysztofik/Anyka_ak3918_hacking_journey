@@ -1724,13 +1724,17 @@ mod tests {
     async fn test_set_scopes_increments_metadata_version() {
         let config = DiscoveryConfig::default();
         let discovery = WsDiscovery::new(config);
+        let metadata_version = discovery.metadata_version.clone();
 
-        let initial_version = discovery.metadata_version.load(Ordering::Relaxed);
+        let initial_version = metadata_version.load(Ordering::Relaxed);
 
         // Start the service to get a handle
         let (handle, task) = discovery.run_service().await.unwrap();
 
         handle.set_scopes(vec!["new_scope".to_string()]).await;
+
+        let updated_version = metadata_version.load(Ordering::Relaxed);
+        assert!(updated_version > initial_version);
 
         // The handle shares the same metadata_version Arc
         assert!(handle.is_running());
@@ -1976,7 +1980,7 @@ mod tests {
     #[test]
     fn test_discovery_mode_clone_and_copy() {
         let mode = DiscoveryMode::Discoverable;
-        let cloned = mode.clone();
+        let cloned = mode; // Copy + Clone
         let copied = mode; // Copy
         assert_eq!(mode, cloned);
         assert_eq!(mode, copied);

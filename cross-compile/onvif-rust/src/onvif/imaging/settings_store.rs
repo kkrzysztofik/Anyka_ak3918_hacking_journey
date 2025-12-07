@@ -292,59 +292,55 @@ impl ImagingSettingsStore {
         let options = self.get_options(video_source_token).await?;
 
         // Validate brightness
-        if let Some(brightness) = settings.brightness {
-            if let Some(ref range) = options.brightness {
-                if brightness < range.min || brightness > range.max {
-                    return Err(ImagingSettingsError::OutOfRange {
-                        parameter: "Brightness".to_string(),
-                        value: brightness,
-                        min: range.min,
-                        max: range.max,
-                    });
-                }
-            }
+        if let Some(brightness) = settings.brightness
+            && let Some(ref range) = options.brightness
+            && (brightness < range.min || brightness > range.max)
+        {
+            return Err(ImagingSettingsError::OutOfRange {
+                parameter: "Brightness".to_string(),
+                value: brightness,
+                min: range.min,
+                max: range.max,
+            });
         }
 
         // Validate contrast
-        if let Some(contrast) = settings.contrast {
-            if let Some(ref range) = options.contrast {
-                if contrast < range.min || contrast > range.max {
-                    return Err(ImagingSettingsError::OutOfRange {
-                        parameter: "Contrast".to_string(),
-                        value: contrast,
-                        min: range.min,
-                        max: range.max,
-                    });
-                }
-            }
+        if let Some(contrast) = settings.contrast
+            && let Some(ref range) = options.contrast
+            && (contrast < range.min || contrast > range.max)
+        {
+            return Err(ImagingSettingsError::OutOfRange {
+                parameter: "Contrast".to_string(),
+                value: contrast,
+                min: range.min,
+                max: range.max,
+            });
         }
 
         // Validate color saturation
-        if let Some(saturation) = settings.color_saturation {
-            if let Some(ref range) = options.color_saturation {
-                if saturation < range.min || saturation > range.max {
-                    return Err(ImagingSettingsError::OutOfRange {
-                        parameter: "ColorSaturation".to_string(),
-                        value: saturation,
-                        min: range.min,
-                        max: range.max,
-                    });
-                }
-            }
+        if let Some(saturation) = settings.color_saturation
+            && let Some(ref range) = options.color_saturation
+            && (saturation < range.min || saturation > range.max)
+        {
+            return Err(ImagingSettingsError::OutOfRange {
+                parameter: "ColorSaturation".to_string(),
+                value: saturation,
+                min: range.min,
+                max: range.max,
+            });
         }
 
         // Validate sharpness
-        if let Some(sharpness) = settings.sharpness {
-            if let Some(ref range) = options.sharpness {
-                if sharpness < range.min || sharpness > range.max {
-                    return Err(ImagingSettingsError::OutOfRange {
-                        parameter: "Sharpness".to_string(),
-                        value: sharpness,
-                        min: range.min,
-                        max: range.max,
-                    });
-                }
-            }
+        if let Some(sharpness) = settings.sharpness
+            && let Some(ref range) = options.sharpness
+            && (sharpness < range.min || sharpness > range.max)
+        {
+            return Err(ImagingSettingsError::OutOfRange {
+                parameter: "Sharpness".to_string(),
+                value: sharpness,
+                min: range.min,
+                max: range.max,
+            });
         }
 
         Ok(())
@@ -365,15 +361,15 @@ impl ImagingSettingsStore {
             _ => None,
         };
 
-        if let Some(range) = range {
-            if value < range.min || value > range.max {
-                return Err(ImagingSettingsError::OutOfRange {
-                    parameter: parameter.to_string(),
-                    value,
-                    min: range.min,
-                    max: range.max,
-                });
-            }
+        if let Some(range) = range
+            && (value < range.min || value > range.max)
+        {
+            return Err(ImagingSettingsError::OutOfRange {
+                parameter: parameter.to_string(),
+                value,
+                min: range.min,
+                max: range.max,
+            });
         }
 
         Ok(())

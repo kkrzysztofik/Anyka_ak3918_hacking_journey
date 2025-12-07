@@ -548,7 +548,7 @@ fn validate_digest_request(
     let user = state
         .user_storage
         .get_user(&params.username)
-        .ok_or_else(|| HttpDigestError::InvalidDigest)?;
+        .ok_or(HttpDigestError::InvalidDigest)?;
 
     // Get the password for verification
     let password = state
@@ -738,7 +738,7 @@ mod tests {
         let auth = HttpDigestAuth::new("ONVIF", 300);
         let nonce = auth.generate_nonce();
 
-        let ha1 = md5_hex(&format!("admin:ONVIF:correct_password"));
+        let ha1 = md5_hex("admin:ONVIF:correct_password");
         let ha2 = md5_hex("GET:/");
         let response = md5_hex(&format!("{}:{}:{}", ha1, nonce, ha2));
 

@@ -160,12 +160,12 @@ impl ConfigPersistenceService {
 
                 // Handle debounce timer
                 _ = sleep(self.save_delay), if pending_save => {
-                    if let Some(last) = last_request {
-                        if last.elapsed() >= self.save_delay {
-                            self.do_save();
-                            pending_save = false;
-                            last_request = None;
-                        }
+                    if let Some(last) = last_request
+                        && last.elapsed() >= self.save_delay
+                    {
+                        self.do_save();
+                        pending_save = false;
+                        last_request = None;
                     }
                 }
             }
@@ -198,7 +198,6 @@ impl ConfigPersistenceService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
     use tempfile::NamedTempFile;
 
     use crate::config::ApplicationConfig;

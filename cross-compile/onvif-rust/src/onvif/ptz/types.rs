@@ -183,8 +183,8 @@ mod tests {
 
     #[test]
     fn test_default_tokens() {
-        assert!(!DEFAULT_NODE_TOKEN.is_empty());
-        assert!(!DEFAULT_CONFIG_TOKEN.is_empty());
+        assert_eq!(DEFAULT_NODE_TOKEN, "PTZNodeToken1");
+        assert_eq!(DEFAULT_CONFIG_TOKEN, "PTZConfigToken1");
     }
 
     #[test]

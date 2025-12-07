@@ -1194,20 +1194,12 @@ pub struct BackupFile {
 }
 
 /// GetSystemBackup response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "tds:GetSystemBackupResponse")]
 pub struct GetSystemBackupResponse {
     /// Backup files.
     #[serde(rename = "tds:BackupFiles", default)]
     pub backup_files: Vec<BackupFile>,
-}
-
-impl Default for GetSystemBackupResponse {
-    fn default() -> Self {
-        Self {
-            backup_files: vec![],
-        }
-    }
 }
 
 /// RestoreSystem request.

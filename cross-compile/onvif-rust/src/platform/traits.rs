@@ -559,12 +559,12 @@ pub trait NetworkInfo: Send + Sync {
         use std::net::UdpSocket;
         match UdpSocket::bind("0.0.0.0:0") {
             Ok(socket) => {
-                if socket.connect("8.8.8.8:80").is_ok() {
-                    if let Ok(addr) = socket.local_addr() {
-                        let ip = addr.ip().to_string();
-                        if ip != "0.0.0.0" {
-                            return Some(ip);
-                        }
+                if socket.connect("8.8.8.8:80").is_ok()
+                    && let Ok(addr) = socket.local_addr()
+                {
+                    let ip = addr.ip().to_string();
+                    if ip != "0.0.0.0" {
+                        return Some(ip);
                     }
                 }
                 None

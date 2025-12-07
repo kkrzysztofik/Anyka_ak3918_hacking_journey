@@ -335,6 +335,31 @@ impl ConfigSchema {
                 ConfigParameter::string("network.dns_secondary", "", "Secondary DNS server")
                     .optional(),
             )
+            .param(
+                ConfigParameter::bool(
+                    "network.ntp_from_dhcp",
+                    true,
+                    "Obtain NTP servers from DHCP",
+                )
+                .optional(),
+            )
+            .param(
+                ConfigParameter::string("network.ntp_primary", "", "Primary NTP server").optional(),
+            )
+            .param(
+                ConfigParameter::string("network.ntp_secondary", "", "Secondary NTP server")
+                    .optional(),
+            )
+            .param(ConfigParameter::bool(
+                "network.http_enabled",
+                true,
+                "Enable HTTP protocol",
+            ))
+            .param(ConfigParameter::bool(
+                "network.rtsp_enabled",
+                true,
+                "Enable RTSP protocol",
+            ))
             .param(ConfigParameter::bool(
                 "network.dhcp_enabled",
                 true,
@@ -378,6 +403,14 @@ impl ConfigSchema {
                 "Device hostname",
             ))
             .param(
+                ConfigParameter::string(
+                    "device.scopes",
+                    "",
+                    "Configurable ONVIF scopes (comma-separated)",
+                )
+                .optional(),
+            )
+            .param(
                 ConfigParameter::string("device.uuid", "", "Device UUID (empty to auto-generate)")
                     .optional(),
             )
@@ -417,6 +450,13 @@ impl ConfigSchema {
                 1024,
                 10485760,
                 "Maximum request body size in bytes",
+            ))
+            .param(ConfigParameter::int(
+                "server.config_save_delay_ms",
+                500,
+                50,
+                10000,
+                "Debounce delay for config saves in milliseconds",
             ))
             .param(ConfigParameter::bool(
                 "server.auth_enabled",
@@ -527,6 +567,36 @@ impl ConfigSchema {
                 true,
                 "Move to home position on startup",
             ))
+            .param(
+                ConfigParameter::string(
+                    "ptz.presets_json",
+                    "",
+                    "Serialized PTZ presets for persistence",
+                )
+                .optional(),
+            )
+            .param(
+                ConfigParameter::float("ptz.home_pan", 0.0, -1.0, 1.0, "Home position pan")
+                    .optional(),
+            )
+            .param(
+                ConfigParameter::float("ptz.home_tilt", 0.0, -1.0, 1.0, "Home position tilt")
+                    .optional(),
+            )
+            .param(
+                ConfigParameter::float("ptz.home_zoom", 0.0, 0.0, 1.0, "Home position zoom")
+                    .optional(),
+            )
+            .param(
+                ConfigParameter::int(
+                    "ptz.next_preset_num",
+                    1,
+                    1,
+                    1000,
+                    "Next preset number for auto token generation",
+                )
+                .optional(),
+            )
     }
 
     fn imaging_section() -> ConfigSection {
@@ -579,6 +649,7 @@ impl ConfigSchema {
                 &format!("Profile{}", index),
                 "Profile name",
             ))
+            // Video configuration
             .param(ConfigParameter::int(
                 &format!("{}.width", section_name),
                 if index == 1 { 1920 } else { 640 },
@@ -605,7 +676,7 @@ impl ConfigSchema {
                 if index == 1 { 4000 } else { 512 },
                 64,
                 16384,
-                "Bitrate in kbps",
+                "Video bitrate in kbps",
             ))
             .param(ConfigParameter::string(
                 &format!("{}.encoding", section_name),
@@ -624,7 +695,32 @@ impl ConfigSchema {
                 80,
                 1,
                 100,
-                "Quality level",
+                "Video quality level",
+            ))
+            // Audio configuration (part of ONVIF media profile)
+            .param(ConfigParameter::bool(
+                &format!("{}.audio_enabled", section_name),
+                index == 1, // Enable audio only on main profile by default
+                "Enable audio for this profile",
+            ))
+            .param(ConfigParameter::string(
+                &format!("{}.audio_encoding", section_name),
+                "G711",
+                "Audio encoding (G711, G726, AAC)",
+            ))
+            .param(ConfigParameter::int(
+                &format!("{}.audio_bitrate", section_name),
+                64,
+                8,
+                512,
+                "Audio bitrate in kbps",
+            ))
+            .param(ConfigParameter::int(
+                &format!("{}.audio_sample_rate", section_name),
+                8000,
+                8000,
+                48000,
+                "Audio sample rate in Hz",
             ))
     }
 
