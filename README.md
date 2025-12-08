@@ -8,25 +8,73 @@ This project was originally developed by **Gerge** (<https://gitea.raspiweb.com/
 
 ## Recent Updates
 
-- **Complete Platform Abstraction Layer**: Full hardware abstraction implementation for Anyka AK3918 with proper SDK integration
-- **ONVIF Server Implementation**: Complete ONVIF server with Device, Media, PTZ, and Imaging services
-- **RTSP Streaming**: Robust RTSP server with H.264 video and audio streaming support
-- **Docker Cross-Compilation Environment**: Added Docker-based cross-compilation setup for easier development on Windows and other platforms
-- **Code Quality Improvements**: Fixed compilation errors, improved code structure, and enhanced error handling
-- **Build System**: Streamlined build process with proper Makefiles and build scripts
-- **Web Interface Reorganization**: Separated ONVIF and legacy interfaces for better organization and user experience
+- **ONVIF Rust Rewrite**: Complete rewrite of ONVIF services in Rust for memory safety and modern async architecture
+- **ONVIF 24.12 Compliance**: Targeting latest ONVIF specifications with Profile S/T support
+- **Modern Stack**: Built on `tokio` and `axum` for high-performance asynchronous I/O
+- **Comprehensive Testing**: Unit tests with `mockall` and integration test framework
+- **Code Quality**: Rust's ownership model prevents common embedded pitfalls
+- **Web Interface**: ONVIF and legacy interfaces with clear separation
 
-## ONVIF Rust Rewrite
+## ONVIF Rust Implementation
 
-A significant effort is underway to rewrite the ONVIF application in Rust. This project, located in the `cross-compile/onvif-rust` directory, aims to create a modern, safe, and maintainable ONVIF-compliant IP camera firmware.
+The project features a complete, modern ONVIF 24.12 implementation written in **Rust** for the Anyka AK3918 IP camera. This is the primary ONVIF stack, replacing the legacy C implementation with a memory-safe, asynchronous architecture built on `tokio` and `axum`.
+
+### Status
+
+- **Current Status**: Active Development (Alpha)
+- **Target Platform**: Anyka AK3918 (ARM926EJ-S, 32MB RAM)
+- **ONVIF Compliance**: Profile S/T (Targeting v24.12)
+
+> **⚠️ Current Limitation**: The ONVIF Rust implementation currently uses **stub implementations** for the Platform Abstraction Layer. Real Anyka hardware integration is not yet implemented. All ONVIF API calls are handled by stub/mock implementations for testing and development purposes. Hardware integration with the Anyka AK3918 platform is planned for future development.
+
+### Features
+
+- **Modern Stack**: Built on `tokio` (async runtime) and `axum` (web server)
+- **Memory Safe**: Leverages Rust's ownership model to prevent common embedded pitfalls (buffer overflows, use-after-free)
+- **ONVIF 24.12**: Targeting the latest ONVIF specifications
+- **Implemented Services**:
+  - **Device Service**: System configuration, network interfaces, users, device information
+  - **Media Service**: Video profiles, RTSP stream URI generation, encoder configuration
+  - **PTZ Service**: Pan/Tilt/Zoom control with preset management
+  - **Imaging Service**: Image settings (brightness, contrast, saturation, sharpness)
+
+### Quick Start
+
+#### ONVIF Rust Prerequisites
+
+- Rust (Stable channel)
+- `arm-anykav200-crosstool-ng` toolchain (located at `/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/`)
+
+#### Build for Host (Testing)
+
+```bash
+cd cross-compile/onvif-rust
+cargo build
+cargo test
+```
+
+#### Build for Target (Anyka AK3918)
+
+> **⚠️ CRITICAL**: Always use the custom toolchain's cargo binary
+
+```bash
+cd cross-compile/onvif-rust
+export CARGO=/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo
+$CARGO build --release --target armv5te-unknown-linux-uclibceabi
+```
+
+The resulting binary will be at: `target/armv5te-unknown-linux-uclibceabi/release/onvif-rust`
+
+### Documentation
 
 For detailed information, please refer to the comprehensive developer documentation:
 
-- **[README](cross-compile/onvif-rust/README.md)**
-- **[Architecture](cross-compile/onvif-rust/docs/architecture.md)**
-- **[Development Guide](cross-compile/onvif-rust/docs/development-guide.md)**
-- **[Testing Strategy](cross-compile/onvif-rust/docs/testing.md)**
-- **[Memory Management](cross-compile/onvif-rust/docs/memory_management.md)**
+- **[README](cross-compile/onvif-rust/README.md)** - Project overview and quick start
+- **[Architecture Guide](cross-compile/onvif-rust/doc/ARCHITECTURE.md)** - High-level design, module structure, and data flow
+- **[Developer Guide](cross-compile/onvif-rust/doc/DEVELOPER_GUIDE.md)** - Setup, build instructions, and contribution guidelines
+- **[Memory Management](cross-compile/onvif-rust/doc/MEMORY_MANAGEMENT.md)** - Memory allocation strategies and embedded system considerations
+- **[Requirements](cross-compile/onvif-rust/doc/REQUIREMENTS.md)** - Functional requirements and ONVIF service specifications
+- **[Testing Strategy](cross-compile/onvif-rust/doc/TESTING.md)** - Testing framework, unit tests, and integration tests
 
 ## Summary
 
@@ -34,130 +82,173 @@ This is a simplified README with the latest features. For detailed hacking proce
 
 ### Working Features
 
-- **Complete Platform Abstraction Layer** - Full hardware abstraction for Anyka AK3918
-- **ONVIF Server** - Complete implementation with Device, Media, PTZ, and Imaging services
-- **RTSP Streaming** - H.264 video and audio streaming with proper resource management
-- **PTZ Control** - Full pan-tilt-zoom functionality with preset management
-- **Imaging Services** - Real-time video effects and day/night switching
-- **IR LED Management** - Automatic night vision control
-- **Configuration Management** - INI-style configuration with load/save functionality
+- **ONVIF Rust Implementation** - Modern, memory-safe ONVIF 24.12 server with Device, Media, PTZ, and Imaging services
+- **Memory Safety** - Rust's ownership model prevents buffer overflows and use-after-free errors
+- **Asynchronous Architecture** - High-performance async I/O using `tokio` and `axum`
+- **PTZ Control** - Pan-tilt-zoom functionality with preset management (currently using stub implementation)
+- **Imaging Services** - Image parameter adjustment (brightness, contrast, saturation, sharpness) (currently using stub implementation)
+- **Platform Abstraction** - Clean hardware abstraction layer for portability and testing (currently using `StubPlatform` for development)
+- **Comprehensive Testing** - Unit tests with `mockall` and integration test framework
 - **Web Interfaces** - Both ONVIF and legacy interfaces with clear separation
-- **Motion Detection** - Real-time motion detection capabilities
-- **Audio Support** - Audio recording and playback functionality
-- **Docker Cross-Compilation** - Easy development environment for all platforms
 
 ### Key Technical Achievements
 
-- **Hardware Abstraction**: Clean, platform-agnostic interface for all hardware operations
-- **ONVIF Compliance**: Full implementation of ONVIF Device, Media, PTZ, and Imaging services
-- **RTSP Integration**: Robust streaming with proper video/audio synchronization
-- **Resource Management**: Proper cleanup and resource handling using Anyka SDK
-- **Error Handling**: Comprehensive error handling with standardized return codes
-- **Logging System**: Unified logging interface with timestamp formatting
+- **Memory Safety**: Rust's ownership model eliminates entire classes of embedded bugs
+- **ONVIF 24.12 Compliance**: Full implementation targeting Profile S/T specifications
+- **Modern Async Stack**: High-performance asynchronous I/O with `tokio` and `axum`
+- **Platform Abstraction**: Clean trait-based interface for hardware operations
+- **Comprehensive Testing**: Unit and integration tests with mocking support
+- **Resource Management**: Proper cleanup and resource handling through Rust's RAII
+- **Error Handling**: Type-safe error handling with `Result` types
 
 The camera can now be connected to professional surveillance software such as MotionEye, Blue Iris, or any ONVIF-compliant system, providing full integration with industry-standard protocols.
 
-# Platform Abstraction Layer
+## Development Environment
 
-The project features a comprehensive platform abstraction layer (`cross-compile/onvif/src/platform/platform_anyka.c`) that provides unified hardware access for the Anyka AK3918 platform.
+### Building the Custom Toolchain
 
-## Core Components
+The project uses a custom cross-compilation toolchain built with crosstool-NG that includes GCC, LLVM/Clang, and Rust support for the Anyka AK3918 target.
 
-### Video Processing
+#### Toolchain Build Prerequisites
 
-- **Video Input (VI)**: Device management, sensor resolution detection, day/night switching
-- **Video Processing Subsystem (VPSS)**: Real-time effects (brightness, contrast, saturation, sharpness, hue)
-- **Video Encoder**: H.264/H.265/MJPEG encoding with configurable parameters
+- **System Requirements**:
+  - Linux or WSL environment
+  - At least 10GB free disk space
+  - 4GB+ RAM recommended
+  - 2-4 hours build time (depending on CPU)
 
-### Audio Processing
-
-- **Audio Input (AI)**: Audio capture and device management
-- **Audio Encoder**: AAC, G.711, PCM encoding with synchronized streaming
-
-### Control Systems
-
-- **PTZ Control**: Complete pan-tilt-zoom functionality with coordinate mapping
-- **IR LED Management**: Automatic night vision control and mode switching
-- **Configuration Management**: INI-style configuration with load/save functionality
-
-### System Services
-
-- **Logging System**: Unified logging interface using Anyka's `ak_print()` function
-- **Resource Management**: Proper cleanup and resource handling
-- **Error Handling**: Standardized error codes and comprehensive error reporting
-
-## API Design
-
-The platform abstraction provides a clean, hardware-agnostic interface:
-
-```c
-// Video encoder stream for RTSP
-platform_result_t platform_venc_get_stream(platform_venc_handle_t handle,
-                                          platform_venc_stream_t *stream,
-                                          uint32_t timeout_ms);
-
-// PTZ control
-platform_result_t platform_ptz_move_to_position(int pan_deg, int tilt_deg);
-
-// Configuration management
-const char* platform_config_get_string(const char *section, const char *key,
-                                      const char *default_value);
-```
-
-## Benefits
-
-- **Hardware Independence**: Clean separation between application logic and hardware specifics
-- **Maintainability**: Easy to modify or extend hardware support
-- **Error Handling**: Consistent error reporting across all platform functions
-- **Resource Management**: Proper cleanup and resource handling
-- **Testing**: Easier unit testing with abstracted interfaces
-
-# Development Environment
-
-## Docker Cross-Compilation (Recommended)
-
-For easy development on Windows and other platforms, a Docker-based cross-compilation environment is provided:
+- **Build Dependencies**:
 
 ```bash
-# Build the Docker image
-cd cross-compile
-./docker-build.sh  # Linux/Mac
-# or
-.\docker-build.ps1  # Windows PowerShell
-
-# Compile the ONVIF server
-docker run --rm -v ${PWD}:/workspace anyka-cross-compile make -C /workspace/onvif
-
-# Interactive development shell
-docker run -it --rm -v ${PWD}:/workspace anyka-cross-compile
+sudo apt-get update
+sudo apt-get install -y \
+    build-essential \
+    libncurses-dev \
+    gperf \
+    bison \
+    flex \
+    texinfo \
+    help2man \
+    gawk \
+    libtool-bin \
+    automake \
+    autoconf \
+    wget \
+    git \
+    file \
+    python3 \
+    python3-dev \
+    cmake \
+    ninja-build \
+    curl \
+    unzip \
+    xz-utils \
+    perl \
+    pkg-config
 ```
 
-The Docker environment includes:
+### Building the Toolchain
 
-- Ubuntu 16.04 base with 32-bit library support
-- Pre-installed Anyka ARM toolchain
-- All necessary build dependencies
-- Cross-compilation ready for AK3918 target
+#### Step 1: Navigate to the build directory
+
+```bash
+cd /home/kmk/anyka-dev/toolchain/build-new
+```
+
+#### Step 2: Build the GCC toolchain
+
+```bash
+./build_toolchain.sh
+```
+
+This will:
+
+- Download and build crosstool-NG 1.28.0
+- Configure for ARMv5TEJ with uClibc-ng
+- Build GCC 15.2, Binutils 2.45, and GDB 16.3
+- Install to `../arm-anykav200-crosstool-ng/usr/`
+
+#### Step 3: Build LLVM/Clang (Required for Rust)
+
+```bash
+./build_llvm.sh
+```
+
+This builds LLVM 18.1.8 with Clang and LLD for cross-compilation support.
+
+#### Step 4: Bootstrap Rust from Source
+
+```bash
+./bootstrap_rust.sh
+```
+
+This will:
+
+- Clone Rust source code
+- Add `armv5te-unknown-linux-uclibceabi` target specification
+- Configure Rust to use the custom LLVM
+- Build Rust compiler and std library for the target
+- Install to `../arm-anykav200-crosstool-ng/`
+
+#### Step 5: Verify the installation
+
+```bash
+./verify_rust.sh
+```
+
+After building, the toolchain will be available at:
+
+- `../arm-anykav200-crosstool-ng/bin/rustc`
+- `../arm-anykav200-crosstool-ng/bin/cargo`
+- `../arm-anykav200-crosstool-ng/bin/clang`
+
+For detailed toolchain build instructions, see the [Toolchain Build README](toolchain/build-new/README.md).
+
+## Rust Development Setup
+
+The ONVIF Rust project uses the custom Rust toolchain for cross-compilation to the Anyka AK3918 target.
+
+### Rust Development Prerequisites
+
+- **Custom Toolchain**: Built using the steps above (located at `/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/`)
+
+### Rust Development Quick Start
+
+```bash
+cd cross-compile/onvif-rust
+
+# Use the custom toolchain's cargo
+export CARGO=/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo
+
+# Build for host (testing)
+$CARGO build
+$CARGO test
+
+# Build for target (Anyka AK3918)
+$CARGO build --release --target armv5te-unknown-linux-uclibceabi
+```
+
+For detailed setup instructions, see the [Developer Guide](cross-compile/onvif-rust/doc/DEVELOPER_GUIDE.md).
 
 ## Traditional Setup
 
-For the original Ubuntu 16.04 setup, see the [hack process documentation](hack_process/README.md).
+For the original Ubuntu 16.04 setup and other legacy applications, see the [hack process documentation](hack_process/README.md).
 
-# Quick Start SD Card Hack
+## Quick Start SD Card Hack
 
-This hack runs only when the SD card is inserted leaving the camera unmodified. It is beginner friendly, and requires zero coding/terminal skills. See more [here](SD_card_contents/Factory)
+This hack runs only when the SD card is inserted leaving the camera unmodified. It is beginner friendly, and requires zero coding/terminal skills. See more in the [SD card factory documentation](SD_card_contents/Factory)
 
 It is unlikely that this can cause any harm to your camera as the system remains original, but no matter how small the risk it is never zero (unless you have the exact same camera). Try any of these hacks at your own risk.
 
 The SD card hack is a safe way to test compatibility with the camera and to see if all features are working.
 
-# Web Interface
+## Web Interface
 
-The project includes two web interfaces with clear separation and easy switching between them.
+The project includes two web interfaces with clear separation and easy switching between them. The web interfaces communicate with the ONVIF server (Rust implementation) via HTTP/SOAP requests.
 
-## Web Interface Structure
+### Web Interface Structure
 
-```
+```text
 www/cgi-bin/
 ├── header                    # Common header for all interfaces
 ├── footer                    # Common footer for all interfaces
@@ -226,182 +317,59 @@ www/cgi-bin/
 - Imaging: `http://[CAMERA_IP]/cgi-bin/onvif_imaging`
 - Presets: `http://[CAMERA_IP]/cgi-bin/onvif_presets`
 
-### Legacy Interface
+### Legacy Interface URLs
 
 - Main: `http://[CAMERA_IP]/cgi-bin/legacy/webui`
 - Events: `http://[CAMERA_IP]/cgi-bin/legacy/events`
 - Settings: `http://[CAMERA_IP]/cgi-bin/legacy/settings`
 - System: `http://[CAMERA_IP]/cgi-bin/legacy/system`
 
-# ONVIF Server
+## ONVIF Server
 
-A complete ONVIF server implementation with full platform abstraction integration:
+The ONVIF server is implemented in Rust and provides a complete, memory-safe ONVIF 24.12 implementation. For detailed information about the ONVIF server architecture, features, and usage, please refer to the [ONVIF Rust Implementation](#onvif-rust-implementation) section above and the comprehensive documentation:
 
-## Features
+- **[ONVIF Rust README](cross-compile/onvif-rust/README.md)** - Project overview and features
+- **[Architecture Guide](cross-compile/onvif-rust/doc/ARCHITECTURE.md)** - System architecture and design
+- **[Developer Guide](cross-compile/onvif-rust/doc/DEVELOPER_GUIDE.md)** - Build and deployment instructions
+- **[Requirements](cross-compile/onvif-rust/doc/REQUIREMENTS.md)** - ONVIF service specifications
 
-### Device Management
+## Quick Reference
 
-- Device information, capabilities, and discovery
-- WS-Discovery for automatic device discovery on the network
-- Hardware abstraction for device-specific operations
+The Rust-based ONVIF server implements:
 
-### Media Services
-
-- Video stream configuration and management
-- RTSP streaming with H.264 video and synchronized audio
-- Real-time stream generation using platform video encoder
-- Proper resource management and frame handling
-
-### PTZ Services
-
-- Pan-tilt-zoom control with preset management
-- Relative and absolute movement commands
-- Preset storage and recall (up to 5 positions)
-- Hardware abstraction for PTZ operations
-
-### Imaging Services
-
-- Brightness, contrast, saturation, sharpness, and hue adjustment
-- Real-time parameter adjustment using VPSS effects
-- Day/night mode switching with automatic IR LED control
-- Quick preset configurations
-
-## Architecture
-
-The system uses a layered architecture with clear separation of concerns:
-
-```
-Web Browser → CGI Script → HTTP POST → ONVIF Server → Platform Abstraction → Anyka SDK → Hardware
-```
-
-### Component Layers
-
-1. **Web Interface Layer**: CGI scripts and web pages for user interaction
-2. **ONVIF Service Layer**: SOAP/HTTP server implementing ONVIF protocols
-3. **Platform Abstraction Layer**: Hardware-agnostic interface for all operations
-4. **SDK Integration Layer**: Direct integration with Anyka SDK functions
-5. **Hardware Layer**: Physical camera hardware and peripherals
-
-### Data Flow
-
-- **Configuration**: INI files → Platform abstraction → Hardware settings
-- **Video Streams**: Hardware → SDK → Platform abstraction → RTSP server → Network
-- **PTZ Commands**: Web interface → ONVIF server → Platform abstraction → Hardware
-- **Imaging Controls**: Web interface → ONVIF server → Platform abstraction → VPSS effects
-
-### ONVIF Services Used
-
-1. **PTZ Service** (`/onvif/ptz_service`)
-   - `RelativeMove`: Move camera in specified direction
-   - `Stop`: Stop all camera movement
-   - `SetPreset`: Store current position as preset
-   - `GotoPreset`: Move to saved preset position
-   - `RemovePreset`: Delete saved preset
-
-2. **Imaging Service** (`/onvif/imaging_service`)
-   - `GetImagingSettings`: Retrieve current imaging parameters
-   - `SetImagingSettings`: Apply new imaging parameters
-
-3. **Device Service** (`/onvif/device_service`)
-   - `GetDeviceInformation`: Check server status and capabilities
-
-## Installation
-
-1. **Copy ONVIF Server**: Ensure `onvifd` binary is compiled and available at `/mnt/anyka_hack/onvif/onvifd`
-
-2. **Copy Web Interface**: The web interface files are already included in the SD card contents
-
-3. **Start Services**: Use the provided startup script:
-
-   ```bash
-   /mnt/anyka_hack/web_interface/start_web_interface_onvif.sh
-   ```
-
-4. **Access Interface**: Open browser to `http://[CAMERA_IP]`
-
-## Configuration
-
-The ONVIF server uses the configuration file at `/etc/jffs2/anyka_cfg.ini`:
-
-```ini
-[global]
-user = admin
-secret = admin
-
-[onvif]
-enabled = 1
-http_port = 8080
-
-[ptz]
-invert_directions = 0
-max_pan_speed = 1.0
-max_tilt_speed = 1.0
-
-[imaging]
-default_brightness = 0
-default_contrast = 0
-default_saturation = 0
-```
-
-Both interfaces share the same configuration files:
-
-- `/data/gergesettings.txt`: Main settings
-- `/mnt/tmp/token.txt`: Authentication token
-
-## Current Status
-
-- ✅ **Compilation**: All projects compile successfully with Docker environment
-- ✅ **Platform Abstraction**: Complete hardware abstraction layer implemented
-- ✅ **ONVIF Server**: Full implementation with Device, Media, PTZ, and Imaging services
-- ✅ **RTSP Streaming**: Robust implementation with H.264 video and audio streaming
-- ✅ **PTZ Control**: Complete pan-tilt-zoom functionality with preset management
-- ✅ **Imaging Services**: Real-time video effects and day/night switching
-- ✅ **Configuration Management**: INI-style configuration with load/save functionality
-- ✅ **Resource Management**: Proper cleanup and resource handling
-- ⚠️ **Security**: No authentication implemented (as noted in original design)
-- 🔧 **Known Issues**: See [REVIEW.md](REVIEW.md) for detailed technical analysis and improvement suggestions
-
-## Dependencies
-
-- **ONVIF Server**: Must be running on port 8080 (configurable)
-- **Snapshot Service**: For live camera preview (port 3000)
-- **Busybox HTTPD**: For web server functionality
-- **curl**: For HTTP requests to ONVIF server
-
-## Advantages over Legacy Interface
-
-1. **Standard Protocol**: Uses industry-standard ONVIF protocol
-2. **Better Integration**: Compatible with ONVIF-compliant software
-3. **More Features**: Imaging controls and preset management
-4. **Real-time Status**: Live monitoring of service status
-5. **Future-proof**: Easily extensible with additional ONVIF services
-6. **Hardware Abstraction**: Clean separation between application and hardware
-7. **Robust Error Handling**: Comprehensive error reporting and recovery
-8. **Resource Management**: Proper cleanup and resource handling
-9. **Maintainability**: Easier to modify and extend functionality
-10. **Professional Grade**: Suitable for integration with professional surveillance systems
+- **Device Service**: System information, network configuration, user management
+- **Media Service**: Video profiles, RTSP stream URI generation, encoder configuration
+- **PTZ Service**: Pan/Tilt/Zoom control with preset management
+- **Imaging Service**: Image parameter adjustment (brightness, contrast, saturation, sharpness)
 
 ## Troubleshooting
 
 ### ONVIF Server Not Responding
 
-- Check if `onvifd` process is running: `ps | grep onvifd`
-- Verify port 8080 is not blocked: `netstat -ln | grep 8080`
-- Check configuration file: `/etc/jffs2/anyka_cfg.ini`
+- Check if the `onvif-rust` process is running: `ps | grep onvif-rust`
+- Verify the server port is not blocked: `netstat -ln | grep 8080`
+- Check server logs for error messages
+- Ensure the Rust binary is properly compiled and deployed
 
 ### PTZ Controls Not Working
 
-- Ensure PTZ hardware is properly initialized
+- **Note**: Currently using stub implementation - hardware integration is not yet implemented
+- Ensure PTZ hardware is properly initialized (when hardware integration is available)
 - Check ONVIF server logs for errors
 - Verify profile token is correct (default: "MainProfile")
+- Ensure the platform abstraction layer is correctly configured
 
 ### Imaging Controls Not Working
 
-- Check if imaging service is enabled in ONVIF server
+- **Note**: Currently using stub implementation - hardware integration is not yet implemented
+- Check if imaging service is enabled in the ONVIF server
 - Verify video source token is correct
-- Ensure camera supports imaging adjustments
+- Ensure camera supports imaging adjustments (when hardware integration is available)
+- Check platform abstraction layer for hardware support
 
-# Legacy Applications
+## Legacy Applications
+
+**Note**: The applications in this section are separate legacy utilities and are not part of the ONVIF Rust implementation. These are standalone tools that may be used independently or alongside the ONVIF server.
 
 ## Legacy Web Interface
 
@@ -465,7 +433,7 @@ This gives the following functions without SD card running on the camera:
 - RTSP stream and snapshots for UI with libre_anyka_app
 - ptz movement
 
-# Info Links
+## Info Links
 
 These are the most important links here (this is where 99% of the info and resources come from):
 
@@ -481,16 +449,27 @@ These are the most important links here (this is where 99% of the info and resou
 
 <https://github.com/e27-camera-hack/E27-Camera-Hack/discussions/1> (discussion where most of this was worked on)
 
-# Development
+## Development
+
+### ONVIF Rust Development
+
+For developing the ONVIF Rust implementation:
+
+1. **Setup Environment**: Follow the [Developer Guide](cross-compile/onvif-rust/doc/DEVELOPER_GUIDE.md)
+2. **Build and Test**: Use `cargo build` and `cargo test` with the custom toolchain
+3. **Code Quality**: Run `cargo clippy` and `cargo fmt` for linting and formatting
+4. **Add Services**: Implement new ONVIF services following the existing patterns
+
+## Web Interface Development
 
 To modify the web interface:
 
 1. **Edit CGI Scripts**: Modify the shell scripts in `www/cgi-bin/`
-2. **Update SOAP Requests**: Modify the XML payloads for ONVIF requests
+2. **Update SOAP Requests**: Modify the XML payloads for ONVIF requests (communicates with Rust ONVIF server)
 3. **Add New Features**: Create new CGI scripts for additional ONVIF services
 4. **Test Changes**: Use the startup script to test modifications
 
-# Static Analysis Tools
+## Static Analysis Tools
 
 The project includes comprehensive static analysis tools integrated into the Anyka cross-compile environment to ensure code quality, security, and reliability.
 
@@ -540,46 +519,17 @@ Use the provided PowerShell script for easy analysis:
 .\static-analysis.ps1 -OutputDir "my-analysis-results"
 ```
 
-### Method 2: Docker Commands
+**Note**: For the ONVIF Rust project, use Rust's built-in tools:
 
-Run analysis directly with Docker:
-
-```powershell
-# Clang Static Analyzer
-docker run --rm -v ${PWD}:/workspace anyka-cross-compile make -C /workspace/onvif clang-analyze
-
-# Cppcheck
-docker run --rm -v ${PWD}:/workspace anyka-cross-compile make -C /workspace/onvif cppcheck-analyze
-
-# Snyk
-docker run --rm -v ${PWD}:/workspace anyka-cross-compile make -C /workspace/onvif snyk-analyze
-
-# Snyk with authentication token
-docker run --rm -v ${PWD}:/workspace -e SNYK_TOKEN=your-token-here anyka-cross-compile make -C /workspace/onvif snyk-analyze
-
-# All tools
-docker run --rm -v ${PWD}:/workspace anyka-cross-compile make -C /workspace/onvif static-analysis
-```
-
-### Method 3: Makefile Targets
-
-If running inside the Docker container:
-
-```bash
-# All static analysis
-make static-analysis
-
-# Individual tools
-make clang-analyze
-make cppcheck-analyze
-make snyk-analyze
-```
+- `cargo clippy -- -D warnings` for linting
+- `cargo fmt --check` for formatting
+- `cargo test` for testing
 
 ## Output Files
 
 After running analysis, results are saved in the `analysis-results/` directory:
 
-```
+```text
 analysis-results/
 ├── clang/                    # Clang Static Analyzer results
 │   └── index.html           # Main HTML report
@@ -641,13 +591,6 @@ $env:SNYK_TOKEN = "your-api-token-here"
 .\static-analysis.ps1 -Tool snyk -SnykToken "your-api-token-here"
 ```
 
-#### Method 3: Docker Environment Variable
-
-```powershell
-# Pass token to Docker container
-docker run --rm -v ${PWD}:/workspace -e SNYK_TOKEN=your-token-here anyka-cross-compile make -C /workspace/onvif snyk-analyze
-```
-
 ### Authentication Behavior
 
 - **With Token**: Full Snyk functionality, cloud-based analysis, latest vulnerability database
@@ -683,10 +626,12 @@ git config --unset core.hooksPath
 The tools can be integrated into CI/CD pipelines:
 
 ```yaml
-# Example GitHub Actions step
-- name: Run Static Analysis
+# For ONVIF Rust project
+- name: Run Rust Linting
   run: |
-    docker run --rm -v ${{ github.workspace }}:/workspace anyka-cross-compile make -C /workspace/onvif static-analysis
+    cd cross-compile/onvif-rust
+    cargo clippy -- -D warnings
+    cargo fmt --check
 ```
 
 ### IDE Integration
@@ -756,21 +701,9 @@ strcpy(dest, src);  // Known safe in this context
 4. **Use multiple tools** - Each tool has different strengths
 5. **Keep tools updated** - Use latest versions for better analysis
 
-## Troubleshooting
+### Static Analysis Troubleshooting
 
-### Docker Issues
-
-```powershell
-# Rebuild Docker image if tools are missing
-docker build -t anyka-cross-compile -f Dockerfile .
-
-# Check if tools are installed
-docker run --rm anyka-cross-compile clang --version
-docker run --rm anyka-cross-compile cppcheck --version
-docker run --rm anyka-cross-compile semgrep --version
-```
-
-### Permission Issues
+#### Permission Issues
 
 ```powershell
 # Fix file permissions if needed
@@ -789,7 +722,7 @@ Get-ChildItem -Path "analysis-results" -Recurse | ForEach-Object { $_.Attributes
 - [Clang Static Analyzer Documentation](https://clang.llvm.org/docs/analyzer/)
 - [Cppcheck Manual](http://cppcheck.sourceforge.net/manual.pdf)
 - [Snyk Documentation](https://docs.snyk.io/)
-- [ONVIF Project Coding Standards](#coding-standards--guidelines)
+- ONVIF Project Coding Standards (see project documentation)
 
 ## Future Enhancements
 
