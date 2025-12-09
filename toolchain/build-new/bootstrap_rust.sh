@@ -245,6 +245,9 @@ target = ["x86_64-unknown-linux-gnu", "${TARGET_NAME}"]
 # Use system Rust toolchain for bootstrap (matches version ${RUST_VERSION})
 rustc = "${system_rustc}"
 cargo = "${system_cargo}"
+# Build extended tools (cargo, rustfmt, clippy, etc.)
+extended = true
+tools = ["cargo", "rustfmt", "clippy", "rustdoc"]
 
 [install]
 prefix = "${INSTALL_DIR}"
@@ -361,9 +364,8 @@ EOF
 
     # Build Rust compiler and std library for both host and target
     # Host is needed for build scripts, target is for cross-compilation
+    # Targets are specified in config.toml, no need for --target flags
     python3 x.py build --stage 2 \
-        --target "x86_64-unknown-linux-gnu" \
-        --target "${TARGET_NAME}" \
         2>&1 | tee "${BUILD_DIR}/rust_build.log" || {
         log_error "Rust build failed. Check log: ${BUILD_DIR}/rust_build.log"
         exit 1
@@ -400,19 +402,10 @@ install_rust() {
     # Clang wrapper should already be created and configured in config.toml
     # No need to set RUSTFLAGS as the wrapper handles all the flags
 
-    # Install Rust for both host (needed for build scripts) and target
-    # x.py install doesn't accept multiple --target flags, so we install separately
-    log_info "Installing Rust for host (x86_64-unknown-linux-gnu)..."
+    # Install Rust for all targets defined in config.toml
+    # This installs compiler, stdlib, and extended tools (cargo, rustfmt, clippy)
+    log_info "Installing Rust for all targets..."
     python3 x.py install --stage 2 \
-        --target "x86_64-unknown-linux-gnu" \
-        2>&1 | tee -a "${BUILD_DIR}/rust_install.log" || {
-        log_error "Rust host installation failed. Check log: ${BUILD_DIR}/rust_install.log"
-        exit 1
-    }
-
-    log_info "Installing Rust for target (${TARGET_NAME})..."
-    python3 x.py install --stage 2 \
-        --target "${TARGET_NAME}" \
         2>&1 | tee -a "${BUILD_DIR}/rust_install.log" || {
         log_error "Rust target installation failed. Check log: ${BUILD_DIR}/rust_install.log"
         exit 1

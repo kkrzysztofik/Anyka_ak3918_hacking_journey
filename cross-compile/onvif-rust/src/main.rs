@@ -29,7 +29,8 @@ async fn main() -> Result<()> {
     let health = app.health();
     if app.is_degraded() {
         tracing::warn!(
-            "Application running in DEGRADED mode. Unavailable services: {:?}",
+            "Application health: {} (DEGRADED). Unavailable services: {:?}",
+            health.status,
             app.degraded_services()
         );
     } else {

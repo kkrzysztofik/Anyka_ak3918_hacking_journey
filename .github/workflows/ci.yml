@@ -29,7 +29,7 @@ jobs:
 
       - name: Configure Git
         run: |
-          git config --global --add safe.directory $GITHUB_WORKSPACE
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
@@ -61,7 +61,7 @@ jobs:
 
       - name: Configure Git
         run: |
-          git config --global --add safe.directory $GITHUB_WORKSPACE
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
@@ -77,9 +77,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             cross-compile/onvif-rust/target
-          key: ${{ runner.os }}-cargo-rust-onvif-${{ hashFiles('cross-compile/onvif-rust/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-rust-onvif-${{ hashFiles('cross-compile/onvif-rust/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-rust-onvif-
+            cargo-${{ runner.os }}-rust-onvif-
 
       - name: Run Tests with Coverage
         working-directory: cross-compile/onvif-rust
