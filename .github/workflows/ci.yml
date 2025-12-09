@@ -53,6 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: kkrzysztofik/anyka-cross-compile:latest
+      options: --security-opt seccomp=unconfined
 
     steps:
       - name: Checkout Code
