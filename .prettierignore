@@ -1,0 +1,18 @@
+# -----------------------------------------------------------------------------
+# Prettier exclusions
+# -----------------------------------------------------------------------------
+node_modules/
+dist/
+build/
+coverage/
+out/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+*.log
+.env
+.env.*
+toolchain/
+cross-compile/onvif-rust/target/
+cross-compile/onvif-rust/debug/
+cross-compile/onvif-rust/release/

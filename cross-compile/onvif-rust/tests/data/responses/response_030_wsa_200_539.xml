@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+  xmlns:e="http://www.w3.org/2003/05/soap-encoding" xmlns:wsa="http://www.w3.org/2005/08/addressing"
+  xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:wsaw="http://www.w3.org/2006/05/addressing/wsdl"
+  xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2" xmlns:wstop="http://docs.oasis-open.org/wsn/t-1"
+  xmlns:wsntw="http://docs.oasis-open.org/wsn/bw-2"
+  xmlns:wsrf-rw="http://docs.oasis-open.org/wsrf/rw-2"
+  xmlns:wsrf-r="http://docs.oasis-open.org/wsrf/r-2"
+  xmlns:wsrf-bf="http://docs.oasis-open.org/wsrf/bf-2" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl"
+  xmlns:wsoap12="http://schemas.xmlsoap.org/wsdl/soap12"
+  xmlns:http="http://schemas.xmlsoap.org/wsdl/http"
+  xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery"
+  xmlns:wsadis="http://schemas.xmlsoap.org/ws/2004/08/addressing"
+  xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:tns1="http://www.onvif.org/ver10/topics"
+  xmlns:tds="http://www.onvif.org/ver10/device/wsdl"
+  xmlns:trt="http://www.onvif.org/ver10/media/wsdl"
+  xmlns:tev="http://www.onvif.org/ver10/events/wsdl"
+  xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl"
+  xmlns:tst="http://www.onvif.org/ver10/storage/wsdl"
+  xmlns:dn="http://www.onvif.org/ver10/network/wsdl"
+  xmlns:tr2="http://www.onvif.org/ver20/media/wsdl" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"
+  xmlns:tan="http://www.onvif.org/ver20/analytics/wsdl"
+  xmlns:axt="http://www.onvif.org/ver20/analytics"
+  xmlns:tmd="http://www.onvif.org/ver10/deviceIO/wsdl" xmlns:ter="http://www.onvif.org/ver10/error">
+  <s:Header>
+    <wsa:MessageID>urn:uuid:a2d7141b-98e1-4b78-8543-e2f60f4aeb9c</wsa:MessageID>
+    <wsa:To>http://www.w3.org/2005/08/addressing/anonymous</wsa:To>
+    <wsa:Action>http://www.onvif.org/ver10/events/wsdl/EventPortType/GetEventPropertiesResponse</wsa:Action>
+  </s:Header>
+  <s:Body>
+    <tev:GetEventPropertiesResponse>
+      <tev:TopicNamespaceLocation>http://www.onvif.org/onvif/ver10/topics/topicns.xml</tev:TopicNamespaceLocation>
+      <wsnt:FixedTopicSet>true</wsnt:FixedTopicSet>
+      <wstop:TopicSet xmlns="">
+        <tns1:VideoSource wstop:topic="true">
+          <ImageTooBlurry wstop:topic="true">
+            <ImagingService wstop:topic="true">
+              <tt:MessageDescription IsProperty="true">
+                <tt:Source>
+                  <tt:SimpleItemDescription Name="Source" Type="tt:ReferenceToken" />
+                </tt:Source>
+                <tt:Data>
+                  <tt:SimpleItemDescription Name="State" Type="xs:boolean" />
+                </tt:Data>
+              </tt:MessageDescription>
+            </ImagingService>
+          </ImageTooBlurry>
+        </tns1:VideoSource>
+        <tns1:VideoSource wstop:topic="true">
+          <ImageTooDark wstop:topic="true">
+            <ImagingService wstop:topic="true">
+              <tt:MessageDescription IsProperty="true">
+                <tt:Source>
+                  <tt:SimpleItemDescription Name="Source" Type="tt:ReferenceToken" />
+                </tt:Source>
+                <tt:Data>
+                  <tt:SimpleItemDescription Name="State" Type="xs:boolean" />
+                </tt:Data>
+              </tt:MessageDescription>
+            </ImagingService>
+          </ImageTooDark>
+        </tns1:VideoSource>
+        <tns1:VideoSource wstop:topic="true">
+          <ImageTooBright wstop:topic="true">
+            <ImagingService wstop:topic="true">
+              <tt:MessageDescription IsProperty="true">
+                <tt:Source>
+                  <tt:SimpleItemDescription Name="Source" Type="tt:ReferenceToken" />
+                </tt:Source>
+                <tt:Data>
+                  <tt:SimpleItemDescription Name="State" Type="xs:boolean" />
+                </tt:Data>
+              </tt:MessageDescription>
+            </ImagingService>
+          </ImageTooBright>
+        </tns1:VideoSource>
+        <tns1:VideoSource wstop:topic="true">
+          <GlobalSceneChange wstop:topic="true">
+            <ImagingService wstop:topic="true">
+              <tt:MessageDescription IsProperty="true">
+                <tt:Source>
+                  <tt:SimpleItemDescription Name="Source" Type="tt:ReferenceToken" />
+                </tt:Source>
+                <tt:Data>
+                  <tt:SimpleItemDescription Name="State" Type="xs:boolean" />
+                </tt:Data>
+              </tt:MessageDescription>
+            </ImagingService>
+          </GlobalSceneChange>
+        </tns1:VideoSource>
+        <tns1:VideoSource wstop:topic="true">
+          <SignalLoss wstop:topic="true">
+            <tt:MessageDescription IsProperty="true">
+              <tt:Source>
+                <tt:SimpleItemDescription Name="Source" Type="tt:ReferenceToken" />
+              </tt:Source>
+              <tt:Data>
+                <tt:SimpleItemDescription Name="State" Type="xs:boolean" />
+              </tt:Data>
+            </tt:MessageDescription>
+          </SignalLoss>
+        </tns1:VideoSource>
+        <tns1:VideoSource wstop:topic="true">
+          <MotionAlarm wstop:topic="true">
+            <tt:MessageDescription IsProperty="true">
+              <tt:Source>
+                <tt:SimpleItemDescription Name="Source" Type="tt:ReferenceToken" />
+              </tt:Source>
+              <tt:Data>
+                <tt:SimpleItemDescription Name="State" Type="xs:boolean" />
+              </tt:Data>
+            </tt:MessageDescription>
+          </MotionAlarm>
+        </tns1:VideoSource>
+        <tns1:Configuration wstop:topic="false">
+          <Profile wstop:topic="true">
+            <tt:MessageDescription IsProperty="false">
+              <tt:Source>
+                <tt:SimpleItemDescription Name="Token" Type="tt:ReferenceToken" />
+              </tt:Source>
+              <tt:Data>
+                <tt:ElementItemDescription Name="Configuration" Type="tt:Profile" />
+              </tt:Data>
+            </tt:MessageDescription>
+          </Profile>
+          <VideoEncoderConfiguration wstop:topic="true">
+            <tt:MessageDescription IsProperty="false">
+              <tt:Source>
+                <tt:SimpleItemDescription Name="Token" Type="tt:ReferenceToken" />
+              </tt:Source>
+              <tt:Data>
+                <tt:ElementItemDescription Name="Configuration" Type="tt:VideoEncoderConfiguration" />
+              </tt:Data>
+            </tt:MessageDescription>
+          </VideoEncoderConfiguration>
+          <VideoSourceConfiguration wstop:topic="false">
+            <MediaService wstop:topic="true">
+              <tt:MessageDescription IsProperty="false">
+                <tt:Source>
+                  <tt:SimpleItemDescription Name="Token" Type="tt:ReferenceToken" />
+                </tt:Source>
+                <tt:Data>
+                  <tt:ElementItemDescription Name="Configuration" Type="tt:VideoSourceConfiguration" />
+                </tt:Data>
+              </tt:MessageDescription>
+            </MediaService>
+          </VideoSourceConfiguration>
+          <AudioEncoderConfiguration wstop:topic="true">
+            <tt:MessageDescription IsProperty="false">
+              <tt:Source>
+                <tt:SimpleItemDescription Name="Token" Type="tt:ReferenceToken" />
+              </tt:Source>
+              <tt:Data>
+                <tt:ElementItemDescription Name="Configuration" Type="tt:AudioEncoderConfiguration" />
+              </tt:Data>
+            </tt:MessageDescription>
+          </AudioEncoderConfiguration>
+          <VideoAnalyticsConfiguration wstop:topic="true">
+            <tt:MessageDescription IsProperty="false">
+              <tt:Source>
+                <tt:SimpleItemDescription Name="Token" Type="tt:ReferenceToken" />
+              </tt:Source>
+              <tt:Data>
+                <tt:ElementItemDescription Name="Configuration"
+                  Type="tt:VideoAnalyticsConfiguration" />
+              </tt:Data>
+            </tt:MessageDescription>
+          </VideoAnalyticsConfiguration>
+        </tns1:Configuration>
+        <tns1:Media wstop:topic="false">
+          <ProfileChanged wstop:topic="true">
+            <tt:MessageDescription IsProperty="false">
+              <tt:Data>
+                <tt:SimpleItemDescription Name="Token" Type="tt:ReferenceToken" />
+              </tt:Data>
+            </tt:MessageDescription>
+          </ProfileChanged>
+          <ConfigurationChanged wstop:topic="true">
+            <tt:MessageDescription IsProperty="false">
+              <tt:Source>
+                <tt:SimpleItemDescription Name="Token" Type="tt:ReferenceToken" />
+              </tt:Source>
+              <tt:Data>
+                <tt:SimpleItemDescription Name="Type" Type="xs:string" />
+              </tt:Data>
+            </tt:MessageDescription>
+          </ConfigurationChanged>
+        </tns1:Media>
+        <tns1:RuleEngine wstop:topic="true">
+          <CellMotionDetector wstop:topic="true">
+            <Motion wstop:topic="true">
+              <tt:MessageDescription IsProperty="true">
+                <tt:Source>
+                  <tt:SimpleItemDescription Name="VideoSource" Type="tt:ReferenceToken" />
+                  <tt:SimpleItemDescription Name="Rule" Type="xs:string" />
+                </tt:Source>
+                <tt:Data>
+                  <tt:SimpleItemDescription Name="State" Type="xs:boolean" />
+                </tt:Data>
+              </tt:MessageDescription>
+            </Motion>
+          </CellMotionDetector>
+          <TamperDetector wstop:topic="true">
+            <Tamper wstop:topic="true">
+              <tt:MessageDescription IsProperty="true">
+                <tt:Source>
+                  <tt:SimpleItemDescription Name="VideoSource" Type="tt:ReferenceToken" />
+                  <tt:SimpleItemDescription Name="Rule" Type="xs:string" />
+                </tt:Source>
+                <tt:Data>
+                  <tt:SimpleItemDescription Name="IsTamper" Type="xs:boolean" />
+                </tt:Data>
+              </tt:MessageDescription>
+            </Tamper>
+          </TamperDetector>
+          <LineDetector wstop:topic="true">
+            <Crossed wstop:topic="true">
+              <tt:MessageDescription IsProperty="true">
+                <tt:Source>
+                  <tt:SimpleItemDescription Name="VideoSource" Type="tt:ReferenceToken" />
+                </tt:Source>
+                <tt:Data>
+                  <tt:SimpleItemDescription Name="State" Type="xs:boolean" />
+                  <tt:SimpleItemDescription Name="ObjectId" Type="xs:integer" />
+                </tt:Data>
+              </tt:MessageDescription>
+            </Crossed>
+          </LineDetector>
+          <FieldDetector wstop:topic="true">
+            <ObjectsInside wstop:topic="true">
+              <tt:MessageDescription IsProperty="true">
+                <tt:Source>
+                  <tt:SimpleItemDescription Name="VideoSource" Type="tt:ReferenceToken" />
+                </tt:Source>
+                <tt:Data>
+                  <tt:SimpleItemDescription Name="State" Type="xs:boolean" />
+                  <tt:SimpleItemDescription Name="ObjectId" Type="xs:integer" />
+                </tt:Data>
+              </tt:MessageDescription>
+            </ObjectsInside>
+          </FieldDetector>
+        </tns1:RuleEngine>
+        <tns1:Device wstop:topic="true">
+          <Trigger wstop:topic="true">
+            <DigitalInput wstop:topic="true">
+              <tt:MessageDescription IsProperty="true">
+                <tt:Source>
+                  <tt:SimpleItemDescription Name="InputToken" Type="tt:ReferenceToken" />
+                </tt:Source>
+                <tt:Data>
+                  <tt:SimpleItemDescription Name="LogicalState" Type="xs:boolean" />
+                </tt:Data>
+              </tt:MessageDescription>
+            </DigitalInput>
+          </Trigger>
+        </tns1:Device>
+        <tns1:Device wstop:topic="true">
+          <Trigger wstop:topic="true">
+            <Relay wstop:topic="true">
+              <tt:MessageDescription IsProperty="true">
+                <tt:Source>
+                  <tt:SimpleItemDescription Name="RelayToken" Type="tt:ReferenceToken" />
+                </tt:Source>
+                <tt:Data>
+                  <tt:SimpleItemDescription Name="LogicalState" Type="tt:RelayLogicalState" />
+                </tt:Data>
+              </tt:MessageDescription>
+            </Relay>
+          </Trigger>
+        </tns1:Device>
+      </wstop:TopicSet>
+      <wsnt:TopicExpressionDialect>http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet</wsnt:TopicExpressionDialect>
+      <wsnt:TopicExpressionDialect>http://docs.oasis-open.org/wsnt/t-1/TopicExpression/ConcreteSet</wsnt:TopicExpressionDialect>
+      <wsnt:TopicExpressionDialect>http://docs.oasis-open.org/wsn/t-1/TopicExpression/Concrete</wsnt:TopicExpressionDialect>
+      <tev:MessageContentFilterDialect>
+        http://www.onvif.org/ver10/tev/messageContentFilter/ItemFilter</tev:MessageContentFilterDialect>
+      <tev:MessageContentSchemaLocation>http://www.onvif.org/onvif/ver10/schema/onvif.xsd</tev:MessageContentSchemaLocation>
+    </tev:GetEventPropertiesResponse>
+  </s:Body>
+</s:Envelope>

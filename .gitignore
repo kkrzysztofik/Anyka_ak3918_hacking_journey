@@ -38,6 +38,16 @@ cross-compile/onvif/tests/coverage/**/*
 cross-compile/rust-hello/.cargo/**/*
 cross-compile/rust-hello/target/**/*
 
+# Rust ONVIF workspace outputs
+cross-compile/onvif-rust/.cargo/**/*
+cross-compile/onvif-rust/target/**/*
+cross-compile/onvif-rust/debug/**/*
+cross-compile/onvif-rust/release/**/*
+cross-compile/onvif-rust/coverage/**/*
+cross-compile/onvif-rust/**/*.rs.bk
+cross-compile/onvif-rust/**/*.rlib
+cross-compile/onvif-rust/**/*.prof*
+
 # -----------------------------------------------------------------------------
 # Development Tools and IDE Files
 # -----------------------------------------------------------------------------
@@ -107,7 +117,6 @@ htmlcov/
 
 # Test results
 test-results/
-*.xml
 junit.xml
 *.tap
 
@@ -230,3 +239,5 @@ Icon
 # -----------------------------------------------------------------------------
 verbose
 off
+
+cross-compile/ONVIF-Device-Manager/**/*

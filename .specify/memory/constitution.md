@@ -295,6 +295,11 @@ All source files must follow this include order:
 
 ## Governance
 
+### Rust Implementation Addendum
+
+- For Rust code located under the `cross-compile/onvif-rust/` directory, a Rust-specific constitutional addendum is defined in `.specify/memory/constitution-rust.md`.
+- The main constitution’s core principles (Security First, Standards Compliance, Reliability, etc.) fully apply to this Rust code; however, language-, tooling-, and testing-specific requirements for `cross-compile/onvif-rust/` are governed by the Rust addendum when they differ from the C-focused requirements in this document.
+
 ### Constitutional Authority
 
 - This constitution supersedes all other development practices and guidelines

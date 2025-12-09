@@ -1,0 +1,17 @@
+# -----------------------------------------------------------------------------
+# Packaging exclusions for cross-compile/www
+# -----------------------------------------------------------------------------
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.*
+Dockerfile*
+*.log
+*.tmp
+tests/
+scripts/
+config/
+.vscode/
+.idea/

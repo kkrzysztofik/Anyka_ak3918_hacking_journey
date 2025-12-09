@@ -1,0 +1,365 @@
+# ONVIF Camera Configuration File
+# Configuration for onvif-rust daemon on Anyka AK3918 IP Camera
+#
+# This file should be placed at /etc/onvif/config.toml on the device
+# or in the same directory as the onvif-rust binary when running from SD card.
+#
+# Default config path: /etc/onvif/config.toml
+
+# ============================================================================
+# ONVIF Protocol Settings
+# ============================================================================
+[onvif]
+# Device service endpoint path
+device_service_path = "/onvif/device_service"
+
+# Media service endpoint path
+media_service_path = "/onvif/media_service"
+
+# PTZ service endpoint path
+ptz_service_path = "/onvif/ptz_service"
+
+# Imaging service endpoint path
+imaging_service_path = "/onvif/imaging_service"
+
+# ONVIF profile level (S, G, T)
+profile_level = "S"
+
+# ============================================================================
+# Network Configuration
+# ============================================================================
+[network]
+# Network interface name
+interface = "eth0"
+
+# Static IP address (leave empty for DHCP)
+ip_address = ""
+
+# Network mask (used with static IP)
+netmask = "255.255.255.0"
+
+# Default gateway (used with static IP)
+gateway = ""
+
+# Primary DNS server
+dns_primary = ""
+
+# Secondary DNS server
+dns_secondary = ""
+
+# Enable DHCP (true/false)
+dhcp_enabled = true
+
+# ============================================================================
+# Device Information
+# ============================================================================
+[device]
+# Device manufacturer
+manufacturer = "Anyka"
+
+# Device model
+model = "AK3918 Camera"
+
+# Firmware version
+firmware_version = "1.0.0"
+
+# Serial number (leave empty to auto-generate from MAC address)
+serial_number = ""
+
+# Hardware identifier
+hardware_id = "ak3918"
+
+# Device hostname
+hostname = "ipcam"
+
+# Device UUID (leave empty to auto-generate)
+uuid = ""
+
+# ============================================================================
+# HTTP Server Settings
+# ============================================================================
+[server]
+# HTTP server port (1-65535)
+port = 80
+
+# IP address to bind to (0.0.0.0 for all interfaces)
+bind_address = "0.0.0.0"
+
+# Maximum concurrent connections (1-256)
+max_connections = 16
+
+# Request timeout in seconds (1-300)
+request_timeout = 30
+
+# Maximum request body size in bytes (1024-10485760)
+max_body_size = 1048576
+
+# Enable authentication (true/false)
+auth_enabled = false
+
+# Authentication realm
+realm = "ONVIF Camera"
+
+# ============================================================================
+# Logging Configuration
+# ============================================================================
+[logging]
+# Log level: error, warn, info, debug, trace
+level = "debug"
+
+# Enable verbose HTTP request/response logging
+http_verbose = true
+
+# Enable console logging
+console_enabled = true
+
+# Log file path (leave empty to disable file logging)
+file_path = "/mnt/anyka_hack/onvif/onvif.log"
+
+# ============================================================================
+# Media Stream Settings
+# ============================================================================
+[media]
+# RTSP server port (1-65535)
+rtsp_port = 554
+
+# Snapshot HTTP port (0 to use main server port)
+snapshot_port = 0
+
+# Snapshot endpoint path
+snapshot_path = "/snapshot"
+
+# Maximum concurrent streams (1-8)
+max_streams = 4
+
+# ============================================================================
+# PTZ Control Settings
+# ============================================================================
+[ptz]
+# Enable PTZ control (true/false)
+enabled = true
+
+# Default pan speed (0.0-1.0)
+pan_speed = 0.5
+
+# Default tilt speed (0.0-1.0)
+tilt_speed = 0.5
+
+# Default zoom speed (0.0-1.0)
+zoom_speed = 0.5
+
+# Maximum number of presets (1-64)
+max_presets = 16
+
+# Move to home position on startup (true/false)
+home_on_start = true
+
+# ============================================================================
+# Imaging Settings
+# ============================================================================
+[imaging]
+# Default brightness (0.0-100.0)
+brightness = 50.0
+
+# Default contrast (0.0-100.0)
+contrast = 50.0
+
+# Default saturation (0.0-100.0)
+saturation = 50.0
+
+# Default sharpness (0.0-100.0)
+sharpness = 50.0
+
+# IR cut filter enabled (true/false)
+ir_cut_filter = true
+
+# IR LED enabled (true/false)
+ir_led = false
+
+# ============================================================================
+# WS-Discovery Settings
+# ============================================================================
+[discovery]
+# Device endpoint UUID for WS-Discovery (leave empty to auto-generate and persist)
+endpoint_uuid = ""
+
+# Local IP address for XAddrs ('auto' for automatic detection)
+local_ip = "auto"
+
+# Enable WS-Discovery service (true/false)
+enabled = true
+
+# Hello announcement interval in seconds (30-3600)
+hello_interval = 300
+
+# ============================================================================
+# Stream Profile 1 (Main Stream - High Quality)
+# ============================================================================
+[stream_profile_1]
+# Enable this profile (required for profile to be loaded)
+enabled = true
+
+# Profile name
+name = "Profile1"
+
+# Video width (160-3840)
+width = 1920
+
+# Video height (120-2160)
+height = 1080
+
+# Frame rate (1-60)
+framerate = 25
+
+# Video bitrate in kbps (64-16384)
+bitrate = 4000
+
+# Video encoding (H264, H265, MJPEG)
+encoding = "H264"
+
+# GOP length (1-300)
+gop_length = 50
+
+# Video quality level (1-100)
+quality = 80
+
+# Audio enabled for this profile (true/false)
+audio_enabled = true
+
+# Audio encoding (G711, G726, AAC)
+audio_encoding = "G711"
+
+# Audio bitrate in kbps (8-512)
+audio_bitrate = 64
+
+# Audio sample rate in Hz (8000-48000)
+audio_sample_rate = 8000
+
+# ============================================================================
+# Stream Profile 2 (Sub Stream - Lower Quality)
+# ============================================================================
+[stream_profile_2]
+# Enable this profile (required for profile to be loaded)
+enabled = true
+
+# Profile name
+name = "Profile2"
+
+# Video width (160-3840)
+width = 640
+
+# Video height (120-2160)
+height = 480
+
+# Frame rate (1-60)
+framerate = 15
+
+# Video bitrate in kbps (64-16384)
+bitrate = 512
+
+# Video encoding (H264, H265, MJPEG)
+encoding = "H264"
+
+# GOP length (1-300)
+gop_length = 30
+
+# Video quality level (1-100)
+quality = 80
+
+# Audio enabled for this profile (true/false)
+audio_enabled = false
+
+# Audio encoding (G711, G726, AAC)
+audio_encoding = "G711"
+
+# Audio bitrate in kbps (8-512)
+audio_bitrate = 64
+
+# Audio sample rate in Hz (8000-48000)
+audio_sample_rate = 8000
+
+# ============================================================================
+# Stream Profile 3 (Optional - Mobile/Low Bandwidth)
+# ============================================================================
+[stream_profile_3]
+# Enable this profile (required for profile to be loaded)
+enabled = false
+
+# Profile name
+name = "Profile3"
+
+# Video width (160-3840)
+width = 640
+
+# Video height (120-2160)
+height = 480
+
+# Frame rate (1-60)
+framerate = 15
+
+# Video bitrate in kbps (64-16384)
+bitrate = 512
+
+# Video encoding (H264, H265, MJPEG)
+encoding = "H264"
+
+# GOP length (1-300)
+gop_length = 30
+
+# Video quality level (1-100)
+quality = 80
+
+# Audio enabled for this profile (true/false)
+audio_enabled = false
+
+# Audio encoding (G711, G726, AAC)
+audio_encoding = "G711"
+
+# Audio bitrate in kbps (8-512)
+audio_bitrate = 64
+
+# Audio sample rate in Hz (8000-48000)
+audio_sample_rate = 8000
+
+# ============================================================================
+# Stream Profile 4 (Optional - Snapshot/MJPEG)
+# ============================================================================
+[stream_profile_4]
+# Enable this profile (required for profile to be loaded)
+enabled = false
+
+# Profile name
+name = "Profile4"
+
+# Video width (160-3840)
+width = 640
+
+# Video height (120-2160)
+height = 480
+
+# Frame rate (1-60)
+framerate = 15
+
+# Video bitrate in kbps (64-16384)
+bitrate = 512
+
+# Video encoding (H264, H265, MJPEG)
+encoding = "H264"
+
+# GOP length (1-300)
+gop_length = 30
+
+# Video quality level (1-100)
+quality = 80
+
+# Audio enabled for this profile (true/false)
+audio_enabled = false
+
+# Audio encoding (G711, G726, AAC)
+audio_encoding = "G711"
+
+# Audio bitrate in kbps (8-512)
+audio_bitrate = 64
+
+# Audio sample rate in Hz (8000-48000)
+audio_sample_rate = 8000
