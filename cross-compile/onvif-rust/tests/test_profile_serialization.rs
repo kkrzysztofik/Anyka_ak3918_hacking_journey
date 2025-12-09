@@ -1,5 +1,5 @@
+use onvif_rust::onvif::media::GetProfilesResponse;
 use onvif_rust::onvif::types::common::*;
-use onvif_rust::onvif::types::media::*;
 
 #[test]
 fn test_serialize_get_profiles_with_data() {
@@ -88,6 +88,9 @@ fn test_serialize_get_profiles_with_data() {
             default_ptz_timeout: Some("PT1S".to_string()),
             pan_tilt_limits: None,
             zoom_limits: None,
+            move_ramp: None,
+            preset_ramp: None,
+            preset_tour_ramp: None,
             extension: None,
         }),
         metadata_configuration: None,

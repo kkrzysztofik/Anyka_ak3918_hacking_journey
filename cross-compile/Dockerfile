@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   python3-pip \
   bc \
   pkg-config \
+  libssl-dev \
+  nodejs \
+  npm \
   perl \
   ccache \
   ca-certificates \
@@ -50,6 +53,10 @@ RUN if ! command -v cargo >/dev/null 2>&1; then \
   /root/.rustup/toolchains/*/lib/rustlib/src; \
   fi
 ENV PATH="${PATH}:/root/.cargo/bin"
+
+# Preinstall cargo-tarpaulin to avoid per-job installs (uses vendored OpenSSL)
+RUN cargo install cargo-tarpaulin --locked --features vendored-openssl && \
+  rm -rf /root/.cargo/registry/index/* /root/.cargo/git/db/*
 
 # Install Snyk CLI
 RUN curl -Lo snyk-linux https://downloads.snyk.io/cli/stable/snyk-linux \

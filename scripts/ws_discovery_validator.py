@@ -343,13 +343,13 @@ def create_multicast_socket(interface: Optional[str] = None) -> socket.socket:
     bind_addr = interface if interface else ""
     sock.bind((bind_addr, 0))  # Bind to any available port
     local_port = sock.getsockname()[1]
-    logger.debug("Bound socket: bind_addr=%s, local_port=%d", bind_addr or "0.0.0.0", local_port)
+    logger.debug("Bound socket: bind_addr=%s, local_port=%d", bind_addr or "127.0.0.1", local_port)
 
     # Join multicast group to receive Hello messages
     logger.debug("Joining multicast group: %s", WS_DISCOVERY_MULTICAST)
     mreq = struct.pack("4s4s",
                        socket.inet_aton(WS_DISCOVERY_MULTICAST),
-                       socket.inet_aton(interface if interface else "0.0.0.0"))
+                       socket.inet_aton(interface if interface else "127.0.0.1"))
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     logger.debug("Successfully joined multicast group: %s", WS_DISCOVERY_MULTICAST)
 

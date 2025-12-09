@@ -430,6 +430,12 @@ mod stub_impl {
     }
 
     /// Close video input device (stub).
+    ///
+    /// # Safety
+    ///
+    /// This function is marked as `unsafe` because it accepts a raw pointer. However, since this is a stub
+    /// implementation that does not dereference the pointer, it is safe to call with any pointer value,
+    /// including null pointers.
     pub unsafe fn video_input_close(_handle: *mut std::ffi::c_void) -> AnykaResult<()> {
         Ok(())
     }

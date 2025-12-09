@@ -172,9 +172,18 @@ impl ProfileManager {
             audio_source_config,
         );
 
-        // Initialize profiles from configuration if available, otherwise use hardcoded defaults
+        // Initialize profiles from configuration if explicit stream profiles exist; otherwise use hardcoded defaults.
         if let Some(ref config) = self.config {
-            self.initialize_profiles_from_config(config, default_ptz_config);
+            let snapshot = config.snapshot();
+            let has_stream_profiles = snapshot
+                .keys()
+                .any(|key| key.starts_with("stream_profile_"));
+
+            if has_stream_profiles {
+                self.initialize_profiles_from_config(config, default_ptz_config);
+            } else {
+                self.initialize_profiles_hardcoded(default_ptz_config);
+            }
         } else {
             self.initialize_profiles_hardcoded(default_ptz_config);
         }
@@ -641,7 +650,11 @@ impl ProfileManager {
             extension: None,
         };
 
-        profiles.insert(profile_token, profile.clone());
+        {
+            profiles.insert(profile_token, profile.clone());
+        }
+
+        drop(profiles);
         self.persist_all();
         Ok(profile)
     }
@@ -664,6 +677,8 @@ impl ProfileManager {
         }
 
         profiles.remove(token);
+
+        drop(profiles);
         self.persist_all();
         Ok(())
     }
@@ -699,8 +714,11 @@ impl ProfileManager {
         &self,
         config: VideoSourceConfiguration,
     ) -> OnvifResult<()> {
-        let mut configs = self.video_source_configs.write();
-        configs.insert(config.token.clone(), config);
+        {
+            let mut configs = self.video_source_configs.write();
+            configs.insert(config.token.clone(), config);
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -759,8 +777,11 @@ impl ProfileManager {
         &self,
         config: VideoEncoderConfiguration,
     ) -> OnvifResult<()> {
-        let mut configs = self.video_encoder_configs.write();
-        configs.insert(config.token.clone(), config);
+        {
+            let mut configs = self.video_encoder_configs.write();
+            configs.insert(config.token.clone(), config);
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -855,8 +876,11 @@ impl ProfileManager {
         &self,
         config: AudioSourceConfiguration,
     ) -> OnvifResult<()> {
-        let mut configs = self.audio_source_configs.write();
-        configs.insert(config.token.clone(), config);
+        {
+            let mut configs = self.audio_source_configs.write();
+            configs.insert(config.token.clone(), config);
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -891,8 +915,11 @@ impl ProfileManager {
         &self,
         config: AudioEncoderConfiguration,
     ) -> OnvifResult<()> {
-        let mut configs = self.audio_encoder_configs.write();
-        configs.insert(config.token.clone(), config);
+        {
+            let mut configs = self.audio_encoder_configs.write();
+            configs.insert(config.token.clone(), config);
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -934,13 +961,16 @@ impl ProfileManager {
         config_token: &ReferenceToken,
     ) -> OnvifResult<()> {
         let config = self.get_video_source_configuration(config_token)?;
-        let mut profiles = self.profiles.write();
+        {
+            let mut profiles = self.profiles.write();
 
-        let profile = profiles
-            .get_mut(profile_token)
-            .ok_or_else(|| no_profile_error(profile_token))?;
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
 
-        profile.video_source_configuration = Some(config);
+            profile.video_source_configuration = Some(config);
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -950,13 +980,16 @@ impl ProfileManager {
         &self,
         profile_token: &ReferenceToken,
     ) -> OnvifResult<()> {
-        let mut profiles = self.profiles.write();
+        {
+            let mut profiles = self.profiles.write();
 
-        let profile = profiles
-            .get_mut(profile_token)
-            .ok_or_else(|| no_profile_error(profile_token))?;
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
 
-        profile.video_source_configuration = None;
+            profile.video_source_configuration = None;
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -968,13 +1001,16 @@ impl ProfileManager {
         config_token: &ReferenceToken,
     ) -> OnvifResult<()> {
         let config = self.get_video_encoder_configuration(config_token)?;
-        let mut profiles = self.profiles.write();
+        {
+            let mut profiles = self.profiles.write();
 
-        let profile = profiles
-            .get_mut(profile_token)
-            .ok_or_else(|| no_profile_error(profile_token))?;
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
 
-        profile.video_encoder_configuration = Some(config);
+            profile.video_encoder_configuration = Some(config);
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -984,13 +1020,16 @@ impl ProfileManager {
         &self,
         profile_token: &ReferenceToken,
     ) -> OnvifResult<()> {
-        let mut profiles = self.profiles.write();
+        {
+            let mut profiles = self.profiles.write();
 
-        let profile = profiles
-            .get_mut(profile_token)
-            .ok_or_else(|| no_profile_error(profile_token))?;
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
 
-        profile.video_encoder_configuration = None;
+            profile.video_encoder_configuration = None;
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -1002,13 +1041,16 @@ impl ProfileManager {
         config_token: &ReferenceToken,
     ) -> OnvifResult<()> {
         let config = self.get_audio_source_configuration(config_token)?;
-        let mut profiles = self.profiles.write();
+        {
+            let mut profiles = self.profiles.write();
 
-        let profile = profiles
-            .get_mut(profile_token)
-            .ok_or_else(|| no_profile_error(profile_token))?;
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
 
-        profile.audio_source_configuration = Some(config);
+            profile.audio_source_configuration = Some(config);
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -1018,13 +1060,16 @@ impl ProfileManager {
         &self,
         profile_token: &ReferenceToken,
     ) -> OnvifResult<()> {
-        let mut profiles = self.profiles.write();
+        {
+            let mut profiles = self.profiles.write();
 
-        let profile = profiles
-            .get_mut(profile_token)
-            .ok_or_else(|| no_profile_error(profile_token))?;
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
 
-        profile.audio_source_configuration = None;
+            profile.audio_source_configuration = None;
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -1036,13 +1081,16 @@ impl ProfileManager {
         config_token: &ReferenceToken,
     ) -> OnvifResult<()> {
         let config = self.get_audio_encoder_configuration(config_token)?;
-        let mut profiles = self.profiles.write();
+        {
+            let mut profiles = self.profiles.write();
 
-        let profile = profiles
-            .get_mut(profile_token)
-            .ok_or_else(|| no_profile_error(profile_token))?;
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
 
-        profile.audio_encoder_configuration = Some(config);
+            profile.audio_encoder_configuration = Some(config);
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -1052,13 +1100,16 @@ impl ProfileManager {
         &self,
         profile_token: &ReferenceToken,
     ) -> OnvifResult<()> {
-        let mut profiles = self.profiles.write();
+        {
+            let mut profiles = self.profiles.write();
 
-        let profile = profiles
-            .get_mut(profile_token)
-            .ok_or_else(|| no_profile_error(profile_token))?;
+            let profile = profiles
+                .get_mut(profile_token)
+                .ok_or_else(|| no_profile_error(profile_token))?;
 
-        profile.audio_encoder_configuration = None;
+            profile.audio_encoder_configuration = None;
+        }
+
         self.persist_all();
         Ok(())
     }
@@ -1077,21 +1128,63 @@ impl ProfileManager {
     }
 
     fn persist_to_config(&self, config: &ConfigRuntime) -> Result<(), ConfigError> {
-        let profiles = self.profiles.read();
-        let video_sources = self.video_sources.read();
-        let audio_sources = self.audio_sources.read();
-        let video_source_configs = self.video_source_configs.read();
-        let video_encoder_configs = self.video_encoder_configs.read();
-        let audio_source_configs = self.audio_source_configs.read();
-        let audio_encoder_configs = self.audio_encoder_configs.read();
+        // Snapshot all media state while holding read locks, then release before writing config
+        let (
+            profiles_data,
+            video_sources_data,
+            audio_sources_data,
+            video_source_configs_data,
+            video_encoder_configs_data,
+            audio_source_configs_data,
+            audio_encoder_configs_data,
+        ) = {
+            let profiles = self.profiles.read();
+            let video_sources = self.video_sources.read();
+            let audio_sources = self.audio_sources.read();
+            let video_source_configs = self.video_source_configs.read();
+            let video_encoder_configs = self.video_encoder_configs.read();
+            let audio_source_configs = self.audio_source_configs.read();
+            let audio_encoder_configs = self.audio_encoder_configs.read();
+
+            (
+                profiles
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect::<Vec<_>>(),
+                video_sources
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect::<Vec<_>>(),
+                audio_sources
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect::<Vec<_>>(),
+                video_source_configs
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect::<Vec<_>>(),
+                video_encoder_configs
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect::<Vec<_>>(),
+                audio_source_configs
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect::<Vec<_>>(),
+                audio_encoder_configs
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect::<Vec<_>>(),
+            )
+        };
 
         // Persist profile list
-        let mut tokens: Vec<String> = profiles.keys().cloned().collect();
+        let mut tokens: Vec<String> = profiles_data.iter().map(|(k, _)| k.clone()).collect();
         tokens.sort();
         config.set_string("media.profiles", &tokens.join(","))?;
 
         // Persist sources
-        for (token, source) in video_sources.iter() {
+        for (token, source) in video_sources_data.iter() {
             let prefix = format!("media.video_source.{token}");
             config.set_float(
                 &format!("{}.framerate", prefix),
@@ -1104,13 +1197,13 @@ impl ProfileManager {
             )?;
         }
 
-        for (token, source) in audio_sources.iter() {
+        for (token, source) in audio_sources_data.iter() {
             let prefix = format!("media.audio_source.{token}");
             config.set_int(&format!("{}.channels", prefix), source.channels as i64)?;
         }
 
         // Persist configurations
-        for (token, cfg) in video_source_configs.iter() {
+        for (token, cfg) in video_source_configs_data.iter() {
             let prefix = format!("media.video_source_config.{token}");
             config.set_string(&format!("{}.source_token", prefix), &cfg.source_token)?;
             config.set_string(&format!("{}.name", prefix), &cfg.name)?;
@@ -1121,7 +1214,7 @@ impl ProfileManager {
             config.set_int(&format!("{}.height", prefix), cfg.bounds.height as i64)?;
         }
 
-        for (token, cfg) in video_encoder_configs.iter() {
+        for (token, cfg) in video_encoder_configs_data.iter() {
             let prefix = format!("media.video_encoder_config.{token}");
             config.set_string(&format!("{}.name", prefix), &cfg.name)?;
             config.set_string(
@@ -1167,14 +1260,14 @@ impl ProfileManager {
             config.set_string(&format!("{}.session_timeout", prefix), &cfg.session_timeout)?;
         }
 
-        for (token, cfg) in audio_source_configs.iter() {
+        for (token, cfg) in audio_source_configs_data.iter() {
             let prefix = format!("media.audio_source_config.{token}");
             config.set_string(&format!("{}.source_token", prefix), &cfg.source_token)?;
             config.set_string(&format!("{}.name", prefix), &cfg.name)?;
             config.set_int(&format!("{}.use_count", prefix), cfg.use_count as i64)?;
         }
 
-        for (token, cfg) in audio_encoder_configs.iter() {
+        for (token, cfg) in audio_encoder_configs_data.iter() {
             let prefix = format!("media.audio_encoder_config.{token}");
             config.set_string(&format!("{}.name", prefix), &cfg.name)?;
             config.set_string(
@@ -1191,7 +1284,7 @@ impl ProfileManager {
         }
 
         // Persist profiles
-        for (token, profile) in profiles.iter() {
+        for (token, profile) in profiles_data.iter() {
             let prefix = format!("media.profile.{token}");
             config.set_string(&format!("{}.name", prefix), &profile.name)?;
             config.set_bool(&format!("{}.fixed", prefix), profile.fixed.unwrap_or(false))?;

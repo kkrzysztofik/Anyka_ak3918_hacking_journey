@@ -5,7 +5,10 @@
 //!
 //! # Security Notes
 //!
-//! - ONVIF mandates SHA-1 for UsernameToken digest (legacy protocol requirement)
+//! - **WARNING:** SHA-1 is cryptographically broken and should not be relied upon for security.
+//!   ONVIF mandates SHA-1 for UsernameToken digest (legacy protocol requirement).
+//! - **This implementation MUST only be used with HTTPS/TLS transport to mitigate SHA-1 vulnerabilities,
+//!   as the protocol layer provides the actual security.**
 //! - All comparisons use timing-safe operations to prevent timing attacks
 //! - Timestamps are validated to prevent replay attacks
 //!

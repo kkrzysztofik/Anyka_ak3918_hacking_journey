@@ -272,9 +272,9 @@ fn log_response_verbose(
             status = %status.as_u16(),
             latency_ms = latency_ms,
             body_size = body.len(),
-            "← HTTP response"
+            "<- HTTP response"
         );
-        tracing::info!("← Response body: {}", body_preview);
+        tracing::info!("<- Response body: {}", body_preview);
     } else {
         tracing::warn!(
             method = %method,
@@ -282,9 +282,9 @@ fn log_response_verbose(
             status = %status.as_u16(),
             latency_ms = latency_ms,
             body_size = body.len(),
-            "← HTTP response error"
+            "<- HTTP response error"
         );
-        tracing::warn!("← Response body: {}", body_preview);
+        tracing::warn!("<- Response body: {}", body_preview);
     }
 }
 
