@@ -48,7 +48,8 @@ use super::auth_requirements::{AuthLevel, get_required_level};
 use super::error::OnvifError;
 use super::soap::{UsernameToken, parse_soap_request};
 use super::ws_security::{WsSecurityError, WsSecurityValidator};
-use crate::users::{PasswordManager, UserStorage};
+use crate::users::{PasswordManager, UserAccount, UserStorage};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 
 /// Authentication context for dispatch operations.
 ///
@@ -318,6 +319,13 @@ impl ServiceDispatcher {
         // Extract SOAP action from header
         let soap_action = extract_soap_action(&request);
 
+        // Check Basic Auth existence and validity (before consuming body)
+        let basic_auth_result = if auth_ctx.auth_enabled {
+            self.verify_basic_auth(&request, auth_ctx)
+        } else {
+            Ok(None)
+        };
+
         // Read body
         let body_bytes = match axum::body::to_bytes(request.into_body(), 1024 * 1024).await {
             Ok(bytes) => bytes,
@@ -405,23 +413,50 @@ impl ServiceDispatcher {
 
             // Perform authentication if required
             if required_level != AuthLevel::Anonymous {
-                // Extract WS-Security credentials from envelope
-                let ws_security = envelope
-                    .header
-                    .as_ref()
-                    .and_then(|h| h.security.as_ref())
-                    .and_then(|s| s.username_token.as_ref());
+                // First, check the pre-validated Basic Auth result
+                let mut authenticated = false;
 
-                match self
-                    .authenticate(ws_security, auth_ctx, required_level)
-                    .await
-                {
-                    Ok(()) => {
-                        tracing::debug!("Authentication successful for action {}", action);
+                match &basic_auth_result {
+                    Ok(Some(user)) => {
+                        // Basic Auth credentials found and valid
+                        if required_level.is_satisfied_by(Some(user.level)) {
+                            tracing::debug!("Basic Auth successful for action {}", action);
+                            authenticated = true;
+                        } else {
+                            return error_response(OnvifError::NotAuthorized(
+                                "Insufficient privileges".to_string(),
+                            ));
+                        }
+                    }
+                    Ok(None) => {
+                        // No Basic Auth header, proceed to WS-Security
                     }
                     Err(e) => {
-                        tracing::warn!("Authentication failed for action {}: {:?}", action, e);
-                        return error_response(e);
+                        // Basic Auth header present but invalid
+                        return error_response(e.clone());
+                    }
+                }
+
+                if !authenticated {
+                    // Fallback to WS-Security (UsernameToken)
+                    // Extract WS-Security credentials from envelope
+                    let ws_security = envelope
+                        .header
+                        .as_ref()
+                        .and_then(|h| h.security.as_ref())
+                        .and_then(|s| s.username_token.as_ref());
+
+                    match self
+                        .authenticate(ws_security, auth_ctx, required_level)
+                        .await
+                    {
+                        Ok(()) => {
+                            tracing::debug!("WS-Security Auth successful for action {}", action);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Authentication failed for action {}: {:?}", action, e);
+                            return error_response(e);
+                        }
                     }
                 }
             }
@@ -542,6 +577,79 @@ impl ServiceDispatcher {
         }
 
         Ok(())
+    }
+
+    /// Verify HTTP Basic Authentication credentials.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some(UserAccount))` - Valid Basic Auth credentials found
+    /// * `Ok(None)` - No Basic Auth header found
+    /// * `Err(OnvifError)` - Basic Auth header found but invalid
+    fn verify_basic_auth(
+        &self,
+        request: &Request<Body>,
+        auth_ctx: &AuthContext,
+    ) -> Result<Option<UserAccount>, OnvifError> {
+        let auth_header = match request.headers().get(header::AUTHORIZATION) {
+            Some(h) => h,
+            None => return Ok(None),
+        };
+
+        let auth_str = match auth_header.to_str() {
+            Ok(s) => s,
+            Err(_) => return Ok(None),
+        };
+
+        // Check scheme
+        if !auth_str.starts_with("Basic ") {
+            return Ok(None);
+        }
+
+        let token = &auth_str[6..];
+        let decoded = match BASE64.decode(token) {
+            Ok(d) => d,
+            Err(_) => {
+                return Err(OnvifError::NotAuthorized(
+                    "Invalid Base64 in Authorization header".to_string(),
+                ));
+            }
+        };
+
+        let credential_str = match std::str::from_utf8(&decoded) {
+            Ok(s) => s,
+            Err(_) => {
+                return Err(OnvifError::NotAuthorized(
+                    "Invalid UTF-8 in Basic credentials".to_string(),
+                ));
+            }
+        };
+
+        let (username, password) = match credential_str.split_once(':') {
+            Some(pair) => pair,
+            None => {
+                return Err(OnvifError::NotAuthorized(
+                    "Invalid Basic credentials format".to_string(),
+                ));
+            }
+        };
+
+        // Validate user existence
+        let user = auth_ctx
+            .user_storage
+            .get_user(username)
+            .ok_or_else(|| OnvifError::NotAuthorized(format!("User '{}' not found", username)))?;
+
+        // Validate password
+        // Use password_manager to handle verification (constant time comparison inside)
+        if !auth_ctx
+            .password_manager
+            .verify_password(password, &user.password)
+        {
+            return Err(OnvifError::NotAuthorized("Invalid credentials".to_string()));
+        }
+
+        Ok(Some(user))
     }
 
     /// Check if a service is registered.
@@ -977,5 +1085,80 @@ mod tests {
             AuthLevel::Administrator
         );
         assert_eq!(handler.required_auth_level("UnknownOp"), AuthLevel::User);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_basic_auth_success() {
+        // Setup auth context with enabled auth
+        let user_storage = Arc::new(UserStorage::new());
+        user_storage.create_user("admin", "password123", crate::users::UserLevel::Administrator).unwrap();
+
+        let password_manager = Arc::new(PasswordManager::new());
+        let ws_security = Arc::new(WsSecurityValidator::with_defaults());
+
+        let auth_ctx = AuthContext::new(
+            ws_security,
+            user_storage,
+            password_manager,
+            true, // Enable auth
+        );
+
+        let dispatcher = ServiceDispatcher::new();
+        dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
+
+        // Create Basic Auth header (admin:password123)
+        let credentials = base64::engine::general_purpose::STANDARD.encode("admin:password123");
+
+        let soap_body = r#"<?xml version="1.0"?>
+            <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+                <s:Body><AdminOp xmlns="http://www.onvif.org/ver10/device/wsdl"/></s:Body>
+            </s:Envelope>"#;
+
+        let request = HttpRequest::builder()
+            .method("POST")
+            .header("Content-Type", "application/soap+xml")
+            .header("Authorization", format!("Basic {}", credentials))
+            .body(Body::from(soap_body))
+            .unwrap();
+
+        // Dispatch to "custom" service (AdminOp requires Administrator)
+        let response = dispatcher.dispatch_with_auth("custom", request, &auth_ctx).await;
+
+        // Should succeed
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_basic_auth_invalid_password() {
+        // Setup auth context
+        let user_storage = Arc::new(UserStorage::new());
+        user_storage.create_user("admin", "password123", crate::users::UserLevel::Administrator).unwrap();
+
+        let password_manager = Arc::new(PasswordManager::new());
+        let ws_security = Arc::new(WsSecurityValidator::with_defaults());
+        let auth_ctx = AuthContext::new(ws_security, user_storage, password_manager, true);
+
+        let dispatcher = ServiceDispatcher::new();
+        dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
+
+        // Wrong password
+        let credentials = base64::engine::general_purpose::STANDARD.encode("admin:wrongpass");
+
+        let soap_body = r#"<?xml version="1.0"?>
+            <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+                <s:Body><AdminOp xmlns="http://www.onvif.org/ver10/device/wsdl"/></s:Body>
+            </s:Envelope>"#;
+
+        let request = HttpRequest::builder()
+            .method("POST")
+            .header("Content-Type", "application/soap+xml")
+            .header("Authorization", format!("Basic {}", credentials))
+            .body(Body::from(soap_body))
+            .unwrap();
+
+        let response = dispatcher.dispatch_with_auth("custom", request, &auth_ctx).await;
+
+        // Should NOT be OK. Expecting 401 Unauthorized or 400 Bad Request (depending on error mapping)
+        assert_ne!(response.status(), axum::http::StatusCode::OK);
     }
 }
