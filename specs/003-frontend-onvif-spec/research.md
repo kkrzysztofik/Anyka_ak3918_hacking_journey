@@ -12,238 +12,154 @@ This document captures research findings for the frontend implementation connect
 
 ### Decision
 
-Use existing `onvifClient.ts` pattern with `fast-xml-parser` for XML/SOAP serialization.
+**Custom Lightweight Client** using `axios` and `fast-xml-parser`.
 
 ### Rationale
 
-- Already implemented and tested in `cross-compile/www/src/services/onvifClient.ts`
-- Handles SOAP envelope construction with proper namespaces
-- Parses XML responses into JavaScript objects
-- Supports WS-UsernameToken authentication headers
+- **Browser Compatibility**: Existing libraries like `agsh/onvif` rely on Node.js modules (`net`, `dgram`) and do not work in browsers.
+- **Control**: Allows precise control over SOAP envelope construction and XML parsing to match `onvif-rust` expectations.
+- **Decoupling**: Services are decoupled from the transport layer.
 
 ### Implementation Notes
 
 ```typescript
-// Existing pattern in onvifClient.ts
-const soapEnvelope = XMLParserService.createSOAPEnvelope(body);
+// src/services/soap/client.ts
+const soapEnvelope = createSOAPEnvelope(body, authHeader);
 const response = await axios.post(url, soapEnvelope, {
-  headers: { 'Content-Type': 'application/soap+xml' }
+  headers: {
+    'Content-Type': 'application/soap+xml; charset=utf-8'
+  }
 });
-const parsed = XMLParserService.parse(response.data);
+const parsed = parser.parse(response.data);
 ```
 
 ### Alternatives Considered
 
 | Alternative | Why Rejected |
 |-------------|--------------|
-| Raw fetch + manual XML | More error-prone; duplicates existing work |
-| gSOAP-generated client | Requires code generation; C-focused |
-| ws-security library | Overkill; backend handles auth validation |
+| `agsh/onvif` | Node.js only; relies on `net`/`fs` modules |
+| Raw fetch | `axios` offers better interceptor support for auth/errors |
+| gSOAP | Requires C++ code generation; overkill for Web UI |
 
 ---
 
 ## R2: Authentication Approach
 
-### Decision
+### R2: Decision
 
-HTTP session cookies with WS-UsernameToken embedded in SOAP headers for ONVIF operations.
+**HTTP Basic Authentication** (`Authorization: Basic ...`) as primary mechanism.
 
-### Rationale
+### R2: Rationale
 
-- Backend (onvif-rust) validates WS-UsernameToken in SOAP requests
-- Session cookies provide persistent auth state without frontend token management
-- Follows existing pattern in deviceManagementService.ts
+- **Backend Support**: `onvif-rust` dispatcher explicitly supports Basic Auth validation before WS-Security.
+- **Simplicity**: Eliminates complex client-side digest generation (SHA1, Nonce, Created) required for `UsernameToken`.
+- **Robustness**: Bypasses potential time-sync issues (clock skew) that affect `UsernameToken` validation.
 
-### Implementation Notes
+### R2: Implementation Notes
 
-- Login: POST credentials to backend auth endpoint
-- Session: Browser manages cookies automatically
-- ONVIF calls: Include WS-UsernameToken in SOAP header
+- **Credential Storage**: Store username/password in **Redux (memory only)**.
+- **Header Injection**: Axios interceptor injects `Authorization: Basic <base64>` on every request.
+- **Fallback**: WS-Security `UsernameToken` logic retained in codebase as backup if needed.
 
 ### Flow
 
 ```text
-1. User submits credentials on LoginPage
-2. Backend validates and sets session cookie
-3. Frontend stores auth state in Redux (role, username)
-4. Subsequent ONVIF calls include WS-UsernameToken
-5. Backend validates token + session on each request
+1. User enters credentials.
+2. App stores credentials in memory (Redux).
+3. Axios interceptor adds 'Authorization: Basic ...' header.
+4. Backend verifies credentials against internal UserStorage.
 ```
 
-### Alternatives Considered
+### R2: Alternatives Considered
 
 | Alternative | Why Rejected |
 |-------------|--------------|
-| JWT tokens | Requires backend changes; non-standard for ONVIF |
-| OAuth2/OIDC | Overkill for single-device embedded system |
-| Basic Auth only | Less secure; password in every request |
+| WS-UsernameToken | Complex to implement correctly in browser; sensitive to clock skew |
+| Session Cookies | Basic Auth is stateless and standard for API clients |
 
 ---
 
 ## R3: State Management Strategy
 
-### Decision
+### R3: Decision
 
-Redux Toolkit for global application state; local component state for forms.
+**Redux Toolkit** for global state; **React Hook Form** for form state.
 
-### Rationale
+### R3: Rationale
 
-- Already configured in `cross-compile/www/src/store/`
-- Redux DevTools support for debugging
-- Slices pattern provides clean separation
-- Form state doesn't need global persistence
+- **Global**: Redux handles Auth, Device Status, and UI preferences effectively.
+- **Forms**: React Hook Form manages complex form validation and dirty states better than manual controlled components.
+- **Validation**: `zod` schema validation ensures type safety and robust input checking.
 
 ### State Structure
 
 ```typescript
-// Global Redux state
+// Global (Redux)
 interface RootState {
-  auth: {
-    isAuthenticated: boolean;
-    user: { username: string; role: UserRole } | null;
-    isLoading: boolean;
-    error: string | null;
-  };
-  device: {
-    info: DeviceInfo | null;
-    status: 'online' | 'offline' | 'checking';
-    lastChecked: Date | null;
-  };
-  ui: {
-    sidebarOpen: boolean;
-    currentTheme: 'dark';
-    toasts: Toast[];
-  };
+  auth: { user: User | null; credentials: BasicCredentials | null };
+  device: { info: DeviceInfo | null; status: DeviceStatus };
 }
 
-// Local state for forms (example)
-const [formData, setFormData] = useState<NetworkFormData>(initialValues);
-const [isSaving, setIsSaving] = useState(false);
+// Local (React Hook Form)
+const { register, handleSubmit } = useForm<NetworkSettings>({
+  resolver: zodResolver(networkSchema)
+});
 ```
-
-### Alternatives Considered
-
-| Alternative | Why Rejected |
-|-------------|--------------|
-| Zustand | Would require migration; Redux already works |
-| Jotai/Recoil | Atomic state less suited for complex forms |
-| React Query | Good for caching; but forms need local state anyway |
-| Context only | Insufficient for auth + device + UI state |
 
 ---
 
 ## R4: Form Handling Pattern
 
-### Decision
+### R4: Decision
 
-Controlled components with local `useState`; validate on blur and before submit.
+**React Hook Form** combined with **Zod** schema validation.
 
-### Rationale
+### R4: Rationale
 
-- Simple and predictable
-- Matches patterns in existing design components (`.ai/design/components/`)
-- No additional dependencies
-- Easy to implement validation rules from spec
+- **Performance**: Uncontrolled components reduce re-renders.
+- **Validation**: Zod provides composable, type-safe validation rules (e.g., IP address regex, range checks).
+- **Developer Experience**: Standardizes form error handling and submission logic.
 
 ### Implementation Pattern
 
 ```typescript
-const [ipAddress, setIpAddress] = useState(initialValue);
-const [errors, setErrors] = useState<Record<string, string>>({});
+const networkSchema = z.object({
+  ipAddress: z.string().ip(),
+  port: z.number().min(1).max(65535)
+});
 
-const validateField = (name: string, value: string) => {
-  switch (name) {
-    case 'ipAddress':
-      return isValidIPv4(value) ? null : 'Invalid IP address format';
-    // ...
-  }
-};
-
-const handleSave = async () => {
-  const allErrors = validateAll(formData);
-  if (Object.keys(allErrors).length > 0) {
-    setErrors(allErrors);
-    return;
-  }
-  await saveSettings(formData);
-};
+const onSubmit = (data) => service.update(data);
 ```
-
-### Alternatives Considered
-
-| Alternative | Why Rejected |
-|-------------|--------------|
-| React Hook Form | Adds 20KB; overkill for ~10 forms |
-| Formik | Heavy; complex API |
-| Final Form | Less popular; smaller ecosystem |
 
 ---
 
 ## R5: UI Component Strategy
 
-### Decision
+### R5: Decision
 
-Use **@shadcn/ui** components (already configured in project) with custom theme overrides to match "Camera.UI" dark design.
+**@shadcn/ui** with **Camera.UI** Dark Theme overrides.
 
-### Rationale
+### R5: Rationale
 
-- Project already has shadcn/ui configured with "new-york" style variant (per `.cursor/rules/shadcn.mdc`)
-- Components are accessible by default (WCAG compliant)
-- Can customize via CSS variables to match dark theme with red accents
-- Use `src/components/ui/` for shadcn components
-- Import via `@/components/ui/` alias
+- **Accessibility**: Built-in ARIA support.
+- **Customization**: Tailwind-based styling fits the custom design requirement.
 
-### Design System Theme Override
-
-```css
-/* Override shadcn defaults for Camera.UI theme */
-:root {
-  --background: #0d0d0d;
-  --card: #1c1c1e;
-  --border: #3a3a3c;
-  --foreground: #ffffff;
-  --muted-foreground: #a1a1a6;
-  --primary: #ff3b30;        /* Red accent */
-  --destructive: #dc2626;
-  --ring: #ff3b30;
-}
-```
-
-### Shadcn Components to Use
+### Key Components
 
 | Component | Usage |
 |-----------|-------|
-| Button | Primary, secondary, destructive variants |
-| Input | Form inputs with labels |
-| Select | Dropdown selects |
-| Switch | Toggle switches |
-| Dialog | Modal dialogs (About, Confirm) |
-| Card | Settings section containers |
-| Sonner | Toast notifications |
-| Tabs | Settings category navigation |
-| Table | User list, profiles list |
-| Slider | Imaging settings controls |
-| Skeleton | Loading states |
-
-### Install Additional Components
-
-```bash
-npx shadcn@latest add dialog sonner tabs slider table skeleton
-```
-
-### Alternatives Considered
-
-| Alternative | Why Rejected |
-|-------------|--------------|
-| Pure custom Tailwind | Reinventing the wheel; shadcn already available |
-| Material UI | Wrong aesthetic; heavy bundle |
-| Chakra UI | Not configured in project |
+| `Sheet` | Mobile Navigation Drawer |
+| `Collapsible` | Mobile Settings Menu |
+| `Form` | React Hook Form wrapper components |
+| `Dialog` | About / Change Password Modals |
+| `Card` | Settings containers |
+| `Button`/`Input` | Standard interaction elements |
 
 ---
 
 ## R5b: React Patterns (from .cursor/rules/react.mdc)
 
-### Decision
+### R5b: Decision
 
 Follow project React conventions for performance and maintainability.
 
@@ -300,7 +216,7 @@ const NameInput = () => {
 
 ## R5c: Accessibility Requirements (from .cursor/rules/frontend.mdc)
 
-### Decision
+### R5c: Decision
 
 Implement WCAG-compliant accessibility using ARIA best practices.
 
@@ -317,7 +233,7 @@ Implement WCAG-compliant accessibility using ARIA best practices.
 | `aria-describedby` | Form field help text, error messages |
 | `aria-current` | Active navigation item (`aria-current="page"`) |
 
-### Implementation Examples
+### R5c: Implementation Examples
 
 ```tsx
 // Sidebar navigation
@@ -354,20 +270,20 @@ Implement WCAG-compliant accessibility using ARIA best practices.
 
 ## R6: Error Handling Strategy
 
-### Decision
+### R6: Decision
 
 - React Error Boundaries at route level to catch render errors
 - Toast notifications for operation success/failure
 - Inline form validation errors
 - Connection status indicator for backend availability
 
-### Rationale
+### R6: Rationale
 
 - Prevents entire app from crashing on component errors
 - Provides immediate user feedback
 - Clear visual distinction between validation and system errors
 
-### Implementation Pattern
+### R6: Implementation Pattern
 
 ```typescript
 // Error boundary wrapper
@@ -388,7 +304,7 @@ try {
 <ConnectionStatusBadge status={deviceStatus} />
 ```
 
-### Alternatives Considered
+### R6: Alternatives Considered
 
 | Alternative | Why Rejected |
 |-------------|--------------|
@@ -400,34 +316,35 @@ try {
 
 ## R7: Routing Structure
 
-### Decision
+### R7: Decision
 
-React Router v6 with nested routes for settings.
+**Layout Wrapper Pattern** with React Router v6.
 
-### Route Structure
+### Structure
 
-```text
-/                    → Redirects to /live or /login
-/login               → LoginPage
-/live                → LiveViewPage (placeholder)
-/diagnostics         → DiagnosticsPage (placeholder)
-/settings            → SettingsLayout (with nested routes)
-  /settings/identification  → IdentificationPage
-  /settings/network         → NetworkPage
-  /settings/time            → TimePage
-  /settings/imaging         → ImagingPage
-  /settings/users           → UserManagementPage
-  /settings/maintenance     → MaintenancePage
-  /settings/profiles        → ProfilesPage
+```tsx
+<Routes>
+  <Route path="/login" element={<LoginPage />} />
+  <Route element={<Layout />}> {/* Layout.tsx handles Nav/Header */}
+    <Route path="/live" element={<LiveViewPage />} />
+    <Route path="/settings/*" element={<SettingsRoutes />} />
+  </Route>
+</Routes>
 ```
-
-### Protected Routes
-
-All routes except `/login` require authentication. Redirect to `/login` if not authenticated.
 
 ---
 
 ## R8: Backend Integration Points
+
+### R8: Mock Strategy
+
+**Node.js Mock Server** for local development.
+
+- **Tool**: Simple Node.js script (using `fastify` or `http`).
+- **Function**: Serves static XML responses.
+- **Usage**: `VITE_USE_MOCK=true` proxies requests to the mock server.
+
+### R8: Endpoints
 
 ### ONVIF Service Endpoints (onvif-rust)
 
@@ -440,16 +357,10 @@ All routes except `/login` require authentication. Redirect to `/login` if not a
 
 ### Request Format
 
-All ONVIF operations use SOAP 1.2 over HTTP POST with WS-UsernameToken authentication.
+All ONVIF operations use SOAP 1.2 over HTTP POST. Authentication is handled via HTTP Basic Auth headers (primary) or WS-UsernameToken (fallback).
 
 ### Response Handling
 
 - Success: Parse SOAP body, extract response data
 - Fault: Parse SOAP Fault, display user-friendly error message
 - Network error: Show connection issue UI
-
----
-
-## Summary
-
-All research items resolved. No NEEDS CLARIFICATION remaining. Ready for Phase 1 design artifacts.

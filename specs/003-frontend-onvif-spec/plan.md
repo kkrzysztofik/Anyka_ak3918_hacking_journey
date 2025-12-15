@@ -10,8 +10,20 @@ Build a React-based admin panel for managing a single ONVIF camera device. The f
 ## Technical Context
 
 **Language/Version**: TypeScript 5.x with React 19.1
-**Primary Dependencies**: React 19, Redux Toolkit 2.x, React Router 6.x, Axios, Tailwind CSS 3.x, **@shadcn/ui** (new-york style), Lucide React (icons), fast-xml-parser
-**Storage**: N/A (all state from backend; session via HTTP cookies)
+**Primary Dependencies**:
+
+- React 19
+- Redux Toolkit 2.x
+- React Router 6.x
+- Axios
+- Tailwind CSS 3.x
+- **@shadcn/ui** (new-york style)
+- Lucide React (icons)
+- fast-xml-parser
+- **react-hook-form** (Form management)
+- **zod** & **@hookform/resolvers** (Validation)
+
+**Storage**: N/A (all state from backend; session via memory/cookies)
 **Testing**: Vitest + React Testing Library (to be added)
 **Target Platform**: Modern browsers (Chrome 90+, Firefox 88+, Safari 14+, Edge 90+); responsive (desktop + mobile)
 **Project Type**: Web application (frontend-only, backend exists at `cross-compile/onvif-rust`)
@@ -45,6 +57,7 @@ Build a React-based admin panel for managing a single ONVIF camera device. The f
 ```text
 specs/003-frontend-onvif-spec/
 ├── plan.md              # This file
+├── architecture-decisions.md # Architecture log
 ├── research.md          # Phase 0 output
 ├── data-model.md        # Phase 1 output
 ├── quickstart.md        # Phase 1 output
@@ -56,12 +69,16 @@ specs/003-frontend-onvif-spec/
 ### Source Code (repository root)
 
 ```text
+mock-server/              # Local dev mock server
+├── package.json
+└── server.js
+
 cross-compile/www/
 ├── src/
 │   ├── components/           # Reusable UI components
-│   │   ├── ui/              # @shadcn/ui components (Button, Input, Dialog, etc.)
+│   │   ├── ui/              # @shadcn/ui components (Button, Input, Sheet, etc.)
 │   │   ├── hooks/           # Custom React hooks (per react.mdc guidelines)
-│   │   ├── layout/          # Layout components (Sidebar, Frame, Nav)
+│   │   ├── layout/          # Layout components (Sidebar, Layout, Nav)
 │   │   └── settings/        # Settings-specific components
 │   ├── pages/               # Route-level page components
 │   │   ├── LoginPage.tsx
@@ -76,7 +93,7 @@ cross-compile/www/
 │   │       ├── MaintenancePage.tsx
 │   │       └── ProfilesPage.tsx
 │   ├── services/            # API/backend communication
-│   │   ├── onvifClient.ts   # SOAP/XML client (exists)
+│   │   ├── soap/            # Low-level SOAP client
 │   │   ├── authService.ts   # Authentication
 │   │   ├── deviceService.ts # Device management
 │   │   ├── networkService.ts
@@ -107,7 +124,7 @@ cross-compile/www/
 │   │   └── index.tsx
 │   ├── styles/              # Global styles
 │   │   └── globals.css
-│   ├── App.tsx
+│   ├── Layout.tsx           # Main App Wrapper
 │   ├── main.tsx
 │   └── index.css
 ├── tests/                   # Test files (to be added)
@@ -121,6 +138,7 @@ cross-compile/www/
 ```
 
 **Structure Decision**: Using the existing `cross-compile/www/` project structure. The application follows a standard React SPA pattern with:
+
 - **Pages** for route-level components
 - **Components** for reusable UI elements
 - **Services** for API communication (SOAP/XML to onvif-rust)
@@ -131,34 +149,35 @@ cross-compile/www/
 
 ### R1: ONVIF SOAP Communication Pattern
 
-**Decision**: Use existing `onvifClient.ts` pattern with `fast-xml-parser` for XML/SOAP
-**Rationale**: Already implemented and working; handles SOAP envelope construction and response parsing
+**Decision**: **Custom Lightweight Client** with `axios` + `fast-xml-parser`
+**Rationale**: Browser-compatible; decoupled from UI; allows precise SOAP envelope control
 
 ### R2: Authentication Approach
 
-**Decision**: HTTP session cookies with WS-UsernameToken for ONVIF calls
-**Rationale**: Backend already supports WS-UsernameToken; session cookies simplify frontend state
+**Decision**: **HTTP Basic Auth** as primary
+**Rationale**: Backend supports it explicitly; simpler than WS-UsernameToken; bypasses clock skew issues
 
 ### R3: State Management
 
-**Decision**: Redux Toolkit for global state; local state for forms
-**Rationale**: Already configured in project; good for form state and async operations
+**Decision**: Redux Toolkit for global state; **React Hook Form** for forms
+**Rationale**: Separation of concerns; strong form validation support
 
 ### R4: Form Handling
 
-**Decision**: Controlled components with local state; validate before submit
-**Rationale**: Matches design patterns in existing code; simpler than form libraries
+**Decision**: **React Hook Form** + **Zod**
+**Rationale**: Robust validation schema; better performance than controlled components
 
 ### R5: UI Component Library (from `.cursor/rules/shadcn.mdc`)
 
 **Decision**: Use **@shadcn/ui** components with theme overrides for "Camera.UI" dark theme
 **Rationale**: Already configured in project with "new-york" style; accessible by default; use `@/components/ui/` alias
-**Required Components**: Button, Input, Select, Switch, Dialog, Card, Sonner (toast), Tabs, Table, Slider, Skeleton
+**Required Components**: Button, Input, Select, Switch, Dialog, Card, Sonner (toast), Tabs, Table, Slider, Skeleton, **Sheet**, **Collapsible**, **Form**
 
 ### R5b: React Patterns (from `.cursor/rules/react.mdc`)
 
 **Decision**: Follow project React conventions
 **Requirements**:
+
 - Functional components only (no class components)
 - Custom hooks in `src/components/hooks/`
 - `React.memo()` for expensive components
@@ -171,6 +190,7 @@ cross-compile/www/
 
 **Decision**: WCAG-compliant ARIA implementation
 **Requirements**:
+
 - ARIA landmarks (`<main>`, `<nav>`, roles)
 - `aria-expanded`/`aria-controls` for expandable content
 - `aria-live` for toasts and dynamic updates
@@ -189,6 +209,7 @@ cross-compile/www/
 See [data-model.md](./data-model.md) for complete entity definitions.
 
 **Core Entities**:
+
 - `AuthState`: Current user session (username, role, isAuthenticated)
 - `DeviceInfo`: Device identity and status from GetDeviceInformation
 - `NetworkSettings`: Network configuration from GetNetworkInterfaces
@@ -200,6 +221,7 @@ See [data-model.md](./data-model.md) for complete entity definitions.
 ### API Contracts
 
 See [contracts/](./contracts/) directory:
+
 - `contracts/auth.md`: Authentication endpoints
 - `contracts/device.md`: Device service operations
 - `contracts/network.md`: Network service operations

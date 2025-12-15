@@ -36,7 +36,7 @@ As an administrator, I want to view device identity and status in the Identifica
 
 1. **Given** the backend is reachable, **When** the administrator views device information, **Then** manufacturer/model/firmware/serial/hardware id are displayed.
 2. **Given** the administrator opens Identification settings, **When** the content loads, **Then** the UI shows the “Device Status” section (device name, model, and online indicator).
-3. **Given** the administrator opens the About view, **When** the content loads, **Then** the UI shows the device identity summary and network identifiers that are available (e.g., MAC address).
+3. **Given** the administrator opens the About view, **When** the content loads, **Then** the UI shows the device identity summary, network identifiers that are available (e.g., MAC address), and license information.
 4. **Given** the administrator edits the device name and location, **When** they press “Save Changes”, **Then** the system applies the changes and the UI shows a success confirmation.
 5. **Given** the administrator edits the hostname, **When** they press “Save Changes”, **Then** the system applies the change and the updated hostname is shown after refresh.
 6. **Given** a field is read-only (hardware identifiers), **When** the administrator views settings, **Then** those fields are clearly marked non-editable.
@@ -268,4 +268,4 @@ As a user, I want to access the Live View area so I can see that this feature ex
 - The backend (onvif-rust) exposes ONVIF services: Device, Media, PTZ, Imaging. UI adapts to capability presence rather than forcing all features.
 - Diagnostics backend endpoints (system metrics, logs) will be implemented in a future phase; this phase uses mock/sample data.
 - Network configuration changes may require backend support that is partially implemented; UI should gracefully handle unsupported operations.
-- Session management uses standard HTTP session cookies; explicit token/OAuth is not required for this phase.
+- Authentication uses standard HTTP Basic Authentication (RFC 7617); session cookies or complex token flows are not required for this phase.
