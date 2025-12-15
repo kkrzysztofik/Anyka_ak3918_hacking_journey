@@ -1,8 +1,9 @@
-# Specification Quality Checklist: Frontend ↔ Existing ONVIF Services
+# Specification Quality Checklist: Frontend ↔ ONVIF Services
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
-**Created**: Friday Dec 12, 2025
-**Feature**: [Link to spec.md](../spec.md)
+**Created**: Saturday Dec 13, 2025
+**Feature**: [003-frontend-onvif-spec](../spec.md)
+**Reviewed Against**: Design proposal, Figma designs, onvif-rust API
 
 ## Content Quality
 
@@ -29,7 +30,45 @@
 - [x] Feature meets measurable outcomes defined in Success Criteria
 - [x] No implementation details leak into specification
 
+## Design Alignment Validation
+
+- [x] **Login Screen**: Covered by User Story 1 (Bootstrap) - sign-in flow
+- [x] **Live View**: Covered by User Story 10 - placeholder with disabled PTZ
+- [x] **Diagnostics**: Covered by User Story 9 - placeholder with mock/sample data
+- [x] **Settings - Identification**: Covered by User Story 2 - device info, name/location editing
+- [x] **Settings - Network**: Covered by User Story 3 - IP config, DHCP, DNS, ports, ONVIF discovery
+- [x] **Settings - Time**: Covered by User Story 4 - timezone, NTP configuration
+- [x] **Settings - Maintenance**: Covered by User Story 7 - reboot, reset, backup/restore
+- [x] **Settings - Imaging**: Covered by User Story 6 - brightness/contrast/saturation
+- [x] **Settings - User Management**: Covered by User Story 5 - CRUD users with roles
+- [x] **Settings - Profiles**: Covered by User Story 8 - stream profile management
+- [x] **About Modal**: Covered by User Story 2 (Identification Settings & About)
+- [x] **Change Password Modal**: Covered by User Story 5 (User Management)
+- [x] **User Profile Menu**: Covered by navigation/layout (implied by About/Change Password access)
+
+## Backend API Alignment
+
+- [x] **Device Service**: GetDeviceInformation, GetSystemDateAndTime, GetUsers, CreateUsers, SetUser, SystemReboot - Covered
+- [x] **Media Service**: GetProfiles, GetStreamUri, GetSnapshotUri - Covered (Profiles view)
+- [x] **PTZ Service**: Out of scope for this phase (placeholder only)
+- [x] **Imaging Service**: GetImagingSettings, SetImagingSettings, GetOptions - Covered
+- [x] **Diagnostics endpoints**: Not available this phase - using mock/sample data (placeholder)
+
+## Gap Analysis Summary
+
+| Gap Identified | Resolution |
+|---------------|------------|
+| Diagnostics view missing from spec | Added User Story 9 as placeholder with mock data |
+| Network Settings lacked design details | Expanded User Story 3 with DHCP, ONVIF Discovery, port config |
+| Live View placeholder not specified | Added User Story 10 for placeholder behavior |
+| Hostname placement inconsistent | Moved to Network Settings per design |
+| Edge cases incomplete | Added edge cases (network disconnect, last admin protection) |
+| Success criteria missing for new features | Added SC-006 through SC-008 |
+
 ## Notes
 
-- The spec assumes “trusted local network” deployment; if remote access is required later, security requirements must be expanded (transport security, stronger auth, audit, lockout policy).
-- PTZ, RTSP streaming, and telemetry are explicitly excluded from this phase and should be captured in a follow-on spec once implemented in the backend.
+- Specification is now aligned with the design proposal (`.ai/design_proposal.md`)
+- All design components from `.ai/design/components/` are covered by user stories
+- **Diagnostics and Live View are placeholders** - real-time data deferred to future phase
+- Backend API capabilities from onvif-rust documented in assumptions
+- Items marked complete indicate spec is ready for `/speckit.plan`

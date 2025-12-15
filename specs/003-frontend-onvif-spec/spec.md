@@ -45,19 +45,23 @@ As an administrator, I want to view device identity and status in the Identifica
 
 ### User Story 3 - Network Settings (Priority: P3)
 
-As an administrator, I want to view and update network settings (interfaces, addressing mode, DNS, and service ports) so I can place the device correctly on the network and ensure expected connectivity.
+As an administrator, I want to view and update network settings (interfaces, addressing mode, DNS, hostname, and service ports) so I can place the device correctly on the network and ensure expected connectivity.
 
-**Why this priority**: Network configuration is necessary for deployment and ongoing reachability and maps directly to the Settings “Network” view.
+**Why this priority**: Network configuration is necessary for deployment and ongoing reachability and maps directly to the Settings "Network" view.
 
 **Independent Test**: Can be fully tested by viewing current network values, applying a change (where supported), and verifying the UI reflects the updated values with clear warnings about connectivity risk.
 
 **Acceptance Scenarios**:
 
-1. **Given** the administrator opens Network settings, **When** the content loads, **Then** the UI shows current network interface details (IP address, addressing mode, MAC, and gateway where available).
-2. **Given** the administrator updates DNS settings, **When** they save, **Then** the system applies the change and the UI confirms success.
-3. **Given** the administrator updates service connectivity settings (e.g., ports for relevant services), **When** they save, **Then** the system applies the change and the UI confirms success.
-4. **Given** the administrator attempts a network change that could disconnect the session, **When** they save, **Then** the UI clearly warns about the risk and requires explicit confirmation.
-5. **Given** the user has insufficient permissions, **When** they attempt to save network changes, **Then** the system blocks the action and explains why.
+1. **Given** the administrator opens Network settings, **When** the content loads, **Then** the UI shows a connection status card with current interface details (connection type, signal strength if applicable, MAC address, uptime).
+2. **Given** the administrator opens Network settings, **When** the content loads, **Then** the UI shows the current IP configuration (IP address, subnet mask, gateway, addressing mode).
+3. **Given** the administrator toggles DHCP mode, **When** DHCP is enabled, **Then** the IP/subnet/gateway fields become read-only; when disabled, they become editable.
+4. **Given** the administrator updates the hostname, **When** they save, **Then** the system applies the change and the UI confirms success.
+5. **Given** the administrator updates DNS settings (primary and secondary DNS), **When** they save, **Then** the system applies the change and the UI confirms success.
+6. **Given** the administrator updates service port settings (HTTP, HTTPS, RTSP ports), **When** they save, **Then** the system applies the change and the UI confirms success.
+7. **Given** the administrator toggles ONVIF Discovery, **When** they save, **Then** the device becomes discoverable or hidden on the network accordingly.
+8. **Given** the administrator attempts a network change that could disconnect the session (e.g., IP address change), **When** they save, **Then** the UI clearly warns about the risk and requires explicit confirmation.
+9. **Given** the user has insufficient permissions, **When** they attempt to save network changes, **Then** the system blocks the action and explains why.
 
 ---
 
@@ -133,7 +137,7 @@ As an administrator, I want to perform maintenance operations (reboot, reset to 
 
 As an administrator, I want to create, edit, and delete configuration profiles so I can manage available stream configurations and formats, even if live streaming is not yet enabled in this phase.
 
-**Why this priority**: It’s useful for diagnostics and future readiness, but not required for core configuration.
+**Why this priority**: It's useful for diagnostics and future readiness, but not required for core configuration.
 
 **Independent Test**: Can be fully tested by creating a profile, editing it, and deleting it, then confirming the profile list updates accordingly.
 
@@ -146,42 +150,81 @@ As an administrator, I want to create, edit, and delete configuration profiles s
 
 ---
 
+### User Story 9 - Diagnostics & Statistics Placeholder (Priority: P9)
+
+As an operator, I want to access the Diagnostics & Statistics view so I can see that this feature exists and understand its intended functionality, even though real-time data is not yet available in this phase.
+
+**Why this priority**: Diagnostics will provide visibility into device health, but backend endpoints for metrics/logs are not yet implemented. Showing a placeholder maintains UI consistency.
+
+**Independent Test**: Can be fully tested by navigating to Diagnostics and confirming the placeholder UI displays correctly with sample/mock data without broken elements.
+
+**Acceptance Scenarios**:
+
+1. **Given** the user navigates to Diagnostics, **When** the content loads, **Then** the UI displays a placeholder layout with sample system health status, performance metrics, and device information.
+2. **Given** the Diagnostics placeholder is displayed, **When** the user views performance charts, **Then** the UI shows sample CPU, memory, and temperature visualizations (mock data).
+3. **Given** the Diagnostics placeholder is displayed, **When** the user views the logs section, **Then** the UI shows a sample log list demonstrating the intended log filtering UI.
+4. **Given** the Diagnostics view is displayed, **When** the user looks for a "data not live" indicator, **Then** the UI clearly indicates that real-time data is not yet available in this phase.
+
+---
+
+### User Story 10 - Live View Placeholder (Priority: P10)
+
+As a user, I want to access the Live View area so I can see that this feature exists and understand its current status, even though live streaming is not yet available in this phase.
+
+**Why this priority**: The live view is the primary dashboard but streaming is out of scope; showing a clear placeholder maintains UI consistency and user expectations.
+
+**Independent Test**: Can be fully tested by navigating to Live View and confirming the placeholder communicates "streaming not available" without broken UI.
+
+**Acceptance Scenarios**:
+
+1. **Given** the user is signed in, **When** they navigate to Live View (default landing), **Then** the UI shows a placeholder indicating live streaming is not yet available.
+2. **Given** the Live View placeholder is displayed, **When** the user views PTZ controls, **Then** the controls are visible but disabled with a clear "unavailable" indication.
+3. **Given** the Live View is displayed, **When** the user looks for stream status, **Then** the UI shows connection status and device online/offline indicator.
+
+---
+
 ### Edge Cases
 
-- Camera backend intermittently reachable (flapping network): UI remains usable, shows last-known values with “stale” indicator, and retries safely.
-- Partial capability support: UI hides/disabled unsupported controls rather than failing the entire page.
-- Slow responses: UI shows progress and avoids duplicate actions (no double-save, no command spam).
-- Invalid user input: UI prevents or clearly rejects invalid values with actionable messages.
+- Camera backend intermittently reachable (flapping network): UI remains usable, shows last-known values with "stale" indicator, and retries safely.
+- Partial capability support: UI hides/disables unsupported controls rather than failing the entire page.
+- Slow responses: UI shows progress indicators and avoids duplicate actions (no double-save, no command spam).
+- Invalid user input: UI prevents or clearly rejects invalid values with actionable error messages.
 - Concurrent edits: if two sessions change settings, the UI warns about conflicts and shows which values are currently applied.
 - Authentication expiry: if the session expires, the user is returned to sign-in without data loss where possible.
+- Network change disconnection: if a network settings change causes the session to disconnect, UI provides reconnection guidance.
+- Last administrator protection: UI prevents deletion of the last administrator account to avoid lockout.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
 - **FR-001**: System MUST provide a sign-in flow that gates access to device controls and settings.
-- **FR-002**: System MUST provide an “About” view that summarizes device identity and key identifiers available from the device.
-- **FR-003**: System MUST provide an “Identification” settings view that allows updating device name, location, and hostname where supported, while clearly marking read-only identifiers.
-- **FR-004**: System MUST provide a “Network” settings view that displays current interface configuration (IP, addressing mode, MAC, gateway, DNS) and allows administrators to update supported network settings.
-- **FR-005**: System MUST provide a “Time” settings view that displays current time configuration and allows administrators to switch between manual time and network time (when supported) and configure relevant time settings.
-- **FR-006**: System MUST provide an “Imaging” settings view that displays current imaging settings and allows administrators to update supported imaging controls with validation against allowed ranges/options.
-- **FR-007**: System MUST provide a “User Management” view that allows administrators to view and manage user accounts (create, update role, enable/disable, delete) consistent with device permissions.
-- **FR-008**: System MUST provide a “Maintenance” view that offers safe maintenance actions (at minimum reboot, reset to defaults, backup/restore configuration) with clear confirmation prompts and status feedback.
-- **FR-009**: System MUST provide a “Profiles” view that supports profile lifecycle management (create, edit, delete) and shows a configuration summary for each profile.
-- **FR-010**: System MUST clearly indicate which features are not yet available in this phase (PTZ control, live streaming, telemetry), without presenting broken UI.
-- **FR-011**: System MUST follow the agreed visual theme (“Camera.UI” dark theme with red accents) and remain accessible (keyboard navigation and appropriate ARIA).
-- **FR-012**: System MUST handle backend/network failures gracefully with clear user messaging and without crashing or losing navigation.
+- **FR-002**: System MUST provide an "About" view that summarizes device identity and key identifiers available from the device.
+- **FR-003**: System MUST provide an "Identification" settings view that allows updating device name and location, while clearly marking read-only identifiers (manufacturer, model, firmware, hardware ID, serial number).
+- **FR-004**: System MUST provide a "Network" settings view that displays current interface configuration (connection status, IP, subnet, gateway, MAC, hostname, DNS, service ports) and allows administrators to configure addressing mode (DHCP/static), hostname, DNS servers, service ports, and ONVIF discovery.
+- **FR-005**: System MUST provide a "Time" settings view that displays current time configuration and allows administrators to switch between manual time and network time (when supported) and configure relevant time settings.
+- **FR-006**: System MUST provide an "Imaging" settings view that displays current imaging settings and allows administrators to update supported imaging controls with validation against allowed ranges/options.
+- **FR-007**: System MUST provide a "User Management" view that allows administrators to view and manage user accounts (create, update role/password, delete) with role options (Administrator, Operator, User).
+- **FR-008**: System MUST provide a "Maintenance" view that offers safe maintenance actions (at minimum reboot, reset to defaults, backup/restore configuration) with clear confirmation prompts and status feedback.
+- **FR-009**: System MUST provide a "Profiles" view that supports profile lifecycle management (create, edit, delete) and shows a configuration summary for each profile.
+- **FR-010**: System MUST provide a "Diagnostics & Statistics" placeholder view displaying sample/mock system health status, performance metrics, and logs to demonstrate the intended UI (real-time data not available this phase).
+- **FR-011**: System MUST provide a "Live View" placeholder that indicates streaming is not yet available while showing device connection status and disabled PTZ controls.
+- **FR-012**: System MUST clearly indicate which features are not yet available in this phase (PTZ control, live streaming, telemetry), without presenting broken UI.
+- **FR-013**: System MUST follow the agreed visual theme ("Camera.UI" dark theme with red accents) and remain accessible (keyboard navigation and appropriate ARIA).
+- **FR-014**: System MUST handle backend/network failures gracefully with clear user messaging and without crashing or losing navigation.
+- **FR-015**: System MUST warn users before applying network changes that could disconnect the current session.
 
 ### Key Entities *(include if feature involves data)*
 
 - **Device**: Represents the single camera device being managed (identity, network address, capabilities, health state).
-- **User**: Represents an authenticated person interacting with the admin panel (role/permission level, status enabled/disabled).
+- **User**: Represents an authenticated person interacting with the admin panel (username, password, role: Administrator/Operator/User).
 - **Session**: Represents a signed-in session and its validity (expiry, sign-out).
-- **Identification Settings**: Represents editable identity attributes (device name, location, hostname) and read-only identifiers.
-- **Network Settings**: Represents interface configuration, DNS, gateway, and service connectivity settings.
+- **Identification Settings**: Represents editable identity attributes (device name, location) and read-only identifiers (manufacturer, model, firmware, hardware ID, serial number).
+- **Network Settings**: Represents interface configuration (IP, subnet, gateway, MAC), addressing mode (DHCP/static), hostname, DNS servers, service ports, and ONVIF discovery setting.
 - **Time Settings**: Represents time mode (manual/network time), timezone, and time server configuration.
 - **Maintenance Operation**: Represents a maintenance action request and its outcome (e.g., reboot acknowledged, backup created, restore completed).
 - **Imaging Settings**: Represents configurable image parameters (e.g., brightness/contrast/saturation).
+- **Profile**: Represents a stream configuration profile with associated video/audio encoder settings.
 - **Configuration Change**: Represents a setting update request, outcome, and whether a restart is required.
 
 ## Success Criteria *(mandatory)*
@@ -190,13 +233,39 @@ As an administrator, I want to create, edit, and delete configuration profiles s
 
 - **SC-001**: A signed-in user can complete bootstrap (reach the app landing page and see a clear connected/not-connected state) within 10 seconds on a typical local network.
 - **SC-002**: A signed-in user can determine supported vs unsupported feature areas (e.g., imaging available; PTZ/live streaming/telemetry not yet) within 30 seconds without documentation.
-- **SC-003**: An administrator can complete a user-management task (create, update role, disable, or delete a user) in under 2 minutes under normal conditions.
+- **SC-003**: An administrator can complete a user-management task (create, update role, or delete a user) in under 2 minutes under normal conditions.
 - **SC-004**: An administrator can complete one configuration task in each of: Identification, Network, and Time settings in under 5 minutes total under normal conditions.
 - **SC-005**: Configuration edits (where supported and permitted) persist correctly: after saving and reloading the page, the updated values remain visible in 100% of tested cases.
+- **SC-006**: A user can access Diagnostics placeholder and view sample system health UI within 5 seconds of navigation.
+- **SC-007**: The Diagnostics placeholder clearly indicates that real-time data is not yet available without any broken UI elements.
+- **SC-008**: The Live View placeholder clearly communicates "not yet available" status without any broken UI elements or JavaScript errors.
 
 ## Assumptions & Scope Boundaries
 
+### In Scope
+
 - Single camera only (no device list / multi-device switching).
+- All settings views (Identification, Network, Time, Imaging, User Management, Maintenance, Profiles).
+- Diagnostics placeholder view with sample/mock data demonstrating intended UI.
+- Live View placeholder showing device connection status (streaming not functional).
+- Authentication via username/password with role-based access (Administrator, Operator, User).
+- Dark theme with red accents ("Camera.UI" design system).
+- Responsive design supporting desktop and mobile viewports.
+
+### Out of Scope (This Phase)
+
+- PTZ control functionality (UI shows disabled controls as placeholder).
+- RTSP live video streaming (placeholder indicates "not yet available").
+- Real-time diagnostics data (placeholder with mock data only).
+- Real-time device telemetry.
+- Multi-device management or device discovery.
+- Event/notification subscriptions.
+- Recording playback or storage management.
+
+### Assumptions
+
 - Primary usage is on a trusted local network; security still required (sign-in, least privilege, safe maintenance confirmations).
-- The backend may expose optional capabilities (e.g., imaging); UI adapts to capability presence rather than forcing all features.
-- PTZ control, RTSP streaming, and device telemetry are explicitly out of scope for this phase and will be specified later when implemented.
+- The backend (onvif-rust) exposes ONVIF services: Device, Media, PTZ, Imaging. UI adapts to capability presence rather than forcing all features.
+- Diagnostics backend endpoints (system metrics, logs) will be implemented in a future phase; this phase uses mock/sample data.
+- Network configuration changes may require backend support that is partially implemented; UI should gracefully handle unsupported operations.
+- Session management uses standard HTTP session cookies; explicit token/OAuth is not required for this phase.
