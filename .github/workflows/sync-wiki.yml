@@ -1,0 +1,62 @@
+name: Sync Wiki
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "wiki/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-wiki:
+    name: Sync Wiki to GitHub
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout Wiki Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync Wiki Content
+        run: |
+          # Remove all existing files in wiki repo (except .git)
+          find wiki-repo -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+
+          # Copy all files from wiki folder to wiki repo
+          cp -r wiki/* wiki-repo/
+
+          # Navigate to wiki repo
+          cd wiki-repo
+
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Check if there are changes
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Changes detected, committing and pushing..."
+            git add .
+            git commit -m "Sync wiki from main repository (commit: ${{ github.sha }})"
+            git push origin master
+          else
+            echo "No changes to sync"
+          fi
+
+      - name: Summary
+        run: |
+          echo "✅ Wiki sync completed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Synced files:**" >> $GITHUB_STEP_SUMMARY
+          ls -1 wiki/ >> $GITHUB_STEP_SUMMARY
