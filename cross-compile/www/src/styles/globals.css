@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../../tailwind.config.js";
 
 @layer base {
   :root {
@@ -54,7 +53,23 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer components {
+  .sidebar-icon {
+    @apply w-6 h-6 stroke-current fill-none stroke-2;
+  }
+
+  .ptz-button {
+    @apply w-12 h-12 flex items-center justify-center text-xl font-bold rounded-lg transition-colors;
+  }
+
+  .card {
+    @apply bg-card rounded-lg p-6;
   }
 }

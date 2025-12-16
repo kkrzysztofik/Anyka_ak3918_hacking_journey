@@ -15,6 +15,7 @@ export function createMockResponse<T>(data: T, status = 200): AxiosResponse<T> {
     statusText: 'OK',
     headers: {},
     config: {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       headers: {} as any,
     },
   }

@@ -60,26 +60,26 @@ export default defineConfig(({ mode }) => ({
     proxy: {
       // Proxy ONVIF requests to avoid CORS issues during development
       '/onvif': {
-        target: 'http://192.168.1.100:8081',
+        target: process.env.VITE_API_TARGET || 'http://192.168.1.100:8080',
         changeOrigin: true,
         secure: false,
       },
       // Proxy utilization requests
       '/utilization': {
-        target: 'http://192.168.1.100:8081',
+        target: process.env.VITE_API_TARGET || 'http://192.168.1.100:8080',
         changeOrigin: true,
         secure: false,
       },
       // Proxy snapshot requests
       '/snapshot': {
-        target: 'http://192.168.1.100:8081',
+        target: process.env.VITE_API_TARGET || 'http://192.168.1.100:8080',
         changeOrigin: true,
         secure: false,
       }
     }
   },
   build: {
-    outDir: '../../SD_card_contents/anyka_hack/web_interface/www',
+    outDir: '../../SD_card_contents/anyka_hack/onvif/www',
     sourcemap: true,
     rollupOptions: {
       external: ['react', 'react-dom'],
@@ -125,7 +125,7 @@ export default defineConfig(({ mode }) => ({
           }
 
           // Video and PTZ components
-          if (id.includes('VideoFeed') || id.includes('PTZControls')) {
+          if (id.includes('node_modules')) {
             return 'camera-components';
           }
 
@@ -144,8 +144,8 @@ export default defineConfig(({ mode }) => ({
             return 'vendor';
           }
         },
-        chunkFileNames: (chunkInfo) => {
-          const facadeModuleId = chunkInfo.facadeModuleId ? chunkInfo.facadeModuleId.split('/').pop() : 'chunk';
+        chunkFileNames: (_chunkInfo) => {
+          // const facadeModuleId = chunkInfo.facadeModuleId ? chunkInfo.facadeModuleId.split('/').pop() : 'chunk';
           return `js/[name]-[hash].js`;
         },
         entryFileNames: 'js/[name]-[hash].js',

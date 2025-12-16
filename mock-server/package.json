@@ -1,0 +1,10 @@
+{
+  "name": "onvif-mock-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Mock ONVIF server for local development",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

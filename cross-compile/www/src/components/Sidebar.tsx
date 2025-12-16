@@ -1,11 +1,11 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Camera, Image, Settings, Monitor, HardDrive } from '../utils/icons';
+import { Camera, HardDrive, Monitor, Settings } from 'lucide-react';
 import type { SidebarProps } from '../types';
 
 const Sidebar: React.FC<SidebarProps> = () => {
   const location = useLocation();
-  
+
   const navItems = [
     { icon: Camera, label: 'Camera', href: '/camera' },
     { icon: HardDrive, label: 'Device', href: '/device' },
@@ -19,7 +19,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
       <div className="flex items-center justify-center w-10 h-10 bg-accent-red rounded-lg">
         <span className="text-white font-bold text-lg">U</span>
       </div>
-      
+
       {/* Navigation Icons */}
       <nav className="flex flex-col space-y-4">
         {navItems.map((item, index) => {
@@ -29,11 +29,10 @@ const Sidebar: React.FC<SidebarProps> = () => {
             <Link
               key={index}
               to={item.href}
-              className={`flex items-center justify-center w-12 h-12 rounded-lg transition-colors ${
-                isActive
-                  ? 'bg-accent-red/20 border-l-2 border-accent-red'
-                  : 'hover:bg-gray-600'
-              }`}
+              className={`flex items - center justify - center w - 12 h - 12 rounded - lg transition - colors ${isActive
+                ? 'bg-accent-red/20 border-l-2 border-accent-red'
+                : 'hover:bg-gray-600'
+                } `}
               title={item.label}
             >
               <Icon className="sidebar-icon" />
@@ -41,7 +40,7 @@ const Sidebar: React.FC<SidebarProps> = () => {
           );
         })}
       </nav>
-      
+
       {/* Version */}
       <div className="mt-auto text-xs text-gray-400">
         v1.0.0

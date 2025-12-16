@@ -1091,7 +1091,13 @@ mod tests {
     async fn test_dispatch_basic_auth_success() {
         // Setup auth context with enabled auth
         let user_storage = Arc::new(UserStorage::new());
-        user_storage.create_user("admin", "password123", crate::users::UserLevel::Administrator).unwrap();
+        user_storage
+            .create_user(
+                "admin",
+                "password123",
+                crate::users::UserLevel::Administrator,
+            )
+            .unwrap();
 
         let password_manager = Arc::new(PasswordManager::new());
         let ws_security = Arc::new(WsSecurityValidator::with_defaults());
@@ -1122,7 +1128,9 @@ mod tests {
             .unwrap();
 
         // Dispatch to "custom" service (AdminOp requires Administrator)
-        let response = dispatcher.dispatch_with_auth("custom", request, &auth_ctx).await;
+        let response = dispatcher
+            .dispatch_with_auth("custom", request, &auth_ctx)
+            .await;
 
         // Should succeed
         assert_eq!(response.status(), axum::http::StatusCode::OK);
@@ -1132,7 +1140,13 @@ mod tests {
     async fn test_dispatch_basic_auth_invalid_password() {
         // Setup auth context
         let user_storage = Arc::new(UserStorage::new());
-        user_storage.create_user("admin", "password123", crate::users::UserLevel::Administrator).unwrap();
+        user_storage
+            .create_user(
+                "admin",
+                "password123",
+                crate::users::UserLevel::Administrator,
+            )
+            .unwrap();
 
         let password_manager = Arc::new(PasswordManager::new());
         let ws_security = Arc::new(WsSecurityValidator::with_defaults());
@@ -1156,7 +1170,9 @@ mod tests {
             .body(Body::from(soap_body))
             .unwrap();
 
-        let response = dispatcher.dispatch_with_auth("custom", request, &auth_ctx).await;
+        let response = dispatcher
+            .dispatch_with_auth("custom", request, &auth_ctx)
+            .await;
 
         // Should NOT be OK. Expecting 401 Unauthorized or 400 Bad Request (depending on error mapping)
         assert_ne!(response.status(), axum::http::StatusCode::OK);

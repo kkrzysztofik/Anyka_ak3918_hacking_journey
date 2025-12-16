@@ -1,0 +1,48 @@
+name: WebUI CI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'cross-compile/www/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'cross-compile/www/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cross-compile/www
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: cross-compile/www/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Lint
+      run: npm run lint
+
+    - name: Test
+      run: npm run test
+
+    - name: Build
+      run: npm run build
+
+    - name: Run Snyk to check for vulnerabilities
+      uses: snyk/actions/node@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        file: cross-compile/www/package.json
+        args: --monitor

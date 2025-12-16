@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown, Wifi, WifiOff } from '../utils/icons';
+import { Wifi, WifiOff } from 'lucide-react';
 import type { SystemInfoProps } from '../types';
 
 const SystemInfo: React.FC<SystemInfoProps> = ({ cameraIP, onvifStatus, onStatusCheck }) => {
@@ -59,7 +59,7 @@ const SystemInfo: React.FC<SystemInfoProps> = ({ cameraIP, onvifStatus, onStatus
           ))}
         </div>
       </div>
-      
+
       {/* ONVIF Status */}
       <div className="card">
         <h2 className="text-xl font-semibold mb-4">ONVIF Status</h2>
@@ -67,7 +67,7 @@ const SystemInfo: React.FC<SystemInfoProps> = ({ cameraIP, onvifStatus, onStatus
           {getStatusIcon()}
           <span className={getStatusColor()}>{getStatusText()}</span>
         </div>
-        
+
         <div className="mb-4">
           <button
             onClick={onStatusCheck}
@@ -76,7 +76,7 @@ const SystemInfo: React.FC<SystemInfoProps> = ({ cameraIP, onvifStatus, onStatus
             Refresh Status
           </button>
         </div>
-        
+
       </div>
     </div>
   );

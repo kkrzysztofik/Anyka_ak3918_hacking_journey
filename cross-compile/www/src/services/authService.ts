@@ -6,15 +6,10 @@
  */
 
 import { apiClient, ENDPOINTS } from '@/services/api'
-import { createSOAPEnvelope, parseSOAPResponse, soapBodies, type SOAPFault } from '@/services/soap/client'
+import { createSOAPEnvelope, parseSOAPResponse, soapBodies } from '@/services/soap/client'
+import type { DeviceInfo } from '@/types'
 
-export interface DeviceInfo {
-  manufacturer: string
-  model: string
-  firmwareVersion: string
-  serialNumber: string
-  hardwareId: string
-}
+
 
 export interface LoginResult {
   success: boolean

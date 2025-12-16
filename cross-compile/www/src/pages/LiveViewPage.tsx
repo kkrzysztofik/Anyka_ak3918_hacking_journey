@@ -6,7 +6,7 @@
 
 import React from 'react'
 import { Camera, ZoomIn, ZoomOut, Move, Home, VideoOff } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 
 export default function LiveViewPage() {

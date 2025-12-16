@@ -5,13 +5,13 @@
  */
 
 import React, { useState, useCallback } from 'react'
-import { Outlet, NavLink, useLocation } from 'react-router-dom'
+import { Outlet, NavLink } from 'react-router-dom'
 import {
   Camera,
   Settings,
   Activity,
   Menu,
-  X,
+  // X, // Removed unused
   LogOut,
   User,
   Network,
@@ -19,12 +19,12 @@ import {
   Image,
   Users,
   Wrench,
-  Layers,
-  Home
+  Home,
+  Layers // Added as per instruction
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { Button } from '@/components/ui/button'
-import { Sheet, SheetContent, SheetTrigger, SheetClose, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { ConnectionStatusBadge } from '@/components/common/ConnectionStatus'
 import { cn } from '@/lib/utils'
 
@@ -55,16 +55,16 @@ function NavLinkItem({ item, onClick }: { item: NavItem; onClick?: () => void })
     <NavLink
       to={item.path}
       onClick={onClick}
-      className={({ isActive }) =>
+      className={({ isActive: _isActive }) =>
         cn(
           'flex items-center gap-3 px-3 py-2 rounded-md transition-colors',
-          isActive
+          _isActive
             ? 'bg-primary text-primary-foreground'
             : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
         )
       }
     >
-      {({ isActive }) => (
+      {({ isActive: _isActive }) => (
         <>
           {item.icon}
           <span>{item.label}</span>
@@ -75,8 +75,8 @@ function NavLinkItem({ item, onClick }: { item: NavItem; onClick?: () => void })
 }
 
 function Sidebar() {
-  const location = useLocation()
-  const isSettingsActive = location.pathname.startsWith('/settings')
+
+
 
   return (
     <aside

@@ -320,34 +320,33 @@ mod ffi_impl {
         Ok(())
     }
 
+    /// RAII Wrapper for Video Input Device
+    pub struct VideoInput {
+        handle: *mut c_void,
+    }
+
+    // SAFETY: The handle is thread-safe within the SDK context for these operations
+    unsafe impl Send for VideoInput {}
+    unsafe impl Sync for VideoInput {}
+
+    impl Drop for VideoInput {
+        fn drop(&mut self) {
+            if !self.handle.is_null() {
+                // SAFETY: We own the handle and checking for null
+                unsafe { ak_vi_close(self.handle); }
+            }
+        }
+    }
+
     /// Open video input device.
-    pub fn video_input_open(device: VideoDevice) -> AnykaResult<*mut c_void> {
+    pub fn video_input_open(device: VideoDevice) -> AnykaResult<VideoInput> {
         // SAFETY: Calling FFI function with valid device ID
         let sdk_device: video_dev_type = unsafe { std::mem::transmute(device.0 as i32) };
         let handle = unsafe { ak_vi_open(sdk_device) };
         if handle.is_null() {
             Err(AnykaError::ResourceUnavailable("Video input".to_string()))
         } else {
-            Ok(handle)
-        }
-    }
-
-    /// Close video input device.
-    /// Close video input device.
-    ///
-    /// # Safety
-    /// Caller must ensure `handle` was obtained from `video_input_open` and is valid for the
-    /// underlying SDK. Passing an arbitrary or freed pointer is undefined behavior.
-    pub unsafe fn video_input_close(handle: *mut c_void) -> AnykaResult<()> {
-        if handle.is_null() {
-            return Err(AnykaError::InvalidParameter("Null handle".to_string()));
-        }
-        // SAFETY: Calling FFI function with valid handle
-        let result = unsafe { ak_vi_close(handle) };
-        if result < 0 {
-            Err(AnykaError::SdkError(result))
-        } else {
-            Ok(())
+            Ok(VideoInput { handle })
         }
     }
 

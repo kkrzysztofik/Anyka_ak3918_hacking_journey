@@ -84,6 +84,8 @@ pub struct OnvifServerConfig {
     pub max_body_size: usize,
     /// Enable CORS for browser-based clients.
     pub enable_cors: bool,
+    /// Path to static files root directory (e.g. "www").
+    pub static_root: Option<String>,
     /// Enable verbose HTTP request/response logging.
     pub http_verbose: bool,
 }
@@ -96,6 +98,7 @@ impl Default for OnvifServerConfig {
             request_timeout_secs: 30,
             max_body_size: 1024 * 1024, // 1MB
             enable_cors: false,
+            static_root: Some("www".to_string()),
             http_verbose: false,
         }
     }
@@ -456,7 +459,7 @@ impl OnvifServer {
 
         // Build the main router with middleware
         // Layers are applied in reverse order: last added = first executed
-        Router::new()
+        let app = Router::new()
             .nest("/onvif", service_routes)
             .layer(
                 ServiceBuilder::new()
@@ -478,7 +481,23 @@ impl OnvifServer {
             // Memory check middleware - runs FIRST (outermost layer)
             // Order matters: first add the middleware, then the Extension it uses
             .layer(middleware::from_fn(memory_check_middleware))
-            .layer(axum::Extension(memory_monitor))
+            .layer(axum::Extension(memory_monitor));
+
+        // Add static file serving if configured
+        if let Some(static_root) = &self.config.static_root {
+            use tower_http::services::ServeDir;
+
+            tracing::info!("Serving static files from: {}", static_root);
+            // Serve pre-compressed files if available (brotli/gzip) to save CPU on embedded device
+            let serve_dir = ServeDir::new(static_root)
+                .precompressed_br()
+                .precompressed_gzip()
+                .append_index_html_on_directories(true);
+
+            app.fallback_service(serve_dir)
+        } else {
+            app
+        }
     }
 
     /// Signal the server to shut down gracefully.
@@ -679,6 +698,7 @@ mod tests {
             request_timeout_secs: 60,
             max_body_size: 2 * 1024 * 1024,
             enable_cors: true,
+            static_root: Some("/tmp".to_string()),
             http_verbose: true,
         };
 
@@ -890,5 +910,66 @@ mod tests {
             services.contains(&"imaging".to_string()),
             "Imaging service not registered"
         );
+    }
+    #[tokio::test]
+    async fn test_serve_static_files_with_compression() {
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+        use std::fs::File;
+        use std::io::Write;
+
+        // Create a temp directory for static files
+        let temp_dir = tempfile::tempdir().unwrap();
+        let static_root = temp_dir.path().to_str().unwrap().to_string();
+
+        // Create index.html
+        let file_path = temp_dir.path().join("index.html");
+        let mut file = File::create(file_path).unwrap();
+        file.write_all(b"Hello World").unwrap();
+
+        // Create index.html.gz (simulated compressed content)
+        // We use distinct content to verify the server picks the .gz file
+        let gz_path = temp_dir.path().join("index.html.gz");
+        let mut gz_file = File::create(gz_path).unwrap();
+        gz_file.write_all(b"Hello Gzip").unwrap();
+
+        let mut config = OnvifServerConfig::default();
+        config.static_root = Some(static_root);
+
+        let server = OnvifServer::new(config).unwrap();
+        let state = OnvifServerState {
+            dispatcher: Arc::clone(&server.dispatcher),
+            shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: server.auth_enabled,
+            memory_monitor: Arc::clone(&server.memory_monitor),
+        };
+
+        let app = server.build_router(state);
+
+        // Test 1: Request without compression preference -> serves plain file
+        let request = Request::builder()
+            .uri("/")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get("content-encoding").is_none());
+        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(&body[..], b"Hello World");
+
+        // Test 2: Request with gzip preference -> serves .gz file
+        let request = Request::builder()
+            .uri("/")
+            .header("Accept-Encoding", "gzip")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers().get("content-encoding").unwrap(), "gzip");
+        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        assert_eq!(&body[..], b"Hello Gzip");
     }
 }

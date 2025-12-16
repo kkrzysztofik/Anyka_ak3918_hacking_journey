@@ -42,8 +42,13 @@ export default function LoginPage() {
   // Redirect if already authenticated
   React.useEffect(() => {
     if (isAuthenticated) {
-      const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/'
-      navigate(from, { replace: true })
+      const rawFrom = (location.state as { from?: { pathname: string } })?.from?.pathname
+      let safeFrom = '/'
+      // Strict validation: must be a string, start with /, and NOT start with //
+      if (rawFrom && typeof rawFrom === 'string' && rawFrom.startsWith('/') && !rawFrom.startsWith('//')) {
+        safeFrom = rawFrom
+      }
+      navigate(safeFrom, { replace: true })
     }
   }, [isAuthenticated, navigate, location])
 
@@ -65,7 +70,7 @@ export default function LoginPage() {
           description: result.error || 'Please check your credentials',
         })
       }
-    } catch (error) {
+    } catch { // Ignore error for now
       toast.error('Connection error', {
         description: 'Unable to reach the camera. Please check your connection.',
       })

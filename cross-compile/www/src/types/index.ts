@@ -34,7 +34,7 @@ export interface ONVIFStatus {
   error?: string;
 }
 
-export interface ONVIFResponse<T = any> {
+export interface ONVIFResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
@@ -46,7 +46,7 @@ export interface DeviceInfo {
   firmwareVersion: string;
   serialNumber: string;
   hardwareId: string;
-  systemDateAndTime: {
+  systemDateAndTime?: {
     utcDateTime: Date;
     timeZone: string;
     daylightSavingTime: boolean;
@@ -110,58 +110,8 @@ export interface Endpoint {
   type: 'rtsp' | 'http' | 'onvif';
 }
 
-// Redux state types
-export interface RootState {
-  camera: CameraState;
-  onvif: ONVIFState;
-  ui: UIState;
-  device: DeviceState;
-  systemUtilization: SystemUtilizationState;
-}
-
-export interface CameraState {
-  ip: string;
-  name: string;
-  type: string;
-  isConnected: boolean;
-  snapshotUrl: string;
-  isPlaying: boolean;
-  lastSnapshotTime: Date | null;
-}
-
-export interface ONVIFState {
-  status: 'online' | 'offline' | 'checking';
-  lastChecked: Date | null;
-  error: string | null;
-  isInitialized: boolean;
-}
-
-export interface UIState {
-  currentTime: Date;
-  sidebarCollapsed: boolean;
-  fullscreenMode: boolean;
-}
-
-export interface DeviceState {
-  // Add device state properties as needed
-  // This should match the deviceSlice state
-}
-
-export interface SystemUtilizationState {
-  systemInfo: SystemInfo | null;
-  cpuHistory: DataPoint[];
-  tempHistory: DataPoint[];
-  isLoading: boolean;
-  error: string | null;
-  isAutoRefresh: boolean;
-  lastUpdated: Date | null;
-  connectionStatus: 'connected' | 'disconnected' | 'checking';
-}
-
 // Component prop types
-export interface SidebarProps {
-  // No props needed for now
-}
+export type SidebarProps = Record<string, never>;
 
 export interface HeaderProps {
   cameraName: string;
@@ -184,10 +134,12 @@ export interface SystemInfoProps {
 }
 
 // Service types
-export interface ONVIFResponse<T = any> {
-  success: boolean;
-  data?: T;
-  error?: string;
+
+
+export interface SOAPFault {
+  service: string;
+  action: string;
+  body: string;
 }
 
 export interface SOAPRequest {
