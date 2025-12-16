@@ -57,7 +57,7 @@ const parsed = parser.parse(response.data);
 
 ### R2: Implementation Notes
 
-- **Credential Storage**: Store username/password in **Redux (memory only)**.
+- **Credential Storage**: Store username/password in **React Context (memory only)**.
 - **Header Injection**: Axios interceptor injects `Authorization: Basic <base64>` on every request.
 - **Fallback**: WS-Security `UsernameToken` logic retained in codebase as backup if needed.
 
@@ -65,7 +65,7 @@ const parsed = parser.parse(response.data);
 
 ```text
 1. User enters credentials.
-2. App stores credentials in memory (Redux).
+2. App stores credentials in memory (Context).
 3. Axios interceptor adds 'Authorization: Basic ...' header.
 4. Backend verifies credentials against internal UserStorage.
 ```
@@ -76,6 +76,7 @@ const parsed = parser.parse(response.data);
 |-------------|--------------|
 | WS-UsernameToken | Complex to implement correctly in browser; sensitive to clock skew |
 | Session Cookies | Basic Auth is stateless and standard for API clients |
+| Redux | Overkill for simple session state; Context is sufficient |
 
 ---
 
@@ -83,26 +84,31 @@ const parsed = parser.parse(response.data);
 
 ### R3: Decision
 
-**Redux Toolkit** for global state; **React Hook Form** for form state.
+**TanStack Query (React Query)** for server state; **React Context** for session; **React Hook Form** for forms.
 
 ### R3: Rationale
 
-- **Global**: Redux handles Auth, Device Status, and UI preferences effectively.
-- **Forms**: React Hook Form manages complex form validation and dirty states better than manual controlled components.
-- **Validation**: `zod` schema validation ensures type safety and robust input checking.
+- **Server State**: TanStack Query handles caching, background polling, and revalidation of ONVIF settings automatically.
+- **Session**: Simple Context prevents prop-drilling for Auth status.
+- **Forms**: React Hook Form manages complex form validation and dirty states.
+- **Simplicity**: Removes boilerplate (reducers/thunks) associated with Redux.
 
 ### State Structure
 
 ```typescript
-// Global (Redux)
-interface RootState {
-  auth: { user: User | null; credentials: BasicCredentials | null };
-  device: { info: DeviceInfo | null; status: DeviceStatus };
-}
+// Server State (TanStack Query)
+const { data: deviceInfo } = useQuery({
+  queryKey: ['device', 'info'],
+  queryFn: deviceService.getDeviceInformation
+});
 
-// Local (React Hook Form)
+// Session State (Context)
+const { user, login, logout } = useAuth(); // from AuthContext
+
+// Local Form State (React Hook Form)
 const { register, handleSubmit } = useForm<NetworkSettings>({
-  resolver: zodResolver(networkSchema)
+  resolver: zodResolver(networkSchema),
+  defaultValues: queryData // Pre-fill from server state
 });
 ```
 
@@ -359,8 +365,30 @@ try {
 
 All ONVIF operations use SOAP 1.2 over HTTP POST. Authentication is handled via HTTP Basic Auth headers (primary) or WS-UsernameToken (fallback).
 
-### Response Handling
+### R8: Response Handling
 
 - Success: Parse SOAP body, extract response data
 - Fault: Parse SOAP Fault, display user-friendly error message
 - Network error: Show connection issue UI
+
+---
+
+## R9: Performance Strategy
+
+### R9: Decision
+
+**Software Compression (Gzip/Brotli)** + **Aggressive Code Splitting**.
+
+### R9: Rationale
+
+- **Hardware Limits**: Research into `onvif-rust` codebase confirms **no hardware acceleration** for Gzip is currently exposed/available on the AK3918 platform. Software compression must be efficient.
+- **Bandwidth**: Embedded web servers have limited throughput; minimizing payload size is critical.
+- **App Size**: React 19 + libraries is heavy. Code splitting ensures the initial load (bootstrap) remains under the "3s on local network" goal.
+
+### Implementation Requirements
+
+1. **Build Time**: Vite configured to generate `.gz` and `.br` assets pre-compressed.
+2. **Runtime**: `onvif-rust` static file server must prefer pre-compressed assets if `Accept-Encoding` matches.
+3. **Splitting**:
+    - `React.lazy` for every top-level Route.
+    - Vendor chunk separation (splitting React/Tanstack from app code).

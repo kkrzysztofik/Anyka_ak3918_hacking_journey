@@ -9,11 +9,11 @@ Build a React-based admin panel for managing a single ONVIF camera device. The f
 
 ## Technical Context
 
-**Language/Version**: TypeScript 5.x with React 19.1
+**Language/Version**: TypeScript 5.x with React 19.x
 **Primary Dependencies**:
 
 - React 19
-- Redux Toolkit 2.x
+- **TanStack Query v5** (Server Access & Caching)
 - React Router 6.x
 - Axios
 - Tailwind CSS 3.x
@@ -27,7 +27,12 @@ Build a React-based admin panel for managing a single ONVIF camera device. The f
 **Testing**: Vitest + React Testing Library (to be added)
 **Target Platform**: Modern browsers (Chrome 90+, Firefox 88+, Safari 14+, Edge 90+); responsive (desktop + mobile)
 **Project Type**: Web application (frontend-only, backend exists at `cross-compile/onvif-rust`)
-**Performance Goals**: Initial load < 3s on local network; page transitions < 500ms
+**Performance Goals**:
+
+- Initial load < 3s on local network
+- Page transitions < 500ms
+- **Gzip/Brotli Compression** enabled for serving assets
+- **Code Splitting** implemented for all routes
 **Constraints**: Must work on embedded device (limited bandwidth); graceful degradation when backend unavailable
 **Scale/Scope**: Single camera; ~15 views/screens; 3 user roles
 
@@ -102,12 +107,10 @@ cross-compile/www/
 │   │   ├── userService.ts
 │   │   ├── maintenanceService.ts
 │   │   └── profileService.ts
-│   ├── store/               # Redux state management
-│   │   ├── index.ts
-│   │   └── slices/
-│   │       ├── authSlice.ts
-│   │       ├── deviceSlice.ts
-│   │       └── uiSlice.ts
+│   ├── lib/                 # Shared utilities & State
+│   │   ├── queryClient.ts   # TanStack Query Client
+│   │   ├── store.ts         # User session store (Context/Zustand if needed)
+│   │   └── utils.ts
 │   ├── hooks/               # Custom React hooks
 │   │   ├── useAuth.ts
 │   │   ├── useDevice.ts
@@ -142,7 +145,7 @@ cross-compile/www/
 - **Pages** for route-level components
 - **Components** for reusable UI elements
 - **Services** for API communication (SOAP/XML to onvif-rust)
-- **Store** for global state (Redux Toolkit)
+- **TanStack Query** for server state management & caching
 - **Hooks** for shared logic
 
 ## Phase 0: Research Summary
@@ -159,8 +162,8 @@ cross-compile/www/
 
 ### R3: State Management
 
-**Decision**: Redux Toolkit for global state; **React Hook Form** for forms
-**Rationale**: Separation of concerns; strong form validation support
+**Decision**: **TanStack Query (React Query)** for server state; Context for auth.
+**Rationale**: Most state is server-side (settings). React Query handles caching, deduplication, and revalidation out of the box, reducing boilerplate compared to Redux.
 
 ### R4: Form Handling
 
@@ -242,4 +245,4 @@ See [quickstart.md](./quickstart.md) for development setup instructions.
 | Single project | ✅ | Frontend-only; backend already exists |
 | No new abstractions | ✅ | Using existing service patterns |
 | Standard routing | ✅ | React Router with nested settings routes |
-| Minimal state | ✅ | Redux for auth/device; local state for forms |
+| Minimal state | ✅ | React Query for async state; local state for forms |

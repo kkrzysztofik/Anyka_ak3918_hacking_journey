@@ -1,9 +1,35 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import viteCompression from 'vite-plugin-compression'
+import { resolve, dirname } from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
-  plugins: [react()],
+  // Vitest configuration
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      exclude: ['node_modules/', 'src/test/'],
+    },
+  },
+  plugins: [
+    react(),
+    viteCompression({ algorithm: 'gzip' }),
+    viteCompression({ algorithm: 'brotliCompress', ext: '.br' })
+  ],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, './src')
+    }
+  },
   esbuild: {
     // Use esbuild for TypeScript compilation (faster than tsc)
     target: 'es2020',
@@ -63,56 +89,56 @@ export default defineConfig(({ mode }) => ({
           'react-dom': 'ReactDOM'
         },
         manualChunks: (id) => {
-          // Redux toolkit and related
-          if (id.includes('@reduxjs/toolkit') || id.includes('react-redux')) {
-            return 'redux-vendor';
+          // TanStack Query and related
+          if (id.includes('@tanstack/react-query')) {
+            return 'query-vendor';
           }
-          
+
           // Router libraries
           if (id.includes('react-router-dom')) {
             return 'router-vendor';
           }
-          
+
           // UI libraries
           if (id.includes('lucide-react')) {
             return 'ui-vendor';
           }
-          
+
           // HTTP and networking
           if (id.includes('axios')) {
             return 'http-vendor';
           }
-          
+
           // XML parsing and utilities
           if (id.includes('fast-xml-parser') || id.includes('dompurify')) {
             return 'utils-vendor';
           }
-          
+
           // ONVIF services and related components
           if (id.includes('/services/') || id.includes('onvif')) {
             return 'onvif-services';
           }
-          
+
           // Device management components
           if (id.includes('DeviceService') || id.includes('SystemInfo')) {
             return 'device-components';
           }
-          
+
           // Video and PTZ components
           if (id.includes('VideoFeed') || id.includes('PTZControls')) {
             return 'camera-components';
           }
-          
+
           // Store slices
           if (id.includes('/store/slices/')) {
             return 'store-slices';
           }
-          
+
           // Utilities and helpers
           if (id.includes('/utils/') || id.includes('/config/')) {
             return 'app-utils';
           }
-          
+
           // Default chunk for other modules
           if (id.includes('node_modules')) {
             return 'vendor';
