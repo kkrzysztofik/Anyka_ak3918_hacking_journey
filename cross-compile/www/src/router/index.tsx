@@ -5,7 +5,7 @@
  */
 
 import React, { Suspense, type ReactNode } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import Layout from '@/Layout'
 
@@ -86,9 +86,9 @@ function AppRoutes() {
 
 export default function AppRouter() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <AppRoutes />
-    </BrowserRouter>
+    </HashRouter>
   )
 }
 

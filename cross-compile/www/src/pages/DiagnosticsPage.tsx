@@ -71,7 +71,7 @@ export default function DiagnosticsPage() {
       {/* Quick Stats */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <StatCard icon={Clock} label="Uptime" value={mockStats.uptime} />
-        <StatCard icon={Thermometer} label="Temperature" value={mockStats.temperature} unit="°C" color="text-orange-500" />
+        <StatCard icon={Thermometer} label="Temperature" value={mockStats.temperature} unit="°C" color="text-orange" />
         <StatCard icon={Wifi} label="Network RX" value={mockStats.networkRx} />
       </div>
 
@@ -95,7 +95,7 @@ export default function DiagnosticsPage() {
               </div>
               <span className="text-sm text-muted-foreground">{mockStats.cpuUsage}%</span>
             </div>
-            <ProgressBar value={mockStats.cpuUsage} color="bg-blue-500" />
+            <ProgressBar value={mockStats.cpuUsage} color="bg-blue" />
           </div>
 
           <div>
@@ -106,7 +106,7 @@ export default function DiagnosticsPage() {
               </div>
               <span className="text-sm text-muted-foreground">{mockStats.memoryUsage}%</span>
             </div>
-            <ProgressBar value={mockStats.memoryUsage} color="bg-green-500" />
+            <ProgressBar value={mockStats.memoryUsage} color="bg-green" />
           </div>
         </CardContent>
       </Card>

@@ -67,7 +67,7 @@ use super::dispatcher::{AuthContext, ServiceDispatcher};
 use super::error::OnvifError;
 use super::ws_security::{WsSecurityConfig, WsSecurityValidator};
 use crate::app::AppState;
-use crate::logging::{HttpLogConfig, HttpLoggingMiddleware, memory_check_middleware};
+use crate::logging::{HttpLogConfig, HttpLoggingMiddleware, memory_check_middleware, static_asset_logging_middleware};
 use crate::users::{PasswordManager, UserStorage};
 use crate::utils::MemoryMonitor;
 
@@ -422,16 +422,19 @@ impl OnvifServer {
 
         let mut shutdown_rx = self.shutdown_tx.subscribe();
 
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.recv().await;
-                tracing::info!("Shutdown signal received, stopping server...");
-            })
-            .await
-            .map_err(|e| {
-                tracing::error!("Server error: {}", e);
-                OnvifError::HardwareFailure(format!("Server error: {}", e))
-            })?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.recv().await;
+            tracing::info!("Shutdown signal received, stopping server...");
+        })
+        .await
+        .map_err(|e| {
+            tracing::error!("Server error: {}", e);
+            OnvifError::HardwareFailure(format!("Server error: {}", e))
+        })?;
 
         tracing::info!("ONVIF server stopped");
         Ok(())
@@ -485,16 +488,24 @@ impl OnvifServer {
 
         // Add static file serving if configured
         if let Some(static_root) = &self.config.static_root {
-            use tower_http::services::ServeDir;
+            use tower_http::services::{ServeDir, ServeFile};
 
             tracing::info!("Serving static files from: {}", static_root);
+
+            let index_path = std::path::Path::new(static_root).join("index.html");
+
             // Serve pre-compressed files if available (brotli/gzip) to save CPU on embedded device
             let serve_dir = ServeDir::new(static_root)
                 .precompressed_br()
                 .precompressed_gzip()
-                .append_index_html_on_directories(true);
+                .append_index_html_on_directories(true)
+                .fallback(ServeFile::new(index_path));
 
-            app.fallback_service(serve_dir)
+            // Add static asset logging middleware
+            // Note: ConnectInfo is extracted from the TCP connection by the server
+            // It's available as an extractor in the middleware
+            app.layer(axum::middleware::from_fn(static_asset_logging_middleware))
+                .fallback_service(serve_dir)
         } else {
             app
         }
@@ -752,7 +763,8 @@ mod tests {
         use axum::http::{Request, StatusCode};
         use tower::ServiceExt;
 
-        let config = OnvifServerConfig::default();
+        let mut config = OnvifServerConfig::default();
+        config.static_root = None;
         let server = OnvifServer::new(config).unwrap();
 
         let state = OnvifServerState {
@@ -788,7 +800,8 @@ mod tests {
         use axum::http::{Request, StatusCode};
         use tower::ServiceExt;
 
-        let config = OnvifServerConfig::default();
+        let mut config = OnvifServerConfig::default();
+        config.static_root = None;
         let server = OnvifServer::new(config).unwrap();
 
         let state = OnvifServerState {

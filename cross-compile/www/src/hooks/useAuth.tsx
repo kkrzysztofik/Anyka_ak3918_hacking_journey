@@ -28,15 +28,32 @@ interface AuthProviderProps {
   children: ReactNode
 }
 
+const AUTH_STORAGE_KEY = 'onvif_camera_auth'
+
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [credentials, setCredentials] = useState<AuthCredentials | null>(null)
+  const [credentials, setCredentials] = useState<AuthCredentials | null>(() => {
+    // Initialize from sessionStorage if available
+    const stored = sessionStorage.getItem(AUTH_STORAGE_KEY)
+    if (stored) {
+      try {
+        return JSON.parse(stored)
+      } catch (e) {
+        console.error('Failed to parse stored credentials', e)
+        return null
+      }
+    }
+    return null
+  })
 
   const login = useCallback((username: string, password: string) => {
-    setCredentials({ username, password })
+    const creds = { username, password }
+    setCredentials(creds)
+    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(creds))
   }, [])
 
   const logout = useCallback(() => {
     setCredentials(null)
+    sessionStorage.removeItem(AUTH_STORAGE_KEY)
   }, [])
 
   const getCredentials = useCallback(() => credentials, [credentials])

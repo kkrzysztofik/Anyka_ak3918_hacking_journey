@@ -495,6 +495,27 @@ impl ConfigSchema {
                 )
                 .optional(),
             )
+            .param(ConfigParameter::bool(
+                "logging.static_assets.enabled",
+                true,
+                "Enable static asset access logging",
+            ))
+            .param(
+                ConfigParameter::string(
+                    "logging.static_assets.file_path",
+                    "logs",
+                    "Directory for static asset access logs",
+                )
+                .optional(),
+            )
+            .param(
+                ConfigParameter::string(
+                    "logging.static_assets.file_name",
+                    "access",
+                    "Base name for static asset access log files (rotated daily)",
+                )
+                .optional(),
+            )
     }
 
     fn media_section() -> ConfigSection {

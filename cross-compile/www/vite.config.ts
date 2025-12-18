@@ -38,21 +38,21 @@ export default defineConfig(({ mode }) => ({
       logLevel: 'warning'
     })
   },
-  // External dependencies for CDN
+  // Define environment variables
   define: {
-    // Define environment variables
     __APP_VERSION__: '"1.0.0"',
   },
   // Optimize dependencies
   optimizeDeps: {
     include: [
+      'react',
+      'react-dom',
       'react-router-dom',
       '@reduxjs/toolkit',
       'react-redux',
       'axios',
       'lucide-react'
-    ],
-    exclude: ['@vite/client', '@vite/env', 'react', 'react-dom']
+    ]
   },
   server: {
     host: '0.0.0.0',
@@ -82,12 +82,7 @@ export default defineConfig(({ mode }) => ({
     outDir: '../../SD_card_contents/anyka_hack/onvif/www',
     sourcemap: true,
     rollupOptions: {
-      external: ['react', 'react-dom'],
       output: {
-        globals: {
-          'react': 'React',
-          'react-dom': 'ReactDOM'
-        },
         manualChunks: (id) => {
           // TanStack Query and related
           if (id.includes('@tanstack/react-query')) {

@@ -1,6 +1,6 @@
 /**
  * @file Main entry point for the application
- * @description Application entry point with CDN React integration
+ * @description Application entry point with fully embedded React and all dependencies
  */
 
 import React from 'react';

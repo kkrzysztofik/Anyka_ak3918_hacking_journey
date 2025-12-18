@@ -2,6 +2,10 @@
 
 React-based web interface for the Anyka AK3918 camera, communicating securely via ONVIF and custom HTTP endpoints.
 
+## ✅ Fully Embedded Build
+
+**All JavaScript libraries, including React, React-DOM, and all dependencies, are fully embedded in the production build.** There are no remote CDN dependencies. The application is completely self-contained and works offline, making it ideal for embedded deployment on the AK3918 camera without internet connectivity requirements.
+
 ## 🚀 Quick Start
 
 ### Prerequisites

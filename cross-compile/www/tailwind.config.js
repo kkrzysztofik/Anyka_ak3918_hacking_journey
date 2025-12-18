@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  darkMode: ["class"],
+  // Dark theme only - no light theme support
   content: [
     "./src/**/*.{js,jsx,ts,tsx}",
     "./components/**/*.{js,jsx,ts,tsx}",
@@ -15,11 +15,21 @@ export default {
     },
     extend: {
       colors: {
-        // Camera.UI Dark Theme palette
-        'dark-bg': '#1a1a1a',
-        'dark-sidebar': '#2d2d2d',
-        'dark-card': '#3a3a3a',
-        'accent-red': '#ef4444',
+        // Apple iOS-inspired dark theme palette (matches design spec)
+        'dark-bg': '#0d0d0d',
+        'dark-sidebar': '#1c1c1e',
+        'dark-card': '#2c2c2e',
+        'dark-border': '#3a3a3c',
+        'dark-secondary-text': '#a1a1a6',
+        // Semantic colors matching design
+        'danger': '#dc2626',
+        'danger-light': '#ff3b30',
+        'blue': '#007AFF',
+        'blue-hover': '#0066CC',
+        'orange': '#ff9f0a',
+        'orange-hover': '#ffb340',
+        'green': '#34c759',
+        'accent-red': '#ff3b30',
         // shadcn/ui CSS variable-based colors
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
