@@ -48,8 +48,6 @@ export default defineConfig(({ mode }) => ({
       'react',
       'react-dom',
       'react-router-dom',
-      '@reduxjs/toolkit',
-      'react-redux',
       'axios',
       'lucide-react'
     ]
@@ -60,19 +58,19 @@ export default defineConfig(({ mode }) => ({
     proxy: {
       // Proxy ONVIF requests to avoid CORS issues during development
       '/onvif': {
-        target: process.env.VITE_API_TARGET || 'http://192.168.1.100:8080',
+        target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80',
         changeOrigin: true,
         secure: false,
       },
       // Proxy utilization requests
       '/utilization': {
-        target: process.env.VITE_API_TARGET || 'http://192.168.1.100:8080',
+        target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80',
         changeOrigin: true,
         secure: false,
       },
       // Proxy snapshot requests
       '/snapshot': {
-        target: process.env.VITE_API_TARGET || 'http://192.168.1.100:8080',
+        target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80',
         changeOrigin: true,
         secure: false,
       }
@@ -80,6 +78,7 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     outDir: '../../SD_card_contents/anyka_hack/onvif/www',
+    emptyOutDir: true,
     sourcemap: true,
     rollupOptions: {
       output: {

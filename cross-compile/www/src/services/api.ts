@@ -19,12 +19,12 @@ export function setAuthHeaderGetter(getter: () => string | null) {
 
 /**
  * Configured Axios instance for ONVIF SOAP requests
- * 
+ *
  * Headers:
  * - Content-Type: SOAP 1.2 XML format with UTF-8 encoding
  * - Accept: Indicates server can respond with SOAP/XML formats
  * - Accept-Encoding: Allows server to compress response with gzip or deflate
- * 
+ *
  * Note on Brotli: While .br files are pre-compressed in build output,
  * Brotli support requires server-side configuration to serve .br files
  * with Content-Encoding: br header when Accept-Encoding: br is present.
@@ -34,7 +34,6 @@ export const apiClient: AxiosInstance = axios.create({
   headers: {
     'Content-Type': 'application/soap+xml; charset=utf-8',
     'Accept': 'application/soap+xml, application/xml, */*',
-    'Accept-Encoding': 'gzip, deflate',
   },
 })
 

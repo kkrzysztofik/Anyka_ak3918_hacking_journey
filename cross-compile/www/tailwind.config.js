@@ -14,6 +14,9 @@ export default {
       },
     },
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'sans-serif'],
+      },
       colors: {
         // Apple iOS-inspired dark theme palette (matches design spec)
         'dark-bg': '#0d0d0d',

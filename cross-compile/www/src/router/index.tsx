@@ -32,7 +32,6 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 
 // Lazy-loaded page components
 const LoginPage = React.lazy(() => import('@/pages/LoginPage'))
-const DashboardPage = React.lazy(() => import('@/pages/DashboardPage'))
 const LiveViewPage = React.lazy(() => import('@/pages/LiveViewPage'))
 const DiagnosticsPage = React.lazy(() => import('@/pages/DiagnosticsPage'))
 
@@ -60,7 +59,7 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         >
-          <Route path="/" element={<DashboardPage />} />
+          <Route path="/" element={<Navigate to="/live" replace />} />
           <Route path="/live" element={<LiveViewPage />} />
           <Route path="/diagnostics" element={<DiagnosticsPage />} />
 
