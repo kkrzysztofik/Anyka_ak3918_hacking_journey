@@ -1,32 +1,32 @@
 /**
  * SOAP Client Tests
  */
+import { describe, expect, it } from 'vitest';
 
-import { describe, it, expect } from 'vitest'
-import { createSOAPEnvelope, parseSOAPResponse, soapBodies } from '@/services/soap/client'
+import { createSOAPEnvelope, parseSOAPResponse, soapBodies } from '@/services/soap/client';
 
 describe('SOAP Client', () => {
   describe('createSOAPEnvelope', () => {
     it('should create a valid SOAP envelope with body content', () => {
-      const body = '<tds:GetDeviceInformation />'
-      const envelope = createSOAPEnvelope(body)
+      const body = '<tds:GetDeviceInformation />';
+      const envelope = createSOAPEnvelope(body);
 
-      expect(envelope).toContain('<?xml version="1.0" encoding="UTF-8"?>')
-      expect(envelope).toContain('soap:Envelope')
-      expect(envelope).toContain('soap:Body')
-      expect(envelope).toContain(body)
-    })
+      expect(envelope).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+      expect(envelope).toContain('soap:Envelope');
+      expect(envelope).toContain('soap:Body');
+      expect(envelope).toContain(body);
+    });
 
     it('should include all required ONVIF namespaces', () => {
-      const envelope = createSOAPEnvelope('<test />')
+      const envelope = createSOAPEnvelope('<test />');
 
-      expect(envelope).toContain('xmlns:soap=')
-      expect(envelope).toContain('xmlns:tds=')
-      expect(envelope).toContain('xmlns:trt=')
-      expect(envelope).toContain('xmlns:timg=')
-      expect(envelope).toContain('xmlns:tptz=')
-    })
-  })
+      expect(envelope).toContain('xmlns:soap=');
+      expect(envelope).toContain('xmlns:tds=');
+      expect(envelope).toContain('xmlns:trt=');
+      expect(envelope).toContain('xmlns:timg=');
+      expect(envelope).toContain('xmlns:tptz=');
+    });
+  });
 
   describe('parseSOAPResponse', () => {
     it('should parse a successful SOAP response', () => {
@@ -38,13 +38,13 @@ describe('SOAP Client', () => {
               <Model>AK3918E</Model>
             </GetDeviceInformationResponse>
           </soap:Body>
-        </soap:Envelope>`
+        </soap:Envelope>`;
 
-      const result = parseSOAPResponse<Record<string, unknown>>(xml)
+      const result = parseSOAPResponse<Record<string, unknown>>(xml);
 
-      expect(result.success).toBe(true)
-      expect(result.data).toBeDefined()
-    })
+      expect(result.success).toBe(true);
+      expect(result.data).toBeDefined();
+    });
 
     it('should handle SOAP faults', () => {
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -59,43 +59,43 @@ describe('SOAP Client', () => {
               </soap:Reason>
             </soap:Fault>
           </soap:Body>
-        </soap:Envelope>`
+        </soap:Envelope>`;
 
-      const result = parseSOAPResponse<Record<string, unknown>>(xml)
+      const result = parseSOAPResponse<Record<string, unknown>>(xml);
 
-      expect(result.success).toBe(false)
-      expect(result.fault).toBeDefined()
-    })
+      expect(result.success).toBe(false);
+      expect(result.fault).toBeDefined();
+    });
 
     it('should return error for invalid XML', () => {
-      const result = parseSOAPResponse<Record<string, unknown>>('not valid xml')
+      const result = parseSOAPResponse<Record<string, unknown>>('not valid xml');
 
-      expect(result.success).toBe(false)
-      expect(result.fault?.code).toBe('ParseError')
-    })
+      expect(result.success).toBe(false);
+      expect(result.fault?.code).toBe('ParseError');
+    });
 
     it('should return error for missing envelope', () => {
-      const xml = '<NoEnvelope />'
-      const result = parseSOAPResponse<Record<string, unknown>>(xml)
+      const xml = '<NoEnvelope />';
+      const result = parseSOAPResponse<Record<string, unknown>>(xml);
 
-      expect(result.success).toBe(false)
-    })
-  })
+      expect(result.success).toBe(false);
+    });
+  });
 
   describe('soapBodies', () => {
     it('should create GetDeviceInformation body', () => {
-      const body = soapBodies.getDeviceInformation()
-      expect(body).toContain('tds:GetDeviceInformation')
-    })
+      const body = soapBodies.getDeviceInformation();
+      expect(body).toContain('tds:GetDeviceInformation');
+    });
 
     it('should create GetSystemDateAndTime body', () => {
-      const body = soapBodies.getSystemDateAndTime()
-      expect(body).toContain('tds:GetSystemDateAndTime')
-    })
+      const body = soapBodies.getSystemDateAndTime();
+      expect(body).toContain('tds:GetSystemDateAndTime');
+    });
 
     it('should create GetNetworkInterfaces body', () => {
-      const body = soapBodies.getNetworkInterfaces()
-      expect(body).toContain('tds:GetNetworkInterfaces')
-    })
-  })
-})
+      const body = soapBodies.getNetworkInterfaces();
+      expect(body).toContain('tds:GetNetworkInterfaces');
+    });
+  });
+});

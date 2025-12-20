@@ -3,46 +3,47 @@
  *
  * Routes with ProtectedRoute wrapper and React.lazy code splitting.
  */
+import React, { type ReactNode, Suspense } from 'react';
 
-import React, { Suspense, type ReactNode } from 'react'
-import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { useAuth } from '@/hooks/useAuth'
-import Layout from '@/Layout'
+import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+
+import Layout from '@/Layout';
+import { useAuth } from '@/hooks/useAuth';
 
 // Loading fallback for lazy-loaded routes
 function LoadingFallback() {
   return (
-    <div className="flex items-center justify-center h-full">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+    <div className="flex h-full items-center justify-center">
+      <div className="border-primary h-8 w-8 animate-spin rounded-full border-b-2" />
     </div>
-  )
+  );
 }
 
 // Protected route wrapper - redirects to login if not authenticated
 function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth()
-  const location = useLocation()
+  const { isAuthenticated } = useAuth();
+  const location = useLocation();
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  return <>{children}</>
+  return <>{children}</>;
 }
 
 // Lazy-loaded page components
-const LoginPage = React.lazy(() => import('@/pages/LoginPage'))
-const LiveViewPage = React.lazy(() => import('@/pages/LiveViewPage'))
-const DiagnosticsPage = React.lazy(() => import('@/pages/DiagnosticsPage'))
+const LoginPage = React.lazy(() => import('@/pages/LoginPage'));
+const LiveViewPage = React.lazy(() => import('@/pages/LiveViewPage'));
+const DiagnosticsPage = React.lazy(() => import('@/pages/DiagnosticsPage'));
 
 // Settings pages
-const IdentificationPage = React.lazy(() => import('@/pages/settings/IdentificationPage'))
-const NetworkPage = React.lazy(() => import('@/pages/settings/NetworkPage'))
-const TimePage = React.lazy(() => import('@/pages/settings/TimePage'))
-const ImagingPage = React.lazy(() => import('@/pages/settings/ImagingPage'))
-const UserManagementPage = React.lazy(() => import('@/pages/settings/UserManagementPage'))
-const MaintenancePage = React.lazy(() => import('@/pages/settings/MaintenancePage'))
-const ProfilesPage = React.lazy(() => import('@/pages/settings/ProfilesPage'))
+const IdentificationPage = React.lazy(() => import('@/pages/settings/IdentificationPage'));
+const NetworkPage = React.lazy(() => import('@/pages/settings/NetworkPage'));
+const TimePage = React.lazy(() => import('@/pages/settings/TimePage'));
+const ImagingPage = React.lazy(() => import('@/pages/settings/ImagingPage'));
+const UserManagementPage = React.lazy(() => import('@/pages/settings/UserManagementPage'));
+const MaintenancePage = React.lazy(() => import('@/pages/settings/MaintenancePage'));
+const ProfilesPage = React.lazy(() => import('@/pages/settings/ProfilesPage'));
 
 function AppRoutes() {
   return (
@@ -80,7 +81,7 @@ function AppRoutes() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
-  )
+  );
 }
 
 export default function AppRouter() {
@@ -88,7 +89,7 @@ export default function AppRouter() {
     <HashRouter>
       <AppRoutes />
     </HashRouter>
-  )
+  );
 }
 
-export { ProtectedRoute, LoadingFallback }
+export { ProtectedRoute, LoadingFallback };

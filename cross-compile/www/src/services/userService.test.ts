@@ -1,8 +1,10 @@
 /**
  * User Service Tests
  */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { apiClient } from '@/services/api';
+import { createUser, deleteUser, getUsers, setUser } from '@/services/userService';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -12,15 +14,12 @@ vi.mock('@/services/api', () => ({
   ENDPOINTS: {
     device: '/onvif/device_service',
   },
-}))
-
-import { apiClient } from '@/services/api'
-import { getUsers, createUser, deleteUser, setUser } from '@/services/userService'
+}));
 
 describe('userService', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-  })
+    vi.clearAllMocks();
+  });
 
   describe('getUsers', () => {
     it('should parse user list', async () => {
@@ -40,18 +39,18 @@ describe('userService', () => {
               </GetUsersResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await getUsers()
+      const result = await getUsers();
 
-      expect(result).toHaveLength(2)
-      expect(result[0].username).toBe('admin')
-      expect(result[0].userLevel).toBe('Administrator')
-      expect(result[1].username).toBe('operator')
-      expect(result[1].userLevel).toBe('Operator')
-    })
+      expect(result).toHaveLength(2);
+      expect(result[0].username).toBe('admin');
+      expect(result[0].userLevel).toBe('Administrator');
+      expect(result[1].username).toBe('operator');
+      expect(result[1].userLevel).toBe('Operator');
+    });
 
     it('should return empty array when no users', async () => {
       const mockResponse = {
@@ -61,15 +60,15 @@ describe('userService', () => {
               <GetUsersResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await getUsers()
+      const result = await getUsers();
 
-      expect(result).toEqual([])
-    })
-  })
+      expect(result).toEqual([]);
+    });
+  });
 
   describe('createUser', () => {
     it('should send create user request', async () => {
@@ -80,22 +79,22 @@ describe('userService', () => {
               <CreateUsersResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await createUser('newuser', 'password123', 'User')
+      await createUser('newuser', 'password123', 'User');
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('<tt:Username>newuser</tt:Username>')
-      )
+        expect.stringContaining('<tt:Username>newuser</tt:Username>'),
+      );
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('<tt:UserLevel>User</tt:UserLevel>')
-      )
-    })
-  })
+        expect.stringContaining('<tt:UserLevel>User</tt:UserLevel>'),
+      );
+    });
+  });
 
   describe('deleteUser', () => {
     it('should send delete user request', async () => {
@@ -106,18 +105,18 @@ describe('userService', () => {
               <DeleteUsersResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await deleteUser('olduser')
+      await deleteUser('olduser');
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('<tds:Username>olduser</tds:Username>')
-      )
-    })
-  })
+        expect.stringContaining('<tds:Username>olduser</tds:Username>'),
+      );
+    });
+  });
 
   describe('setUser', () => {
     it('should send update user request', async () => {
@@ -128,16 +127,16 @@ describe('userService', () => {
               <SetUserResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await setUser('admin', 'newpassword', 'Administrator')
+      await setUser('admin', 'newpassword', 'Administrator');
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('<tt:Username>admin</tt:Username>')
-      )
-    })
-  })
-})
+        expect.stringContaining('<tt:Username>admin</tt:Username>'),
+      );
+    });
+  });
+});

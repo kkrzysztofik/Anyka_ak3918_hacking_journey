@@ -103,7 +103,6 @@ export interface DeviceStatus {
   };
 }
 
-
 export interface Endpoint {
   label: string;
   url: string;
@@ -134,7 +133,6 @@ export interface SystemInfoProps {
 }
 
 // Service types
-
 
 export interface SOAPFault {
   service: string;

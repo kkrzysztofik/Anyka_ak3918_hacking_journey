@@ -4,46 +4,51 @@
  * Responsive layout with integrated sidebar navigation, header, and mobile sheet nav.
  * Matches the premium dark theme design from .ai/design.
  */
+import React, { useState } from 'react';
 
-import React, { useState } from 'react'
-import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import {
-  Camera,
   Activity,
-  Menu,
-  User,
-  Network,
+  Camera,
+  Cctv,
+  ChevronUp,
   Clock,
   Image,
-  Users,
-  Cctv,
-  KeyRound,
-  ChevronUp,
   Info,
-  LogOut,
+  KeyRound,
   Layers,
+  LogOut,
+  Menu,
+  Network,
+  Settings,
+  User,
+  Users,
   Wrench,
-  Settings
-} from 'lucide-react'
-import { useAuth } from '@/hooks/useAuth'
-import { Button } from '@/components/ui/button'
-import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
-import { ChangePasswordDialog } from '@/components/ChangePasswordDialog'
-import { AboutDialog } from '@/components/AboutDialog'
-import { ConnectionStatusBadge } from '@/components/common/ConnectionStatus'
-import { cn } from '@/lib/utils'
+} from 'lucide-react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
+import { AboutDialog } from '@/components/AboutDialog';
+import { ChangePasswordDialog } from '@/components/ChangePasswordDialog';
+import { ConnectionStatusBadge } from '@/components/common/ConnectionStatus';
+import { Button } from '@/components/ui/button';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { useAuth } from '@/hooks/useAuth';
+import { cn } from '@/lib/utils';
 
 interface NavItem {
-  path: string
-  label: string
-  description?: string
-  icon: React.ElementType
-  children?: NavItem[]
+  path: string;
+  label: string;
+  description?: string;
+  icon: React.ElementType;
+  children?: NavItem[];
 }
 
 const navItems: NavItem[] = [
-  { path: '/live', label: 'Live View', description: 'Real-time camera stream', icon: Camera },
+  {
+    path: '/live',
+    label: 'Live View',
+    description: 'Real-time camera stream',
+    icon: Camera,
+  },
   {
     path: '/settings',
     label: 'Settings',
@@ -57,24 +62,38 @@ const navItems: NavItem[] = [
       { path: '/settings/profiles', label: 'Profiles', icon: Layers },
       { path: '/settings/users', label: 'Users', icon: Users },
       { path: '/settings/maintenance', label: 'Maintenance', icon: Settings },
-    ]
+    ],
   },
-  { path: '/diagnostics', label: 'Diagnostics', description: 'System telemetry & logs', icon: Activity },
-]
+  {
+    path: '/diagnostics',
+    label: 'Diagnostics',
+    description: 'System telemetry & logs',
+    icon: Activity,
+  },
+];
 
-function NavLinkItem({ item, onClick, isMobile = false }: { item: NavItem; onClick?: () => void; isMobile?: boolean }) {
-  const [isOpen, setIsOpen] = useState(false)
-  const location = useLocation()
-  const isActive = item.path === '/settings'
-    ? location.pathname.startsWith('/settings')
-    : location.pathname === item.path
+function NavLinkItem({
+  item,
+  onClick,
+  isMobile = false,
+}: {
+  item: NavItem;
+  onClick?: () => void;
+  isMobile?: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const location = useLocation();
+  const isActive =
+    item.path === '/settings'
+      ? location.pathname.startsWith('/settings')
+      : location.pathname === item.path;
 
   // Auto-expand if child is active
   React.useEffect(() => {
     if (item.children && location.pathname.startsWith(item.path)) {
-      setIsOpen(true)
+      setIsOpen(true);
     }
-  }, [location.pathname, item.path, item.children])
+  }, [location.pathname, item.path, item.children]);
 
   if (item.children) {
     return (
@@ -82,62 +101,68 @@ function NavLinkItem({ item, onClick, isMobile = false }: { item: NavItem; onCli
         <button
           onClick={() => setIsOpen(!isOpen)}
           className={cn(
-            'w-full relative flex items-center gap-4 px-4 py-3 rounded-lg transition-all group duration-200 text-left',
+            'group relative flex w-full items-center gap-4 rounded-lg px-4 py-3 text-left transition-all duration-200',
             isActive
-              ? 'bg-accent-red/10 border-l-[3px] border-accent-red rounded-l-none'
+              ? 'bg-accent-red/10 border-accent-red rounded-l-none border-l-[3px]'
               : 'hover:bg-white/5',
-            isMobile ? 'border-l-0 rounded-lg h-auto' : 'h-[72px]'
+            isMobile ? 'h-auto rounded-lg border-l-0' : 'h-[72px]',
           )}
         >
-          <div className={cn(
-            'p-2 rounded-lg transition-colors',
-            isActive ? 'text-white' : 'text-dark-secondary-text group-hover:text-white'
-          )}>
-            <item.icon className="w-5 h-5" />
+          <div
+            className={cn(
+              'rounded-lg p-2 transition-colors',
+              isActive ? 'text-white' : 'text-dark-secondary-text group-hover:text-white',
+            )}
+          >
+            <item.icon className="h-5 w-5" />
           </div>
           <div className="flex flex-col">
-            <span className={cn(
-              'text-[15px] font-medium transition-colors',
-              isActive ? 'text-white' : 'text-dark-secondary-text group-hover:text-white'
-            )}>
+            <span
+              className={cn(
+                'text-[15px] font-medium transition-colors',
+                isActive ? 'text-white' : 'text-dark-secondary-text group-hover:text-white',
+              )}
+            >
               {item.label}
             </span>
             {item.description && (
-              <span className="text-[12px] text-dark-secondary-text/60 line-clamp-1 text-left">
+              <span className="text-dark-secondary-text/60 line-clamp-1 text-left text-[12px]">
                 {item.description}
               </span>
             )}
           </div>
-          <ChevronUp className={cn(
-            "w-4 h-4 text-dark-secondary-text transition-transform duration-200",
-            isOpen ? "" : "rotate-180"
-          )} />
+          <ChevronUp
+            className={cn(
+              'text-dark-secondary-text h-4 w-4 transition-transform duration-200',
+              isOpen ? '' : 'rotate-180',
+            )}
+          />
         </button>
 
         {isOpen && (
           <div className="flex flex-col gap-1 pl-4">
-            {item.children.map(child => (
+            {item.children.map((child) => (
               <NavLink
                 key={child.path}
                 to={child.path}
                 onClick={onClick}
                 className={({ isActive }) =>
                   cn(
-                    'flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm',
+                    'flex items-center gap-3 rounded-lg px-4 py-2 text-sm transition-colors',
                     isActive
-                      ? 'text-white bg-white/10'
-                      : 'text-dark-secondary-text hover:text-white hover:bg-white/5'
+                      ? 'bg-white/10 text-white'
+                      : 'text-dark-secondary-text hover:bg-white/5 hover:text-white',
                   )
                 }
               >
-                <child.icon className="w-4 h-4" />
+                <child.icon className="h-4 w-4" />
                 <span>{child.label}</span>
               </NavLink>
             ))}
           </div>
         )}
       </div>
-    )
+    );
   }
 
   return (
@@ -146,31 +171,35 @@ function NavLinkItem({ item, onClick, isMobile = false }: { item: NavItem; onCli
       onClick={onClick}
       className={({ isActive }) =>
         cn(
-          'relative flex items-center gap-4 px-4 py-3 rounded-lg transition-all group duration-200',
+          'group relative flex items-center gap-4 rounded-lg px-4 py-3 transition-all duration-200',
           isActive
-            ? 'bg-accent-red/10 border-l-[3px] border-accent-red rounded-l-none'
+            ? 'bg-accent-red/10 border-accent-red rounded-l-none border-l-[3px]'
             : 'hover:bg-white/5',
-          isMobile ? 'border-l-0 rounded-lg h-auto' : 'h-[72px]'
+          isMobile ? 'h-auto rounded-lg border-l-0' : 'h-[72px]',
         )
       }
     >
       {({ isActive }) => (
         <>
-          <div className={cn(
-            'p-2 rounded-lg transition-colors',
-            isActive ? 'text-white' : 'text-dark-secondary-text group-hover:text-white'
-          )}>
-            <item.icon className="w-5 h-5" />
+          <div
+            className={cn(
+              'rounded-lg p-2 transition-colors',
+              isActive ? 'text-white' : 'text-dark-secondary-text group-hover:text-white',
+            )}
+          >
+            <item.icon className="h-5 w-5" />
           </div>
           <div className="flex flex-col">
-            <span className={cn(
-              'text-[15px] font-medium transition-colors',
-              isActive ? 'text-white' : 'text-dark-secondary-text group-hover:text-white'
-            )}>
+            <span
+              className={cn(
+                'text-[15px] font-medium transition-colors',
+                isActive ? 'text-white' : 'text-dark-secondary-text group-hover:text-white',
+              )}
+            >
               {item.label}
             </span>
             {item.description && (
-              <span className="text-[12px] text-dark-secondary-text/60 line-clamp-1">
+              <span className="text-dark-secondary-text/60 line-clamp-1 text-[12px]">
                 {item.description}
               </span>
             )}
@@ -178,87 +207,88 @@ function NavLinkItem({ item, onClick, isMobile = false }: { item: NavItem; onCli
         </>
       )}
     </NavLink>
-  )
+  );
 }
 
 function SidebarContent({ onClose }: { onClose?: () => void }) {
-  const { username, logout } = useAuth()
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false)
-  const [isAboutOpen, setIsAboutOpen] = useState(false)
+  const { username, logout } = useAuth();
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
 
   return (
     <>
-      <div className="flex flex-col h-full bg-dark-sidebar border-r border-dark-border">
+      <div className="bg-dark-sidebar border-dark-border flex h-full flex-col border-r">
         {/* Branding */}
-        <div className="p-6 mb-2">
+        <div className="mb-2 p-6">
           <div className="flex items-center gap-3">
-            <div className="size-10 bg-accent-red rounded-xl flex items-center justify-center shadow-lg shadow-accent-red/20">
-              <Cctv className="w-6 h-6 text-white" />
+            <div className="bg-accent-red shadow-accent-red/20 flex size-10 items-center justify-center rounded-xl shadow-lg">
+              <Cctv className="h-6 w-6 text-white" />
             </div>
             <div className="flex flex-col">
-              <span className="text-white font-medium text-lg leading-tight">ONVIF</span>
-              <span className="text-dark-secondary-text text-[11px] uppercase tracking-wider font-medium">Device Manager</span>
+              <span className="text-lg leading-tight font-medium text-white">ONVIF</span>
+              <span className="text-dark-secondary-text text-[11px] font-medium tracking-wider uppercase">
+                Device Manager
+              </span>
             </div>
           </div>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-2">
           {navItems.map((item) => (
             <NavLinkItem key={item.path} item={item} onClick={onClose} />
           ))}
         </nav>
 
         {/* Footer / User section */}
-        <div className="p-4 border-t border-dark-border bg-dark-sidebar/50 relative">
+        <div className="border-dark-border bg-dark-sidebar/50 relative border-t p-4">
           {/* User Menu Popup */}
           {isMenuOpen && (
             <>
-              <div
-                className="fixed inset-0 z-40"
-                onClick={() => setIsMenuOpen(false)}
-              />
-              <div className="absolute bottom-full left-4 right-4 mb-2 bg-dark-sidebar border border-dark-border rounded-lg shadow-xl py-1 z-50 animate-in fade-in zoom-in duration-200">
-                <div className="px-4 py-3 border-b border-dark-border">
+              <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
+              <div className="bg-dark-sidebar border-dark-border animate-in fade-in zoom-in absolute right-4 bottom-full left-4 z-50 mb-2 rounded-lg border py-1 shadow-xl duration-200">
+                <div className="border-dark-border border-b px-4 py-3">
                   <p className="text-sm font-semibold text-white">Admin User</p>
-                  <p className="text-xs text-dark-secondary-text truncate">{username}@device.local</p>
+                  <p className="text-dark-secondary-text truncate text-xs">
+                    {username}@device.local
+                  </p>
                 </div>
 
                 <div className="py-1">
                   <button
-                    className="w-full flex items-center px-4 py-2 text-sm text-dark-secondary-text hover:bg-dark-hover hover:text-white transition-colors"
+                    className="text-dark-secondary-text hover:bg-dark-hover flex w-full items-center px-4 py-2 text-sm transition-colors hover:text-white"
                     onClick={() => {
-                      setIsMenuOpen(false)
-                      setIsChangePasswordOpen(true)
+                      setIsMenuOpen(false);
+                      setIsChangePasswordOpen(true);
                     }}
                   >
-                    <KeyRound className="w-4 h-4 mr-3" />
+                    <KeyRound className="mr-3 h-4 w-4" />
                     Change Password
                   </button>
 
                   <button
                     key="about"
                     onClick={() => {
-                      setIsMenuOpen(false)
-                      setIsAboutOpen(true)
+                      setIsMenuOpen(false);
+                      setIsAboutOpen(true);
                     }}
-                    className="w-full flex items-center px-4 py-2 text-sm text-dark-secondary-text hover:bg-dark-hover hover:text-white transition-colors"
+                    className="text-dark-secondary-text hover:bg-dark-hover flex w-full items-center px-4 py-2 text-sm transition-colors hover:text-white"
                   >
-                    <Info className="w-4 h-4 mr-3" />
+                    <Info className="mr-3 h-4 w-4" />
                     About
                   </button>
                 </div>
 
-                <div className="border-t border-dark-border py-1">
+                <div className="border-dark-border border-t py-1">
                   <button
-                    className="w-full flex items-center px-4 py-2 text-sm text-accent-red hover:bg-dark-hover transition-colors"
+                    className="text-accent-red hover:bg-dark-hover flex w-full items-center px-4 py-2 text-sm transition-colors"
                     onClick={() => {
-                      setIsMenuOpen(false)
-                      logout()
+                      setIsMenuOpen(false);
+                      logout();
                     }}
                   >
-                    <LogOut className="w-4 h-4 mr-3" />
+                    <LogOut className="mr-3 h-4 w-4" />
                     Sign Out
                   </button>
                 </div>
@@ -268,72 +298,67 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
 
           <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className="flex items-center justify-between gap-3 px-2 py-2 rounded-lg bg-dark-card border border-dark-border w-full hover:bg-dark-hover transition-colors group"
+            className="bg-dark-card border-dark-border hover:bg-dark-hover group flex w-full items-center justify-between gap-3 rounded-lg border px-2 py-2 transition-colors"
           >
             <div className="flex items-center gap-3">
-              <div className="size-8 rounded-full bg-accent-red/10 flex items-center justify-center border border-accent-red/20">
-                <User className="w-4 h-4 text-accent-red" />
+              <div className="bg-accent-red/10 border-accent-red/20 flex size-8 items-center justify-center rounded-full border">
+                <User className="text-accent-red h-4 w-4" />
               </div>
               <div className="flex flex-col items-start transition-opacity">
-                <span className="text-[13px] font-medium text-white truncate max-w-[100px]">{username}</span>
-                <span className="text-[10px] text-dark-secondary-text">Administrator</span>
+                <span className="max-w-[100px] truncate text-[13px] font-medium text-white">
+                  {username}
+                </span>
+                <span className="text-dark-secondary-text text-[10px]">Administrator</span>
               </div>
             </div>
-            <ChevronUp className={cn(
-              "w-4 h-4 text-dark-secondary-text transition-transform duration-200",
-              isMenuOpen ? "rotate-180" : ""
-            )} />
+            <ChevronUp
+              className={cn(
+                'text-dark-secondary-text h-4 w-4 transition-transform duration-200',
+                isMenuOpen ? 'rotate-180' : '',
+              )}
+            />
           </button>
 
           <div className="mt-4 text-center">
-            <p className="text-[10px] text-dark-secondary-text/40 italic">
+            <p className="text-dark-secondary-text/40 text-[10px] italic">
               v1.0.0-beta • ONVIF 24.12
             </p>
           </div>
         </div>
       </div>
 
-      <ChangePasswordDialog
-        open={isChangePasswordOpen}
-        onOpenChange={setIsChangePasswordOpen}
-      />
+      <ChangePasswordDialog open={isChangePasswordOpen} onOpenChange={setIsChangePasswordOpen} />
 
-      <AboutDialog
-        open={isAboutOpen}
-        onOpenChange={setIsAboutOpen}
-      />
+      <AboutDialog open={isAboutOpen} onOpenChange={setIsAboutOpen} />
     </>
-  )
+  );
 }
 
-
 function Header() {
-  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
-  const location = useLocation()
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const location = useLocation();
 
   // Find the current page title based on the route
-  const currentItem = navItems.find(item =>
-    item.path === '/'
-      ? location.pathname === '/'
-      : location.pathname.startsWith(item.path)
-  )
-  const pageTitle = currentItem?.label || 'Dashboard'
+  const currentItem = navItems.find((item) =>
+    item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path),
+  );
+  const pageTitle = currentItem?.label || 'Dashboard';
 
   return (
-    <header className="flex lg:hidden items-center justify-between h-16 px-6 bg-dark-bg/80 backdrop-blur-md border-b border-dark-border sticky top-0 z-30">
+    <header className="bg-dark-bg/80 border-dark-border sticky top-0 z-30 flex h-16 items-center justify-between border-b px-6 backdrop-blur-md lg:hidden">
       <div className="flex items-center gap-4">
         <Sheet open={isMobileNavOpen} onOpenChange={setIsMobileNavOpen}>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="lg:hidden text-white">
-              <Menu className="w-6 h-6" />
+            <Button variant="ghost" size="icon" className="text-white lg:hidden">
+              <Menu className="h-6 w-6" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="p-0 border-r-0 w-[300px]">
+          <SheetContent side="left" className="w-[300px] border-r-0 p-0">
             <SidebarContent onClose={() => setIsMobileNavOpen(false)} />
           </SheetContent>
         </Sheet>
         <div className="flex items-center gap-4">
-          <h2 className="text-sm font-medium text-dark-secondary-text uppercase tracking-[0.2em]">
+          <h2 className="text-dark-secondary-text text-sm font-medium tracking-[0.2em] uppercase">
             {pageTitle}
           </h2>
         </div>
@@ -344,23 +369,23 @@ function Header() {
         {/* Mobile User Profile could go here if needed, or we rely on the one in the sheet sidebar */}
       </div>
     </header>
-  )
+  );
 }
 
 export default function Layout() {
   return (
-    <div className="flex h-screen bg-dark-bg font-sans selection:bg-accent-red/30">
-      <aside className="hidden lg:block w-[320px] shrink-0 h-full overflow-hidden">
+    <div className="bg-dark-bg selection:bg-accent-red/30 flex h-screen font-sans">
+      <aside className="hidden h-full w-[320px] shrink-0 overflow-hidden lg:block">
         <SidebarContent />
       </aside>
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex min-w-0 flex-1 flex-col">
         <Header />
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
-          <div className="w-full h-full animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="animate-in fade-in slide-in-from-bottom-4 h-full w-full duration-500">
             <Outlet />
           </div>
         </main>
       </div>
     </div>
-  )
+  );
 }

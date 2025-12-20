@@ -1,51 +1,53 @@
-import React, { useEffect, useState } from 'react'
-import { Info, Loader2, Copyright, Github } from 'lucide-react'
+import React, { useEffect, useState } from 'react';
+
+import { Copyright, Github, Info, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
+
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { getDeviceInformation, type DeviceInfo } from '@/services/deviceService'
-import { toast } from 'sonner'
+} from '@/components/ui/dialog';
+import { type DeviceInfo, getDeviceInformation } from '@/services/deviceService';
 
 interface AboutDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
-  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (open && !deviceInfo) {
       const fetchData = async () => {
-        setIsLoading(true)
+        setIsLoading(true);
         try {
-          const info = await getDeviceInformation()
-          setDeviceInfo(info)
+          const info = await getDeviceInformation();
+          setDeviceInfo(info);
         } catch (error) {
-          console.error('Failed to fetch device info:', error)
-          toast.error('Failed to load device information')
+          console.error('Failed to fetch device info:', error);
+          toast.error('Failed to load device information');
         } finally {
-          setIsLoading(false)
+          setIsLoading(false);
         }
-      }
-      fetchData()
+      };
+      fetchData();
     }
-  }, [open, deviceInfo])
+  }, [open, deviceInfo]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px] bg-dark-sidebar border-dark-border text-white">
+      <DialogContent className="bg-dark-sidebar border-dark-border text-white sm:max-w-[425px]">
         <DialogHeader>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="size-10 bg-accent-red/10 rounded-lg flex items-center justify-center">
-              <Info className="size-6 text-accent-red" />
+          <div className="mb-2 flex items-center gap-3">
+            <div className="bg-accent-red/10 flex size-10 items-center justify-center rounded-lg">
+              <Info className="text-accent-red size-6" />
             </div>
             <div>
               <DialogTitle className="text-xl">About Device</DialogTitle>
@@ -58,8 +60,8 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
 
         <div className="py-2">
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-8 text-dark-secondary-text">
-              <Loader2 className="h-8 w-8 animate-spin mb-2" />
+            <div className="text-dark-secondary-text flex flex-col items-center justify-center py-8">
+              <Loader2 className="mb-2 h-8 w-8 animate-spin" />
               <p>Loading device information...</p>
             </div>
           ) : deviceInfo ? (
@@ -83,30 +85,30 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
                 </div>
                 <div className="col-span-2 space-y-1">
                   <p className="text-dark-secondary-text">Hardware ID</p>
-                  <p className="font-medium text-white font-mono text-xs bg-dark-bg p-2 rounded border border-dark-border break-all">
+                  <p className="bg-dark-bg border-dark-border rounded border p-2 font-mono text-xs font-medium break-all text-white">
                     {deviceInfo.hardwareId}
                   </p>
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-dark-border space-y-3">
+              <div className="border-dark-border space-y-3 border-t pt-4">
                 <a
                   href="https://github.com/kkrzysztofik/Anyka_ak3918_hacking_journey"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-dark-secondary-text hover:text-white transition-colors text-sm"
+                  className="text-dark-secondary-text flex items-center gap-2 text-sm transition-colors hover:text-white"
                 >
                   <Github className="size-4" />
                   <span>View Project on GitHub</span>
                 </a>
 
-                <div className="flex items-center gap-2 text-dark-secondary-text text-sm">
+                <div className="text-dark-secondary-text flex items-center gap-2 text-sm">
                   <Copyright className="size-4" />
                   <a
                     href="https://www.gnu.org/licenses/gpl-3.0.html"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="hover:text-white transition-colors"
+                    className="transition-colors hover:text-white"
                   >
                     GNU General Public License v3.0
                   </a>
@@ -120,7 +122,7 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
               </div>
             </div>
           ) : (
-            <div className="py-8 text-center text-dark-secondary-text">
+            <div className="text-dark-secondary-text py-8 text-center">
               Unable to load device information.
             </div>
           )}
@@ -136,5 +138,5 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

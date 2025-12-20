@@ -3,56 +3,68 @@
  *
  * Add User and Change Password dialog components.
  */
+import React, { useState } from 'react';
 
-import React, { useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import { Loader2 } from 'lucide-react'
+import { zodResolver } from '@hookform/resolvers/zod';
+import { Loader2 } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { z } from 'zod';
+
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
-import type { UserLevel } from '@/services/userService'
+} from '@/components/ui/dialog';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import type { UserLevel } from '@/services/userService';
 
 // Schemas
-const addUserSchema = z.object({
-  username: z.string().min(1, 'Username is required').max(32),
-  password: z.string().min(4, 'Password must be at least 4 characters').max(64),
-  confirmPassword: z.string(),
-  userLevel: z.enum(['Administrator', 'Operator', 'User']),
-}).refine(data => data.password === data.confirmPassword, {
-  message: 'Passwords do not match',
-  path: ['confirmPassword'],
-})
+const addUserSchema = z
+  .object({
+    username: z.string().min(1, 'Username is required').max(32),
+    password: z.string().min(4, 'Password must be at least 4 characters').max(64),
+    confirmPassword: z.string(),
+    userLevel: z.enum(['Administrator', 'Operator', 'User']),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
 
-const changePasswordSchema = z.object({
-  password: z.string().min(4, 'Password must be at least 4 characters').max(64),
-  confirmPassword: z.string(),
-}).refine(data => data.password === data.confirmPassword, {
-  message: 'Passwords do not match',
-  path: ['confirmPassword'],
-})
+const changePasswordSchema = z
+  .object({
+    password: z.string().min(4, 'Password must be at least 4 characters').max(64),
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
 
-type AddUserFormData = z.infer<typeof addUserSchema>
-type ChangePasswordFormData = z.infer<typeof changePasswordSchema>
+type AddUserFormData = z.infer<typeof addUserSchema>;
+type ChangePasswordFormData = z.infer<typeof changePasswordSchema>;
 
 // Add User Dialog
 interface AddUserDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onSubmit: (username: string, password: string, userLevel: UserLevel) => Promise<void>
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (username: string, password: string, userLevel: UserLevel) => Promise<void>;
 }
 
 export function AddUserDialog({ open, onOpenChange, onSubmit }: AddUserDialogProps) {
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(false);
 
   const form = useForm<AddUserFormData>({
     resolver: zodResolver(addUserSchema),
@@ -62,18 +74,18 @@ export function AddUserDialog({ open, onOpenChange, onSubmit }: AddUserDialogPro
       confirmPassword: '',
       userLevel: 'User',
     },
-  })
+  });
 
   const handleSubmit = async (data: AddUserFormData) => {
-    setIsLoading(true)
+    setIsLoading(true);
     try {
-      await onSubmit(data.username, data.password, data.userLevel as UserLevel)
-      form.reset()
-      onOpenChange(false)
+      await onSubmit(data.username, data.password, data.userLevel as UserLevel);
+      form.reset();
+      onOpenChange(false);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -108,7 +120,7 @@ export function AddUserDialog({ open, onOpenChange, onSubmit }: AddUserDialogPro
                   <FormControl>
                     <select
                       {...field}
-                      className="w-full h-10 px-3 rounded-md border border-input bg-background"
+                      className="border-input bg-background h-10 w-full rounded-md border px-3"
                     >
                       <option value="Administrator">Administrator</option>
                       <option value="Operator">Operator</option>
@@ -161,19 +173,24 @@ export function AddUserDialog({ open, onOpenChange, onSubmit }: AddUserDialogPro
         </Form>
       </DialogContent>
     </Dialog>
-  )
+  );
 }
 
 // Change Password Dialog
 interface ChangePasswordDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  username: string
-  onSubmit: (password: string) => Promise<void>
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  username: string;
+  onSubmit: (password: string) => Promise<void>;
 }
 
-export function ChangePasswordDialog({ open, onOpenChange, username, onSubmit }: ChangePasswordDialogProps) {
-  const [isLoading, setIsLoading] = useState(false)
+export function ChangePasswordDialog({
+  open,
+  onOpenChange,
+  username,
+  onSubmit,
+}: ChangePasswordDialogProps) {
+  const [isLoading, setIsLoading] = useState(false);
 
   const form = useForm<ChangePasswordFormData>({
     resolver: zodResolver(changePasswordSchema),
@@ -181,18 +198,18 @@ export function ChangePasswordDialog({ open, onOpenChange, username, onSubmit }:
       password: '',
       confirmPassword: '',
     },
-  })
+  });
 
   const handleSubmit = async (data: ChangePasswordFormData) => {
-    setIsLoading(true)
+    setIsLoading(true);
     try {
-      await onSubmit(data.password)
-      form.reset()
-      onOpenChange(false)
+      await onSubmit(data.password);
+      form.reset();
+      onOpenChange(false);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -247,5 +264,5 @@ export function ChangePasswordDialog({ open, onOpenChange, username, onSubmit }:
         </Form>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

@@ -1,9 +1,8 @@
 /**
  * Test utilities and mock helpers
  */
-
-import { vi } from 'vitest'
-import type { AxiosResponse } from 'axios'
+import type { AxiosResponse } from 'axios';
+import { vi } from 'vitest';
 
 /**
  * Create a mock Axios response
@@ -18,7 +17,7 @@ export function createMockResponse<T>(data: T, status = 200): AxiosResponse<T> {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       headers: {} as any,
     },
-  }
+  };
 }
 
 /**
@@ -30,7 +29,7 @@ export function createTestSOAPResponse(bodyContent: string): string {
   <soap:Body>
     ${bodyContent}
   </soap:Body>
-</soap:Envelope>`
+</soap:Envelope>`;
 }
 
 /**
@@ -40,5 +39,5 @@ export function mockApiClient() {
   return {
     post: vi.fn(),
     get: vi.fn(),
-  }
+  };
 }

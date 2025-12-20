@@ -3,59 +3,62 @@
  *
  * Video stream and PTZ controls placeholder.
  */
+import React, { useState } from 'react';
 
-import React, { useState } from 'react'
 import {
-  Camera,
-  Move,
-  Home,
-  Settings2,
-  Bookmark,
-  ChevronDown,
-  Wifi,
   Activity,
-  Copy,
-  ArrowUp,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
-  ArrowDown
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { cn } from '@/lib/utils'
+  ArrowUp,
+  Bookmark,
+  Camera,
+  Copy,
+  Home,
+  Settings2,
+  Wifi,
+} from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 export default function LiveViewPage() {
-  const [streamType, setStreamType] = useState<'main' | 'sub'>('main')
-  const [ptzSpeed, setPtzSpeed] = useState(50)
+  const [streamType, setStreamType] = useState<'main' | 'sub'>('main');
+  const [ptzSpeed, setPtzSpeed] = useState(50);
 
   // Handlers for PTZ (placeholders)
-  const handlePtz = (action: string) => console.log('PTZ:', action)
+  const handlePtz = (action: string) => console.log('PTZ:', action);
 
   return (
-    <div className="flex flex-col gap-6 h-full">
-      <div className="flex flex-col gap-2 shrink-0">
+    <div className="flex h-full flex-col gap-6">
+      <div className="flex shrink-0 flex-col gap-2">
         <h1 className="text-2xl font-medium text-white">Live Video Preview</h1>
-        <p className="text-muted-foreground text-sm">Real-time ONVIF stream monitoring and playback controls</p>
+        <p className="text-muted-foreground text-sm">
+          Real-time ONVIF stream monitoring and playback controls
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 flex-1 min-h-0">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
         {/* Left Column: Video & Stream Info */}
-        <div className="flex flex-col gap-4 min-h-0">
+        <div className="flex min-h-0 flex-col gap-4">
           {/* Main Video Area */}
-          <div className="relative flex-1 bg-black rounded-xl overflow-hidden group border border-zinc-800 shadow-2xl">
+          <div className="group relative flex-1 overflow-hidden rounded-xl border border-zinc-800 bg-black shadow-2xl">
             {/* Header Overlay */}
-            <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-10 bg-gradient-to-b from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+            <div className="absolute top-0 right-0 left-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent p-4 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
               <div className="flex items-center gap-2 text-white/90">
-                <Camera className="w-5 h-5 text-accent-red" />
+                <Camera className="text-accent-red h-5 w-5" />
                 <span className="font-medium">Video Stream</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex bg-zinc-900/80 rounded-lg p-1 border border-zinc-700/50">
+                <div className="flex rounded-lg border border-zinc-700/50 bg-zinc-900/80 p-1">
                   <button
                     onClick={() => setStreamType('main')}
                     className={cn(
-                      "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                      streamType === 'main' ? "bg-accent-red text-white" : "text-zinc-400 hover:text-white"
+                      'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+                      streamType === 'main'
+                        ? 'bg-accent-red text-white'
+                        : 'text-zinc-400 hover:text-white',
                     )}
                   >
                     Main Stream
@@ -63,44 +66,50 @@ export default function LiveViewPage() {
                   <button
                     onClick={() => setStreamType('sub')}
                     className={cn(
-                      "px-3 py-1 text-xs font-medium rounded-md transition-colors",
-                      streamType === 'sub' ? "bg-accent-red text-white" : "text-zinc-400 hover:text-white"
+                      'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+                      streamType === 'sub'
+                        ? 'bg-accent-red text-white'
+                        : 'text-zinc-400 hover:text-white',
                     )}
                   >
                     Sub Stream
                   </button>
                 </div>
-                <div className="flex items-center gap-2 bg-zinc-900/80 px-3 py-1.5 rounded-lg border border-zinc-700/50">
-                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  <span className="text-xs text-green-500 font-medium">Connected</span>
+                <div className="flex items-center gap-2 rounded-lg border border-zinc-700/50 bg-zinc-900/80 px-3 py-1.5">
+                  <div className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
+                  <span className="text-xs font-medium text-green-500">Connected</span>
                 </div>
               </div>
             </div>
 
             {/* Video Placeholder */}
-            <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 bg-[url('/grid-pattern.png')] bg-repeat">
-              <div className="p-8 rounded-full bg-zinc-900/50 mb-4">
-                <Camera className="w-12 h-12 text-zinc-600" />
+            <div className="flex h-full w-full flex-col items-center justify-center bg-[url('/grid-pattern.png')] bg-repeat text-zinc-500">
+              <div className="mb-4 rounded-full bg-zinc-900/50 p-8">
+                <Camera className="h-12 w-12 text-zinc-600" />
               </div>
               <h3 className="text-xl font-medium text-zinc-400">ONVIF Stream Preview</h3>
               <p className="text-sm text-zinc-600">1920×1080 @ 30fps</p>
             </div>
 
             {/* LIVE Indicator */}
-            <div className="absolute top-20 left-6 flex items-center gap-2 bg-black/60 px-2 py-1 rounded-md backdrop-blur-sm">
-              <div className="w-2 h-2 bg-red-600 rounded-full animate-pulse" />
-              <span className="text-[10px] font-bold text-white tracking-widest">LIVE</span>
+            <div className="absolute top-20 left-6 flex items-center gap-2 rounded-md bg-black/60 px-2 py-1 backdrop-blur-sm">
+              <div className="h-2 w-2 animate-pulse rounded-full bg-red-600" />
+              <span className="text-[10px] font-bold tracking-widest text-white">LIVE</span>
             </div>
           </div>
 
           {/* Stream URL Bar */}
-          <div className="bg-zinc-900/50 p-3 rounded-lg border border-zinc-800 flex items-center gap-4">
-            <span className="text-sm font-medium text-zinc-400 whitespace-nowrap">Stream URL</span>
-            <div className="flex-1 bg-black/40 rounded px-3 py-2 text-sm font-mono text-zinc-300 truncate border border-zinc-800/50">
+          <div className="flex items-center gap-4 rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+            <span className="text-sm font-medium whitespace-nowrap text-zinc-400">Stream URL</span>
+            <div className="flex-1 truncate rounded border border-zinc-800/50 bg-black/40 px-3 py-2 font-mono text-sm text-zinc-300">
               rtsp://192.168.1.100:554/main
             </div>
-            <Button variant="outline" size="sm" className="bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-700">
-              <Copy className="w-3.5 h-3.5 mr-2" />
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white"
+            >
+              <Copy className="mr-2 h-3.5 w-3.5" />
               Copy
             </Button>
           </div>
@@ -108,41 +117,41 @@ export default function LiveViewPage() {
           {/* Bottom Info Grid */}
           <div className="grid grid-cols-2 gap-4">
             {/* Stream Info */}
-            <Card className="bg-zinc-900/50 border-zinc-800 p-4">
-              <div className="flex items-center gap-2 mb-4 text-accent-red">
-                <Activity className="w-4 h-4" />
-                <h3 className="font-semibold text-sm">Stream Info</h3>
+            <Card className="border-zinc-800 bg-zinc-900/50 p-4">
+              <div className="text-accent-red mb-4 flex items-center gap-2">
+                <Activity className="h-4 w-4" />
+                <h3 className="text-sm font-semibold">Stream Info</h3>
               </div>
               <div className="grid grid-cols-2 gap-y-2 text-sm">
                 <span className="text-zinc-500">Resolution</span>
-                <span className="text-zinc-200 text-right font-mono">1920x1080</span>
+                <span className="text-right font-mono text-zinc-200">1920x1080</span>
                 <span className="text-zinc-500">Bitrate</span>
-                <span className="text-zinc-200 text-right font-mono">4096 Kbps</span>
+                <span className="text-right font-mono text-zinc-200">4096 Kbps</span>
                 <span className="text-zinc-500">Frame Rate</span>
-                <span className="text-zinc-200 text-right font-mono">30 fps</span>
+                <span className="text-right font-mono text-zinc-200">30 fps</span>
                 <span className="text-zinc-500">Codec</span>
-                <span className="text-zinc-200 text-right font-mono">H.264</span>
+                <span className="text-right font-mono text-zinc-200">H.264</span>
               </div>
             </Card>
 
             {/* Network Stats */}
-            <Card className="bg-zinc-900/50 border-zinc-800 p-4">
-              <div className="flex items-center gap-2 mb-4 text-accent-red">
-                <Wifi className="w-4 h-4" />
-                <h3 className="font-semibold text-sm">Network Stats</h3>
+            <Card className="border-zinc-800 bg-zinc-900/50 p-4">
+              <div className="text-accent-red mb-4 flex items-center gap-2">
+                <Wifi className="h-4 w-4" />
+                <h3 className="text-sm font-semibold">Network Stats</h3>
               </div>
               <div className="grid grid-cols-2 gap-y-2 text-sm">
                 <span className="text-zinc-500">Status</span>
-                <span className="text-green-500 text-right font-medium flex justify-end items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                <span className="flex items-center justify-end gap-1.5 text-right font-medium text-green-500">
+                  <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
                   Connected
                 </span>
                 <span className="text-zinc-500">Packet Loss</span>
-                <span className="text-zinc-200 text-right font-mono">0.0%</span>
+                <span className="text-right font-mono text-zinc-200">0.0%</span>
                 <span className="text-zinc-500">Latency</span>
-                <span className="text-zinc-200 text-right font-mono">45 ms</span>
+                <span className="text-right font-mono text-zinc-200">45 ms</span>
                 <span className="text-zinc-500">Bandwidth</span>
-                <span className="text-zinc-200 text-right font-mono">4.2 Mbps</span>
+                <span className="text-right font-mono text-zinc-200">4.2 Mbps</span>
               </div>
             </Card>
           </div>
@@ -151,10 +160,10 @@ export default function LiveViewPage() {
         {/* Right Column: Controls */}
         <div className="flex flex-col gap-4">
           {/* PTZ Controls */}
-          <Card className="bg-zinc-900/50 border-zinc-800 p-5">
-            <div className="flex items-center gap-2 mb-6 text-accent-red">
-              <Camera className="w-4 h-4" />
-              <h3 className="font-semibold text-sm">Pan & Tilt</h3>
+          <Card className="border-zinc-800 bg-zinc-900/50 p-5">
+            <div className="text-accent-red mb-6 flex items-center gap-2">
+              <Camera className="h-4 w-4" />
+              <h3 className="text-sm font-semibold">Pan & Tilt</h3>
             </div>
 
             <div className="flex flex-col items-center gap-6">
@@ -164,24 +173,24 @@ export default function LiveViewPage() {
                 <div className="flex gap-1">
                   <button
                     onMouseDown={() => handlePtz('up-left')}
-                    className="w-11 h-11 md:w-12 md:h-12 rounded-lg bg-zinc-800 hover:bg-accent-red active:bg-red-700 flex items-center justify-center transition-colors group"
+                    className="hover:bg-accent-red group flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                   >
                     <div className="-rotate-45">
-                      <ArrowUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                      <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </div>
                   </button>
                   <button
                     onMouseDown={() => handlePtz('up')}
-                    className="w-11 h-11 md:w-12 md:h-12 rounded-lg bg-zinc-800 hover:bg-accent-red active:bg-red-700 flex items-center justify-center transition-colors"
+                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                   >
-                    <ArrowUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                    <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
                   </button>
                   <button
                     onMouseDown={() => handlePtz('up-right')}
-                    className="w-11 h-11 md:w-12 md:h-12 rounded-lg bg-zinc-800 hover:bg-accent-red active:bg-red-700 flex items-center justify-center transition-colors"
+                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                   >
                     <div className="rotate-45">
-                      <ArrowUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                      <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </div>
                   </button>
                 </div>
@@ -190,21 +199,21 @@ export default function LiveViewPage() {
                 <div className="flex gap-1">
                   <button
                     onMouseDown={() => handlePtz('left')}
-                    className="w-11 h-11 md:w-12 md:h-12 rounded-lg bg-zinc-800 hover:bg-accent-red active:bg-red-700 flex items-center justify-center transition-colors"
+                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                   >
-                    <ArrowLeft className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                    <ArrowLeft className="h-4 w-4 text-white md:h-5 md:w-5" />
                   </button>
                   <button
                     onClick={() => handlePtz('home')}
-                    className="w-11 h-11 md:w-12 md:h-12 rounded-lg bg-accent-red hover:bg-red-700 flex items-center justify-center transition-colors shadow-lg shadow-red-900/20"
+                    className="bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg shadow-lg shadow-red-900/20 transition-colors hover:bg-red-700 md:h-12 md:w-12"
                   >
-                    <Home className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                    <Home className="h-4 w-4 text-white md:h-5 md:w-5" />
                   </button>
                   <button
                     onMouseDown={() => handlePtz('right')}
-                    className="w-11 h-11 md:w-12 md:h-12 rounded-lg bg-zinc-800 hover:bg-accent-red active:bg-red-700 flex items-center justify-center transition-colors"
+                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                   >
-                    <ArrowRight className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                    <ArrowRight className="h-4 w-4 text-white md:h-5 md:w-5" />
                   </button>
                 </div>
 
@@ -212,24 +221,24 @@ export default function LiveViewPage() {
                 <div className="flex gap-1">
                   <button
                     onMouseDown={() => handlePtz('down-left')}
-                    className="w-11 h-11 md:w-12 md:h-12 rounded-lg bg-zinc-800 hover:bg-accent-red active:bg-red-700 flex items-center justify-center transition-colors"
+                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                   >
                     <div className="-rotate-[135deg]">
-                      <ArrowUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                      <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </div>
                   </button>
                   <button
                     onMouseDown={() => handlePtz('down')}
-                    className="w-11 h-11 md:w-12 md:h-12 rounded-lg bg-zinc-800 hover:bg-accent-red active:bg-red-700 flex items-center justify-center transition-colors"
+                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                   >
-                    <ArrowDown className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                    <ArrowDown className="h-4 w-4 text-white md:h-5 md:w-5" />
                   </button>
                   <button
                     onMouseDown={() => handlePtz('down-right')}
-                    className="w-11 h-11 md:w-12 md:h-12 rounded-lg bg-zinc-800 hover:bg-accent-red active:bg-red-700 flex items-center justify-center transition-colors"
+                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                   >
                     <div className="rotate-[135deg]">
-                      <ArrowUp className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                      <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </div>
                   </button>
                 </div>
@@ -247,31 +256,43 @@ export default function LiveViewPage() {
                   max="100"
                   value={ptzSpeed}
                   onChange={(e) => setPtzSpeed(Number(e.target.value))}
-                  className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-accent-red"
+                  className="accent-accent-red h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-zinc-800"
                 />
               </div>
             </div>
           </Card>
 
           {/* Presets */}
-          <Card className="bg-zinc-900/50 border-zinc-800 p-5 flex-1">
-            <div className="flex items-center gap-2 mb-4 text-accent-red">
-              <Bookmark className="w-4 h-4" />
-              <h3 className="font-semibold text-sm">Presets</h3>
+          <Card className="flex-1 border-zinc-800 bg-zinc-900/50 p-5">
+            <div className="text-accent-red mb-4 flex items-center gap-2">
+              <Bookmark className="h-4 w-4" />
+              <h3 className="text-sm font-semibold">Presets</h3>
             </div>
             <div className="space-y-2">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="flex items-center gap-2 group">
-                  <Button variant="outline" className="flex-1 justify-between bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-700 hover:border-zinc-600">
+                <div key={i} className="group flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1 justify-between border-zinc-700 bg-zinc-800 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-700 hover:text-white"
+                  >
                     <span className="text-xs">Preset {i}</span>
-                    <span className="text-[10px] text-zinc-500 bg-black/20 px-1.5 py-0.5 rounded">#{i}</span>
+                    <span className="rounded bg-black/20 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                      #{i}
+                    </span>
                   </Button>
-                  <Button variant="ghost" size="icon" className="w-8 h-8 text-zinc-500 hover:text-accent-red hover:bg-zinc-800">
-                    <Settings2 className="w-3.5 h-3.5" />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="hover:text-accent-red h-8 w-8 text-zinc-500 hover:bg-zinc-800"
+                  >
+                    <Settings2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               ))}
-              <Button variant="outline" className="w-full mt-2 border-dashed border-zinc-700 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50">
+              <Button
+                variant="outline"
+                className="mt-2 w-full border-dashed border-zinc-700 text-zinc-500 hover:bg-zinc-800/50 hover:text-zinc-300"
+              >
                 + Add Preset
               </Button>
             </div>
@@ -279,5 +300,5 @@ export default function LiveViewPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

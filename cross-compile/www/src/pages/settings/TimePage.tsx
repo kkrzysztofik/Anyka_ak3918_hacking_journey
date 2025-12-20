@@ -1,259 +1,436 @@
-/* eslint-disable react-hooks/incompatible-library */
-/**
- * Time Settings Page
- *
- * Configure NTP vs Manual Time.
- */
+import React, { useEffect, useState } from 'react';
 
-import React from 'react'
-import { useForm } from 'react-hook-form'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { Clock, Save, Loader2 } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Switch } from '@/components/ui/switch'
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
-import { getSystemDateAndTime, setSystemDateAndTime, type SystemDateTime, type DateTimeType } from '@/services/timeService'
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Calendar, Clock, Globe, Monitor, RefreshCw, Save } from 'lucide-react';
+import { useForm, useWatch } from 'react-hook-form';
+import { toast } from 'sonner';
+import { z } from 'zod';
 
-interface TimeFormData {
-  useNTP: boolean
-  timezone: string
-  daylightSavings: boolean
-  manualDate: string
-  manualTime: string
-}
+import { Button } from '@/components/ui/button';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import {
+  SettingsCard,
+  SettingsCardContent,
+  SettingsCardDescription,
+  SettingsCardHeader,
+  SettingsCardTitle,
+} from '@/components/ui/settings-card';
+import { Switch } from '@/components/ui/switch';
+import { type DateTimeConfig, getDateTime, setDateTime, setNTP } from '@/services/timeService';
+
+// Validation Schema
+const timeSchema = z.object({
+  mode: z.enum(['ntp', 'computer', 'manual']),
+  ntpFromDHCP: z.boolean(),
+  ntpServer1: z.string().optional(),
+  ntpServer2: z.string().optional(),
+  timezone: z.string().min(1, 'Timezone is required'),
+  manualDate: z.string().optional(),
+  manualTime: z.string().optional(),
+});
+
+type TimeFormData = z.infer<typeof timeSchema>;
+
+// Common Timezones (Stub list - in a real app this would be extensive)
+const TIMEZONES = [
+  { value: 'GMT', label: 'GMT (Greenwich Mean Time)' },
+  { value: 'CET', label: 'CET (Central European Time)' },
+  { value: 'EST', label: 'EST (Eastern Standard Time)' },
+  { value: 'PST', label: 'PST (Pacific Standard Time)' },
+  { value: 'CST', label: 'CST (China Standard Time)' },
+  { value: 'JST', label: 'JST (Japan Standard Time)' },
+  { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
+];
 
 export default function TimePage() {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
+  const [deviceTime, setDeviceTime] = useState<Date | null>(null);
 
-  // Fetch time config
-  const { data, isLoading, error } = useQuery<SystemDateTime>({
-    queryKey: ['systemDateTime'],
-    queryFn: getSystemDateAndTime,
-    refetchInterval: 60000, // Refresh every minute
-  })
+  // Fetch Time Config
+  const { data: config, isLoading } = useQuery<DateTimeConfig>({
+    queryKey: ['timeConfig'],
+    queryFn: getDateTime,
+  });
+
+  // Simulated live clock for "Current Device Time"
+  useEffect(() => {
+    if (config) {
+      // Initialize with fetched time (parsing simplified for demo)
+      // In reality, we'd offset this by local execution time
+      const now = new Date();
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDeviceTime(now);
+    }
+  }, [config]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setDeviceTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const form = useForm<TimeFormData>({
+    resolver: zodResolver(timeSchema),
     defaultValues: {
-      useNTP: true,
+      mode: 'ntp',
+      ntpFromDHCP: true,
+      ntpServer1: 'pool.ntp.org',
+      ntpServer2: 'time.google.com',
       timezone: 'UTC',
-      daylightSavings: false,
-      manualDate: '',
-      manualTime: '',
+      manualDate: new Date().toISOString().split('T')[0],
+      manualTime: new Date().toTimeString().split(' ')[0],
     },
-  })
+  });
 
-  const useNTP = form.watch('useNTP')
+  const mode = useWatch({ control: form.control, name: 'mode' });
+  const ntpFromDHCP = useWatch({ control: form.control, name: 'ntpFromDHCP' });
 
-  // Update form when data is loaded
-  React.useEffect(() => {
-    if (data) {
-      const d = data.utcDateTime
+  // Load initial values
+  useEffect(() => {
+    if (config) {
       form.reset({
-        useNTP: data.dateTimeType === 'NTP',
-        timezone: data.timezone,
-        daylightSavings: data.daylightSavings,
-        manualDate: d.toISOString().split('T')[0],
-        manualTime: d.toISOString().split('T')[1].substring(0, 5),
-      })
+        mode: config.ntp.enabled ? 'ntp' : 'manual',
+        ntpFromDHCP: config.ntp.fromDHCP,
+        ntpServer1: 'pool.ntp.org', // Stub as API generally doesn't return server list easily in simple calls
+        ntpServer2: 'time.google.com',
+        timezone: config.timezone || 'UTC',
+        manualDate: new Date().toISOString().split('T')[0],
+        manualTime: new Date().toTimeString().split(' ')[0],
+      });
     }
-  }, [data, form])
+  }, [config, form]);
 
-  // Mutation for saving time config
   const mutation = useMutation({
     mutationFn: async (values: TimeFormData) => {
-      const dateTimeType: DateTimeType = values.useNTP ? 'NTP' : 'Manual'
-      let manualDateTime: Date | undefined
+      // 1. Set Timezone
+      // await setTimezone(values.timezone) // If separate API existed
 
-      if (!values.useNTP && values.manualDate && values.manualTime) {
-        manualDateTime = new Date(`${values.manualDate}T${values.manualTime}:00Z`)
+      // 2. Set Mode
+      if (values.mode === 'ntp') {
+        await setNTP(values.ntpFromDHCP);
+        // If we supported setting custom NTP servers, we'd do it here
+      } else if (values.mode === 'computer') {
+        const now = new Date();
+        await setDateTime('manual', now.toISOString(), values.timezone);
+      } else {
+        // Manual
+        const dateStr = `${values.manualDate}T${values.manualTime}`;
+        const date = new Date(dateStr);
+        await setDateTime('manual', date.toISOString(), values.timezone);
       }
-
-      await setSystemDateAndTime(
-        dateTimeType,
-        values.daylightSavings,
-        values.timezone,
-        manualDateTime
-      )
     },
     onSuccess: () => {
-      toast.success('Time settings saved')
-      queryClient.invalidateQueries({ queryKey: ['systemDateTime'] })
+      toast.success('Time settings saved');
+      queryClient.invalidateQueries({ queryKey: ['timeConfig'] });
     },
     onError: (error) => {
       toast.error('Failed to save time settings', {
         description: error instanceof Error ? error.message : 'An error occurred',
-      })
+      });
     },
-  })
+  });
 
   const onSubmit = (values: TimeFormData) => {
-    mutation.mutate(values)
-  }
+    mutation.mutate(values);
+  };
 
-  // Format current time for display
-  const currentTimeDisplay = data?.utcDateTime
-    ? data.utcDateTime.toLocaleString()
-    : '--'
+  const handleSyncComputer = () => {
+    form.setValue('mode', 'computer');
+    const now = new Date();
+    form.setValue('manualDate', now.toISOString().split('T')[0]);
+    form.setValue('manualTime', now.toTimeString().split(' ')[0]);
+    toast.info('Selected computer time');
+  };
 
-  if (error) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Time</h1>
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-destructive">Failed to load time configuration</p>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
+  if (isLoading) return <div className="text-white">Loading...</div>;
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Time</h1>
+    <div
+      className="absolute inset-0 overflow-auto bg-[#0d0d0d] lg:inset-[0_0_0_356.84px]"
+      data-name="Container"
+    >
+      <div className="max-w-[1200px] p-[16px] pb-[80px] md:p-[32px] md:pb-[48px] lg:p-[48px]">
+        {/* Header */}
+        <div className="mb-[32px] md:mb-[40px]">
+          <h1 className="mb-[8px] text-[22px] text-white md:text-[28px]">Time</h1>
+          <p className="text-[13px] text-[#a1a1a6] md:text-[14px]">
+            Configure system clock, NTP synchronization, and timezone
+          </p>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Clock className="w-5 h-5" />
-            Time Configuration
-          </CardTitle>
-          <CardDescription>
-            Configure time synchronization and timezone
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex items-center gap-2 text-muted-foreground py-4">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading time settings...
+        {/* Current Time Display */}
+        <div className="mb-[24px] flex items-center justify-between rounded-[16px] border border-[#3a3a3c] bg-gradient-to-r from-[#1c1c1e] to-[#2c2c2e] p-[24px]">
+          <div>
+            <div className="mb-[4px] text-[13px] font-medium tracking-wider text-[#a1a1a6] uppercase">
+              Device Time
             </div>
-          ) : (
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                {/* Current Time Display */}
-                <div className="p-4 bg-muted rounded-lg">
-                  <div className="text-sm text-muted-foreground">Current Device Time</div>
-                  <div className="text-2xl font-mono font-bold">{currentTimeDisplay}</div>
-                  <div className="text-sm text-muted-foreground mt-1">
-                    Mode: {data?.dateTimeType || '--'} | Timezone: {data?.timezone || '--'}
+            <div className="font-mono text-[32px] font-medium tracking-tight text-white">
+              {deviceTime ? deviceTime.toLocaleTimeString() : '--:--:--'}
+            </div>
+            <div className="text-[14px] text-[#a1a1a6]">
+              {deviceTime
+                ? deviceTime.toLocaleDateString(undefined, {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                  })
+                : 'Loading...'}
+            </div>
+          </div>
+          <div className="flex size-[48px] items-center justify-center rounded-full bg-[#0a84ff]/10">
+            <Clock className="size-6 text-[#0a84ff]" />
+          </div>
+        </div>
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-[24px]">
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-[12px]">
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(255,159,10,0.1)]">
+                    <RefreshCw className="size-5 text-[#ff9f0a]" />
+                  </div>
+                  <div>
+                    <SettingsCardTitle>Synchronization</SettingsCardTitle>
+                    <SettingsCardDescription>
+                      Choose how the device keeps time
+                    </SettingsCardDescription>
                   </div>
                 </div>
-
-                {/* NTP Toggle */}
+              </SettingsCardHeader>
+              <SettingsCardContent className="space-y-[24px]">
                 <FormField
                   control={form.control}
-                  name="useNTP"
+                  name="mode"
                   render={({ field }) => (
-                    <FormItem className="flex items-center justify-between rounded-lg border p-4">
-                      <div className="space-y-0.5">
-                        <FormLabel className="text-base">Use NTP</FormLabel>
-                        <FormDescription>
-                          Automatically synchronize time with network time servers
-                        </FormDescription>
+                    <RadioGroup
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                      className="grid grid-cols-1 gap-[16px] md:grid-cols-3"
+                    >
+                      {/* NTP Mode */}
+                      <div>
+                        <RadioGroupItem value="ntp" id="ntp" className="peer sr-only" />
+                        <Label
+                          htmlFor="ntp"
+                          className="border-muted bg-popover hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-primary flex flex-col items-center justify-between rounded-md border-2 p-4 peer-data-[state=checked]:border-[#0a84ff] peer-data-[state=checked]:bg-[#0a84ff]/5"
+                        >
+                          <Globe className="mb-3 h-6 w-6" />
+                          NTP Server
+                          <p className="mt-1 text-center text-[11px] font-normal text-[#a1a1a6]">
+                            Automatic sync
+                          </p>
+                        </Label>
                       </div>
-                      <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
-                      </FormControl>
-                    </FormItem>
+
+                      {/* Computer Mode */}
+                      <div>
+                        <RadioGroupItem value="computer" id="computer" className="peer sr-only" />
+                        <Label
+                          htmlFor="computer"
+                          onClick={handleSyncComputer}
+                          className="border-muted bg-popover hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-primary flex flex-col items-center justify-between rounded-md border-2 p-4 peer-data-[state=checked]:border-[#0a84ff] peer-data-[state=checked]:bg-[#0a84ff]/5"
+                        >
+                          <Monitor className="mb-3 h-6 w-6" />
+                          Computer
+                          <p className="mt-1 text-center text-[11px] font-normal text-[#a1a1a6]">
+                            Sync with browser
+                          </p>
+                        </Label>
+                      </div>
+
+                      {/* Manual Mode */}
+                      <div>
+                        <RadioGroupItem value="manual" id="manual" className="peer sr-only" />
+                        <Label
+                          htmlFor="manual"
+                          className="border-muted bg-popover hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-primary flex flex-col items-center justify-between rounded-md border-2 p-4 peer-data-[state=checked]:border-[#0a84ff] peer-data-[state=checked]:bg-[#0a84ff]/5"
+                        >
+                          <Calendar className="mb-3 h-6 w-6" />
+                          Manual
+                          <p className="mt-1 text-center text-[11px] font-normal text-[#a1a1a6]">
+                            Set manually
+                          </p>
+                        </Label>
+                      </div>
+                    </RadioGroup>
                   )}
                 />
 
-                {/* Timezone */}
+                {/* NTP Settings */}
+                {mode === 'ntp' && (
+                  <div className="animate-in fade-in slide-in-from-top-2 space-y-[16px] pt-[8px]">
+                    <FormField
+                      control={form.control}
+                      name="ntpFromDHCP"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between rounded-lg border border-[#3a3a3c] bg-[#2c2c2e] p-4">
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-base text-white">NTP from DHCP</FormLabel>
+                            <FormDescription className="text-[#a1a1a6]">
+                              Obtain NTP servers automatically
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    {!ntpFromDHCP && (
+                      <div className="grid grid-cols-1 gap-[16px] md:grid-cols-2">
+                        <FormField
+                          control={form.control}
+                          name="ntpServer1"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-[#a1a1a6]">Primary Server</FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  className="border-[#3a3a3c] bg-transparent text-white"
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="ntpServer2"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className="text-[#a1a1a6]">Secondary Server</FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  className="border-[#3a3a3c] bg-transparent text-white"
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Manual Settings */}
+                {mode === 'manual' && (
+                  <div className="animate-in fade-in slide-in-from-top-2 grid grid-cols-1 gap-[16px] pt-[8px] md:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="manualDate"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-[#a1a1a6]">Date</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="date"
+                              {...field}
+                              className="border-[#3a3a3c] bg-transparent text-white"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="manualTime"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-[#a1a1a6]">Time</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="time"
+                              step="1"
+                              {...field}
+                              className="border-[#3a3a3c] bg-transparent text-white"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
+              </SettingsCardContent>
+            </SettingsCard>
+
+            {/* Timezone Configuration */}
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-[12px]">
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(191,90,242,0.1)]">
+                    <Globe className="size-5 text-[#bf5af2]" />
+                  </div>
+                  <div>
+                    <SettingsCardTitle>Time Zone</SettingsCardTitle>
+                    <SettingsCardDescription>Set the local time zone</SettingsCardDescription>
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent>
                 <FormField
                   control={form.control}
                   name="timezone"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Timezone</FormLabel>
+                      <FormLabel className="text-[#a1a1a6]">Region</FormLabel>
                       <FormControl>
-                        <Input placeholder="UTC+0" {...field} />
+                        <select
+                          className="placeholder:text-muted-foreground flex h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:ring-2 focus:ring-[#0a84ff] focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                          onChange={field.onChange}
+                          value={field.value}
+                        >
+                          <option value="" disabled>
+                            Select timezone
+                          </option>
+                          {TIMEZONES.map((tz) => (
+                            <option key={tz.value} value={tz.value}>
+                              {tz.label}
+                            </option>
+                          ))}
+                        </select>
                       </FormControl>
-                      <FormDescription>
-                        POSIX timezone string (e.g., UTC+0, EST+5, PST+8)
-                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+              </SettingsCardContent>
+            </SettingsCard>
 
-                {/* Daylight Savings */}
-                <FormField
-                  control={form.control}
-                  name="daylightSavings"
-                  render={({ field }) => (
-                    <FormItem className="flex items-center justify-between rounded-lg border p-4">
-                      <div className="space-y-0.5">
-                        <FormLabel className="text-base">Daylight Saving Time</FormLabel>
-                        <FormDescription>
-                          Enable daylight saving time adjustment
-                        </FormDescription>
-                      </div>
-                      <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-
-                {/* Manual Date/Time (hidden when NTP enabled) */}
-                {!useNTP && (
-                  <div className="border-t pt-6 mt-6">
-                    <h3 className="text-sm font-medium mb-4">Manual Date & Time</h3>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <FormField
-                        control={form.control}
-                        name="manualDate"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Date</FormLabel>
-                            <FormControl>
-                              <Input type="date" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="manualTime"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Time (UTC)</FormLabel>
-                            <FormControl>
-                              <Input type="time" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex justify-end">
-                  <Button type="submit" disabled={mutation.isPending || !form.formState.isDirty}>
-                    {mutation.isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <Save className="mr-2 h-4 w-4" />
-                        Save Changes
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </form>
-            </Form>
-          )}
-        </CardContent>
-      </Card>
+            {/* Actions */}
+            <div className="flex items-center gap-[16px]">
+              <Button
+                type="submit"
+                disabled={mutation.isPending || !form.formState.isDirty}
+                className="h-[44px] rounded-[8px] bg-[#0a84ff] px-[32px] font-semibold text-white hover:bg-[#0077ed]"
+              >
+                <Save className="mr-2 size-4" />
+                Save Changes
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </div>
     </div>
-  )
+  );
 }

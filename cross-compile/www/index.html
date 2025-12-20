@@ -1,57 +1,69 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@500&display=swap"
+      rel="stylesheet"
+    />
+    <title>ONVIF Camera Web Interface</title>
 
-<head>
-  <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ONVIF Camera Web Interface</title>
-
-  <style>
-    /* Loading styles */
-    .loading-container {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      background: #1a1a1a;
-      color: #fff;
-      font-family: Arial, sans-serif;
-    }
-
-    .loading-spinner {
-      width: 40px;
-      height: 40px;
-      border: 4px solid #374151;
-      border-top: 4px solid #3b82f6;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-right: 15px;
-    }
-
-    @keyframes spin {
-      0% {
-        transform: rotate(0deg);
+    <style>
+      /* Reset margin/padding to eliminate white borders */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
       }
 
-      100% {
-        transform: rotate(360deg);
+      /* Loading styles */
+      .loading-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        background: #0d0d0d;
+        color: #fff;
+        font-family: 'Inter', sans-serif;
+        font-weight: 500;
       }
-    }
-  </style>
-</head>
 
-<body>
-  <div id="root">
-    <!-- Loading fallback while React loads -->
-    <div class="loading-container">
-      <div class="loading-spinner"></div>
-      <span>Loading application...</span>
+      .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #374151;
+        border-top: 4px solid #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 15px;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="root">
+      <!-- Loading fallback while React loads -->
+      <div class="loading-container">
+        <div class="loading-spinner"></div>
+        <span>Loading application...</span>
+      </div>
     </div>
-  </div>
 
-  <!-- Application bundle will be loaded here -->
-  <script type="module" src="/src/main.tsx"></script>
-</body>
-
+    <!-- Application bundle will be loaded here -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

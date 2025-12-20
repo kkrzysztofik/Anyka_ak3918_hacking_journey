@@ -1,10 +1,10 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import viteCompression from 'vite-plugin-compression'
-import { resolve, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import react from '@vitejs/plugin-react';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
+import { defineConfig } from 'vite';
+import viteCompression from 'vite-plugin-compression';
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -23,20 +23,20 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     viteCompression({ algorithm: 'gzip' }),
-    viteCompression({ algorithm: 'brotliCompress', ext: '.br' })
+    viteCompression({ algorithm: 'brotliCompress', ext: '.br' }),
   ],
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src')
-    }
+      '@': resolve(__dirname, './src'),
+    },
   },
   esbuild: {
     // Use esbuild for TypeScript compilation (faster than tsc)
     target: 'es2020',
     // Enable type checking in type-check mode
     ...(mode === 'type-check' && {
-      logLevel: 'warning'
-    })
+      logLevel: 'warning',
+    }),
   },
   // Define environment variables
   define: {
@@ -44,13 +44,7 @@ export default defineConfig(({ mode }) => ({
   },
   // Optimize dependencies
   optimizeDeps: {
-    include: [
-      'react',
-      'react-dom',
-      'react-router-dom',
-      'axios',
-      'lucide-react'
-    ]
+    include: ['react', 'react-dom', 'react-router-dom', 'axios', 'lucide-react'],
   },
   server: {
     host: '0.0.0.0',
@@ -73,8 +67,8 @@ export default defineConfig(({ mode }) => ({
         target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80',
         changeOrigin: true,
         secure: false,
-      }
-    }
+      },
+    },
   },
   build: {
     outDir: '../../SD_card_contents/anyka_hack/onvif/www',
@@ -150,8 +144,8 @@ export default defineConfig(({ mode }) => ({
             return `css/[name]-[hash].${ext}`;
           }
           return `assets/[name]-[hash].${ext}`;
-        }
-      }
+        },
+      },
     },
     // Optimize chunk size
     chunkSizeWarningLimit: 1000,
@@ -163,5 +157,5 @@ export default defineConfig(({ mode }) => ({
         drop_debugger: true,
       },
     },
-  }
-}))
+  },
+}));

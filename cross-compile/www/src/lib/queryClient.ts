@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient } from '@tanstack/react-query';
 
 /**
  * TanStack Query client singleton with default caching rules.
@@ -19,4 +19,4 @@ export const queryClient = new QueryClient({
       retry: 0, // Don't retry mutations
     },
   },
-})
+});

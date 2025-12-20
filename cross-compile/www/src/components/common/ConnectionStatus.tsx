@@ -3,16 +3,17 @@
  *
  * Shows online/offline status of the camera device.
  */
+import React from 'react';
 
-import React from 'react'
-import { Wifi, WifiOff, Loader2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Loader2, Wifi, WifiOff } from 'lucide-react';
 
-export type ConnectionState = 'connected' | 'disconnected' | 'checking'
+import { cn } from '@/lib/utils';
+
+export type ConnectionState = 'connected' | 'disconnected' | 'checking';
 
 interface ConnectionStatusProps {
-  status: ConnectionState
-  className?: string
+  status: ConnectionState;
+  className?: string;
 }
 
 export function ConnectionStatus({ status, className }: ConnectionStatusProps) {
@@ -24,24 +25,24 @@ export function ConnectionStatus({ status, className }: ConnectionStatusProps) {
     >
       {status === 'connected' && (
         <>
-          <Wifi className="w-4 h-4 text-green-500" aria-hidden="true" />
+          <Wifi className="h-4 w-4 text-green-500" aria-hidden="true" />
           <span className="text-green-500">Connected</span>
         </>
       )}
       {status === 'disconnected' && (
         <>
-          <WifiOff className="w-4 h-4 text-destructive" aria-hidden="true" />
+          <WifiOff className="text-destructive h-4 w-4" aria-hidden="true" />
           <span className="text-destructive">Disconnected</span>
         </>
       )}
       {status === 'checking' && (
         <>
-          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" aria-hidden="true" />
+          <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" aria-hidden="true" />
           <span className="text-muted-foreground">Checking...</span>
         </>
       )}
     </div>
-  )
+  );
 }
 
 /**
@@ -51,23 +52,25 @@ export function ConnectionStatusBadge({ status, className }: ConnectionStatusPro
   return (
     <div
       className={cn(
-        'flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium',
+        'flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium',
         status === 'connected' && 'bg-green-500/10 text-green-500',
         status === 'disconnected' && 'bg-destructive/10 text-destructive',
         status === 'checking' && 'bg-muted text-muted-foreground',
-        className
+        className,
       )}
       role="status"
       aria-live="polite"
     >
-      {status === 'connected' && <Wifi className="w-3 h-3" aria-hidden="true" />}
-      {status === 'disconnected' && <WifiOff className="w-3 h-3" aria-hidden="true" />}
-      {status === 'checking' && <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />}
+      {status === 'connected' && <Wifi className="h-3 w-3" aria-hidden="true" />}
+      {status === 'disconnected' && <WifiOff className="h-3 w-3" aria-hidden="true" />}
+      {status === 'checking' && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}
       <span className="sr-only">
-        {status === 'connected' ? 'Connected to device' :
-          status === 'disconnected' ? 'Disconnected from device' :
-            'Checking connection status'}
+        {status === 'connected'
+          ? 'Connected to device'
+          : status === 'disconnected'
+            ? 'Disconnected from device'
+            : 'Checking connection status'}
       </span>
     </div>
-  )
+  );
 }

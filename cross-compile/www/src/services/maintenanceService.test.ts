@@ -1,8 +1,10 @@
 /**
  * Maintenance Service Tests
  */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { apiClient } from '@/services/api';
+import { setSystemFactoryDefault, systemReboot } from '@/services/maintenanceService';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -12,15 +14,12 @@ vi.mock('@/services/api', () => ({
   ENDPOINTS: {
     device: '/onvif/device_service',
   },
-}))
-
-import { apiClient } from '@/services/api'
-import { systemReboot, setSystemFactoryDefault } from '@/services/maintenanceService'
+}));
 
 describe('maintenanceService', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-  })
+    vi.clearAllMocks();
+  });
 
   describe('systemReboot', () => {
     it('should send reboot request', async () => {
@@ -33,17 +32,17 @@ describe('maintenanceService', () => {
               </SystemRebootResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await systemReboot()
+      await systemReboot();
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('tds:SystemReboot')
-      )
-    })
+        expect.stringContaining('tds:SystemReboot'),
+      );
+    });
 
     it('should throw on failure', async () => {
       const mockResponse = {
@@ -56,13 +55,13 @@ describe('maintenanceService', () => {
               </soap:Fault>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await expect(systemReboot()).rejects.toThrow()
-    })
-  })
+      await expect(systemReboot()).rejects.toThrow();
+    });
+  });
 
   describe('setSystemFactoryDefault', () => {
     it('should send soft reset request', async () => {
@@ -73,17 +72,17 @@ describe('maintenanceService', () => {
               <SetSystemFactoryDefaultResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await setSystemFactoryDefault('Soft')
+      await setSystemFactoryDefault('Soft');
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('<tds:FactoryDefault>Soft</tds:FactoryDefault>')
-      )
-    })
+        expect.stringContaining('<tds:FactoryDefault>Soft</tds:FactoryDefault>'),
+      );
+    });
 
     it('should send hard reset request', async () => {
       const mockResponse = {
@@ -93,16 +92,16 @@ describe('maintenanceService', () => {
               <SetSystemFactoryDefaultResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await setSystemFactoryDefault('Hard')
+      await setSystemFactoryDefault('Hard');
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('<tds:FactoryDefault>Hard</tds:FactoryDefault>')
-      )
-    })
-  })
-})
+        expect.stringContaining('<tds:FactoryDefault>Hard</tds:FactoryDefault>'),
+      );
+    });
+  });
+});

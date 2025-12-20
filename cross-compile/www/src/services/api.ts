@@ -3,18 +3,17 @@
  *
  * Axios instance configured with automatic Basic Auth header injection.
  */
-
-import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import axios, { type AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 
 // Store reference to auth getter (set by AuthProvider integration)
-let getAuthHeader: (() => string | null) | null = null
+let getAuthHeader: (() => string | null) | null = null;
 
 /**
  * Set the auth header getter function
  * Called by App.tsx after AuthProvider is mounted
  */
 export function setAuthHeaderGetter(getter: () => string | null) {
-  getAuthHeader = getter
+  getAuthHeader = getter;
 }
 
 /**
@@ -33,23 +32,23 @@ export const apiClient: AxiosInstance = axios.create({
   timeout: 10000,
   headers: {
     'Content-Type': 'application/soap+xml; charset=utf-8',
-    'Accept': 'application/soap+xml, application/xml, */*',
+    Accept: 'application/soap+xml, application/xml, */*',
   },
-})
+});
 
 // Request interceptor - inject Basic Auth header
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     if (getAuthHeader) {
-      const authHeader = getAuthHeader()
+      const authHeader = getAuthHeader();
       if (authHeader) {
-        config.headers.Authorization = authHeader
+        config.headers.Authorization = authHeader;
       }
     }
-    return config
+    return config;
   },
-  (error: AxiosError) => Promise.reject(error)
-)
+  (error: AxiosError) => Promise.reject(error),
+);
 
 // Response interceptor - handle common errors
 apiClient.interceptors.response.use(
@@ -57,11 +56,11 @@ apiClient.interceptors.response.use(
   (error: AxiosError) => {
     if (error.response?.status === 401) {
       // Clear credentials on 401 Unauthorized
-      console.warn('API returned 401 Unauthorized')
+      console.warn('API returned 401 Unauthorized');
     }
-    return Promise.reject(error)
-  }
-)
+    return Promise.reject(error);
+  },
+);
 
 /**
  * ONVIF service endpoints
@@ -71,6 +70,6 @@ export const ENDPOINTS = {
   media: '/onvif/media_service',
   imaging: '/onvif/imaging_service',
   ptz: '/onvif/ptz_service',
-} as const
+} as const;
 
-export type ServiceEndpoint = keyof typeof ENDPOINTS
+export type ServiceEndpoint = keyof typeof ENDPOINTS;

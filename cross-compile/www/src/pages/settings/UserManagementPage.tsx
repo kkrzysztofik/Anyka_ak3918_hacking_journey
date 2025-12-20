@@ -1,15 +1,17 @@
 /**
  * User Management Page
  *
- * Manage users and passwords.
+ * Manage system users, roles, and credentials.
  */
+import React, { useState } from 'react';
 
-import React, { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { Users, Plus, Key, Trash2, Loader2, Shield, UserCheck, User as UserIcon } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Edit2, Eye, EyeOff, Plus, Trash2, User, Users } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { toast } from 'sonner';
+import { z } from 'zod';
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,184 +21,241 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { AddUserDialog, ChangePasswordDialog } from '@/components/users/UserDialogs'
-import { getUsers, createUser, deleteUser, setUser, type OnvifUser, type UserLevel } from '@/services/userService'
-import { useAuth } from '@/hooks/useAuth'
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  SettingsCard,
+  SettingsCardContent,
+  SettingsCardDescription,
+  SettingsCardHeader,
+  SettingsCardTitle,
+} from '@/components/ui/settings-card';
+import {
+  type UserRole,
+  type User as UserType,
+  createUser,
+  deleteUser,
+  getUsers,
+  setUser,
+} from '@/services/userService';
 
-const userLevelIcons: Record<UserLevel, React.ReactNode> = {
-  Administrator: <Shield className="w-4 h-4 text-destructive" />,
-  Operator: <UserCheck className="w-4 h-4 text-primary" />,
-  User: <UserIcon className="w-4 h-4 text-muted-foreground" />,
-  Anonymous: <UserIcon className="w-4 h-4 text-muted-foreground" />,
-}
+// Schema for adding/editing user
+const userSchema = z.object({
+  username: z.string().min(1, 'Username is required'),
+  password: z.string().min(4, 'Password must be at least 4 characters'),
+  role: z.enum(['Administrator', 'Operator', 'User', 'Anonymous'] as const),
+});
+
+type UserFormData = z.infer<typeof userSchema>;
 
 export default function UserManagementPage() {
-  const queryClient = useQueryClient()
-  const { username: currentUser } = useAuth()
+  const queryClient = useQueryClient();
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserType | null>(null);
+  const [deletingUser, setDeletingUser] = useState<UserType | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const [showAddDialog, setShowAddDialog] = useState(false)
-  const [showPasswordDialog, setShowPasswordDialog] = useState(false)
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
-  const [selectedUser, setSelectedUser] = useState<OnvifUser | null>(null)
-
-  // Fetch users
-  const { data: users, isLoading, error } = useQuery<OnvifUser[]>({
+  // Fetch Users
+  const {
+    data: users,
+    isLoading,
+    error,
+  } = useQuery<UserType[]>({
     queryKey: ['users'],
     queryFn: getUsers,
-  })
+  });
 
-  // Create user mutation
+  // Create User Mutation
   const createMutation = useMutation({
-    mutationFn: ({ username, password, userLevel }: { username: string; password: string; userLevel: UserLevel }) =>
-      createUser(username, password, userLevel),
+    mutationFn: (data: UserFormData) => createUser(data.username, data.password, data.role),
     onSuccess: () => {
-      toast.success('User created successfully')
-      queryClient.invalidateQueries({ queryKey: ['users'] })
+      toast.success('User created successfully');
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setShowAddDialog(false);
+      form.reset();
     },
     onError: (error) => {
       toast.error('Failed to create user', {
         description: error instanceof Error ? error.message : 'An error occurred',
-      })
+      });
     },
-  })
+  });
 
-  // Delete user mutation
-  const deleteMutation = useMutation({
-    mutationFn: deleteUser,
+  // Edit User Mutation
+  const editMutation = useMutation({
+    mutationFn: (data: UserFormData) => setUser(data.username, data.password, data.role),
     onSuccess: () => {
-      toast.success('User deleted successfully')
-      queryClient.invalidateQueries({ queryKey: ['users'] })
-      setShowDeleteDialog(false)
-      setSelectedUser(null)
+      toast.success('User updated successfully');
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setEditingUser(null);
+      form.reset();
+    },
+    onError: (error) => {
+      toast.error('Failed to update user', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  // Delete User Mutation
+  const deleteMutation = useMutation({
+    mutationFn: (username: string) => deleteUser(username),
+    onSuccess: () => {
+      toast.success('User deleted successfully');
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setDeletingUser(null);
     },
     onError: (error) => {
       toast.error('Failed to delete user', {
         description: error instanceof Error ? error.message : 'An error occurred',
-      })
+      });
     },
-  })
+  });
 
-  // Change password mutation
-  const passwordMutation = useMutation({
-    mutationFn: ({ username, password, userLevel }: { username: string; password: string; userLevel: UserLevel }) =>
-      setUser(username, password, userLevel),
-    onSuccess: () => {
-      toast.success('Password changed successfully')
-      setShowPasswordDialog(false)
-      setSelectedUser(null)
+  const form = useForm<UserFormData>({
+    resolver: zodResolver(userSchema),
+    defaultValues: {
+      username: '',
+      password: '',
+      role: 'User',
     },
-    onError: (error) => {
-      toast.error('Failed to change password', {
-        description: error instanceof Error ? error.message : 'An error occurred',
-      })
-    },
-  })
+  });
 
-  const handleAddUser = async (username: string, password: string, userLevel: UserLevel) => {
-    await createMutation.mutateAsync({ username, password, userLevel })
-  }
+  // Handle Edit Click
+  const handleEditClick = (user: UserType) => {
+    setEditingUser(user);
+    form.reset({
+      username: user.username,
+      password: '', // Password not retrieved for security
+      role: user.userLevel as UserRole,
+    });
+  };
 
-  const handleChangePassword = async (password: string) => {
-    if (!selectedUser) return
-    await passwordMutation.mutateAsync({
-      username: selectedUser.username,
-      password,
-      userLevel: selectedUser.userLevel,
-    })
-  }
+  // Handle Submit (Create or Edit)
+  const onSubmit = (data: UserFormData) => {
+    if (editingUser) {
+      editMutation.mutate(data);
+    } else {
+      createMutation.mutate(data);
+    }
+  };
 
-  const handleDeleteUser = () => {
-    if (!selectedUser) return
-    deleteMutation.mutate(selectedUser.username)
-  }
+  if (isLoading) return <div className="text-white">Loading users...</div>;
 
   if (error) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Users</h1>
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-destructive">Failed to load users</p>
-          </CardContent>
-        </Card>
-      </div>
-    )
+    return <div className="text-red-500">Error loading users: {(error as Error).message}</div>;
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Users</h1>
-        <Button onClick={() => setShowAddDialog(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          Add User
-        </Button>
-      </div>
+    <div
+      className="absolute inset-0 overflow-auto bg-[#0d0d0d] lg:inset-[0_0_0_356.84px]"
+      data-name="Container"
+    >
+      <div className="max-w-[1200px] p-[16px] pb-[80px] md:p-[32px] md:pb-[48px] lg:p-[48px]">
+        {/* Header */}
+        <div className="mb-[32px] flex items-center justify-between md:mb-[40px]">
+          <div>
+            <h1 className="mb-[8px] text-[22px] text-white md:text-[28px]">User Management</h1>
+            <p className="text-[13px] text-[#a1a1a6] md:text-[14px]">
+              Manage access accounts and security roles
+            </p>
+          </div>
+          <Button
+            onClick={() => {
+              setEditingUser(null);
+              form.reset({ username: '', password: '', role: 'User' });
+              setShowAddDialog(true);
+            }}
+            className="rounded-[8px] bg-[#0a84ff] text-white hover:bg-[#0077ed]"
+          >
+            <Plus className="mr-2 size-4" />
+            Add User
+          </Button>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="w-5 h-5" />
-            User Accounts
-          </CardTitle>
-          <CardDescription>
-            Manage user accounts and access levels
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex items-center gap-2 text-muted-foreground py-4">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading users...
+        <SettingsCard>
+          <SettingsCardHeader>
+            <div className="flex items-center gap-[12px]">
+              <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
+                <Users className="size-5 text-[#0a84ff]" />
+              </div>
+              <div>
+                <SettingsCardTitle>Users</SettingsCardTitle>
+                <SettingsCardDescription>
+                  {users?.length} accounts configured
+                </SettingsCardDescription>
+              </div>
             </div>
-          ) : users && users.length > 0 ? (
-            <div className="border rounded-lg">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b bg-muted/50">
-                    <th className="text-left p-3 font-medium">Username</th>
-                    <th className="text-left p-3 font-medium">Level</th>
-                    <th className="text-right p-3 font-medium">Actions</th>
+          </SettingsCardHeader>
+          <SettingsCardContent className="p-0">
+            <div className="overflow-hidden">
+              <table className="w-full text-left text-sm text-[#a1a1a6]">
+                <thead className="border-b border-[#3a3a3c] bg-[#1c1c1e] text-xs font-medium uppercase">
+                  <tr>
+                    <th className="px-6 py-4">User</th>
+                    <th className="px-6 py-4">Role</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {users.map((user) => (
-                    <tr key={user.username} className="border-b last:border-0">
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          {userLevelIcons[user.userLevel]}
-                          <span className="font-medium">{user.username}</span>
-                          {user.username === currentUser && (
-                            <span className="text-xs text-muted-foreground">(you)</span>
-                          )}
+                <tbody className="divide-y divide-[#3a3a3c]">
+                  {users?.map((user) => (
+                    <tr key={user.username} className="transition-colors hover:bg-[#2c2c2e]/50">
+                      <td className="flex items-center gap-3 px-6 py-4 font-medium text-white">
+                        <div className="flex size-8 items-center justify-center rounded-full bg-[#3a3a3c] text-white">
+                          <User className="size-4" />
                         </div>
+                        {user.username}
                       </td>
-                      <td className="p-3 text-muted-foreground">{user.userLevel}</td>
-                      <td className="p-3">
-                        <div className="flex justify-end gap-2">
+                      <td className="px-6 py-4">
+                        <Badge
+                          className={`pointer-events-none rounded-md border px-2 py-1 text-xs font-medium ${user.userLevel === 'Administrator' ? 'border-[rgba(255,69,58,0.2)] bg-[rgba(255,69,58,0.1)] text-[#ff453a]' : ''} ${user.userLevel === 'Operator' ? 'border-[rgba(255,159,10,0.2)] bg-[rgba(255,159,10,0.1)] text-[#ff9f0a]' : ''} ${user.userLevel === 'User' ? 'border-[rgba(48,209,88,0.2)] bg-[rgba(48,209,88,0.1)] text-[#30d158]' : ''} ${user.userLevel === 'Anonymous' ? 'border-[rgba(142,142,147,0.2)] bg-[rgba(142,142,147,0.1)] text-[#8e8e93]' : ''} `}
+                        >
+                          {user.userLevel}
+                        </Badge>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
                           <Button
                             variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedUser(user)
-                              setShowPasswordDialog(true)
-                            }}
+                            size="icon"
+                            onClick={() => handleEditClick(user)}
+                            className="h-8 w-8 text-[#a1a1a6] hover:bg-[#3a3a3c] hover:text-white"
                           >
-                            <Key className="w-4 h-4" />
-                            <span className="sr-only">Change password</span>
+                            <Edit2 className="size-4" />
                           </Button>
                           <Button
                             variant="ghost"
-                            size="sm"
-                            disabled={user.username === currentUser}
-                            onClick={() => {
-                              setSelectedUser(user)
-                              setShowDeleteDialog(true)
-                            }}
+                            size="icon"
+                            onClick={() => setDeletingUser(user)}
+                            disabled={users.length <= 1} // Prevent deleting last user
+                            className="h-8 w-8 text-[#a1a1a6] hover:bg-[rgba(220,38,38,0.1)] hover:text-[#dc2626]"
                           >
-                            <Trash2 className="w-4 h-4 text-destructive" />
-                            <span className="sr-only">Delete user</span>
+                            <Trash2 className="size-4" />
                           </Button>
                         </div>
                       </td>
@@ -205,51 +264,161 @@ export default function UserManagementPage() {
                 </tbody>
               </table>
             </div>
-          ) : (
-            <p className="text-muted-foreground py-4">No users found</p>
-          )}
-        </CardContent>
-      </Card>
+          </SettingsCardContent>
+        </SettingsCard>
 
-      {/* Add User Dialog */}
-      <AddUserDialog
-        open={showAddDialog}
-        onOpenChange={setShowAddDialog}
-        onSubmit={handleAddUser}
-      />
+        {/* Add/Edit Dialog */}
+        <Dialog
+          open={showAddDialog || !!editingUser}
+          onOpenChange={(open) => {
+            if (!open) {
+              setShowAddDialog(false);
+              setEditingUser(null);
+            }
+          }}
+        >
+          <DialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle className="text-white">
+                {editingUser ? 'Edit User' : 'Add User'}
+              </DialogTitle>
+              <DialogDescription className="text-[#a1a1a6]">
+                {editingUser
+                  ? 'Update user details and access level.'
+                  : 'Create a new user account.'}
+              </DialogDescription>
+            </DialogHeader>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="username"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-[#a1a1a6]">Username</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="jdoe"
+                          {...field}
+                          disabled={!!editingUser} // Can't change username in ONVIF usually directly without recreate, simplifying for now
+                          className="border-[#3a3a3c] bg-transparent text-white focus:border-[#0a84ff]"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="password"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-[#a1a1a6]">Password</FormLabel>
+                      <div className="relative">
+                        <FormControl>
+                          <Input
+                            type={showPassword ? 'text' : 'password'}
+                            placeholder={
+                              editingUser ? 'Leave blank to keep current' : 'Enter password'
+                            }
+                            {...field}
+                            className="border-[#3a3a3c] bg-transparent pr-10 text-white focus:border-[#0a84ff]"
+                          />
+                        </FormControl>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="absolute top-0 right-0 h-full px-3 py-2 text-[#a1a1a6] hover:text-white"
+                          onClick={() => setShowPassword(!showPassword)}
+                        >
+                          {showPassword ? (
+                            <EyeOff className="size-4" />
+                          ) : (
+                            <Eye className="size-4" />
+                          )}
+                        </Button>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="role"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-[#a1a1a6]">Role</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="border-[#3a3a3c] bg-transparent text-white">
+                            <SelectValue placeholder="Select a role" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white">
+                          <SelectItem value="Administrator">Administrator</SelectItem>
+                          <SelectItem value="Operator">Operator</SelectItem>
+                          <SelectItem value="User">User</SelectItem>
+                          <SelectItem value="Anonymous">Anonymous</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <DialogFooter className="mt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setShowAddDialog(false);
+                      setEditingUser(null);
+                    }}
+                    className="border-[#3a3a3c] text-white hover:bg-[#2c2c2e]"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={createMutation.isPending || editMutation.isPending}
+                    className="bg-[#0a84ff] text-white hover:bg-[#0077ed]"
+                  >
+                    {createMutation.isPending || editMutation.isPending ? 'Saving...' : 'Save User'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
 
-      {/* Change Password Dialog */}
-      {selectedUser && (
-        <ChangePasswordDialog
-          open={showPasswordDialog}
-          onOpenChange={setShowPasswordDialog}
-          username={selectedUser.username}
-          onSubmit={handleChangePassword}
-        />
-      )}
-
-      {/* Delete Confirmation */}
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete User</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete user <strong>{selectedUser?.username}</strong>?
-              This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteUser}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        {/* Delete Confirmation */}
+        <AlertDialog open={!!deletingUser} onOpenChange={() => setDeletingUser(null)}>
+          <AlertDialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-white">Delete User?</AlertDialogTitle>
+              <AlertDialogDescription className="text-[#a1a1a6]">
+                Are you sure you want to delete user "<strong>{deletingUser?.username}</strong>"?
+                This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]">
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => deletingUser && deleteMutation.mutate(deletingUser.username)}
+                className="bg-[#dc2626] text-white hover:bg-[#ef4444]"
+              >
+                {deleteMutation.isPending ? 'Deleting...' : 'Delete User'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
     </div>
-  )
+  );
 }

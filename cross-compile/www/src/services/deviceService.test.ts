@@ -1,8 +1,15 @@
 /**
  * Device Service Tests
  */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { apiClient } from '@/services/api';
+import {
+  getDeviceIdentification,
+  getDeviceInformation,
+  getScopes,
+  setScopes,
+} from '@/services/deviceService';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -12,15 +19,12 @@ vi.mock('@/services/api', () => ({
   ENDPOINTS: {
     device: '/onvif/device_service',
   },
-}))
-
-import { apiClient } from '@/services/api'
-import { getDeviceInformation, getScopes, setScopes, getDeviceIdentification } from '@/services/deviceService'
+}));
 
 describe('deviceService', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-  })
+    vi.clearAllMocks();
+  });
 
   describe('getDeviceInformation', () => {
     it('should parse device information correctly', async () => {
@@ -37,18 +41,18 @@ describe('deviceService', () => {
               </GetDeviceInformationResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await getDeviceInformation()
+      const result = await getDeviceInformation();
 
-      expect(result.manufacturer).toBe('Anyka')
-      expect(result.model).toBe('AK3918E')
-      expect(result.firmwareVersion).toBe('2.0.0')
-      expect(result.serialNumber).toBe('SN12345')
-      expect(result.hardwareId).toBe('HW12345')
-    })
+      expect(result.manufacturer).toBe('Anyka');
+      expect(result.model).toBe('AK3918E');
+      expect(result.firmwareVersion).toBe('2.0.0');
+      expect(result.serialNumber).toBe('SN12345');
+      expect(result.hardwareId).toBe('HW12345');
+    });
 
     it('should throw on SOAP fault', async () => {
       const mockResponse = {
@@ -61,12 +65,12 @@ describe('deviceService', () => {
               </soap:Fault>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await expect(getDeviceInformation()).rejects.toThrow()
-    })
+      await expect(getDeviceInformation()).rejects.toThrow();
+    });
 
     it('should throw on missing response data', async () => {
       const mockResponse = {
@@ -76,13 +80,13 @@ describe('deviceService', () => {
               <SomeOtherResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await expect(getDeviceInformation()).rejects.toThrow('Invalid response')
-    })
-  })
+      await expect(getDeviceInformation()).rejects.toThrow('Invalid response');
+    });
+  });
 
   describe('getScopes', () => {
     it('should parse scopes and extract name/location', async () => {
@@ -102,15 +106,15 @@ describe('deviceService', () => {
               </GetScopesResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await getScopes()
+      const result = await getScopes();
 
-      expect(result.name).toBe('MyCam')
-      expect(result.location).toBe('LivingRoom')
-    })
+      expect(result.name).toBe('MyCam');
+      expect(result.location).toBe('LivingRoom');
+    });
 
     it('should return empty strings when no matching scopes', async () => {
       const mockResponse = {
@@ -124,16 +128,16 @@ describe('deviceService', () => {
               </GetScopesResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await getScopes()
+      const result = await getScopes();
 
-      expect(result.name).toBe('')
-      expect(result.location).toBe('')
-    })
-  })
+      expect(result.name).toBe('');
+      expect(result.location).toBe('');
+    });
+  });
 
   describe('setScopes', () => {
     it('should call API with correct SOAP body', async () => {
@@ -144,21 +148,21 @@ describe('deviceService', () => {
               <SetScopesResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await setScopes('NewName', 'NewLocation')
+      await setScopes('NewName', 'NewLocation');
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('NewName')
-      )
+        expect.stringContaining('NewName'),
+      );
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('NewLocation')
-      )
-    })
+        expect.stringContaining('NewLocation'),
+      );
+    });
 
     it('should throw on failure', async () => {
       const mockResponse = {
@@ -171,13 +175,13 @@ describe('deviceService', () => {
               </soap:Fault>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await expect(setScopes('Test', 'Test')).rejects.toThrow()
-    })
-  })
+      await expect(setScopes('Test', 'Test')).rejects.toThrow();
+    });
+  });
 
   describe('getDeviceIdentification', () => {
     it('should combine device info and scopes', async () => {
@@ -194,7 +198,7 @@ describe('deviceService', () => {
               </GetDeviceInformationResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
       const scopesResponse = {
         data: `<?xml version="1.0" encoding="UTF-8"?>
@@ -206,17 +210,17 @@ describe('deviceService', () => {
               </GetScopesResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
       vi.mocked(apiClient.post)
         .mockResolvedValueOnce(deviceInfoResponse)
-        .mockResolvedValueOnce(scopesResponse)
+        .mockResolvedValueOnce(scopesResponse);
 
-      const result = await getDeviceIdentification()
+      const result = await getDeviceIdentification();
 
-      expect(result.deviceInfo.manufacturer).toBe('Anyka')
-      expect(result.name).toBe('TestCam')
-      expect(result.location).toBe('Office')
-    })
-  })
-})
+      expect(result.deviceInfo.manufacturer).toBe('Anyka');
+      expect(result.name).toBe('TestCam');
+      expect(result.location).toBe('Office');
+    });
+  });
+});

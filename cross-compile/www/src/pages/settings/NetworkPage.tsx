@@ -1,21 +1,17 @@
-/* eslint-disable react-hooks/incompatible-library */
 /**
- * Network Settings Page
+ * Network Page
  *
- * Configure IP, DNS, and Ports with DHCP toggle.
+ * Configure network interfaces, DNS, and ports.
  */
+import React, { useEffect, useState } from 'react';
 
-import React, { useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { Network, Save, Loader2, AlertTriangle } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Switch } from '@/components/ui/switch'
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Globe, Info, Network, RotateCcw, Save, Server, Wifi } from 'lucide-react';
+import { useForm, useWatch } from 'react-hook-form';
+import { toast } from 'sonner';
+import { z } from 'zod';
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,157 +21,264 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { getNetworkConfig, setNetworkInterface, setDNS, type NetworkConfig } from '@/services/networkService'
-import { networkSchema, type NetworkFormData } from '@/lib/schemas/network'
+} from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import {
+  SettingsCard,
+  SettingsCardContent,
+  SettingsCardDescription,
+  SettingsCardHeader,
+  SettingsCardTitle,
+} from '@/components/ui/settings-card';
+import {
+  StatusCard,
+  StatusCardContent,
+  StatusCardImage,
+  StatusCardItem,
+} from '@/components/ui/status-card';
+import { Switch } from '@/components/ui/switch';
+import {
+  type NetworkConfig,
+  getNetworkConfig,
+  setDNS,
+  setNetworkInterface,
+} from '@/services/networkService';
+
+// Validation Schema
+const ipRegex =
+  /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+
+const networkSchema = z.object({
+  dhcp: z.boolean(),
+  address: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
+  prefixLength: z.number().min(0).max(32).optional(),
+  gateway: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
+  dnsFromDHCP: z.boolean(),
+  primaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
+  secondaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
+  // Stubs
+  onvifDiscovery: z.boolean().default(true),
+  hostname: z.string().optional(),
+  httpPort: z.number().default(80),
+  httpsPort: z.number().default(443),
+  rtspPort: z.number().default(554),
+});
+
+type NetworkFormData = z.infer<typeof networkSchema>;
 
 export default function NetworkPage() {
-  const queryClient = useQueryClient()
-  const [showWarning, setShowWarning] = useState(false)
-  const [pendingValues, setPendingValues] = useState<NetworkFormData | null>(null)
+  const queryClient = useQueryClient();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingValues, setPendingValues] = useState<NetworkFormData | null>(null);
 
-  // Fetch network config
-  const { data, isLoading, error } = useQuery<NetworkConfig>({
+  // Fetch data
+  const { data: config, isLoading } = useQuery<NetworkConfig>({
     queryKey: ['networkConfig'],
     queryFn: getNetworkConfig,
-  })
+  });
 
+  // Form setup
   const form = useForm<NetworkFormData>({
-    resolver: zodResolver(networkSchema),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolver: zodResolver(networkSchema) as any,
     defaultValues: {
       dhcp: true,
       address: '',
       prefixLength: 24,
       gateway: '',
       dnsFromDHCP: true,
-      dns1: '',
-      dns2: '',
+      primaryDNS: '',
+      secondaryDNS: '',
+      onvifDiscovery: true,
+      hostname: 'camera-device',
+      httpPort: 80,
+      httpsPort: 443,
+      rtspPort: 554,
     },
-  })
+  });
 
-  const dhcpEnabled = form.watch('dhcp')
-  const dnsFromDHCP = form.watch('dnsFromDHCP')
+  // Watch for conditional rendering
+  const dhcpEnabled = useWatch({ control: form.control, name: 'dhcp' });
+  const dnsFromDHCP = useWatch({ control: form.control, name: 'dnsFromDHCP' });
 
-  // Update form when data is loaded
-  React.useEffect(() => {
-    if (data && data.interfaces.length > 0) {
-      const iface = data.interfaces[0]
+  // Load data into form
+  useEffect(() => {
+    if (config) {
+      const iface = config.interfaces[0]; // Assume single interface
       form.reset({
-        dhcp: iface.dhcp,
-        address: iface.address || '',
-        prefixLength: iface.prefixLength || 24,
-        gateway: iface.gateway || '',
-        dnsFromDHCP: data.dns.fromDHCP,
-        dns1: data.dns.dnsServers[0] || '',
-        dns2: data.dns.dnsServers[1] || '',
-      })
+        dhcp: iface?.dhcp ?? true,
+        address: iface?.address || '',
+        prefixLength: iface?.prefixLength || 24,
+        gateway: iface?.gateway || '',
+        dnsFromDHCP: config.dns.fromDHCP,
+        primaryDNS: config.dns.dnsServers[0] || '',
+        secondaryDNS: config.dns.dnsServers[1] || '',
+        // Keep stubs
+        onvifDiscovery: true,
+        hostname: iface?.name || 'camera-device',
+        httpPort: 80,
+        httpsPort: 443,
+        rtspPort: 554,
+      });
     }
-  }, [data, form])
+  }, [config, form]);
 
-  // Mutation for saving network config
   const mutation = useMutation({
     mutationFn: async (values: NetworkFormData) => {
-      const token = data?.interfaces[0]?.token || 'eth0'
+      const iface = config?.interfaces[0];
+      if (!iface) throw new Error('No interface found');
 
-      // Set network interface
-      await setNetworkInterface(
-        token,
-        values.dhcp,
-        values.address,
-        values.prefixLength
-      )
+      await setNetworkInterface(iface.token, values.dhcp, values.address, values.prefixLength);
 
-      // Set DNS
-      const dnsServers = [values.dns1, values.dns2].filter(Boolean) as string[]
-      await setDNS(values.dnsFromDHCP, dnsServers)
+      const dnsServers = [values.primaryDNS, values.secondaryDNS].filter(Boolean) as string[];
+      await setDNS(values.dnsFromDHCP, dnsServers);
     },
     onSuccess: () => {
       toast.success('Network settings saved', {
-        description: 'Changes may require a device reboot to take effect',
-      })
-      queryClient.invalidateQueries({ queryKey: ['networkConfig'] })
+        description: 'The device may lose connectivity if IP settings changed.',
+      });
+      queryClient.invalidateQueries({ queryKey: ['networkConfig'] });
+      setConfirmOpen(false);
     },
     onError: (error) => {
-      toast.error('Failed to save network settings', {
+      toast.error('Failed to save settings', {
         description: error instanceof Error ? error.message : 'An error occurred',
-      })
+      });
+      setConfirmOpen(false);
     },
-  })
+  });
 
-  const handleSubmit = (values: NetworkFormData) => {
-    // Show warning dialog before saving network changes
-    setPendingValues(values)
-    setShowWarning(true)
-  }
+  const onSubmit = (values: NetworkFormData) => {
+    setPendingValues(values);
+    setConfirmOpen(true);
+  };
 
-  const confirmSave = () => {
+  const handleConfirm = () => {
     if (pendingValues) {
-      mutation.mutate(pendingValues)
+      mutation.mutate(pendingValues);
     }
-    setShowWarning(false)
-    setPendingValues(null)
-  }
+  };
 
-  if (error) {
-    return (
-      <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Network</h1>
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-destructive">Failed to load network configuration</p>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
+  const handleReset = () => {
+    if (config) {
+      // Re-trigger the useEffect to reset
+      // A quick hack is to just re-fetch or clone the data,
+      // but form.reset inside useEffect handles it if we depend on config.
+      // Actually, we can just call form.reset with current config derived values
+      const iface = config.interfaces[0];
+      form.reset({
+        dhcp: iface?.dhcp ?? true,
+        address: iface?.address || '',
+        prefixLength: iface?.prefixLength || 24,
+        gateway: iface?.gateway || '',
+        dnsFromDHCP: config.dns.fromDHCP,
+        primaryDNS: config.dns.dnsServers[0] || '',
+        secondaryDNS: config.dns.dnsServers[1] || '',
+        onvifDiscovery: true,
+        hostname: iface?.name || 'camera-device',
+        httpPort: 80,
+        httpsPort: 443,
+        rtspPort: 554,
+      });
+      toast.info('Form reset to current values');
+    }
+  };
+
+  if (isLoading) return <div className="text-white">Loading...</div>;
+
+  const primaryInterface = config?.interfaces[0];
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Network</h1>
+    <div
+      className="absolute inset-0 overflow-auto bg-[#0d0d0d] lg:inset-[0_0_0_356.84px]"
+      data-name="Container"
+    >
+      <div className="max-w-[1200px] p-[16px] pb-[80px] md:p-[32px] md:pb-[48px] lg:p-[48px]">
+        {/* Header */}
+        <div className="mb-[32px] md:mb-[40px]">
+          <h1 className="mb-[8px] text-[22px] text-white md:text-[28px]">Network</h1>
+          <p className="text-[13px] text-[#a1a1a6] md:text-[14px]">
+            Configure IP address, DNS, and service ports
+          </p>
+        </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Network className="w-5 h-5" />
-            Network Configuration
-          </CardTitle>
-          <CardDescription>
-            Configure IP address, DHCP, and DNS settings
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex items-center gap-2 text-muted-foreground py-4">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Loading network settings...
-            </div>
-          ) : (
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
-                {/* Interface info */}
-                {data?.interfaces[0] && (
-                  <div className="grid grid-cols-2 gap-4 p-4 bg-muted rounded-lg text-sm">
-                    <div>
-                      <span className="text-muted-foreground">Interface:</span>
-                      <span className="ml-2 font-medium">{data.interfaces[0].name}</span>
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">MAC:</span>
-                      <span className="ml-2 font-mono">{data.interfaces[0].hwAddress}</span>
-                    </div>
+        {/* Connection Status Card */}
+        <StatusCard>
+          <StatusCardImage>
+            <Network className="size-8 opacity-50" />
+          </StatusCardImage>
+          <StatusCardContent>
+            <StatusCardItem label="MAC Address" value={primaryInterface?.hwAddress || '--'} />
+            <StatusCardItem label="Speed" value="100 Mbps" />
+            <StatusCardItem
+              label="Status"
+              value={
+                <div className="flex items-center gap-2">
+                  <div className="size-2 rounded-full bg-green-500" />
+                  <span>Connected</span>
+                </div>
+              }
+            />
+            <StatusCardItem label="Uptime" value="--" />
+          </StatusCardContent>
+        </StatusCard>
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-[24px]">
+            {/* Network Configuration */}
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-[12px]">
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
+                    <Globe className="size-5 text-[#0a84ff]" />
                   </div>
-                )}
+                  <div>
+                    <SettingsCardTitle>Network Configuration</SettingsCardTitle>
+                    <SettingsCardDescription>
+                      IP address and hostname settings
+                    </SettingsCardDescription>
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent className="space-y-[24px]">
+                {/* Hostname (Stub) */}
+                <FormField
+                  control={form.control}
+                  name="hostname"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-[#a1a1a6]">Hostname</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          className="border-[#3a3a3c] bg-transparent text-white focus:border-[#dc2626]"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
                 {/* DHCP Toggle */}
                 <FormField
                   control={form.control}
                   name="dhcp"
                   render={({ field }) => (
-                    <FormItem className="flex items-center justify-between rounded-lg border p-4">
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border border-[#3a3a3c] bg-[#2c2c2e] p-4">
                       <div className="space-y-0.5">
-                        <FormLabel className="text-base">DHCP</FormLabel>
-                        <FormDescription>
-                          Automatically obtain IP address from network
+                        <FormLabel className="text-base text-white">DHCP</FormLabel>
+                        <FormDescription className="text-[#a1a1a6]">
+                          Automatically obtain IP settings from the router
                         </FormDescription>
                       </div>
                       <FormControl>
@@ -185,17 +288,38 @@ export default function NetworkPage() {
                   )}
                 />
 
-                {/* Static IP fields (hidden when DHCP enabled) */}
+                {/* ONVIF Discovery (Stub) */}
+                <FormField
+                  control={form.control}
+                  name="onvifDiscovery"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border border-[#3a3a3c] bg-[#2c2c2e] p-4">
+                      <div className="space-y-0.5">
+                        <FormLabel className="text-base text-white">ONVIF Discovery</FormLabel>
+                        <FormDescription className="text-[#a1a1a6]">
+                          Make this device visible to ONVIF clients
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch checked={field.value} onCheckedChange={field.onChange} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+
                 {!dhcpEnabled && (
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="animate-in fade-in slide-in-from-top-2 grid grid-cols-1 gap-[24px] md:grid-cols-2">
                     <FormField
                       control={form.control}
                       name="address"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>IP Address</FormLabel>
+                          <FormLabel className="text-[#a1a1a6]">IP Address</FormLabel>
                           <FormControl>
-                            <Input placeholder="192.168.1.100" {...field} />
+                            <Input
+                              {...field}
+                              className="border-[#3a3a3c] bg-transparent text-white"
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -206,9 +330,14 @@ export default function NetworkPage() {
                       name="prefixLength"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Prefix Length (CIDR)</FormLabel>
+                          <FormLabel className="text-[#a1a1a6]">Prefix Length</FormLabel>
                           <FormControl>
-                            <Input type="number" min={1} max={32} {...field} />
+                            <Input
+                              type="number"
+                              {...field}
+                              onChange={(e) => field.onChange(parseInt(e.target.value))}
+                              className="border-[#3a3a3c] bg-transparent text-white"
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -219,9 +348,12 @@ export default function NetworkPage() {
                       name="gateway"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Gateway</FormLabel>
+                          <FormLabel className="text-[#a1a1a6]">Gateway</FormLabel>
                           <FormControl>
-                            <Input placeholder="192.168.1.1" {...field} />
+                            <Input
+                              {...field}
+                              className="border-[#3a3a3c] bg-transparent text-white"
+                            />
                           </FormControl>
                           <FormMessage />
                         </FormItem>
@@ -229,103 +361,211 @@ export default function NetworkPage() {
                     />
                   </div>
                 )}
+              </SettingsCardContent>
+            </SettingsCard>
 
-                {/* DNS Settings */}
-                <div className="border-t pt-6 mt-6">
-                  <h3 className="text-sm font-medium mb-4">DNS Configuration</h3>
+            {/* DNS Configuration */}
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-[12px]">
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(191,90,242,0.1)]">
+                    <Server className="size-5 text-[#bf5af2]" />
+                  </div>
+                  <div>
+                    <SettingsCardTitle>DNS Configuration</SettingsCardTitle>
+                    <SettingsCardDescription>Domain Name System servers</SettingsCardDescription>
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent className="space-y-[24px]">
+                <FormField
+                  control={form.control}
+                  name="dnsFromDHCP"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border border-[#3a3a3c] bg-[#2c2c2e] p-4">
+                      <div className="space-y-0.5">
+                        <FormLabel className="text-base text-white">Obtain DNS from DHCP</FormLabel>
+                      </div>
+                      <FormControl>
+                        <Switch checked={field.value} onCheckedChange={field.onChange} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                {!dnsFromDHCP && (
+                  <div className="animate-in fade-in slide-in-from-top-2 grid grid-cols-1 gap-[24px] md:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="primaryDNS"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-[#a1a1a6]">Primary DNS</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              className="border-[#3a3a3c] bg-transparent text-white"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="secondaryDNS"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-[#a1a1a6]">Secondary DNS</FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              className="border-[#3a3a3c] bg-transparent text-white"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
+              </SettingsCardContent>
+            </SettingsCard>
 
+            {/* Port Configuration (Stub) */}
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-[12px]">
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(48,209,88,0.1)]">
+                    <Wifi className="size-5 text-[#30d158]" />
+                  </div>
+                  <div>
+                    <SettingsCardTitle>Port Configuration</SettingsCardTitle>
+                    <SettingsCardDescription>Service ports (HTTP/RTSP)</SettingsCardDescription>
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent className="space-y-[24px]">
+                <div className="grid grid-cols-1 gap-[24px] md:grid-cols-3">
                   <FormField
                     control={form.control}
-                    name="dnsFromDHCP"
+                    name="httpPort"
                     render={({ field }) => (
-                      <FormItem className="flex items-center justify-between rounded-lg border p-4 mb-4">
-                        <div className="space-y-0.5">
-                          <FormLabel className="text-base">DNS from DHCP</FormLabel>
-                          <FormDescription>
-                            Use DNS servers provided by DHCP
-                          </FormDescription>
-                        </div>
+                      <FormItem>
+                        <FormLabel className="text-[#a1a1a6]">HTTP Port</FormLabel>
                         <FormControl>
-                          <Switch checked={field.value} onCheckedChange={field.onChange} />
+                          <Input
+                            type="number"
+                            {...field}
+                            onChange={(e) => field.onChange(parseInt(e.target.value))}
+                            className="border-[#3a3a3c] bg-transparent text-white"
+                          />
                         </FormControl>
+                        <FormMessage />
                       </FormItem>
                     )}
                   />
-
-                  {!dnsFromDHCP && (
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <FormField
-                        control={form.control}
-                        name="dns1"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Primary DNS</FormLabel>
-                            <FormControl>
-                              <Input placeholder="8.8.8.8" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name="dns2"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Secondary DNS</FormLabel>
-                            <FormControl>
-                              <Input placeholder="8.8.4.4" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex justify-end">
-                  <Button type="submit" disabled={mutation.isPending || !form.formState.isDirty}>
-                    {mutation.isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <Save className="mr-2 h-4 w-4" />
-                        Save Changes
-                      </>
+                  <FormField
+                    control={form.control}
+                    name="httpsPort"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-[#a1a1a6]">HTTPS Port</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            {...field}
+                            onChange={(e) => field.onChange(parseInt(e.target.value))}
+                            className="border-[#3a3a3c] bg-transparent text-white"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
                     )}
-                  </Button>
+                  />
+                  <FormField
+                    control={form.control}
+                    name="rtspPort"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-[#a1a1a6]">RTSP Port</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            {...field}
+                            onChange={(e) => field.onChange(parseInt(e.target.value))}
+                            className="border-[#3a3a3c] bg-transparent text-white"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
-              </form>
-            </Form>
-          )}
-        </CardContent>
-      </Card>
+              </SettingsCardContent>
+            </SettingsCard>
 
-      {/* Warning Dialog */}
-      <AlertDialog open={showWarning} onOpenChange={setShowWarning}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-destructive" />
-              Connectivity Risk
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Changing network settings may cause loss of connectivity to this device.
-              Make sure you have physical access to the device in case you need to reset the network configuration.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmSave}>
-              Continue and Save
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            {/* Action Buttons */}
+            <div className="flex items-center gap-[16px]">
+              <Button
+                type="submit"
+                disabled={mutation.isPending || !form.formState.isDirty}
+                className="h-[44px] rounded-[8px] bg-[#dc2626] px-[32px] font-semibold text-white hover:bg-[#ef4444]"
+              >
+                <Save className="mr-2 size-4" />
+                Save Changes
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleReset}
+                className="h-[44px] rounded-[8px] border-[#3a3a3c] bg-transparent px-[32px] text-[#a1a1a6] hover:bg-[#1c1c1e] hover:text-white"
+              >
+                <RotateCcw className="mr-2 size-4" />
+                Reset
+              </Button>
+            </div>
+
+            {/* Help Text */}
+            <div className="mt-[24px] flex gap-[12px] rounded-[8px] border border-[rgba(0,122,255,0.2)] bg-[rgba(0,122,255,0.05)] p-[16px]">
+              <Info className="mt-[2px] size-5 flex-shrink-0 text-[#007AFF]" />
+              <div>
+                <p className="mb-[4px] text-[14px] font-medium text-[#007AFF]">
+                  Network Information
+                </p>
+                <p className="text-[13px] text-[#a1a1a6]">
+                  Changing IP settings may cause the device to become unreachable. Ensure you are on
+                  the same subnet if you set a static IP address. Port changes will require a device
+                  reboot.
+                </p>
+              </div>
+            </div>
+          </form>
+        </Form>
+
+        {/* Confirmation Modal */}
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-white">Save Network Settings?</AlertDialogTitle>
+              <AlertDialogDescription className="text-[#a1a1a6]">
+                Applying these changes might disconnect the device from the network. You may need to
+                reconnect using the new IP address.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]">
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleConfirm}
+                className="bg-[#dc2626] text-white hover:bg-[#ef4444]"
+              >
+                {mutation.isPending ? 'Saving...' : 'Confirm Save'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
     </div>
-  )
+  );
 }

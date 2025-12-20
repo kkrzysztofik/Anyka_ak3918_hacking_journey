@@ -1,8 +1,15 @@
 /**
  * Network Service Tests
  */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { apiClient } from '@/services/api';
+import {
+  getDNS,
+  getNetworkInterfaces,
+  setDNS,
+  setNetworkInterface,
+} from '@/services/networkService';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -12,15 +19,12 @@ vi.mock('@/services/api', () => ({
   ENDPOINTS: {
     device: '/onvif/device_service',
   },
-}))
-
-import { apiClient } from '@/services/api'
-import { getNetworkInterfaces, getDNS, setNetworkInterface, setDNS } from '@/services/networkService'
+}));
 
 describe('networkService', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-  })
+    vi.clearAllMocks();
+  });
 
   describe('getNetworkInterfaces', () => {
     it('should parse network interfaces correctly', async () => {
@@ -49,20 +53,20 @@ describe('networkService', () => {
               </GetNetworkInterfacesResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await getNetworkInterfaces()
+      const result = await getNetworkInterfaces();
 
-      expect(result).toHaveLength(1)
-      expect(result[0].token).toBe('eth0')
-      expect(result[0].name).toBe('eth0')
-      expect(result[0].hwAddress).toBe('00:11:22:33:44:55')
-      expect(result[0].dhcp).toBe(false)
-      expect(result[0].address).toBe('192.168.1.100')
-      expect(result[0].prefixLength).toBe(24)
-    })
+      expect(result).toHaveLength(1);
+      expect(result[0].token).toBe('eth0');
+      expect(result[0].name).toBe('eth0');
+      expect(result[0].hwAddress).toBe('00:11:22:33:44:55');
+      expect(result[0].dhcp).toBe(false);
+      expect(result[0].address).toBe('192.168.1.100');
+      expect(result[0].prefixLength).toBe(24);
+    });
 
     it('should return empty array when no interfaces', async () => {
       const mockResponse = {
@@ -72,15 +76,15 @@ describe('networkService', () => {
               <GetNetworkInterfacesResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await getNetworkInterfaces()
+      const result = await getNetworkInterfaces();
 
-      expect(result).toEqual([])
-    })
-  })
+      expect(result).toEqual([]);
+    });
+  });
 
   describe('getDNS', () => {
     it('should parse DNS configuration', async () => {
@@ -98,16 +102,16 @@ describe('networkService', () => {
               </GetDNSResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await getDNS()
+      const result = await getDNS();
 
-      expect(result.fromDHCP).toBe(false)
-      expect(result.dnsServers).toContain('8.8.8.8')
-    })
-  })
+      expect(result.fromDHCP).toBe(false);
+      expect(result.dnsServers).toContain('8.8.8.8');
+    });
+  });
 
   describe('setNetworkInterface', () => {
     it('should send DHCP configuration', async () => {
@@ -118,17 +122,17 @@ describe('networkService', () => {
               <SetNetworkInterfacesResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await setNetworkInterface('eth0', true)
+      await setNetworkInterface('eth0', true);
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('<tt:DHCP>true</tt:DHCP>')
-      )
-    })
+        expect.stringContaining('<tt:DHCP>true</tt:DHCP>'),
+      );
+    });
 
     it('should send static IP configuration', async () => {
       const mockResponse = {
@@ -138,17 +142,17 @@ describe('networkService', () => {
               <SetNetworkInterfacesResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await setNetworkInterface('eth0', false, '192.168.1.50', 24)
+      await setNetworkInterface('eth0', false, '192.168.1.50', 24);
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('192.168.1.50')
-      )
-    })
+        expect.stringContaining('192.168.1.50'),
+      );
+    });
 
     it('should throw on failure', async () => {
       const mockResponse = {
@@ -161,13 +165,13 @@ describe('networkService', () => {
               </soap:Fault>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await expect(setNetworkInterface('eth0', true)).rejects.toThrow()
-    })
-  })
+      await expect(setNetworkInterface('eth0', true)).rejects.toThrow();
+    });
+  });
 
   describe('setDNS', () => {
     it('should send DNS from DHCP configuration', async () => {
@@ -178,17 +182,17 @@ describe('networkService', () => {
               <SetDNSResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await setDNS(true)
+      await setDNS(true);
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('<tds:FromDHCP>true</tds:FromDHCP>')
-      )
-    })
+        expect.stringContaining('<tds:FromDHCP>true</tds:FromDHCP>'),
+      );
+    });
 
     it('should send manual DNS servers', async () => {
       const mockResponse = {
@@ -198,21 +202,21 @@ describe('networkService', () => {
               <SetDNSResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await setDNS(false, ['8.8.8.8', '8.8.4.4'])
+      await setDNS(false, ['8.8.8.8', '8.8.4.4']);
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('8.8.8.8')
-      )
+        expect.stringContaining('8.8.8.8'),
+      );
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('8.8.4.4')
-      )
-    })
+        expect.stringContaining('8.8.4.4'),
+      );
+    });
 
     it('should throw on failure', async () => {
       const mockResponse = {
@@ -225,10 +229,9 @@ describe('networkService', () => {
               </soap:Fault>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
-
-    })
-  })
-})
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+    });
+  });
+});

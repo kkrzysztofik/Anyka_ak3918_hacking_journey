@@ -1,10 +1,10 @@
-@import "@fontsource/inter/300.css";
-@import "@fontsource/inter/400.css";
-@import "@fontsource/inter/500.css";
-@import "@fontsource/inter/600.css";
-@import "@fontsource/inter/700.css";
+@import '@fontsource/inter/300.css';
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
 
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @layer base {
   * {
@@ -13,17 +13,19 @@
 
   body {
     @apply bg-dark-bg text-white;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1;
   }
 }
 
 @layer components {
   .sidebar-icon {
-    @apply w-6 h-6 stroke-current fill-none stroke-2;
+    @apply h-6 w-6 fill-none stroke-current stroke-2;
   }
 
   .ptz-button {
-    @apply w-12 h-12 flex items-center justify-center text-xl font-bold rounded-lg transition-colors;
+    @apply flex h-12 w-12 items-center justify-center rounded-lg text-xl font-bold transition-colors;
   }
 
   .card {

@@ -1,8 +1,10 @@
 /**
  * Auth Service Tests
  */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { apiClient } from '@/services/api';
+import { checkDeviceReachable, verifyCredentials } from '@/services/authService';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -12,15 +14,12 @@ vi.mock('@/services/api', () => ({
   ENDPOINTS: {
     device: '/onvif/device_service',
   },
-}))
-
-import { apiClient } from '@/services/api'
-import { verifyCredentials, checkDeviceReachable } from '@/services/authService'
+}));
 
 describe('authService', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-  })
+    vi.clearAllMocks();
+  });
 
   describe('verifyCredentials', () => {
     it('should return success with device info on valid response', async () => {
@@ -37,17 +36,17 @@ describe('authService', () => {
               </tds:GetDeviceInformationResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await verifyCredentials('admin', 'password')
+      const result = await verifyCredentials('admin', 'password');
 
-      expect(result.success).toBe(true)
-      expect(result.deviceInfo).toBeDefined()
-      expect(result.deviceInfo?.manufacturer).toBe('Anyka')
-      expect(result.deviceInfo?.model).toBe('AK3918E')
-    })
+      expect(result.success).toBe(true);
+      expect(result.deviceInfo).toBeDefined();
+      expect(result.deviceInfo?.manufacturer).toBe('Anyka');
+      expect(result.deviceInfo?.model).toBe('AK3918E');
+    });
 
     it('should return failure on SOAP fault', async () => {
       const mockResponse = {
@@ -60,51 +59,51 @@ describe('authService', () => {
               </soap:Fault>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await verifyCredentials('admin', 'wrong')
+      const result = await verifyCredentials('admin', 'wrong');
 
-      expect(result.success).toBe(false)
-      expect(result.error).toBeDefined()
-    })
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
 
     it('should return failure on network error', async () => {
-      vi.mocked(apiClient.post).mockRejectedValueOnce(new Error('Network error'))
+      vi.mocked(apiClient.post).mockRejectedValueOnce(new Error('Network error'));
 
-      const result = await verifyCredentials('admin', 'password')
+      const result = await verifyCredentials('admin', 'password');
 
-      expect(result.success).toBe(false)
-      expect(result.error).toBeDefined()
-    })
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+    });
 
     it('should handle 401 unauthorized error', async () => {
-      vi.mocked(apiClient.post).mockRejectedValueOnce(new Error('401 Unauthorized'))
+      vi.mocked(apiClient.post).mockRejectedValueOnce(new Error('401 Unauthorized'));
 
-      const result = await verifyCredentials('admin', 'wrongpass')
+      const result = await verifyCredentials('admin', 'wrongpass');
 
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('Invalid username or password')
-    })
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Invalid username or password');
+    });
 
     it('should handle ECONNREFUSED error', async () => {
-      vi.mocked(apiClient.post).mockRejectedValueOnce(new Error('ECONNREFUSED'))
+      vi.mocked(apiClient.post).mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
-      const result = await verifyCredentials('admin', 'password')
+      const result = await verifyCredentials('admin', 'password');
 
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('Unable to connect to camera')
-    })
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Unable to connect to camera');
+    });
 
     it('should handle non-Error exceptions', async () => {
-      vi.mocked(apiClient.post).mockRejectedValueOnce('string error')
+      vi.mocked(apiClient.post).mockRejectedValueOnce('string error');
 
-      const result = await verifyCredentials('admin', 'password')
+      const result = await verifyCredentials('admin', 'password');
 
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('An unexpected error occurred')
-    })
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('An unexpected error occurred');
+    });
 
     it('should call apiClient.post with device endpoint', async () => {
       const mockResponse = {
@@ -116,35 +115,38 @@ describe('authService', () => {
               </tds:GetDeviceInformationResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await verifyCredentials('admin', 'password')
+      await verifyCredentials('admin', 'password');
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
         expect.stringContaining('GetDeviceInformation'),
-        expect.objectContaining({ headers: expect.any(Object) })
-      )
-    })
-  })
+        expect.objectContaining({ headers: expect.any(Object) }),
+      );
+    });
+  });
 
   describe('checkDeviceReachable', () => {
     it('should return true when device responds with 200', async () => {
-      vi.mocked(apiClient.post).mockResolvedValueOnce({ status: 200, data: '<response/>' })
+      vi.mocked(apiClient.post).mockResolvedValueOnce({
+        status: 200,
+        data: '<response/>',
+      });
 
-      const result = await checkDeviceReachable()
+      const result = await checkDeviceReachable();
 
-      expect(result).toBe(true)
-    })
+      expect(result).toBe(true);
+    });
 
     it('should return false on network error', async () => {
-      vi.mocked(apiClient.post).mockRejectedValueOnce(new Error('Connection refused'))
+      vi.mocked(apiClient.post).mockRejectedValueOnce(new Error('Connection refused'));
 
-      const result = await checkDeviceReachable()
+      const result = await checkDeviceReachable();
 
-      expect(result).toBe(false)
-    })
-  })
-})
+      expect(result).toBe(false);
+    });
+  });
+});

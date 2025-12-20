@@ -1,8 +1,10 @@
 /**
  * Time Service Tests
  */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { apiClient } from '@/services/api';
+import { getSystemDateAndTime, setSystemDateAndTime } from '@/services/timeService';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -12,15 +14,12 @@ vi.mock('@/services/api', () => ({
   ENDPOINTS: {
     device: '/onvif/device_service',
   },
-}))
-
-import { apiClient } from '@/services/api'
-import { getSystemDateAndTime, setSystemDateAndTime } from '@/services/timeService'
+}));
 
 describe('timeService', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-  })
+    vi.clearAllMocks();
+  });
 
   describe('getSystemDateAndTime', () => {
     it('should parse NTP configuration', async () => {
@@ -51,17 +50,17 @@ describe('timeService', () => {
               </GetSystemDateAndTimeResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await getSystemDateAndTime()
+      const result = await getSystemDateAndTime();
 
-      expect(result.dateTimeType).toBe('NTP')
-      expect(result.daylightSavings).toBe(false)
-      expect(result.timezone).toBe('UTC+0')
-      expect(result.utcDateTime).toBeInstanceOf(Date)
-    })
+      expect(result.dateTimeType).toBe('NTP');
+      expect(result.daylightSavings).toBe(false);
+      expect(result.timezone).toBe('UTC+0');
+      expect(result.utcDateTime).toBeInstanceOf(Date);
+    });
 
     it('should parse Manual configuration', async () => {
       const mockResponse = {
@@ -81,16 +80,16 @@ describe('timeService', () => {
               </GetSystemDateAndTimeResponse>
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const result = await getSystemDateAndTime()
+      const result = await getSystemDateAndTime();
 
-      expect(result.dateTimeType).toBe('Manual')
-      expect(result.daylightSavings).toBe(true)
-    })
-  })
+      expect(result.dateTimeType).toBe('Manual');
+      expect(result.daylightSavings).toBe(true);
+    });
+  });
 
   describe('setSystemDateAndTime', () => {
     it('should send NTP configuration', async () => {
@@ -101,17 +100,17 @@ describe('timeService', () => {
               <SetSystemDateAndTimeResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await setSystemDateAndTime('NTP', false, 'UTC+0')
+      await setSystemDateAndTime('NTP', false, 'UTC+0');
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('<tds:DateTimeType>NTP</tds:DateTimeType>')
-      )
-    })
+        expect.stringContaining('<tds:DateTimeType>NTP</tds:DateTimeType>'),
+      );
+    });
 
     it('should send Manual configuration with date', async () => {
       const mockResponse = {
@@ -121,21 +120,21 @@ describe('timeService', () => {
               <SetSystemDateAndTimeResponse />
             </soap:Body>
           </soap:Envelope>`,
-      }
+      };
 
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse)
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      const testDate = new Date('2024-06-15T12:00:00Z')
-      await setSystemDateAndTime('Manual', false, 'UTC+0', testDate)
+      const testDate = new Date('2024-06-15T12:00:00Z');
+      await setSystemDateAndTime('Manual', false, 'UTC+0', testDate);
 
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('<tds:DateTimeType>Manual</tds:DateTimeType>')
-      )
+        expect.stringContaining('<tds:DateTimeType>Manual</tds:DateTimeType>'),
+      );
       expect(apiClient.post).toHaveBeenCalledWith(
         '/onvif/device_service',
-        expect.stringContaining('<tt:Year>2024</tt:Year>')
-      )
-    })
-  })
-})
+        expect.stringContaining('<tt:Year>2024</tt:Year>'),
+      );
+    });
+  });
+});
