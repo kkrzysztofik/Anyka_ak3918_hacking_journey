@@ -275,8 +275,8 @@ export default function NetworkPage() {
                   name="dhcp"
                   render={({ field }) => (
                     <FormItem className="flex flex-row items-center justify-between rounded-lg border border-[#3a3a3c] bg-[#2c2c2e] p-4">
-                      <div className="space-y-0.5">
-                        <FormLabel className="text-base text-white">DHCP</FormLabel>
+                      <div>
+                        <FormLabel className="text-base leading-none text-white">DHCP</FormLabel>
                         <FormDescription className="text-[#a1a1a6]">
                           Automatically obtain IP settings from the router
                         </FormDescription>
@@ -294,8 +294,8 @@ export default function NetworkPage() {
                   name="onvifDiscovery"
                   render={({ field }) => (
                     <FormItem className="flex flex-row items-center justify-between rounded-lg border border-[#3a3a3c] bg-[#2c2c2e] p-4">
-                      <div className="space-y-0.5">
-                        <FormLabel className="text-base text-white">ONVIF Discovery</FormLabel>
+                      <div>
+                        <FormLabel className="text-base leading-none text-white">ONVIF Discovery</FormLabel>
                         <FormDescription className="text-[#a1a1a6]">
                           Make this device visible to ONVIF clients
                         </FormDescription>
@@ -383,9 +383,7 @@ export default function NetworkPage() {
                   name="dnsFromDHCP"
                   render={({ field }) => (
                     <FormItem className="flex flex-row items-center justify-between rounded-lg border border-[#3a3a3c] bg-[#2c2c2e] p-4">
-                      <div className="space-y-0.5">
-                        <FormLabel className="text-base text-white">Obtain DNS from DHCP</FormLabel>
-                      </div>
+                      <FormLabel className="text-base leading-none text-white">Obtain DNS from DHCP</FormLabel>
                       <FormControl>
                         <Switch checked={field.value} onCheckedChange={field.onChange} />
                       </FormControl>

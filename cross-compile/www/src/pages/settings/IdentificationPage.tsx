@@ -215,27 +215,27 @@ export default function IdentificationPage() {
               <SettingsCardContent className="grid grid-cols-1 gap-[24px] md:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-[13px] text-[#6b6b6f]">Manufacturer</label>
-                  <div className="text-[15px] text-white">
+                  <div className="font-mono text-[15px] text-white">
                     {deviceInfo?.deviceInfo.manufacturer}
                   </div>
                 </div>
                 <div>
                   <label className="mb-1 block text-[13px] text-[#6b6b6f]">Model</label>
-                  <div className="text-[15px] text-white">{deviceInfo?.deviceInfo.model}</div>
+                  <div className="font-mono text-[15px] text-white">{deviceInfo?.deviceInfo.model}</div>
                 </div>
                 <div>
                   <label className="mb-1 block text-[13px] text-[#6b6b6f]">Hardware ID</label>
-                  <div className="text-[15px] text-white">{deviceInfo?.deviceInfo.hardwareId}</div>
+                  <div className="font-mono text-[15px] text-white">{deviceInfo?.deviceInfo.hardwareId}</div>
                 </div>
                 <div>
                   <label className="mb-1 block text-[13px] text-[#6b6b6f]">Firmware Version</label>
-                  <div className="text-[15px] text-white">
+                  <div className="font-mono text-[15px] text-white">
                     {deviceInfo?.deviceInfo.firmwareVersion}
                   </div>
                 </div>
                 <div>
                   <label className="mb-1 block text-[13px] text-[#6b6b6f]">Serial Number</label>
-                  <div className="text-[15px] text-white">
+                  <div className="font-mono text-[15px] text-white">
                     {deviceInfo?.deviceInfo.serialNumber}
                   </div>
                 </div>
@@ -258,21 +258,21 @@ export default function IdentificationPage() {
               <SettingsCardContent className="grid grid-cols-1 gap-[24px] md:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-[13px] text-[#6b6b6f]">Device ID</label>
-                  <div className="text-[15px] text-white">{deviceInfo?.deviceInfo.hardwareId}</div>
+                  <div className="font-mono text-[15px] text-white">{deviceInfo?.deviceInfo.hardwareId}</div>
                 </div>
                 <div>
                   <label className="mb-1 block text-[13px] text-[#6b6b6f]">IP Address</label>
-                  <div className="text-[15px] text-white">{primaryInterface?.address || '--'}</div>
+                  <div className="font-mono text-[15px] text-white">{primaryInterface?.address || '--'}</div>
                 </div>
                 <div>
                   <label className="mb-1 block text-[13px] text-[#6b6b6f]">MAC Address</label>
-                  <div className="text-[15px] text-white">
+                  <div className="font-mono text-[15px] text-white">
                     {primaryInterface?.hwAddress || '--'}
                   </div>
                 </div>
                 <div>
                   <label className="mb-1 block text-[13px] text-[#6b6b6f]">ONVIF Version</label>
-                  <div className="text-[15px] text-white">24.12</div>
+                  <div className="font-mono text-[15px] text-white">24.12</div>
                 </div>
               </SettingsCardContent>
             </SettingsCard>

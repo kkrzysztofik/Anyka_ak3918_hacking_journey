@@ -58,7 +58,7 @@ const StatusCardItem = React.forwardRef<
 >(({ className, label, value, ...props }, ref) => (
   <div ref={ref} className={cn('', className)} {...props}>
     <h4 className="mb-[4px] text-[13px] text-[#6b6b6f]">{label}</h4>
-    <div className="text-[15px] font-medium text-white">{value}</div>
+    <div className="font-mono text-[15px] text-white">{value}</div>
   </div>
 ));
 StatusCardItem.displayName = 'StatusCardItem';

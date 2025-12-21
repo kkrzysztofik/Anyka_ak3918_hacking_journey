@@ -463,11 +463,10 @@ export async function getVideoEncoderConfigurationOptions(
         : [];
 
     result.h264 = {
-      resolutionsAvailable:
-        resolutionsArray.map((r) => ({
-          width: Number(r.Width || 1920),
-          height: Number(r.Height || 1080),
-        })),
+      resolutionsAvailable: resolutionsArray.map((r) => ({
+        width: Number(r.Width || 1920),
+        height: Number(r.Height || 1080),
+      })),
       frameRateRange: {
         min: Number(frameRateRange?.Min ?? 1),
         max: Number(frameRateRange?.Max ?? 30),

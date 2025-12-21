@@ -133,7 +133,7 @@ function NavLinkItem({
           </div>
           <ChevronUp
             className={cn(
-              'text-dark-secondary-text h-4 w-4 transition-transform duration-200',
+              'ml-auto h-4 w-4 text-muted-foreground transition-transform duration-200',
               isOpen ? '' : 'rotate-180',
             )}
           />
@@ -375,13 +375,13 @@ function Header() {
 export default function Layout() {
   return (
     <div className="bg-dark-bg selection:bg-accent-red/30 flex h-screen font-sans">
-      <aside className="hidden h-full w-[320px] shrink-0 overflow-hidden lg:block">
+      <aside className="hidden h-full w-[260px] shrink-0 overflow-hidden lg:block">
         <SidebarContent />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
-          <div className="animate-in fade-in slide-in-from-bottom-4 h-full w-full duration-500">
+          <div className="page-enter h-full w-full">
             <Outlet />
           </div>
         </main>

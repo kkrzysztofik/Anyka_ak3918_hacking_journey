@@ -46,38 +46,29 @@ function StatCard({
   label,
   value,
   subValue,
-  status = 'default',
-  color = 'text-zinc-400',
+  color = 'text-muted-foreground',
+  colorBg = 'bg-muted',
 }: {
   icon: React.ElementType;
   label: string;
   value: string;
   subValue?: string;
-  status?: 'default' | 'success' | 'warning' | 'error';
   color?: string;
+  colorBg?: string;
 }) {
-  const statusColors = {
-    default: 'bg-zinc-900 border-zinc-800',
-    success: 'bg-green-500/10 border-green-500/20',
-    warning: 'bg-yellow-500/10 border-yellow-500/20',
-    error: 'bg-red-500/10 border-red-500/20',
-  };
-
   return (
-    <Card className={cn('border', statusColors[status])}>
-      <CardContent className="pt-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-muted-foreground mb-1 text-sm font-medium">{label}</p>
-            <h3 className="font-mono text-2xl font-bold">{value}</h3>
-            {subValue && <p className="text-muted-foreground mt-1 text-xs">{subValue}</p>}
-          </div>
-          <div className={cn('rounded-lg bg-zinc-800/50 p-2', color)}>
-            <Icon className="h-5 w-5" />
-          </div>
+    <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex items-center gap-4 p-5">
+        <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', colorBg)}>
+          <Icon className={cn('h-5 w-5', color)} />
         </div>
-      </CardContent>
-    </Card>
+        <div className="min-w-0 flex-1">
+          <p className="text-muted-foreground text-sm font-medium">{label}</p>
+          <h3 className="font-mono text-xl font-bold text-foreground">{value}</h3>
+          {subValue && <p className="text-muted-foreground text-xs">{subValue}</p>}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -85,8 +76,8 @@ function StatCard({
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="rounded-lg border border-zinc-700 bg-zinc-900/90 p-2 text-xs text-zinc-100 shadow-xl backdrop-blur-md">
-        <p className="mb-1 font-mono text-zinc-400">{`Time: +${label}s`}</p>
+      <div className="rounded-lg border border-border bg-card/95 p-2 text-xs text-foreground shadow-xl backdrop-blur-md">
+        <p className="mb-1 font-mono text-muted-foreground">{`Time: +${label}s`}</p>
         {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
         {payload.map((entry: any, index: number) => (
           <p key={index} style={{ color: entry.color }}>
@@ -102,7 +93,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export default function DiagnosticsPage() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-8">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-bold text-white">Diagnostics & Statistics</h1>
         <p className="text-muted-foreground text-sm">
@@ -117,24 +108,24 @@ export default function DiagnosticsPage() {
           label="System Status"
           value="Healthy"
           subValue="● Online"
-          status="success"
           color="text-green-500"
+          colorBg="bg-green-500/10"
         />
         <StatCard
           icon={Cpu}
           label="CPU Usage"
           value="51%"
           subValue="Avg: 48%"
-          status="default"
           color="text-red-500"
+          colorBg="bg-red-500/10"
         />
         <StatCard
           icon={HardDrive}
           label="Memory"
           value="69%"
           subValue="1.4 GB / 2.0 GB"
-          status="warning"
           color="text-yellow-500"
+          colorBg="bg-yellow-500/10"
         />
         <StatCard
           icon={Thermometer}
@@ -142,25 +133,31 @@ export default function DiagnosticsPage() {
           value="64°C"
           subValue="Normal range"
           color="text-blue-500"
+          colorBg="bg-blue-500/10"
         />
       </div>
 
       {/* Charts Row 1: CPU & Memory */}
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="border-zinc-800 bg-zinc-900/40">
-          <CardHeader className="pb-2">
+        <Card className="overflow-hidden border-border bg-card">
+          <CardHeader className="border-b border-border">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-accent-red flex items-center gap-2 text-sm font-medium">
-                <Activity className="h-4 w-4" />
-                CPU Usage History
-              </CardTitle>
-              <Button variant="ghost" size="icon" className="h-6 w-6">
-                <Clock className="h-3 w-3 text-zinc-500" />
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-500/10">
+                  <Activity className="h-5 w-5 text-red-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-sm font-semibold text-foreground">CPU Usage</CardTitle>
+                  <p className="text-xs text-muted-foreground">Processor load over time</p>
+                </div>
+              </div>
+              <Button variant="ghost" size="icon" className="h-8 w-8">
+                <Clock className="h-4 w-4 text-muted-foreground" />
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="h-[180px] w-full pt-4">
+          <CardContent className="pt-4">
+            <div className="h-[180px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={cpuData}>
                   <defs>
@@ -191,7 +188,7 @@ export default function DiagnosticsPage() {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            <div className="mt-2 flex justify-between font-mono text-xs text-zinc-600">
+            <div className="mt-2 flex justify-between font-mono text-xs text-muted-foreground">
               <span>00:00</span>
               <span>00:15</span>
               <span>00:30</span>
@@ -199,20 +196,25 @@ export default function DiagnosticsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-zinc-800 bg-zinc-900/40">
-          <CardHeader className="pb-2">
+        <Card className="overflow-hidden border-border bg-card">
+          <CardHeader className="border-b border-border">
             <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-sm font-medium text-yellow-500">
-                <HardDrive className="h-4 w-4" />
-                Memory Usage History
-              </CardTitle>
-              <Button variant="ghost" size="icon" className="h-6 w-6">
-                <Clock className="h-3 w-3 text-zinc-500" />
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-yellow-500/10">
+                  <HardDrive className="h-5 w-5 text-yellow-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-sm font-semibold text-foreground">Memory Usage</CardTitle>
+                  <p className="text-xs text-muted-foreground">RAM utilization over time</p>
+                </div>
+              </div>
+              <Button variant="ghost" size="icon" className="h-8 w-8">
+                <Clock className="h-4 w-4 text-muted-foreground" />
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="h-[180px] w-full pt-4">
+          <CardContent className="pt-4">
+            <div className="h-[180px] w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={memoryData}>
                   <defs>
@@ -242,7 +244,7 @@ export default function DiagnosticsPage() {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            <div className="mt-2 flex justify-between font-mono text-xs text-zinc-600">
+            <div className="mt-2 flex justify-between font-mono text-xs text-muted-foreground">
               <span>00:00</span>
               <span>00:15</span>
               <span>00:30</span>
@@ -252,14 +254,19 @@ export default function DiagnosticsPage() {
       </div>
 
       {/* Charts Row 2: Network */}
-      <Card className="border-zinc-800 bg-zinc-900/40">
-        <CardHeader className="pb-2">
+      <Card className="overflow-hidden border-border bg-card">
+        <CardHeader className="border-b border-border">
           <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-blue-500">
-              <Wifi className="h-4 w-4" />
-              Network Throughput
-            </CardTitle>
-            <div className="flex items-center gap-4 text-xs">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+                <Wifi className="h-5 w-5 text-blue-500" />
+              </div>
+              <div>
+                <CardTitle className="text-sm font-semibold text-foreground">Network Throughput</CardTitle>
+                <p className="text-xs text-muted-foreground">Upload and download bandwidth</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <div className="h-2 w-2 rounded-full bg-blue-500"></div> Download
               </span>
@@ -269,8 +276,8 @@ export default function DiagnosticsPage() {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="relative h-[120px] w-full pt-4">
+        <CardContent className="pt-4">
+          <div className="relative h-[120px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={networkData}>
                 <defs>
@@ -312,7 +319,7 @@ export default function DiagnosticsPage() {
               </AreaChart>
             </ResponsiveContainer>
           </div>
-          <div className="mt-2 flex justify-between font-mono text-xs text-zinc-600">
+          <div className="mt-2 flex justify-between font-mono text-xs text-muted-foreground">
             <span>00:00</span>
             <span>00:15</span>
             <span>00:30</span>
@@ -323,34 +330,39 @@ export default function DiagnosticsPage() {
       {/* Info Grid */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Device Info */}
-        <Card className="border-zinc-800 bg-zinc-900/40">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-sm font-medium">
-              <Info className="h-4 w-4 text-zinc-400" />
-              Device Information
-            </CardTitle>
+        <Card className="overflow-hidden border-border bg-card">
+          <CardHeader className="border-b border-border">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+                <Info className="h-5 w-5 text-blue-500" />
+              </div>
+              <div>
+                <CardTitle className="text-sm font-semibold text-foreground">Device Information</CardTitle>
+                <p className="text-xs text-muted-foreground">Hardware and firmware details</p>
+              </div>
+            </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-4">
             <dl className="grid grid-cols-2 gap-4 text-sm">
               <div className="space-y-1">
-                <dt className="text-zinc-500">Model</dt>
-                <dd className="font-medium text-white">Anyka-3918-Pro</dd>
+                <dt className="text-muted-foreground">Model</dt>
+                <dd className="font-mono text-foreground">Anyka-3918-Pro</dd>
               </div>
               <div className="space-y-1 text-right">
-                <dt className="text-zinc-500">Firmware</dt>
-                <dd className="font-medium text-white">v2.4.1</dd>
+                <dt className="text-muted-foreground">Firmware</dt>
+                <dd className="font-mono text-foreground">v2.4.1</dd>
               </div>
               <div className="space-y-1">
-                <dt className="text-zinc-500">Serial Number</dt>
-                <dd className="font-mono text-zinc-300">AK-2025-X892</dd>
+                <dt className="text-muted-foreground">Serial Number</dt>
+                <dd className="font-mono text-foreground">AK-2025-X892</dd>
               </div>
               <div className="space-y-1 text-right">
-                <dt className="text-zinc-500">IP Address</dt>
-                <dd className="font-mono text-zinc-300">192.168.1.100</dd>
+                <dt className="text-muted-foreground">IP Address</dt>
+                <dd className="font-mono text-foreground">192.168.1.100</dd>
               </div>
-              <div className="col-span-2 mt-2 border-t border-zinc-800 pt-2">
+              <div className="col-span-2 mt-2 border-t border-border pt-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-zinc-500">Uptime</span>
+                  <span className="text-muted-foreground">Uptime</span>
                   <span className="font-mono text-white">12d 5h 32m</span>
                 </div>
               </div>
@@ -359,30 +371,35 @@ export default function DiagnosticsPage() {
         </Card>
 
         {/* System Metrics */}
-        <Card className="border-zinc-800 bg-zinc-900/40">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-sm font-medium">
-              <Activity className="h-4 w-4 text-red-500" />
-              System Metrics
-            </CardTitle>
+        <Card className="overflow-hidden border-border bg-card">
+          <CardHeader className="border-b border-border">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-500/10">
+                <Activity className="h-5 w-5 text-red-500" />
+              </div>
+              <div>
+                <CardTitle className="text-sm font-semibold text-foreground">System Metrics</CardTitle>
+                <p className="text-xs text-muted-foreground">Performance and storage statistics</p>
+              </div>
+            </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-4">
             <div className="space-y-4 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Storage Used</span>
-                <span className="text-zinc-200">85% (42.5 GB / 50 GB)</span>
+                <span className="text-muted-foreground">Storage Used</span>
+                <span className="font-mono text-foreground">85% (42.5 GB / 50 GB)</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Active Streams</span>
-                <span className="text-zinc-200">2</span>
+                <span className="text-muted-foreground">Active Streams</span>
+                <span className="font-mono text-foreground">2</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Dropped Frames (24h)</span>
-                <span className="text-zinc-200">12</span>
+                <span className="text-muted-foreground">Dropped Frames (24h)</span>
+                <span className="font-mono text-foreground">12</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Avg Bitrate</span>
-                <span className="text-zinc-200">4.2 Mbps</span>
+                <span className="text-muted-foreground">Avg Bitrate</span>
+                <span className="font-mono text-foreground">4.2 Mbps</span>
               </div>
             </div>
           </CardContent>
@@ -390,81 +407,145 @@ export default function DiagnosticsPage() {
       </div>
 
       {/* System Logs */}
-      <Card className="overflow-hidden border-zinc-800 bg-zinc-900/40">
-        <CardHeader className="border-b border-zinc-800 bg-zinc-900/50 px-4 py-3">
+      <Card className="overflow-hidden border-border bg-card">
+        <CardHeader className="border-b border-border">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-accent-red flex items-center gap-2 text-sm font-medium">
-              <FileText className="h-4 w-4" />
-              System Logs
-            </CardTitle>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 border-zinc-700 bg-zinc-800 text-xs"
-              >
-                Filter
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 border-zinc-700 bg-zinc-800 text-xs"
-              >
-                <Download className="mr-1 h-3 w-3" /> Export
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10">
+                <FileText className="h-5 w-5 text-orange-500" />
+              </div>
+              <div>
+                <CardTitle className="text-sm font-semibold text-foreground">System Logs</CardTitle>
+                <p className="text-xs text-muted-foreground">Recent activity and events</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-md border border-border bg-muted/50 p-0.5">
+                <Button variant="default" size="sm" className="h-6 px-2.5 text-xs">
+                  All
+                </Button>
+                <Button variant="ghost" size="sm" className="h-6 px-2.5 text-xs text-muted-foreground hover:text-foreground">
+                  Info
+                </Button>
+                <Button variant="ghost" size="sm" className="h-6 px-2.5 text-xs text-muted-foreground hover:text-foreground">
+                  Warning
+                </Button>
+                <Button variant="ghost" size="sm" className="h-6 px-2.5 text-xs text-muted-foreground hover:text-foreground">
+                  Error
+                </Button>
+              </div>
+              <Button variant="outline" size="sm" className="h-7 gap-1 border-border text-xs">
+                <Download className="h-3 w-3" /> Export
               </Button>
             </div>
           </div>
         </CardHeader>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-zinc-900/50 tracking-wider text-zinc-500 uppercase">
+        <div className="max-h-[400px] overflow-y-auto overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
               <tr>
-                <th className="px-4 py-3 font-medium">Timestamp</th>
-                <th className="px-4 py-3 font-medium">Level</th>
-                <th className="px-4 py-3 font-medium">Category</th>
-                <th className="px-4 py-3 font-medium">Message</th>
+                <th className="px-5 py-3 font-medium">Timestamp</th>
+                <th className="px-5 py-3 font-medium">Level</th>
+                <th className="px-5 py-3 font-medium">Category</th>
+                <th className="px-5 py-3 font-medium">Message</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800/50">
-              <tr className="hover:bg-zinc-800/20">
-                <td className="px-4 py-3 font-mono text-zinc-400">2025-12-15 14:32:15</td>
-                <td className="px-4 py-3">
-                  <span className="rounded border border-blue-900/30 bg-blue-900/20 px-1.5 py-0.5 text-blue-400">
+            <tbody className="divide-y divide-border">
+              <tr className="hover:bg-muted/30">
+                <td className="px-5 py-4">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span className="font-mono text-xs">2025-12-11<br />14:32:15</span>
+                  </div>
+                </td>
+                <td className="px-5 py-4">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400"></span>
                     Info
                   </span>
                 </td>
-                <td className="px-4 py-3 text-zinc-300">Stream</td>
-                <td className="px-4 py-3 text-zinc-300">Main stream started successfully</td>
+                <td className="px-5 py-4 font-medium text-foreground">Stream</td>
+                <td className="px-5 py-4 text-muted-foreground">Main stream started successfully</td>
               </tr>
-              <tr className="hover:bg-zinc-800/20">
-                <td className="px-4 py-3 font-mono text-zinc-400">2025-12-15 14:30:42</td>
-                <td className="px-4 py-3">
-                  <span className="rounded border border-yellow-900/30 bg-yellow-900/20 px-1.5 py-0.5 text-yellow-400">
+              <tr className="hover:bg-muted/30">
+                <td className="px-5 py-4">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span className="font-mono text-xs">2025-12-11<br />14:30:42</span>
+                  </div>
+                </td>
+                <td className="px-5 py-4">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 text-xs font-medium text-yellow-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-yellow-400"></span>
                     Warning
                   </span>
                 </td>
-                <td className="px-4 py-3 text-zinc-300">Network</td>
-                <td className="px-4 py-3 text-zinc-300">High latency detected: 125ms</td>
+                <td className="px-5 py-4 font-medium text-foreground">Network</td>
+                <td className="px-5 py-4 text-muted-foreground">High latency detected: 125ms</td>
               </tr>
-              <tr className="hover:bg-zinc-800/20">
-                <td className="px-4 py-3 font-mono text-zinc-400">2025-12-15 14:28:03</td>
-                <td className="px-4 py-3">
-                  <span className="rounded border border-blue-900/30 bg-blue-900/20 px-1.5 py-0.5 text-blue-400">
+              <tr className="hover:bg-muted/30">
+                <td className="px-5 py-4">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span className="font-mono text-xs">2025-12-11<br />14:28:03</span>
+                  </div>
+                </td>
+                <td className="px-5 py-4">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400"></span>
                     Info
                   </span>
                 </td>
-                <td className="px-4 py-3 text-zinc-300">PTZ</td>
-                <td className="px-4 py-3 text-zinc-300">Preset position 1 updated</td>
+                <td className="px-5 py-4 font-medium text-foreground">PTZ</td>
+                <td className="px-5 py-4 text-muted-foreground">Preset position 1 updated</td>
               </tr>
-              <tr className="hover:bg-zinc-800/20">
-                <td className="px-4 py-3 font-mono text-zinc-400">2025-12-15 14:25:17</td>
-                <td className="px-4 py-3">
-                  <span className="rounded border border-red-900/30 bg-red-900/20 px-1.5 py-0.5 text-red-400">
+              <tr className="hover:bg-muted/30">
+                <td className="px-5 py-4">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span className="font-mono text-xs">2025-12-11<br />14:25:17</span>
+                  </div>
+                </td>
+                <td className="px-5 py-4">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-red-400"></span>
                     Error
                   </span>
                 </td>
-                <td className="px-4 py-3 text-zinc-300">Storage</td>
-                <td className="px-4 py-3 text-zinc-300">Storage capacity at 85%</td>
+                <td className="px-5 py-4 font-medium text-foreground">Storage</td>
+                <td className="px-5 py-4 text-muted-foreground">Storage capacity at 85%</td>
+              </tr>
+              <tr className="hover:bg-muted/30">
+                <td className="px-5 py-4">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span className="font-mono text-xs">2025-12-11<br />14:20:55</span>
+                  </div>
+                </td>
+                <td className="px-5 py-4">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400"></span>
+                    Info
+                  </span>
+                </td>
+                <td className="px-5 py-4 font-medium text-foreground">System</td>
+                <td className="px-5 py-4 text-muted-foreground">Firmware version 2.4.1 running</td>
+              </tr>
+              <tr className="hover:bg-muted/30">
+                <td className="px-5 py-4">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span className="font-mono text-xs">2025-12-11<br />14:18:33</span>
+                  </div>
+                </td>
+                <td className="px-5 py-4">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400"></span>
+                    Info
+                  </span>
+                </td>
+                <td className="px-5 py-4 font-medium text-foreground">Auth</td>
+                <td className="px-5 py-4 text-muted-foreground">User admin logged in</td>
               </tr>
             </tbody>
           </table>

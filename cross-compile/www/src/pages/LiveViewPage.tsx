@@ -20,7 +20,13 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import {
+  SettingsCard,
+  SettingsCardContent,
+  SettingsCardDescription,
+  SettingsCardHeader,
+  SettingsCardTitle,
+} from '@/components/ui/settings-card';
 import { cn } from '@/lib/utils';
 
 export default function LiveViewPage() {
@@ -75,10 +81,7 @@ export default function LiveViewPage() {
                     Sub Stream
                   </button>
                 </div>
-                <div className="flex items-center gap-2 rounded-lg border border-zinc-700/50 bg-zinc-900/80 px-3 py-1.5">
-                  <div className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
-                  <span className="text-xs font-medium text-green-500">Connected</span>
-                </div>
+                <div className="status-badge-connected">Connected</div>
               </div>
             </div>
 
@@ -92,22 +95,21 @@ export default function LiveViewPage() {
             </div>
 
             {/* LIVE Indicator */}
-            <div className="absolute top-20 left-6 flex items-center gap-2 rounded-md bg-black/60 px-2 py-1 backdrop-blur-sm">
-              <div className="h-2 w-2 animate-pulse rounded-full bg-red-600" />
-              <span className="text-[10px] font-bold tracking-widest text-white">LIVE</span>
+            <div className="live-indicator absolute top-20 left-6 backdrop-blur-sm">
+              LIVE
             </div>
           </div>
 
           {/* Stream URL Bar */}
-          <div className="flex items-center gap-4 rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-            <span className="text-sm font-medium whitespace-nowrap text-zinc-400">Stream URL</span>
-            <div className="flex-1 truncate rounded border border-zinc-800/50 bg-black/40 px-3 py-2 font-mono text-sm text-zinc-300">
+          <div className="flex items-center gap-4 rounded-lg border border-border bg-card p-3">
+            <span className="text-sm font-medium whitespace-nowrap text-muted-foreground">Stream URL</span>
+            <div className="flex-1 truncate rounded border border-border bg-background px-3 py-2 font-mono text-sm text-foreground">
               rtsp://192.168.1.100:554/main
             </div>
             <Button
               variant="outline"
               size="sm"
-              className="border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white"
+              className="border-border bg-muted text-foreground hover:bg-muted/80"
             >
               <Copy className="mr-2 h-3.5 w-3.5" />
               Copy
@@ -117,186 +119,221 @@ export default function LiveViewPage() {
           {/* Bottom Info Grid */}
           <div className="grid grid-cols-2 gap-4">
             {/* Stream Info */}
-            <Card className="border-zinc-800 bg-zinc-900/50 p-4">
-              <div className="text-accent-red mb-4 flex items-center gap-2">
-                <Activity className="h-4 w-4" />
-                <h3 className="text-sm font-semibold">Stream Info</h3>
-              </div>
-              <div className="grid grid-cols-2 gap-y-2 text-sm">
-                <span className="text-zinc-500">Resolution</span>
-                <span className="text-right font-mono text-zinc-200">1920x1080</span>
-                <span className="text-zinc-500">Bitrate</span>
-                <span className="text-right font-mono text-zinc-200">4096 Kbps</span>
-                <span className="text-zinc-500">Frame Rate</span>
-                <span className="text-right font-mono text-zinc-200">30 fps</span>
-                <span className="text-zinc-500">Codec</span>
-                <span className="text-right font-mono text-zinc-200">H.264</span>
-              </div>
-            </Card>
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-red/10">
+                    <Activity className="h-5 w-5 text-accent-red" />
+                  </div>
+                  <div>
+                    <SettingsCardTitle>Stream Info</SettingsCardTitle>
+                    <SettingsCardDescription>Video stream parameters</SettingsCardDescription>
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent>
+                <div className="grid grid-cols-2 gap-y-3 text-sm">
+                  <span className="text-muted-foreground">Resolution</span>
+                  <span className="text-right font-mono text-foreground">1920x1080</span>
+                  <span className="text-muted-foreground">Bitrate</span>
+                  <span className="text-right font-mono text-foreground">4096 Kbps</span>
+                  <span className="text-muted-foreground">Frame Rate</span>
+                  <span className="text-right font-mono text-foreground">30 fps</span>
+                  <span className="text-muted-foreground">Codec</span>
+                  <span className="text-right font-mono text-foreground">H.264</span>
+                </div>
+              </SettingsCardContent>
+            </SettingsCard>
 
             {/* Network Stats */}
-            <Card className="border-zinc-800 bg-zinc-900/50 p-4">
-              <div className="text-accent-red mb-4 flex items-center gap-2">
-                <Wifi className="h-4 w-4" />
-                <h3 className="text-sm font-semibold">Network Stats</h3>
-              </div>
-              <div className="grid grid-cols-2 gap-y-2 text-sm">
-                <span className="text-zinc-500">Status</span>
-                <span className="flex items-center justify-end gap-1.5 text-right font-medium text-green-500">
-                  <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                  Connected
-                </span>
-                <span className="text-zinc-500">Packet Loss</span>
-                <span className="text-right font-mono text-zinc-200">0.0%</span>
-                <span className="text-zinc-500">Latency</span>
-                <span className="text-right font-mono text-zinc-200">45 ms</span>
-                <span className="text-zinc-500">Bandwidth</span>
-                <span className="text-right font-mono text-zinc-200">4.2 Mbps</span>
-              </div>
-            </Card>
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
+                    <Wifi className="h-5 w-5 text-green-500" />
+                  </div>
+                  <div>
+                    <SettingsCardTitle>Network Stats</SettingsCardTitle>
+                    <SettingsCardDescription>Connection metrics</SettingsCardDescription>
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent>
+                <div className="grid grid-cols-2 gap-y-3 text-sm">
+                  <span className="text-muted-foreground">Status</span>
+                  <span className="flex items-center justify-end gap-1.5 text-right font-medium text-green-500">
+                    <div className="status-pulse h-1.5 w-1.5 rounded-full bg-green-500" />
+                    Connected
+                  </span>
+                  <span className="text-muted-foreground">Packet Loss</span>
+                  <span className="text-right font-mono text-foreground">0.0%</span>
+                  <span className="text-muted-foreground">Latency</span>
+                  <span className="text-right font-mono text-foreground">45 ms</span>
+                  <span className="text-muted-foreground">Bandwidth</span>
+                  <span className="text-right font-mono text-foreground">4.2 Mbps</span>
+                </div>
+              </SettingsCardContent>
+            </SettingsCard>
           </div>
         </div>
 
         {/* Right Column: Controls */}
         <div className="flex flex-col gap-4">
           {/* PTZ Controls */}
-          <Card className="border-zinc-800 bg-zinc-900/50 p-5">
-            <div className="text-accent-red mb-6 flex items-center gap-2">
-              <Camera className="h-4 w-4" />
-              <h3 className="text-sm font-semibold">Pan & Tilt</h3>
-            </div>
-
-            <div className="flex flex-col items-center gap-6">
-              {/* D-Pad */}
-              <div className="flex flex-col items-center gap-1">
-                {/* Top Row */}
-                <div className="flex gap-1">
-                  <button
-                    onMouseDown={() => handlePtz('up-left')}
-                    className="hover:bg-accent-red group flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
-                  >
-                    <div className="-rotate-45">
-                      <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
-                    </div>
-                  </button>
-                  <button
-                    onMouseDown={() => handlePtz('up')}
-                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
-                  >
-                    <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
-                  </button>
-                  <button
-                    onMouseDown={() => handlePtz('up-right')}
-                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
-                  >
-                    <div className="rotate-45">
-                      <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
-                    </div>
-                  </button>
+          <SettingsCard>
+            <SettingsCardHeader>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-red/10">
+                  <Camera className="h-5 w-5 text-accent-red" />
                 </div>
-
-                {/* Middle Row */}
-                <div className="flex gap-1">
-                  <button
-                    onMouseDown={() => handlePtz('left')}
-                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
-                  >
-                    <ArrowLeft className="h-4 w-4 text-white md:h-5 md:w-5" />
-                  </button>
-                  <button
-                    onClick={() => handlePtz('home')}
-                    className="bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg shadow-lg shadow-red-900/20 transition-colors hover:bg-red-700 md:h-12 md:w-12"
-                  >
-                    <Home className="h-4 w-4 text-white md:h-5 md:w-5" />
-                  </button>
-                  <button
-                    onMouseDown={() => handlePtz('right')}
-                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
-                  >
-                    <ArrowRight className="h-4 w-4 text-white md:h-5 md:w-5" />
-                  </button>
-                </div>
-
-                {/* Bottom Row */}
-                <div className="flex gap-1">
-                  <button
-                    onMouseDown={() => handlePtz('down-left')}
-                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
-                  >
-                    <div className="-rotate-[135deg]">
-                      <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
-                    </div>
-                  </button>
-                  <button
-                    onMouseDown={() => handlePtz('down')}
-                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
-                  >
-                    <ArrowDown className="h-4 w-4 text-white md:h-5 md:w-5" />
-                  </button>
-                  <button
-                    onMouseDown={() => handlePtz('down-right')}
-                    className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
-                  >
-                    <div className="rotate-[135deg]">
-                      <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
-                    </div>
-                  </button>
+                <div>
+                  <SettingsCardTitle>Pan & Tilt</SettingsCardTitle>
+                  <SettingsCardDescription>PTZ camera controls</SettingsCardDescription>
                 </div>
               </div>
+            </SettingsCardHeader>
+            <SettingsCardContent>
+              <div className="flex flex-col items-center gap-6">
+                {/* D-Pad */}
+                <div className="flex flex-col items-center gap-1">
+                  {/* Top Row */}
+                  <div className="flex gap-1">
+                    <button
+                      onMouseDown={() => handlePtz('up-left')}
+                      className="hover:bg-accent-red group flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                    >
+                      <div className="-rotate-45">
+                        <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
+                      </div>
+                    </button>
+                    <button
+                      onMouseDown={() => handlePtz('up')}
+                      className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                    >
+                      <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
+                    </button>
+                    <button
+                      onMouseDown={() => handlePtz('up-right')}
+                      className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                    >
+                      <div className="rotate-45">
+                        <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
+                      </div>
+                    </button>
+                  </div>
 
-              {/* Speed Slider */}
-              <div className="w-full space-y-2">
-                <div className="flex justify-between text-xs text-zinc-500">
-                  <span>Speed</span>
-                  <span>{ptzSpeed}%</span>
+                  {/* Middle Row */}
+                  <div className="flex gap-1">
+                    <button
+                      onMouseDown={() => handlePtz('left')}
+                      className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                    >
+                      <ArrowLeft className="h-4 w-4 text-white md:h-5 md:w-5" />
+                    </button>
+                    <button
+                      onClick={() => handlePtz('home')}
+                      className="bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg shadow-lg shadow-red-900/20 transition-colors hover:bg-red-700 md:h-12 md:w-12"
+                    >
+                      <Home className="h-4 w-4 text-white md:h-5 md:w-5" />
+                    </button>
+                    <button
+                      onMouseDown={() => handlePtz('right')}
+                      className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                    >
+                      <ArrowRight className="h-4 w-4 text-white md:h-5 md:w-5" />
+                    </button>
+                  </div>
+
+                  {/* Bottom Row */}
+                  <div className="flex gap-1">
+                    <button
+                      onMouseDown={() => handlePtz('down-left')}
+                      className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                    >
+                      <div className="-rotate-[135deg]">
+                        <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
+                      </div>
+                    </button>
+                    <button
+                      onMouseDown={() => handlePtz('down')}
+                      className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                    >
+                      <ArrowDown className="h-4 w-4 text-white md:h-5 md:w-5" />
+                    </button>
+                    <button
+                      onMouseDown={() => handlePtz('down-right')}
+                      className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                    >
+                      <div className="rotate-[135deg]">
+                        <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
+                      </div>
+                    </button>
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="100"
-                  value={ptzSpeed}
-                  onChange={(e) => setPtzSpeed(Number(e.target.value))}
-                  className="accent-accent-red h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-zinc-800"
-                />
+
+                {/* Speed Slider */}
+                <div className="w-full space-y-2">
+                  <div className="flex justify-between text-xs text-zinc-500">
+                    <span>Speed</span>
+                    <span>{ptzSpeed}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    value={ptzSpeed}
+                    onChange={(e) => setPtzSpeed(Number(e.target.value))}
+                    className="accent-accent-red h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-zinc-800"
+                  />
+                </div>
               </div>
-            </div>
-          </Card>
+            </SettingsCardContent>
+          </SettingsCard>
 
           {/* Presets */}
-          <Card className="flex-1 border-zinc-800 bg-zinc-900/50 p-5">
-            <div className="text-accent-red mb-4 flex items-center gap-2">
-              <Bookmark className="h-4 w-4" />
-              <h3 className="text-sm font-semibold">Presets</h3>
-            </div>
-            <div className="space-y-2">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="group flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    className="flex-1 justify-between border-zinc-700 bg-zinc-800 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-700 hover:text-white"
-                  >
-                    <span className="text-xs">Preset {i}</span>
-                    <span className="rounded bg-black/20 px-1.5 py-0.5 text-[10px] text-zinc-500">
-                      #{i}
-                    </span>
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="hover:text-accent-red h-8 w-8 text-zinc-500 hover:bg-zinc-800"
-                  >
-                    <Settings2 className="h-3.5 w-3.5" />
-                  </Button>
+          <SettingsCard className="flex-1">
+            <SettingsCardHeader>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+                  <Bookmark className="h-5 w-5 text-blue-500" />
                 </div>
-              ))}
-              <Button
-                variant="outline"
-                className="mt-2 w-full border-dashed border-zinc-700 text-zinc-500 hover:bg-zinc-800/50 hover:text-zinc-300"
-              >
-                + Add Preset
-              </Button>
-            </div>
-          </Card>
+                <div>
+                  <SettingsCardTitle>Presets</SettingsCardTitle>
+                  <SettingsCardDescription>Saved camera positions</SettingsCardDescription>
+                </div>
+              </div>
+            </SettingsCardHeader>
+            <SettingsCardContent>
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="group flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      className="flex-1 justify-between border-border bg-muted text-foreground hover:border-ring hover:bg-muted/80"
+                    >
+                      <span className="text-xs">Preset {i}</span>
+                      <span className="rounded bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                        #{i}
+                      </span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-accent-red"
+                    >
+                      <Settings2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  variant="outline"
+                  className="mt-2 w-full border-dashed border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                >
+                  + Add Preset
+                </Button>
+              </div>
+            </SettingsCardContent>
+          </SettingsCard>
         </div>
       </div>
     </div>
