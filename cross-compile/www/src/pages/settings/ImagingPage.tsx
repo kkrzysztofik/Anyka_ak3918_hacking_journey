@@ -19,9 +19,10 @@ import {
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
 import { Slider } from '@/components/ui/slider';
-import { Switch } from '@/components/ui/switch';
 import {
+  type ImagingOptions,
   type ImagingSettings,
+  getImagingOptions,
   getImagingSettings,
   setImagingSettings,
 } from '@/services/imagingService';
@@ -35,60 +36,62 @@ export default function ImagingPage() {
     queryFn: () => getImagingSettings(),
   });
 
-  // Local state for all form values (including stubs)
-  const [localSettings, setLocalSettings] = useState<
-    ImagingSettings & {
-      focusMode: string;
-      whiteBalanceMode: string;
-      whiteBalanceCr: number;
-      whiteBalanceCb: number;
-      wdrMode: string;
-      wdrLevel: number;
-      exposureMode: string;
-      shutterLimit: string;
-      exposureGain: number;
-      irMode: string;
-      irLevel: number;
-    }
-  >({
+  // Fetch options (valid ranges)
+  const { data: options } = useQuery<ImagingOptions>({
+    queryKey: ['imagingOptions'],
+    queryFn: () => getImagingOptions(),
+  });
+
+  // Local state for all form values
+  const [localSettings, setLocalSettings] = useState<ImagingSettings>({
     brightness: 50,
     contrast: 50,
     saturation: 50,
     sharpness: 50,
-    // Stubs
-    focusMode: 'auto',
-    whiteBalanceMode: 'auto',
-    whiteBalanceCr: 50,
-    whiteBalanceCb: 50,
-    wdrMode: 'off',
-    wdrLevel: 50,
-    exposureMode: 'auto',
-    shutterLimit: '1/30',
-    exposureGain: 50,
-    irMode: 'auto',
-    irLevel: 100,
+    irCutFilter: 'AUTO',
+    wideDynamicRange: {
+      mode: 'OFF',
+      level: 50,
+    },
+    backlightCompensation: {
+      mode: 'OFF',
+      level: 50,
+    },
   });
 
   // Initialize form with fetched settings
   useEffect(() => {
     if (settings) {
-      // Avoid setting state directly if only initial
-      // or just use form.reset() style pattern if using forms
-      // Here we are using local state for sliders, so we can just default to settings in useState if possible,
-      // but since it's async, we need this effect.
-      // The linter warning is about setLocalSettings causing re-render loop if settings changes often.
-      // We can check if values are different before setting.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLocalSettings((prev) => {
+        // Only update if values actually changed to avoid unnecessary re-renders
         if (
           prev.brightness === settings.brightness &&
           prev.contrast === settings.contrast &&
           prev.saturation === settings.saturation &&
-          prev.sharpness === settings.sharpness
+          prev.sharpness === settings.sharpness &&
+          prev.irCutFilter === settings.irCutFilter &&
+          JSON.stringify(prev.wideDynamicRange) === JSON.stringify(settings.wideDynamicRange) &&
+          JSON.stringify(prev.backlightCompensation) ===
+            JSON.stringify(settings.backlightCompensation)
         ) {
           return prev;
         }
-        return { ...prev, ...settings };
+        return {
+          ...prev,
+          ...settings,
+          // Ensure defaults for optional fields
+          wideDynamicRange: settings.wideDynamicRange ||
+            prev.wideDynamicRange || {
+              mode: 'OFF',
+              level: 50,
+            },
+          backlightCompensation: settings.backlightCompensation ||
+            prev.backlightCompensation || {
+              mode: 'OFF',
+              level: 50,
+            },
+        };
       });
     }
   }, [settings]);
@@ -112,6 +115,9 @@ export default function ImagingPage() {
       contrast: localSettings.contrast,
       saturation: localSettings.saturation,
       sharpness: localSettings.sharpness,
+      irCutFilter: localSettings.irCutFilter,
+      wideDynamicRange: localSettings.wideDynamicRange,
+      backlightCompensation: localSettings.backlightCompensation,
     });
   };
 
@@ -122,10 +128,7 @@ export default function ImagingPage() {
     }
   };
 
-  const updateSetting = <K extends keyof typeof localSettings>(
-    key: K,
-    value: (typeof localSettings)[K],
-  ) => {
+  const updateSetting = <K extends keyof ImagingSettings>(key: K, value: ImagingSettings[K]) => {
     setLocalSettings((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -191,8 +194,8 @@ export default function ImagingPage() {
                 </div>
                 <Slider
                   value={[localSettings.brightness]}
-                  min={0}
-                  max={100}
+                  min={options?.brightness?.min ?? 0}
+                  max={options?.brightness?.max ?? 100}
                   step={1}
                   onValueChange={([val]) => updateSetting('brightness', val)}
                   className="py-1"
@@ -207,8 +210,8 @@ export default function ImagingPage() {
                 </div>
                 <Slider
                   value={[localSettings.contrast]}
-                  min={0}
-                  max={100}
+                  min={options?.contrast?.min ?? 0}
+                  max={options?.contrast?.max ?? 100}
                   step={1}
                   onValueChange={([val]) => updateSetting('contrast', val)}
                   className="py-1"
@@ -223,8 +226,8 @@ export default function ImagingPage() {
                 </div>
                 <Slider
                   value={[localSettings.saturation]}
-                  min={0}
-                  max={100}
+                  min={options?.saturation?.min ?? 0}
+                  max={options?.saturation?.max ?? 100}
                   step={1}
                   onValueChange={([val]) => updateSetting('saturation', val)}
                   className="py-1"
@@ -248,18 +251,6 @@ export default function ImagingPage() {
             </SettingsCardHeader>
             <SettingsCardContent className="space-y-[24px]">
               <div className="space-y-[12px]">
-                <Label className="text-[#e5e5e5]">Focus Mode</Label>
-                <select
-                  value={localSettings.focusMode}
-                  onChange={(e) => updateSetting('focusMode', e.target.value)}
-                  disabled
-                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <option value="auto">Auto Focus</option>
-                  <option value="manual">Manual</option>
-                </select>
-              </div>
-              <div className="space-y-[12px]">
                 <div className="flex items-center justify-between">
                   <Label className="text-[#e5e5e5]">Sharpness</Label>
                   <span className="text-sm text-[#a1a1a6] tabular-nums">
@@ -268,8 +259,8 @@ export default function ImagingPage() {
                 </div>
                 <Slider
                   value={[localSettings.sharpness]}
-                  min={0}
-                  max={100}
+                  min={options?.sharpness?.min ?? 0}
+                  max={options?.sharpness?.max ?? 100}
                   step={1}
                   onValueChange={([val]) => updateSetting('sharpness', val)}
                   className="py-1"
@@ -336,7 +327,7 @@ export default function ImagingPage() {
             </SettingsCardContent>
           </SettingsCard>
 
-          {/* Infrared (STUB) */}
+          {/* Infrared (IR Cut Filter) */}
           <SettingsCard>
             <SettingsCardHeader>
               <div className="flex items-center gap-[12px]">
@@ -345,24 +336,37 @@ export default function ImagingPage() {
                 </div>
                 <div>
                   <SettingsCardTitle>Infrared Settings</SettingsCardTitle>
-                  <SettingsCardDescription>
-                    Night vision control (Unavailable)
-                  </SettingsCardDescription>
+                  <SettingsCardDescription>IR cut filter control</SettingsCardDescription>
                 </div>
               </div>
             </SettingsCardHeader>
-            <SettingsCardContent className="pointer-events-none space-y-[24px] opacity-60">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="block text-[#e5e5e5]">IR Mode</Label>
-                  <span className="text-[13px] text-[#a1a1a6]">Auto-switch day/night</span>
-                </div>
-                <Switch checked disabled />
+            <SettingsCardContent className="space-y-[24px]">
+              <div className="space-y-[12px]">
+                <Label className="text-[#e5e5e5]">IR Cut Filter Mode</Label>
+                <select
+                  value={localSettings.irCutFilter || 'AUTO'}
+                  onChange={(e) =>
+                    updateSetting('irCutFilter', e.target.value as 'ON' | 'OFF' | 'AUTO')
+                  }
+                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                >
+                  {options?.irCutFilterModes?.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {mode === 'AUTO' ? 'Auto' : mode === 'ON' ? 'Day Mode' : 'Night Mode'}
+                    </option>
+                  )) || (
+                    <>
+                      <option value="AUTO">Auto</option>
+                      <option value="ON">Day Mode</option>
+                      <option value="OFF">Night Mode</option>
+                    </>
+                  )}
+                </select>
               </div>
             </SettingsCardContent>
           </SettingsCard>
 
-          {/* Backlight & WDR (STUB) */}
+          {/* Backlight & WDR */}
           <SettingsCard>
             <SettingsCardHeader>
               <div className="flex items-center gap-[12px]">
@@ -372,21 +376,112 @@ export default function ImagingPage() {
                 <div>
                   <SettingsCardTitle>Backlight & WDR</SettingsCardTitle>
                   <SettingsCardDescription>
-                    Wide Dynamic Range (Unavailable)
+                    Wide Dynamic Range and backlight compensation
                   </SettingsCardDescription>
                 </div>
               </div>
             </SettingsCardHeader>
-            <SettingsCardContent className="pointer-events-none space-y-[24px] opacity-60">
+            <SettingsCardContent className="space-y-[24px]">
+              {/* Wide Dynamic Range */}
               <div className="space-y-[12px]">
-                <Label className="text-[#e5e5e5]">WDR Mode</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-[#e5e5e5]">WDR Mode</Label>
+                </div>
                 <select
-                  value="off"
-                  disabled
-                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white disabled:opacity-50"
+                  value={localSettings.wideDynamicRange?.mode || 'OFF'}
+                  onChange={(e) =>
+                    updateSetting('wideDynamicRange', {
+                      mode: e.target.value as 'ON' | 'OFF',
+                      level: localSettings.wideDynamicRange?.level || 50,
+                    })
+                  }
+                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
                 >
-                  <option value="off">Off</option>
+                  {options?.wideDynamicRange?.modes?.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {mode}
+                    </option>
+                  )) || (
+                    <>
+                      <option value="OFF">Off</option>
+                      <option value="ON">On</option>
+                    </>
+                  )}
                 </select>
+                {localSettings.wideDynamicRange?.mode === 'ON' && (
+                  <div className="space-y-[12px]">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[#e5e5e5]">WDR Level</Label>
+                      <span className="text-sm text-[#a1a1a6] tabular-nums">
+                        {localSettings.wideDynamicRange.level}%
+                      </span>
+                    </div>
+                    <Slider
+                      value={[localSettings.wideDynamicRange.level]}
+                      min={options?.wideDynamicRange?.level?.min ?? 0}
+                      max={options?.wideDynamicRange?.level?.max ?? 100}
+                      step={1}
+                      onValueChange={([val]) =>
+                        updateSetting('wideDynamicRange', {
+                          mode: localSettings.wideDynamicRange?.mode || 'OFF',
+                          level: val,
+                        })
+                      }
+                      className="py-1"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Backlight Compensation */}
+              <div className="space-y-[12px]">
+                <div className="flex items-center justify-between">
+                  <Label className="text-[#e5e5e5]">Backlight Compensation Mode</Label>
+                </div>
+                <select
+                  value={localSettings.backlightCompensation?.mode || 'OFF'}
+                  onChange={(e) =>
+                    updateSetting('backlightCompensation', {
+                      mode: e.target.value as 'ON' | 'OFF',
+                      level: localSettings.backlightCompensation?.level || 50,
+                    })
+                  }
+                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                >
+                  {options?.backlightCompensation?.modes?.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {mode}
+                    </option>
+                  )) || (
+                    <>
+                      <option value="OFF">Off</option>
+                      <option value="ON">On</option>
+                    </>
+                  )}
+                </select>
+                {localSettings.backlightCompensation?.mode === 'ON' && (
+                  <div className="space-y-[12px]">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[#e5e5e5]">Backlight Level</Label>
+                      <span className="text-sm text-[#a1a1a6] tabular-nums">
+                        {localSettings.backlightCompensation.level}%
+                      </span>
+                    </div>
+                    <Slider
+                      value={[localSettings.backlightCompensation.level]}
+                      min={options?.backlightCompensation?.level?.min ?? 0}
+                      max={options?.backlightCompensation?.level?.max ?? 100}
+                      step={1}
+                      onValueChange={([val]) =>
+                        updateSetting('backlightCompensation', {
+                          mode: localSettings.backlightCompensation?.mode || 'OFF',
+                          level: val,
+                        })
+                      }
+                      className="py-1"
+                    />
+                  </div>
+                )}
               </div>
             </SettingsCardContent>
           </SettingsCard>

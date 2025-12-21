@@ -155,7 +155,7 @@ export async function setNetworkInterface(
  */
 export async function setDNS(_fromDHCP: boolean, dnsServers?: string[]): Promise<void> {
   const manualDNS =
-    !fromDHCP && dnsServers?.length
+    !_fromDHCP && dnsServers?.length
       ? dnsServers
           .map(
             (ip) =>
@@ -165,7 +165,7 @@ export async function setDNS(_fromDHCP: boolean, dnsServers?: string[]): Promise
       : '';
 
   const body = `<tds:SetDNS>
-    <tds:FromDHCP>${fromDHCP}</tds:FromDHCP>
+    <tds:FromDHCP>${_fromDHCP}</tds:FromDHCP>
     ${manualDNS}
   </tds:SetDNS>`;
 

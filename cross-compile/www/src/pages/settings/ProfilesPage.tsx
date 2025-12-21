@@ -3,7 +3,7 @@
  *
  * Manage media profiles and their configurations (Video/Audio Sources, Encoders, PTZ, Analytics, Metadata).
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -52,11 +52,17 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   type MediaProfile,
+  type VideoEncoderConfiguration,
+  type VideoEncoderConfigurationOptions,
   createProfile,
   deleteProfile,
   getProfiles,
+  getVideoEncoderConfiguration,
+  getVideoEncoderConfigurationOptions,
+  setVideoEncoderConfiguration,
 } from '@/services/profileService';
 
 // Schema for creating a profile
@@ -70,6 +76,10 @@ export default function ProfilesPage() {
   const queryClient = useQueryClient();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [profileToDelete, setProfileToDelete] = useState<MediaProfile | null>(null);
+  const [editingEncoder, setEditingEncoder] = useState<{
+    profileToken: string;
+    encoderToken: string;
+  } | null>(null);
 
   // Track open state for each profile card
   const [openProfiles, setOpenProfiles] = useState<Record<string, boolean>>({});
@@ -253,6 +263,15 @@ export default function ProfilesPage() {
                             ? `${profile.videoEncoderConfiguration.name} (${profile.videoEncoderConfiguration.encoding})`
                             : ''
                         }
+                        onEdit={
+                          profile.videoEncoderConfiguration
+                            ? () =>
+                                setEditingEncoder({
+                                  profileToken: profile.token,
+                                  encoderToken: profile.videoEncoderConfiguration!.token,
+                                })
+                            : undefined
+                        }
                       />
 
                       {/* Audio Source Config */}
@@ -374,6 +393,14 @@ export default function ProfilesPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Video Encoder Edit Dialog */}
+        {editingEncoder && (
+          <VideoEncoderEditDialog
+            encoderToken={editingEncoder.encoderToken}
+            onClose={() => setEditingEncoder(null)}
+          />
+        )}
       </div>
     </div>
   );
@@ -385,12 +412,14 @@ function ConfigSection({
   active,
   token,
   details,
+  onEdit,
 }: {
   title: string;
   icon: React.ReactNode;
   active: boolean;
   token?: string;
   details?: string;
+  onEdit?: () => void;
 }) {
   return (
     <div
@@ -411,10 +440,253 @@ function ConfigSection({
       <Button
         variant="link"
         className={`mt-[8px] h-auto p-0 text-[11px] ${active ? 'text-[#0a84ff]' : 'text-[#a1a1a6]'}`}
-        disabled // Disabled for now as editing is complex
+        onClick={onEdit}
+        disabled={!onEdit}
       >
-        {active ? 'Edit (Coming Soon)' : 'Add (Coming Soon)'}
+        {active ? 'Edit' : 'Add (Coming Soon)'}
       </Button>
     </div>
+  );
+}
+
+function VideoEncoderEditDialog({
+  encoderToken,
+  onClose,
+}: {
+  encoderToken: string;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [config, setConfig] = useState<VideoEncoderConfiguration | null>(null);
+  const [options, setOptions] = useState<VideoEncoderConfigurationOptions | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch encoder configuration and options
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [encoderConfig, encoderOptions] = await Promise.all([
+          getVideoEncoderConfiguration(encoderToken),
+          getVideoEncoderConfigurationOptions(encoderToken),
+        ]);
+        if (encoderConfig) {
+          setConfig(encoderConfig);
+        }
+        setOptions(encoderOptions);
+      } catch (error) {
+        toast.error('Failed to load encoder configuration', {
+          description: error instanceof Error ? error.message : 'An error occurred',
+        });
+        onClose();
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+  }, [encoderToken, onClose]);
+
+  const updateMutation = useMutation({
+    mutationFn: (updatedConfig: VideoEncoderConfiguration) =>
+      setVideoEncoderConfiguration(updatedConfig, false),
+    onSuccess: () => {
+      toast.success('Video encoder configuration updated');
+      queryClient.invalidateQueries({ queryKey: ['profiles'] });
+      onClose();
+    },
+    onError: (error) => {
+      toast.error('Failed to update encoder configuration', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  const handleSave = () => {
+    if (config) {
+      updateMutation.mutate(config);
+    }
+  };
+
+  if (isLoading || !config || !options) {
+    return (
+      <Dialog open onOpenChange={onClose}>
+        <DialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[600px]">
+          <div className="py-8 text-center text-[#a1a1a6]">Loading...</div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  const h264Options = options.h264;
+  const availableResolutions = h264Options?.resolutionsAvailable || [];
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[600px]">
+        <DialogHeader>
+          <DialogTitle className="text-white">Edit Video Encoder Configuration</DialogTitle>
+          <DialogDescription className="text-[#a1a1a6]">
+            Configure video encoding settings for this profile
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          {/* Resolution */}
+          <div className="space-y-2">
+            <Label className="text-[#e5e5e5]">Resolution</Label>
+            <select
+              value={`${config.resolution.width}x${config.resolution.height}`}
+              onChange={(e) => {
+                const [width, height] = e.target.value.split('x').map(Number);
+                setConfig({ ...config, resolution: { width, height } });
+              }}
+              className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-[#0a84ff] focus:outline-none"
+            >
+              {availableResolutions.map((res) => (
+                <option key={`${res.width}x${res.height}`} value={`${res.width}x${res.height}`}>
+                  {res.width} × {res.height}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quality */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-[#e5e5e5]">Quality</Label>
+              <span className="text-sm text-[#a1a1a6] tabular-nums">{config.quality}</span>
+            </div>
+            <input
+              type="range"
+              min={options.qualityRange.min}
+              max={options.qualityRange.max}
+              value={config.quality}
+              onChange={(e) => setConfig({ ...config, quality: Number(e.target.value) })}
+              className="w-full"
+            />
+          </div>
+
+          {/* Frame Rate */}
+          {config.rateControl && h264Options && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-[#e5e5e5]">Frame Rate Limit</Label>
+                <span className="text-sm text-[#a1a1a6] tabular-nums">
+                  {config.rateControl.frameRateLimit} fps
+                </span>
+              </div>
+              <input
+                type="range"
+                min={h264Options.frameRateRange.min}
+                max={h264Options.frameRateRange.max}
+                value={config.rateControl.frameRateLimit}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    rateControl: {
+                      ...config.rateControl!,
+                      frameRateLimit: Number(e.target.value),
+                    },
+                  })
+                }
+                className="w-full"
+              />
+            </div>
+          )}
+
+          {/* Bitrate */}
+          {config.rateControl && h264Options && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-[#e5e5e5]">Bitrate Limit</Label>
+                <span className="text-sm text-[#a1a1a6] tabular-nums">
+                  {config.rateControl.bitrateLimit} kbps
+                </span>
+              </div>
+              <input
+                type="range"
+                min={h264Options.bitrateRange.min}
+                max={h264Options.bitrateRange.max}
+                value={config.rateControl.bitrateLimit}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    rateControl: {
+                      ...config.rateControl!,
+                      bitrateLimit: Number(e.target.value),
+                    },
+                  })
+                }
+                className="w-full"
+              />
+            </div>
+          )}
+
+          {/* H.264 Profile */}
+          {config.h264 && h264Options && (
+            <div className="space-y-2">
+              <Label className="text-[#e5e5e5]">H.264 Profile</Label>
+              <select
+                value={config.h264.h264Profile}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    h264: { ...config.h264!, h264Profile: e.target.value },
+                  })
+                }
+                className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-[#0a84ff] focus:outline-none"
+              >
+                {h264Options.h264ProfilesSupported.map((profile) => (
+                  <option key={profile} value={profile}>
+                    {profile}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* GOP Length */}
+          {config.h264 && h264Options && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-[#e5e5e5]">GOP Length</Label>
+                <span className="text-sm text-[#a1a1a6] tabular-nums">{config.h264.govLength}</span>
+              </div>
+              <input
+                type="range"
+                min={h264Options.govLengthRange.min}
+                max={h264Options.govLengthRange.max}
+                value={config.h264.govLength}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    h264: { ...config.h264!, govLength: Number(e.target.value) },
+                  })
+                }
+                className="w-full"
+              />
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            className="border-[#3a3a3c] text-white hover:bg-[#2c2c2e]"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={handleSave}
+            disabled={updateMutation.isPending}
+            className="bg-[#0a84ff] text-white hover:bg-[#0077ed]"
+          >
+            {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -81,8 +81,6 @@ function StatCard({
   );
 }
 
-
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -175,7 +173,10 @@ export default function DiagnosticsPage() {
                   {/* Hidden Axis but keep domain */}
                   <XAxis dataKey="time" hide />
                   <YAxis domain={[0, 100]} hide />
-                  <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#333', strokeWidth: 1 }} />
+                  <Tooltip
+                    content={<CustomTooltip />}
+                    cursor={{ stroke: '#333', strokeWidth: 1 }}
+                  />
                   <Area
                     type="monotone"
                     dataKey="value"
@@ -223,7 +224,10 @@ export default function DiagnosticsPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
                   <XAxis dataKey="time" hide />
                   <YAxis domain={[0, 100]} hide />
-                  <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#333', strokeWidth: 1 }} />
+                  <Tooltip
+                    content={<CustomTooltip />}
+                    cursor={{ stroke: '#333', strokeWidth: 1 }}
+                  />
                   <Area
                     type="monotone"
                     dataKey="value"
