@@ -75,7 +75,8 @@ jobs:
         continue-on-error: true
         working-directory: cross-compile/www
         run: |
-          if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
+          set +x  # Disable command echo to prevent secret leakage
+          if [ -n "$SNYK_TOKEN" ]; then
             snyk code test --sarif > snyk-code.sarif || true
             echo "snyk_code_status=completed" >> $GITHUB_OUTPUT
           else
@@ -89,7 +90,8 @@ jobs:
         continue-on-error: true
         working-directory: cross-compile/www
         run: |
-          if [ -n "${{ secrets.SNYK_TOKEN }}" ] && [ -f "package.json" ]; then
+          set +x  # Disable command echo to prevent secret leakage
+          if [ -n "$SNYK_TOKEN" ] && [ -f "package.json" ]; then
             snyk monitor --all-projects || true
             # Parse results for PR comment
             snyk test --file=package.json --json > snyk-oss-results.json 2>&1 || true
@@ -122,7 +124,8 @@ jobs:
         continue-on-error: true
         if: steps.build-docker.outputs.docker_built == 'true'
         run: |
-          if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
+          set +x  # Disable command echo to prevent secret leakage
+          if [ -n "$SNYK_TOKEN" ]; then
             snyk container monitor anyka-dev:test --file=cross-compile/Dockerfile || true
             echo "snyk_container_status=completed" >> $GITHUB_OUTPUT
           else
@@ -144,7 +147,6 @@ jobs:
         uses: sonarsource/sonarqube-scan-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         with:
           projectBaseDir: .
           # Configuration is automatically loaded from sonar-project.properties in project root
@@ -156,7 +158,6 @@ jobs:
         uses: sonarsource/sonarqube-quality-gate-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
       - name: Generate Run Summary
         run: |
@@ -220,7 +221,7 @@ jobs:
             |--------|-------|
             | **Scan Status** | ${sonarStatus === 'success' ? '✅ Completed' : '⚠️ Failed/Skipped'} |
             | **Quality Gate** | ${qualityGateStatus === 'success' ? '✅ Passed' : '⚠️ Failed/Skipped'} |
-            ${sonarStatus === 'success' ? '| **View Report** | [SonarQube Dashboard](${{ secrets.SONAR_HOST_URL }}/dashboard?id=anyka-dev) |' : ''}
+            ${sonarStatus === 'success' ? '| **View Report** | [SonarQube Cloud Dashboard](https://sonarcloud.io/dashboard?id=kkrzysztofik_Anyka_ak3918_hacking_journey) |' : ''}
 
             ### ✅ Build Status
             - **Lint**: ✅ Passed

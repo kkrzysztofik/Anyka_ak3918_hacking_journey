@@ -4,14 +4,12 @@ use axum::{
     Router,
     body::Body,
     extract::ConnectInfo,
-    http::{Request, StatusCode, header},
-    middleware::Next,
-    response::Response,
+    http::{Request, header},
 };
 use onvif_rust::logging::static_asset_logging_middleware;
 use std::net::SocketAddr;
 use std::str::FromStr;
-use tower::ServiceBuilder;
+use tower::ServiceExt;
 use tower_http::services::ServeDir;
 
 #[tokio::test]
@@ -19,7 +17,6 @@ async fn test_static_asset_logging_format_with_get_request() {
     // Create a simple router with the static asset logging middleware
     let app = Router::new()
         .layer(axum::middleware::from_fn(static_asset_logging_middleware))
-        .layer(ConnectInfo::layer())
         .fallback_service(ServeDir::new("."));
 
     // Create a mock request to a static asset
@@ -114,7 +111,7 @@ fn test_apache_log_format_with_missing_headers() {
 
     // Verify hyphens are used for missing values
     assert!(
-        log_line.contains("\"- \""),
+        log_line.contains("\"-\""),
         "Should use - for missing headers"
     );
 }
@@ -168,7 +165,7 @@ fn test_apache_log_format_content_length_hyphen() {
 }
 
 #[test]
-fn test_apache_log_RFC_compliance() {
+fn test_apache_log_rfc_compliance() {
     // Test RFC 3875 (CGI) common log format compliance
     // Format: host ident authuser date request status bytes
     let log_line =
