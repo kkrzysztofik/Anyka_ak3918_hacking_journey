@@ -9,7 +9,7 @@
 // Encryption result interface
 export interface EncryptedData {
   data: string; // Base64-encoded ciphertext
-  iv: string;   // Base64-encoded initialization vector
+  iv: string; // Base64-encoded initialization vector
   salt: string; // Base64-encoded salt for key derivation
 }
 
@@ -18,13 +18,9 @@ export interface EncryptedData {
  */
 async function generateKey(salt: Uint8Array): Promise<CryptoKey> {
   // Import the salt as a key material
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    salt,
-    { name: 'PBKDF2' },
-    false,
-    ['deriveKey'],
-  );
+  const keyMaterial = await crypto.subtle.importKey('raw', salt, { name: 'PBKDF2' }, false, [
+    'deriveKey',
+  ]);
 
   // Derive a key using PBKDF2
   return crypto.subtle.deriveKey(
@@ -73,11 +69,7 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
   const encoder = new TextEncoder();
   const data = encoder.encode(plaintext);
 
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: iv },
-    key,
-    data,
-  );
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, data);
 
   return {
     data: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
@@ -99,11 +91,7 @@ export async function decrypt(encrypted: EncryptedData): Promise<string> {
   const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.charCodeAt(0));
   const key = await generateKey(salt);
 
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: iv },
-    key,
-    ciphertext,
-  );
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext);
 
   const decoder = new TextDecoder();
   return decoder.decode(decrypted);

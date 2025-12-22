@@ -15,11 +15,8 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import {
-  decrypt,
-  encrypt,
-  type EncryptedData,
-} from '../utils/crypto';
+
+import { type EncryptedData, decrypt, encrypt } from '../utils/crypto';
 
 interface AuthCredentials {
   username: string;
