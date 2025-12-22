@@ -13,6 +13,8 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
   lint:
@@ -23,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -57,7 +59,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure Git
         run: |
@@ -89,19 +91,167 @@ jobs:
           cargo tarpaulin --target x86_64-unknown-linux-gnu --all-features --out Html --out Lcov --out Xml --output-dir coverage
 
       - name: Upload Coverage HTML
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-html
           path: cross-compile/onvif-rust/coverage/tarpaulin-report.html
 
       - name: Upload Coverage LCOV
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-lcov
           path: cross-compile/onvif-rust/coverage/lcov.info
 
       - name: Upload Coverage Cobertura
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coverage-cobertura
           path: cross-compile/onvif-rust/coverage/cobertura.xml
+
+      - name: Generate Coverage Summary
+        id: coverage-summary
+        working-directory: cross-compile/onvif-rust
+        run: |
+          if [ -f "coverage/cobertura.xml" ]; then
+            # Extract coverage percentage from cobertura XML using Python (available in most containers)
+            COVERAGE_PCT=$(python3 -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage/cobertura.xml'); root = tree.getroot(); rate = float(root.get('line-rate', 0)) * 100; print(f'{rate:.2f}')" 2>/dev/null || echo "0.00")
+            echo "coverage=$COVERAGE_PCT" >> $GITHUB_OUTPUT
+            echo "✅ Coverage: ${COVERAGE_PCT}%"
+          else
+            echo "coverage=0.00" >> $GITHUB_OUTPUT
+            echo "⚠️ Coverage file not found"
+          fi
+
+      - name: Run Snyk Security Scan
+        id: snyk-scan
+        continue-on-error: true
+        working-directory: cross-compile/onvif-rust
+        run: |
+          if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
+            # Install Snyk CLI
+            npm install -g snyk
+            # Run Snyk scan for Rust dependencies (if Cargo.lock exists)
+            if [ -f "Cargo.lock" ]; then
+              snyk test --severity-threshold=high --json > snyk-results.json 2>&1 || true
+              SNYK_ISSUES=$(cat snyk-results.json | jq -r '.vulnerabilities | length' 2>/dev/null || echo "0")
+              echo "snyk_issues=$SNYK_ISSUES" >> $GITHUB_OUTPUT
+              echo "snyk_status=completed" >> $GITHUB_OUTPUT
+            else
+              echo "snyk_issues=0" >> $GITHUB_OUTPUT
+              echo "snyk_status=skipped" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "snyk_issues=0" >> $GITHUB_OUTPUT
+            echo "snyk_status=skipped" >> $GITHUB_OUTPUT
+          fi
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: SonarQube Scan
+        id: sonar-scan
+        continue-on-error: true
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: .
+          # Configuration is automatically loaded from sonar-project.properties in project root
+          # Coverage path is already configured in sonar-project.properties
+
+      - name: SonarQube Quality Gate Check
+        id: sonar-quality-gate
+        continue-on-error: true
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      - name: Generate Run Summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          # 🔍 CI Analysis Summary - Rust ONVIF API
+
+          ## 📊 Test Coverage
+          - **Coverage**: ${{ steps.coverage-summary.outputs.coverage }}%
+          - **Report**: [View Coverage Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ## 🔒 Security Scan (Snyk)
+          - **Status**: ${{ steps.snyk-scan.outputs.snyk_status }}
+          - **Issues Found**: ${{ steps.snyk-scan.outputs.snyk_issues }}
+
+          ## 🎯 Code Quality (SonarQube)
+          - **Status**: ${{ steps.sonar-scan.outcome == 'success' && '✅ Passed' || '⚠️ Failed/Skipped' }}
+          - **Quality Gate**: ${{ steps.sonar-quality-gate.outcome == 'success' && '✅ Passed' || '⚠️ Failed/Skipped' }}
+
+          ## 📦 Artifacts
+          - Coverage HTML Report
+          - Coverage LCOV Report
+          - Coverage Cobertura XML
+
+          EOF
+
+      - name: Comment PR with Analysis Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const coverage = '${{ steps.coverage-summary.outputs.coverage }}';
+            const snykStatus = '${{ steps.snyk-scan.outputs.snyk_status }}';
+            const snykIssues = '${{ steps.snyk-scan.outputs.snyk_issues }}';
+            const sonarStatus = '${{ steps.sonar-scan.outcome }}';
+            const qualityGateStatus = '${{ steps.sonar-quality-gate.outcome }}';
+
+            const comment = `## 🔍 Code Analysis Results - Rust ONVIF API
+
+            ### 📊 Test Coverage
+            | Metric | Value |
+            |--------|-------|
+            | **Line Coverage** | ${coverage}% |
+            | **Coverage Report** | [View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            ### 🔒 Security Scan (Snyk)
+            | Metric | Value |
+            |--------|-------|
+            | **Status** | ${snykStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped'} |
+            | **Vulnerabilities Found** | ${snykIssues} |
+            ${snykStatus === 'completed' && snykIssues !== '0' ? '| **Action Required** | ⚠️ Review vulnerabilities in Snyk dashboard |' : ''}
+
+            ### 🎯 Code Quality (SonarQube)
+            | Metric | Value |
+            |--------|-------|
+            | **Scan Status** | ${sonarStatus === 'success' ? '✅ Completed' : '⚠️ Failed/Skipped'} |
+            | **Quality Gate** | ${qualityGateStatus === 'success' ? '✅ Passed' : '⚠️ Failed/Skipped'} |
+            ${sonarStatus === 'success' ? '| **View Report** | [SonarQube Dashboard](${{ secrets.SONAR_HOST_URL }}/dashboard?id=anyka-dev) |' : ''}
+
+            ---
+            *This comment is automatically updated on each push to the PR*`;
+
+            // Find existing bot comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Code Analysis Results - Rust ONVIF API')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment,
+              });
+            }

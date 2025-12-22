@@ -93,5 +93,9 @@
     "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
     "editor.semanticHighlighting.enabled": true,
     "editor.suggest.snippetsPreventQuickSuggestions": false
+  },
+  "sonarlint.connectedMode.project": {
+    "connectionId": "kkrzysztofik Org",
+    "projectKey": "kkrzysztofik_Anyka_ak3918_hacking_journey"
   }
 }

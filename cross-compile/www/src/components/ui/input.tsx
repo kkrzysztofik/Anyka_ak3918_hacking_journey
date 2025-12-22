@@ -13,7 +13,7 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<'input'>>(
           // Border and focus
           'border-input focus-visible:border-ring focus-visible:ring-ring/20 focus-visible:ring-2',
           // Placeholder and file input
-          'placeholder:text-muted-foreground file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground',
+          'placeholder:text-muted-foreground file:text-foreground file:border-0 file:bg-transparent file:text-sm file:font-medium',
           // Transitions and states
           'shadow-sm transition-all duration-200 focus-visible:outline-none',
           'disabled:cursor-not-allowed disabled:opacity-50',

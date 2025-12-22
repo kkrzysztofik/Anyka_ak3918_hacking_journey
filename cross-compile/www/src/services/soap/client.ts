@@ -7,11 +7,13 @@
 import { XMLBuilder, XMLParser } from 'fast-xml-parser';
 
 // SOAP namespace declarations
-const SOAP_NS = 'http://www.w3.org/2003/05/soap-envelope';
-const DEVICE_NS = 'http://www.onvif.org/ver10/device/wsdl';
-const MEDIA_NS = 'http://www.onvif.org/ver10/media/wsdl';
-const IMAGING_NS = 'http://www.onvif.org/ver20/imaging/wsdl';
-const PTZ_NS = 'http://www.onvif.org/ver20/ptz/wsdl';
+// These are XML namespace URIs (identifiers), not network protocols
+// NOSONAR: S5332 - These are XML namespace identifiers, not actual HTTP connections
+const SOAP_NS = 'http://www.w3.org/2003/05/soap-envelope'; // NOSONAR
+const DEVICE_NS = 'http://www.onvif.org/ver10/device/wsdl'; // NOSONAR
+const MEDIA_NS = 'http://www.onvif.org/ver10/media/wsdl'; // NOSONAR
+const IMAGING_NS = 'http://www.onvif.org/ver20/imaging/wsdl'; // NOSONAR
+const PTZ_NS = 'http://www.onvif.org/ver20/ptz/wsdl'; // NOSONAR
 
 export interface SOAPFault {
   code: string;
@@ -150,6 +152,16 @@ export const soapBodies = {
   systemReboot: () => '<tds:SystemReboot />',
   setSystemFactoryDefault: (type: 'Hard' | 'Soft') =>
     `<tds:SetSystemFactoryDefault><tds:FactoryDefault>${type}</tds:FactoryDefault></tds:SetSystemFactoryDefault>`,
+  getSystemBackup: () => '<tds:GetSystemBackup />',
+  restoreSystem: (backupFiles: Array<{ Name: string; Data: string }>) => {
+    const filesXml = backupFiles
+      .map(
+        (file) =>
+          `<tds:BackupFile><tds:Name>${file.Name}</tds:Name><tds:Data>${file.Data}</tds:Data></tds:BackupFile>`,
+      )
+      .join('');
+    return `<tds:RestoreSystem><tds:BackupFiles>${filesXml}</tds:BackupFiles></tds:RestoreSystem>`;
+  },
 };
 
 export { parser, builder };

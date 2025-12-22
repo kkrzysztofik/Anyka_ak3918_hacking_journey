@@ -95,15 +95,15 @@ export default function LiveViewPage() {
             </div>
 
             {/* LIVE Indicator */}
-            <div className="live-indicator absolute top-20 left-6 backdrop-blur-sm">
-              LIVE
-            </div>
+            <div className="live-indicator absolute top-20 left-6 backdrop-blur-sm">LIVE</div>
           </div>
 
           {/* Stream URL Bar */}
-          <div className="flex items-center gap-4 rounded-lg border border-border bg-card p-3">
-            <span className="text-sm font-medium whitespace-nowrap text-muted-foreground">Stream URL</span>
-            <div className="flex-1 truncate rounded border border-border bg-background px-3 py-2 font-mono text-sm text-foreground">
+          <div className="border-border bg-card flex items-center gap-4 rounded-lg border p-3">
+            <span className="text-muted-foreground text-sm font-medium whitespace-nowrap">
+              Stream URL
+            </span>
+            <div className="border-border bg-background text-foreground flex-1 truncate rounded border px-3 py-2 font-mono text-sm">
               rtsp://192.168.1.100:554/main
             </div>
             <Button
@@ -122,8 +122,8 @@ export default function LiveViewPage() {
             <SettingsCard>
               <SettingsCardHeader>
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-red/10">
-                    <Activity className="h-5 w-5 text-accent-red" />
+                  <div className="bg-accent-red/10 flex h-10 w-10 items-center justify-center rounded-lg">
+                    <Activity className="text-accent-red h-5 w-5" />
                   </div>
                   <div>
                     <SettingsCardTitle>Stream Info</SettingsCardTitle>
@@ -134,13 +134,13 @@ export default function LiveViewPage() {
               <SettingsCardContent>
                 <div className="grid grid-cols-2 gap-y-3 text-sm">
                   <span className="text-muted-foreground">Resolution</span>
-                  <span className="text-right font-mono text-foreground">1920x1080</span>
+                  <span className="text-foreground text-right font-mono">1920x1080</span>
                   <span className="text-muted-foreground">Bitrate</span>
-                  <span className="text-right font-mono text-foreground">4096 Kbps</span>
+                  <span className="text-foreground text-right font-mono">4096 Kbps</span>
                   <span className="text-muted-foreground">Frame Rate</span>
-                  <span className="text-right font-mono text-foreground">30 fps</span>
+                  <span className="text-foreground text-right font-mono">30 fps</span>
                   <span className="text-muted-foreground">Codec</span>
-                  <span className="text-right font-mono text-foreground">H.264</span>
+                  <span className="text-foreground text-right font-mono">H.264</span>
                 </div>
               </SettingsCardContent>
             </SettingsCard>
@@ -166,11 +166,11 @@ export default function LiveViewPage() {
                     Connected
                   </span>
                   <span className="text-muted-foreground">Packet Loss</span>
-                  <span className="text-right font-mono text-foreground">0.0%</span>
+                  <span className="text-foreground text-right font-mono">0.0%</span>
                   <span className="text-muted-foreground">Latency</span>
-                  <span className="text-right font-mono text-foreground">45 ms</span>
+                  <span className="text-foreground text-right font-mono">45 ms</span>
                   <span className="text-muted-foreground">Bandwidth</span>
-                  <span className="text-right font-mono text-foreground">4.2 Mbps</span>
+                  <span className="text-foreground text-right font-mono">4.2 Mbps</span>
                 </div>
               </SettingsCardContent>
             </SettingsCard>
@@ -183,8 +183,8 @@ export default function LiveViewPage() {
           <SettingsCard>
             <SettingsCardHeader>
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-red/10">
-                  <Camera className="h-5 w-5 text-accent-red" />
+                <div className="bg-accent-red/10 flex h-10 w-10 items-center justify-center rounded-lg">
+                  <Camera className="text-accent-red h-5 w-5" />
                 </div>
                 <div>
                   <SettingsCardTitle>Pan & Tilt</SettingsCardTitle>
@@ -309,17 +309,17 @@ export default function LiveViewPage() {
                   <div key={i} className="group flex items-center gap-2">
                     <Button
                       variant="outline"
-                      className="flex-1 justify-between border-border bg-muted text-foreground hover:border-ring hover:bg-muted/80"
+                      className="border-border bg-muted text-foreground hover:border-ring hover:bg-muted/80 flex-1 justify-between"
                     >
                       <span className="text-xs">Preset {i}</span>
-                      <span className="rounded bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                      <span className="bg-background text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
                         #{i}
                       </span>
                     </Button>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:bg-muted hover:text-accent-red"
+                      className="text-muted-foreground hover:bg-muted hover:text-accent-red h-8 w-8"
                     >
                       <Settings2 className="h-3.5 w-3.5" />
                     </Button>
@@ -327,7 +327,7 @@ export default function LiveViewPage() {
                 ))}
                 <Button
                   variant="outline"
-                  className="mt-2 w-full border-dashed border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                  className="border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground mt-2 w-full border-dashed"
                 >
                   + Add Preset
                 </Button>

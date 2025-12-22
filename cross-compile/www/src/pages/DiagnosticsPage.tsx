@@ -57,14 +57,16 @@ function StatCard({
   colorBg?: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
+    <div className="border-border bg-card overflow-hidden rounded-xl border">
       <div className="flex items-center gap-4 p-5">
-        <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', colorBg)}>
+        <div
+          className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', colorBg)}
+        >
           <Icon className={cn('h-5 w-5', color)} />
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-muted-foreground text-sm font-medium">{label}</p>
-          <h3 className="font-mono text-xl font-bold text-foreground">{value}</h3>
+          <h3 className="text-foreground font-mono text-xl font-bold">{value}</h3>
           {subValue && <p className="text-muted-foreground text-xs">{subValue}</p>}
         </div>
       </div>
@@ -76,8 +78,8 @@ function StatCard({
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="rounded-lg border border-border bg-card/95 p-2 text-xs text-foreground shadow-xl backdrop-blur-md">
-        <p className="mb-1 font-mono text-muted-foreground">{`Time: +${label}s`}</p>
+      <div className="border-border bg-card/95 text-foreground rounded-lg border p-2 text-xs shadow-xl backdrop-blur-md">
+        <p className="text-muted-foreground mb-1 font-mono">{`Time: +${label}s`}</p>
         {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
         {payload.map((entry: any, index: number) => (
           <p key={index} style={{ color: entry.color }}>
@@ -139,20 +141,20 @@ export default function DiagnosticsPage() {
 
       {/* Charts Row 1: CPU & Memory */}
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="overflow-hidden border-border bg-card">
-          <CardHeader className="border-b border-border">
+        <Card className="border-border bg-card overflow-hidden">
+          <CardHeader className="border-border border-b">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-500/10">
                   <Activity className="h-5 w-5 text-red-500" />
                 </div>
                 <div>
-                  <CardTitle className="text-sm font-semibold text-foreground">CPU Usage</CardTitle>
-                  <p className="text-xs text-muted-foreground">Processor load over time</p>
+                  <CardTitle className="text-foreground text-sm font-semibold">CPU Usage</CardTitle>
+                  <p className="text-muted-foreground text-xs">Processor load over time</p>
                 </div>
               </div>
               <Button variant="ghost" size="icon" className="h-8 w-8">
-                <Clock className="h-4 w-4 text-muted-foreground" />
+                <Clock className="text-muted-foreground h-4 w-4" />
               </Button>
             </div>
           </CardHeader>
@@ -188,7 +190,7 @@ export default function DiagnosticsPage() {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            <div className="mt-2 flex justify-between font-mono text-xs text-muted-foreground">
+            <div className="text-muted-foreground mt-2 flex justify-between font-mono text-xs">
               <span>00:00</span>
               <span>00:15</span>
               <span>00:30</span>
@@ -196,20 +198,22 @@ export default function DiagnosticsPage() {
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden border-border bg-card">
-          <CardHeader className="border-b border-border">
+        <Card className="border-border bg-card overflow-hidden">
+          <CardHeader className="border-border border-b">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-yellow-500/10">
                   <HardDrive className="h-5 w-5 text-yellow-500" />
                 </div>
                 <div>
-                  <CardTitle className="text-sm font-semibold text-foreground">Memory Usage</CardTitle>
-                  <p className="text-xs text-muted-foreground">RAM utilization over time</p>
+                  <CardTitle className="text-foreground text-sm font-semibold">
+                    Memory Usage
+                  </CardTitle>
+                  <p className="text-muted-foreground text-xs">RAM utilization over time</p>
                 </div>
               </div>
               <Button variant="ghost" size="icon" className="h-8 w-8">
-                <Clock className="h-4 w-4 text-muted-foreground" />
+                <Clock className="text-muted-foreground h-4 w-4" />
               </Button>
             </div>
           </CardHeader>
@@ -244,7 +248,7 @@ export default function DiagnosticsPage() {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            <div className="mt-2 flex justify-between font-mono text-xs text-muted-foreground">
+            <div className="text-muted-foreground mt-2 flex justify-between font-mono text-xs">
               <span>00:00</span>
               <span>00:15</span>
               <span>00:30</span>
@@ -254,19 +258,21 @@ export default function DiagnosticsPage() {
       </div>
 
       {/* Charts Row 2: Network */}
-      <Card className="overflow-hidden border-border bg-card">
-        <CardHeader className="border-b border-border">
+      <Card className="border-border bg-card overflow-hidden">
+        <CardHeader className="border-border border-b">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
                 <Wifi className="h-5 w-5 text-blue-500" />
               </div>
               <div>
-                <CardTitle className="text-sm font-semibold text-foreground">Network Throughput</CardTitle>
-                <p className="text-xs text-muted-foreground">Upload and download bandwidth</p>
+                <CardTitle className="text-foreground text-sm font-semibold">
+                  Network Throughput
+                </CardTitle>
+                <p className="text-muted-foreground text-xs">Upload and download bandwidth</p>
               </div>
             </div>
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <div className="text-muted-foreground flex items-center gap-4 text-xs">
               <span className="flex items-center gap-1.5">
                 <div className="h-2 w-2 rounded-full bg-blue-500"></div> Download
               </span>
@@ -319,7 +325,7 @@ export default function DiagnosticsPage() {
               </AreaChart>
             </ResponsiveContainer>
           </div>
-          <div className="mt-2 flex justify-between font-mono text-xs text-muted-foreground">
+          <div className="text-muted-foreground mt-2 flex justify-between font-mono text-xs">
             <span>00:00</span>
             <span>00:15</span>
             <span>00:30</span>
@@ -330,15 +336,17 @@ export default function DiagnosticsPage() {
       {/* Info Grid */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Device Info */}
-        <Card className="overflow-hidden border-border bg-card">
-          <CardHeader className="border-b border-border">
+        <Card className="border-border bg-card overflow-hidden">
+          <CardHeader className="border-border border-b">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
                 <Info className="h-5 w-5 text-blue-500" />
               </div>
               <div>
-                <CardTitle className="text-sm font-semibold text-foreground">Device Information</CardTitle>
-                <p className="text-xs text-muted-foreground">Hardware and firmware details</p>
+                <CardTitle className="text-foreground text-sm font-semibold">
+                  Device Information
+                </CardTitle>
+                <p className="text-muted-foreground text-xs">Hardware and firmware details</p>
               </div>
             </div>
           </CardHeader>
@@ -346,21 +354,21 @@ export default function DiagnosticsPage() {
             <dl className="grid grid-cols-2 gap-4 text-sm">
               <div className="space-y-1">
                 <dt className="text-muted-foreground">Model</dt>
-                <dd className="font-mono text-foreground">Anyka-3918-Pro</dd>
+                <dd className="text-foreground font-mono">Anyka-3918-Pro</dd>
               </div>
               <div className="space-y-1 text-right">
                 <dt className="text-muted-foreground">Firmware</dt>
-                <dd className="font-mono text-foreground">v2.4.1</dd>
+                <dd className="text-foreground font-mono">v2.4.1</dd>
               </div>
               <div className="space-y-1">
                 <dt className="text-muted-foreground">Serial Number</dt>
-                <dd className="font-mono text-foreground">AK-2025-X892</dd>
+                <dd className="text-foreground font-mono">AK-2025-X892</dd>
               </div>
               <div className="space-y-1 text-right">
                 <dt className="text-muted-foreground">IP Address</dt>
-                <dd className="font-mono text-foreground">192.168.1.100</dd>
+                <dd className="text-foreground font-mono">192.168.1.100</dd>
               </div>
-              <div className="col-span-2 mt-2 border-t border-border pt-2">
+              <div className="border-border col-span-2 mt-2 border-t pt-2">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Uptime</span>
                   <span className="font-mono text-white">12d 5h 32m</span>
@@ -371,15 +379,17 @@ export default function DiagnosticsPage() {
         </Card>
 
         {/* System Metrics */}
-        <Card className="overflow-hidden border-border bg-card">
-          <CardHeader className="border-b border-border">
+        <Card className="border-border bg-card overflow-hidden">
+          <CardHeader className="border-border border-b">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-500/10">
                 <Activity className="h-5 w-5 text-red-500" />
               </div>
               <div>
-                <CardTitle className="text-sm font-semibold text-foreground">System Metrics</CardTitle>
-                <p className="text-xs text-muted-foreground">Performance and storage statistics</p>
+                <CardTitle className="text-foreground text-sm font-semibold">
+                  System Metrics
+                </CardTitle>
+                <p className="text-muted-foreground text-xs">Performance and storage statistics</p>
               </div>
             </div>
           </CardHeader>
@@ -387,19 +397,19 @@ export default function DiagnosticsPage() {
             <div className="space-y-4 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Storage Used</span>
-                <span className="font-mono text-foreground">85% (42.5 GB / 50 GB)</span>
+                <span className="text-foreground font-mono">85% (42.5 GB / 50 GB)</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Active Streams</span>
-                <span className="font-mono text-foreground">2</span>
+                <span className="text-foreground font-mono">2</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Dropped Frames (24h)</span>
-                <span className="font-mono text-foreground">12</span>
+                <span className="text-foreground font-mono">12</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Avg Bitrate</span>
-                <span className="font-mono text-foreground">4.2 Mbps</span>
+                <span className="text-foreground font-mono">4.2 Mbps</span>
               </div>
             </div>
           </CardContent>
@@ -407,42 +417,54 @@ export default function DiagnosticsPage() {
       </div>
 
       {/* System Logs */}
-      <Card className="overflow-hidden border-border bg-card">
-        <CardHeader className="border-b border-border">
+      <Card className="border-border bg-card overflow-hidden">
+        <CardHeader className="border-border border-b">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10">
                 <FileText className="h-5 w-5 text-orange-500" />
               </div>
               <div>
-                <CardTitle className="text-sm font-semibold text-foreground">System Logs</CardTitle>
-                <p className="text-xs text-muted-foreground">Recent activity and events</p>
+                <CardTitle className="text-foreground text-sm font-semibold">System Logs</CardTitle>
+                <p className="text-muted-foreground text-xs">Recent activity and events</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex items-center rounded-md border border-border bg-muted/50 p-0.5">
+              <div className="border-border bg-muted/50 flex items-center rounded-md border p-0.5">
                 <Button variant="default" size="sm" className="h-6 px-2.5 text-xs">
                   All
                 </Button>
-                <Button variant="ghost" size="sm" className="h-6 px-2.5 text-xs text-muted-foreground hover:text-foreground">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
+                >
                   Info
                 </Button>
-                <Button variant="ghost" size="sm" className="h-6 px-2.5 text-xs text-muted-foreground hover:text-foreground">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
+                >
                   Warning
                 </Button>
-                <Button variant="ghost" size="sm" className="h-6 px-2.5 text-xs text-muted-foreground hover:text-foreground">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
+                >
                   Error
                 </Button>
               </div>
-              <Button variant="outline" size="sm" className="h-7 gap-1 border-border text-xs">
+              <Button variant="outline" size="sm" className="border-border h-7 gap-1 text-xs">
                 <Download className="h-3 w-3" /> Export
               </Button>
             </div>
           </div>
         </CardHeader>
-        <div className="max-h-[400px] overflow-y-auto overflow-x-auto">
+        <div className="max-h-[400px] overflow-x-auto overflow-y-auto">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+            <thead className="border-border bg-muted/40 text-muted-foreground border-b text-xs">
               <tr>
                 <th className="px-5 py-3 font-medium">Timestamp</th>
                 <th className="px-5 py-3 font-medium">Level</th>
@@ -450,12 +472,16 @@ export default function DiagnosticsPage() {
                 <th className="px-5 py-3 font-medium">Message</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody className="divide-border divide-y">
               <tr className="hover:bg-muted/30">
                 <td className="px-5 py-4">
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                  <div className="text-muted-foreground flex items-center gap-2">
                     <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">2025-12-11<br />14:32:15</span>
+                    <span className="font-mono text-xs">
+                      2025-12-11
+                      <br />
+                      14:32:15
+                    </span>
                   </div>
                 </td>
                 <td className="px-5 py-4">
@@ -464,14 +490,20 @@ export default function DiagnosticsPage() {
                     Info
                   </span>
                 </td>
-                <td className="px-5 py-4 font-medium text-foreground">Stream</td>
-                <td className="px-5 py-4 text-muted-foreground">Main stream started successfully</td>
+                <td className="text-foreground px-5 py-4 font-medium">Stream</td>
+                <td className="text-muted-foreground px-5 py-4">
+                  Main stream started successfully
+                </td>
               </tr>
               <tr className="hover:bg-muted/30">
                 <td className="px-5 py-4">
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                  <div className="text-muted-foreground flex items-center gap-2">
                     <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">2025-12-11<br />14:30:42</span>
+                    <span className="font-mono text-xs">
+                      2025-12-11
+                      <br />
+                      14:30:42
+                    </span>
                   </div>
                 </td>
                 <td className="px-5 py-4">
@@ -480,14 +512,18 @@ export default function DiagnosticsPage() {
                     Warning
                   </span>
                 </td>
-                <td className="px-5 py-4 font-medium text-foreground">Network</td>
-                <td className="px-5 py-4 text-muted-foreground">High latency detected: 125ms</td>
+                <td className="text-foreground px-5 py-4 font-medium">Network</td>
+                <td className="text-muted-foreground px-5 py-4">High latency detected: 125ms</td>
               </tr>
               <tr className="hover:bg-muted/30">
                 <td className="px-5 py-4">
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                  <div className="text-muted-foreground flex items-center gap-2">
                     <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">2025-12-11<br />14:28:03</span>
+                    <span className="font-mono text-xs">
+                      2025-12-11
+                      <br />
+                      14:28:03
+                    </span>
                   </div>
                 </td>
                 <td className="px-5 py-4">
@@ -496,14 +532,18 @@ export default function DiagnosticsPage() {
                     Info
                   </span>
                 </td>
-                <td className="px-5 py-4 font-medium text-foreground">PTZ</td>
-                <td className="px-5 py-4 text-muted-foreground">Preset position 1 updated</td>
+                <td className="text-foreground px-5 py-4 font-medium">PTZ</td>
+                <td className="text-muted-foreground px-5 py-4">Preset position 1 updated</td>
               </tr>
               <tr className="hover:bg-muted/30">
                 <td className="px-5 py-4">
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                  <div className="text-muted-foreground flex items-center gap-2">
                     <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">2025-12-11<br />14:25:17</span>
+                    <span className="font-mono text-xs">
+                      2025-12-11
+                      <br />
+                      14:25:17
+                    </span>
                   </div>
                 </td>
                 <td className="px-5 py-4">
@@ -512,14 +552,18 @@ export default function DiagnosticsPage() {
                     Error
                   </span>
                 </td>
-                <td className="px-5 py-4 font-medium text-foreground">Storage</td>
-                <td className="px-5 py-4 text-muted-foreground">Storage capacity at 85%</td>
+                <td className="text-foreground px-5 py-4 font-medium">Storage</td>
+                <td className="text-muted-foreground px-5 py-4">Storage capacity at 85%</td>
               </tr>
               <tr className="hover:bg-muted/30">
                 <td className="px-5 py-4">
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                  <div className="text-muted-foreground flex items-center gap-2">
                     <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">2025-12-11<br />14:20:55</span>
+                    <span className="font-mono text-xs">
+                      2025-12-11
+                      <br />
+                      14:20:55
+                    </span>
                   </div>
                 </td>
                 <td className="px-5 py-4">
@@ -528,14 +572,18 @@ export default function DiagnosticsPage() {
                     Info
                   </span>
                 </td>
-                <td className="px-5 py-4 font-medium text-foreground">System</td>
-                <td className="px-5 py-4 text-muted-foreground">Firmware version 2.4.1 running</td>
+                <td className="text-foreground px-5 py-4 font-medium">System</td>
+                <td className="text-muted-foreground px-5 py-4">Firmware version 2.4.1 running</td>
               </tr>
               <tr className="hover:bg-muted/30">
                 <td className="px-5 py-4">
-                  <div className="flex items-center gap-2 text-muted-foreground">
+                  <div className="text-muted-foreground flex items-center gap-2">
                     <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">2025-12-11<br />14:18:33</span>
+                    <span className="font-mono text-xs">
+                      2025-12-11
+                      <br />
+                      14:18:33
+                    </span>
                   </div>
                 </td>
                 <td className="px-5 py-4">
@@ -544,8 +592,8 @@ export default function DiagnosticsPage() {
                     Info
                   </span>
                 </td>
-                <td className="px-5 py-4 font-medium text-foreground">Auth</td>
-                <td className="px-5 py-4 text-muted-foreground">User admin logged in</td>
+                <td className="text-foreground px-5 py-4 font-medium">Auth</td>
+                <td className="text-muted-foreground px-5 py-4">User admin logged in</td>
               </tr>
             </tbody>
           </table>

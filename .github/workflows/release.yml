@@ -20,13 +20,13 @@ jobs:
         working-directory: cross-compile/www
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "24"
+          cache: "npm"
           cache-dependency-path: cross-compile/www/package-lock.json
 
       - name: Install dependencies
@@ -36,7 +36,7 @@ jobs:
         run: npm run build
 
       - name: Archive WebUI Build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: webui-build
           path: SD_card_contents/anyka_hack/onvif/www/
@@ -48,7 +48,7 @@ jobs:
       image: kkrzysztofik/anyka-cross-compile:latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -89,7 +89,7 @@ jobs:
           chmod +x release-artifacts/SD_card_contents/anyka_hack/onvif/onvif-rust
 
       - name: Archive Rust Build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: rust-build
           path: release-artifacts/SD_card_contents/anyka_hack/onvif/onvif-rust
@@ -100,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Extract Tag Information
         id: tag_info
@@ -114,13 +114,13 @@ jobs:
         run: mkdir -p release-final/SD_card_contents/anyka_hack/onvif/www
 
       - name: Download Rust Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: rust-build
           path: release-final/SD_card_contents/anyka_hack/onvif/
 
       - name: Download WebUI Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: webui-build
           path: release-final/SD_card_contents/anyka_hack/onvif/www

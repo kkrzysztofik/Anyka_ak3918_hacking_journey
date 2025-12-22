@@ -37,7 +37,12 @@ import {
   SettingsCardHeader,
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
-import { setSystemFactoryDefault, systemReboot } from '@/services/maintenanceService';
+import {
+  getSystemBackup,
+  restoreSystem,
+  setSystemFactoryDefault,
+  systemReboot,
+} from '@/services/maintenanceService';
 
 export default function MaintenancePage() {
   const [rebootOpen, setRebootOpen] = useState(false);
@@ -98,9 +103,98 @@ export default function MaintenancePage() {
     },
   });
 
-  // Stub handlers for Backup/Restore/Upgrade
-  const handleBackup = () => toast.info('Backup feature not available');
-  const handleRestore = () => toast.info('Restore feature not available');
+  // Backup Mutation
+  const backupMutation = useMutation({
+    mutationFn: getSystemBackup,
+    onSuccess: (backupFiles) => {
+      if (backupFiles.length === 0) {
+        toast.error('Backup failed', {
+          description: 'No backup files received from device',
+        });
+        return;
+      }
+
+      // Find config.toml file
+      const configFile = backupFiles.find((f) => f.Name === 'config.toml');
+      if (!configFile) {
+        toast.error('Backup failed', {
+          description: 'Backup does not contain config.toml',
+        });
+        return;
+      }
+
+      // Decode base64 to TOML content
+      try {
+        const tomlContent = atob(configFile.Data);
+        const blob = new Blob([tomlContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+
+        // Generate filename with current date
+        const date = new Date().toISOString().split('T')[0];
+        const filename = `config-backup-${date}.toml`;
+
+        // Trigger download
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        // Clean up
+        URL.revokeObjectURL(url);
+
+        toast.success('Backup downloaded', {
+          description: `Configuration saved as ${filename}`,
+        });
+      } catch (error) {
+        toast.error('Backup failed', {
+          description: error instanceof Error ? error.message : 'Failed to decode backup data',
+        });
+      }
+    },
+    onError: (error) => {
+      toast.error('Backup failed', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  // Restore Mutation
+  const restoreMutation = useMutation({
+    mutationFn: restoreSystem,
+    onSuccess: () => {
+      toast.success('Configuration restored', {
+        description: 'Device settings have been restored successfully',
+      });
+    },
+    onError: (error) => {
+      toast.error('Restore failed', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  // Backup handler
+  const handleBackup = () => {
+    backupMutation.mutate();
+  };
+
+  // Restore handler
+  const handleRestore = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.toml';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        restoreMutation.mutate(file);
+      }
+    };
+    input.click();
+  };
+
+  // Stub handler for Upgrade
   const handleUpgrade = () => toast.info('Firmware upgrade not available');
 
   return (
@@ -127,9 +221,7 @@ export default function MaintenancePage() {
                 </div>
                 <div>
                   <SettingsCardTitle>Configuration Backup & Restore</SettingsCardTitle>
-                  <SettingsCardDescription>
-                    Save or load device settings (Unavailable)
-                  </SettingsCardDescription>
+                  <SettingsCardDescription>Save or load device settings</SettingsCardDescription>
                 </div>
               </div>
             </SettingsCardHeader>
@@ -139,17 +231,19 @@ export default function MaintenancePage() {
                   variant="outline"
                   className="flex h-[80px] flex-col items-center justify-center gap-[8px] border-[#3a3a3c] bg-[#1c1c1e] hover:bg-[#2c2c2e] hover:text-white"
                   onClick={handleBackup}
+                  disabled={backupMutation.isPending}
                 >
                   <Download className="size-5 text-[#0a84ff]" />
-                  <span>Backup</span>
+                  <span>{backupMutation.isPending ? 'Backing up...' : 'Backup'}</span>
                 </Button>
                 <Button
                   variant="outline"
                   className="flex h-[80px] flex-col items-center justify-center gap-[8px] border-[#3a3a3c] bg-[#1c1c1e] hover:bg-[#2c2c2e] hover:text-white"
                   onClick={handleRestore}
+                  disabled={restoreMutation.isPending}
                 >
                   <Upload className="size-5 text-[#0a84ff]" />
-                  <span>Restore</span>
+                  <span>{restoreMutation.isPending ? 'Restoring...' : 'Restore'}</span>
                 </Button>
               </div>
             </SettingsCardContent>

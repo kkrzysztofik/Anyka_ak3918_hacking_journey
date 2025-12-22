@@ -1,6 +1,6 @@
 import react from '@vitejs/plugin-react';
-import { dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import viteCompression from 'vite-plugin-compression';
 
@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => ({
     include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'json', 'html', 'lcov'],
       exclude: ['node_modules/', 'src/test/'],
     },
   },
@@ -47,26 +47,28 @@ export default defineConfig(({ mode }) => ({
     include: ['react', 'react-dom', 'react-router-dom', 'axios', 'lucide-react'],
   },
   server: {
-    host: '0.0.0.0',
+    // NOSONAR: S5332 - Binding to 0.0.0.0 is required for embedded device access
+    host: '0.0.0.0', // NOSONAR
     port: 3000,
     proxy: {
       // Proxy ONVIF requests to avoid CORS issues during development
+      // NOSONAR: S5332, S4830 - HTTP and secure:false are required for embedded camera devices
       '/onvif': {
-        target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80',
+        target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80', // NOSONAR
         changeOrigin: true,
-        secure: false,
+        secure: false, // NOSONAR
       },
       // Proxy utilization requests
       '/utilization': {
-        target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80',
+        target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80', // NOSONAR
         changeOrigin: true,
-        secure: false,
+        secure: false, // NOSONAR
       },
       // Proxy snapshot requests
       '/snapshot': {
-        target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80',
+        target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80', // NOSONAR
         changeOrigin: true,
-        secure: false,
+        secure: false, // NOSONAR
       },
     },
   },
@@ -132,15 +134,18 @@ export default defineConfig(({ mode }) => ({
             return 'vendor';
           }
         },
-        chunkFileNames: (_chunkInfo) => {
-          // const facadeModuleId = chunkInfo.facadeModuleId ? chunkInfo.facadeModuleId.split('/').pop() : 'chunk';
+        chunkFileNames: () => {
           return `js/[name]-[hash].js`;
         },
         entryFileNames: 'js/[name]-[hash].js',
         assetFileNames: (assetInfo) => {
-          const info = assetInfo.name.split('.');
+          // Use names array (preferred) or fall back to name if names is not available
+          // NOSONAR: S1874 - name is still needed as fallback for older Rollup versions
+          const assetName =
+            assetInfo.names?.[0] ?? (assetInfo as { name?: string }).name ?? 'asset'; // NOSONAR
+          const info = assetName.split('.');
           const ext = info[info.length - 1];
-          if (/\.(css)$/.test(assetInfo.name)) {
+          if (/\.(css)$/.test(assetName)) {
             return `css/[name]-[hash].${ext}`;
           }
           return `assets/[name]-[hash].${ext}`;

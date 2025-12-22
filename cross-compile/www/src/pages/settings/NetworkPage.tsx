@@ -295,7 +295,9 @@ export default function NetworkPage() {
                   render={({ field }) => (
                     <FormItem className="flex flex-row items-center justify-between rounded-lg border border-[#3a3a3c] bg-[#2c2c2e] p-4">
                       <div>
-                        <FormLabel className="text-base leading-none text-white">ONVIF Discovery</FormLabel>
+                        <FormLabel className="text-base leading-none text-white">
+                          ONVIF Discovery
+                        </FormLabel>
                         <FormDescription className="text-[#a1a1a6]">
                           Make this device visible to ONVIF clients
                         </FormDescription>
@@ -383,7 +385,9 @@ export default function NetworkPage() {
                   name="dnsFromDHCP"
                   render={({ field }) => (
                     <FormItem className="flex flex-row items-center justify-between rounded-lg border border-[#3a3a3c] bg-[#2c2c2e] p-4">
-                      <FormLabel className="text-base leading-none text-white">Obtain DNS from DHCP</FormLabel>
+                      <FormLabel className="text-base leading-none text-white">
+                        Obtain DNS from DHCP
+                      </FormLabel>
                       <FormControl>
                         <Switch checked={field.value} onCheckedChange={field.onChange} />
                       </FormControl>

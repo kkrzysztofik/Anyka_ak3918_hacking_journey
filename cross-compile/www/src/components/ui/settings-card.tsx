@@ -6,10 +6,7 @@ const SettingsCard = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLD
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn(
-        'overflow-hidden rounded-xl border border-border bg-card',
-        className,
-      )}
+      className={cn('border-border bg-card overflow-hidden rounded-xl border', className)}
       {...props}
     />
   ),
@@ -18,7 +15,7 @@ SettingsCard.displayName = 'SettingsCard';
 
 const SettingsCardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('border-b border-border p-5', className)} {...props} />
+    <div ref={ref} className={cn('border-border border-b p-5', className)} {...props} />
   ),
 );
 SettingsCardHeader.displayName = 'SettingsCardHeader';
@@ -29,10 +26,7 @@ const SettingsCardTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <h3
     ref={ref}
-    className={cn(
-      'text-sm font-semibold leading-none tracking-tight text-foreground',
-      className,
-    )}
+    className={cn('text-foreground text-sm leading-none font-semibold tracking-tight', className)}
     {...props}
   />
 ));
@@ -42,14 +36,12 @@ const SettingsCardDescription = React.forwardRef<
   HTMLParagraphElement,
   React.HTMLAttributes<HTMLParagraphElement>
 >(({ className, ...props }, ref) => (
-  <p ref={ref} className={cn('text-xs text-muted-foreground', className)} {...props} />
+  <p ref={ref} className={cn('text-muted-foreground text-xs', className)} {...props} />
 ));
 SettingsCardDescription.displayName = 'SettingsCardDescription';
 
 const SettingsCardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('p-5', className)} {...props} />
-  ),
+  ({ className, ...props }, ref) => <div ref={ref} className={cn('p-5', className)} {...props} />,
 );
 SettingsCardContent.displayName = 'SettingsCardContent';
 
