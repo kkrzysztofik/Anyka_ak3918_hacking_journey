@@ -67,7 +67,9 @@ use super::dispatcher::{AuthContext, ServiceDispatcher};
 use super::error::OnvifError;
 use super::ws_security::{WsSecurityConfig, WsSecurityValidator};
 use crate::app::AppState;
-use crate::logging::{HttpLogConfig, HttpLoggingMiddleware, memory_check_middleware, static_asset_logging_middleware};
+use crate::logging::{
+    HttpLogConfig, HttpLoggingMiddleware, memory_check_middleware, static_asset_logging_middleware,
+};
 use crate::users::{PasswordManager, UserStorage};
 use crate::utils::MemoryMonitor;
 
@@ -927,9 +929,9 @@ mod tests {
     #[tokio::test]
     async fn test_serve_static_files_with_compression() {
         use axum::http::{Request, StatusCode};
-        use tower::ServiceExt;
         use std::fs::File;
         use std::io::Write;
+        use tower::ServiceExt;
 
         // Create a temp directory for static files
         let temp_dir = tempfile::tempdir().unwrap();
@@ -963,14 +965,13 @@ mod tests {
         let app = server.build_router(state);
 
         // Test 1: Request without compression preference -> serves plain file
-        let request = Request::builder()
-            .uri("/")
-            .body(Body::empty())
-            .unwrap();
+        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
         let response = app.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert!(response.headers().get("content-encoding").is_none());
-        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
         assert_eq!(&body[..], b"Hello World");
 
         // Test 2: Request with gzip preference -> serves .gz file
@@ -982,7 +983,9 @@ mod tests {
         let response = app.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers().get("content-encoding").unwrap(), "gzip");
-        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
         assert_eq!(&body[..], b"Hello Gzip");
     }
 }

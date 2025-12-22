@@ -122,30 +122,79 @@ jobs:
             echo "⚠️ Coverage file not found"
           fi
 
-      - name: Run Snyk Security Scan
-        id: snyk-scan
+      - name: Install Snyk CLI
+        if: env.SNYK_TOKEN != ''
+        run: npm install -g snyk
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Snyk Code test
+        id: snyk-code
         continue-on-error: true
         working-directory: cross-compile/onvif-rust
         run: |
           if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
-            # Install Snyk CLI
-            npm install -g snyk
-            # Run Snyk scan for Rust dependencies (if Cargo.lock exists)
-            if [ -f "Cargo.lock" ]; then
-              snyk test --severity-threshold=high --json > snyk-results.json 2>&1 || true
-              SNYK_ISSUES=$(cat snyk-results.json | jq -r '.vulnerabilities | length' 2>/dev/null || echo "0")
-              echo "snyk_issues=$SNYK_ISSUES" >> $GITHUB_OUTPUT
-              echo "snyk_status=completed" >> $GITHUB_OUTPUT
-            else
-              echo "snyk_issues=0" >> $GITHUB_OUTPUT
-              echo "snyk_status=skipped" >> $GITHUB_OUTPUT
-            fi
+            snyk code test --sarif > snyk-code.sarif || true
+            echo "snyk_code_status=completed" >> $GITHUB_OUTPUT
           else
-            echo "snyk_issues=0" >> $GITHUB_OUTPUT
-            echo "snyk_status=skipped" >> $GITHUB_OUTPUT
+            echo "snyk_code_status=skipped" >> $GITHUB_OUTPUT
           fi
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Snyk Open Source monitor
+        id: snyk-oss
+        continue-on-error: true
+        working-directory: cross-compile/onvif-rust
+        run: |
+          if [ -n "${{ secrets.SNYK_TOKEN }}" ] && [ -f "Cargo.toml" ]; then
+            snyk monitor --all-projects || true
+            # Parse results for PR comment
+            snyk test --json > snyk-oss-results.json 2>&1 || true
+            SNYK_ISSUES=$(cat snyk-oss-results.json | jq -r '.vulnerabilities | length' 2>/dev/null || echo "0")
+            echo "snyk_issues=$SNYK_ISSUES" >> $GITHUB_OUTPUT
+            echo "snyk_oss_status=completed" >> $GITHUB_OUTPUT
+          else
+            echo "snyk_issues=0" >> $GITHUB_OUTPUT
+            echo "snyk_oss_status=skipped" >> $GITHUB_OUTPUT
+          fi
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Build Docker image for container scanning
+        id: build-docker
+        continue-on-error: true
+        if: env.SNYK_TOKEN != ''
+        run: |
+          if [ -f "cross-compile/Dockerfile" ]; then
+            docker build -t anyka-dev:test -f cross-compile/Dockerfile . || true
+            echo "docker_built=true" >> $GITHUB_OUTPUT
+          else
+            echo "docker_built=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Snyk Container monitor
+        id: snyk-container
+        continue-on-error: true
+        if: steps.build-docker.outputs.docker_built == 'true'
+        run: |
+          if [ -n "${{ secrets.SNYK_TOKEN }}" ]; then
+            snyk container monitor anyka-dev:test --file=cross-compile/Dockerfile || true
+            echo "snyk_container_status=completed" >> $GITHUB_OUTPUT
+          else
+            echo "snyk_container_status=skipped" >> $GITHUB_OUTPUT
+          fi
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Upload Snyk Code result to GitHub Code Scanning
+        if: always() && steps.snyk-code.outputs.snyk_code_status == 'completed'
+        uses: github/codeql-action/upload-sarif@v3
+        continue-on-error: true
+        with:
+          sarif_file: cross-compile/onvif-rust/snyk-code.sarif
 
       - name: SonarQube Scan
         id: sonar-scan
@@ -176,9 +225,11 @@ jobs:
           - **Coverage**: ${{ steps.coverage-summary.outputs.coverage }}%
           - **Report**: [View Coverage Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
-          ## 🔒 Security Scan (Snyk)
-          - **Status**: ${{ steps.snyk-scan.outputs.snyk_status }}
-          - **Issues Found**: ${{ steps.snyk-scan.outputs.snyk_issues }}
+          ## 🔒 Security Scans (Snyk)
+          - **Code (SAST)**: ${{ steps.snyk-code.outputs.snyk_code_status == 'completed' && '✅ Completed' || '⚠️ Skipped' }}
+          - **Open Source (SCA)**: ${{ steps.snyk-oss.outputs.snyk_oss_status == 'completed' && '✅ Completed' || '⚠️ Skipped' }}
+          - **Container**: ${{ steps.snyk-container.outputs.snyk_container_status == 'completed' && '✅ Completed' || steps.build-docker.outputs.docker_built == 'false' && '⏭️ No Dockerfile' || '⚠️ Skipped' }}
+          - **SCA Issues Found**: ${{ steps.snyk-oss.outputs.snyk_issues || '0' }}
 
           ## 🎯 Code Quality (SonarQube)
           - **Status**: ${{ steps.sonar-scan.outcome == 'success' && '✅ Passed' || '⚠️ Failed/Skipped' }}
@@ -198,8 +249,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const coverage = '${{ steps.coverage-summary.outputs.coverage }}';
-            const snykStatus = '${{ steps.snyk-scan.outputs.snyk_status }}';
-            const snykIssues = '${{ steps.snyk-scan.outputs.snyk_issues }}';
+            const snykCodeStatus = '${{ steps.snyk-code.outputs.snyk_code_status }}';
+            const snykOssStatus = '${{ steps.snyk-oss.outputs.snyk_oss_status }}';
+            const snykContainerStatus = '${{ steps.snyk-container.outputs.snyk_container_status }}';
+            const snykIssues = '${{ steps.snyk-oss.outputs.snyk_issues || 0 }}';
+            const dockerBuilt = '${{ steps.build-docker.outputs.docker_built }}';
             const sonarStatus = '${{ steps.sonar-scan.outcome }}';
             const qualityGateStatus = '${{ steps.sonar-quality-gate.outcome }}';
 
@@ -211,12 +265,13 @@ jobs:
             | **Line Coverage** | ${coverage}% |
             | **Coverage Report** | [View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 
-            ### 🔒 Security Scan (Snyk)
-            | Metric | Value |
-            |--------|-------|
-            | **Status** | ${snykStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped'} |
-            | **Vulnerabilities Found** | ${snykIssues} |
-            ${snykStatus === 'completed' && snykIssues !== '0' ? '| **Action Required** | ⚠️ Review vulnerabilities in Snyk dashboard |' : ''}
+            ### 🔒 Security Scans (Snyk)
+            | Scan Type | Status | Details |
+            |-----------|--------|---------|
+            | **Code (SAST)** | ${snykCodeStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped'} | [View in Code Scanning](https://github.com/${{ github.repository }}/security/code-scanning) |
+            | **Open Source (SCA)** | ${snykOssStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped'} | ${snykIssues !== '0' ? `⚠️ ${snykIssues} vulnerabilities found` : '✅ No issues'} |
+            | **Container** | ${dockerBuilt === 'true' ? (snykContainerStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped') : '⏭️ No Dockerfile'} | Container image security scan |
+            ${snykOssStatus === 'completed' && snykIssues !== '0' ? '| **Action Required** | ⚠️ Review vulnerabilities in [Snyk Dashboard](https://app.snyk.io/) |' : ''}
 
             ### 🎯 Code Quality (SonarQube)
             | Metric | Value |

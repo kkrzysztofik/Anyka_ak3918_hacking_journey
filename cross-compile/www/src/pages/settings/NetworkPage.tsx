@@ -261,7 +261,7 @@ export default function NetworkPage() {
                       <FormControl>
                         <Input
                           {...field}
-                          className="border-[#3a3a3c] bg-transparent text-white focus:border-[#dc2626]"
+                          className="border-[#3a3a3c] bg-transparent text-white focus:border-[#007AFF]"
                         />
                       </FormControl>
                       <FormMessage />
@@ -511,7 +511,7 @@ export default function NetworkPage() {
               <Button
                 type="submit"
                 disabled={mutation.isPending || !form.formState.isDirty}
-                className="h-[44px] rounded-[8px] bg-[#dc2626] px-[32px] font-semibold text-white hover:bg-[#ef4444]"
+                className="h-[44px] rounded-[8px] bg-[#007AFF] px-[32px] font-semibold text-white hover:bg-[#0066CC]"
               >
                 <Save className="mr-2 size-4" />
                 Save Changes
@@ -560,7 +560,7 @@ export default function NetworkPage() {
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleConfirm}
-                className="bg-[#dc2626] text-white hover:bg-[#ef4444]"
+                className="bg-[#007AFF] text-white hover:bg-[#0066CC]"
               >
                 {mutation.isPending ? 'Saving...' : 'Confirm Save'}
               </AlertDialogAction>

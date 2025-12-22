@@ -2,7 +2,8 @@
 /**
  * Authentication Context and Hook
  *
- * Manages Basic Auth credentials in memory only (not localStorage for security).
+ * Manages Basic Auth credentials with encrypted password storage.
+ * Passwords are encrypted using AES-GCM before storing in sessionStorage.
  * Provides AuthProvider wrapper and useAuth hook.
  */
 import React, {
@@ -10,19 +11,30 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from 'react';
+import {
+  decrypt,
+  encrypt,
+  type EncryptedData,
+} from '../utils/crypto';
 
 interface AuthCredentials {
   username: string;
   password: string;
 }
 
+interface StoredAuthData {
+  username: string;
+  encryptedPassword: EncryptedData;
+}
+
 interface AuthContextValue {
   isAuthenticated: boolean;
   username: string | null;
-  login: (username: string, password: string) => void;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   getCredentials: () => AuthCredentials | null;
   getBasicAuthHeader: () => string | null;
@@ -37,24 +49,41 @@ interface AuthProviderProps {
 const AUTH_STORAGE_KEY = 'onvif_camera_auth';
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [credentials, setCredentials] = useState<AuthCredentials | null>(() => {
-    // Initialize from sessionStorage if available
-    const stored = sessionStorage.getItem(AUTH_STORAGE_KEY);
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch (e) {
-        console.error('Failed to parse stored credentials', e);
-        return null;
-      }
-    }
-    return null;
-  });
+  const [credentials, setCredentials] = useState<AuthCredentials | null>(null);
 
-  const login = useCallback((username: string, password: string) => {
+  // Hydrate credentials from sessionStorage on mount
+  useEffect(() => {
+    const hydrateCredentials = async () => {
+      const stored = sessionStorage.getItem(AUTH_STORAGE_KEY);
+      if (stored) {
+        try {
+          const data: StoredAuthData = JSON.parse(stored);
+          // Decrypt the password asynchronously
+          const password = await decrypt(data.encryptedPassword);
+          setCredentials({ username: data.username, password });
+        } catch (e) {
+          console.error('Failed to decrypt stored credentials', e);
+          // Clear invalid stored data
+          sessionStorage.removeItem(AUTH_STORAGE_KEY);
+        }
+      }
+    };
+
+    hydrateCredentials();
+  }, []);
+
+  const login = useCallback(async (username: string, password: string) => {
+    // Encrypt password before storing
+    const encryptedPassword = await encrypt(password);
     const creds = { username, password };
     setCredentials(creds);
-    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(creds));
+
+    // Store username in clear text, password encrypted
+    const storedData: StoredAuthData = {
+      username,
+      encryptedPassword,
+    };
+    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(storedData));
   }, []);
 
   const logout = useCallback(() => {

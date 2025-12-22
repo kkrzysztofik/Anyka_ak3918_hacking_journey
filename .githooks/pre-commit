@@ -1,17 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pre-commit hook: Run Rust formatter for onvif-rust only when relevant files are staged
-# This script will run cargo fmt --check and if formatting is needed, run cargo fmt to auto-format and restage changes.
+# Pre-commit hook: Run code quality checks
+# - cargo fmt (auto-formats and restages if needed)
+# - cargo clippy -- -D warnings (Rust linting)
+# - npm lint (JavaScript/TypeScript linting)
+# - prettier --check (JavaScript/TypeScript formatting)
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 
+# Custom cargo path
+CARGO_BIN="/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo"
+RUST_PROJECT_DIR="cross-compile/onvif-rust"
+NPM_PROJECT_DIR="cross-compile/www"
+
 STAGED_FILES=$(git diff --cached --name-only)
-if printf "%s" "$STAGED_FILES" | grep -q '^cross-compile/onvif-rust/'; then
-  echo "🔧 Running cargo fmt for cross-compile/onvif-rust..."
-  if [ -f cross-compile/onvif-rust/Cargo.toml ]; then
-    pushd cross-compile/onvif-rust >/dev/null || exit 1
+
+# Track if any checks failed
+FAILED=0
+
+# Check if Rust files are staged
+RUST_FILES=$(printf "%s" "$STAGED_FILES" | grep -qE '\.(rs|toml)$' && echo "yes" || echo "")
+# Check if JS/TS files are staged
+JS_FILES=$(printf "%s" "$STAGED_FILES" | grep -qE '\.(js|jsx|ts|tsx|json|css|scss|html)$' && echo "yes" || echo "")
+
+# 1. Rust formatting check (auto-formats if needed)
+if [ -n "$RUST_FILES" ] && printf "%s" "$STAGED_FILES" | grep -q "^${RUST_PROJECT_DIR}/"; then
+  echo "🔧 Running cargo fmt for ${RUST_PROJECT_DIR}..."
+  if [ -f "${RUST_PROJECT_DIR}/Cargo.toml" ]; then
+    pushd "${RUST_PROJECT_DIR}" >/dev/null || exit 1
     # Optional setup script for toolchain / cross compilation configs (idempotent)
     if [ -x ./scripts/setup-cargo-config.sh ]; then
       ./scripts/setup-cargo-config.sh || true
@@ -25,7 +43,7 @@ if printf "%s" "$STAGED_FILES" | grep -q '^cross-compile/onvif-rust/'; then
       # Stage only modified or new files under cross-compile/onvif-rust
       # Run from repo root to ensure paths work correctly
       # Filter out deleted files (D prefix) and only restage existing files
-      MODIFIED_FILES=$(git status --porcelain | grep '^.M\|^M.\|^A.\|^??' | awk '{print $2}' | grep '^cross-compile/onvif-rust/' || true)
+      MODIFIED_FILES=$(git status --porcelain | grep '^.M\|^M.\|^A.\|^??' | awk '{print $2}' | grep "^${RUST_PROJECT_DIR}/" || true)
       if [ -n "$MODIFIED_FILES" ]; then
         echo "Restaging formatted files:"
         echo "$MODIFIED_FILES"
@@ -38,8 +56,74 @@ if printf "%s" "$STAGED_FILES" | grep -q '^cross-compile/onvif-rust/'; then
       popd >/dev/null || exit 1
     fi
   else
-    echo "⚠️  cross-compile/onvif-rust/Cargo.toml not found; skipping cargo fmt"
+    echo "⚠️  ${RUST_PROJECT_DIR}/Cargo.toml not found; skipping cargo fmt"
   fi
 fi
 
+# 2. Rust clippy check
+if [ -n "$RUST_FILES" ] && printf "%s" "$STAGED_FILES" | grep -q "^${RUST_PROJECT_DIR}/"; then
+  echo "🔍 Running cargo clippy for ${RUST_PROJECT_DIR}..."
+  if [ -f "${RUST_PROJECT_DIR}/Cargo.toml" ]; then
+    if [ -f "$CARGO_BIN" ]; then
+      pushd "${RUST_PROJECT_DIR}" >/dev/null || exit 1
+      # Optional setup script for toolchain / cross compilation configs (idempotent)
+      if [ -x ./scripts/setup-cargo-config.sh ]; then
+        ./scripts/setup-cargo-config.sh || true
+      fi
+      if ! "$CARGO_BIN" clippy -- -D warnings; then
+        echo "❌ cargo clippy check failed"
+        FAILED=1
+      else
+        echo "✅ cargo clippy check passed"
+      fi
+      popd >/dev/null || exit 1
+    else
+      echo "⚠️  Custom cargo binary not found at $CARGO_BIN, skipping cargo clippy"
+    fi
+  fi
+fi
+
+# 3. npm lint check
+if [ -n "$JS_FILES" ] && printf "%s" "$STAGED_FILES" | grep -q "^${NPM_PROJECT_DIR}/"; then
+  echo "🔍 Running npm lint for ${NPM_PROJECT_DIR}..."
+  if [ -f "${NPM_PROJECT_DIR}/package.json" ]; then
+    pushd "${NPM_PROJECT_DIR}" >/dev/null || exit 1
+    if ! npm run lint:fix; then
+      echo "❌ npm lint check failed"
+      echo "💡 Run 'npm run lint:fix' to fix linting issues"
+      FAILED=1
+    else
+      echo "✅ npm lint check passed"
+    fi
+    popd >/dev/null || exit 1
+  else
+    echo "⚠️  ${NPM_PROJECT_DIR}/package.json not found; skipping npm lint"
+  fi
+fi
+
+# 4. prettier check
+if [ -n "$JS_FILES" ] && printf "%s" "$STAGED_FILES" | grep -q "^${NPM_PROJECT_DIR}/"; then
+  echo "🎨 Checking Prettier formatting for ${NPM_PROJECT_DIR}..."
+  if [ -f "${NPM_PROJECT_DIR}/package.json" ]; then
+    pushd "${NPM_PROJECT_DIR}" >/dev/null || exit 1
+    if ! npm run prettier .; then
+      echo "❌ Prettier formatting check failed"
+      echo "💡 Run 'npm run prettier' to fix formatting issues"
+      FAILED=1
+    else
+      echo "✅ Prettier formatting check passed"
+    fi
+    popd >/dev/null || exit 1
+  else
+    echo "⚠️  ${NPM_PROJECT_DIR}/package.json not found; skipping prettier check"
+  fi
+fi
+
+# Exit with failure if any check failed
+if [ $FAILED -eq 1 ]; then
+  echo "❌ Pre-commit checks failed. Please fix the issues above before committing."
+  exit 1
+fi
+
+echo "✅ All pre-commit checks passed!"
 exit 0

@@ -1,12 +1,12 @@
 //! Integration tests for static asset access logging.
 
 use axum::{
+    Router,
+    body::Body,
     extract::ConnectInfo,
     http::{Request, StatusCode, header},
     middleware::Next,
     response::Response,
-    Router,
-    body::Body,
 };
 use onvif_rust::logging::static_asset_logging_middleware;
 use std::net::SocketAddr;
@@ -52,9 +52,18 @@ fn test_apache_timestamp_format_structure() {
     // Examples: [10/Oct/2000:13:55:36 +0000]
     let example_timestamp = "[10/Oct/2000:13:55:36 +0000]";
 
-    assert!(example_timestamp.contains('/'), "Timestamp should contain /");
-    assert!(example_timestamp.contains(':'), "Timestamp should contain :");
-    assert!(example_timestamp.len() > 10, "Timestamp should be reasonably long");
+    assert!(
+        example_timestamp.contains('/'),
+        "Timestamp should contain /"
+    );
+    assert!(
+        example_timestamp.contains(':'),
+        "Timestamp should contain :"
+    );
+    assert!(
+        example_timestamp.len() > 10,
+        "Timestamp should be reasonably long"
+    );
 }
 
 #[test]
@@ -78,7 +87,10 @@ fn test_static_asset_log_format_contains_apache_fields() {
     assert!(log_line.contains(client_ip), "Should contain client IP");
     assert!(log_line.contains(method), "Should contain HTTP method");
     assert!(log_line.contains(path), "Should contain request path");
-    assert!(log_line.contains(&status.to_string()), "Should contain status code");
+    assert!(
+        log_line.contains(&status.to_string()),
+        "Should contain status code"
+    );
     assert!(log_line.contains(size), "Should contain response size");
     assert!(log_line.contains(referer), "Should contain referer");
     assert!(log_line.contains(user_agent), "Should contain user-agent");
@@ -92,8 +104,8 @@ fn test_apache_log_format_with_missing_headers() {
     let path = "/index.html";
     let status = 200;
     let size = "1024";
-    let referer = "-";  // No referer
-    let user_agent = "-";  // No user agent
+    let referer = "-"; // No referer
+    let user_agent = "-"; // No user agent
 
     let log_line = format!(
         "{} - - [timestamp] \"{} {} HTTP/1.1\" {} {} \"{}\" \"{}\"",
@@ -101,7 +113,10 @@ fn test_apache_log_format_with_missing_headers() {
     );
 
     // Verify hyphens are used for missing values
-    assert!(log_line.contains("\"- \""), "Should use - for missing headers");
+    assert!(
+        log_line.contains("\"- \""),
+        "Should use - for missing headers"
+    );
 }
 
 #[test]
@@ -114,8 +129,11 @@ fn test_apache_log_format_status_codes() {
             "127.0.0.1 - - [timestamp] \"GET /file HTTP/1.1\" {} 1024 \"-\" \"-\"",
             status
         );
-        assert!(log_line.contains(&status.to_string()),
-                "Log should contain status code {}", status);
+        assert!(
+            log_line.contains(&status.to_string()),
+            "Log should contain status code {}",
+            status
+        );
     }
 }
 
@@ -128,8 +146,14 @@ fn test_apache_log_format_with_query_string() {
         path
     );
 
-    assert!(log_line.contains("q=test"), "Should contain query parameter q");
-    assert!(log_line.contains("lang=en"), "Should contain query parameter lang");
+    assert!(
+        log_line.contains("q=test"),
+        "Should contain query parameter q"
+    );
+    assert!(
+        log_line.contains("lang=en"),
+        "Should contain query parameter lang"
+    );
 }
 
 #[test]
@@ -137,14 +161,18 @@ fn test_apache_log_format_content_length_hyphen() {
     // Test that missing Content-Length is represented as "-"
     let log_line = "127.0.0.1 - - [timestamp] \"GET /file HTTP/1.1\" 204 - \"-\" \"-\"";
 
-    assert!(log_line.contains(" - \""), "Should contain hyphen for missing Content-Length");
+    assert!(
+        log_line.contains(" - \""),
+        "Should contain hyphen for missing Content-Length"
+    );
 }
 
 #[test]
 fn test_apache_log_RFC_compliance() {
     // Test RFC 3875 (CGI) common log format compliance
     // Format: host ident authuser date request status bytes
-    let log_line = "192.168.1.1 - frank [10/Oct/2000:13:55:36 -0700] \"GET /apache_pb.gif HTTP/1.0\" 200 2326";
+    let log_line =
+        "192.168.1.1 - frank [10/Oct/2000:13:55:36 -0700] \"GET /apache_pb.gif HTTP/1.0\" 200 2326";
 
     // Should be parseable as: IP, -, -, [timestamp], request line, status, bytes
     let parts: Vec<&str> = log_line.split_whitespace().collect();
@@ -158,6 +186,12 @@ fn test_apache_log_RFC_compliance() {
 fn test_log_config_default_values() {
     let config = onvif_rust::logging::StaticAssetLogConfig::default();
 
-    assert!(config.enabled, "Static asset logging should be enabled by default");
-    assert_eq!(config.target, "static_assets", "Default target should be 'static_assets'");
+    assert!(
+        config.enabled,
+        "Static asset logging should be enabled by default"
+    );
+    assert_eq!(
+        config.target, "static_assets",
+        "Default target should be 'static_assets'"
+    );
 }

@@ -26,8 +26,8 @@
 
 pub mod http;
 pub mod http_memory;
-pub mod static_assets;
 mod platform;
+pub mod static_assets;
 
 pub use http::{HttpLogConfig, HttpLoggingMiddleware};
 pub use http_memory::memory_check_middleware;

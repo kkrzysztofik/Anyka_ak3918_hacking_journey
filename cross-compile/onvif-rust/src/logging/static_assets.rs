@@ -62,7 +62,11 @@ pub async fn static_asset_logging_middleware(
     let client_ip = addr.ip().to_string();
     let method = req.method().to_string();
     let path = req.uri().path().to_string();
-    let query = req.uri().query().map(|q| format!("?{}", q)).unwrap_or_default();
+    let query = req
+        .uri()
+        .query()
+        .map(|q| format!("?{}", q))
+        .unwrap_or_default();
     let full_path = format!("{}{}", path, query);
 
     // Extract headers before consuming the request
@@ -117,11 +121,7 @@ pub async fn static_asset_logging_middleware(
 fn format_apache_timestamp() -> String {
     let now = Local::now();
     let offset = now.format("%z");
-    let formatted_offset = format!(
-        "{}:{}",
-        &offset.to_string()[..3],
-        &offset.to_string()[3..]
-    );
+    let formatted_offset = format!("{}:{}", &offset.to_string()[..3], &offset.to_string()[3..]);
     let year_time = now.format("%Y:%H:%M:%S");
     format!(
         "{}/{}:{} {}",
