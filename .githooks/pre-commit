@@ -83,37 +83,52 @@ if [ -n "$RUST_FILES" ] && printf "%s" "$STAGED_FILES" | grep -q "^${RUST_PROJEC
   fi
 fi
 
-# 3. npm lint check
+# 3. npm lint check (auto-fixes and restages if needed)
 if [ -n "$JS_FILES" ] && printf "%s" "$STAGED_FILES" | grep -q "^${NPM_PROJECT_DIR}/"; then
-  echo "🔍 Running npm lint for ${NPM_PROJECT_DIR}..."
+  echo "🔍 Running npm lint:fix for ${NPM_PROJECT_DIR}..."
   if [ -f "${NPM_PROJECT_DIR}/package.json" ]; then
     pushd "${NPM_PROJECT_DIR}" >/dev/null || exit 1
+    # Run lint:fix to auto-fix issues
     if ! npm run lint:fix; then
-      echo "❌ npm lint check failed"
-      echo "💡 Run 'npm run lint:fix' to fix linting issues"
+      echo "❌ npm lint:fix failed"
+      echo "💡 Some linting issues could not be auto-fixed"
       FAILED=1
     else
-      echo "✅ npm lint check passed"
+      echo "✅ npm lint:fix completed"
     fi
     popd >/dev/null || exit 1
+    # Restage any files that were modified by lint:fix
+    MODIFIED_FILES=$(git status --porcelain | grep '^.M\|^M.\|^A.' | awk '{print $2}' | grep "^${NPM_PROJECT_DIR}/" || true)
+    if [ -n "$MODIFIED_FILES" ]; then
+      echo "Restaging linted files:"
+      echo "$MODIFIED_FILES"
+      echo "$MODIFIED_FILES" | xargs -r git add --
+    fi
   else
     echo "⚠️  ${NPM_PROJECT_DIR}/package.json not found; skipping npm lint"
   fi
 fi
 
-# 4. prettier check
+# 4. prettier check (auto-formats and restages if needed)
 if [ -n "$JS_FILES" ] && printf "%s" "$STAGED_FILES" | grep -q "^${NPM_PROJECT_DIR}/"; then
-  echo "🎨 Checking Prettier formatting for ${NPM_PROJECT_DIR}..."
+  echo "🎨 Running Prettier formatting for ${NPM_PROJECT_DIR}..."
   if [ -f "${NPM_PROJECT_DIR}/package.json" ]; then
     pushd "${NPM_PROJECT_DIR}" >/dev/null || exit 1
+    # Run prettier to auto-format files
     if ! npm run prettier .; then
-      echo "❌ Prettier formatting check failed"
-      echo "💡 Run 'npm run prettier' to fix formatting issues"
+      echo "❌ Prettier formatting failed"
       FAILED=1
     else
-      echo "✅ Prettier formatting check passed"
+      echo "✅ Prettier formatting completed"
     fi
     popd >/dev/null || exit 1
+    # Restage any files that were modified by prettier
+    MODIFIED_FILES=$(git status --porcelain | grep '^.M\|^M.\|^A.' | awk '{print $2}' | grep "^${NPM_PROJECT_DIR}/" || true)
+    if [ -n "$MODIFIED_FILES" ]; then
+      echo "Restaging prettier-formatted files:"
+      echo "$MODIFIED_FILES"
+      echo "$MODIFIED_FILES" | xargs -r git add --
+    fi
   else
     echo "⚠️  ${NPM_PROJECT_DIR}/package.json not found; skipping prettier check"
   fi

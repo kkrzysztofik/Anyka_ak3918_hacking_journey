@@ -45,9 +45,7 @@ export interface ImagingOptions {
 /**
  * Helper function to parse IR Cut Filter mode
  */
-function parseIrCutFilter(
-  irCutFilter: unknown,
-): IrCutFilterMode | undefined {
+function parseIrCutFilter(irCutFilter: unknown): IrCutFilterMode | undefined {
   if (!irCutFilter) {
     return undefined;
   }

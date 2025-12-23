@@ -73,7 +73,9 @@ export function AboutDialog({ deviceInfo, isLoading }: AboutDialogProps) {
             );
           }
           return (
-            <div className="text-destructive py-4 text-center">Failed to load device information</div>
+            <div className="text-destructive py-4 text-center">
+              Failed to load device information
+            </div>
           );
         })()}
       </DialogContent>
