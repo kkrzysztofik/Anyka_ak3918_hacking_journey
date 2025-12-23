@@ -20,7 +20,8 @@ export interface LoginResult {
 export async function verifyCredentials(username: string, password: string): Promise<LoginResult> {
   try {
     // Create Basic Auth header for this request
-    const authHeader = `Basic ${btoa(`${username}:${password}`)}`;
+    const credentials = `${username}:${password}`;
+    const authHeader = `Basic ${btoa(credentials)}`;
 
     const envelope = createSOAPEnvelope(soapBodies.getDeviceInformation());
 
@@ -71,12 +72,26 @@ function extractDeviceInfo(data: Record<string, unknown> | undefined): DeviceInf
   const response = data.GetDeviceInformationResponse as Record<string, unknown> | undefined;
   if (!response) return undefined;
 
+  // Helper to safely convert to string, avoiding object stringification
+  const safeString = (value: unknown, defaultValue: string): string => {
+    if (value === null || value === undefined) {
+      return defaultValue;
+    }
+    if (typeof value === 'string') {
+      return value || defaultValue;
+    }
+    if (typeof value === 'object') {
+      return defaultValue;
+    }
+    return String(value);
+  };
+
   return {
-    manufacturer: String(response.Manufacturer || 'Unknown'),
-    model: String(response.Model || 'Unknown'),
-    firmwareVersion: String(response.FirmwareVersion || 'Unknown'),
-    serialNumber: String(response.SerialNumber || 'Unknown'),
-    hardwareId: String(response.HardwareId || 'Unknown'),
+    manufacturer: safeString(response.Manufacturer, 'Unknown'),
+    model: safeString(response.Model, 'Unknown'),
+    firmwareVersion: safeString(response.FirmwareVersion, 'Unknown'),
+    serialNumber: safeString(response.SerialNumber, 'Unknown'),
+    hardwareId: safeString(response.HardwareId, 'Unknown'),
   };
 }
 

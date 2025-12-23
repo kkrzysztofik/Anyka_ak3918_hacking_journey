@@ -130,10 +130,24 @@ function extractSOAPFault(body: Record<string, unknown>): SOAPFault | null {
   const reasonText =
     typeof text === 'object' ? (text as Record<string, unknown>)['#text'] || text : text;
 
+  // Helper to safely convert to string, avoiding object stringification
+  const safeString = (value: unknown, defaultValue: string): string => {
+    if (value === null || value === undefined) {
+      return defaultValue;
+    }
+    if (typeof value === 'string') {
+      return value || defaultValue;
+    }
+    if (typeof value === 'object') {
+      return defaultValue;
+    }
+    return String(value);
+  };
+
   return {
-    code: String(codeValue),
-    subcode: subcodeValue ? String(subcodeValue) : undefined,
-    reason: String(reasonText),
+    code: safeString(codeValue, 'Unknown error'),
+    subcode: subcodeValue ? safeString(subcodeValue, '') : undefined,
+    reason: safeString(reasonText, 'Unknown error'),
   };
 }
 

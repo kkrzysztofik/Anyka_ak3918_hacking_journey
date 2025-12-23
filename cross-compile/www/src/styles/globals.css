@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+/* NOSONAR: S4662 - @config is a valid Tailwind CSS v4 directive */
 @config '../../tailwind.config.js';
 
 @layer base {

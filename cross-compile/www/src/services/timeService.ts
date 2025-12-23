@@ -57,10 +57,24 @@ export async function getSystemDateAndTime(): Promise<SystemDateTime> {
   const minute = Number(time?.Minute || 0);
   const second = Number(time?.Second || 0);
 
+  // Helper to safely convert to string, avoiding object stringification
+  const safeString = (value: unknown, defaultValue: string): string => {
+    if (value === null || value === undefined) {
+      return defaultValue;
+    }
+    if (typeof value === 'string') {
+      return value || defaultValue;
+    }
+    if (typeof value === 'object') {
+      return defaultValue;
+    }
+    return String(value);
+  };
+
   return {
-    dateTimeType: String(sdt.DateTimeType || 'NTP') as DateTimeType,
+    dateTimeType: safeString(sdt.DateTimeType, 'NTP') as DateTimeType,
     daylightSavings: sdt.DaylightSavings === true || sdt.DaylightSavings === 'true',
-    timezone: String(timezone?.TZ || 'UTC'),
+    timezone: safeString(timezone?.TZ, 'UTC'),
     utcDateTime: new Date(Date.UTC(year, month, day, hour, minute, second)),
   };
 }

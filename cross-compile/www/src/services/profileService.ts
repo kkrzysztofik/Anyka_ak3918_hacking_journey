@@ -20,7 +20,13 @@ function safeString(value: unknown, defaultValue: string = ''): string {
   if (typeof value === 'object') {
     return defaultValue;
   }
-  return String(value);
+  // For primitives (number, boolean, symbol, bigint), convert safely
+  const primitiveTypes = ['number', 'boolean', 'symbol', 'bigint'];
+  if (primitiveTypes.includes(typeof value)) {
+    return String(value);
+  }
+  // Fallback for any other type
+  return defaultValue;
 }
 
 export interface MediaProfile {

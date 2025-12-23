@@ -46,12 +46,26 @@ export async function getDeviceInformation(): Promise<DeviceInfo> {
     throw new Error('Invalid response: missing GetDeviceInformationResponse');
   }
 
+  // Helper to safely convert to string, avoiding object stringification
+  const safeString = (value: unknown, defaultValue: string): string => {
+    if (value === null || value === undefined) {
+      return defaultValue;
+    }
+    if (typeof value === 'string') {
+      return value || defaultValue;
+    }
+    if (typeof value === 'object') {
+      return defaultValue;
+    }
+    return String(value);
+  };
+
   return {
-    manufacturer: String(data.Manufacturer || 'Unknown'),
-    model: String(data.Model || 'Unknown'),
-    firmwareVersion: String(data.FirmwareVersion || 'Unknown'),
-    serialNumber: String(data.SerialNumber || 'Unknown'),
-    hardwareId: String(data.HardwareId || 'Unknown'),
+    manufacturer: safeString(data.Manufacturer, 'Unknown'),
+    model: safeString(data.Model, 'Unknown'),
+    firmwareVersion: safeString(data.FirmwareVersion, 'Unknown'),
+    serialNumber: safeString(data.SerialNumber, 'Unknown'),
+    hardwareId: safeString(data.HardwareId, 'Unknown'),
   };
 }
 
