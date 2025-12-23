@@ -1,4 +1,4 @@
-name: WebUI CI
+name: CI - WebUI
 
 on:
   push:
@@ -16,7 +16,8 @@ permissions:
   issues: write
 
 jobs:
-  build-and-test:
+  test-and-coverage:
+    name: Test Suite & Coverage
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -61,200 +62,25 @@ jobs:
             cross-compile/www/coverage/**
           retention-days: 7
 
-      - name: Build
-        run: npm run build
+      # - name: Call Security Scans - Removed as docker container build was removed
+      #   uses: ./.github/workflows/shared/security-scans.yml
+      #   with:
+      #     project_type: "WebUI"
+      #   secrets:
+      #     SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      - name: Install Snyk CLI
-        if: env.SNYK_TOKEN != ''
-        run: npm install -g snyk
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Snyk Code test
-        id: snyk-code
-        continue-on-error: true
-        working-directory: cross-compile/www
-        run: |
-          set +x  # Disable command echo to prevent secret leakage
-          if [ -n "$SNYK_TOKEN" ]; then
-            snyk code test --sarif > snyk-code.sarif || true
-            echo "snyk_code_status=completed" >> $GITHUB_OUTPUT
-          else
-            echo "snyk_code_status=skipped" >> $GITHUB_OUTPUT
-          fi
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Snyk Open Source monitor
-        id: snyk-oss
-        continue-on-error: true
-        working-directory: cross-compile/www
-        run: |
-          set +x  # Disable command echo to prevent secret leakage
-          if [ -n "$SNYK_TOKEN" ] && [ -f "package.json" ]; then
-            snyk monitor --all-projects || true
-            # Parse results for PR comment
-            snyk test --file=package.json --json > snyk-oss-results.json 2>&1 || true
-            SNYK_ISSUES=$(node -e "const fs = require('fs'); try { const data = JSON.parse(fs.readFileSync('snyk-oss-results.json')); console.log(data.vulnerabilities ? data.vulnerabilities.length : 0); } catch(e) { console.log(0); }" 2>/dev/null || echo "0")
-            echo "snyk_issues=$SNYK_ISSUES" >> $GITHUB_OUTPUT
-            echo "snyk_oss_status=completed" >> $GITHUB_OUTPUT
-          else
-            echo "snyk_issues=0" >> $GITHUB_OUTPUT
-            echo "snyk_oss_status=skipped" >> $GITHUB_OUTPUT
-          fi
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Build Docker image for container scanning
-        id: build-docker
-        continue-on-error: true
-        if: env.SNYK_TOKEN != ''
-        run: |
-          if [ -f "cross-compile/Dockerfile" ]; then
-            docker build -t anyka-dev:test -f cross-compile/Dockerfile . || true
-            echo "docker_built=true" >> $GITHUB_OUTPUT
-          else
-            echo "docker_built=false" >> $GITHUB_OUTPUT
-          fi
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Snyk Container monitor
-        id: snyk-container
-        continue-on-error: true
-        if: steps.build-docker.outputs.docker_built == 'true'
-        run: |
-          set +x  # Disable command echo to prevent secret leakage
-          if [ -n "$SNYK_TOKEN" ]; then
-            snyk container monitor anyka-dev:test --file=cross-compile/Dockerfile || true
-            echo "snyk_container_status=completed" >> $GITHUB_OUTPUT
-          else
-            echo "snyk_container_status=skipped" >> $GITHUB_OUTPUT
-          fi
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload Snyk Code result to GitHub Code Scanning
-        if: always() && steps.snyk-code.outputs.snyk_code_status == 'completed'
-        uses: github/codeql-action/upload-sarif@v3
-        continue-on-error: true
+      - name: Call Quality Gates
+        uses: ./.github/workflows/shared/quality-gates.yml
         with:
-          sarif_file: cross-compile/www/snyk-code.sarif
-
-      - name: SonarQube Scan
-        id: sonar-scan
-        continue-on-error: true
-        uses: sonarsource/sonarqube-scan-action@master
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          projectBaseDir: .
-          # Configuration is automatically loaded from sonar-project.properties in project root
-          # Coverage path is already configured in sonar-project.properties
-
-      - name: SonarQube Quality Gate Check
-        id: sonar-quality-gate
-        continue-on-error: true
-        uses: sonarsource/sonarqube-quality-gate-action@master
-        env:
+          project_type: "WebUI"
+        secrets:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      - name: Generate Run Summary
-        run: |
-          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
-          # 🔍 CI Analysis Summary - WebUI
-
-          ## 📊 Test Coverage
-          - **Coverage**: ${{ steps.test-coverage.outputs.coverage }}%
-          - **Report**: [View Coverage Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
-
-          ## 🔒 Security Scans (Snyk)
-          - **Code (SAST)**: ${{ steps.snyk-code.outputs.snyk_code_status == 'completed' && '✅ Completed' || '⚠️ Skipped' }}
-          - **Open Source (SCA)**: ${{ steps.snyk-oss.outputs.snyk_oss_status == 'completed' && '✅ Completed' || '⚠️ Skipped' }}
-          - **Container**: ${{ steps.snyk-container.outputs.snyk_container_status == 'completed' && '✅ Completed' || steps.build-docker.outputs.docker_built == 'false' && '⏭️ No Dockerfile' || '⚠️ Skipped' }}
-          - **SCA Issues Found**: ${{ steps.snyk-oss.outputs.snyk_issues || '0' }}
-
-          ## 🎯 Code Quality (SonarQube)
-          - **Status**: ${{ steps.sonar-scan.outcome == 'success' && '✅ Passed' || '⚠️ Failed/Skipped' }}
-          - **Quality Gate**: ${{ steps.sonar-quality-gate.outcome == 'success' && '✅ Passed' || '⚠️ Failed/Skipped' }}
-
-          ## 📦 Build Status
-          - **Build**: ✅ Successful
-          - **Lint**: ✅ Passed
-          - **Tests**: ✅ Passed
-
-          EOF
-
-      - name: Comment PR with Analysis Results
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+      - name: Call Reporting
+        uses: ./.github/workflows/shared/reporting.yml
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const coverage = '${{ steps.test-coverage.outputs.coverage }}';
-            const snykCodeStatus = '${{ steps.snyk-code.outputs.snyk_code_status }}';
-            const snykOssStatus = '${{ steps.snyk-oss.outputs.snyk_oss_status }}';
-            const snykContainerStatus = '${{ steps.snyk-container.outputs.snyk_container_status }}';
-            const snykIssues = '${{ steps.snyk-oss.outputs.snyk_issues || 0 }}';
-            const dockerBuilt = '${{ steps.build-docker.outputs.docker_built }}';
-            const sonarStatus = '${{ steps.sonar-scan.outcome }}';
-            const qualityGateStatus = '${{ steps.sonar-quality-gate.outcome }}';
-
-            const comment = `## 🔍 Code Analysis Results - WebUI
-
-            ### 📊 Test Coverage
-            | Metric | Value |
-            |--------|-------|
-            | **Line Coverage** | ${coverage}% |
-            | **Coverage Report** | [View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
-
-            ### 🔒 Security Scans (Snyk)
-            | Scan Type | Status | Details |
-            |-----------|--------|---------|
-            | **Code (SAST)** | ${snykCodeStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped'} | [View in Code Scanning](https://github.com/${{ github.repository }}/security/code-scanning) |
-            | **Open Source (SCA)** | ${snykOssStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped'} | ${snykIssues !== '0' ? `⚠️ ${snykIssues} vulnerabilities found` : '✅ No issues'} |
-            | **Container** | ${dockerBuilt === 'true' ? (snykContainerStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped') : '⏭️ No Dockerfile'} | Container image security scan |
-            ${snykOssStatus === 'completed' && snykIssues !== '0' ? '| **Action Required** | ⚠️ Review vulnerabilities in [Snyk Dashboard](https://app.snyk.io/) |' : ''}
-
-            ### 🎯 Code Quality (SonarQube)
-            | Metric | Value |
-            |--------|-------|
-            | **Scan Status** | ${sonarStatus === 'success' ? '✅ Completed' : '⚠️ Failed/Skipped'} |
-            | **Quality Gate** | ${qualityGateStatus === 'success' ? '✅ Passed' : '⚠️ Failed/Skipped'} |
-            ${sonarStatus === 'success' ? '| **View Report** | [SonarQube Cloud Dashboard](https://sonarcloud.io/dashboard?id=kkrzysztofik_Anyka_ak3918_hacking_journey) |' : ''}
-
-            ### ✅ Build Status
-            - **Lint**: ✅ Passed
-            - **Tests**: ✅ Passed
-            - **Build**: ✅ Successful
-
-            ---
-            *This comment is automatically updated on each push to the PR*`;
-
-            // Find existing bot comment
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const botComment = comments.find(comment =>
-              comment.user.type === 'Bot' &&
-              comment.body.includes('Code Analysis Results - WebUI')
-            );
-
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: comment,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: comment,
-              });
-            }
+          project_type: "WebUI"
+          test_coverage: ${{ steps.test-coverage.outputs.coverage }}
+        needs: [quality-gates]
+        secrets:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

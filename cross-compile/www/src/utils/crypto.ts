@@ -72,9 +72,9 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
   const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, data);
 
   return {
-    data: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
-    iv: btoa(String.fromCharCode(...iv)),
-    salt: btoa(String.fromCharCode(...salt)),
+    data: btoa(Array.from(new Uint8Array(ciphertext), (b) => String.fromCodePoint(b)).join('')),
+    iv: btoa(Array.from(iv, (b) => String.fromCodePoint(b)).join('')),
+    salt: btoa(Array.from(salt, (b) => String.fromCodePoint(b)).join('')),
   };
 }
 
@@ -86,9 +86,9 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
  * @throws Error if decryption fails
  */
 export async function decrypt(encrypted: EncryptedData): Promise<string> {
-  const salt = Uint8Array.from(atob(encrypted.salt), (c) => c.charCodeAt(0));
-  const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.charCodeAt(0));
-  const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.charCodeAt(0));
+  const salt = Uint8Array.from(atob(encrypted.salt), (c) => c.codePointAt(0)!);
+  const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.codePointAt(0)!);
+  const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.codePointAt(0)!);
   const key = await generateKey(salt);
 
   const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext);

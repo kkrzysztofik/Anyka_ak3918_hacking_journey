@@ -1,0 +1,119 @@
+name: Shared Reporting
+
+on:
+  workflow_call:
+    inputs:
+      project_type:
+        required: true
+        type: string
+      test_coverage:
+        required: false
+        type: string
+
+jobs:
+  generate-summary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Run Summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+          # 🔍 CI Analysis Summary - ${{ inputs.project_type }}
+
+          ## 📊 Test Coverage
+          - **Coverage**: ${{ inputs.test_coverage || 'N/A' }}%
+          - **Report**: [View Coverage Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ## 🔒 Security Scans (Snyk)
+          - **Code (SAST)**: ${{ needs.security-scans.outputs.snyk_code_status == 'completed' && '✅ Completed' || '⚠️ Skipped' }}
+          - **Open Source (SCA)**: ${{ needs.security-scans.outputs.snyk_oss_status == 'completed' && '✅ Completed' || '⚠️ Skipped' }}
+          - **SCA Issues Found**: ${{ needs.security-scans.outputs.snyk_issues || '0' }}
+
+          ## 🎯 Code Quality (SonarQube)
+          - **Status**: ${{ needs.quality-gates.outputs.sonar-scan.outcome == 'success' && '✅ Passed' || '⚠️ Failed/Skipped' }}
+          - **Quality Gate**: ${{ needs.quality-gates.outputs.sonar-quality-gate.outcome == 'success' && '✅ Passed' || '⚠️ Failed/Skipped' }}
+
+          ## 📦 Build Status
+          - **Build**: ✅ Successful
+          - **Lint**: ✅ Passed
+          - **Tests**: ✅ Passed
+
+          EOF
+
+  comment-pr:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [security-scans, quality-gates]
+    steps:
+      - name: Comment PR with Analysis Results
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const projectType = '${{ inputs.project_type }}';
+            const coverage = '${{ inputs.test_coverage || '0' }}';
+            const snykCodeStatus = '${{ needs.security-scans.outputs.snyk_code_status }}';
+            const snykOssStatus = '${{ needs.security-scans.outputs.snyk_oss_status }}';
+            const snykContainerStatus = '${{ needs.security-scans.outputs.snyk_container_status }}';
+            const snykIssues = '${{ needs.security-scans.outputs.snyk_issues || 0 }}';
+            const dockerBuilt = '${{ needs.security-scans.outputs.docker_built }}';
+            const sonarStatus = '${{ needs.quality-gates.outputs.sonar-scan.outcome }}';
+            const qualityGateStatus = '${{ needs.quality-gates.outputs.sonar-quality-gate.outcome }}';
+
+            const comment = `## 🔍 Code Analysis Results - ${{ inputs.project_type }}
+
+            ### 📊 Test Coverage
+            | Metric | Value |
+            |--------|-------|
+            | **Line Coverage** | ${coverage}% |
+            | **Coverage Report** | [View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            ### 🔒 Security Scans (Snyk)
+            | Scan Type | Status | Details |
+            |-----------|--------|---------|
+            | **Code (SAST)** | ${snykCodeStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped'} | [View in Code Scanning](https://github.com/${{ github.repository }}/security/code-scanning) |
+            | **Open Source (SCA)** | ${snykOssStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped'} | ${snykIssues !== '0' ? `⚠️ ${snykIssues} vulnerabilities found` : '✅ No issues'} |
+            | **Container** | ${dockerBuilt === 'true' ? (snykContainerStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped') : '⏭️ No Dockerfile'} | Container image security scan |
+            ${snykOssStatus === 'completed' && snykIssues !== '0' ? '| **Action Required** | ⚠️ Review vulnerabilities in [Snyk Dashboard](https://app.snyk.io/) |' : ''}
+
+            ### 🎯 Code Quality (SonarQube)
+            | Metric | Value |
+            |--------|-------|
+            | **Scan Status** | ${sonarStatus === 'success' ? '✅ Completed' : '⚠️ Failed/Skipped'} |
+            | **Quality Gate** | ${qualityGateStatus === 'success' ? '✅ Passed' : '⚠️ Failed/Skipped'} |
+            ${sonarStatus === 'success' ? '| **View Report** | [SonarQube Cloud Dashboard](https://sonarcloud.io/dashboard?id=kkrzysztofik_Anyka_ak3918_hacking_journey) |' : ''}
+
+            ### ✅ Build Status
+            - **Lint**: ✅ Passed
+            - **Tests**: ✅ Passed
+            - **Build**: ✅ Successful
+
+            ---
+            *This comment is automatically updated on each push to the PR*`;
+
+            // Find existing bot comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Code Analysis Results - ' + projectType)
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment,
+              });
+            }

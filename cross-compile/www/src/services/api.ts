@@ -56,7 +56,7 @@ apiClient.interceptors.response.use(
   (error: AxiosError) => {
     if (error.response?.status === 401) {
       // Clear credentials on 401 Unauthorized
-      console.warn('API returned 401 Unauthorized');
+      // Auth clearing is handled by auth interceptor
     }
     return Promise.reject(error);
   },

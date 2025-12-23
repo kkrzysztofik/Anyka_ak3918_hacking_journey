@@ -33,8 +33,11 @@ export default function LiveViewPage() {
   const [streamType, setStreamType] = useState<'main' | 'sub'>('main');
   const [ptzSpeed, setPtzSpeed] = useState(50);
 
-  // Handlers for PTZ (placeholders)
-  const handlePtz = (action: string) => console.log('PTZ:', action);
+  // Handlers for PTZ (will be implemented with PTZ service)
+  const handlePtz = (_action: string) => {
+    // PTZ actions are handled by the PTZ service
+    // This will be implemented in future PR
+  };
 
   return (
     <div className="flex h-full flex-col gap-6">

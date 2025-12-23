@@ -58,8 +58,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // Decrypt the password asynchronously
           const password = await decrypt(data.encryptedPassword);
           setCredentials({ username: data.username, password });
-        } catch (e) {
-          console.error('Failed to decrypt stored credentials', e);
+        } catch {
           // Clear invalid stored data
           sessionStorage.removeItem(AUTH_STORAGE_KEY);
         }

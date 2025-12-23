@@ -77,9 +77,8 @@ export default function LoginPage() {
       } else {
         toast.error(result.error || 'Authentication failed');
       }
-    } catch (error) {
+    } catch {
       toast.error('An error occurred during sign in');
-      console.error('Login error:', error);
     } finally {
       setIsLoading(false);
     }
