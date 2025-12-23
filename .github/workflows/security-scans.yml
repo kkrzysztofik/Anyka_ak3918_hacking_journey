@@ -9,11 +9,27 @@ on:
       working_directory:
         required: true
         type: string
+    outputs:
+      snyk_code_status:
+        description: "Status of Snyk Code scan"
+        value: ${{ jobs.snyk-code.outputs.snyk_code_status }}
+      snyk_oss_status:
+        description: "Status of Snyk Open Source scan"
+        value: ${{ jobs.snyk-oss.outputs.snyk_oss_status }}
+      snyk_issues:
+        description: "Number of Snyk issues found"
+        value: ${{ jobs.snyk-oss.outputs.snyk_issues }}
+    secrets:
+      SNYK_TOKEN:
+        required: true
 
 jobs:
   snyk-setup:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
       - name: Install Snyk CLI
         if: env.SNYK_TOKEN != ''
         run: npm install -g snyk
@@ -24,7 +40,12 @@ jobs:
     needs: snyk-setup
     runs-on: ubuntu-latest
     continue-on-error: true
+    outputs:
+      snyk_code_status: ${{ steps.snyk-code.outputs.snyk_code_status }}
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
       - name: Run Snyk Code test
         id: snyk-code
         continue-on-error: true
@@ -44,7 +65,13 @@ jobs:
     needs: snyk-setup
     runs-on: ubuntu-latest
     continue-on-error: true
+    outputs:
+      snyk_oss_status: ${{ steps.snyk-oss.outputs.snyk_oss_status }}
+      snyk_issues: ${{ steps.snyk-oss.outputs.snyk_issues }}
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
       - name: Run Snyk Open Source monitor
         id: snyk-oss
         continue-on-error: true
@@ -69,8 +96,11 @@ jobs:
     runs-on: ubuntu-latest
     if: always() && needs.snyk-code.outputs.snyk_code_status == 'completed'
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
       - name: Upload Snyk Code result to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         continue-on-error: true
         with:
           sarif_file: ${{ inputs.working_directory }}/snyk-code.sarif

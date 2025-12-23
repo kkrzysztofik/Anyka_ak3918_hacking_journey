@@ -15,6 +15,7 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  security-events: write
 
 jobs:
   lint:
@@ -56,7 +57,8 @@ jobs:
     container:
       image: kkrzysztofik/anyka-cross-compile:latest
       options: --security-opt seccomp=unconfined
-
+    outputs:
+      coverage: ${{ steps.coverage-summary.outputs.coverage }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -122,25 +124,33 @@ jobs:
             echo "⚠️ Coverage file not found"
           fi
 
-      - name: Call Security Scans
-        uses: ./.github/workflows/shared/security-scans.yml
-        with:
-          project_type: "Rust ONVIF API"
-        secrets:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+  security-scans:
+    needs: test-and-coverage
+    uses: ./.github/workflows/security-scans.yml
+    with:
+      project_type: "Rust ONVIF API"
+      working_directory: "cross-compile/onvif-rust"
+    secrets:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      - name: Call Quality Gates
-        uses: ./.github/workflows/shared/quality-gates.yml
-        with:
-          project_type: "Rust ONVIF API"
-        secrets:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  quality-gates:
+    needs: test-and-coverage
+    uses: ./.github/workflows/quality-gates.yml
+    with:
+      project_type: "Rust ONVIF API"
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      - name: Call Reporting
-        uses: ./.github/workflows/shared/reporting.yml
-        with:
-          project_type: "Rust ONVIF API"
-          test_coverage: ${{ steps.coverage-summary.outputs.coverage }}
-        needs: [security-scans, quality-gates]
-        secrets:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  reporting:
+    needs: [test-and-coverage, security-scans, quality-gates]
+    uses: ./.github/workflows/reporting.yml
+    with:
+      project_type: "Rust ONVIF API"
+      test_coverage: ${{ needs.test-and-coverage.outputs.coverage }}
+      snyk_code_status: ${{ needs.security-scans.outputs.snyk_code_status }}
+      snyk_oss_status: ${{ needs.security-scans.outputs.snyk_oss_status }}
+      snyk_issues: ${{ needs.security-scans.outputs.snyk_issues }}
+      sonar_scan_status: ${{ needs.quality-gates.outputs.sonar-scan-status }}
+      quality_gate_status: ${{ needs.quality-gates.outputs.quality-gate-status }}
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

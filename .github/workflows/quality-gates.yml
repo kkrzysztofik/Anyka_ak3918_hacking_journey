@@ -1,0 +1,127 @@
+name: Shared Quality Gates
+
+on:
+  workflow_call:
+    inputs:
+      project_type:
+        required: true
+        type: string
+    outputs:
+      sonar-scan-status:
+        description: "Status of SonarQube scan"
+        value: ${{ jobs.sonar-scan.outputs.sonar-scan-status }}
+      quality-gate-status:
+        description: "Status of Quality Gate check"
+        value: ${{ jobs.sonar-quality-gate.outputs.quality-gate-status }}
+    secrets:
+      SONAR_TOKEN:
+        required: true
+
+jobs:
+  sonar-scan:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    outputs:
+      sonar-scan-status: ${{ steps.sonar-scan.outcome }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        id: sonar-scan
+        continue-on-error: true
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          projectBaseDir: .
+          # Configuration is automatically loaded from sonar-project.properties
+
+  sonar-quality-gate:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: sonar-scan
+    outputs:
+      quality-gate-status: ${{ steps.sonar-quality-gate.outcome }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: SonarQube Quality Gate Check
+        id: sonar-quality-gate
+        continue-on-error: true
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Generate and Upload SARIF Report
+        shell: bash
+        run: |
+          echo "### 🎯 SonarQube Issues Report"
+          # Fetch open issues from SonarCloud API
+          ISSUES=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" "https://sonarcloud.io/api/issues/search?componentKeys=anyka-dev&resolved=false&ps=100")
+          COUNT=$(echo $ISSUES | jq '.total')
+
+          # Initialize SARIF structure
+          cat > sonar-report.sarif <<EOF
+          {
+            "\$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [
+              {
+                "tool": {
+                  "driver": {
+                    "name": "SonarCloud",
+                    "rules": []
+                  }
+                },
+                "results": []
+              }
+            ]
+          }
+          EOF
+
+          if [ "$COUNT" -eq "0" ]; then
+            echo "✅ No open issues found in SonarQube."
+          else
+            echo "⚠️ Found $COUNT open issues."
+            # Format issues into a readable list for CLI
+            echo $ISSUES | jq -r '.issues[] | "- [\(.severity)] \(.message) (\(.component):\(.line))"'
+
+            # Transform SonarCloud JSON to SARIF results using jq
+            # We map SonarCloud severity to SARIF level (error, warning, note)
+            echo $ISSUES | jq '
+              def map_severity(s):
+                if s == "BLOCKER" or s == "CRITICAL" then "error"
+                elif s == "MAJOR" then "warning"
+                else "note" end;
+
+              .issues | map({
+                "ruleId": .rule,
+                "level": map_severity(.severity),
+                "message": { "text": .message },
+                "locations": [{
+                  "physicalLocation": {
+                    "artifactLocation": { "uri": .component | sub("^anyka-dev:"; "") },
+                    "region": { "startLine": (.line // 1) }
+                  }
+                }]
+              })
+            ' > sarif-results.json
+
+            # Merge results into the main SARIF file
+            jq --argfile results sarif-results.json '.runs[0].results = $results' sonar-report.sarif > sonar-report-final.sarif
+            mv sonar-report-final.sarif sonar-report.sarif
+          fi
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Upload SonarCloud Scan Results to GitHub
+        uses: github/codeql-action/upload-sarif@v3
+        continue-on-error: true
+        with:
+          sarif_file: sonar-report.sarif
