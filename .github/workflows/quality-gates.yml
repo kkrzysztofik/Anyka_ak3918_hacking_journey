@@ -62,7 +62,7 @@ jobs:
         run: |
           echo "### 🎯 SonarQube Issues Report"
           # Fetch open issues from SonarCloud API
-          ISSUES=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" "https://sonarcloud.io/api/issues/search?componentKeys=anyka-dev&resolved=false&ps=100")
+          ISSUES=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" "https://sonarcloud.io/api/issues/search?componentKeys=kkrzysztofik_Anyka_ak3918_hacking_journey&resolved=false&ps=100")
           COUNT=$(echo $ISSUES | jq '.total')
 
           # Initialize SARIF structure
@@ -104,7 +104,7 @@ jobs:
                 "message": { "text": .message },
                 "locations": [{
                   "physicalLocation": {
-                    "artifactLocation": { "uri": .component | sub("^anyka-dev:"; "") },
+                    "artifactLocation": { "uri": .component | sub("^kkrzysztofik_Anyka_ak3918_hacking_journey:"; "") },
                     "region": { "startLine": (.line // 1) }
                   }
                 }]
@@ -119,7 +119,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Upload SonarCloud Scan Results to GitHub
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         continue-on-error: true
         with:
           sarif_file: sonar-report.sarif

@@ -17,11 +17,13 @@
 #### User Needs Analysis
 
 **Primary Users**:
+
 - **Network Administrators**: Need quick access to network configuration, device status, and diagnostic information
 - **Security Professionals**: Require reliable camera control, imaging settings, and real-time monitoring capabilities
 - **Technical Operators**: Must efficiently manage multiple camera profiles, user accounts, and system maintenance tasks
 
 **Core User Needs**:
+
 1. **Rapid Information Scanning**: Users need to quickly assess system status, connection health, and configuration states
 2. **Precision Control**: Camera settings (imaging, PTZ, profiles) require precise, confidence-inspiring controls
 3. **Technical Credibility**: The interface must communicate reliability and technical competence
@@ -30,12 +32,14 @@
 #### Use Case Prioritization
 
 **High-Frequency Tasks**:
+
 1. Live view monitoring and PTZ control
 2. Quick status checks (connection, diagnostics)
 3. Imaging parameter adjustments (brightness, contrast, saturation)
 4. Profile management and switching
 
 **Critical Tasks**:
+
 1. Network configuration (IP settings, authentication)
 2. User management and security settings
 3. System diagnostics and troubleshooting
@@ -72,6 +76,7 @@ The Industrial/Utilitarian aesthetic perfectly aligns with the application's pur
 - **Terminal Interfaces**: Monospaced data presentation for technical information
 
 **Visual Language**:
+
 - **Typography**: Monospaced font for technical data (status codes, IP addresses, diagnostic values), refined sans-serif for UI
 - **Color**: Deep, desaturated backgrounds with high-contrast accent colors for status and actions
 - **Layout**: Grid-based, structured compositions with clear information hierarchy
@@ -85,6 +90,7 @@ The Industrial/Utilitarian aesthetic perfectly aligns with the application's pur
 #### Typography
 
 **Current State**:
+
 - Inter font family (300-700 weights) loaded from Google Fonts CDN
 - Generic, widely-used typeface that lacks distinctiveness
 - Single font family for all content
@@ -108,6 +114,7 @@ The Industrial/Utilitarian aesthetic perfectly aligns with the application's pur
    - Brand elements (logo text)
 
 **Implementation Notes**:
+
 - Use `@fontsource` packages for self-hosting (already in use for Inter)
 - Load variable fonts to reduce bundle size
 - Implement font-display: swap for performance
@@ -156,6 +163,7 @@ extend: {
 #### Color & Theme
 
 **Current State**:
+
 - iOS-inspired dark theme (#0d0d0d background)
 - Semantic colors (red, blue, orange, green) with iOS-style values
 - Generic color application without strong identity
@@ -188,6 +196,7 @@ extend: {
    - Technical data: `#e5e7eb` (high contrast for monospaced)
 
 **Implementation Notes**:
+
 - Maintain WCAG AA contrast ratios (4.5:1 for normal text, 3:1 for large text)
 - Use CSS custom properties for easy theme adjustments
 - Create semantic color tokens for consistent application
@@ -267,6 +276,7 @@ colors: {
 #### Motion & Animation
 
 **Current State**:
+
 - Basic CSS transitions (200ms duration)
 - Simple loading spinner
 - Minimal page transitions (fade-in, slide-in)
@@ -295,6 +305,7 @@ colors: {
    - **Focus Indicators**: Strong, visible focus rings for accessibility
 
 **Implementation Notes**:
+
 - Prioritize CSS animations over JavaScript for performance
 - Use `will-change` sparingly and only for animated elements
 - Respect `prefers-reduced-motion` for accessibility
@@ -384,6 +395,7 @@ function ConnectionStatusBadge({ status }: { status: 'connected' | 'disconnected
 #### Spatial Composition
 
 **Current State**:
+
 - Standard sidebar (320px) + main content layout
 - Centered content with consistent padding
 - Card-based sections with uniform spacing
@@ -413,6 +425,7 @@ function ConnectionStatusBadge({ status }: { status: 'connected' | 'disconnected
    - **Form Fields**: Clear separation between input groups
 
 **Implementation Notes**:
+
 - Maintain responsive behavior for tablet devices
 - Use CSS Grid for complex layouts
 - Ensure touch targets are at least 44x44px for mobile
@@ -477,6 +490,7 @@ function DiagnosticsLayout() {
 #### Visual Details & Atmosphere
 
 **Current State**:
+
 - Solid colors with minimal effects
 - Basic shadows and borders
 - No background textures or patterns
@@ -510,6 +524,7 @@ function DiagnosticsLayout() {
    - **Data Loading**: Pulse animation for live data
 
 **Implementation Notes**:
+
 - Keep textures subtle to avoid distraction
 - Use CSS for textures (no image assets when possible)
 - Ensure all effects work with reduced motion preferences

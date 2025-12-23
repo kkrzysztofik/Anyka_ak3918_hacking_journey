@@ -29,9 +29,6 @@ on:
         required: false
         type: string
         default: 'skipped'
-    secrets:
-      GH_TOKEN:
-        required: true
 
 jobs:
   generate-summary:
