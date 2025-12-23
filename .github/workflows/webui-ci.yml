@@ -66,7 +66,7 @@ jobs:
 
   quality-gates:
     needs: test-and-coverage
-    uses: .github/workflows/quality-gates.yml
+    uses: ./.github/workflows/quality-gates.yml
     with:
       project_type: "WebUI"
     secrets:
@@ -74,7 +74,7 @@ jobs:
 
   security-scans:
     needs: test-and-coverage
-    uses: .github/workflows/security-scans.yml
+    uses: ./.github/workflows/security-scans.yml
     with:
       project_type: "WebUI"
       working_directory: "cross-compile/www"
@@ -82,7 +82,7 @@ jobs:
 
   reporting:
     needs: [test-and-coverage, security-scans, quality-gates]
-    uses: .github/workflows/reporting.yml
+    uses: ./.github/workflows/reporting.yml
     with:
       project_type: "WebUI"
       test_coverage: ${{ needs.test-and-coverage.outputs.coverage }}
