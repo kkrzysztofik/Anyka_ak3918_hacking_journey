@@ -31,10 +31,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install Snyk CLI
-        if: env.SNYK_TOKEN != ''
         run: npm install -g snyk
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
   snyk-code:
     needs: snyk-setup

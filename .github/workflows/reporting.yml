@@ -79,18 +79,18 @@ jobs:
             const sonarStatus = '${{ inputs.sonar_scan_status }}';
             const qualityGateStatus = '${{ inputs.quality_gate_status }}';
 
-            const comment = `## 🔍 Code Analysis Results - ${{ inputs.project_type }}
+            const comment = `## 🔍 Code Analysis Results - ${projectType}
 
             ### 📊 Test Coverage
             | Metric | Value |
             |--------|-------|
             | **Line Coverage** | ${coverage}% |
-            | **Coverage Report** | [View Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+            | **Coverage Report** | [View Artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |
 
             ### 🔒 Security Scans (Snyk)
             | Scan Type | Status | Details |
             |-----------|--------|---------|
-            | **Code (SAST)** | ${snykCodeStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped'} | [View in Code Scanning](https://github.com/${{ github.repository }}/security/code-scanning) |
+            | **Code (SAST)** | ${snykCodeStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped'} | [View in Code Scanning](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) |
             | **Open Source (SCA)** | ${snykOssStatus === 'completed' ? '✅ Completed' : '⚠️ Skipped'} | ${snykIssues !== '0' ? `⚠️ ${snykIssues} vulnerabilities found` : '✅ No issues'} |
             ${snykOssStatus === 'completed' && snykIssues !== '0' ? '| **Action Required** | ⚠️ Review vulnerabilities in [Snyk Dashboard](https://app.snyk.io/) |' : ''}
 

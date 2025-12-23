@@ -130,16 +130,14 @@ jobs:
     with:
       project_type: "Rust ONVIF API"
       working_directory: "cross-compile/onvif-rust"
-    secrets:
-      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    secrets: inherit
 
   quality-gates:
     needs: test-and-coverage
     uses: ./.github/workflows/quality-gates.yml
     with:
       project_type: "Rust ONVIF API"
-    secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    secrets: inherit
 
   reporting:
     needs: [test-and-coverage, security-scans, quality-gates]
@@ -152,5 +150,4 @@ jobs:
       snyk_issues: ${{ needs.security-scans.outputs.snyk_issues }}
       sonar_scan_status: ${{ needs.quality-gates.outputs.sonar-scan-status }}
       quality_gate_status: ${{ needs.quality-gates.outputs.quality-gate-status }}
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    secrets: inherit
