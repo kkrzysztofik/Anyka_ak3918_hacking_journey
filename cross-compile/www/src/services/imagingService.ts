@@ -49,7 +49,11 @@ function parseIrCutFilter(irCutFilter: unknown): IrCutFilterMode | undefined {
   if (!irCutFilter) {
     return undefined;
   }
-  const mode = typeof irCutFilter === 'string' ? irCutFilter : String(irCutFilter);
+  // Only accept string values to avoid object stringification
+  if (typeof irCutFilter !== 'string') {
+    return undefined;
+  }
+  const mode = irCutFilter;
   if (mode === 'ON' || mode === 'OFF' || mode === 'AUTO') {
     return mode as IrCutFilterMode;
   }
@@ -66,7 +70,8 @@ function parseWideDynamicRangeSettings(
     return undefined;
   }
   const modeValue = wdr.Mode ?? 'OFF';
-  const mode = typeof modeValue === 'string' ? modeValue : String(modeValue);
+  // Only accept string values to avoid object stringification
+  const mode = typeof modeValue === 'string' ? modeValue : 'OFF';
   const level = Number(wdr.Level ?? 50);
   if (mode === 'ON' || mode === 'OFF') {
     return {
@@ -87,7 +92,8 @@ function parseBacklightCompensationSettings(
     return undefined;
   }
   const modeValue = backlight.Mode ?? 'OFF';
-  const mode = typeof modeValue === 'string' ? modeValue : String(modeValue);
+  // Only accept string values to avoid object stringification
+  const mode = typeof modeValue === 'string' ? modeValue : 'OFF';
   const level = Number(backlight.Level ?? 50);
   if (mode === 'ON' || mode === 'OFF') {
     return {

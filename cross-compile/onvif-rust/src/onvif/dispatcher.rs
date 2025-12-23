@@ -326,15 +326,58 @@ impl ServiceDispatcher {
             Ok(None)
         };
 
+        // Read and parse request body
+        let envelope = match self.read_and_parse_request(request).await {
+            Ok(env) => env,
+            Err(response) => return response,
+        };
+
+        // Determine action (prefer header, fallback to body)
+        let action = match self.extract_action(soap_action, &envelope) {
+            Ok(action) => action,
+            Err(response) => return response,
+        };
+
+        tracing::debug!(
+            "Dispatching {} to service '{}' (auth_enabled: {})",
+            action,
+            service,
+            auth_ctx.auth_enabled
+        );
+
+        // Find handler
+        let handler = match self.find_handler(service) {
+            Ok(handler) => handler,
+            Err(response) => return response,
+        };
+
+        // Check authentication if enabled
+        if let Err(response) = self
+            .check_authentication(&action, &handler, &basic_auth_result, &envelope, auth_ctx)
+            .await
+        {
+            return response;
+        }
+
+        // Handle the operation
+        self.handle_operation(&handler, &action, &envelope.body_xml)
+            .await
+    }
+
+    /// Read request body and parse SOAP envelope.
+    async fn read_and_parse_request(
+        &self,
+        request: Request<Body>,
+    ) -> Result<super::soap::RawSoapEnvelope, Response> {
         // Read body
         let body_bytes = match axum::body::to_bytes(request.into_body(), 1024 * 1024).await {
             Ok(bytes) => bytes,
             Err(e) => {
                 tracing::error!("Failed to read request body: {}", e);
-                return error_response(OnvifError::WellFormed(format!(
+                return Err(error_response(OnvifError::WellFormed(format!(
                     "Failed to read request body: {}",
                     e
-                )));
+                ))));
             }
         };
 
@@ -342,31 +385,38 @@ impl ServiceDispatcher {
             Ok(s) => s,
             Err(e) => {
                 tracing::error!("Invalid UTF-8 in request body: {}", e);
-                return error_response(OnvifError::WellFormed(format!(
+                return Err(error_response(OnvifError::WellFormed(format!(
                     "Invalid UTF-8 in request body: {}",
                     e
-                )));
+                ))));
             }
         };
 
         // Parse SOAP envelope
-        let envelope = match parse_soap_request(body_str) {
-            Ok(env) => env,
+        match parse_soap_request(body_str) {
+            Ok(env) => Ok(env),
             Err(e) => {
                 tracing::error!("Failed to parse SOAP envelope: {}", e);
-                return error_response(OnvifError::WellFormed(format!(
+                Err(error_response(OnvifError::WellFormed(format!(
                     "Failed to parse SOAP envelope: {}",
                     e
-                )));
+                ))))
             }
-        };
+        }
+    }
 
-        // Determine action (prefer header, fallback to body)
+    /// Extract SOAP action from header or envelope.
+    fn extract_action(
+        &self,
+        soap_action: Option<String>,
+        envelope: &super::soap::RawSoapEnvelope,
+    ) -> Result<String, Response> {
         tracing::debug!(
             "Action extraction (with auth): soap_action_header={:?}, envelope_action={:?}",
             soap_action,
             envelope.action
         );
+
         let action = soap_action
             .clone()
             .or(envelope.action.clone())
@@ -378,92 +428,103 @@ impl ServiceDispatcher {
                 soap_action,
                 envelope.action
             );
-            return error_response(OnvifError::WellFormed(
+            return Err(error_response(OnvifError::WellFormed(
                 "Missing SOAP action in request".to_string(),
-            ));
+            )));
         }
 
-        tracing::debug!(
-            "Dispatching {} to service '{}' (auth_enabled: {})",
-            action,
-            service,
-            auth_ctx.auth_enabled
-        );
+        Ok(action)
+    }
 
-        // Find handler first (to get required auth level)
+    /// Find handler for the given service.
+    fn find_handler(&self, service: &str) -> Result<Arc<dyn ServiceHandler>, Response> {
         let handler = {
             let handlers = self.handlers.read();
             handlers.get(&service.to_lowercase()).cloned()
         };
 
-        let handler = match handler {
-            Some(h) => h,
+        match handler {
+            Some(h) => Ok(h),
             None => {
                 tracing::warn!("No handler registered for service: {}", service);
-                return error_response(OnvifError::ActionNotSupported(format!(
+                Err(error_response(OnvifError::ActionNotSupported(format!(
                     "Service '{}' not available",
                     service
+                ))))
+            }
+        }
+    }
+
+    /// Check authentication for the request.
+    async fn check_authentication(
+        &self,
+        action: &str,
+        handler: &Arc<dyn ServiceHandler>,
+        basic_auth_result: &Result<Option<UserAccount>, OnvifError>,
+        envelope: &super::soap::RawSoapEnvelope,
+        auth_ctx: &AuthContext,
+    ) -> Result<(), Response> {
+        if !auth_ctx.auth_enabled {
+            return Ok(());
+        }
+
+        let required_level = handler.required_auth_level(action);
+
+        // Skip authentication for anonymous operations
+        if required_level == AuthLevel::Anonymous {
+            return Ok(());
+        }
+
+        // Try Basic Auth first
+        match basic_auth_result {
+            Ok(Some(user)) => {
+                if required_level.is_satisfied_by(Some(user.level)) {
+                    tracing::debug!("Basic Auth successful for action {}", action);
+                    return Ok(());
+                }
+                return Err(error_response(OnvifError::NotAuthorized(
+                    "Insufficient privileges".to_string(),
                 )));
             }
-        };
-
-        // Check authentication if enabled
-        if auth_ctx.auth_enabled {
-            let required_level = handler.required_auth_level(&action);
-
-            // Perform authentication if required
-            if required_level != AuthLevel::Anonymous {
-                // First, check the pre-validated Basic Auth result
-                let mut authenticated = false;
-
-                match &basic_auth_result {
-                    Ok(Some(user)) => {
-                        // Basic Auth credentials found and valid
-                        if required_level.is_satisfied_by(Some(user.level)) {
-                            tracing::debug!("Basic Auth successful for action {}", action);
-                            authenticated = true;
-                        } else {
-                            return error_response(OnvifError::NotAuthorized(
-                                "Insufficient privileges".to_string(),
-                            ));
-                        }
-                    }
-                    Ok(None) => {
-                        // No Basic Auth header, proceed to WS-Security
-                    }
-                    Err(e) => {
-                        // Basic Auth header present but invalid
-                        return error_response(e.clone());
-                    }
-                }
-
-                if !authenticated {
-                    // Fallback to WS-Security (UsernameToken)
-                    // Extract WS-Security credentials from envelope
-                    let ws_security = envelope
-                        .header
-                        .as_ref()
-                        .and_then(|h| h.security.as_ref())
-                        .and_then(|s| s.username_token.as_ref());
-
-                    match self
-                        .authenticate(ws_security, auth_ctx, required_level)
-                        .await
-                    {
-                        Ok(()) => {
-                            tracing::debug!("WS-Security Auth successful for action {}", action);
-                        }
-                        Err(e) => {
-                            tracing::warn!("Authentication failed for action {}: {:?}", action, e);
-                            return error_response(e);
-                        }
-                    }
-                }
+            Ok(None) => {
+                // No Basic Auth header, proceed to WS-Security
+            }
+            Err(e) => {
+                // Basic Auth header present but invalid
+                return Err(error_response(e.clone()));
             }
         }
 
-        // Handle the operation
-        match handler.handle_operation(&action, &envelope.body_xml).await {
+        // Fallback to WS-Security (UsernameToken)
+        let ws_security = envelope
+            .header
+            .as_ref()
+            .and_then(|h| h.security.as_ref())
+            .and_then(|s| s.username_token.as_ref());
+
+        match self
+            .authenticate(ws_security, auth_ctx, required_level)
+            .await
+        {
+            Ok(()) => {
+                tracing::debug!("WS-Security Auth successful for action {}", action);
+                Ok(())
+            }
+            Err(e) => {
+                tracing::warn!("Authentication failed for action {}: {:?}", action, e);
+                Err(error_response(e))
+            }
+        }
+    }
+
+    /// Handle the operation and return response.
+    async fn handle_operation(
+        &self,
+        handler: &Arc<dyn ServiceHandler>,
+        action: &str,
+        body_xml: &str,
+    ) -> Response {
+        match handler.handle_operation(action, body_xml).await {
             Ok(response_body) => {
                 let response_xml = super::soap::build_soap_response(&response_body);
                 (
@@ -513,67 +574,91 @@ impl ServiceDispatcher {
         // Get password type and validate
         let password_type = token.password.password_type.as_deref().unwrap_or("");
 
-        // Check if digest authentication
+        // Route to appropriate authentication method
         if password_type.contains("PasswordDigest") {
-            // Digest authentication - validate nonce, created, and digest
-            let nonce = token
-                .nonce
-                .as_ref()
-                .map(|n| n.value.as_str())
-                .ok_or_else(|| {
-                    OnvifError::NotAuthorized("Missing nonce for digest authentication".to_string())
-                })?;
-
-            let created = token.created.as_deref().ok_or_else(|| {
-                OnvifError::NotAuthorized(
-                    "Missing created timestamp for digest authentication".to_string(),
-                )
-            })?;
-
-            // Validate timestamp
-            if let Err(e) = auth_ctx.ws_security.validate_timestamp(created) {
-                return Err(ws_error_to_onvif(e));
-            }
-
-            // Check nonce for replay
-            if let Err(e) = auth_ctx.ws_security.check_nonce(nonce, username) {
-                return Err(ws_error_to_onvif(e));
-            }
-
-            // Get stored password for digest verification
-            let stored_password = auth_ctx
-                .password_manager
-                .get_password_for_digest(&user.password);
-
-            // Verify digest
-            if let Err(e) = auth_ctx.ws_security.verify_digest(
-                nonce,
-                created,
-                &token.password.value,
-                stored_password,
-            ) {
-                return Err(ws_error_to_onvif(e));
-            }
+            self.authenticate_digest(token, username, auth_ctx, &user)?;
         } else if password_type.contains("PasswordText") || password_type.is_empty() {
-            // Plaintext authentication (less secure but supported)
-            if auth_ctx.ws_security.requires_digest() {
-                return Err(OnvifError::NotAuthorized(
-                    "Digest authentication required".to_string(),
-                ));
-            }
-
-            // Verify plaintext password
-            if !auth_ctx
-                .password_manager
-                .verify_password(&token.password.value, &user.password)
-            {
-                return Err(OnvifError::NotAuthorized("Invalid credentials".to_string()));
-            }
+            self.authenticate_plaintext(token, auth_ctx, &user)?;
         } else {
             return Err(OnvifError::NotAuthorized(format!(
                 "Unsupported password type: {}",
                 password_type
             )));
+        }
+
+        Ok(())
+    }
+
+    /// Authenticate using digest (PasswordDigest) method.
+    fn authenticate_digest(
+        &self,
+        token: &UsernameToken,
+        username: &str,
+        auth_ctx: &AuthContext,
+        user: &UserAccount,
+    ) -> Result<(), OnvifError> {
+        // Extract nonce
+        let nonce = token
+            .nonce
+            .as_ref()
+            .map(|n| n.value.as_str())
+            .ok_or_else(|| {
+                OnvifError::NotAuthorized("Missing nonce for digest authentication".to_string())
+            })?;
+
+        // Extract created timestamp
+        let created = token.created.as_deref().ok_or_else(|| {
+            OnvifError::NotAuthorized(
+                "Missing created timestamp for digest authentication".to_string(),
+            )
+        })?;
+
+        // Validate timestamp
+        auth_ctx
+            .ws_security
+            .validate_timestamp(created)
+            .map_err(ws_error_to_onvif)?;
+
+        // Check nonce for replay
+        auth_ctx
+            .ws_security
+            .check_nonce(nonce, username)
+            .map_err(ws_error_to_onvif)?;
+
+        // Get stored password for digest verification
+        let stored_password = auth_ctx
+            .password_manager
+            .get_password_for_digest(&user.password);
+
+        // Verify digest
+        auth_ctx
+            .ws_security
+            .verify_digest(nonce, created, &token.password.value, stored_password)
+            .map_err(ws_error_to_onvif)?;
+
+        Ok(())
+    }
+
+    /// Authenticate using plaintext (PasswordText) method.
+    fn authenticate_plaintext(
+        &self,
+        token: &UsernameToken,
+        auth_ctx: &AuthContext,
+        user: &UserAccount,
+    ) -> Result<(), OnvifError> {
+        // Check if digest is required
+        if auth_ctx.ws_security.requires_digest() {
+            return Err(OnvifError::NotAuthorized(
+                "Digest authentication required".to_string(),
+            ));
+        }
+
+        // Verify plaintext password
+        if !auth_ctx
+            .password_manager
+            .verify_password(&token.password.value, &user.password)
+        {
+            return Err(OnvifError::NotAuthorized("Invalid credentials".to_string()));
         }
 
         Ok(())
@@ -677,56 +762,52 @@ impl Default for ServiceDispatcher {
 /// `action` parameter of the `Content-Type` header.
 fn extract_soap_action(request: &Request<Body>) -> Option<String> {
     // Try SOAPAction header first
-    if let Some(action) = request.headers().get("SOAPAction")
-        && let Ok(action_str) = action.to_str()
-    {
-        // Remove quotes if present
-        let action = action_str.trim_matches('"');
-        // Extract action name from URI if needed
-        if let Some(pos) = action.rfind('/') {
-            let extracted = action[pos + 1..].to_string();
-            // Return None for empty strings
-            return if extracted.is_empty() {
-                None
-            } else {
-                Some(extracted)
-            };
-        }
-        // Return None for empty strings
-        return if action.is_empty() {
-            None
-        } else {
-            Some(action.to_string())
-        };
+    if let Some(action) = extract_action_from_soap_header(request) {
+        return Some(action);
     }
 
     // Try Content-Type header with action parameter
-    if let Some(content_type) = request.headers().get(header::CONTENT_TYPE)
-        && let Ok(ct_str) = content_type.to_str()
-    {
-        // Look for action= parameter
-        for part in ct_str.split(';') {
-            let part = part.trim();
-            if let Some(action) = part.strip_prefix("action=") {
-                let action = action.trim_matches('"');
-                if let Some(pos) = action.rfind('/') {
-                    let extracted = action[pos + 1..].to_string();
-                    return if extracted.is_empty() {
-                        None
-                    } else {
-                        Some(extracted)
-                    };
-                }
-                return if action.is_empty() {
-                    None
-                } else {
-                    Some(action.to_string())
-                };
-            }
+    extract_action_from_content_type(request)
+}
+
+/// Extract action from SOAPAction header.
+fn extract_action_from_soap_header(request: &Request<Body>) -> Option<String> {
+    let action_header = request.headers().get("SOAPAction")?;
+    let action_str = action_header.to_str().ok()?;
+    normalize_action(action_str)
+}
+
+/// Extract action from Content-Type header's action parameter.
+fn extract_action_from_content_type(request: &Request<Body>) -> Option<String> {
+    let content_type = request.headers().get(header::CONTENT_TYPE)?;
+    let ct_str = content_type.to_str().ok()?;
+
+    // Look for action= parameter
+    for part in ct_str.split(';') {
+        let part = part.trim();
+        if let Some(action) = part.strip_prefix("action=") {
+            return normalize_action(action);
         }
     }
 
     None
+}
+
+/// Normalize action string by trimming quotes and extracting from URI if needed.
+fn normalize_action(action: &str) -> Option<String> {
+    let action = action.trim_matches('"');
+    let action = extract_action_from_uri(action).unwrap_or_else(|| action.to_string());
+
+    if action.is_empty() {
+        None
+    } else {
+        Some(action)
+    }
+}
+
+/// Extract action name from URI (last segment after '/').
+fn extract_action_from_uri(uri: &str) -> Option<String> {
+    uri.rfind('/').map(|pos| uri[pos + 1..].to_string())
 }
 
 /// Build an error response from an OnvifError.

@@ -441,7 +441,7 @@ pub use ffi_impl::*;
 // Stub implementations for native builds (testing)
 #[cfg(use_stubs)]
 mod stub_impl {
-    use super::*;
+    use super::{AnykaResult, LogLevel, PtzDirection, PtzMotor, VideoDevice};
 
     /// Print a message (stub - does nothing).
     pub fn ak_log(_level: LogLevel, _message: &str) -> AnykaResult<()> {

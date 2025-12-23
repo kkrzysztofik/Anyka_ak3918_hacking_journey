@@ -16,6 +16,10 @@ function safeString(value: unknown, defaultValue: string = ''): string {
   if (typeof value === 'string') {
     return value || defaultValue;
   }
+  // Only convert primitive types to string, objects return default to avoid '[object Object]'
+  if (typeof value === 'object') {
+    return defaultValue;
+  }
   return String(value);
 }
 
