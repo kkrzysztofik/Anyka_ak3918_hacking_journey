@@ -24,80 +24,84 @@ on:
         required: true
 
 jobs:
-  snyk-setup:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-
-      - name: Install Snyk CLI
-        run: npm install -g snyk
-
   snyk-code:
-    needs: snyk-setup
+    name: Snyk Code Analysis
     runs-on: ubuntu-latest
     continue-on-error: true
     outputs:
-      snyk_code_status: ${{ steps.snyk-code.outputs.snyk_code_status }}
+      snyk_code_status: ${{ steps.snyk-code.outcome }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
 
-      - name: Run Snyk Code test
+      - name: Setup Snyk CLI
+        uses: snyk/actions/setup@master
+
+      - name: Run Snyk Code Test
         id: snyk-code
         continue-on-error: true
         working-directory: ${{ inputs.working_directory }}
-        run: |
-          set +x
-          if [ -n "$SNYK_TOKEN" ]; then
-            snyk code test --sarif > snyk-code.sarif || true
-            echo "snyk_code_status=completed" >> $GITHUB_OUTPUT
-          else
-            echo "snyk_code_status=skipped" >> $GITHUB_OUTPUT
-          fi
+        run: snyk code test --sarif-file-output=snyk-code.sarif
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-  snyk-oss:
-    needs: snyk-setup
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    outputs:
-      snyk_oss_status: ${{ steps.snyk-oss.outputs.snyk_oss_status }}
-      snyk_issues: ${{ steps.snyk-oss.outputs.snyk_issues }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-
-      - name: Run Snyk Open Source monitor
-        id: snyk-oss
-        continue-on-error: true
-        working-directory: ${{ inputs.working_directory }}
-        run: |
-          set +x
-          if [ -n "$SNYK_TOKEN" ] && [ -f "package.json" ]; then
-            snyk monitor --all-projects || true
-            snyk test --file=package.json --json > snyk-oss-results.json 2>&1 || true
-            SNYK_ISSUES=$(node -e "const fs = require('fs'); try { const data = JSON.parse(fs.readFileSync('snyk-oss-results.json')); console.log(data.vulnerabilities ? data.vulnerabilities.length : 0); } catch(e) { console.log(0); }" 2>/dev/null || echo "0")
-            echo "snyk_issues=$SNYK_ISSUES" >> $GITHUB_OUTPUT
-            echo "snyk_oss_status=completed" >> $GITHUB_OUTPUT
-          else
-            echo "snyk_issues=0" >> $GITHUB_OUTPUT
-            echo "snyk_oss_status=skipped" >> $GITHUB_OUTPUT
-          fi
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-  upload-sarif:
-    needs: snyk-code
-    runs-on: ubuntu-latest
-    if: always() && needs.snyk-code.outputs.snyk_code_status == 'completed'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-
-      - name: Upload Snyk Code result to GitHub Code Scanning
+      - name: Upload Snyk Code SARIF to GitHub
         uses: github/codeql-action/upload-sarif@v4
         continue-on-error: true
         with:
           sarif_file: ${{ inputs.working_directory }}/snyk-code.sarif
+
+  snyk-oss:
+    name: Snyk Open Source
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    outputs:
+      snyk_oss_status: ${{ steps.snyk-oss.outcome }}
+      snyk_issues: ${{ steps.count-issues.outputs.snyk_issues }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run Snyk OSS for Node.js
+        id: snyk-oss
+        if: hashFiles(format('{0}/package.json', inputs.working_directory)) != ''
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --file=${{ inputs.working_directory }}/package.json --sarif-file-output=${{ inputs.working_directory }}/snyk-oss.sarif
+          command: test
+
+      - name: Upload Snyk OSS SARIF to GitHub
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: ${{ inputs.working_directory }}/snyk-oss.sarif
+
+      - name: Count Snyk Issues
+        id: count-issues
+        run: |
+          # Count issues from SARIF file if it exists
+          if [ -f "${{ inputs.working_directory }}/snyk-oss.sarif" ]; then
+            SNYK_ISSUES=$(jq '.runs[0].results | length' "${{ inputs.working_directory }}/snyk-oss.sarif" 2>/dev/null || echo "0")
+          else
+            SNYK_ISSUES=0
+          fi
+          echo "snyk_issues=$SNYK_ISSUES" >> $GITHUB_OUTPUT
+
+      - name: Run Snyk Monitor
+        if: steps.snyk-oss.outcome == 'success' || steps.snyk-oss.outcome == 'failure'
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --file=${{ inputs.working_directory }}/package.json
+          command: monitor

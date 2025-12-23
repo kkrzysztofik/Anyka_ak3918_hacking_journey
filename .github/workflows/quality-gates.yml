@@ -19,6 +19,7 @@ on:
 
 jobs:
   sonar-scan:
+    name: SonarQube Analysis
     runs-on: ubuntu-latest
     continue-on-error: true
     outputs:
@@ -39,6 +40,7 @@ jobs:
           projectBaseDir: .
 
   sonar-quality-gate:
+    name: SonarQube Quality Gate
     runs-on: ubuntu-latest
     continue-on-error: true
     needs: sonar-scan
@@ -111,8 +113,8 @@ jobs:
               })
             ' > sarif-results.json
 
-            # Merge results into the main SARIF file
-            jq --argfile results sarif-results.json '.runs[0].results = $results' sonar-report.sarif > sonar-report-final.sarif
+            # Merge results into the main SARIF file (use --slurpfile as --argfile is deprecated)
+            jq --slurpfile results sarif-results.json '.runs[0].results = $results[0]' sonar-report.sarif > sonar-report-final.sarif
             mv sonar-report-final.sarif sonar-report.sarif
           fi
         env:

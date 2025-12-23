@@ -32,6 +32,7 @@ on:
 
 jobs:
   generate-summary:
+    name: Generate CI Summary
     runs-on: ubuntu-latest
     steps:
       - name: Generate Run Summary
@@ -60,6 +61,7 @@ jobs:
           EOF
 
   comment-pr:
+    name: Comment PR with Results
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
