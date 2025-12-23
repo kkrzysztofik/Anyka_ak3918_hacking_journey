@@ -45,7 +45,17 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
+      - name: Check if Snyk Code SARIF exists
+        id: check-snyk-code-sarif
+        run: |
+          if [ -f "${{ inputs.working_directory }}/snyk-code.sarif" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Upload Snyk Code SARIF to GitHub
+        if: steps.check-snyk-code-sarif.outputs.exists == 'true'
         uses: github/codeql-action/upload-sarif@v4
         continue-on-error: true
         with:
@@ -65,7 +75,14 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: ${{ inputs.working_directory }}/package-lock.json
+
+      - name: Install dependencies
+        if: hashFiles(format('{0}/package.json', inputs.working_directory)) != ''
+        working-directory: ${{ inputs.working_directory }}
+        run: npm ci
 
       - name: Run Snyk OSS for Node.js
         id: snyk-oss
@@ -78,8 +95,17 @@ jobs:
           args: --file=${{ inputs.working_directory }}/package.json --sarif-file-output=${{ inputs.working_directory }}/snyk-oss.sarif
           command: test
 
+      - name: Check if Snyk OSS SARIF exists
+        id: check-snyk-oss-sarif
+        run: |
+          if [ -f "${{ inputs.working_directory }}/snyk-oss.sarif" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Upload Snyk OSS SARIF to GitHub
-        if: always()
+        if: steps.check-snyk-oss-sarif.outputs.exists == 'true'
         uses: github/codeql-action/upload-sarif@v4
         continue-on-error: true
         with:

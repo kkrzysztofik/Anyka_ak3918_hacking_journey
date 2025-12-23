@@ -9,21 +9,22 @@ on:
     outputs:
       sonar-scan-status:
         description: "Status of SonarQube scan"
-        value: ${{ jobs.sonar-scan.outputs.sonar-scan-status }}
+        value: ${{ jobs.sonarqube.outputs.sonar-scan-status }}
       quality-gate-status:
         description: "Status of Quality Gate check"
-        value: ${{ jobs.sonar-quality-gate.outputs.quality-gate-status }}
+        value: ${{ jobs.sonarqube.outputs.quality-gate-status }}
     secrets:
       SONAR_TOKEN:
         required: true
 
 jobs:
-  sonar-scan:
-    name: SonarQube Analysis
+  sonarqube:
+    name: SonarQube Analysis & Quality Gate
     runs-on: ubuntu-latest
     continue-on-error: true
     outputs:
       sonar-scan-status: ${{ steps.sonar-scan.outcome }}
+      quality-gate-status: ${{ steps.sonar-quality-gate.outcome || steps.skip-quality-gate.outputs.status || 'skipped' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -49,48 +50,18 @@ jobs:
       - name: SonarQube Scan
         id: sonar-scan
         continue-on-error: true
-        uses: sonarsource/sonarqube-scan-action@master
+        uses: sonarsource/sonarqube-scan-action@v7.0.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          projectBaseDir: .
-
-      - name: Upload scannerwork artifacts
-        if: always() && steps.sonar-scan.outcome != 'skipped'
-        uses: actions/upload-artifact@v4
-        continue-on-error: true
-        with:
-          name: scannerwork
-          path: .scannerwork/
-          retention-days: 1
-          if-no-files-found: ignore
-
-  sonar-quality-gate:
-    name: SonarQube Quality Gate
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    needs: sonar-scan
-    outputs:
-      quality-gate-status: ${{ steps.sonar-quality-gate.outcome || steps.skip-quality-gate.outputs.status || 'skipped' }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Download scannerwork artifacts
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: scannerwork
-          path: .scannerwork/
 
       - name: Check if scannerwork exists
         id: check-scannerwork
+        if: always()
         run: |
           if [ -f ".scannerwork/report-task.txt" ]; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "✅ Found report-task.txt"
+            cat .scannerwork/report-task.txt
           else
             echo "exists=false" >> $GITHUB_OUTPUT
             echo "⚠️ report-task.txt not found - scan may have failed"
@@ -101,6 +72,8 @@ jobs:
         if: steps.check-scannerwork.outputs.exists == 'true'
         continue-on-error: true
         uses: sonarsource/sonarqube-quality-gate-action@master
+        with:
+          pollingTimeoutSec: 600
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
