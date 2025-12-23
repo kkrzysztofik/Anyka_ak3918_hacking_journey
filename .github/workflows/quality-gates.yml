@@ -30,6 +30,22 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cross-compile/onvif-rust/target
+          key: cargo-${{ runner.os }}-sonar-${{ hashFiles('cross-compile/onvif-rust/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-sonar-
+
       - name: SonarQube Scan
         id: sonar-scan
         continue-on-error: true
@@ -38,6 +54,14 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           projectBaseDir: .
+
+      - name: Upload scannerwork artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scannerwork
+          path: .scannerwork/
+          retention-days: 1
 
   sonar-quality-gate:
     name: SonarQube Quality Gate
@@ -51,6 +75,12 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Download scannerwork artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: scannerwork
+          path: .scannerwork/
 
       - name: SonarQube Quality Gate Check
         id: sonar-quality-gate

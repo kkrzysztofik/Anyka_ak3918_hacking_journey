@@ -125,6 +125,7 @@ jobs:
           fi
 
   security-scans:
+    name: Security Scans
     needs: test-and-coverage
     uses: ./.github/workflows/security-scans.yml
     with:
@@ -133,6 +134,7 @@ jobs:
     secrets: inherit
 
   quality-gates:
+    name: Code Quality Gates
     needs: test-and-coverage
     uses: ./.github/workflows/quality-gates.yml
     with:
@@ -140,6 +142,7 @@ jobs:
     secrets: inherit
 
   reporting:
+    name: Generate CI Report
     needs: [test-and-coverage, security-scans, quality-gates]
     uses: ./.github/workflows/reporting.yml
     with:
