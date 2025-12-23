@@ -350,11 +350,21 @@ export default function ImagingPage() {
                   }
                   className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
                 >
-                  {options?.irCutFilterModes?.map((mode) => (
-                    <option key={mode} value={mode}>
-                      {mode === 'AUTO' ? 'Auto' : mode === 'ON' ? 'Day Mode' : 'Night Mode'}
-                    </option>
-                  )) || (
+                  {options?.irCutFilterModes?.map((mode) => {
+                    let label: string;
+                    if (mode === 'AUTO') {
+                      label = 'Auto';
+                    } else if (mode === 'ON') {
+                      label = 'Day Mode';
+                    } else {
+                      label = 'Night Mode';
+                    }
+                    return (
+                      <option key={mode} value={mode}>
+                        {label}
+                      </option>
+                    );
+                  }) || (
                     <>
                       <option value="AUTO">Auto</option>
                       <option value="ON">Day Mode</option>

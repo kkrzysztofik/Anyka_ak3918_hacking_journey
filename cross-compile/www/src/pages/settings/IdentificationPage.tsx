@@ -138,7 +138,7 @@ export default function IdentificationPage() {
                 </div>
               }
             />
-            <StatusCardItem label="Uptime" value="--" /> {/* TODO: Implement uptime */}
+            <StatusCardItem label="Uptime" value="--" />
             <StatusCardItem label="MAC Address" value={primaryInterface?.hwAddress || '--'} />
             <StatusCardItem label="Speed" value="100 Mbps" />
             <StatusCardItem label="Channel" value="Auto" />
@@ -214,31 +214,31 @@ export default function IdentificationPage() {
               </SettingsCardHeader>
               <SettingsCardContent className="grid grid-cols-1 gap-[24px] md:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-[13px] text-[#6b6b6f]">Manufacturer</label>
+                  <p className="mb-1 block text-[13px] text-[#6b6b6f]">Manufacturer</p>
                   <div className="font-mono text-[15px] text-white">
                     {deviceInfo?.deviceInfo.manufacturer}
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-[13px] text-[#6b6b6f]">Model</label>
+                  <p className="mb-1 block text-[13px] text-[#6b6b6f]">Model</p>
                   <div className="font-mono text-[15px] text-white">
                     {deviceInfo?.deviceInfo.model}
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-[13px] text-[#6b6b6f]">Hardware ID</label>
+                  <p className="mb-1 block text-[13px] text-[#6b6b6f]">Hardware ID</p>
                   <div className="font-mono text-[15px] text-white">
                     {deviceInfo?.deviceInfo.hardwareId}
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-[13px] text-[#6b6b6f]">Firmware Version</label>
+                  <p className="mb-1 block text-[13px] text-[#6b6b6f]">Firmware Version</p>
                   <div className="font-mono text-[15px] text-white">
                     {deviceInfo?.deviceInfo.firmwareVersion}
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-[13px] text-[#6b6b6f]">Serial Number</label>
+                  <p className="mb-1 block text-[13px] text-[#6b6b6f]">Serial Number</p>
                   <div className="font-mono text-[15px] text-white">
                     {deviceInfo?.deviceInfo.serialNumber}
                   </div>
@@ -261,25 +261,25 @@ export default function IdentificationPage() {
               </SettingsCardHeader>
               <SettingsCardContent className="grid grid-cols-1 gap-[24px] md:grid-cols-2">
                 <div>
-                  <label className="mb-1 block text-[13px] text-[#6b6b6f]">Device ID</label>
+                  <p className="mb-1 block text-[13px] text-[#6b6b6f]">Device ID</p>
                   <div className="font-mono text-[15px] text-white">
                     {deviceInfo?.deviceInfo.hardwareId}
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-[13px] text-[#6b6b6f]">IP Address</label>
+                  <p className="mb-1 block text-[13px] text-[#6b6b6f]">IP Address</p>
                   <div className="font-mono text-[15px] text-white">
                     {primaryInterface?.address || '--'}
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-[13px] text-[#6b6b6f]">MAC Address</label>
+                  <p className="mb-1 block text-[13px] text-[#6b6b6f]">MAC Address</p>
                   <div className="font-mono text-[15px] text-white">
                     {primaryInterface?.hwAddress || '--'}
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-[13px] text-[#6b6b6f]">ONVIF Version</label>
+                  <p className="mb-1 block text-[13px] text-[#6b6b6f]">ONVIF Version</p>
                   <div className="font-mono text-[15px] text-white">24.12</div>
                 </div>
               </SettingsCardContent>

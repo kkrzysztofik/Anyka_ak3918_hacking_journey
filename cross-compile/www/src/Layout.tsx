@@ -76,11 +76,11 @@ function NavLinkItem({
   item,
   onClick,
   isMobile = false,
-}: {
+}: Readonly<{
   item: NavItem;
   onClick?: () => void;
   isMobile?: boolean;
-}) {
+}>) {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
   const isActive =
@@ -210,7 +210,7 @@ function NavLinkItem({
   );
 }
 
-function SidebarContent({ onClose }: { onClose?: () => void }) {
+function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
   const { username, logout } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
@@ -246,7 +246,17 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
           {/* User Menu Popup */}
           {isMenuOpen && (
             <>
-              <div className="fixed inset-0 z-40" onClick={() => setIsMenuOpen(false)} />
+              <button
+                type="button"
+                className="fixed inset-0 z-40"
+                onClick={() => setIsMenuOpen(false)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setIsMenuOpen(false);
+                  }
+                }}
+                aria-label="Close menu"
+              />
               <div className="bg-dark-sidebar border-dark-border animate-in fade-in zoom-in absolute right-4 bottom-full left-4 z-50 mb-2 rounded-lg border py-1 shadow-xl duration-200">
                 <div className="border-dark-border border-b px-4 py-3">
                   <p className="text-sm font-semibold text-white">Admin User</p>

@@ -11,7 +11,6 @@ import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
 } from 'react';
@@ -33,78 +32,89 @@ interface AuthContextValue {
   username: string | null;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
-  getCredentials: () => AuthCredentials | null;
-  getBasicAuthHeader: () => string | null;
+  getCredentials: () => Promise<AuthCredentials | null>;
+  getBasicAuthHeader: () => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 interface AuthProviderProps {
-  children: ReactNode;
+  readonly children: ReactNode;
 }
 
 const AUTH_STORAGE_KEY = 'onvif_camera_auth';
 
+// Helper function to hydrate initial state from sessionStorage
+function getInitialStoredData(): StoredAuthData | null {
+  const stored = sessionStorage.getItem(AUTH_STORAGE_KEY);
+  if (stored) {
+    try {
+      return JSON.parse(stored) as StoredAuthData;
+    } catch {
+      // Clear invalid stored data
+      sessionStorage.removeItem(AUTH_STORAGE_KEY);
+      return null;
+    }
+  }
+  return null;
+}
+
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [credentials, setCredentials] = useState<AuthCredentials | null>(null);
-
-  // Hydrate credentials from sessionStorage on mount
-  useEffect(() => {
-    const hydrateCredentials = async () => {
-      const stored = sessionStorage.getItem(AUTH_STORAGE_KEY);
-      if (stored) {
-        try {
-          const data: StoredAuthData = JSON.parse(stored);
-          // Decrypt the password asynchronously
-          const password = await decrypt(data.encryptedPassword);
-          setCredentials({ username: data.username, password });
-        } catch {
-          // Clear invalid stored data
-          sessionStorage.removeItem(AUTH_STORAGE_KEY);
-        }
-      }
-    };
-
-    hydrateCredentials();
-  }, []);
+  // Use lazy initialization to avoid setState in effect
+  const [storedData, setStoredData] = useState<StoredAuthData | null>(getInitialStoredData);
 
   const login = useCallback(async (username: string, password: string) => {
     // Encrypt password before storing
     const encryptedPassword = await encrypt(password);
-    const creds = { username, password };
-    setCredentials(creds);
 
-    // Store username in clear text, password encrypted
-    const storedData: StoredAuthData = {
+    // Store only encrypted data (password never stored in clear text in state)
+    const data: StoredAuthData = {
       username,
       encryptedPassword,
     };
-    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(storedData));
+    setStoredData(data);
+    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(data));
   }, []);
 
   const logout = useCallback(() => {
-    setCredentials(null);
+    setStoredData(null);
     sessionStorage.removeItem(AUTH_STORAGE_KEY);
   }, []);
 
-  const getCredentials = useCallback(() => credentials, [credentials]);
+  const getCredentials = useCallback(async (): Promise<AuthCredentials | null> => {
+    if (!storedData) return null;
+    try {
+      // Decrypt password only when needed
+      const password = await decrypt(storedData.encryptedPassword);
+      return { username: storedData.username, password };
+    } catch {
+      return null;
+    }
+  }, [storedData]);
 
-  const getBasicAuthHeader = useCallback(() => {
-    if (!credentials) return null;
-    const encoded = btoa(`${credentials.username}:${credentials.password}`);
-    return `Basic ${encoded}`;
-  }, [credentials]);
+  const getBasicAuthHeader = useCallback(async (): Promise<string | null> => {
+    if (!storedData) return null;
+    try {
+      // Decrypt password only when needed for auth header
+      const password = await decrypt(storedData.encryptedPassword);
+      const encoded = btoa(`${storedData.username}:${password}`);
+      // Password is now in memory temporarily, but will be garbage collected
+      return `Basic ${encoded}`;
+    } catch {
+      return null;
+    }
+  }, [storedData]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      isAuthenticated: credentials !== null,
-      username: credentials?.username ?? null,
+      isAuthenticated: storedData !== null,
+      username: storedData?.username ?? null,
       login,
       logout,
       getCredentials,
       getBasicAuthHeader,
     }),
-    [credentials, login, logout, getCredentials, getBasicAuthHeader],
+    [storedData, login, logout, getCredentials, getBasicAuthHeader],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

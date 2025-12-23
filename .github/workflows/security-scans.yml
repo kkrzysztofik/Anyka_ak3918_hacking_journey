@@ -28,6 +28,9 @@ jobs:
     name: Snyk Code Analysis
     runs-on: ubuntu-latest
     continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
     outputs:
       snyk_code_status: ${{ steps.snyk-code.outcome }}
     steps:
@@ -65,6 +68,9 @@ jobs:
     name: Snyk Open Source
     runs-on: ubuntu-latest
     continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
     outputs:
       snyk_oss_status: ${{ steps.snyk-oss.outcome }}
       snyk_issues: ${{ steps.count-issues.outputs.snyk_issues }}

@@ -6,6 +6,19 @@
 import { ENDPOINTS, apiClient } from '@/services/api';
 import { createSOAPEnvelope, parseSOAPResponse } from '@/services/soap/client';
 
+/**
+ * Helper function to safely convert a value to string
+ */
+function safeString(value: unknown, defaultValue: string = ''): string {
+  if (value === null || value === undefined) {
+    return defaultValue;
+  }
+  if (typeof value === 'string') {
+    return value || defaultValue;
+  }
+  return String(value);
+}
+
 export interface MediaProfile {
   token: string;
   name: string;
@@ -115,47 +128,47 @@ export async function getProfiles(): Promise<MediaProfile[]> {
     const metadataConfig = profile.MetadataConfiguration as Record<string, unknown> | undefined;
 
     return {
-      token: String(profile['@_token'] || ''),
-      name: String(profile.Name || ''),
-      videoSourceToken: videoSource ? String(videoSource['@_token'] || '') : undefined,
-      videoEncoderToken: videoEncoder ? String(videoEncoder['@_token'] || '') : undefined,
-      audioSourceToken: audioSource ? String(audioSource['@_token'] || '') : undefined,
-      audioEncoderToken: audioEncoder ? String(audioEncoder['@_token'] || '') : undefined,
+      token: safeString(profile['@_token']),
+      name: safeString(profile.Name),
+      videoSourceToken: videoSource ? safeString(videoSource['@_token']) : undefined,
+      videoEncoderToken: videoEncoder ? safeString(videoEncoder['@_token']) : undefined,
+      audioSourceToken: audioSource ? safeString(audioSource['@_token']) : undefined,
+      audioEncoderToken: audioEncoder ? safeString(audioEncoder['@_token']) : undefined,
       videoSourceConfiguration: videoSource
         ? {
-            token: String(videoSource['@_token'] || ''),
-            name: String(videoSource.Name || ''),
+            token: safeString(videoSource['@_token']),
+            name: safeString(videoSource.Name),
           }
         : undefined,
       videoEncoderConfiguration: videoEncoder
         ? {
-            token: String(videoEncoder['@_token'] || ''),
-            name: String(videoEncoder.Name || ''),
-            encoding: String(videoEncoder.Encoding || 'H264'),
+            token: safeString(videoEncoder['@_token']),
+            name: safeString(videoEncoder.Name),
+            encoding: safeString(videoEncoder.Encoding, 'H264'),
           }
         : undefined,
       audioSourceConfiguration: audioSource
         ? {
-            token: String(audioSource['@_token'] || ''),
-            name: String(audioSource.Name || ''),
+            token: safeString(audioSource['@_token']),
+            name: safeString(audioSource.Name),
           }
         : undefined,
       audioEncoderConfiguration: audioEncoder
         ? {
-            token: String(audioEncoder['@_token'] || ''),
-            name: String(audioEncoder.Name || ''),
+            token: safeString(audioEncoder['@_token']),
+            name: safeString(audioEncoder.Name),
           }
         : undefined,
       ptzConfiguration: ptzConfig
         ? {
-            token: String(ptzConfig['@_token'] || ''),
-            name: String(ptzConfig.Name || ''),
+            token: safeString(ptzConfig['@_token']),
+            name: safeString(ptzConfig.Name),
           }
         : undefined,
       metadataConfiguration: metadataConfig
         ? {
-            token: String(metadataConfig['@_token'] || ''),
-            name: String(metadataConfig.Name || ''),
+            token: safeString(metadataConfig['@_token']),
+            name: safeString(metadataConfig.Name),
           }
         : undefined,
       fixed: profile.fixed === true || profile.fixed === 'true',
@@ -188,8 +201,8 @@ export async function getProfile(token: string): Promise<MediaProfile | null> {
   }
 
   return {
-    token: String(profile['@_token'] || ''),
-    name: String(profile.Name || ''),
+    token: safeString(profile['@_token']),
+    name: safeString(profile.Name),
   };
 }
 
@@ -213,7 +226,7 @@ export async function createProfile(name: string): Promise<string> {
   const data = parsed.data?.CreateProfileResponse as Record<string, unknown> | undefined;
   const profile = data?.Profile as Record<string, unknown> | undefined;
 
-  return String(profile?.['@_token'] || '');
+  return safeString(profile?.['@_token']);
 }
 
 /**
@@ -264,9 +277,9 @@ export async function getVideoEncoderConfigurations(): Promise<VideoEncoderConfi
     const h264 = config.H264 as Record<string, unknown> | undefined;
 
     return {
-      token: String(config['@_token'] || ''),
-      name: String(config.Name || ''),
-      encoding: String(config.Encoding || 'H264') as VideoEncoding,
+      token: safeString(config['@_token']),
+      name: safeString(config.Name),
+      encoding: safeString(config.Encoding, 'H264') as VideoEncoding,
       resolution: {
         width: Number(resolution?.Width || 1920),
         height: Number(resolution?.Height || 1080),
@@ -282,10 +295,10 @@ export async function getVideoEncoderConfigurations(): Promise<VideoEncoderConfi
       h264: h264
         ? {
             govLength: Number(h264.GovLength || 30),
-            h264Profile: String(h264.H264Profile || 'Main'),
+            h264Profile: safeString(h264.H264Profile, 'Main'),
           }
         : undefined,
-      sessionTimeout: String(config.SessionTimeout || 'PT60S'),
+      sessionTimeout: safeString(config.SessionTimeout, 'PT60S'),
     };
   });
 }
@@ -323,9 +336,9 @@ export async function getVideoEncoderConfiguration(
   const h264 = config.H264 as Record<string, unknown> | undefined;
 
   return {
-    token: String(config['@_token'] || ''),
-    name: String(config.Name || ''),
-    encoding: String(config.Encoding || 'H264') as VideoEncoding,
+    token: safeString(config['@_token']),
+    name: safeString(config.Name),
+    encoding: safeString(config.Encoding, 'H264') as VideoEncoding,
     resolution: {
       width: Number(resolution?.Width || 1920),
       height: Number(resolution?.Height || 1080),
@@ -341,10 +354,10 @@ export async function getVideoEncoderConfiguration(
     h264: h264
       ? {
           govLength: Number(h264.GovLength || 30),
-          h264Profile: String(h264.H264Profile || 'Main'),
+          h264Profile: safeString(h264.H264Profile, 'Main'),
         }
       : undefined,
-    sessionTimeout: String(config.SessionTimeout || 'PT60S'),
+    sessionTimeout: safeString(config.SessionTimeout, 'PT60S'),
   };
 }
 
@@ -400,6 +413,90 @@ export async function setVideoEncoderConfiguration(
 }
 
 /**
+ * Helper function to parse H264 options
+ */
+function parseH264Options(h264: Record<string, unknown>): VideoEncoderConfigurationOptions['h264'] {
+  const resolutions = h264.ResolutionsAvailable as
+    | Array<Record<string, unknown>>
+    | Record<string, unknown>
+    | undefined;
+  const frameRateRange = h264.FrameRateRange as Record<string, unknown> | undefined;
+  const encodingIntervalRange = h264.EncodingIntervalRange as Record<string, unknown> | undefined;
+  const bitrateRange = h264.BitrateRange as Record<string, unknown> | undefined;
+  const govLengthRange = h264.GovLengthRange as Record<string, unknown> | undefined;
+  const profiles = h264.H264ProfilesSupported as string[] | undefined;
+
+  let resolutionsArray: Array<Record<string, unknown>>;
+  if (Array.isArray(resolutions)) {
+    resolutionsArray = resolutions;
+  } else if (resolutions) {
+    resolutionsArray = [resolutions];
+  } else {
+    resolutionsArray = [];
+  }
+
+  return {
+    resolutionsAvailable: resolutionsArray.map((r) => ({
+      width: Number(r.Width || 1920),
+      height: Number(r.Height || 1080),
+    })),
+    frameRateRange: {
+      min: Number(frameRateRange?.Min ?? 1),
+      max: Number(frameRateRange?.Max ?? 30),
+    },
+    encodingIntervalRange: {
+      min: Number(encodingIntervalRange?.Min ?? 1),
+      max: Number(encodingIntervalRange?.Max ?? 30),
+    },
+    bitrateRange: {
+      min: Number(bitrateRange?.Min ?? 64),
+      max: Number(bitrateRange?.Max ?? 8192),
+    },
+    h264ProfilesSupported: profiles || [],
+    govLengthRange: {
+      min: Number(govLengthRange?.Min ?? 1),
+      max: Number(govLengthRange?.Max ?? 300),
+    },
+  };
+}
+
+/**
+ * Helper function to parse JPEG options
+ */
+function parseJpegOptions(jpeg: Record<string, unknown>): VideoEncoderConfigurationOptions['jpeg'] {
+  const resolutions = jpeg.ResolutionsAvailable as
+    | Array<Record<string, unknown>>
+    | Record<string, unknown>
+    | undefined;
+  const frameRateRange = jpeg.FrameRateRange as Record<string, unknown> | undefined;
+  const encodingIntervalRange = jpeg.EncodingIntervalRange as Record<string, unknown> | undefined;
+
+  let resolutionsArray: Array<Record<string, unknown>>;
+  if (Array.isArray(resolutions)) {
+    resolutionsArray = resolutions;
+  } else if (resolutions) {
+    resolutionsArray = [resolutions];
+  } else {
+    resolutionsArray = [];
+  }
+
+  return {
+    resolutionsAvailable: resolutionsArray.map((r) => ({
+      width: Number(r.Width || 1920),
+      height: Number(r.Height || 1080),
+    })),
+    frameRateRange: {
+      min: Number(frameRateRange?.Min ?? 1),
+      max: Number(frameRateRange?.Max ?? 30),
+    },
+    encodingIntervalRange: {
+      min: Number(encodingIntervalRange?.Min ?? 1),
+      max: Number(encodingIntervalRange?.Max ?? 30),
+    },
+  };
+}
+
+/**
  * Get video encoder configuration options
  */
 export async function getVideoEncoderConfigurationOptions(
@@ -446,75 +543,11 @@ export async function getVideoEncoderConfigurationOptions(
   };
 
   if (h264) {
-    const resolutions = h264.ResolutionsAvailable as
-      | Array<Record<string, unknown>>
-      | Record<string, unknown>
-      | undefined;
-    const frameRateRange = h264.FrameRateRange as Record<string, unknown> | undefined;
-    const encodingIntervalRange = h264.EncodingIntervalRange as Record<string, unknown> | undefined;
-    const bitrateRange = h264.BitrateRange as Record<string, unknown> | undefined;
-    const govLengthRange = h264.GovLengthRange as Record<string, unknown> | undefined;
-    const profiles = h264.H264ProfilesSupported as string[] | undefined;
-
-    const resolutionsArray = Array.isArray(resolutions)
-      ? resolutions
-      : resolutions
-        ? [resolutions]
-        : [];
-
-    result.h264 = {
-      resolutionsAvailable: resolutionsArray.map((r) => ({
-        width: Number(r.Width || 1920),
-        height: Number(r.Height || 1080),
-      })),
-      frameRateRange: {
-        min: Number(frameRateRange?.Min ?? 1),
-        max: Number(frameRateRange?.Max ?? 30),
-      },
-      encodingIntervalRange: {
-        min: Number(encodingIntervalRange?.Min ?? 1),
-        max: Number(encodingIntervalRange?.Max ?? 30),
-      },
-      bitrateRange: {
-        min: Number(bitrateRange?.Min ?? 64),
-        max: Number(bitrateRange?.Max ?? 8192),
-      },
-      h264ProfilesSupported: profiles || [],
-      govLengthRange: {
-        min: Number(govLengthRange?.Min ?? 1),
-        max: Number(govLengthRange?.Max ?? 300),
-      },
-    };
+    result.h264 = parseH264Options(h264);
   }
 
   if (jpeg) {
-    const resolutions = jpeg.ResolutionsAvailable as
-      | Array<Record<string, unknown>>
-      | Record<string, unknown>
-      | undefined;
-    const frameRateRange = jpeg.FrameRateRange as Record<string, unknown> | undefined;
-    const encodingIntervalRange = jpeg.EncodingIntervalRange as Record<string, unknown> | undefined;
-
-    const resolutionsArray = Array.isArray(resolutions)
-      ? resolutions
-      : resolutions
-        ? [resolutions]
-        : [];
-
-    result.jpeg = {
-      resolutionsAvailable: resolutionsArray.map((r) => ({
-        width: Number(r.Width || 1920),
-        height: Number(r.Height || 1080),
-      })),
-      frameRateRange: {
-        min: Number(frameRateRange?.Min ?? 1),
-        max: Number(frameRateRange?.Max ?? 30),
-      },
-      encodingIntervalRange: {
-        min: Number(encodingIntervalRange?.Min ?? 1),
-        max: Number(encodingIntervalRange?.Max ?? 30),
-      },
-    };
+    result.jpeg = parseJpegOptions(jpeg);
   }
 
   return result;

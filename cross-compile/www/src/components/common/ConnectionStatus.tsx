@@ -12,15 +12,14 @@ import { cn } from '@/lib/utils';
 export type ConnectionState = 'connected' | 'disconnected' | 'checking';
 
 interface ConnectionStatusProps {
-  status: ConnectionState;
-  className?: string;
+  readonly status: ConnectionState;
+  readonly className?: string;
 }
 
 export function ConnectionStatus({ status, className }: ConnectionStatusProps) {
   return (
-    <div
+    <output
       className={cn('flex items-center gap-2 text-sm', className)}
-      role="status"
       aria-live="polite"
     >
       {status === 'connected' && (
@@ -41,7 +40,7 @@ export function ConnectionStatus({ status, className }: ConnectionStatusProps) {
           <span className="text-muted-foreground">Checking...</span>
         </>
       )}
-    </div>
+    </output>
   );
 }
 
@@ -49,8 +48,17 @@ export function ConnectionStatus({ status, className }: ConnectionStatusProps) {
  * Compact version for header
  */
 export function ConnectionStatusBadge({ status, className }: ConnectionStatusProps) {
+  let statusText: string;
+  if (status === 'connected') {
+    statusText = 'Connected to device';
+  } else if (status === 'disconnected') {
+    statusText = 'Disconnected from device';
+  } else {
+    statusText = 'Checking connection status';
+  }
+
   return (
-    <div
+    <output
       className={cn(
         'flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium',
         status === 'connected' && 'bg-green-500/10 text-green-500',
@@ -58,19 +66,12 @@ export function ConnectionStatusBadge({ status, className }: ConnectionStatusPro
         status === 'checking' && 'bg-muted text-muted-foreground',
         className,
       )}
-      role="status"
       aria-live="polite"
     >
       {status === 'connected' && <Wifi className="h-3 w-3" aria-hidden="true" />}
       {status === 'disconnected' && <WifiOff className="h-3 w-3" aria-hidden="true" />}
       {status === 'checking' && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}
-      <span className="sr-only">
-        {status === 'connected'
-          ? 'Connected to device'
-          : status === 'disconnected'
-            ? 'Disconnected from device'
-            : 'Checking connection status'}
-      </span>
-    </div>
+      <span className="sr-only">{statusText}</span>
+    </output>
   );
 }

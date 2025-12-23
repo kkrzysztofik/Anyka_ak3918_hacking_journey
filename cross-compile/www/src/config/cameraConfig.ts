@@ -28,8 +28,9 @@ export const createCameraConfig = (ip: string): CameraConfig => {
   }
 
   // Basic IP validation
-  const ipRegex =
-    /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+  // Octet pattern: 0-255 (25[0-5] | 2[0-4]\d | 1?\d\d? | [01]?\d\d?)
+  const octet = String.raw`(?:25[0-5]|2[0-4]\d|[01]?\d\d?)`;
+  const ipRegex = new RegExp(String.raw`^(?:${octet}\.){3}${octet}$`);
   if (!ipRegex.test(ip)) {
     throw new Error('Invalid IP address format');
   }
@@ -51,10 +52,11 @@ export const createCustomCameraConfig = (config: Partial<CameraConfig>): CameraC
 
   if (config.ip) {
     if (typeof config.ip !== 'string') {
-      throw new Error('IP address must be a string');
+      throw new TypeError('IP address must be a string');
     }
-    const ipRegex =
-      /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+    // Octet pattern: 0-255 (25[0-5] | 2[0-4]\d | 1?\d\d? | [01]?\d\d?)
+    const octet = String.raw`(?:25[0-5]|2[0-4]\d|[01]?\d\d?)`;
+    const ipRegex = new RegExp(String.raw`^(?:${octet}\.){3}${octet}$`);
     if (!ipRegex.test(config.ip)) {
       throw new Error('Invalid IP address format');
     }

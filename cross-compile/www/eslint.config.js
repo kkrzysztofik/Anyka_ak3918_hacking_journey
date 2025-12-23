@@ -1,5 +1,4 @@
 import js from '@eslint/js';
-// import tailwindcss from 'eslint-plugin-tailwindcss';
 import prettier from 'eslint-config-prettier';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
@@ -13,7 +12,6 @@ export default tseslint.config(
     ...c,
     files: ['**/*.{ts,tsx}'],
   })),
-  // ...tailwindcss.configs['flat/recommended'],
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {

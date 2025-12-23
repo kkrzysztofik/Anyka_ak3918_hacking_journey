@@ -3,8 +3,12 @@
  */
 import { z } from 'zod';
 
-const ipv4Regex =
-  /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+// Simplified IPv4 regex to reduce complexity
+// Octet pattern: 0-255 (25[0-5] | 2[0-4][0-9] | 1[0-9][0-9] | [1-9][0-9] | [0-9])
+const octet = String.raw`(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)`;
+const ipv4Regex = new RegExp(
+  String.raw`^${octet}\.${octet}\.${octet}\.${octet}$`
+);
 
 export const networkSchema = z
   .object({

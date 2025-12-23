@@ -6,13 +6,13 @@
 import axios, { type AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios';
 
 // Store reference to auth getter (set by AuthProvider integration)
-let getAuthHeader: (() => string | null) | null = null;
+let getAuthHeader: (() => Promise<string | null>) | null = null;
 
 /**
  * Set the auth header getter function
  * Called by App.tsx after AuthProvider is mounted
  */
-export function setAuthHeaderGetter(getter: () => string | null) {
+export function setAuthHeaderGetter(getter: () => Promise<string | null>) {
   getAuthHeader = getter;
 }
 
@@ -38,9 +38,9 @@ export const apiClient: AxiosInstance = axios.create({
 
 // Request interceptor - inject Basic Auth header
 apiClient.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
+  async (config: InternalAxiosRequestConfig) => {
     if (getAuthHeader) {
-      const authHeader = getAuthHeader();
+      const authHeader = await getAuthHeader();
       if (authHeader) {
         config.headers.Authorization = authHeader;
       }

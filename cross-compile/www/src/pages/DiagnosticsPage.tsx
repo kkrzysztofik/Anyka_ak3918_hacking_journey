@@ -48,14 +48,14 @@ function StatCard({
   subValue,
   color = 'text-muted-foreground',
   colorBg = 'bg-muted',
-}: {
+}: Readonly<{
   icon: React.ElementType;
   label: string;
   value: string;
   subValue?: string;
   color?: string;
   colorBg?: string;
-}) {
+}>) {
   return (
     <div className="border-border bg-card overflow-hidden rounded-xl border">
       <div className="flex items-center gap-4 p-5">
@@ -76,13 +76,13 @@ function StatCard({
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const CustomTooltip = ({ active, payload, label }: any) => {
-  if (active && payload && payload.length) {
+  if (active && payload?.length) {
     return (
       <div className="border-border bg-card/95 text-foreground rounded-lg border p-2 text-xs shadow-xl backdrop-blur-md">
         <p className="text-muted-foreground mb-1 font-mono">{`Time: +${label}s`}</p>
         {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-        {payload.map((entry: any, index: number) => (
-          <p key={index} style={{ color: entry.color }}>
+        {payload.map((entry: any) => (
+          <p key={`${entry.name}-${entry.value}`} style={{ color: entry.color }}>
             {entry.name}: {Number(entry.value).toFixed(1)}
             {entry.unit}
           </p>
@@ -486,8 +486,8 @@ export default function DiagnosticsPage() {
                 </td>
                 <td className="px-5 py-4">
                   <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400"></span>
-                    Info
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400" aria-hidden="true"></span>
+                    <span>Info</span>
                   </span>
                 </td>
                 <td className="text-foreground px-5 py-4 font-medium">Stream</td>
@@ -508,8 +508,8 @@ export default function DiagnosticsPage() {
                 </td>
                 <td className="px-5 py-4">
                   <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 text-xs font-medium text-yellow-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-yellow-400"></span>
-                    Warning
+                    <span className="h-1.5 w-1.5 rounded-full bg-yellow-400" aria-hidden="true"></span>
+                    <span>Warning</span>
                   </span>
                 </td>
                 <td className="text-foreground px-5 py-4 font-medium">Network</td>
@@ -528,8 +528,8 @@ export default function DiagnosticsPage() {
                 </td>
                 <td className="px-5 py-4">
                   <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400"></span>
-                    Info
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400" aria-hidden="true"></span>
+                    <span>Info</span>
                   </span>
                 </td>
                 <td className="text-foreground px-5 py-4 font-medium">PTZ</td>
@@ -548,8 +548,8 @@ export default function DiagnosticsPage() {
                 </td>
                 <td className="px-5 py-4">
                   <span className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-red-400"></span>
-                    Error
+                    <span className="h-1.5 w-1.5 rounded-full bg-red-400" aria-hidden="true"></span>
+                    <span>Error</span>
                   </span>
                 </td>
                 <td className="text-foreground px-5 py-4 font-medium">Storage</td>
@@ -568,8 +568,8 @@ export default function DiagnosticsPage() {
                 </td>
                 <td className="px-5 py-4">
                   <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400"></span>
-                    Info
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400" aria-hidden="true"></span>
+                    <span>Info</span>
                   </span>
                 </td>
                 <td className="text-foreground px-5 py-4 font-medium">System</td>
@@ -588,8 +588,8 @@ export default function DiagnosticsPage() {
                 </td>
                 <td className="px-5 py-4">
                   <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400"></span>
-                    Info
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400" aria-hidden="true"></span>
+                    <span>Info</span>
                   </span>
                 </td>
                 <td className="text-foreground px-5 py-4 font-medium">Auth</td>

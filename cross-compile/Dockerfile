@@ -2,27 +2,27 @@ FROM ubuntu:24.04
 
 # Install base dependencies for Rust ONVIF project
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  git \
-  wget \
-  file \
-  binutils \
-  curl \
-  sudo \
-  unzip \
-  python3 \
-  python3-pip \
   bc \
-  pkg-config \
+  binutils \
+  ca-certificates \
+  ccache \
+  curl \
+  file \
+  git \
+  libc6-dev \
   libssl-dev \
+  libtinfo6 \
+  libxml2 \
   nodejs \
   npm \
   perl \
-  ccache \
-  ca-certificates \
-  libxml2 \
+  pkg-config \
+  python3 \
+  python3-pip \
+  sudo \
+  unzip \
+  wget \
   zlib1g \
-  libtinfo6 \
-  libc6-dev \
   && rm -rf /var/lib/apt/lists/* \
   && apt-get clean
 
@@ -39,11 +39,10 @@ RUN rm -rf /opt/arm-anykav200-crosstool-ng/share/doc \
 ENV PATH="/opt/arm-anykav200-crosstool-ng/bin:${PATH}"
 
 # Install build-essential for host builds (gcc for x86_64 proc-macros and build scripts)
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
-  rm -rf /var/lib/apt/lists/* && apt-get clean
-
 # Install cargo via rustup (toolchain's cargo is a symlink that won't work in Docker)
-RUN if ! command -v cargo >/dev/null 2>&1; then \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
+  rm -rf /var/lib/apt/lists/* && apt-get clean && \
+  if ! command -v cargo >/dev/null 2>&1; then \
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal --component cargo --component rustfmt --component clippy && \
   /root/.cargo/bin/cargo --version && \
   rm -rf /root/.rustup/toolchains/*/share/doc \
@@ -55,19 +54,17 @@ RUN if ! command -v cargo >/dev/null 2>&1; then \
 ENV PATH="${PATH}:/root/.cargo/bin"
 
 # Preinstall cargo-tarpaulin to avoid per-job installs (uses vendored OpenSSL)
-RUN cargo install cargo-tarpaulin --locked --features vendored-openssl && \
-  rm -rf /root/.cargo/registry/index/* /root/.cargo/git/db/*
-
 # Install Snyk CLI
-RUN curl -Lo snyk-linux https://downloads.snyk.io/cli/stable/snyk-linux \
+# Verify installation
+RUN cargo install cargo-tarpaulin --locked --features vendored-openssl && \
+  rm -rf /root/.cargo/registry/index/* /root/.cargo/git/db/* && \
+  curl -Lo snyk-linux https://downloads.snyk.io/cli/stable/snyk-linux \
   && curl -Lo snyk-linux.sha256 https://downloads.snyk.io/cli/stable/snyk-linux.sha256 \
   && sha256sum -c snyk-linux.sha256 \
   && chmod +x snyk-linux \
   && mv snyk-linux /usr/local/bin/snyk \
-  && rm snyk-linux.sha256
-
-# Verify installation
-RUN arm-unknown-linux-uclibcgnueabi-gcc --version || arm-anykav200-linux-uclibcgnueabi-gcc --version && \
+  && rm snyk-linux.sha256 && \
+  arm-unknown-linux-uclibcgnueabi-gcc --version || arm-anykav200-linux-uclibcgnueabi-gcc --version && \
   EXPECTED_RUSTC="/opt/arm-anykav200-crosstool-ng/bin/rustc" && \
   ACTUAL_RUSTC=$(which rustc) && \
   rustc --version && \

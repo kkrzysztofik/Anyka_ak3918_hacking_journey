@@ -43,6 +43,64 @@ export interface ImagingOptions {
 }
 
 /**
+ * Helper function to parse IR Cut Filter mode
+ */
+function parseIrCutFilter(
+  irCutFilter: unknown,
+): IrCutFilterMode | undefined {
+  if (!irCutFilter) {
+    return undefined;
+  }
+  const mode = typeof irCutFilter === 'string' ? irCutFilter : String(irCutFilter);
+  if (mode === 'ON' || mode === 'OFF' || mode === 'AUTO') {
+    return mode as IrCutFilterMode;
+  }
+  return undefined;
+}
+
+/**
+ * Helper function to parse Wide Dynamic Range settings
+ */
+function parseWideDynamicRangeSettings(
+  wdr: Record<string, unknown> | undefined,
+): ImagingSettings['wideDynamicRange'] {
+  if (!wdr) {
+    return undefined;
+  }
+  const modeValue = wdr.Mode ?? 'OFF';
+  const mode = typeof modeValue === 'string' ? modeValue : String(modeValue);
+  const level = Number(wdr.Level ?? 50);
+  if (mode === 'ON' || mode === 'OFF') {
+    return {
+      mode: mode as WideDynamicMode,
+      level,
+    };
+  }
+  return undefined;
+}
+
+/**
+ * Helper function to parse Backlight Compensation settings
+ */
+function parseBacklightCompensationSettings(
+  backlight: Record<string, unknown> | undefined,
+): ImagingSettings['backlightCompensation'] {
+  if (!backlight) {
+    return undefined;
+  }
+  const modeValue = backlight.Mode ?? 'OFF';
+  const mode = typeof modeValue === 'string' ? modeValue : String(modeValue);
+  const level = Number(backlight.Level ?? 50);
+  if (mode === 'ON' || mode === 'OFF') {
+    return {
+      mode: mode as BacklightCompensationMode,
+      level,
+    };
+  }
+  return undefined;
+}
+
+/**
  * Get imaging settings for a video source
  */
 export async function getImagingSettings(
@@ -76,40 +134,14 @@ export async function getImagingSettings(
     sharpness: Number(settings?.Sharpness ?? 50),
   };
 
-  // Parse IR Cut Filter
-  const irCutFilter = settings?.IrCutFilter;
-  if (irCutFilter) {
-    const mode = String(irCutFilter);
-    if (mode === 'ON' || mode === 'OFF' || mode === 'AUTO') {
-      result.irCutFilter = mode as IrCutFilterMode;
-    }
-  }
-
-  // Parse Wide Dynamic Range
-  const wdr = settings?.WideDynamicRange as Record<string, unknown> | undefined;
-  if (wdr) {
-    const mode = String(wdr.Mode || 'OFF');
-    const level = Number(wdr.Level ?? 50);
-    if (mode === 'ON' || mode === 'OFF') {
-      result.wideDynamicRange = {
-        mode: mode as WideDynamicMode,
-        level,
-      };
-    }
-  }
-
-  // Parse Backlight Compensation
-  const backlight = settings?.BacklightCompensation as Record<string, unknown> | undefined;
-  if (backlight) {
-    const mode = String(backlight.Mode || 'OFF');
-    const level = Number(backlight.Level ?? 50);
-    if (mode === 'ON' || mode === 'OFF') {
-      result.backlightCompensation = {
-        mode: mode as BacklightCompensationMode,
-        level,
-      };
-    }
-  }
+  // Parse optional settings using helper functions
+  result.irCutFilter = parseIrCutFilter(settings?.IrCutFilter);
+  result.wideDynamicRange = parseWideDynamicRangeSettings(
+    settings?.WideDynamicRange as Record<string, unknown> | undefined,
+  );
+  result.backlightCompensation = parseBacklightCompensationSettings(
+    settings?.BacklightCompensation as Record<string, unknown> | undefined,
+  );
 
   return result;
 }
@@ -175,6 +207,74 @@ export async function setImagingSettings(
 }
 
 /**
+ * Helper function to parse a range from options
+ */
+function parseRange(
+  rangeData: Record<string, unknown> | undefined,
+): { min: number; max: number } | undefined {
+  if (!rangeData) {
+    return undefined;
+  }
+  return {
+    min: Number(rangeData.Min ?? 0),
+    max: Number(rangeData.Max ?? 100),
+  };
+}
+
+/**
+ * Helper function to parse level range
+ */
+function parseLevelRange(
+  level: Record<string, unknown> | undefined,
+): { min: number; max: number } | undefined {
+  if (!level) {
+    return undefined;
+  }
+  return {
+    min: Number(level.Min ?? 0),
+    max: Number(level.Max ?? 100),
+  };
+}
+
+/**
+ * Helper function to parse Wide Dynamic Range options
+ */
+function parseWideDynamicRange(
+  wdr: Record<string, unknown> | undefined,
+): ImagingOptions['wideDynamicRange'] {
+  if (!wdr) {
+    return undefined;
+  }
+  const modes = wdr.Mode;
+  const level = wdr.Level as Record<string, unknown> | undefined;
+  return {
+    modes: Array.isArray(modes)
+      ? modes.map(String).filter((m): m is WideDynamicMode => m === 'ON' || m === 'OFF')
+      : [],
+    level: parseLevelRange(level),
+  };
+}
+
+/**
+ * Helper function to parse Backlight Compensation options
+ */
+function parseBacklightCompensation(
+  backlight: Record<string, unknown> | undefined,
+): ImagingOptions['backlightCompensation'] {
+  if (!backlight) {
+    return undefined;
+  }
+  const modes = backlight.Mode;
+  const level = backlight.Level as Record<string, unknown> | undefined;
+  return {
+    modes: Array.isArray(modes)
+      ? modes.map(String).filter((m): m is BacklightCompensationMode => m === 'ON' || m === 'OFF')
+      : [],
+    level: parseLevelRange(level),
+  };
+}
+
+/**
  * Get imaging options (valid ranges and supported modes) for a video source
  */
 export async function getImagingOptions(
@@ -203,86 +303,34 @@ export async function getImagingOptions(
   const result: ImagingOptions = {};
 
   // Parse brightness range
-  const brightness = options.Brightness as Record<string, unknown> | undefined;
-  if (brightness) {
-    result.brightness = {
-      min: Number(brightness.Min ?? 0),
-      max: Number(brightness.Max ?? 100),
-    };
-  }
+  result.brightness = parseRange(options.Brightness as Record<string, unknown> | undefined);
 
   // Parse contrast range
-  const contrast = options.Contrast as Record<string, unknown> | undefined;
-  if (contrast) {
-    result.contrast = {
-      min: Number(contrast.Min ?? 0),
-      max: Number(contrast.Max ?? 100),
-    };
-  }
+  result.contrast = parseRange(options.Contrast as Record<string, unknown> | undefined);
 
   // Parse saturation range
-  const saturation = options.ColorSaturation as Record<string, unknown> | undefined;
-  if (saturation) {
-    result.saturation = {
-      min: Number(saturation.Min ?? 0),
-      max: Number(saturation.Max ?? 100),
-    };
-  }
+  result.saturation = parseRange(options.ColorSaturation as Record<string, unknown> | undefined);
 
   // Parse sharpness range
-  const sharpness = options.Sharpness as Record<string, unknown> | undefined;
-  if (sharpness) {
-    result.sharpness = {
-      min: Number(sharpness.Min ?? 0),
-      max: Number(sharpness.Max ?? 100),
-    };
-  }
+  result.sharpness = parseRange(options.Sharpness as Record<string, unknown> | undefined);
 
   // Parse IR Cut Filter modes
   const irCutFilterModes = options.IrCutFilterModes;
   if (Array.isArray(irCutFilterModes)) {
     result.irCutFilterModes = irCutFilterModes
-      .map((m) => String(m))
+      .map(String)
       .filter((m): m is IrCutFilterMode => m === 'ON' || m === 'OFF' || m === 'AUTO');
   }
 
   // Parse Wide Dynamic Range options
-  const wdr = options.WideDynamicRange as Record<string, unknown> | undefined;
-  if (wdr) {
-    const modes = wdr.Mode;
-    const level = wdr.Level as Record<string, unknown> | undefined;
-    result.wideDynamicRange = {
-      modes: Array.isArray(modes)
-        ? modes.map((m) => String(m)).filter((m): m is WideDynamicMode => m === 'ON' || m === 'OFF')
-        : [],
-      level: level
-        ? {
-            min: Number(level.Min ?? 0),
-            max: Number(level.Max ?? 100),
-          }
-        : undefined,
-    };
-  }
+  result.wideDynamicRange = parseWideDynamicRange(
+    options.WideDynamicRange as Record<string, unknown> | undefined,
+  );
 
   // Parse Backlight Compensation options
-  const backlight = options.BacklightCompensation as Record<string, unknown> | undefined;
-  if (backlight) {
-    const modes = backlight.Mode;
-    const level = backlight.Level as Record<string, unknown> | undefined;
-    result.backlightCompensation = {
-      modes: Array.isArray(modes)
-        ? modes
-            .map((m) => String(m))
-            .filter((m): m is BacklightCompensationMode => m === 'ON' || m === 'OFF')
-        : [],
-      level: level
-        ? {
-            min: Number(level.Min ?? 0),
-            max: Number(level.Max ?? 100),
-          }
-        : undefined,
-    };
-  }
+  result.backlightCompensation = parseBacklightCompensation(
+    options.BacklightCompensation as Record<string, unknown> | undefined,
+  );
 
   return result;
 }

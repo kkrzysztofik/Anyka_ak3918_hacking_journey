@@ -19,8 +19,8 @@ import {
 import type { DeviceInfo } from '@/services/deviceService';
 
 interface AboutDialogProps {
-  deviceInfo: DeviceInfo | undefined;
-  isLoading?: boolean;
+  readonly deviceInfo: DeviceInfo | undefined;
+  readonly isLoading?: boolean;
 }
 
 export function AboutDialog({ deviceInfo, isLoading }: AboutDialogProps) {
@@ -38,36 +38,44 @@ export function AboutDialog({ deviceInfo, isLoading }: AboutDialogProps) {
           <DialogDescription>Hardware and firmware information</DialogDescription>
         </DialogHeader>
 
-        {isLoading ? (
-          <div className="text-muted-foreground py-4 text-center">
-            Loading device information...
-          </div>
-        ) : deviceInfo ? (
-          <dl className="grid grid-cols-2 gap-4 py-4">
-            <div>
-              <dt className="text-muted-foreground text-sm">Manufacturer</dt>
-              <dd className="font-medium">{deviceInfo.manufacturer}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground text-sm">Model</dt>
-              <dd className="font-medium">{deviceInfo.model}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground text-sm">Firmware Version</dt>
-              <dd className="font-medium">{deviceInfo.firmwareVersion}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground text-sm">Serial Number</dt>
-              <dd className="font-medium">{deviceInfo.serialNumber}</dd>
-            </div>
-            <div className="col-span-2">
-              <dt className="text-muted-foreground text-sm">Hardware ID</dt>
-              <dd className="font-mono text-xs font-medium">{deviceInfo.hardwareId}</dd>
-            </div>
-          </dl>
-        ) : (
-          <div className="text-destructive py-4 text-center">Failed to load device information</div>
-        )}
+        {(() => {
+          if (isLoading) {
+            return (
+              <div className="text-muted-foreground py-4 text-center">
+                Loading device information...
+              </div>
+            );
+          }
+          if (deviceInfo) {
+            return (
+              <dl className="grid grid-cols-2 gap-4 py-4">
+                <div>
+                  <dt className="text-muted-foreground text-sm">Manufacturer</dt>
+                  <dd className="font-medium">{deviceInfo.manufacturer}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-sm">Model</dt>
+                  <dd className="font-medium">{deviceInfo.model}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-sm">Firmware Version</dt>
+                  <dd className="font-medium">{deviceInfo.firmwareVersion}</dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground text-sm">Serial Number</dt>
+                  <dd className="font-medium">{deviceInfo.serialNumber}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-muted-foreground text-sm">Hardware ID</dt>
+                  <dd className="font-mono text-xs font-medium">{deviceInfo.hardwareId}</dd>
+                </div>
+              </dl>
+            );
+          }
+          return (
+            <div className="text-destructive py-4 text-center">Failed to load device information</div>
+          );
+        })()}
       </DialogContent>
     </Dialog>
   );

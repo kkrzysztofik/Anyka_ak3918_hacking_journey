@@ -55,8 +55,10 @@ import {
 } from '@/services/networkService';
 
 // Validation Schema
-const ipRegex =
-  /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+// Simplified IPv4 regex to reduce complexity
+// Octet pattern: 0-255 (25[0-5] | 2[0-4][0-9] | 1[0-9][0-9] | [1-9][0-9] | [0-9])
+const octet = String.raw`(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)`;
+const ipRegex = new RegExp(String.raw`^${octet}\.${octet}\.${octet}\.${octet}$`);
 
 const networkSchema = z.object({
   dhcp: z.boolean(),
@@ -261,7 +263,7 @@ export default function NetworkPage() {
                       <FormControl>
                         <Input
                           {...field}
-                          className="border-[#3a3a3c] bg-transparent text-white focus:border-[#007AFF]"
+                          className="border-[#3a3a3c] bg-transparent text-white focus:border-[#0a84ff]"
                         />
                       </FormControl>
                       <FormMessage />
@@ -337,7 +339,7 @@ export default function NetworkPage() {
                             <Input
                               type="number"
                               {...field}
-                              onChange={(e) => field.onChange(parseInt(e.target.value))}
+                              onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
                               className="border-[#3a3a3c] bg-transparent text-white"
                             />
                           </FormControl>
@@ -458,7 +460,7 @@ export default function NetworkPage() {
                           <Input
                             type="number"
                             {...field}
-                            onChange={(e) => field.onChange(parseInt(e.target.value))}
+                            onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
                             className="border-[#3a3a3c] bg-transparent text-white"
                           />
                         </FormControl>
@@ -476,7 +478,7 @@ export default function NetworkPage() {
                           <Input
                             type="number"
                             {...field}
-                            onChange={(e) => field.onChange(parseInt(e.target.value))}
+                            onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
                             className="border-[#3a3a3c] bg-transparent text-white"
                           />
                         </FormControl>
@@ -494,7 +496,7 @@ export default function NetworkPage() {
                           <Input
                             type="number"
                             {...field}
-                            onChange={(e) => field.onChange(parseInt(e.target.value))}
+                            onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
                             className="border-[#3a3a3c] bg-transparent text-white"
                           />
                         </FormControl>

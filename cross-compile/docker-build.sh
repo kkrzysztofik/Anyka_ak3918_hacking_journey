@@ -31,19 +31,27 @@ readonly NC='\033[0m' # No Color
 # =============================================================================
 
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    local message="$1"
+    echo -e "${BLUE}[INFO]${NC} ${message}"
+    return 0
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    local message="$1"
+    echo -e "${GREEN}[SUCCESS]${NC} ${message}"
+    return 0
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    local message="$1"
+    echo -e "${RED}[ERROR]${NC} ${message}" >&2
+    return 0
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    local message="$1"
+    echo -e "${YELLOW}[WARN]${NC} ${message}"
+    return 0
 }
 
 # =============================================================================
@@ -52,7 +60,9 @@ log_warn() {
 
 # Check if a command exists
 command_exists() {
-    command -v "$1" &> /dev/null
+    local cmd="$1"
+    command -v "${cmd}" &> /dev/null
+    return 0
 }
 
 # Print usage information
@@ -79,6 +89,7 @@ After building, use the image:
   docker run -it --rm -v \${PWD}:/workspace ${IMAGE_TAG}
   docker run --rm -v \${PWD}:/workspace ${IMAGE_TAG} make -C /workspace/cross-compile/onvif
 EOF
+    return 0
 }
 
 # =============================================================================
@@ -100,12 +111,13 @@ check_prerequisites() {
         exit 1
     fi
 
-    if [ ! -f "${DOCKERFILE}" ]; then
+    if [[ ! -f "${DOCKERFILE}" ]]; then
         log_error "Dockerfile not found: ${DOCKERFILE}"
         exit 1
     fi
 
     log_success "Prerequisites check passed"
+    return 0
 }
 
 # =============================================================================
@@ -114,17 +126,20 @@ check_prerequisites() {
 
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
-        case $1 in
+        local arg="$1"
+        case "${arg}" in
             -h|--help)
                 print_usage
                 exit 0
                 ;;
             -t|--tag)
-                IMAGE_TAG="$2"
+                local tag="$2"
+                IMAGE_TAG="${tag}"
                 shift 2
                 ;;
             -f|--file)
-                DOCKERFILE="$2"
+                local file="$2"
+                DOCKERFILE="${file}"
                 shift 2
                 ;;
             --no-cache)
@@ -132,16 +147,18 @@ parse_arguments() {
                 shift
                 ;;
             --build-arg)
-                BUILD_ARGS="${BUILD_ARGS} --build-arg $2"
+                local build_arg="$2"
+                BUILD_ARGS="${BUILD_ARGS} --build-arg ${build_arg}"
                 shift 2
                 ;;
             *)
-                log_error "Unknown option: $1"
-                echo "Use --help for usage information"
+                log_error "Unknown option: ${arg}"
+                echo "Use --help for usage information" >&2
                 exit 1
                 ;;
         esac
     done
+    return 0
 }
 
 # =============================================================================
@@ -157,12 +174,12 @@ build_docker_image() {
     # Build docker command
     local docker_cmd="docker build"
 
-    if [ "${NO_CACHE}" = true ]; then
+    if [[ "${NO_CACHE}" = true ]]; then
         docker_cmd="${docker_cmd} --no-cache"
         log_info "Building without cache"
     fi
 
-    if [ -n "${BUILD_ARGS}" ]; then
+    if [[ -n "${BUILD_ARGS}" ]]; then
         docker_cmd="${docker_cmd} ${BUILD_ARGS}"
     fi
 
@@ -199,9 +216,11 @@ build_docker_image() {
 # =============================================================================
 
 main() {
-    parse_arguments "$@"
+    local args=("$@")
+    parse_arguments "${args[@]}"
     check_prerequisites
     build_docker_image
+    return 0
 }
 
 # Run main function
