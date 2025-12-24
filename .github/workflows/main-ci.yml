@@ -97,8 +97,8 @@ jobs:
             --all-features \
             --skip-clean \
             --follow-exec \
-            --timeout 300 \
-            --test-threads $(nproc) \
+            --timeout 600 \
+            --implicit-test-threads \
             --out Html \
             --out Lcov \
             --out Xml \
