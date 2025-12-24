@@ -24,7 +24,6 @@ jobs:
   rust-lint:
     name: Rust - Lint Code
     runs-on: ubuntu-latest
-    if: hashFiles('cross-compile/onvif-rust/**/*.rs') != ''
     container:
       image: kkrzysztofik/anyka-cross-compile:latest
 
@@ -58,7 +57,6 @@ jobs:
   rust-test-and-coverage:
     name: Rust - Test Suite & Coverage
     runs-on: ubuntu-latest
-    if: hashFiles('cross-compile/onvif-rust/**/*.rs') != ''
     container:
       image: kkrzysztofik/anyka-cross-compile:latest
       options: --security-opt seccomp=unconfined
@@ -124,7 +122,6 @@ jobs:
   webui-test-and-coverage:
     name: WebUI - Test Suite & Coverage
     runs-on: ubuntu-latest
-    if: hashFiles('cross-compile/www/**/*.{ts,tsx}') != ''
     defaults:
       run:
         working-directory: cross-compile/www
