@@ -573,7 +573,7 @@ jobs:
             | Scan Type | Status | Details |
             |-----------|--------|---------|
             | **Code (SAST)** | ${formatStatus(snykCodeStatus)} | [View in Code Scanning](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) |
-            | **Open Source (SCA)** | ${formatStatus(snykOssStatus)} | ${snykIssues !== '0' ? \`⚠️ ${snykIssues} vulnerabilities found\` : '✅ No issues'} |
+            | **Open Source (SCA)** | ${formatStatus(snykOssStatus)} | ${snykIssues !== '0' ? `⚠️ ${snykIssues} vulnerabilities found` : '✅ No issues'} |
 
             ### 🎯 Code Quality (SonarQube)
             | Metric | Value |
