@@ -38,6 +38,14 @@ jobs:
       contents: read
     steps:
       - name: Generate Run Summary
+        env:
+          SNYK_CODE_STATUS_INPUT: ${{ inputs.snyk_code_status }}
+          SNYK_OSS_STATUS_INPUT: ${{ inputs.snyk_oss_status }}
+          SONAR_SCAN_STATUS_INPUT: ${{ inputs.sonar_scan_status }}
+          QUALITY_GATE_STATUS_INPUT: ${{ inputs.quality_gate_status }}
+          PROJECT_TYPE: ${{ inputs.project_type }}
+          TEST_COVERAGE: ${{ inputs.test_coverage || 'N/A' }}
+          SNYK_ISSUES: ${{ inputs.snyk_issues || '0' }}
         run: |
           # Helper function to get status emoji
           get_status() {
@@ -56,22 +64,22 @@ jobs:
             esac
           }
 
-          SNYK_CODE_STATUS=$(get_status "${{ inputs.snyk_code_status }}")
-          SNYK_OSS_STATUS=$(get_status "${{ inputs.snyk_oss_status }}")
-          SONAR_SCAN_STATUS=$(get_status "${{ inputs.sonar_scan_status }}")
-          QUALITY_GATE_STATUS=$(get_quality_gate_status "${{ inputs.quality_gate_status }}")
+          SNYK_CODE_STATUS=$(get_status "${SNYK_CODE_STATUS_INPUT}")
+          SNYK_OSS_STATUS=$(get_status "${SNYK_OSS_STATUS_INPUT}")
+          SONAR_SCAN_STATUS=$(get_status "${SONAR_SCAN_STATUS_INPUT}")
+          QUALITY_GATE_STATUS=$(get_quality_gate_status "${QUALITY_GATE_STATUS_INPUT}")
 
           cat >> $GITHUB_STEP_SUMMARY << EOF
-          # 🔍 CI Analysis Summary - ${{ inputs.project_type }}
+          # 🔍 CI Analysis Summary - ${PROJECT_TYPE}
 
           ## 📊 Test Coverage
-          - **Coverage**: ${{ inputs.test_coverage || 'N/A' }}%
+          - **Coverage**: ${TEST_COVERAGE}%
           - **Report**: [View Coverage Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
           ## 🔒 Security Scans (Snyk)
           - **Code (SAST)**: ${SNYK_CODE_STATUS}
           - **Open Source (SCA)**: ${SNYK_OSS_STATUS}
-          - **SCA Issues Found**: ${{ inputs.snyk_issues || '0' }}
+          - **SCA Issues Found**: ${SNYK_ISSUES}
 
           ## 🎯 Code Quality (SonarQube)
           - **Status**: ${SONAR_SCAN_STATUS}
@@ -92,7 +100,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Comment PR with Analysis Results
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |

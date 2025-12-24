@@ -32,7 +32,8 @@ export default defineConfig(({ mode }) => ({
   },
   esbuild: {
     // Use esbuild for TypeScript compilation (faster than tsc)
-    target: 'es2020',
+    // Target ES2024 for modern browser support (Chrome 117+, Firefox 119+, Safari 17.4+, Edge 117+)
+    target: 'es2024',
     // Enable type checking in type-check mode
     ...(mode === 'type-check' && {
       logLevel: 'warning',

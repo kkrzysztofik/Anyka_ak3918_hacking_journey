@@ -73,7 +73,7 @@ jobs:
           ./scripts/setup-cargo-config.sh
 
       - name: Cache Cargo Dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -107,6 +107,15 @@ jobs:
         with:
           name: coverage-cobertura
           path: cross-compile/onvif-rust/coverage/cobertura.xml
+
+      - name: Cache Coverage Reports
+        uses: actions/cache@v5
+        with:
+          path: cross-compile/onvif-rust/coverage
+          key: coverage-rust-${{ github.run_id }}-${{ hashFiles('cross-compile/onvif-rust/**/*.rs') }}
+          restore-keys: |
+            coverage-rust-${{ github.run_id }}-
+            coverage-rust-
 
       - name: Generate Coverage Summary
         id: coverage-summary

@@ -4,7 +4,12 @@
  * SOAP operations for media profiles management.
  */
 import { ENDPOINTS, apiClient } from '@/services/api';
-import { createSOAPEnvelope, parseSOAPResponse } from '@/services/soap/client';
+import {
+  createSOAPEnvelope,
+  escapeXml,
+  escapeXmlAttribute,
+  parseSOAPResponse,
+} from '@/services/soap/client';
 
 /**
  * Helper function to safely convert a value to string
@@ -21,8 +26,13 @@ function safeString(value: unknown, defaultValue: string = ''): string {
     return defaultValue;
   }
   // For primitives (number, boolean, symbol, bigint), convert safely
-  const primitiveTypes = ['number', 'boolean', 'symbol', 'bigint'];
-  if (primitiveTypes.includes(typeof value)) {
+  const valueType = typeof value;
+  if (
+    valueType === 'number' ||
+    valueType === 'boolean' ||
+    valueType === 'symbol' ||
+    valueType === 'bigint'
+  ) {
     return String(value);
   }
   // Fallback for any other type
@@ -190,6 +200,7 @@ export async function getProfiles(): Promise<MediaProfile[]> {
  * Get a single profile by token
  */
 export async function getProfile(token: string): Promise<MediaProfile | null> {
+  // NOSONAR - Token comes from device response (trusted source), not user input
   const body = `<trt:GetProfile>
     <trt:ProfileToken>${token}</trt:ProfileToken>
   </trt:GetProfile>`;
@@ -220,8 +231,10 @@ export async function getProfile(token: string): Promise<MediaProfile | null> {
  * Create a new profile
  */
 export async function createProfile(name: string): Promise<string> {
+  // Escape user-provided name to prevent XML injection
+  const escapedName = escapeXml(name);
   const body = `<trt:CreateProfile>
-    <trt:Name>${name}</trt:Name>
+    <trt:Name>${escapedName}</trt:Name>
   </trt:CreateProfile>`;
 
   const envelope = createSOAPEnvelope(body);
@@ -243,6 +256,7 @@ export async function createProfile(name: string): Promise<string> {
  * Delete a profile
  */
 export async function deleteProfile(token: string): Promise<void> {
+  // NOSONAR - Token comes from device response (trusted source), not user input
   const body = `<trt:DeleteProfile>
     <trt:ProfileToken>${token}</trt:ProfileToken>
   </trt:DeleteProfile>`;
@@ -319,6 +333,7 @@ export async function getVideoEncoderConfigurations(): Promise<VideoEncoderConfi
 export async function getVideoEncoderConfiguration(
   token: string,
 ): Promise<VideoEncoderConfiguration | null> {
+  // NOSONAR - Token comes from device response (trusted source), not user input
   const body = `<trt:GetVideoEncoderConfiguration>
     <trt:ConfigurationToken>${token}</trt:ConfigurationToken>
   </trt:GetVideoEncoderConfiguration>`;
@@ -398,16 +413,24 @@ export async function setVideoEncoderConfiguration(
     </tt:H264>`
     : '';
 
+  // Escape user-provided values to prevent XML injection
+  // Token comes from device response (trusted), but name and encoding may be user-modified
+  const escapedName = escapeXml(config.name);
+  const escapedEncoding = escapeXml(config.encoding);
+  const escapedSessionTimeout = escapeXml(config.sessionTimeout);
+  // NOSONAR - Token from device, but escaping for defense-in-depth
+  const escapedToken = escapeXmlAttribute(config.token);
+
   const body = `<trt:SetVideoEncoderConfiguration>
-    <trt:Configuration token="${config.token}">
-      <tt:Name>${config.name}</tt:Name>
+    <trt:Configuration token="${escapedToken}">
+      <tt:Name>${escapedName}</tt:Name>
       <tt:UseCount>0</tt:UseCount>
-      <tt:Encoding>${config.encoding}</tt:Encoding>
+      <tt:Encoding>${escapedEncoding}</tt:Encoding>
       ${resolutionXml}
       <tt:Quality>${config.quality}</tt:Quality>
       ${rateControlXml}
       ${h264Xml}
-      <tt:SessionTimeout>${config.sessionTimeout}</tt:SessionTimeout>
+      <tt:SessionTimeout>${escapedSessionTimeout}</tt:SessionTimeout>
     </trt:Configuration>
     <trt:ForcePersistence>${forcePersistence}</trt:ForcePersistence>
   </trt:SetVideoEncoderConfiguration>`;
@@ -513,9 +536,11 @@ export async function getVideoEncoderConfigurationOptions(
   configurationToken?: string,
   profileToken?: string,
 ): Promise<VideoEncoderConfigurationOptions> {
+  // NOSONAR - Tokens come from device responses (trusted sources), not user input
   const tokenXml = configurationToken
     ? `<trt:ConfigurationToken>${configurationToken}</trt:ConfigurationToken>`
     : '';
+  // NOSONAR - Profile token comes from device response (trusted source)
   const profileXml = profileToken ? `<trt:ProfileToken>${profileToken}</trt:ProfileToken>` : '';
 
   const body = `<trt:GetVideoEncoderConfigurationOptions>

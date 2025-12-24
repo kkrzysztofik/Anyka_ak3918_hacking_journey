@@ -8,9 +8,6 @@ on:
       - "cross-compile/onvif-rust/**"
       - "cross-compile/www/**"
 
-permissions:
-  contents: write
-
 jobs:
   build_webui:
     name: Build WebUI
@@ -98,6 +95,8 @@ jobs:
     name: Create Release
     needs: [build_webui, build_rust]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -114,13 +113,13 @@ jobs:
         run: mkdir -p release-final/SD_card_contents/anyka_hack/onvif/www
 
       - name: Download Rust Artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: rust-build
           path: release-final/SD_card_contents/anyka_hack/onvif/
 
       - name: Download WebUI Artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: webui-build
           path: release-final/SD_card_contents/anyka_hack/onvif/www
@@ -134,7 +133,7 @@ jobs:
           ls -la anyka-onvif-complete-${{ steps.tag_info.outputs.tag_name }}.zip
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.5.0
         with:
           tag_name: ${{ steps.tag_info.outputs.tag_name }}
           name: Anyka ONVIF Complete Release ${{ steps.tag_info.outputs.tag_name }}

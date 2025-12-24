@@ -44,7 +44,7 @@ class TestLoggingUtils:
         """Log detailed SOAP request information"""
         self.request_logger.info("=== SOAP REQUEST ===")
         self.request_logger.info(f"URL: {url}")
-        self.request_logger.info(f"Method: POST")
+        self.request_logger.info("Method: POST")
         self.request_logger.info(f"Timeout: {timeout}s")
         self.request_logger.info(f"Authentication: {'Yes' if auth else 'No'}")
         self.request_logger.info(f"Content-Length: {len(soap_body.encode('utf-8'))}")

@@ -6,6 +6,10 @@ on:
       project_type:
         required: true
         type: string
+      working_directory:
+        required: false
+        type: string
+        default: ""
     outputs:
       sonar-scan-status:
         description: "Status of SonarQube scan"
@@ -39,8 +43,15 @@ jobs:
         with:
           components: clippy
 
+      - name: Setup Cargo Config
+        working-directory: cross-compile/onvif-rust
+        run: |
+          if [ -f "scripts/setup-cargo-config.sh" ]; then
+            ./scripts/setup-cargo-config.sh
+          fi
+
       - name: Cache Cargo Dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -49,6 +60,59 @@ jobs:
           key: cargo-${{ runner.os }}-sonar-${{ hashFiles('cross-compile/onvif-rust/Cargo.lock') }}
           restore-keys: |
             cargo-${{ runner.os }}-sonar-
+
+      - name: Restore Rust Coverage from Cache
+        if: contains(inputs.project_type, 'Rust')
+        uses: actions/cache@v5
+        continue-on-error: true
+        with:
+          path: cross-compile/onvif-rust/coverage
+          key: coverage-rust-${{ github.run_id }}-${{ hashFiles('cross-compile/onvif-rust/**/*.rs') }}
+          restore-keys: |
+            coverage-rust-${{ github.run_id }}-
+            coverage-rust-
+
+      - name: Restore WebUI Coverage from Cache
+        if: contains(inputs.project_type, 'WebUI') || contains(inputs.project_type, 'Web')
+        uses: actions/cache@v5
+        continue-on-error: true
+        with:
+          path: cross-compile/www/coverage
+          key: coverage-webui-${{ github.run_id }}-${{ hashFiles('cross-compile/www/**/*.{ts,tsx}') }}
+          restore-keys: |
+            coverage-webui-${{ github.run_id }}-
+            coverage-webui-
+
+      - name: Verify Coverage Reports
+        env:
+          PROJECT_TYPE: ${{ inputs.project_type }}
+        run: |
+          echo "Checking for coverage reports before SonarCloud scan..."
+          echo "Project type: ${PROJECT_TYPE}"
+
+          # Check Rust coverage if project type indicates Rust
+          if [[ "${PROJECT_TYPE}" == *"Rust"* ]] || [[ "${PROJECT_TYPE}" == *"rust"* ]]; then
+            if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
+              echo "✅ Found Rust coverage: cross-compile/onvif-rust/coverage/cobertura.xml"
+              ls -lh cross-compile/onvif-rust/coverage/
+            else
+              echo "⚠️ Rust coverage not found (expected for project type: ${PROJECT_TYPE})"
+            fi
+          else
+            echo "ℹ️ Skipping Rust coverage check (not applicable for project type: ${PROJECT_TYPE})"
+          fi
+
+          # Check WebUI coverage if project type indicates WebUI
+          if [[ "${PROJECT_TYPE}" == *"WebUI"* ]] || [[ "${PROJECT_TYPE}" == *"webui"* ]] || [[ "${PROJECT_TYPE}" == *"Web"* ]]; then
+            if [ -f "cross-compile/www/coverage/lcov.info" ]; then
+              echo "✅ Found WebUI coverage: cross-compile/www/coverage/lcov.info"
+              ls -lh cross-compile/www/coverage/
+            else
+              echo "⚠️ WebUI coverage not found (expected for project type: ${PROJECT_TYPE})"
+            fi
+          else
+            echo "ℹ️ Skipping WebUI coverage check (not applicable for project type: ${PROJECT_TYPE})"
+          fi
 
       - name: SonarQube Scan
         id: sonar-scan
@@ -74,7 +138,7 @@ jobs:
         id: sonar-quality-gate
         if: steps.check-scannerwork.outputs.exists == 'true'
         continue-on-error: true
-        uses: sonarsource/sonarqube-quality-gate-action@master
+        uses: sonarsource/sonarqube-quality-gate-action@v1.2.0
         with:
           pollingTimeoutSec: 600
         env:

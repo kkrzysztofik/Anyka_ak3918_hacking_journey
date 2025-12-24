@@ -12,14 +12,13 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  issues: write
-  security-events: write
 
 jobs:
   test-and-coverage:
     name: Test Suite & Coverage
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: cross-compile/www
@@ -64,9 +63,22 @@ jobs:
             cross-compile/www/coverage/**
           retention-days: 7
 
+      - name: Cache Coverage Reports
+        uses: actions/cache@v5
+        if: always()
+        with:
+          path: cross-compile/www/coverage
+          key: coverage-webui-${{ github.run_id }}-${{ hashFiles('cross-compile/www/**/*.{ts,tsx}') }}
+          restore-keys: |
+            coverage-webui-${{ github.run_id }}-
+            coverage-webui-
+
   quality-gates:
     name: Code Quality Gates
     needs: test-and-coverage
+    permissions:
+      contents: read
+      security-events: write
     uses: ./.github/workflows/quality-gates.yml
     with:
       project_type: "WebUI"
@@ -76,6 +88,9 @@ jobs:
   security-scans:
     name: Security Scans
     needs: test-and-coverage
+    permissions:
+      contents: read
+      security-events: write
     uses: ./.github/workflows/security-scans.yml
     with:
       project_type: "WebUI"
@@ -85,6 +100,10 @@ jobs:
   reporting:
     name: Generate CI Report
     needs: [test-and-coverage, security-scans, quality-gates]
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     uses: ./.github/workflows/reporting.yml
     with:
       project_type: "WebUI"

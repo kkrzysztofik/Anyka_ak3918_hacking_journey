@@ -40,6 +40,8 @@ ENV PATH="/opt/arm-anykav200-crosstool-ng/bin:${PATH}"
 
 # Install build-essential for host builds (gcc for x86_64 proc-macros and build scripts)
 # Install cargo via rustup (toolchain's cargo is a symlink that won't work in Docker)
+# Preinstall cargo-tarpaulin to avoid per-job installs (uses vendored OpenSSL)
+# Install Snyk CLI and verify installation
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
   rm -rf /var/lib/apt/lists/* && apt-get clean && \
   if ! command -v cargo >/dev/null 2>&1; then \
@@ -50,16 +52,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
   /root/.rustup/toolchains/*/lib/rustlib/*/doc \
   /root/.rustup/toolchains/*/lib/rustlib/*/src \
   /root/.rustup/toolchains/*/lib/rustlib/src; \
-  fi
-ENV PATH="${PATH}:/root/.cargo/bin"
-
-# Preinstall cargo-tarpaulin to avoid per-job installs (uses vendored OpenSSL)
-# Install Snyk CLI
-# Verify installation
-RUN cargo install cargo-tarpaulin --locked --features vendored-openssl && \
+  fi && \
+  cargo install cargo-tarpaulin --locked --features vendored-openssl && \
   rm -rf /root/.cargo/registry/index/* /root/.cargo/git/db/* && \
-  curl -Lo snyk-linux https://downloads.snyk.io/cli/stable/snyk-linux \
-  && curl -Lo snyk-linux.sha256 https://downloads.snyk.io/cli/stable/snyk-linux.sha256 \
+  curl --proto '=https' --tlsv1.2 --location --fail --show-error -Lo snyk-linux https://downloads.snyk.io/cli/stable/snyk-linux \
+  && curl --proto '=https' --tlsv1.2 --location --fail --show-error -Lo snyk-linux.sha256 https://downloads.snyk.io/cli/stable/snyk-linux.sha256 \
   && sha256sum -c snyk-linux.sha256 \
   && chmod +x snyk-linux \
   && mv snyk-linux /usr/local/bin/snyk \

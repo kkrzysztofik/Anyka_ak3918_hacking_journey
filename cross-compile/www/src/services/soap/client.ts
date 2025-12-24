@@ -48,6 +48,33 @@ const builderOptions = {
 const builder = new XMLBuilder(builderOptions);
 
 /**
+ * Escapes XML special characters to prevent XML injection attacks.
+ * Use this for user-provided input that will be inserted into XML content.
+ *
+ * @param input - The string to escape
+ * @returns The escaped string safe for XML insertion
+ */
+export function escapeXml(input: string): string {
+  return input
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
+}
+
+/**
+ * Escapes XML attribute values.
+ * Use this for user-provided input that will be used in XML attributes.
+ *
+ * @param input - The string to escape
+ * @returns The escaped string safe for XML attribute insertion
+ */
+export function escapeXmlAttribute(input: string): string {
+  return escapeXml(input);
+}
+
+/**
  * Creates a SOAP 1.2 envelope with the given body content
  */
 export function createSOAPEnvelope(body: string): string {
