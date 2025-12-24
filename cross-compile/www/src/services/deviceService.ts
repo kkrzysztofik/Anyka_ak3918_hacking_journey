@@ -5,6 +5,7 @@
  */
 import { ENDPOINTS, apiClient } from '@/services/api';
 import { createSOAPEnvelope, parseSOAPResponse, soapBodies } from '@/services/soap/client';
+import { safeString } from '@/utils/safeString';
 
 export interface DeviceInfo {
   manufacturer: string;
@@ -45,20 +46,6 @@ export async function getDeviceInformation(): Promise<DeviceInfo> {
   if (!data) {
     throw new Error('Invalid response: missing GetDeviceInformationResponse');
   }
-
-  // Helper to safely convert to string, avoiding object stringification
-  const safeString = (value: unknown, defaultValue: string): string => {
-    if (value === null || value === undefined) {
-      return defaultValue;
-    }
-    if (typeof value === 'string') {
-      return value || defaultValue;
-    }
-    if (typeof value === 'object') {
-      return defaultValue;
-    }
-    return String(value);
-  };
 
   return {
     manufacturer: safeString(data.Manufacturer, 'Unknown'),

@@ -97,5 +97,6 @@
   "sonarlint.connectedMode.project": {
     "connectionId": "kkrzysztofik",
     "projectKey": "kkrzysztofik_Anyka_ak3918_hacking_journey"
-  }
+  },
+  "css.lint.unknownAtRules": "ignore"
 }

@@ -6,6 +6,8 @@
  */
 import { XMLBuilder, XMLParser } from 'fast-xml-parser';
 
+import { safeString } from '@/utils/safeString';
+
 // SOAP namespace declarations
 // These are XML namespace URIs (identifiers), not network protocols
 // NOSONAR: S5332 - These are XML namespace identifiers, not actual HTTP connections
@@ -156,20 +158,6 @@ function extractSOAPFault(body: Record<string, unknown>): SOAPFault | null {
   const text = reasonObj?.Text || reasonObj?.['soap:Text'] || 'Unknown error';
   const reasonText =
     typeof text === 'object' ? (text as Record<string, unknown>)['#text'] || text : text;
-
-  // Helper to safely convert to string, avoiding object stringification
-  const safeString = (value: unknown, defaultValue: string): string => {
-    if (value === null || value === undefined) {
-      return defaultValue;
-    }
-    if (typeof value === 'string') {
-      return value || defaultValue;
-    }
-    if (typeof value === 'object') {
-      return defaultValue;
-    }
-    return String(value);
-  };
 
   return {
     code: safeString(codeValue, 'Unknown error'),

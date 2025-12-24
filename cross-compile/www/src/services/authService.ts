@@ -7,6 +7,7 @@
 import { ENDPOINTS, apiClient } from '@/services/api';
 import { createSOAPEnvelope, parseSOAPResponse, soapBodies } from '@/services/soap/client';
 import type { DeviceInfo } from '@/types';
+import { safeString } from '@/utils/safeString';
 
 export interface LoginResult {
   success: boolean;
@@ -71,20 +72,6 @@ function extractDeviceInfo(data: Record<string, unknown> | undefined): DeviceInf
   // Navigate to GetDeviceInformationResponse
   const response = data.GetDeviceInformationResponse as Record<string, unknown> | undefined;
   if (!response) return undefined;
-
-  // Helper to safely convert to string, avoiding object stringification
-  const safeString = (value: unknown, defaultValue: string): string => {
-    if (value === null || value === undefined) {
-      return defaultValue;
-    }
-    if (typeof value === 'string') {
-      return value || defaultValue;
-    }
-    if (typeof value === 'object') {
-      return defaultValue;
-    }
-    return String(value);
-  };
 
   return {
     manufacturer: safeString(response.Manufacturer, 'Unknown'),

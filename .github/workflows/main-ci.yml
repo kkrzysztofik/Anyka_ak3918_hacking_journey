@@ -246,7 +246,6 @@ jobs:
         with:
           args: --file=cross-compile/www/package.json --sarif-file-output=cross-compile/www/snyk-oss-webui.sarif
           command: test
-          working-directory: cross-compile/www
 
       - name: Upload WebUI Snyk OSS SARIF
         if: hashFiles('cross-compile/www/snyk-oss-webui.sarif') != ''
@@ -302,7 +301,6 @@ jobs:
         with:
           args: --file=cross-compile/www/package.json
           command: monitor
-          working-directory: cross-compile/www
 
   # =============================================================================
   # SONARQUBE - Unified Quality Analysis

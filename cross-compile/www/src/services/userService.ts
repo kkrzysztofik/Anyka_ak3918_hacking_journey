@@ -5,6 +5,7 @@
  */
 import { ENDPOINTS, apiClient } from '@/services/api';
 import { createSOAPEnvelope, parseSOAPResponse } from '@/services/soap/client';
+import { safeString } from '@/utils/safeString';
 
 export type UserLevel = 'Administrator' | 'Operator' | 'User' | 'Anonymous';
 
@@ -34,20 +35,6 @@ export async function getUsers(): Promise<OnvifUser[]> {
   }
 
   const usersList = Array.isArray(users) ? users : [users];
-
-  // Helper to safely convert to string, avoiding object stringification
-  const safeString = (value: unknown, defaultValue: string): string => {
-    if (value === null || value === undefined) {
-      return defaultValue;
-    }
-    if (typeof value === 'string') {
-      return value || defaultValue;
-    }
-    if (typeof value === 'object') {
-      return defaultValue;
-    }
-    return String(value);
-  };
 
   return usersList.map((user: Record<string, unknown>) => ({
     username: safeString(user.Username, ''),

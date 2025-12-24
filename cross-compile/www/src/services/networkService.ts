@@ -5,6 +5,7 @@
  */
 import { ENDPOINTS, apiClient } from '@/services/api';
 import { createSOAPEnvelope, parseSOAPResponse } from '@/services/soap/client';
+import { safeString } from '@/utils/safeString';
 
 export interface NetworkInterface {
   token: string;
@@ -52,20 +53,6 @@ export async function getNetworkInterfaces(): Promise<NetworkInterface[]> {
   // Handle single or array of interfaces
   const interfacesList = Array.isArray(interfaces) ? interfaces : [interfaces];
 
-  // Helper to safely convert to string, avoiding object stringification
-  const safeString = (value: unknown, defaultValue: string): string => {
-    if (value === null || value === undefined) {
-      return defaultValue;
-    }
-    if (typeof value === 'string') {
-      return value || defaultValue;
-    }
-    if (typeof value === 'object') {
-      return defaultValue;
-    }
-    return String(value);
-  };
-
   return interfacesList.map((iface: Record<string, unknown>) => {
     const info = iface.Info as Record<string, unknown> | undefined;
     const ipv4 = iface.IPv4 as Record<string, unknown> | undefined;
@@ -105,32 +92,24 @@ export async function getDNS(): Promise<DNSConfig> {
   const searchDomain = dnsInfo?.SearchDomain;
   const dnsServers = dnsInfo?.DNSManual || dnsInfo?.DNSFromDHCP;
 
-  // Helper to safely convert to string, avoiding object stringification
-  const safeString = (value: unknown, defaultValue: string): string => {
-    if (value === null || value === undefined) {
-      return defaultValue;
-    }
-    if (typeof value === 'string') {
-      return value || defaultValue;
-    }
-    if (typeof value === 'object') {
-      return defaultValue;
-    }
-    return String(value);
-  };
+  let searchDomainList: string[] = [];
+  if (Array.isArray(searchDomain)) {
+    searchDomainList = searchDomain.map((item) => safeString(item, ''));
+  } else if (searchDomain) {
+    searchDomainList = [safeString(searchDomain, '')];
+  }
+
+  let dnsServersList: string[] = [];
+  if (Array.isArray(dnsServers)) {
+    dnsServersList = dnsServers.map((d: Record<string, unknown>) => safeString(d.IPv4Address, ''));
+  } else if (dnsServers) {
+    dnsServersList = [safeString((dnsServers as Record<string, unknown>).IPv4Address, '')];
+  }
 
   return {
     fromDHCP: dnsInfo?.FromDHCP === true || dnsInfo?.FromDHCP === 'true',
-    searchDomain: Array.isArray(searchDomain)
-      ? searchDomain.map((item) => safeString(item, ''))
-      : searchDomain
-        ? [safeString(searchDomain, '')]
-        : [],
-    dnsServers: Array.isArray(dnsServers)
-      ? dnsServers.map((d: Record<string, unknown>) => safeString(d.IPv4Address, ''))
-      : dnsServers
-        ? [safeString((dnsServers as Record<string, unknown>).IPv4Address, '')]
-        : [],
+    searchDomain: searchDomainList,
+    dnsServers: dnsServersList,
   };
 }
 

@@ -5,6 +5,7 @@
  */
 import { ENDPOINTS, apiClient } from '@/services/api';
 import { createSOAPEnvelope, parseSOAPResponse, soapBodies } from '@/services/soap/client';
+import { safeString } from '@/utils/safeString';
 
 export type DateTimeType = 'NTP' | 'Manual';
 
@@ -56,20 +57,6 @@ export async function getSystemDateAndTime(): Promise<SystemDateTime> {
   const hour = Number(time?.Hour || 0);
   const minute = Number(time?.Minute || 0);
   const second = Number(time?.Second || 0);
-
-  // Helper to safely convert to string, avoiding object stringification
-  const safeString = (value: unknown, defaultValue: string): string => {
-    if (value === null || value === undefined) {
-      return defaultValue;
-    }
-    if (typeof value === 'string') {
-      return value || defaultValue;
-    }
-    if (typeof value === 'object') {
-      return defaultValue;
-    }
-    return String(value);
-  };
 
   return {
     dateTimeType: safeString(sdt.DateTimeType, 'NTP') as DateTimeType,

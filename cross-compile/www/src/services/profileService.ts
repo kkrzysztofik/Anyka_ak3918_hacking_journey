@@ -10,34 +10,7 @@ import {
   escapeXmlAttribute,
   parseSOAPResponse,
 } from '@/services/soap/client';
-
-/**
- * Helper function to safely convert a value to string
- */
-function safeString(value: unknown, defaultValue: string = ''): string {
-  if (value === null || value === undefined) {
-    return defaultValue;
-  }
-  if (typeof value === 'string') {
-    return value || defaultValue;
-  }
-  // Only convert primitive types to string, objects return default to avoid '[object Object]'
-  if (typeof value === 'object') {
-    return defaultValue;
-  }
-  // For primitives (number, boolean, symbol, bigint), convert safely
-  const valueType = typeof value;
-  if (
-    valueType === 'number' ||
-    valueType === 'boolean' ||
-    valueType === 'symbol' ||
-    valueType === 'bigint'
-  ) {
-    return String(value);
-  }
-  // Fallback for any other type
-  return defaultValue;
-}
+import { safeString } from '@/utils/safeString';
 
 export interface MediaProfile {
   token: string;
@@ -148,47 +121,47 @@ export async function getProfiles(): Promise<MediaProfile[]> {
     const metadataConfig = profile.MetadataConfiguration as Record<string, unknown> | undefined;
 
     return {
-      token: safeString(profile['@_token']),
-      name: safeString(profile.Name),
-      videoSourceToken: videoSource ? safeString(videoSource['@_token']) : undefined,
-      videoEncoderToken: videoEncoder ? safeString(videoEncoder['@_token']) : undefined,
-      audioSourceToken: audioSource ? safeString(audioSource['@_token']) : undefined,
-      audioEncoderToken: audioEncoder ? safeString(audioEncoder['@_token']) : undefined,
+      token: safeString(profile['@_token'], ''),
+      name: safeString(profile.Name, ''),
+      videoSourceToken: videoSource ? safeString(videoSource['@_token'], '') : undefined,
+      videoEncoderToken: videoEncoder ? safeString(videoEncoder['@_token'], '') : undefined,
+      audioSourceToken: audioSource ? safeString(audioSource['@_token'], '') : undefined,
+      audioEncoderToken: audioEncoder ? safeString(audioEncoder['@_token'], '') : undefined,
       videoSourceConfiguration: videoSource
         ? {
-            token: safeString(videoSource['@_token']),
-            name: safeString(videoSource.Name),
+            token: safeString(videoSource['@_token'], ''),
+            name: safeString(videoSource.Name, ''),
           }
         : undefined,
       videoEncoderConfiguration: videoEncoder
         ? {
-            token: safeString(videoEncoder['@_token']),
-            name: safeString(videoEncoder.Name),
+            token: safeString(videoEncoder['@_token'], ''),
+            name: safeString(videoEncoder.Name, ''),
             encoding: safeString(videoEncoder.Encoding, 'H264'),
           }
         : undefined,
       audioSourceConfiguration: audioSource
         ? {
-            token: safeString(audioSource['@_token']),
-            name: safeString(audioSource.Name),
+            token: safeString(audioSource['@_token'], ''),
+            name: safeString(audioSource.Name, ''),
           }
         : undefined,
       audioEncoderConfiguration: audioEncoder
         ? {
-            token: safeString(audioEncoder['@_token']),
-            name: safeString(audioEncoder.Name),
+            token: safeString(audioEncoder['@_token'], ''),
+            name: safeString(audioEncoder.Name, ''),
           }
         : undefined,
       ptzConfiguration: ptzConfig
         ? {
-            token: safeString(ptzConfig['@_token']),
-            name: safeString(ptzConfig.Name),
+            token: safeString(ptzConfig['@_token'], ''),
+            name: safeString(ptzConfig.Name, ''),
           }
         : undefined,
       metadataConfiguration: metadataConfig
         ? {
-            token: safeString(metadataConfig['@_token']),
-            name: safeString(metadataConfig.Name),
+            token: safeString(metadataConfig['@_token'], ''),
+            name: safeString(metadataConfig.Name, ''),
           }
         : undefined,
       fixed: profile.fixed === true || profile.fixed === 'true',
@@ -222,8 +195,8 @@ export async function getProfile(token: string): Promise<MediaProfile | null> {
   }
 
   return {
-    token: safeString(profile['@_token']),
-    name: safeString(profile.Name),
+    token: safeString(profile['@_token'], ''),
+    name: safeString(profile.Name, ''),
   };
 }
 
@@ -249,7 +222,7 @@ export async function createProfile(name: string): Promise<string> {
   const data = parsed.data?.CreateProfileResponse as Record<string, unknown> | undefined;
   const profile = data?.Profile as Record<string, unknown> | undefined;
 
-  return safeString(profile?.['@_token']);
+  return safeString(profile?.['@_token'], '');
 }
 
 /**
@@ -301,8 +274,8 @@ export async function getVideoEncoderConfigurations(): Promise<VideoEncoderConfi
     const h264 = config.H264 as Record<string, unknown> | undefined;
 
     return {
-      token: safeString(config['@_token']),
-      name: safeString(config.Name),
+      token: safeString(config['@_token'], ''),
+      name: safeString(config.Name, ''),
       encoding: safeString(config.Encoding, 'H264') as VideoEncoding,
       resolution: {
         width: Number(resolution?.Width || 1920),
@@ -361,8 +334,8 @@ export async function getVideoEncoderConfiguration(
   const h264 = config.H264 as Record<string, unknown> | undefined;
 
   return {
-    token: safeString(config['@_token']),
-    name: safeString(config.Name),
+    token: safeString(config['@_token'], ''),
+    name: safeString(config.Name, ''),
     encoding: safeString(config.Encoding, 'H264') as VideoEncoding,
     resolution: {
       width: Number(resolution?.Width || 1920),
