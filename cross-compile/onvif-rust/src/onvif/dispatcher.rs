@@ -329,13 +329,13 @@ impl ServiceDispatcher {
         // Read and parse request body
         let envelope = match self.read_and_parse_request(request).await {
             Ok(env) => env,
-            Err(response) => return response,
+            Err(response) => return *response,
         };
 
         // Determine action (prefer header, fallback to body)
         let action = match self.extract_action(soap_action, &envelope) {
             Ok(action) => action,
-            Err(response) => return response,
+            Err(response) => return *response,
         };
 
         tracing::debug!(
@@ -348,7 +348,7 @@ impl ServiceDispatcher {
         // Find handler
         let handler = match self.find_handler(service) {
             Ok(handler) => handler,
-            Err(response) => return response,
+            Err(response) => return *response,
         };
 
         // Check authentication if enabled
@@ -356,7 +356,7 @@ impl ServiceDispatcher {
             .check_authentication(&action, &handler, &basic_auth_result, &envelope, auth_ctx)
             .await
         {
-            return response;
+            return *response;
         }
 
         // Handle the operation
@@ -368,16 +368,16 @@ impl ServiceDispatcher {
     async fn read_and_parse_request(
         &self,
         request: Request<Body>,
-    ) -> Result<super::soap::RawSoapEnvelope, Response> {
+    ) -> Result<super::soap::RawSoapEnvelope, Box<Response>> {
         // Read body
         let body_bytes = match axum::body::to_bytes(request.into_body(), 1024 * 1024).await {
             Ok(bytes) => bytes,
             Err(e) => {
                 tracing::error!("Failed to read request body: {}", e);
-                return Err(error_response(OnvifError::WellFormed(format!(
+                return Err(Box::new(error_response(OnvifError::WellFormed(format!(
                     "Failed to read request body: {}",
                     e
-                ))));
+                )))));
             }
         };
 
@@ -385,10 +385,10 @@ impl ServiceDispatcher {
             Ok(s) => s,
             Err(e) => {
                 tracing::error!("Invalid UTF-8 in request body: {}", e);
-                return Err(error_response(OnvifError::WellFormed(format!(
+                return Err(Box::new(error_response(OnvifError::WellFormed(format!(
                     "Invalid UTF-8 in request body: {}",
                     e
-                ))));
+                )))));
             }
         };
 
@@ -397,10 +397,10 @@ impl ServiceDispatcher {
             Ok(env) => Ok(env),
             Err(e) => {
                 tracing::error!("Failed to parse SOAP envelope: {}", e);
-                Err(error_response(OnvifError::WellFormed(format!(
+                Err(Box::new(error_response(OnvifError::WellFormed(format!(
                     "Failed to parse SOAP envelope: {}",
                     e
-                ))))
+                )))))
             }
         }
     }
@@ -410,7 +410,7 @@ impl ServiceDispatcher {
         &self,
         soap_action: Option<String>,
         envelope: &super::soap::RawSoapEnvelope,
-    ) -> Result<String, Response> {
+    ) -> Result<String, Box<Response>> {
         tracing::debug!(
             "Action extraction (with auth): soap_action_header={:?}, envelope_action={:?}",
             soap_action,
@@ -428,16 +428,16 @@ impl ServiceDispatcher {
                 soap_action,
                 envelope.action
             );
-            return Err(error_response(OnvifError::WellFormed(
+            return Err(Box::new(error_response(OnvifError::WellFormed(
                 "Missing SOAP action in request".to_string(),
-            )));
+            ))));
         }
 
         Ok(action)
     }
 
     /// Find handler for the given service.
-    fn find_handler(&self, service: &str) -> Result<Arc<dyn ServiceHandler>, Response> {
+    fn find_handler(&self, service: &str) -> Result<Arc<dyn ServiceHandler>, Box<Response>> {
         let handler = {
             let handlers = self.handlers.read();
             handlers.get(&service.to_lowercase()).cloned()
@@ -447,9 +447,8 @@ impl ServiceDispatcher {
             Some(h) => Ok(h),
             None => {
                 tracing::warn!("No handler registered for service: {}", service);
-                Err(error_response(OnvifError::ActionNotSupported(format!(
-                    "Service '{}' not available",
-                    service
+                Err(Box::new(error_response(OnvifError::ActionNotSupported(
+                    format!("Service '{}' not available", service),
                 ))))
             }
         }
@@ -463,7 +462,7 @@ impl ServiceDispatcher {
         basic_auth_result: &Result<Option<UserAccount>, OnvifError>,
         envelope: &super::soap::RawSoapEnvelope,
         auth_ctx: &AuthContext,
-    ) -> Result<(), Response> {
+    ) -> Result<(), Box<Response>> {
         if !auth_ctx.auth_enabled {
             return Ok(());
         }
@@ -482,16 +481,16 @@ impl ServiceDispatcher {
                     tracing::debug!("Basic Auth successful for action {}", action);
                     return Ok(());
                 }
-                return Err(error_response(OnvifError::NotAuthorized(
+                return Err(Box::new(error_response(OnvifError::NotAuthorized(
                     "Insufficient privileges".to_string(),
-                )));
+                ))));
             }
             Ok(None) => {
                 // No Basic Auth header, proceed to WS-Security
             }
             Err(e) => {
                 // Basic Auth header present but invalid
-                return Err(error_response(e.clone()));
+                return Err(Box::new(error_response(e.clone())));
             }
         }
 
@@ -512,7 +511,7 @@ impl ServiceDispatcher {
             }
             Err(e) => {
                 tracing::warn!("Authentication failed for action {}: {:?}", action, e);
-                Err(error_response(e))
+                Err(Box::new(error_response(e)))
             }
         }
     }
