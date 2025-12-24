@@ -10,6 +10,7 @@ import {
   getScopes,
   setScopes,
 } from '@/services/deviceService';
+import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -28,20 +29,15 @@ describe('deviceService', () => {
 
   describe('getDeviceInformation', () => {
     it('should parse device information correctly', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetDeviceInformationResponse>
-                <Manufacturer>Anyka</Manufacturer>
-                <Model>AK3918E</Model>
-                <FirmwareVersion>2.0.0</FirmwareVersion>
-                <SerialNumber>SN12345</SerialNumber>
-                <HardwareId>HW12345</HardwareId>
-              </GetDeviceInformationResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetDeviceInformationResponse>
+          <Manufacturer>Anyka</Manufacturer>
+          <Model>AK3918E</Model>
+          <FirmwareVersion>2.0.0</FirmwareVersion>
+          <SerialNumber>SN12345</SerialNumber>
+          <HardwareId>HW12345</HardwareId>
+        </GetDeviceInformationResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -55,17 +51,7 @@ describe('deviceService', () => {
     });
 
     it('should throw on SOAP fault', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Operation failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Operation failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -73,14 +59,7 @@ describe('deviceService', () => {
     });
 
     it('should throw on missing response data', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SomeOtherResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SomeOtherResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -90,23 +69,18 @@ describe('deviceService', () => {
 
   describe('getScopes', () => {
     it('should parse scopes and extract name/location', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetScopesResponse>
-                <Scopes>
-                  <ScopeDef>Fixed</ScopeDef>
-                  <ScopeItem>onvif://www.onvif.org/name/MyCam</ScopeItem>
-                </Scopes>
-                <Scopes>
-                  <ScopeDef>Configurable</ScopeDef>
-                  <ScopeItem>onvif://www.onvif.org/location/LivingRoom</ScopeItem>
-                </Scopes>
-              </GetScopesResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetScopesResponse>
+          <Scopes>
+            <ScopeDef>Fixed</ScopeDef>
+            <ScopeItem>onvif://www.onvif.org/name/MyCam</ScopeItem>
+          </Scopes>
+          <Scopes>
+            <ScopeDef>Configurable</ScopeDef>
+            <ScopeItem>onvif://www.onvif.org/location/LivingRoom</ScopeItem>
+          </Scopes>
+        </GetScopesResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -117,18 +91,13 @@ describe('deviceService', () => {
     });
 
     it('should return empty strings when no matching scopes', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetScopesResponse>
-                <Scopes>
-                  <ScopeItem>onvif://www.onvif.org/type/video_encoder</ScopeItem>
-                </Scopes>
-              </GetScopesResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetScopesResponse>
+          <Scopes>
+            <ScopeItem>onvif://www.onvif.org/type/video_encoder</ScopeItem>
+          </Scopes>
+        </GetScopesResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -141,14 +110,7 @@ describe('deviceService', () => {
 
   describe('setScopes', () => {
     it('should call API with correct SOAP body', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetScopesResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetScopesResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -165,17 +127,7 @@ describe('deviceService', () => {
     });
 
     it('should throw on failure', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Set failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Set failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -185,32 +137,22 @@ describe('deviceService', () => {
 
   describe('getDeviceIdentification', () => {
     it('should combine device info and scopes', async () => {
-      const deviceInfoResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetDeviceInformationResponse>
-                <Manufacturer>Anyka</Manufacturer>
-                <Model>AK3918E</Model>
-                <FirmwareVersion>1.0.0</FirmwareVersion>
-                <SerialNumber>SN123</SerialNumber>
-                <HardwareId>HW123</HardwareId>
-              </GetDeviceInformationResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const deviceInfoResponse = createMockSOAPResponse(`
+        <GetDeviceInformationResponse>
+          <Manufacturer>Anyka</Manufacturer>
+          <Model>AK3918E</Model>
+          <FirmwareVersion>1.0.0</FirmwareVersion>
+          <SerialNumber>SN123</SerialNumber>
+          <HardwareId>HW123</HardwareId>
+        </GetDeviceInformationResponse>
+      `);
 
-      const scopesResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetScopesResponse>
-                <Scopes><ScopeItem>onvif://www.onvif.org/name/TestCam</ScopeItem></Scopes>
-                <Scopes><ScopeItem>onvif://www.onvif.org/location/Office</ScopeItem></Scopes>
-              </GetScopesResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const scopesResponse = createMockSOAPResponse(`
+        <GetScopesResponse>
+          <Scopes><ScopeItem>onvif://www.onvif.org/name/TestCam</ScopeItem></Scopes>
+          <Scopes><ScopeItem>onvif://www.onvif.org/location/Office</ScopeItem></Scopes>
+        </GetScopesResponse>
+      `);
 
       vi.mocked(apiClient.post)
         .mockResolvedValueOnce(deviceInfoResponse)

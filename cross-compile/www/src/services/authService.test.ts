@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiClient } from '@/services/api';
 import { checkDeviceReachable, verifyCredentials } from '@/services/authService';
+import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -23,20 +24,15 @@ describe('authService', () => {
 
   describe('verifyCredentials', () => {
     it('should return success with device info on valid response', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
-                <tds:Manufacturer>Anyka</tds:Manufacturer>
-                <tds:Model>AK3918E</tds:Model>
-                <tds:FirmwareVersion>1.0.0</tds:FirmwareVersion>
-                <tds:SerialNumber>ABC123</tds:SerialNumber>
-                <tds:HardwareId>HW001</tds:HardwareId>
-              </tds:GetDeviceInformationResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+          <tds:Manufacturer>Anyka</tds:Manufacturer>
+          <tds:Model>AK3918E</tds:Model>
+          <tds:FirmwareVersion>1.0.0</tds:FirmwareVersion>
+          <tds:SerialNumber>ABC123</tds:SerialNumber>
+          <tds:HardwareId>HW001</tds:HardwareId>
+        </tds:GetDeviceInformationResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -49,17 +45,7 @@ describe('authService', () => {
     });
 
     it('should return failure on SOAP fault', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Not Authorized</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Not Authorized');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -106,16 +92,11 @@ describe('authService', () => {
     });
 
     it('should call apiClient.post with device endpoint', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
-                <tds:Manufacturer>Test</tds:Manufacturer>
-              </tds:GetDeviceInformationResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+          <tds:Manufacturer>Test</tds:Manufacturer>
+        </tds:GetDeviceInformationResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 

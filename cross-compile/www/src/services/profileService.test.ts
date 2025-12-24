@@ -10,6 +10,7 @@ import {
   getVideoEncoderConfigurations,
   setVideoEncoderConfiguration,
 } from '@/services/profileService';
+import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -28,34 +29,29 @@ describe('profileService', () => {
 
   describe('getVideoEncoderConfigurations', () => {
     it('should parse video encoder configurations correctly', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetVideoEncoderConfigurationsResponse>
-                <Configurations token="encoder_1">
-                  <Name>MainStream</Name>
-                  <Encoding>H264</Encoding>
-                  <Resolution>
-                    <Width>1920</Width>
-                    <Height>1080</Height>
-                  </Resolution>
-                  <Quality>80</Quality>
-                  <RateControl>
-                    <FrameRateLimit>30</FrameRateLimit>
-                    <EncodingInterval>1</EncodingInterval>
-                    <BitrateLimit>4000</BitrateLimit>
-                  </RateControl>
-                  <H264>
-                    <GovLength>30</GovLength>
-                    <H264Profile>Main</H264Profile>
-                  </H264>
-                  <SessionTimeout>PT60S</SessionTimeout>
-                </Configurations>
-              </GetVideoEncoderConfigurationsResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetVideoEncoderConfigurationsResponse>
+          <Configurations token="encoder_1">
+            <Name>MainStream</Name>
+            <Encoding>H264</Encoding>
+            <Resolution>
+              <Width>1920</Width>
+              <Height>1080</Height>
+            </Resolution>
+            <Quality>80</Quality>
+            <RateControl>
+              <FrameRateLimit>30</FrameRateLimit>
+              <EncodingInterval>1</EncodingInterval>
+              <BitrateLimit>4000</BitrateLimit>
+            </RateControl>
+            <H264>
+              <GovLength>30</GovLength>
+              <H264Profile>Main</H264Profile>
+            </H264>
+            <SessionTimeout>PT60S</SessionTimeout>
+          </Configurations>
+        </GetVideoEncoderConfigurationsResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -79,29 +75,24 @@ describe('profileService', () => {
     });
 
     it('should handle multiple configurations', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetVideoEncoderConfigurationsResponse>
-                <Configurations token="encoder_1">
-                  <Name>MainStream</Name>
-                  <Encoding>H264</Encoding>
-                  <Resolution><Width>1920</Width><Height>1080</Height></Resolution>
-                  <Quality>80</Quality>
-                  <SessionTimeout>PT60S</SessionTimeout>
-                </Configurations>
-                <Configurations token="encoder_2">
-                  <Name>SubStream</Name>
-                  <Encoding>H264</Encoding>
-                  <Resolution><Width>640</Width><Height>480</Height></Resolution>
-                  <Quality>60</Quality>
-                  <SessionTimeout>PT60S</SessionTimeout>
-                </Configurations>
-              </GetVideoEncoderConfigurationsResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetVideoEncoderConfigurationsResponse>
+          <Configurations token="encoder_1">
+            <Name>MainStream</Name>
+            <Encoding>H264</Encoding>
+            <Resolution><Width>1920</Width><Height>1080</Height></Resolution>
+            <Quality>80</Quality>
+            <SessionTimeout>PT60S</SessionTimeout>
+          </Configurations>
+          <Configurations token="encoder_2">
+            <Name>SubStream</Name>
+            <Encoding>H264</Encoding>
+            <Resolution><Width>640</Width><Height>480</Height></Resolution>
+            <Quality>60</Quality>
+            <SessionTimeout>PT60S</SessionTimeout>
+          </Configurations>
+        </GetVideoEncoderConfigurationsResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -113,14 +104,7 @@ describe('profileService', () => {
     });
 
     it('should return empty array when no configurations', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetVideoEncoderConfigurationsResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<GetVideoEncoderConfigurationsResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -130,17 +114,7 @@ describe('profileService', () => {
     });
 
     it('should throw on SOAP fault', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Operation failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Operation failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -150,34 +124,29 @@ describe('profileService', () => {
 
   describe('getVideoEncoderConfiguration', () => {
     it('should parse single video encoder configuration', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetVideoEncoderConfigurationResponse>
-                <Configuration token="encoder_1">
-                  <Name>MainStream</Name>
-                  <Encoding>H264</Encoding>
-                  <Resolution>
-                    <Width>1920</Width>
-                    <Height>1080</Height>
-                  </Resolution>
-                  <Quality>80</Quality>
-                  <RateControl>
-                    <FrameRateLimit>30</FrameRateLimit>
-                    <EncodingInterval>1</EncodingInterval>
-                    <BitrateLimit>4000</BitrateLimit>
-                  </RateControl>
-                  <H264>
-                    <GovLength>30</GovLength>
-                    <H264Profile>Main</H264Profile>
-                  </H264>
-                  <SessionTimeout>PT60S</SessionTimeout>
-                </Configuration>
-              </GetVideoEncoderConfigurationResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetVideoEncoderConfigurationResponse>
+          <Configuration token="encoder_1">
+            <Name>MainStream</Name>
+            <Encoding>H264</Encoding>
+            <Resolution>
+              <Width>1920</Width>
+              <Height>1080</Height>
+            </Resolution>
+            <Quality>80</Quality>
+            <RateControl>
+              <FrameRateLimit>30</FrameRateLimit>
+              <EncodingInterval>1</EncodingInterval>
+              <BitrateLimit>4000</BitrateLimit>
+            </RateControl>
+            <H264>
+              <GovLength>30</GovLength>
+              <H264Profile>Main</H264Profile>
+            </H264>
+            <SessionTimeout>PT60S</SessionTimeout>
+          </Configuration>
+        </GetVideoEncoderConfigurationResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -189,17 +158,7 @@ describe('profileService', () => {
     });
 
     it('should return null on SOAP fault', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Not found</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Not found');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -209,14 +168,7 @@ describe('profileService', () => {
     });
 
     it('should return null on missing configuration', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetVideoEncoderConfigurationResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<GetVideoEncoderConfigurationResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -228,14 +180,7 @@ describe('profileService', () => {
 
   describe('setVideoEncoderConfiguration', () => {
     it('should set video encoder configuration', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetVideoEncoderConfigurationResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetVideoEncoderConfigurationResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -268,14 +213,7 @@ describe('profileService', () => {
     });
 
     it('should include force persistence flag', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetVideoEncoderConfigurationResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetVideoEncoderConfigurationResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -296,17 +234,7 @@ describe('profileService', () => {
     });
 
     it('should throw on SOAP fault', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Set failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Set failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -325,63 +253,58 @@ describe('profileService', () => {
 
   describe('getVideoEncoderConfigurationOptions', () => {
     it('should parse video encoder configuration options', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetVideoEncoderConfigurationOptionsResponse>
-                <Options>
-                  <QualityRange>
-                    <Min>0</Min>
-                    <Max>100</Max>
-                  </QualityRange>
-                  <H264>
-                    <ResolutionsAvailable>
-                      <Width>1920</Width>
-                      <Height>1080</Height>
-                    </ResolutionsAvailable>
-                    <ResolutionsAvailable>
-                      <Width>1280</Width>
-                      <Height>720</Height>
-                    </ResolutionsAvailable>
-                    <FrameRateRange>
-                      <Min>1</Min>
-                      <Max>30</Max>
-                    </FrameRateRange>
-                    <EncodingIntervalRange>
-                      <Min>1</Min>
-                      <Max>30</Max>
-                    </EncodingIntervalRange>
-                    <BitrateRange>
-                      <Min>64</Min>
-                      <Max>8192</Max>
-                    </BitrateRange>
-                    <H264ProfilesSupported>Main</H264ProfilesSupported>
-                    <H264ProfilesSupported>High</H264ProfilesSupported>
-                    <GovLengthRange>
-                      <Min>1</Min>
-                      <Max>300</Max>
-                    </GovLengthRange>
-                  </H264>
-                  <JPEG>
-                    <ResolutionsAvailable>
-                      <Width>1920</Width>
-                      <Height>1080</Height>
-                    </ResolutionsAvailable>
-                    <FrameRateRange>
-                      <Min>1</Min>
-                      <Max>30</Max>
-                    </FrameRateRange>
-                    <EncodingIntervalRange>
-                      <Min>1</Min>
-                      <Max>30</Max>
-                    </EncodingIntervalRange>
-                  </JPEG>
-                </Options>
-              </GetVideoEncoderConfigurationOptionsResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetVideoEncoderConfigurationOptionsResponse>
+          <Options>
+            <QualityRange>
+              <Min>0</Min>
+              <Max>100</Max>
+            </QualityRange>
+            <H264>
+              <ResolutionsAvailable>
+                <Width>1920</Width>
+                <Height>1080</Height>
+              </ResolutionsAvailable>
+              <ResolutionsAvailable>
+                <Width>1280</Width>
+                <Height>720</Height>
+              </ResolutionsAvailable>
+              <FrameRateRange>
+                <Min>1</Min>
+                <Max>30</Max>
+              </FrameRateRange>
+              <EncodingIntervalRange>
+                <Min>1</Min>
+                <Max>30</Max>
+              </EncodingIntervalRange>
+              <BitrateRange>
+                <Min>64</Min>
+                <Max>8192</Max>
+              </BitrateRange>
+              <H264ProfilesSupported>Main</H264ProfilesSupported>
+              <H264ProfilesSupported>High</H264ProfilesSupported>
+              <GovLengthRange>
+                <Min>1</Min>
+                <Max>300</Max>
+              </GovLengthRange>
+            </H264>
+            <JPEG>
+              <ResolutionsAvailable>
+                <Width>1920</Width>
+                <Height>1080</Height>
+              </ResolutionsAvailable>
+              <FrameRateRange>
+                <Min>1</Min>
+                <Max>30</Max>
+              </FrameRateRange>
+              <EncodingIntervalRange>
+                <Min>1</Min>
+                <Max>30</Max>
+              </EncodingIntervalRange>
+            </JPEG>
+          </Options>
+        </GetVideoEncoderConfigurationOptionsResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -398,18 +321,13 @@ describe('profileService', () => {
     });
 
     it('should handle optional configuration token and profile token', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetVideoEncoderConfigurationOptionsResponse>
-                <Options>
-                  <QualityRange><Min>0</Min><Max>100</Max></QualityRange>
-                </Options>
-              </GetVideoEncoderConfigurationOptionsResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetVideoEncoderConfigurationOptionsResponse>
+          <Options>
+            <QualityRange><Min>0</Min><Max>100</Max></QualityRange>
+          </Options>
+        </GetVideoEncoderConfigurationOptionsResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -421,17 +339,7 @@ describe('profileService', () => {
     });
 
     it('should throw on SOAP fault', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Get options failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Get options failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -439,14 +347,9 @@ describe('profileService', () => {
     });
 
     it('should throw on missing Options', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetVideoEncoderConfigurationOptionsResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(
+        '<GetVideoEncoderConfigurationOptionsResponse />',
+      );
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 

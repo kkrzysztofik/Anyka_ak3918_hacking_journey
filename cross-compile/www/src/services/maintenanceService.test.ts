@@ -10,6 +10,7 @@ import {
   setSystemFactoryDefault,
   systemReboot,
 } from '@/services/maintenanceService';
+import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -28,16 +29,11 @@ describe('maintenanceService', () => {
 
   describe('systemReboot', () => {
     it('should send reboot request', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SystemRebootResponse>
-                <Message>Rebooting...</Message>
-              </SystemRebootResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <SystemRebootResponse>
+          <Message>Rebooting...</Message>
+        </SystemRebootResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -50,17 +46,7 @@ describe('maintenanceService', () => {
     });
 
     it('should throw on failure', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Reboot failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Reboot failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -70,14 +56,7 @@ describe('maintenanceService', () => {
 
   describe('setSystemFactoryDefault', () => {
     it('should send soft reset request', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetSystemFactoryDefaultResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetSystemFactoryDefaultResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -90,14 +69,7 @@ describe('maintenanceService', () => {
     });
 
     it('should send hard reset request', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetSystemFactoryDefaultResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetSystemFactoryDefaultResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -113,21 +85,16 @@ describe('maintenanceService', () => {
   describe('getSystemBackup', () => {
     it('should retrieve backup with single file', async () => {
       const mockBackupData = btoa('[device]\nmanufacturer = "Test"');
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <tds:GetSystemBackupResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
-                <tds:BackupFiles>
-                  <tds:BackupFile>
-                    <tds:Name>config.toml</tds:Name>
-                    <tds:Data>${mockBackupData}</tds:Data>
-                  </tds:BackupFile>
-                </tds:BackupFiles>
-              </tds:GetSystemBackupResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <tds:GetSystemBackupResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+          <tds:BackupFiles>
+            <tds:BackupFile>
+              <tds:Name>config.toml</tds:Name>
+              <tds:Data>${mockBackupData}</tds:Data>
+            </tds:BackupFile>
+          </tds:BackupFiles>
+        </tds:GetSystemBackupResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -145,25 +112,20 @@ describe('maintenanceService', () => {
     it('should retrieve backup with multiple files', async () => {
       const mockBackupData1 = btoa('[device]\nmanufacturer = "Test"');
       const mockBackupData2 = btoa('[network]\nip = "192.168.1.1"');
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <tds:GetSystemBackupResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
-                <tds:BackupFiles>
-                  <tds:BackupFile>
-                    <tds:Name>config.toml</tds:Name>
-                    <tds:Data>${mockBackupData1}</tds:Data>
-                  </tds:BackupFile>
-                  <tds:BackupFile>
-                    <tds:Name>network.toml</tds:Name>
-                    <tds:Data>${mockBackupData2}</tds:Data>
-                  </tds:BackupFile>
-                </tds:BackupFiles>
-              </tds:GetSystemBackupResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <tds:GetSystemBackupResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+          <tds:BackupFiles>
+            <tds:BackupFile>
+              <tds:Name>config.toml</tds:Name>
+              <tds:Data>${mockBackupData1}</tds:Data>
+            </tds:BackupFile>
+            <tds:BackupFile>
+              <tds:Name>network.toml</tds:Name>
+              <tds:Data>${mockBackupData2}</tds:Data>
+            </tds:BackupFile>
+          </tds:BackupFiles>
+        </tds:GetSystemBackupResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -177,16 +139,11 @@ describe('maintenanceService', () => {
     it('should return empty array when BackupFile is missing', async () => {
       // Test case where BackupFiles exists but BackupFile is missing/null
       // This simulates the parser returning BackupFiles but no BackupFile property
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <tds:GetSystemBackupResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
-                <tds:BackupFiles />
-              </tds:GetSystemBackupResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <tds:GetSystemBackupResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+          <tds:BackupFiles />
+        </tds:GetSystemBackupResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -197,17 +154,7 @@ describe('maintenanceService', () => {
     });
 
     it('should throw on SOAP fault', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Backup failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Backup failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -221,14 +168,9 @@ describe('maintenanceService', () => {
     });
 
     it('should throw on invalid response structure', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <tds:GetSystemBackupResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl" />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <tds:GetSystemBackupResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl" />
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -251,14 +193,9 @@ describe('maintenanceService', () => {
       const mockFile = createMockFile(tomlContent);
       const base64Data = btoa(tomlContent);
 
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <tds:RestoreSystemResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl" />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <tds:RestoreSystemResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl" />
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -283,14 +220,9 @@ describe('maintenanceService', () => {
       const mockFile = createMockFile(tomlContent);
       const expectedBase64 = btoa(tomlContent);
 
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <tds:RestoreSystemResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl" />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <tds:RestoreSystemResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl" />
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -305,14 +237,9 @@ describe('maintenanceService', () => {
       const tomlContent = '[device]\nmanufacturer = "Test"';
       const mockFile = createMockFile(tomlContent, 'backup.toml');
 
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <tds:RestoreSystemResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl" />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <tds:RestoreSystemResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl" />
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -327,17 +254,7 @@ describe('maintenanceService', () => {
       const tomlContent = '[device]\nmanufacturer = "Test"';
       const mockFile = createMockFile(tomlContent);
 
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Restore failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Restore failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 

@@ -10,6 +10,7 @@ import {
   setDNS,
   setNetworkInterface,
 } from '@/services/networkService';
+import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -28,32 +29,27 @@ describe('networkService', () => {
 
   describe('getNetworkInterfaces', () => {
     it('should parse network interfaces correctly', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetNetworkInterfacesResponse>
-                <NetworkInterfaces token="eth0">
-                  <Enabled>true</Enabled>
-                  <Info>
-                    <Name>eth0</Name>
-                    <HwAddress>00:11:22:33:44:55</HwAddress>
-                  </Info>
-                  <IPv4>
-                    <Enabled>true</Enabled>
-                    <Config>
-                      <DHCP>false</DHCP>
-                      <Manual>
-                        <Address>192.168.1.100</Address>
-                        <PrefixLength>24</PrefixLength>
-                      </Manual>
-                    </Config>
-                  </IPv4>
-                </NetworkInterfaces>
-              </GetNetworkInterfacesResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetNetworkInterfacesResponse>
+          <NetworkInterfaces token="eth0">
+            <Enabled>true</Enabled>
+            <Info>
+              <Name>eth0</Name>
+              <HwAddress>00:11:22:33:44:55</HwAddress>
+            </Info>
+            <IPv4>
+              <Enabled>true</Enabled>
+              <Config>
+                <DHCP>false</DHCP>
+                <Manual>
+                  <Address>192.168.1.100</Address>
+                  <PrefixLength>24</PrefixLength>
+                </Manual>
+              </Config>
+            </IPv4>
+          </NetworkInterfaces>
+        </GetNetworkInterfacesResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -69,14 +65,7 @@ describe('networkService', () => {
     });
 
     it('should return empty array when no interfaces', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetNetworkInterfacesResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<GetNetworkInterfacesResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -88,21 +77,16 @@ describe('networkService', () => {
 
   describe('getDNS', () => {
     it('should parse DNS configuration', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetDNSResponse>
-                <DNSInformation>
-                  <FromDHCP>false</FromDHCP>
-                  <DNSManual>
-                    <IPv4Address>8.8.8.8</IPv4Address>
-                  </DNSManual>
-                </DNSInformation>
-              </GetDNSResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetDNSResponse>
+          <DNSInformation>
+            <FromDHCP>false</FromDHCP>
+            <DNSManual>
+              <IPv4Address>8.8.8.8</IPv4Address>
+            </DNSManual>
+          </DNSInformation>
+        </GetDNSResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -115,14 +99,7 @@ describe('networkService', () => {
 
   describe('setNetworkInterface', () => {
     it('should send DHCP configuration', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetNetworkInterfacesResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetNetworkInterfacesResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -135,14 +112,7 @@ describe('networkService', () => {
     });
 
     it('should send static IP configuration', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetNetworkInterfacesResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetNetworkInterfacesResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -155,17 +125,7 @@ describe('networkService', () => {
     });
 
     it('should throw on failure', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -175,14 +135,7 @@ describe('networkService', () => {
 
   describe('setDNS', () => {
     it('should send DNS from DHCP configuration', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetDNSResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetDNSResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -195,14 +148,7 @@ describe('networkService', () => {
     });
 
     it('should send manual DNS servers', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetDNSResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetDNSResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -219,17 +165,7 @@ describe('networkService', () => {
     });
 
     it('should throw on failure', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>DNS Failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'DNS Failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
     });

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiClient } from '@/services/api';
 import { createUser, deleteUser, getUsers, setUser } from '@/services/userService';
+import { createMockSOAPResponse } from '@/test/utils';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -23,23 +24,18 @@ describe('userService', () => {
 
   describe('getUsers', () => {
     it('should parse user list', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetUsersResponse>
-                <User>
-                  <Username>admin</Username>
-                  <UserLevel>Administrator</UserLevel>
-                </User>
-                <User>
-                  <Username>operator</Username>
-                  <UserLevel>Operator</UserLevel>
-                </User>
-              </GetUsersResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetUsersResponse>
+          <User>
+            <Username>admin</Username>
+            <UserLevel>Administrator</UserLevel>
+          </User>
+          <User>
+            <Username>operator</Username>
+            <UserLevel>Operator</UserLevel>
+          </User>
+        </GetUsersResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -53,14 +49,7 @@ describe('userService', () => {
     });
 
     it('should return empty array when no users', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetUsersResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<GetUsersResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -72,14 +61,7 @@ describe('userService', () => {
 
   describe('createUser', () => {
     it('should send create user request', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <CreateUsersResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<CreateUsersResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -98,14 +80,7 @@ describe('userService', () => {
 
   describe('deleteUser', () => {
     it('should send delete user request', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <DeleteUsersResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<DeleteUsersResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -120,14 +95,7 @@ describe('userService', () => {
 
   describe('setUser', () => {
     it('should send update user request', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetUserResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetUserResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 

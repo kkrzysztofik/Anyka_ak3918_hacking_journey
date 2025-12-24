@@ -78,12 +78,114 @@ exclude:
 # Ignore specific vulnerabilities in our maintained code if needed
 # (Add specific vulnerability IDs here as they are discovered)
 ignore:
-  # Example format for ignoring specific vulnerabilities:
-  # SNYK-CC-K8S-1:
-  #   - 'path/to/file.c':
-  #       reason: 'Vulnerability not applicable to our use case'
-  #       expires: '2025-12-31T23:59:59.999Z'
-  #       created: '2025-01-27T10:00:00.000Z'
+  # Snyk Code false positives - ONVIF protocol requirements and test data
+  # SHA1/MD5 usage is required for ONVIF WS-Security and HTTP Digest Auth compatibility
+  # Hardcoded credentials are test data in unit tests, not production code
+
+  # SHA1 Hash Issues (ONVIF WS-Security requirement)
+  "960ddd30-16a6-48ac-a2f6-81cba65970ca":
+    - "cross-compile/onvif-rust/src/onvif/ws_security.rs:345":
+        reason: "SHA1 required for ONVIF WS-Security protocol compatibility"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "3e6d6766-3d63-4f87-8545-610044338f73":
+    - "cross-compile/onvif-rust/src/auth/ws_security.rs:326":
+        reason: "SHA1 required for ONVIF WS-Security protocol compatibility"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "e80e97b1-a0ed-4d5d-9903-656373297093":
+    - "cross-compile/onvif-rust/src/onvif/ws_security.rs:205":
+        reason: "SHA1 required for ONVIF WS-Security protocol compatibility"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "f928c0eb-819e-491d-9032-e4fb5c993c92":
+    - "cross-compile/onvif-rust/src/auth/ws_security.rs:215":
+        reason: "SHA1 required for ONVIF WS-Security protocol compatibility"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  # MD5 Hash Issue (ONVIF HTTP Digest Auth requirement)
+  "0bc0fb9f-0735-4a22-9816-e1782128e327":
+    - "cross-compile/onvif-rust/src/auth/http_digest.rs:432":
+        reason: "MD5 required for ONVIF HTTP Digest Authentication protocol compatibility"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  # Hardcoded Credentials - Test Data (not production code)
+  "eaa0760e-648a-4239-919e-284dba1412c1":
+    - "cross-compile/onvif-rust/src/auth/http_digest.rs:652":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "fa3e1b21-f629-48c6-a766-771a1474ce7e":
+    - "cross-compile/onvif-rust/src/onvif/ws_security.rs:458":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "28805f3f-eb06-4164-81af-068bdcbf3518":
+    - "cross-compile/onvif-rust/src/auth/http_digest.rs:768":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "3d9ce68b-707e-4ba4-91b4-ed834838992d":
+    - "cross-compile/onvif-rust/src/auth/http_digest.rs:683":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "12bd7663-441a-4543-a7c3-19617d3b82d0":
+    - "cross-compile/onvif-rust/src/auth/ws_security.rs:362":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "a3380659-1fde-4402-9661-9762232d7c49":
+    - "cross-compile/onvif-rust/src/users/password.rs:220":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "dadb5033-c7c6-48c5-936e-aa8f0de115d5":
+    - "cross-compile/onvif-rust/src/users/password.rs:212":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "768eb3d0-6da1-4da0-8753-479aa87a0910":
+    - "cross-compile/onvif-rust/src/auth/ws_security.rs:343":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "d00d099f-2a55-45d7-8862-22fe4ab79d70":
+    - "cross-compile/onvif-rust/src/onvif/ws_security.rs:565":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "97396046-8bf0-4096-b9b1-c2322240793d":
+    - "cross-compile/onvif-rust/src/onvif/ws_security.rs:374":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "c78ee844-cde9-4b29-8b79-2e415e9f66c1":
+    - "cross-compile/onvif-rust/src/auth/ws_security.rs:388":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
+
+  "87f3573c-3431-49a2-84c2-54c8fac858a4":
+    - "cross-compile/onvif-rust/src/auth/ws_security.rs:375":
+        reason: "Test data in unit test, not production code"
+        expires: "2099-12-31T23:59:59.999Z"
+        created: "2025-01-27T10:00:00.000Z"
 
 # Patch specific vulnerabilities if needed
 # (Add patches here as they are identified)

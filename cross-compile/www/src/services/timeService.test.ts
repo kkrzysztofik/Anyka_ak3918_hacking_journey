@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiClient } from '@/services/api';
 import { getSystemDateAndTime, setSystemDateAndTime } from '@/services/timeService';
+import { createMockSOAPResponse } from '@/test/utils';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -23,34 +24,29 @@ describe('timeService', () => {
 
   describe('getSystemDateAndTime', () => {
     it('should parse NTP configuration', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetSystemDateAndTimeResponse>
-                <SystemDateAndTime>
-                  <DateTimeType>NTP</DateTimeType>
-                  <DaylightSavings>false</DaylightSavings>
-                  <TimeZone>
-                    <TZ>UTC+0</TZ>
-                  </TimeZone>
-                  <UTCDateTime>
-                    <Time>
-                      <Hour>12</Hour>
-                      <Minute>30</Minute>
-                      <Second>45</Second>
-                    </Time>
-                    <Date>
-                      <Year>2024</Year>
-                      <Month>6</Month>
-                      <Day>15</Day>
-                    </Date>
-                  </UTCDateTime>
-                </SystemDateAndTime>
-              </GetSystemDateAndTimeResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetSystemDateAndTimeResponse>
+          <SystemDateAndTime>
+            <DateTimeType>NTP</DateTimeType>
+            <DaylightSavings>false</DaylightSavings>
+            <TimeZone>
+              <TZ>UTC+0</TZ>
+            </TimeZone>
+            <UTCDateTime>
+              <Time>
+                <Hour>12</Hour>
+                <Minute>30</Minute>
+                <Second>45</Second>
+              </Time>
+              <Date>
+                <Year>2024</Year>
+                <Month>6</Month>
+                <Day>15</Day>
+              </Date>
+            </UTCDateTime>
+          </SystemDateAndTime>
+        </GetSystemDateAndTimeResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -63,24 +59,19 @@ describe('timeService', () => {
     });
 
     it('should parse Manual configuration', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetSystemDateAndTimeResponse>
-                <SystemDateAndTime>
-                  <DateTimeType>Manual</DateTimeType>
-                  <DaylightSavings>true</DaylightSavings>
-                  <TimeZone><TZ>PST+8</TZ></TimeZone>
-                  <UTCDateTime>
-                    <Time><Hour>8</Hour><Minute>0</Minute><Second>0</Second></Time>
-                    <Date><Year>2024</Year><Month>1</Month><Day>1</Day></Date>
-                  </UTCDateTime>
-                </SystemDateAndTime>
-              </GetSystemDateAndTimeResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetSystemDateAndTimeResponse>
+          <SystemDateAndTime>
+            <DateTimeType>Manual</DateTimeType>
+            <DaylightSavings>true</DaylightSavings>
+            <TimeZone><TZ>PST+8</TZ></TimeZone>
+            <UTCDateTime>
+              <Time><Hour>8</Hour><Minute>0</Minute><Second>0</Second></Time>
+              <Date><Year>2024</Year><Month>1</Month><Day>1</Day></Date>
+            </UTCDateTime>
+          </SystemDateAndTime>
+        </GetSystemDateAndTimeResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -93,14 +84,7 @@ describe('timeService', () => {
 
   describe('setSystemDateAndTime', () => {
     it('should send NTP configuration', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetSystemDateAndTimeResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetSystemDateAndTimeResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -113,14 +97,7 @@ describe('timeService', () => {
     });
 
     it('should send Manual configuration with date', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetSystemDateAndTimeResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetSystemDateAndTimeResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 

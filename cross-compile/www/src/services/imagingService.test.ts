@@ -9,6 +9,7 @@ import {
   getImagingSettings,
   setImagingSettings,
 } from '@/services/imagingService';
+import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -27,21 +28,16 @@ describe('imagingService', () => {
 
   describe('getImagingSettings', () => {
     it('should parse basic imaging settings correctly', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetImagingSettingsResponse>
-                <ImagingSettings>
-                  <Brightness>75</Brightness>
-                  <Contrast>60</Contrast>
-                  <ColorSaturation>55</ColorSaturation>
-                  <Sharpness>70</Sharpness>
-                </ImagingSettings>
-              </GetImagingSettingsResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetImagingSettingsResponse>
+          <ImagingSettings>
+            <Brightness>75</Brightness>
+            <Contrast>60</Contrast>
+            <ColorSaturation>55</ColorSaturation>
+            <Sharpness>70</Sharpness>
+          </ImagingSettings>
+        </GetImagingSettingsResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -54,22 +50,17 @@ describe('imagingService', () => {
     });
 
     it('should parse IR cut filter mode', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetImagingSettingsResponse>
-                <ImagingSettings>
-                  <Brightness>50</Brightness>
-                  <Contrast>50</Contrast>
-                  <ColorSaturation>50</ColorSaturation>
-                  <Sharpness>50</Sharpness>
-                  <IrCutFilter>AUTO</IrCutFilter>
-                </ImagingSettings>
-              </GetImagingSettingsResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetImagingSettingsResponse>
+          <ImagingSettings>
+            <Brightness>50</Brightness>
+            <Contrast>50</Contrast>
+            <ColorSaturation>50</ColorSaturation>
+            <Sharpness>50</Sharpness>
+            <IrCutFilter>AUTO</IrCutFilter>
+          </ImagingSettings>
+        </GetImagingSettingsResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -79,25 +70,20 @@ describe('imagingService', () => {
     });
 
     it('should parse wide dynamic range settings', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetImagingSettingsResponse>
-                <ImagingSettings>
-                  <Brightness>50</Brightness>
-                  <Contrast>50</Contrast>
-                  <ColorSaturation>50</ColorSaturation>
-                  <Sharpness>50</Sharpness>
-                  <WideDynamicRange>
-                    <Mode>ON</Mode>
-                    <Level>75</Level>
-                  </WideDynamicRange>
-                </ImagingSettings>
-              </GetImagingSettingsResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetImagingSettingsResponse>
+          <ImagingSettings>
+            <Brightness>50</Brightness>
+            <Contrast>50</Contrast>
+            <ColorSaturation>50</ColorSaturation>
+            <Sharpness>50</Sharpness>
+            <WideDynamicRange>
+              <Mode>ON</Mode>
+              <Level>75</Level>
+            </WideDynamicRange>
+          </ImagingSettings>
+        </GetImagingSettingsResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -110,25 +96,20 @@ describe('imagingService', () => {
     });
 
     it('should parse backlight compensation settings', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetImagingSettingsResponse>
-                <ImagingSettings>
-                  <Brightness>50</Brightness>
-                  <Contrast>50</Contrast>
-                  <ColorSaturation>50</ColorSaturation>
-                  <Sharpness>50</Sharpness>
-                  <BacklightCompensation>
-                    <Mode>ON</Mode>
-                    <Level>80</Level>
-                  </BacklightCompensation>
-                </ImagingSettings>
-              </GetImagingSettingsResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetImagingSettingsResponse>
+          <ImagingSettings>
+            <Brightness>50</Brightness>
+            <Contrast>50</Contrast>
+            <ColorSaturation>50</ColorSaturation>
+            <Sharpness>50</Sharpness>
+            <BacklightCompensation>
+              <Mode>ON</Mode>
+              <Level>80</Level>
+            </BacklightCompensation>
+          </ImagingSettings>
+        </GetImagingSettingsResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -141,16 +122,11 @@ describe('imagingService', () => {
     });
 
     it('should use default values when settings are missing', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetImagingSettingsResponse>
-                <ImagingSettings />
-              </GetImagingSettingsResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetImagingSettingsResponse>
+          <ImagingSettings />
+        </GetImagingSettingsResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -163,17 +139,7 @@ describe('imagingService', () => {
     });
 
     it('should throw on SOAP fault', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Operation failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Operation failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -181,14 +147,7 @@ describe('imagingService', () => {
     });
 
     it('should throw on missing ImagingSettings', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetImagingSettingsResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<GetImagingSettingsResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -198,14 +157,7 @@ describe('imagingService', () => {
 
   describe('setImagingSettings', () => {
     it('should set basic imaging settings', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetImagingSettingsResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetImagingSettingsResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -224,14 +176,7 @@ describe('imagingService', () => {
     });
 
     it('should set IR cut filter', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetImagingSettingsResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetImagingSettingsResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -249,14 +194,7 @@ describe('imagingService', () => {
     });
 
     it('should set wide dynamic range', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetImagingSettingsResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetImagingSettingsResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -278,14 +216,7 @@ describe('imagingService', () => {
     });
 
     it('should set backlight compensation', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <SetImagingSettingsResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<SetImagingSettingsResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -307,17 +238,7 @@ describe('imagingService', () => {
     });
 
     it('should throw on SOAP fault', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Set failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Set failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -334,52 +255,47 @@ describe('imagingService', () => {
 
   describe('getImagingOptions', () => {
     it('should parse imaging options correctly', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetOptionsResponse>
-                <ImagingOptions>
-                  <Brightness>
-                    <Min>0</Min>
-                    <Max>100</Max>
-                  </Brightness>
-                  <Contrast>
-                    <Min>0</Min>
-                    <Max>100</Max>
-                  </Contrast>
-                  <ColorSaturation>
-                    <Min>0</Min>
-                    <Max>100</Max>
-                  </ColorSaturation>
-                  <Sharpness>
-                    <Min>0</Min>
-                    <Max>100</Max>
-                  </Sharpness>
-                  <IrCutFilterModes>ON</IrCutFilterModes>
-                  <IrCutFilterModes>OFF</IrCutFilterModes>
-                  <IrCutFilterModes>AUTO</IrCutFilterModes>
-                  <WideDynamicRange>
-                    <Mode>ON</Mode>
-                    <Mode>OFF</Mode>
-                    <Level>
-                      <Min>0</Min>
-                      <Max>100</Max>
-                    </Level>
-                  </WideDynamicRange>
-                  <BacklightCompensation>
-                    <Mode>ON</Mode>
-                    <Mode>OFF</Mode>
-                    <Level>
-                      <Min>0</Min>
-                      <Max>100</Max>
-                    </Level>
-                  </BacklightCompensation>
-                </ImagingOptions>
-              </GetOptionsResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetOptionsResponse>
+          <ImagingOptions>
+            <Brightness>
+              <Min>0</Min>
+              <Max>100</Max>
+            </Brightness>
+            <Contrast>
+              <Min>0</Min>
+              <Max>100</Max>
+            </Contrast>
+            <ColorSaturation>
+              <Min>0</Min>
+              <Max>100</Max>
+            </ColorSaturation>
+            <Sharpness>
+              <Min>0</Min>
+              <Max>100</Max>
+            </Sharpness>
+            <IrCutFilterModes>ON</IrCutFilterModes>
+            <IrCutFilterModes>OFF</IrCutFilterModes>
+            <IrCutFilterModes>AUTO</IrCutFilterModes>
+            <WideDynamicRange>
+              <Mode>ON</Mode>
+              <Mode>OFF</Mode>
+              <Level>
+                <Min>0</Min>
+                <Max>100</Max>
+              </Level>
+            </WideDynamicRange>
+            <BacklightCompensation>
+              <Mode>ON</Mode>
+              <Mode>OFF</Mode>
+              <Level>
+                <Min>0</Min>
+                <Max>100</Max>
+              </Level>
+            </BacklightCompensation>
+          </ImagingOptions>
+        </GetOptionsResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -397,21 +313,16 @@ describe('imagingService', () => {
     });
 
     it('should handle missing optional fields', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetOptionsResponse>
-                <ImagingOptions>
-                  <Brightness>
-                    <Min>0</Min>
-                    <Max>100</Max>
-                  </Brightness>
-                </ImagingOptions>
-              </GetOptionsResponse>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse(`
+        <GetOptionsResponse>
+          <ImagingOptions>
+            <Brightness>
+              <Min>0</Min>
+              <Max>100</Max>
+            </Brightness>
+          </ImagingOptions>
+        </GetOptionsResponse>
+      `);
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -423,17 +334,7 @@ describe('imagingService', () => {
     });
 
     it('should throw on SOAP fault', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <soap:Fault>
-                <soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code>
-                <soap:Reason><soap:Text>Get options failed</soap:Text></soap:Reason>
-              </soap:Fault>
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Get options failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
@@ -441,14 +342,7 @@ describe('imagingService', () => {
     });
 
     it('should throw on missing ImagingOptions', async () => {
-      const mockResponse = {
-        data: `<?xml version="1.0" encoding="UTF-8"?>
-          <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
-            <soap:Body>
-              <GetOptionsResponse />
-            </soap:Body>
-          </soap:Envelope>`,
-      };
+      const mockResponse = createMockSOAPResponse('<GetOptionsResponse />');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
