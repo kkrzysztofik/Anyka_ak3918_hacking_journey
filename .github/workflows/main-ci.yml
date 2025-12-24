@@ -83,6 +83,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin
             cross-compile/onvif-rust/target
           key: cargo-${{ runner.os }}-rust-onvif-${{ hashFiles('cross-compile/onvif-rust/Cargo.lock') }}
           restore-keys: |
@@ -91,7 +92,17 @@ jobs:
       - name: Run Tests with Coverage
         working-directory: cross-compile/onvif-rust
         run: |
-          cargo tarpaulin --target x86_64-unknown-linux-gnu --all-features --out Html --out Lcov --out Xml --output-dir coverage
+          cargo tarpaulin \
+            --target x86_64-unknown-linux-gnu \
+            --all-features \
+            --skip-clean \
+            --follow-exec \
+            --timeout 300 \
+            --test-threads $(nproc) \
+            --out Html \
+            --out Lcov \
+            --out Xml \
+            --output-dir coverage
           echo ""
           echo "=== Coverage Files Generated ==="
           echo "Files in coverage directory:"
@@ -378,6 +389,22 @@ jobs:
             cp coverage-artifacts/webui-coverage/lcov.info cross-compile/www/coverage/
             cp coverage-artifacts/webui-coverage/coverage-summary.json cross-compile/www/coverage/ 2>/dev/null || true
             echo "✅ WebUI coverage copied"
+
+            # Fix LCOV file paths to be relative to project root for SonarQube
+            # Vitest generates paths like "SF:src/App.tsx" (relative to cross-compile/www)
+            # but SonarQube expects "SF:cross-compile/www/src/App.tsx" (relative to project root)
+            echo "🔧 Transforming LCOV paths to be relative to project root..."
+            if [ -f "cross-compile/www/coverage/lcov.info" ]; then
+              # Create backup
+              cp cross-compile/www/coverage/lcov.info cross-compile/www/coverage/lcov.info.bak
+              # Transform all SF: paths to include the cross-compile/www/ prefix
+              # This handles paths like "SF:src/..." -> "SF:cross-compile/www/src/..."
+              sed -i 's|^SF:\(.*\)|SF:cross-compile/www/\1|g' cross-compile/www/coverage/lcov.info
+              echo "✅ LCOV paths transformed to project root relative paths"
+              echo "   Sample transformed paths (first 5):"
+              grep '^SF:' cross-compile/www/coverage/lcov.info | head -5 || echo "   No SF entries found"
+              echo "   Total source files in LCOV: $(grep -c '^SF:' cross-compile/www/coverage/lcov.info || echo '0')"
+            fi
           fi
 
           # Verify coverage files exist
@@ -490,6 +517,8 @@ jobs:
             echo "✅ Rust coverage file exists: $RUST_COV_PATH"
             echo "   Size: $(stat -f%z "$RUST_COV_PATH" 2>/dev/null || stat -c%s "$RUST_COV_PATH" 2>/dev/null) bytes"
             echo "   Contains coverage data: $(grep -q 'line-rate' "$RUST_COV_PATH" && echo 'Yes' || echo 'No')"
+            echo "   Sample of file paths in XML (first 5):"
+            grep -o 'filename="[^"]*"' "$RUST_COV_PATH" | head -5 || echo "   No filename attributes found"
           else
             echo "❌ Rust coverage file MISSING: $RUST_COV_PATH"
             echo "   Searching for any XML files in coverage directory:"
@@ -503,6 +532,8 @@ jobs:
             echo "✅ WebUI coverage file exists: $WEBUI_COV_PATH"
             echo "   Size: $(stat -f%z "$WEBUI_COV_PATH" 2>/dev/null || stat -c%s "$WEBUI_COV_PATH" 2>/dev/null) bytes"
             echo "   Contains coverage data: $(grep -q '^SF:' "$WEBUI_COV_PATH" && echo 'Yes' || echo 'No')"
+            echo "   Sample of file paths in LCOV (first 5):"
+            grep '^SF:' "$WEBUI_COV_PATH" | head -5 || echo "   No SF entries found"
           else
             echo "❌ WebUI coverage file MISSING: $WEBUI_COV_PATH"
             echo "   Searching for any LCOV files in coverage directory:"
@@ -513,7 +544,7 @@ jobs:
           # Show sonar-project.properties coverage paths
           echo "=== SonarQube Coverage Configuration ==="
           echo "Rust coverage path from config:"
-          grep "sonar.coverage.jacoco.xmlReportPaths" sonar-project.properties || echo "  (not found)"
+          grep "sonar.rust.cobertura.reportPaths\|sonar.coverage.jacoco.xmlReportPaths" sonar-project.properties || echo "  (not found)"
           echo "WebUI coverage path from config:"
           grep "sonar.javascript.lcov.reportPaths" sonar-project.properties || echo "  (not found)"
           echo ""
