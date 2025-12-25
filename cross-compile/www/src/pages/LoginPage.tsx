@@ -92,10 +92,16 @@ export default function LoginPage() {
           <div className="bg-accent-red shadow-accent-red/20 mb-3 flex size-[56px] items-center justify-center rounded-[16px] shadow-lg md:mb-4 md:size-[64px]">
             <Camera className="size-[28px] text-white md:size-[32px]" />
           </div>
-          <h1 className="mb-1.5 text-center text-[20px] font-semibold text-white md:mb-2 md:text-[24px]">
+          <h1
+            className="mb-1.5 text-center text-[20px] font-semibold text-white md:mb-2 md:text-[24px]"
+            data-testid="login-page-title"
+          >
             ONVIF Device Manager
           </h1>
-          <p className="text-dark-secondary-text text-center text-[13px] md:text-[14px]">
+          <p
+            className="text-dark-secondary-text text-center text-[13px] md:text-[14px]"
+            data-testid="login-page-subtitle"
+          >
             API Management, Live Preview & Telemetry
           </p>
         </div>
@@ -117,10 +123,14 @@ export default function LoginPage() {
                       autoComplete="username"
                       disabled={isLoading}
                       className="border-dark-border placeholder:text-dark-border focus-visible:ring-accent-red focus-visible:border-accent-red h-11 bg-transparent text-[15px] text-white transition-colors md:text-[16px]"
+                      data-testid="login-form-username-input"
                       {...field}
                     />
                   </FormControl>
-                  <FormMessage className="text-accent-red mt-1 text-xs" />
+                  <FormMessage
+                    className="text-accent-red mt-1 text-xs"
+                    data-testid="login-username-error"
+                  />
                 </FormItem>
               )}
             />
@@ -140,6 +150,7 @@ export default function LoginPage() {
                         autoComplete="current-password"
                         disabled={isLoading}
                         className="border-dark-border placeholder:text-dark-border focus-visible:ring-accent-red focus-visible:border-accent-red h-11 bg-transparent pr-12 text-[15px] text-white transition-colors md:text-[16px]"
+                        data-testid="login-form-password-input"
                         {...field}
                       />
                       <button
@@ -147,12 +158,16 @@ export default function LoginPage() {
                         onClick={() => setShowPassword(!showPassword)}
                         className="text-dark-secondary-text absolute top-1/2 right-3 -translate-y-1/2 transition-colors hover:text-white"
                         disabled={isLoading}
+                        data-testid="login-form-password-toggle-button"
                       >
                         {showPassword ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
                       </button>
                     </div>
                   </FormControl>
-                  <FormMessage className="text-accent-red mt-1 text-xs" />
+                  <FormMessage
+                    className="text-accent-red mt-1 text-xs"
+                    data-testid="login-password-error"
+                  />
                 </FormItem>
               )}
             />
@@ -161,11 +176,12 @@ export default function LoginPage() {
               type="submit"
               className="bg-accent-red hover:bg-accent-red/90 mt-2 h-11 w-full text-[15px] font-semibold text-white transition-colors md:text-[16px]"
               disabled={isLoading}
+              data-testid="login-form-submit-button"
             >
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Signing in...
+                  <span data-testid="login-loading-text">Signing in...</span>
                 </>
               ) : (
                 'Sign In'
@@ -176,7 +192,10 @@ export default function LoginPage() {
 
         {/* Footer */}
         <div className="mt-8 text-center md:mt-10">
-          <p className="text-dark-secondary-text text-[11px] md:text-[12px]">
+          <p
+            className="text-dark-secondary-text text-[11px] md:text-[12px]"
+            data-testid="login-page-copyright"
+          >
             © 2025 Krzysztof Krzysztofik. All rights reserved.
           </p>
         </div>

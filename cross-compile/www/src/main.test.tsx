@@ -3,25 +3,37 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-describe('main.tsx', () => {
-  const mockCreateRoot = vi.fn();
-  const mockRender = vi.fn();
+// Mock react-dom/client before any imports
+const mockRender = vi.fn();
+const mockCreateRoot = vi.fn(() => ({ render: mockRender }));
 
+vi.mock('react-dom/client', () => ({
+  createRoot: mockCreateRoot,
+}));
+
+// Mock App component
+vi.mock('./App', () => ({
+  default: () => <div data-testid="app">App Component</div>,
+}));
+
+// Mock React.createElement
+const mockCreateElement = vi.fn((type, props, ...children) => {
+  if (typeof type === 'function') {
+    return type(props);
+  }
+  return { type, props, children };
+});
+
+vi.mock('react', () => ({
+  default: {
+    createElement: mockCreateElement,
+  },
+}));
+
+describe('main.tsx', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Setup DOM
-    document.body.innerHTML = '<div id="root"></div>';
-    mockCreateRoot.mockReturnValue({ render: mockRender });
-
-    // Mock React DOM
-    vi.doMock('react-dom/client', () => ({
-      createRoot: mockCreateRoot,
-    }));
-
-    // Mock App component
-    vi.doMock('./App', () => ({
-      default: () => <div>App Component</div>,
-    }));
+    document.body.innerHTML = '';
   });
 
   afterEach(() => {
@@ -33,34 +45,42 @@ describe('main.tsx', () => {
     // Setup DOM with root container
     document.body.innerHTML = '<div id="root"></div>';
 
-    // Mock createRoot to return render function
-    const mockRoot = { render: mockRender };
-    mockCreateRoot.mockReturnValue(mockRoot);
+    // Reset modules to ensure fresh import
+    vi.resetModules();
 
-    // Test the logic directly (since main.tsx executes on import)
+    // Dynamically import main.tsx to execute it
+    await import('./main');
+
+    // Wait a tick for async operations
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Verify createRoot was called with the container
     const container = document.getElementById('root');
-    if (container) {
-      const root = mockCreateRoot(container);
-      root.render(vi.fn());
-    }
-
     expect(mockCreateRoot).toHaveBeenCalledWith(container);
     expect(mockRender).toHaveBeenCalled();
+    expect(mockCreateElement).toHaveBeenCalled();
   });
 
-  it('should handle missing root container gracefully', () => {
-    // Remove root container
+  it('should handle missing root container gracefully', async () => {
+    // Ensure no root container exists
     document.body.innerHTML = '';
 
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    // Test the logic directly
-    const container = document.getElementById('root');
-    if (!container) {
-      console.error('Root container not found');
-    }
+    // Reset modules to ensure fresh import
+    vi.resetModules();
 
+    // Dynamically import main.tsx to execute it
+    await import('./main');
+
+    // Wait a tick for async operations
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Verify error was logged
     expect(consoleSpy).toHaveBeenCalledWith('Root container not found');
+    // Verify createRoot was not called
+    expect(mockCreateRoot).not.toHaveBeenCalled();
+
     consoleSpy.mockRestore();
   });
 });

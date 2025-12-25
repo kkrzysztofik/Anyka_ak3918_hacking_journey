@@ -69,6 +69,7 @@ export default function LiveViewPage() {
                         ? 'bg-accent-red text-white'
                         : 'text-zinc-400 hover:text-white',
                     )}
+                    data-testid="liveview-main-stream-button"
                   >
                     Main Stream
                   </button>
@@ -80,6 +81,7 @@ export default function LiveViewPage() {
                         ? 'bg-accent-red text-white'
                         : 'text-zinc-400 hover:text-white',
                     )}
+                    data-testid="liveview-sub-stream-button"
                   >
                     Sub Stream
                   </button>
@@ -113,6 +115,7 @@ export default function LiveViewPage() {
               variant="outline"
               size="sm"
               className="border-border bg-muted text-foreground hover:bg-muted/80"
+              data-testid="liveview-copy-url-button"
             >
               <Copy className="mr-2 h-3.5 w-3.5" />
               Copy
@@ -204,6 +207,7 @@ export default function LiveViewPage() {
                     <button
                       onMouseDown={() => handlePtz('up-left')}
                       className="hover:bg-accent-red group flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                      data-testid="liveview-ptz-up-left-button"
                     >
                       <div className="-rotate-45">
                         <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
@@ -212,12 +216,14 @@ export default function LiveViewPage() {
                     <button
                       onMouseDown={() => handlePtz('up')}
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                      data-testid="liveview-ptz-up-button"
                     >
                       <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
                       onMouseDown={() => handlePtz('up-right')}
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                      data-testid="liveview-ptz-up-right-button"
                     >
                       <div className="rotate-45">
                         <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
@@ -230,18 +236,21 @@ export default function LiveViewPage() {
                     <button
                       onMouseDown={() => handlePtz('left')}
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                      data-testid="liveview-ptz-left-button"
                     >
                       <ArrowLeft className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
                       onClick={() => handlePtz('home')}
                       className="bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg shadow-lg shadow-red-900/20 transition-colors hover:bg-red-700 md:h-12 md:w-12"
+                      data-testid="liveview-ptz-home-button"
                     >
                       <Home className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
                       onMouseDown={() => handlePtz('right')}
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                      data-testid="liveview-ptz-right-button"
                     >
                       <ArrowRight className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
@@ -252,6 +261,7 @@ export default function LiveViewPage() {
                     <button
                       onMouseDown={() => handlePtz('down-left')}
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                      data-testid="liveview-ptz-down-left-button"
                     >
                       <div className="-rotate-[135deg]">
                         <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
@@ -260,12 +270,14 @@ export default function LiveViewPage() {
                     <button
                       onMouseDown={() => handlePtz('down')}
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                      data-testid="liveview-ptz-down-button"
                     >
                       <ArrowDown className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
                       onMouseDown={() => handlePtz('down-right')}
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
+                      data-testid="liveview-ptz-down-right-button"
                     >
                       <div className="rotate-[135deg]">
                         <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
@@ -287,6 +299,7 @@ export default function LiveViewPage() {
                     value={ptzSpeed}
                     onChange={(e) => setPtzSpeed(Number(e.target.value))}
                     className="accent-accent-red h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-zinc-800"
+                    data-testid="liveview-ptz-speed-slider"
                   />
                 </div>
               </div>
@@ -313,6 +326,7 @@ export default function LiveViewPage() {
                     <Button
                       variant="outline"
                       className="border-border bg-muted text-foreground hover:border-ring hover:bg-muted/80 flex-1 justify-between"
+                      data-testid={`liveview-preset-${i}-button`}
                     >
                       <span className="text-xs">Preset {i}</span>
                       <span className="bg-background text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
@@ -323,6 +337,7 @@ export default function LiveViewPage() {
                       variant="ghost"
                       size="icon"
                       className="text-muted-foreground hover:bg-muted hover:text-accent-red h-8 w-8"
+                      data-testid={`liveview-preset-${i}-settings-button`}
                     >
                       <Settings2 className="h-3.5 w-3.5" />
                     </Button>
@@ -331,6 +346,7 @@ export default function LiveViewPage() {
                 <Button
                   variant="outline"
                   className="border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground mt-2 w-full border-dashed"
+                  data-testid="liveview-add-preset-button"
                 >
                   + Add Preset
                 </Button>

@@ -49,7 +49,7 @@ interface ChangePasswordDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialogProps) {
+export function ChangePasswordDialog({ open, onOpenChange }: Readonly<ChangePasswordDialogProps>) {
   const { username, login } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
@@ -123,8 +123,13 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
               <KeyRound className="text-accent-red size-6" />
             </div>
             <div>
-              <DialogTitle className="text-xl">Change Password</DialogTitle>
-              <DialogDescription className="text-dark-secondary-text">
+              <DialogTitle className="text-xl" data-testid="change-password-dialog-title">
+                Change Password
+              </DialogTitle>
+              <DialogDescription
+                className="text-dark-secondary-text"
+                data-testid="change-password-dialog-description"
+              >
                 Update your account password for {username}
               </DialogDescription>
             </div>
@@ -147,11 +152,13 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
                         disabled={isLoading}
                         className="bg-dark-bg border-dark-border focus-visible:ring-accent-red pr-10"
                         {...field}
+                        data-testid="change-password-dialog-current-password-input"
                       />
                       <button
                         type="button"
                         onClick={() => setShowCurrentPassword(!showCurrentPassword)}
                         className="text-dark-secondary-text absolute top-1/2 right-3 -translate-y-1/2 transition-colors hover:text-white"
+                        data-testid="change-password-dialog-current-toggle"
                       >
                         {showCurrentPassword ? (
                           <EyeOff className="size-4" />
@@ -180,11 +187,13 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
                         disabled={isLoading}
                         className="bg-dark-bg border-dark-border focus-visible:ring-accent-red pr-10"
                         {...field}
+                        data-testid="change-password-dialog-new-password-input"
                       />
                       <button
                         type="button"
                         onClick={() => setShowNewPassword(!showNewPassword)}
                         className="text-dark-secondary-text absolute top-1/2 right-3 -translate-y-1/2 transition-colors hover:text-white"
+                        data-testid="change-password-dialog-new-toggle"
                       >
                         {showNewPassword ? (
                           <EyeOff className="size-4" />
@@ -212,6 +221,7 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
                       disabled={isLoading}
                       className="bg-dark-bg border-dark-border focus-visible:ring-accent-red"
                       {...field}
+                      data-testid="change-password-dialog-confirm-password-input"
                     />
                   </FormControl>
                   <FormMessage className="text-accent-red text-xs" />
@@ -226,6 +236,7 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
                 onClick={() => onOpenChange(false)}
                 disabled={isLoading}
                 className="text-dark-secondary-text hover:bg-dark-hover hover:text-white"
+                data-testid="change-password-dialog-cancel-button"
               >
                 Cancel
               </Button>
@@ -233,6 +244,7 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
                 type="submit"
                 disabled={isLoading}
                 className="bg-accent-red hover:bg-accent-red/90 min-w-[140px] text-white"
+                data-testid="change-password-dialog-submit-button"
               >
                 {isLoading ? (
                   <>

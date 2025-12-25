@@ -167,6 +167,7 @@ export default function ProfilesPage() {
           <Button
             onClick={() => setShowCreateDialog(true)}
             className="rounded-[8px] bg-[#0a84ff] text-white hover:bg-[#0077ed]"
+            data-testid="profiles-create-profile-button"
           >
             <Plus className="mr-2 size-4" />
             Create Profile
@@ -190,6 +191,7 @@ export default function ProfilesPage() {
                         variant="ghost"
                         size="sm"
                         className="p-0 text-[#a1a1a6] hover:bg-transparent hover:text-white"
+                        data-testid={`profile-expand-${profile.token}`}
                       >
                         {openProfiles[profile.token] ? (
                           <ChevronUp className="size-5" />
@@ -231,6 +233,7 @@ export default function ProfilesPage() {
                         size="icon"
                         onClick={() => setProfileToDelete(profile)}
                         className="text-[#a1a1a6] hover:bg-[rgba(220,38,38,0.1)] hover:text-[#dc2626]"
+                        data-testid={`delete-profile-button-${profile.token}`}
                       >
                         <Trash2 className="size-4" />
                       </Button>
@@ -272,6 +275,7 @@ export default function ProfilesPage() {
                                 })
                             : undefined
                         }
+                        testId={`video-encoder-config-${profile.token}`}
                       />
 
                       {/* Audio Source Config */}
@@ -346,6 +350,7 @@ export default function ProfilesPage() {
                           placeholder="My Profile"
                           {...field}
                           className="border-[#3a3a3c] bg-transparent text-white focus:border-[#0a84ff]"
+                          data-testid="create-profile-dialog-name-input"
                         />
                       </FormControl>
                       <FormMessage />
@@ -358,10 +363,15 @@ export default function ProfilesPage() {
                     variant="outline"
                     onClick={() => setShowCreateDialog(false)}
                     className="border-[#3a3a3c] text-white hover:bg-[#2c2c2e]"
+                    data-testid="create-profile-dialog-cancel-button"
                   >
                     Cancel
                   </Button>
-                  <Button type="submit" className="bg-[#0a84ff] text-white hover:bg-[#0077ed]">
+                  <Button
+                    type="submit"
+                    className="bg-[#0a84ff] text-white hover:bg-[#0077ed]"
+                    data-testid="create-profile-dialog-submit-button"
+                  >
                     Create
                   </Button>
                 </DialogFooter>
@@ -372,21 +382,30 @@ export default function ProfilesPage() {
 
         {/* Delete Confirmation */}
         <AlertDialog open={!!profileToDelete} onOpenChange={() => setProfileToDelete(null)}>
-          <AlertDialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white">
+          <AlertDialogContent
+            className="border-[#3a3a3c] bg-[#1c1c1e] text-white"
+            data-testid="delete-profile-dialog"
+          >
             <AlertDialogHeader>
-              <AlertDialogTitle className="text-white">Delete Profile?</AlertDialogTitle>
+              <AlertDialogTitle className="text-white" data-testid="delete-profile-dialog-title">
+                Delete Profile?
+              </AlertDialogTitle>
               <AlertDialogDescription className="text-[#a1a1a6]">
                 Are you sure you want to delete profile "{profileToDelete?.name}"? This action
                 cannot be undone and may affect active streams.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]">
+              <AlertDialogCancel
+                className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]"
+                data-testid="delete-profile-dialog-cancel"
+              >
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteConfirm}
                 className="bg-[#dc2626] text-white hover:bg-[#ef4444]"
+                data-testid="delete-profile-dialog-confirm"
               >
                 Delete
               </AlertDialogAction>
@@ -413,6 +432,7 @@ function ConfigSection({
   token,
   details,
   onEdit,
+  testId,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -420,10 +440,12 @@ function ConfigSection({
   token?: string;
   details?: string;
   onEdit?: () => void;
+  testId?: string;
 }) {
   return (
     <div
       className={`rounded-[8px] border p-[12px] ${active ? 'border-[#3a3a3c] bg-[#1c1c1e]' : 'border-[#3a3a3c]/50 bg-[#1c1c1e]/50 opacity-50'}`}
+      data-testid={testId}
     >
       <div className="mb-[8px] flex items-center gap-[8px]">
         {icon}
@@ -442,6 +464,7 @@ function ConfigSection({
         className={`mt-[8px] h-auto p-0 text-[11px] ${active ? 'text-[#0a84ff]' : 'text-[#a1a1a6]'}`}
         onClick={onEdit}
         disabled={!onEdit}
+        data-testid={testId ? `${testId}-edit-button` : undefined}
       >
         {active ? 'Edit' : 'Add (Coming Soon)'}
       </Button>
@@ -509,8 +532,16 @@ function VideoEncoderEditDialog({
   if (isLoading || !config || !options) {
     return (
       <Dialog open onOpenChange={onClose}>
-        <DialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[600px]">
-          <div className="py-8 text-center text-[#a1a1a6]">Loading...</div>
+        <DialogContent
+          className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[600px]"
+          data-testid="video-encoder-edit-dialog"
+        >
+          <div
+            className="py-8 text-center text-[#a1a1a6]"
+            data-testid="video-encoder-edit-dialog-loading"
+          >
+            Loading...
+          </div>
         </DialogContent>
       </Dialog>
     );
@@ -521,9 +552,14 @@ function VideoEncoderEditDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[600px]">
+      <DialogContent
+        className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[600px]"
+        data-testid="video-encoder-edit-dialog"
+      >
         <DialogHeader>
-          <DialogTitle className="text-white">Edit Video Encoder Configuration</DialogTitle>
+          <DialogTitle className="text-white" data-testid="video-encoder-edit-dialog-title">
+            Edit Video Encoder Configuration
+          </DialogTitle>
           <DialogDescription className="text-[#a1a1a6]">
             Configure video encoding settings for this profile
           </DialogDescription>
@@ -674,6 +710,7 @@ function VideoEncoderEditDialog({
             variant="outline"
             onClick={onClose}
             className="border-[#3a3a3c] text-white hover:bg-[#2c2c2e]"
+            data-testid="video-encoder-edit-dialog-cancel"
           >
             Cancel
           </Button>
@@ -682,6 +719,7 @@ function VideoEncoderEditDialog({
             onClick={handleSave}
             disabled={updateMutation.isPending}
             className="bg-[#0a84ff] text-white hover:bg-[#0077ed]"
+            data-testid="video-encoder-edit-dialog-save"
           >
             {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
           </Button>

@@ -155,6 +155,7 @@ export default function ImagingPage() {
               variant="outline"
               onClick={handleReset}
               className="h-[40px] rounded-[8px] border-[#3a3a3c] bg-transparent px-[20px] text-[#a1a1a6] hover:bg-[#1c1c1e] hover:text-white"
+              data-testid="imaging-reset-button"
             >
               <RotateCcw className="mr-2 size-4" />
               Reset
@@ -163,6 +164,7 @@ export default function ImagingPage() {
               onClick={handleSave}
               disabled={mutation.isPending}
               className="h-[40px] rounded-[8px] bg-[#dc2626] px-[20px] font-semibold text-white hover:bg-[#ef4444]"
+              data-testid="imaging-save-button"
             >
               <Save className="mr-2 size-4" />
               Save Changes

@@ -153,7 +153,12 @@ export default function DiagnosticsPage() {
                   <p className="text-muted-foreground text-xs">Processor load over time</p>
                 </div>
               </div>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                data-testid="diagnostics-chart-time-button"
+              >
                 <Clock className="text-muted-foreground h-4 w-4" />
               </Button>
             </div>
@@ -212,7 +217,12 @@ export default function DiagnosticsPage() {
                   <p className="text-muted-foreground text-xs">RAM utilization over time</p>
                 </div>
               </div>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                data-testid="diagnostics-chart-time-button"
+              >
                 <Clock className="text-muted-foreground h-4 w-4" />
               </Button>
             </div>
@@ -431,13 +441,19 @@ export default function DiagnosticsPage() {
             </div>
             <div className="flex items-center gap-2">
               <div className="border-border bg-muted/50 flex items-center rounded-md border p-0.5">
-                <Button variant="default" size="sm" className="h-6 px-2.5 text-xs">
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="h-6 px-2.5 text-xs"
+                  data-testid="diagnostics-log-filter-all"
+                >
                   All
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
+                  data-testid="diagnostics-log-filter-info"
                 >
                   Info
                 </Button>
@@ -445,6 +461,7 @@ export default function DiagnosticsPage() {
                   variant="ghost"
                   size="sm"
                   className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
+                  data-testid="diagnostics-log-filter-warning"
                 >
                   Warning
                 </Button>
@@ -452,11 +469,17 @@ export default function DiagnosticsPage() {
                   variant="ghost"
                   size="sm"
                   className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
+                  data-testid="diagnostics-log-filter-error"
                 >
                   Error
                 </Button>
               </div>
-              <Button variant="outline" size="sm" className="border-border h-7 gap-1 text-xs">
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-border h-7 gap-1 text-xs"
+                data-testid="diagnostics-export-button"
+              >
                 <Download className="h-3 w-3" /> Export
               </Button>
             </div>

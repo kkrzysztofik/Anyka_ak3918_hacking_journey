@@ -107,6 +107,7 @@ function NavLinkItem({
               : 'hover:bg-white/5',
             isMobile ? 'h-auto rounded-lg border-l-0' : 'h-[72px]',
           )}
+          data-testid={`layout-nav-${item.path.replaceAll('/', '-').replace(/^-/, '')}-toggle-button`}
         >
           <div
             className={cn(
@@ -154,6 +155,7 @@ function NavLinkItem({
                       : 'text-dark-secondary-text hover:bg-white/5 hover:text-white',
                   )
                 }
+                data-testid={`layout-nav-${child.path.replaceAll('/', '-').replace(/^-/, '')}`}
               >
                 <child.icon className="h-4 w-4" />
                 <span>{child.label}</span>
@@ -178,6 +180,7 @@ function NavLinkItem({
           isMobile ? 'h-auto rounded-lg border-l-0' : 'h-[72px]',
         )
       }
+      data-testid={`layout-nav-${item.path.replaceAll('/', '-').replace(/^-/, '')}`}
     >
       {({ isActive }) => (
         <>
@@ -220,7 +223,7 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
     <>
       <div className="bg-dark-sidebar border-dark-border flex h-full flex-col border-r">
         {/* Branding */}
-        <div className="mb-2 p-6">
+        <div className="mb-2 p-6" data-testid="layout-branding">
           <div className="flex items-center gap-3">
             <div className="bg-accent-red shadow-accent-red/20 flex size-10 items-center justify-center rounded-xl shadow-lg">
               <Cctv className="h-6 w-6 text-white" />
@@ -258,7 +261,10 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
                 aria-label="Close menu"
               />
               <div className="bg-dark-sidebar border-dark-border animate-in fade-in zoom-in absolute right-4 bottom-full left-4 z-50 mb-2 rounded-lg border py-1 shadow-xl duration-200">
-                <div className="border-dark-border border-b px-4 py-3">
+                <div
+                  className="border-dark-border border-b px-4 py-3"
+                  data-testid="layout-user-popup-header"
+                >
                   <p className="text-sm font-semibold text-white">Admin User</p>
                   <p className="text-dark-secondary-text truncate text-xs">
                     {username}@device.local
@@ -272,6 +278,7 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
                       setIsMenuOpen(false);
                       setIsChangePasswordOpen(true);
                     }}
+                    data-testid="layout-change-password-button"
                   >
                     <KeyRound className="mr-3 h-4 w-4" />
                     Change Password
@@ -284,6 +291,7 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
                       setIsAboutOpen(true);
                     }}
                     className="text-dark-secondary-text hover:bg-dark-hover flex w-full items-center px-4 py-2 text-sm transition-colors hover:text-white"
+                    data-testid="layout-about-button"
                   >
                     <Info className="mr-3 h-4 w-4" />
                     About
@@ -297,6 +305,7 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
                       setIsMenuOpen(false);
                       logout();
                     }}
+                    data-testid="layout-sign-out-button"
                   >
                     <LogOut className="mr-3 h-4 w-4" />
                     Sign Out
@@ -309,6 +318,7 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
           <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}
             className="bg-dark-card border-dark-border hover:bg-dark-hover group flex w-full items-center justify-between gap-3 rounded-lg border px-2 py-2 transition-colors"
+            data-testid="layout-user-menu-button"
           >
             <div className="flex items-center gap-3">
               <div className="bg-accent-red/10 border-accent-red/20 flex size-8 items-center justify-center rounded-full border">
@@ -348,27 +358,56 @@ function Header() {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const location = useLocation();
 
-  // Find the current page title based on the route
-  const currentItem = navItems.find((item) =>
-    item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path),
-  );
+  // Create a flat list of all nav items including children
+  const allNavItems = React.useMemo(() => {
+    return navItems.reduce<NavItem[]>((acc, item) => {
+      acc.push(item);
+      if (item.children) {
+        acc.push(...item.children);
+      }
+      return acc;
+    }, []);
+  }, []);
+
+  // Find the current page title based on the route, prioritizing the longest matching path
+  const currentItem = allNavItems
+    .filter((item) =>
+      item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path),
+    )
+    .sort((a, b) => b.path.length - a.path.length)[0];
+
   const pageTitle = currentItem?.label || 'Dashboard';
 
   return (
-    <header className="bg-dark-bg/80 border-dark-border sticky top-0 z-30 flex h-16 items-center justify-between border-b px-6 backdrop-blur-md lg:hidden">
+    <header
+      className="bg-dark-bg/80 border-dark-border sticky top-0 z-30 flex h-16 items-center justify-between border-b px-6 backdrop-blur-md lg:hidden"
+      data-testid="layout-header"
+    >
       <div className="flex items-center gap-4">
         <Sheet open={isMobileNavOpen} onOpenChange={setIsMobileNavOpen}>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="text-white lg:hidden">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-white lg:hidden"
+              data-testid="layout-mobile-menu-trigger"
+            >
               <Menu className="h-6 w-6" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="left" className="w-[300px] border-r-0 p-0">
+          <SheetContent
+            side="left"
+            className="w-[300px] border-r-0 p-0"
+            data-testid="layout-mobile-sidebar"
+          >
             <SidebarContent onClose={() => setIsMobileNavOpen(false)} />
           </SheetContent>
         </Sheet>
         <div className="flex items-center gap-4">
-          <h2 className="text-dark-secondary-text text-sm font-medium tracking-[0.2em] uppercase">
+          <h2
+            className="text-dark-secondary-text text-sm font-medium tracking-[0.2em] uppercase"
+            data-testid="layout-page-title"
+          >
             {pageTitle}
           </h2>
         </div>
@@ -384,13 +423,19 @@ function Header() {
 
 export default function Layout() {
   return (
-    <div className="bg-dark-bg selection:bg-accent-red/30 flex h-screen font-sans">
-      <aside className="hidden h-full w-[260px] shrink-0 overflow-hidden lg:block">
+    <div
+      className="bg-dark-bg selection:bg-accent-red/30 flex h-screen font-sans"
+      data-testid="layout-root"
+    >
+      <aside
+        className="hidden h-full w-[260px] shrink-0 overflow-hidden lg:block"
+        data-testid="layout-desktop-sidebar"
+      >
         <SidebarContent />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />
-        <main className="flex-1 overflow-y-auto p-6 md:p-8">
+        <main className="flex-1 overflow-y-auto p-6 md:p-8" data-testid="layout-main-content">
           <div className="page-enter h-full w-full">
             <Outlet />
           </div>

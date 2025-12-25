@@ -11,6 +11,7 @@
     "lint:fix": "eslint . --fix",
     "type-check": "vite build --mode type-check",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "prettier": "prettier --write ."
   },
   "dependencies": {

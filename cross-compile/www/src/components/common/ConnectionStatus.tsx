@@ -18,7 +18,11 @@ interface ConnectionStatusProps {
 
 export function ConnectionStatus({ status, className }: ConnectionStatusProps) {
   return (
-    <output className={cn('flex items-center gap-2 text-sm', className)} aria-live="polite">
+    <output
+      className={cn('flex items-center gap-2 text-sm', className)}
+      aria-live="polite"
+      data-testid={`connection-status-${status}`}
+    >
       {status === 'connected' && (
         <>
           <Wifi className="h-4 w-4 text-green-500" aria-hidden="true" />
@@ -64,6 +68,7 @@ export function ConnectionStatusBadge({ status, className }: ConnectionStatusPro
         className,
       )}
       aria-live="polite"
+      data-testid={`connection-status-badge-${status}`}
     >
       {status === 'connected' && <Wifi className="h-3 w-3" aria-hidden="true" />}
       {status === 'disconnected' && <WifiOff className="h-3 w-3" aria-hidden="true" />}

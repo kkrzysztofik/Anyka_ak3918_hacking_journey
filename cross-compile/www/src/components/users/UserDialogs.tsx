@@ -63,7 +63,7 @@ interface AddUserDialogProps {
   onSubmit: (username: string, password: string, userLevel: UserLevel) => Promise<void>;
 }
 
-export function AddUserDialog({ open, onOpenChange, onSubmit }: AddUserDialogProps) {
+export function AddUserDialog({ open, onOpenChange, onSubmit }: Readonly<AddUserDialogProps>) {
   const [isLoading, setIsLoading] = useState(false);
 
   const form = useForm<AddUserFormData>({
@@ -91,8 +91,10 @@ export function AddUserDialog({ open, onOpenChange, onSubmit }: AddUserDialogPro
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add User</DialogTitle>
-          <DialogDescription>Create a new user account</DialogDescription>
+          <DialogTitle data-testid="add-user-dialog-title">Add User</DialogTitle>
+          <DialogDescription data-testid="add-user-dialog-description">
+            Create a new user account
+          </DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
@@ -104,7 +106,7 @@ export function AddUserDialog({ open, onOpenChange, onSubmit }: AddUserDialogPro
                 <FormItem>
                   <FormLabel>Username</FormLabel>
                   <FormControl>
-                    <Input placeholder="newuser" {...field} />
+                    <Input placeholder="newuser" {...field} data-testid="add-user-username-input" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -121,6 +123,7 @@ export function AddUserDialog({ open, onOpenChange, onSubmit }: AddUserDialogPro
                     <select
                       {...field}
                       className="border-input bg-background h-10 w-full rounded-md border px-3"
+                      data-testid="add-user-level-select"
                     >
                       <option value="Administrator">Administrator</option>
                       <option value="Operator">Operator</option>
@@ -139,7 +142,7 @@ export function AddUserDialog({ open, onOpenChange, onSubmit }: AddUserDialogPro
                 <FormItem>
                   <FormLabel>Password</FormLabel>
                   <FormControl>
-                    <Input type="password" {...field} />
+                    <Input type="password" {...field} data-testid="add-user-password-input" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -153,7 +156,11 @@ export function AddUserDialog({ open, onOpenChange, onSubmit }: AddUserDialogPro
                 <FormItem>
                   <FormLabel>Confirm Password</FormLabel>
                   <FormControl>
-                    <Input type="password" {...field} />
+                    <Input
+                      type="password"
+                      {...field}
+                      data-testid="add-user-confirm-password-input"
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -161,10 +168,15 @@ export function AddUserDialog({ open, onOpenChange, onSubmit }: AddUserDialogPro
             />
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                data-testid="add-user-cancel-button"
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isLoading}>
+              <Button type="submit" disabled={isLoading} data-testid="add-user-submit-button">
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Create User
               </Button>
@@ -189,7 +201,7 @@ export function ChangePasswordDialog({
   onOpenChange,
   username,
   onSubmit,
-}: ChangePasswordDialogProps) {
+}: Readonly<ChangePasswordDialogProps>) {
   const [isLoading, setIsLoading] = useState(false);
 
   const form = useForm<ChangePasswordFormData>({
@@ -215,8 +227,8 @@ export function ChangePasswordDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Change Password</DialogTitle>
-          <DialogDescription>
+          <DialogTitle data-testid="change-password-dialog-title">Change Password</DialogTitle>
+          <DialogDescription data-testid="change-password-dialog-description">
             Set a new password for user <strong>{username}</strong>
           </DialogDescription>
         </DialogHeader>
@@ -230,7 +242,7 @@ export function ChangePasswordDialog({
                 <FormItem>
                   <FormLabel>New Password</FormLabel>
                   <FormControl>
-                    <Input type="password" {...field} />
+                    <Input type="password" {...field} data-testid="change-password-new-input" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -244,7 +256,7 @@ export function ChangePasswordDialog({
                 <FormItem>
                   <FormLabel>Confirm Password</FormLabel>
                   <FormControl>
-                    <Input type="password" {...field} />
+                    <Input type="password" {...field} data-testid="change-password-confirm-input" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -252,10 +264,19 @@ export function ChangePasswordDialog({
             />
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                data-testid="change-password-cancel-button"
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isLoading}>
+              <Button
+                type="submit"
+                disabled={isLoading}
+                data-testid="change-password-submit-button"
+              >
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Update Password
               </Button>

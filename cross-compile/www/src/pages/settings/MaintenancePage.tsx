@@ -232,6 +232,7 @@ export default function MaintenancePage() {
                   className="flex h-[80px] flex-col items-center justify-center gap-[8px] border-[#3a3a3c] bg-[#1c1c1e] hover:bg-[#2c2c2e] hover:text-white"
                   onClick={handleBackup}
                   disabled={backupMutation.isPending}
+                  data-testid="maintenance-backup-button"
                 >
                   <Download className="size-5 text-[#0a84ff]" />
                   <span>{backupMutation.isPending ? 'Backing up...' : 'Backup'}</span>
@@ -241,6 +242,7 @@ export default function MaintenancePage() {
                   className="flex h-[80px] flex-col items-center justify-center gap-[8px] border-[#3a3a3c] bg-[#1c1c1e] hover:bg-[#2c2c2e] hover:text-white"
                   onClick={handleRestore}
                   disabled={restoreMutation.isPending}
+                  data-testid="maintenance-restore-button"
                 >
                   <Upload className="size-5 text-[#0a84ff]" />
                   <span>{restoreMutation.isPending ? 'Restoring...' : 'Restore'}</span>
@@ -276,6 +278,7 @@ export default function MaintenancePage() {
               <Button
                 className="w-full bg-[#30d158] font-semibold text-black hover:bg-[#28c840]"
                 onClick={handleUpgrade}
+                data-testid="maintenance-upgrade-button"
               >
                 <FileUp className="mr-2 size-4" />
                 Check for Updates
@@ -301,7 +304,10 @@ export default function MaintenancePage() {
             <SettingsCardContent>
               <AlertDialog open={softResetOpen} onOpenChange={setSoftResetOpen}>
                 <AlertDialogTrigger asChild>
-                  <Button className="w-full bg-[#ff9f0a] font-semibold text-black hover:bg-[#ffb340]">
+                  <Button
+                    className="w-full bg-[#ff9f0a] font-semibold text-black hover:bg-[#ffb340]"
+                    data-testid="maintenance-soft-reset-button"
+                  >
                     Reset Settings
                   </Button>
                 </AlertDialogTrigger>
@@ -314,12 +320,16 @@ export default function MaintenancePage() {
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
-                    <AlertDialogCancel className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]">
+                    <AlertDialogCancel
+                      className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]"
+                      data-testid="maintenance-soft-reset-cancel-button"
+                    >
                       Cancel
                     </AlertDialogCancel>
                     <AlertDialogAction
                       onClick={() => softResetMutation.mutate()}
                       className="bg-[#ff9f0a] text-black hover:bg-[#ffb340]"
+                      data-testid="maintenance-soft-reset-confirm-button"
                     >
                       {softResetMutation.isPending ? 'Resetting...' : 'Confirm Reset'}
                     </AlertDialogAction>
@@ -347,7 +357,10 @@ export default function MaintenancePage() {
             <SettingsCardContent>
               <AlertDialog open={hardResetOpen} onOpenChange={setHardResetOpen}>
                 <AlertDialogTrigger asChild>
-                  <Button className="w-full bg-[#dc2626] font-semibold text-white hover:bg-[#ef4444]">
+                  <Button
+                    className="w-full bg-[#dc2626] font-semibold text-white hover:bg-[#ef4444]"
+                    data-testid="maintenance-hard-reset-button"
+                  >
                     Factory Reset
                   </Button>
                 </AlertDialogTrigger>
@@ -361,12 +374,16 @@ export default function MaintenancePage() {
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
-                    <AlertDialogCancel className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]">
+                    <AlertDialogCancel
+                      className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]"
+                      data-testid="maintenance-hard-reset-cancel-button"
+                    >
                       Cancel
                     </AlertDialogCancel>
                     <AlertDialogAction
                       onClick={() => hardResetMutation.mutate()}
                       className="bg-[#dc2626] text-white hover:bg-[#ef4444]"
+                      data-testid="maintenance-hard-reset-confirm-button"
                     >
                       {hardResetMutation.isPending ? 'Resetting...' : 'Erase Everything'}
                     </AlertDialogAction>
@@ -395,6 +412,7 @@ export default function MaintenancePage() {
                   <Button
                     variant="outline"
                     className="w-full border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]"
+                    data-testid="maintenance-reboot-button"
                   >
                     Restart System
                   </Button>
@@ -408,12 +426,16 @@ export default function MaintenancePage() {
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
-                    <AlertDialogCancel className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]">
+                    <AlertDialogCancel
+                      className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]"
+                      data-testid="maintenance-reboot-cancel-button"
+                    >
                       Cancel
                     </AlertDialogCancel>
                     <AlertDialogAction
                       onClick={() => rebootMutation.mutate()}
                       className="bg-white text-black hover:bg-[#e5e5e5]"
+                      data-testid="maintenance-reboot-confirm-button"
                     >
                       {rebootMutation.isPending ? 'Rebooting...' : 'Confirm Reboot'}
                     </AlertDialogAction>

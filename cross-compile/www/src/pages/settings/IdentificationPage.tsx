@@ -174,6 +174,7 @@ export default function IdentificationPage() {
                         <Input
                           {...field}
                           className="border-[#3a3a3c] bg-transparent text-white focus:border-[#dc2626]"
+                          data-testid="identification-device-name-input"
                         />
                       </FormControl>
                       <FormMessage />
@@ -190,6 +191,7 @@ export default function IdentificationPage() {
                         <Input
                           {...field}
                           className="border-[#3a3a3c] bg-transparent text-white focus:border-[#dc2626]"
+                          data-testid="identification-device-location-input"
                         />
                       </FormControl>
                       <FormMessage />
@@ -291,6 +293,7 @@ export default function IdentificationPage() {
                 type="submit"
                 disabled={mutation.isPending || !form.formState.isDirty}
                 className="h-[44px] rounded-[8px] bg-[#dc2626] px-[32px] font-semibold text-white hover:bg-[#ef4444]"
+                data-testid="identification-save-button"
               >
                 <Save className="mr-2 size-4" />
                 Save Changes
@@ -300,6 +303,7 @@ export default function IdentificationPage() {
                 variant="outline"
                 onClick={handleReset}
                 className="h-[44px] rounded-[8px] border-[#3a3a3c] bg-transparent px-[32px] text-[#a1a1a6] hover:bg-[#1c1c1e] hover:text-white"
+                data-testid="identification-reset-button"
               >
                 <RotateCcw className="mr-2 size-4" />
                 Reset to Default

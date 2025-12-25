@@ -73,25 +73,27 @@ if (error) {
 
 ### Test Structure
 
-```typescript
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+ ```typescript
+ import { describe, it, expect, vi } from 'vitest';
+ import { render, screen } from '@testing-library/react';
+ import userEvent from '@testing-library/user-event';
 
-describe('ComponentName', () => {
-  it('renders correctly with default props', () => {
-    render(<ComponentName />);
-    expect(screen.getByRole('button')).toBeInTheDocument();
-  });
+ describe('ComponentName', () => {
+   it('renders correctly with default props', () => {
+     render(<ComponentName />);
+     // ALWAYS use data-testid for selectors
+     expect(screen.getByTestId('component-name-button')).toBeInTheDocument();
+   });
 
-  it('calls onSave when form is submitted', async () => {
-    const onSave = vi.fn();
-    render(<ComponentName onSave={onSave} />);
-    await userEvent.click(screen.getByRole('button', { name: /save/i }));
-    expect(onSave).toHaveBeenCalled();
-  });
-});
-```
+   it('calls onSave when form is submitted', async () => {
+     const onSave = vi.fn();
+     render(<ComponentName onSave={onSave} />);
+     // Do NOT use getByRole, getByText etc.
+     await userEvent.click(screen.getByTestId('component-name-save-button'));
+     expect(onSave).toHaveBeenCalled();
+   });
+ });
+ ```
 
 ### MSW for API Mocking
 

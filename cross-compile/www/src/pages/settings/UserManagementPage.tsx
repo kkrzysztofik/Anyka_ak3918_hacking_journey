@@ -192,6 +192,7 @@ export default function UserManagementPage() {
               setShowAddDialog(true);
             }}
             className="rounded-[8px] bg-[#0a84ff] text-white hover:bg-[#0077ed]"
+            data-testid="user-management-add-user-button"
           >
             <Plus className="mr-2 size-4" />
             Add User
@@ -245,6 +246,7 @@ export default function UserManagementPage() {
                             size="icon"
                             onClick={() => handleEditClick(user)}
                             className="h-8 w-8 text-[#a1a1a6] hover:bg-[#3a3a3c] hover:text-white"
+                            data-testid={`edit-user-button-${user.username}`}
                           >
                             <Edit2 className="size-4" />
                           </Button>
@@ -254,6 +256,7 @@ export default function UserManagementPage() {
                             onClick={() => setDeletingUser(user)}
                             disabled={users.length <= 1} // Prevent deleting last user
                             className="h-8 w-8 text-[#a1a1a6] hover:bg-[rgba(220,38,38,0.1)] hover:text-[#dc2626]"
+                            data-testid={`delete-user-button-${user.username}`}
                           >
                             <Trash2 className="size-4" />
                           </Button>
@@ -277,9 +280,15 @@ export default function UserManagementPage() {
             }
           }}
         >
-          <DialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[425px]">
+          <DialogContent
+            className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[425px]"
+            data-testid={editingUser ? 'edit-user-dialog' : 'add-user-dialog'}
+          >
             <DialogHeader>
-              <DialogTitle className="text-white">
+              <DialogTitle
+                className="text-white"
+                data-testid={editingUser ? 'edit-user-dialog-title' : 'add-user-dialog-title'}
+              >
                 {editingUser ? 'Edit User' : 'Add User'}
               </DialogTitle>
               <DialogDescription className="text-[#a1a1a6]">
@@ -302,6 +311,11 @@ export default function UserManagementPage() {
                           {...field}
                           disabled={!!editingUser} // Can't change username in ONVIF usually directly without recreate, simplifying for now
                           className="border-[#3a3a3c] bg-transparent text-white focus:border-[#0a84ff]"
+                          data-testid={
+                            editingUser
+                              ? 'edit-user-dialog-username-input'
+                              : 'add-user-dialog-username-input'
+                          }
                         />
                       </FormControl>
                       <FormMessage />
@@ -323,6 +337,11 @@ export default function UserManagementPage() {
                             }
                             {...field}
                             className="border-[#3a3a3c] bg-transparent pr-10 text-white focus:border-[#0a84ff]"
+                            data-testid={
+                              editingUser
+                                ? 'edit-user-dialog-password-input'
+                                : 'add-user-dialog-password-input'
+                            }
                           />
                         </FormControl>
                         <Button
@@ -331,6 +350,11 @@ export default function UserManagementPage() {
                           size="icon"
                           className="absolute top-0 right-0 h-full px-3 py-2 text-[#a1a1a6] hover:text-white"
                           onClick={() => setShowPassword(!showPassword)}
+                          data-testid={
+                            editingUser
+                              ? 'edit-user-dialog-password-toggle-button'
+                              : 'add-user-dialog-password-toggle-button'
+                          }
                         >
                           {showPassword ? (
                             <EyeOff className="size-4" />
@@ -355,15 +379,42 @@ export default function UserManagementPage() {
                         value={field.value}
                       >
                         <FormControl>
-                          <SelectTrigger className="border-[#3a3a3c] bg-transparent text-white">
+                          <SelectTrigger
+                            className="border-[#3a3a3c] bg-transparent text-white"
+                            data-testid={
+                              editingUser
+                                ? 'edit-user-dialog-role-select'
+                                : 'add-user-dialog-role-select'
+                            }
+                          >
                             <SelectValue placeholder="Select a role" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white">
-                          <SelectItem value="Administrator">Administrator</SelectItem>
-                          <SelectItem value="Operator">Operator</SelectItem>
-                          <SelectItem value="User">User</SelectItem>
-                          <SelectItem value="Anonymous">Anonymous</SelectItem>
+                          <SelectItem
+                            value="Administrator"
+                            data-testid={`${editingUser ? 'edit-user-dialog' : 'add-user-dialog'}-role-option-Administrator`}
+                          >
+                            Administrator
+                          </SelectItem>
+                          <SelectItem
+                            value="Operator"
+                            data-testid={`${editingUser ? 'edit-user-dialog' : 'add-user-dialog'}-role-option-Operator`}
+                          >
+                            Operator
+                          </SelectItem>
+                          <SelectItem
+                            value="User"
+                            data-testid={`${editingUser ? 'edit-user-dialog' : 'add-user-dialog'}-role-option-User`}
+                          >
+                            User
+                          </SelectItem>
+                          <SelectItem
+                            value="Anonymous"
+                            data-testid={`${editingUser ? 'edit-user-dialog' : 'add-user-dialog'}-role-option-Anonymous`}
+                          >
+                            Anonymous
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -379,6 +430,7 @@ export default function UserManagementPage() {
                       setEditingUser(null);
                     }}
                     className="border-[#3a3a3c] text-white hover:bg-[#2c2c2e]"
+                    data-testid={editingUser ? 'edit-user-dialog-cancel' : 'add-user-dialog-cancel'}
                   >
                     Cancel
                   </Button>
@@ -386,6 +438,7 @@ export default function UserManagementPage() {
                     type="submit"
                     disabled={createMutation.isPending || editMutation.isPending}
                     className="bg-[#0a84ff] text-white hover:bg-[#0077ed]"
+                    data-testid={editingUser ? 'edit-user-dialog-save' : 'add-user-dialog-save'}
                   >
                     {createMutation.isPending || editMutation.isPending ? 'Saving...' : 'Save User'}
                   </Button>
@@ -397,21 +450,30 @@ export default function UserManagementPage() {
 
         {/* Delete Confirmation */}
         <AlertDialog open={!!deletingUser} onOpenChange={() => setDeletingUser(null)}>
-          <AlertDialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white">
+          <AlertDialogContent
+            className="border-[#3a3a3c] bg-[#1c1c1e] text-white"
+            data-testid="delete-user-dialog"
+          >
             <AlertDialogHeader>
-              <AlertDialogTitle className="text-white">Delete User?</AlertDialogTitle>
+              <AlertDialogTitle className="text-white" data-testid="delete-user-dialog-title">
+                Delete User?
+              </AlertDialogTitle>
               <AlertDialogDescription className="text-[#a1a1a6]">
                 Are you sure you want to delete user "<strong>{deletingUser?.username}</strong>"?
                 This action cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]">
+              <AlertDialogCancel
+                className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]"
+                data-testid="delete-user-dialog-cancel"
+              >
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={() => deletingUser && deleteMutation.mutate(deletingUser.username)}
                 className="bg-[#dc2626] text-white hover:bg-[#ef4444]"
+                data-testid="delete-user-dialog-confirm"
               >
                 {deleteMutation.isPending ? 'Deleting...' : 'Delete User'}
               </AlertDialogAction>

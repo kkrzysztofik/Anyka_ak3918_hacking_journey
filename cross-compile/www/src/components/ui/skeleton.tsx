@@ -8,7 +8,7 @@ interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
 /**
  * Skeleton loading component for placeholder content
  */
-function Skeleton({ className, variant = 'default', ...props }: SkeletonProps) {
+function Skeleton({ className, variant = 'default', ...props }: Readonly<SkeletonProps>) {
   const variantClasses = {
     default: '',
     text: 'h-4 w-full rounded',
@@ -20,6 +20,7 @@ function Skeleton({ className, variant = 'default', ...props }: SkeletonProps) {
   return (
     <div
       className={cn('bg-muted animate-pulse rounded', variantClasses[variant], className)}
+      data-testid={props['data-testid' as keyof typeof props] || 'skeleton'}
       {...props}
     />
   );

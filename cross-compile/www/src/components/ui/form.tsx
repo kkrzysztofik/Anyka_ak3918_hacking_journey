@@ -81,7 +81,12 @@ const FormItem = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEl
 
     return (
       <FormItemContext.Provider value={value}>
-        <div ref={ref} className={cn('space-y-2', className)} {...props} />
+        <div
+          ref={ref}
+          className={cn('space-y-2', className)}
+          data-testid={props['data-testid' as keyof typeof props] || 'form-item'}
+          {...props}
+        />
       </FormItemContext.Provider>
     );
   },
@@ -99,6 +104,7 @@ const FormLabel = React.forwardRef<
       ref={ref}
       className={cn(error && 'text-destructive', className)}
       htmlFor={formItemId}
+      data-testid={props['data-testid' as keyof typeof props] || 'form-label'}
       {...props}
     />
   );
@@ -119,6 +125,7 @@ const FormControl = React.forwardRef<
         error === undefined ? `${formDescriptionId}` : `${formDescriptionId} ${formMessageId}`
       }
       aria-invalid={!!error}
+      data-testid={props['data-testid' as keyof typeof props] || 'form-control'}
       {...props}
     />
   );
@@ -136,6 +143,7 @@ const FormDescription = React.forwardRef<
       ref={ref}
       id={formDescriptionId}
       className={cn('text-muted-foreground text-[0.8rem]', className)}
+      data-testid={props['data-testid' as keyof typeof props] || 'form-description'}
       {...props}
     />
   );
@@ -158,6 +166,7 @@ const FormMessage = React.forwardRef<
       ref={ref}
       id={formMessageId}
       className={cn('text-destructive text-[0.8rem] font-medium', className)}
+      data-testid={props['data-testid' as keyof typeof props] || 'form-message'}
       {...props}
     >
       {body}

@@ -1,6 +1,12 @@
 name: CI - Unified Pipeline
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "cross-compile/onvif-rust/**"
+      - "cross-compile/www/**"
   pull_request:
     branches:
       - main
@@ -12,10 +18,7 @@ on:
       - "cross-compile/onvif-rust/**"
       - "cross-compile/www/**"
 
-permissions:
-  contents: read
-  pull-requests: write
-  security-events: write
+
 
 jobs:
   # =============================================================================
@@ -24,6 +27,8 @@ jobs:
   rust-lint:
     name: Rust - Lint Code
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     container:
       image: kkrzysztofik/anyka-cross-compile:latest
 
@@ -57,6 +62,8 @@ jobs:
   rust-test-and-coverage:
     name: Rust - Test Suite & Coverage
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     container:
       image: kkrzysztofik/anyka-cross-compile:latest
       options: --security-opt seccomp=unconfined
@@ -177,7 +184,7 @@ jobs:
       - name: Test with Coverage
         id: test-coverage
         run: |
-          npm run test -- --coverage
+          npm run test:coverage
           echo ""
           echo "=== Coverage Files Generated ==="
           echo "Files in coverage directory:"
@@ -589,6 +596,34 @@ jobs:
             echo "⚠️ report-task.txt not found - scan may have failed"
             echo "Checking for scannerwork directory:"
             ls -la .scannerwork/ 2>/dev/null || echo "Scannerwork directory not found"
+          fi
+
+      - name: Analyze Coverage for Changed Files
+        if: always()
+        run: |
+          echo "=== Coverage Analysis for Changed Files ==="
+          echo "This helps identify which changed files have coverage data"
+          echo ""
+
+          # Get list of changed files in the PR (TypeScript/JavaScript only)
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "Changed TypeScript/JavaScript files in PR:"
+            git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.(ts|tsx|js|jsx)$' | grep -v test | grep -v spec | head -20 || echo "No changed TS/JS files found"
+            echo ""
+
+            # Check which changed files have coverage in LCOV
+            if [ -f "cross-compile/www/coverage/lcov.info" ]; then
+              echo "Changed files WITH coverage in LCOV:"
+              git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.(ts|tsx|js|jsx)$' | grep -v test | grep -v spec | while read file; do
+                if grep -q "^SF:cross-compile/www/$file" cross-compile/www/coverage/lcov.info; then
+                  echo "  ✅ $file"
+                else
+                  echo "  ❌ $file (no coverage data)"
+                fi
+              done
+            fi
+          else
+            echo "Not a pull request - skipping changed files analysis"
           fi
 
       - name: Post-Scan Coverage Verification

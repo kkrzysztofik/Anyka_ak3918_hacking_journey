@@ -224,10 +224,16 @@ export default function TimePage() {
                     >
                       {/* NTP Mode */}
                       <div>
-                        <RadioGroupItem value="ntp" id="ntp" className="peer sr-only" />
+                        <RadioGroupItem
+                          value="ntp"
+                          id="ntp"
+                          className="peer sr-only"
+                          data-testid="time-page-ntp-radio-input"
+                        />
                         <Label
                           htmlFor="ntp"
                           className="border-muted bg-popover hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-primary flex flex-col items-center justify-between rounded-md border-2 p-4 peer-data-[state=checked]:border-[#0a84ff] peer-data-[state=checked]:bg-[#0a84ff]/5"
+                          data-testid="time-page-ntp-radio"
                         >
                           <Globe className="mb-3 h-6 w-6" />
                           NTP Server
@@ -239,11 +245,17 @@ export default function TimePage() {
 
                       {/* Computer Mode */}
                       <div>
-                        <RadioGroupItem value="computer" id="computer" className="peer sr-only" />
+                        <RadioGroupItem
+                          value="computer"
+                          id="computer"
+                          className="peer sr-only"
+                          data-testid="time-page-computer-radio-input"
+                        />
                         <Label
                           htmlFor="computer"
                           onClick={handleSyncComputer}
                           className="border-muted bg-popover hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-primary flex flex-col items-center justify-between rounded-md border-2 p-4 peer-data-[state=checked]:border-[#0a84ff] peer-data-[state=checked]:bg-[#0a84ff]/5"
+                          data-testid="time-page-computer-radio"
                         >
                           <Monitor className="mb-3 h-6 w-6" />
                           Computer
@@ -255,10 +267,16 @@ export default function TimePage() {
 
                       {/* Manual Mode */}
                       <div>
-                        <RadioGroupItem value="manual" id="manual" className="peer sr-only" />
+                        <RadioGroupItem
+                          value="manual"
+                          id="manual"
+                          className="peer sr-only"
+                          data-testid="time-page-manual-radio-input"
+                        />
                         <Label
                           htmlFor="manual"
                           className="border-muted bg-popover hover:bg-accent hover:text-accent-foreground [&:has([data-state=checked])]:border-primary flex flex-col items-center justify-between rounded-md border-2 p-4 peer-data-[state=checked]:border-[#0a84ff] peer-data-[state=checked]:bg-[#0a84ff]/5"
+                          data-testid="time-page-manual-radio"
                         >
                           <Calendar className="mb-3 h-6 w-6" />
                           Manual
@@ -286,7 +304,11 @@ export default function TimePage() {
                             </FormDescription>
                           </div>
                           <FormControl>
-                            <Switch checked={field.value} onCheckedChange={field.onChange} />
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              data-testid="time-page-ntp-from-dhcp-switch"
+                            />
                           </FormControl>
                         </FormItem>
                       )}
@@ -304,6 +326,7 @@ export default function TimePage() {
                                 <Input
                                   {...field}
                                   className="border-[#3a3a3c] bg-transparent text-white"
+                                  data-testid="time-page-ntp-server1-input"
                                 />
                               </FormControl>
                               <FormMessage />
@@ -320,6 +343,7 @@ export default function TimePage() {
                                 <Input
                                   {...field}
                                   className="border-[#3a3a3c] bg-transparent text-white"
+                                  data-testid="time-page-ntp-server2-input"
                                 />
                               </FormControl>
                               <FormMessage />
@@ -345,6 +369,7 @@ export default function TimePage() {
                               type="date"
                               {...field}
                               className="border-[#3a3a3c] bg-transparent text-white"
+                              data-testid="time-page-manual-date-input"
                             />
                           </FormControl>
                           <FormMessage />
@@ -363,6 +388,7 @@ export default function TimePage() {
                               step="1"
                               {...field}
                               className="border-[#3a3a3c] bg-transparent text-white"
+                              data-testid="time-page-manual-time-input"
                             />
                           </FormControl>
                           <FormMessage />
@@ -399,6 +425,7 @@ export default function TimePage() {
                           className="placeholder:text-muted-foreground flex h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:ring-2 focus:ring-[#0a84ff] focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                           onChange={field.onChange}
                           value={field.value}
+                          data-testid="time-page-timezone-select"
                         >
                           <option value="" disabled>
                             Select timezone
@@ -423,6 +450,7 @@ export default function TimePage() {
                 type="submit"
                 disabled={mutation.isPending || !form.formState.isDirty}
                 className="h-[44px] rounded-[8px] bg-[#0a84ff] px-[32px] font-semibold text-white hover:bg-[#0077ed]"
+                data-testid="time-page-save-button"
               >
                 <Save className="mr-2 size-4" />
                 Save Changes

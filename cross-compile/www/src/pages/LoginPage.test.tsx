@@ -16,7 +16,8 @@ vi.mock('@/services/authService', () => ({
 
 // Mock react-router-dom
 const mockNavigate = vi.fn();
-const mockLocation = { state: null, pathname: '/login', hash: '', search: '', key: 'test' };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockLocation = { state: null as any, pathname: '/login', hash: '', search: '', key: 'test' };
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
@@ -57,11 +58,11 @@ describe('LoginPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('ONVIF Device Manager')).toBeInTheDocument();
+      expect(screen.getByTestId('login-page-title')).toHaveTextContent('ONVIF Device Manager');
     });
-    expect(screen.getByPlaceholderText(/enter username/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/enter password/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
+    expect(screen.getByTestId('login-form-password-input')).toBeInTheDocument();
+    expect(screen.getByTestId('login-form-submit-button')).toBeInTheDocument();
   });
 
   it('should show validation error for empty username', async () => {
@@ -73,14 +74,14 @@ describe('LoginPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/enter username/i)).toBeInTheDocument();
+      expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
     });
 
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    const submitButton = screen.getByTestId('login-form-submit-button');
     await user.click(submitButton);
 
     await waitFor(() => {
-      expect(screen.getByText(/username is required/i)).toBeInTheDocument();
+      expect(screen.getByTestId('login-username-error')).toHaveTextContent(/username is required/i);
     });
   });
 
@@ -93,17 +94,17 @@ describe('LoginPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/enter username/i)).toBeInTheDocument();
+      expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
     });
 
-    const usernameInput = screen.getByPlaceholderText(/enter username/i);
+    const usernameInput = screen.getByTestId('login-form-username-input');
     await user.type(usernameInput, 'testuser');
 
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    const submitButton = screen.getByTestId('login-form-submit-button');
     await user.click(submitButton);
 
     await waitFor(() => {
-      expect(screen.getByText(/password is required/i)).toBeInTheDocument();
+      expect(screen.getByTestId('login-password-error')).toHaveTextContent(/password is required/i);
     });
   });
 
@@ -116,31 +117,28 @@ describe('LoginPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/enter password/i)).toBeInTheDocument();
+      expect(screen.getByTestId('login-form-password-input')).toBeInTheDocument();
     });
 
-    const passwordInput = screen.getByPlaceholderText(/enter password/i);
+    const passwordInput = screen.getByTestId('login-form-password-input');
     await user.type(passwordInput, 'testpassword');
 
     // Password should be hidden by default
     expect(passwordInput).toHaveAttribute('type', 'password');
 
-    // Find and click the toggle button (it's a sibling in the relative container)
-    const passwordContainer = passwordInput.closest('.relative');
-    const toggleButton = passwordContainer?.querySelector('button[type="button"]');
+    // Find and click the toggle button
+    const toggleButton = screen.getByTestId('login-form-password-toggle-button');
     expect(toggleButton).toBeInTheDocument();
 
-    if (toggleButton) {
-      await user.click(toggleButton);
-      await waitFor(() => {
-        expect(passwordInput).toHaveAttribute('type', 'text');
-      });
+    await user.click(toggleButton);
+    await waitFor(() => {
+      expect(passwordInput).toHaveAttribute('type', 'text');
+    });
 
-      await user.click(toggleButton);
-      await waitFor(() => {
-        expect(passwordInput).toHaveAttribute('type', 'password');
-      });
-    }
+    await user.click(toggleButton);
+    await waitFor(() => {
+      expect(passwordInput).toHaveAttribute('type', 'password');
+    });
   });
 
   it('should submit form with valid credentials', async () => {
@@ -155,12 +153,12 @@ describe('LoginPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/enter username/i)).toBeInTheDocument();
+      expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
     });
 
-    const usernameInput = screen.getByPlaceholderText(/enter username/i);
-    const passwordInput = screen.getByPlaceholderText(/enter password/i);
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    const usernameInput = screen.getByTestId('login-form-username-input');
+    const passwordInput = screen.getByTestId('login-form-password-input');
+    const submitButton = screen.getByTestId('login-form-submit-button');
 
     await user.type(usernameInput, 'testuser');
     await user.type(passwordInput, 'testpassword');
@@ -183,12 +181,12 @@ describe('LoginPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/enter username/i)).toBeInTheDocument();
+      expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
     });
 
-    const usernameInput = screen.getByPlaceholderText(/enter username/i);
-    const passwordInput = screen.getByPlaceholderText(/enter password/i);
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
+    const usernameInput = screen.getByTestId('login-form-username-input');
+    const passwordInput = screen.getByTestId('login-form-password-input');
+    const submitButton = screen.getByTestId('login-form-submit-button');
 
     await user.type(usernameInput, 'testuser');
     await user.type(passwordInput, 'testpassword');
@@ -196,8 +194,138 @@ describe('LoginPage', () => {
 
     // Should show loading state
     await waitFor(() => {
-      expect(screen.getByText(/signing in/i)).toBeInTheDocument();
+      expect(screen.getByTestId('login-loading-text')).toHaveTextContent(/signing in/i);
     });
     expect(submitButton).toBeDisabled();
+  });
+
+  it('should redirect when already authenticated', async () => {
+    // Set up authenticated state
+    sessionStorage.setItem(
+      'onvif_camera_auth',
+      JSON.stringify({
+        username: 'admin',
+        encryptedPassword: { iv: 'test', data: 'test', tag: 'test' },
+      }),
+    );
+
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
+    });
+  });
+
+  it('should redirect to safe path from location state', async () => {
+    // Set up authenticated state
+    sessionStorage.setItem(
+      'onvif_camera_auth',
+      JSON.stringify({
+        username: 'admin',
+        encryptedPassword: { iv: 'test', data: 'test', tag: 'test' },
+      }),
+    );
+
+    // Mock location with safe path
+    mockLocation.state = { from: { pathname: '/settings' } };
+
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/settings', { replace: true });
+    });
+  });
+
+  it('should not redirect to unsafe path (double slash)', async () => {
+    // Set up authenticated state
+    sessionStorage.setItem(
+      'onvif_camera_auth',
+      JSON.stringify({
+        username: 'admin',
+        encryptedPassword: { iv: 'test', data: 'test', tag: 'test' },
+      }),
+    );
+
+    // Mock location with unsafe path
+    mockLocation.state = { from: { pathname: '//evil.com' } };
+
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
+    });
+  });
+
+  it('should show error toast when authentication fails', async () => {
+    const { verifyCredentials } = await import('@/services/authService');
+    const { toast } = await import('sonner');
+    vi.mocked(verifyCredentials).mockResolvedValue({
+      success: false,
+      error: 'Invalid credentials',
+    });
+
+    const user = userEvent.setup();
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
+    });
+
+    const usernameInput = screen.getByTestId('login-form-username-input');
+    const passwordInput = screen.getByTestId('login-form-password-input');
+    const submitButton = screen.getByTestId('login-form-submit-button');
+
+    await user.type(usernameInput, 'testuser');
+    await user.type(passwordInput, 'wrongpassword');
+    await user.click(submitButton);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Invalid credentials');
+    });
+  });
+
+  it('should show error toast when verifyCredentials throws', async () => {
+    const { verifyCredentials } = await import('@/services/authService');
+    const { toast } = await import('sonner');
+    vi.mocked(verifyCredentials).mockRejectedValue(new Error('Network error'));
+
+    const user = userEvent.setup();
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
+    });
+
+    const usernameInput = screen.getByTestId('login-form-username-input');
+    const passwordInput = screen.getByTestId('login-form-password-input');
+    const submitButton = screen.getByTestId('login-form-submit-button');
+
+    await user.type(usernameInput, 'testuser');
+    await user.type(passwordInput, 'testpassword');
+    await user.click(submitButton);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('An error occurred during sign in');
+    });
   });
 });

@@ -264,6 +264,7 @@ export default function NetworkPage() {
                         <Input
                           {...field}
                           className="border-[#3a3a3c] bg-transparent text-white focus:border-[#0a84ff]"
+                          data-testid="network-hostname-input"
                         />
                       </FormControl>
                       <FormMessage />
@@ -284,7 +285,11 @@ export default function NetworkPage() {
                         </FormDescription>
                       </div>
                       <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          data-testid="network-dhcp-switch"
+                        />
                       </FormControl>
                     </FormItem>
                   )}
@@ -305,7 +310,11 @@ export default function NetworkPage() {
                         </FormDescription>
                       </div>
                       <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          data-testid="network-onvif-discovery-switch"
+                        />
                       </FormControl>
                     </FormItem>
                   )}
@@ -323,6 +332,7 @@ export default function NetworkPage() {
                             <Input
                               {...field}
                               className="border-[#3a3a3c] bg-transparent text-white"
+                              data-testid="network-ip-address-input"
                             />
                           </FormControl>
                           <FormMessage />
@@ -341,6 +351,7 @@ export default function NetworkPage() {
                               {...field}
                               onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
                               className="border-[#3a3a3c] bg-transparent text-white"
+                              data-testid="network-prefix-length-input"
                             />
                           </FormControl>
                           <FormMessage />
@@ -357,6 +368,7 @@ export default function NetworkPage() {
                             <Input
                               {...field}
                               className="border-[#3a3a3c] bg-transparent text-white"
+                              data-testid="network-gateway-input"
                             />
                           </FormControl>
                           <FormMessage />
@@ -391,7 +403,11 @@ export default function NetworkPage() {
                         Obtain DNS from DHCP
                       </FormLabel>
                       <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          data-testid="network-dns-from-dhcp-switch"
+                        />
                       </FormControl>
                     </FormItem>
                   )}
@@ -408,6 +424,7 @@ export default function NetworkPage() {
                             <Input
                               {...field}
                               className="border-[#3a3a3c] bg-transparent text-white"
+                              data-testid="network-primary-dns-input"
                             />
                           </FormControl>
                           <FormMessage />
@@ -424,6 +441,7 @@ export default function NetworkPage() {
                             <Input
                               {...field}
                               className="border-[#3a3a3c] bg-transparent text-white"
+                              data-testid="network-secondary-dns-input"
                             />
                           </FormControl>
                           <FormMessage />
@@ -462,6 +480,7 @@ export default function NetworkPage() {
                             {...field}
                             onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
                             className="border-[#3a3a3c] bg-transparent text-white"
+                            data-testid="network-http-port-input"
                           />
                         </FormControl>
                         <FormMessage />
@@ -480,6 +499,7 @@ export default function NetworkPage() {
                             {...field}
                             onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
                             className="border-[#3a3a3c] bg-transparent text-white"
+                            data-testid="network-https-port-input"
                           />
                         </FormControl>
                         <FormMessage />
@@ -498,6 +518,7 @@ export default function NetworkPage() {
                             {...field}
                             onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
                             className="border-[#3a3a3c] bg-transparent text-white"
+                            data-testid="network-rtsp-port-input"
                           />
                         </FormControl>
                         <FormMessage />
@@ -514,6 +535,7 @@ export default function NetworkPage() {
                 type="submit"
                 disabled={mutation.isPending || !form.formState.isDirty}
                 className="h-[44px] rounded-[8px] bg-[#007AFF] px-[32px] font-semibold text-white hover:bg-[#0066CC]"
+                data-testid="network-save-button"
               >
                 <Save className="mr-2 size-4" />
                 Save Changes
@@ -523,6 +545,7 @@ export default function NetworkPage() {
                 variant="outline"
                 onClick={handleReset}
                 className="h-[44px] rounded-[8px] border-[#3a3a3c] bg-transparent px-[32px] text-[#a1a1a6] hover:bg-[#1c1c1e] hover:text-white"
+                data-testid="network-reset-button"
               >
                 <RotateCcw className="mr-2 size-4" />
                 Reset
@@ -548,7 +571,10 @@ export default function NetworkPage() {
 
         {/* Confirmation Modal */}
         <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-          <AlertDialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white">
+          <AlertDialogContent
+            className="border-[#3a3a3c] bg-[#1c1c1e] text-white"
+            data-testid="network-confirm-dialog"
+          >
             <AlertDialogHeader>
               <AlertDialogTitle className="text-white">Save Network Settings?</AlertDialogTitle>
               <AlertDialogDescription className="text-[#a1a1a6]">
@@ -557,12 +583,16 @@ export default function NetworkPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]">
+              <AlertDialogCancel
+                className="border-[#3a3a3c] bg-transparent text-white hover:bg-[#2c2c2e]"
+                data-testid="network-confirm-cancel-button"
+              >
                 Cancel
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleConfirm}
                 className="bg-[#007AFF] text-white hover:bg-[#0066CC]"
+                data-testid="network-confirm-save-button"
               >
                 {mutation.isPending ? 'Saving...' : 'Confirm Save'}
               </AlertDialogAction>
