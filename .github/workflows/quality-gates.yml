@@ -1,0 +1,220 @@
+name: Shared Quality Gates
+
+on:
+  workflow_call:
+    inputs:
+      project_type:
+        required: true
+        type: string
+      working_directory:
+        required: false
+        type: string
+        default: ""
+    outputs:
+      sonar-scan-status:
+        description: "Status of SonarQube scan"
+        value: ${{ jobs.sonarqube.outputs.sonar-scan-status }}
+      quality-gate-status:
+        description: "Status of Quality Gate check"
+        value: ${{ jobs.sonarqube.outputs.quality-gate-status }}
+    secrets:
+      SONAR_TOKEN:
+        required: true
+
+jobs:
+  sonarqube:
+    name: SonarQube Analysis & Quality Gate
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    outputs:
+      sonar-scan-status: ${{ steps.sonar-scan.outcome }}
+      quality-gate-status: ${{ steps.sonar-quality-gate.outcome || steps.skip-quality-gate.outputs.status || 'skipped' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Setup Cargo Config
+        working-directory: cross-compile/onvif-rust
+        run: |
+          if [ -f "scripts/setup-cargo-config.sh" ]; then
+            ./scripts/setup-cargo-config.sh
+          fi
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cross-compile/onvif-rust/target
+          key: cargo-${{ runner.os }}-sonar-${{ hashFiles('cross-compile/onvif-rust/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-sonar-
+
+      - name: Restore Rust Coverage from Cache
+        if: contains(inputs.project_type, 'Rust')
+        uses: actions/cache@v5
+        continue-on-error: true
+        with:
+          path: cross-compile/onvif-rust/coverage
+          key: coverage-rust-${{ github.run_id }}-${{ hashFiles('cross-compile/onvif-rust/**/*.rs') }}
+          restore-keys: |
+            coverage-rust-${{ github.run_id }}-
+            coverage-rust-
+
+      - name: Restore WebUI Coverage from Cache
+        if: contains(inputs.project_type, 'WebUI') || contains(inputs.project_type, 'Web')
+        uses: actions/cache@v5
+        continue-on-error: true
+        with:
+          path: cross-compile/www/coverage
+          key: coverage-webui-${{ github.run_id }}-${{ hashFiles('cross-compile/www/**/*.{ts,tsx}') }}
+          restore-keys: |
+            coverage-webui-${{ github.run_id }}-
+            coverage-webui-
+
+      - name: Verify Coverage Reports
+        env:
+          PROJECT_TYPE: ${{ inputs.project_type }}
+        run: |
+          echo "Checking for coverage reports before SonarCloud scan..."
+          echo "Project type: ${PROJECT_TYPE}"
+
+          # Check Rust coverage if project type indicates Rust
+          if [[ "${PROJECT_TYPE}" == *"Rust"* ]] || [[ "${PROJECT_TYPE}" == *"rust"* ]]; then
+            if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
+              echo "✅ Found Rust coverage: cross-compile/onvif-rust/coverage/cobertura.xml"
+              ls -lh cross-compile/onvif-rust/coverage/
+            else
+              echo "⚠️ Rust coverage not found (expected for project type: ${PROJECT_TYPE})"
+            fi
+          else
+            echo "ℹ️ Skipping Rust coverage check (not applicable for project type: ${PROJECT_TYPE})"
+          fi
+
+          # Check WebUI coverage if project type indicates WebUI
+          if [[ "${PROJECT_TYPE}" == *"WebUI"* ]] || [[ "${PROJECT_TYPE}" == *"webui"* ]] || [[ "${PROJECT_TYPE}" == *"Web"* ]]; then
+            if [ -f "cross-compile/www/coverage/lcov.info" ]; then
+              echo "✅ Found WebUI coverage: cross-compile/www/coverage/lcov.info"
+              ls -lh cross-compile/www/coverage/
+            else
+              echo "⚠️ WebUI coverage not found (expected for project type: ${PROJECT_TYPE})"
+            fi
+          else
+            echo "ℹ️ Skipping WebUI coverage check (not applicable for project type: ${PROJECT_TYPE})"
+          fi
+
+      - name: SonarQube Scan
+        id: sonar-scan
+        continue-on-error: true
+        uses: sonarsource/sonarqube-scan-action@v7.0.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Check if scannerwork exists
+        id: check-scannerwork
+        if: always()
+        run: |
+          if [ -f ".scannerwork/report-task.txt" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Found report-task.txt"
+            cat .scannerwork/report-task.txt
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ report-task.txt not found - scan may have failed"
+          fi
+
+      - name: SonarQube Quality Gate Check
+        id: sonar-quality-gate
+        if: steps.check-scannerwork.outputs.exists == 'true'
+        continue-on-error: true
+        uses: sonarsource/sonarqube-quality-gate-action@v1.2.0
+        with:
+          pollingTimeoutSec: 600
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Skip Quality Gate (scan failed)
+        if: steps.check-scannerwork.outputs.exists != 'true'
+        id: skip-quality-gate
+        run: |
+          echo "⚠️ Skipping quality gate check - SonarQube scan did not complete successfully"
+          echo "The scan may have failed or the report-task.txt file was not generated"
+          echo "status=skipped" >> $GITHUB_OUTPUT
+
+      - name: Generate and Upload SARIF Report
+        shell: bash
+        run: |
+          echo "### 🎯 SonarQube Issues Report"
+          # Fetch open issues from SonarCloud API
+          ISSUES=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" "https://sonarcloud.io/api/issues/search?componentKeys=kkrzysztofik_Anyka_ak3918_hacking_journey&resolved=false&ps=100")
+          COUNT=$(echo $ISSUES | jq '.total')
+
+          # Initialize SARIF structure
+          cat > sonar-report.sarif <<EOF
+          {
+            "\$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [
+              {
+                "tool": {
+                  "driver": {
+                    "name": "SonarCloud",
+                    "rules": []
+                  }
+                },
+                "results": []
+              }
+            ]
+          }
+          EOF
+
+          if [ "$COUNT" -eq "0" ]; then
+            echo "✅ No open issues found in SonarQube."
+          else
+            echo "⚠️ Found $COUNT open issues."
+            # Format issues into a readable list for CLI
+            echo $ISSUES | jq -r '.issues[] | "- [\(.severity)] \(.message) (\(.component):\(.line))"'
+
+            # Transform SonarCloud JSON to SARIF results using jq
+            echo $ISSUES | jq '
+              def map_severity(s):
+                if s == "BLOCKER" or s == "CRITICAL" then "error"
+                elif s == "MAJOR" then "warning"
+                else "note" end;
+
+              .issues | map({
+                "ruleId": .rule,
+                "level": map_severity(.severity),
+                "message": { "text": .message },
+                "locations": [{
+                  "physicalLocation": {
+                    "artifactLocation": { "uri": .component | sub("^kkrzysztofik_Anyka_ak3918_hacking_journey:"; "") },
+                    "region": { "startLine": (.line // 1) }
+                  }
+                }]
+              })
+            ' > sarif-results.json
+
+            # Merge results into the main SARIF file (use --slurpfile as --argfile is deprecated)
+            jq --slurpfile results sarif-results.json '.runs[0].results = $results[0]' sonar-report.sarif > sonar-report-final.sarif
+            mv sonar-report-final.sarif sonar-report.sarif
+          fi
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Upload SonarCloud Scan Results to GitHub
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: sonar-report.sarif

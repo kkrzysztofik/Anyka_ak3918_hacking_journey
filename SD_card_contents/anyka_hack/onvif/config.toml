@@ -100,6 +100,10 @@ auth_enabled = false
 # Authentication realm
 realm = "ONVIF Camera"
 
+# Path to static file root (relative to binary or absolute)
+static_root = "www"
+
+
 # ============================================================================
 # Logging Configuration
 # ============================================================================

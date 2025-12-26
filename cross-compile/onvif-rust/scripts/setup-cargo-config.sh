@@ -10,7 +10,7 @@ CARGO_CONFIG_DIR="${PROJECT_DIR}/.cargo"
 CARGO_CONFIG="${CARGO_CONFIG_DIR}/config.toml"
 
 # Detect environment
-if [ -d "/opt/arm-anykav200-crosstool-ng" ]; then
+if [[ -d "/opt/arm-anykav200-crosstool-ng" ]]; then
     # Docker environment
     TOOLCHAIN_BASE="/opt/arm-anykav200-crosstool-ng"
 else
@@ -61,4 +61,9 @@ AR_armv5te_unknown_linux_uclibceabi = "${TOOLCHAIN_BASE}/bin/arm-unknown-linux-u
 linker = "/usr/bin/gcc"
 EOF
 
-echo "Generated ${CARGO_CONFIG} for environment: $(test -d /opt/arm-anykav200-crosstool-ng && echo 'Docker' || echo 'Local')"
+if [[ -d /opt/arm-anykav200-crosstool-ng ]]; then
+    ENV_TYPE="Docker"
+else
+    ENV_TYPE="Local"
+fi
+echo "Generated ${CARGO_CONFIG} for environment: ${ENV_TYPE}"

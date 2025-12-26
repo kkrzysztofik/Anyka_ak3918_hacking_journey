@@ -4,7 +4,6 @@
  * @author ONVIF Camera Web Interface
  * @date 2024
  */
-
 import type { CameraConfig } from '../types';
 
 /**
@@ -14,7 +13,7 @@ export const DEFAULT_CAMERA_CONFIG: CameraConfig = {
   ip: '192.168.1.100',
   onvifPort: 8080,
   snapshotPort: 3000,
-  rtspPort: 554
+  rtspPort: 554,
 };
 
 /**
@@ -27,16 +26,18 @@ export const createCameraConfig = (ip: string): CameraConfig => {
   if (!ip || typeof ip !== 'string') {
     throw new Error('IP address is required and must be a string');
   }
-  
+
   // Basic IP validation
-  const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+  // Octet pattern: 0-255 (25[0-5] | 2[0-4]\d | 1?\d\d? | [01]?\d\d?)
+  const octet = String.raw`(?:25[0-5]|2[0-4]\d|[01]?\d\d?)`;
+  const ipRegex = new RegExp(String.raw`^(?:${octet}\.){3}${octet}$`);
   if (!ipRegex.test(ip)) {
     throw new Error('Invalid IP address format');
   }
-  
+
   return {
     ...DEFAULT_CAMERA_CONFIG,
-    ip
+    ip,
   };
 };
 
@@ -48,39 +49,45 @@ export const createCameraConfig = (ip: string): CameraConfig => {
  */
 export const createCustomCameraConfig = (config: Partial<CameraConfig>): CameraConfig => {
   const validatedConfig = { ...DEFAULT_CAMERA_CONFIG };
-  
+
   if (config.ip) {
     if (typeof config.ip !== 'string') {
-      throw new Error('IP address must be a string');
+      throw new TypeError('IP address must be a string');
     }
-    const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+    // Octet pattern: 0-255 (25[0-5] | 2[0-4]\d | 1?\d\d? | [01]?\d\d?)
+    const octet = String.raw`(?:25[0-5]|2[0-4]\d|[01]?\d\d?)`;
+    const ipRegex = new RegExp(String.raw`^(?:${octet}\.){3}${octet}$`);
     if (!ipRegex.test(config.ip)) {
       throw new Error('Invalid IP address format');
     }
     validatedConfig.ip = config.ip;
   }
-  
+
   if (config.onvifPort !== undefined) {
     if (typeof config.onvifPort !== 'number' || config.onvifPort < 1 || config.onvifPort > 65535) {
       throw new Error('ONVIF port must be a number between 1 and 65535');
     }
     validatedConfig.onvifPort = config.onvifPort;
   }
-  
+
   if (config.snapshotPort !== undefined) {
-    if (typeof config.snapshotPort !== 'number' || config.snapshotPort < 1 || config.snapshotPort > 65535) {
+    if (
+      typeof config.snapshotPort !== 'number' ||
+      config.snapshotPort < 1 ||
+      config.snapshotPort > 65535
+    ) {
       throw new Error('Snapshot port must be a number between 1 and 65535');
     }
     validatedConfig.snapshotPort = config.snapshotPort;
   }
-  
+
   if (config.rtspPort !== undefined) {
     if (typeof config.rtspPort !== 'number' || config.rtspPort < 1 || config.rtspPort > 65535) {
       throw new Error('RTSP port must be a number between 1 and 65535');
     }
     validatedConfig.rtspPort = config.rtspPort;
   }
-  
+
   return validatedConfig;
 };
 

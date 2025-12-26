@@ -97,14 +97,21 @@ pub fn log_platform_message(level: PlatformLogLevel, message: &str) {
 /// The caller must ensure:
 /// - `message` is a valid, null-terminated C string
 /// - `message` remains valid for the duration of the call
+///
+/// # Null Safety
+///
+/// - The function explicitly checks for null pointer before dereferencing
+/// - Returns -1 error code if null pointer is detected
+/// - NOSONAR: S1193 - Null check is performed before pointer dereference
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ak_print_wrapper(level: c_int, message: *const c_char) -> c_int {
     if message.is_null() {
         return -1;
     }
 
-    // SAFETY: We've checked that message is not null.
-    // Caller guarantees it's a valid C string.
+    // SAFETY: We've checked that message is not null above.
+    // The C FFI boundary guarantees this is a valid C string pointer.
+    // CStr::from_ptr is safe for non-null pointers to null-terminated strings.
     let c_str = unsafe { CStr::from_ptr(message) };
 
     match c_str.to_str() {

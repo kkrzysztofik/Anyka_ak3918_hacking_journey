@@ -23,19 +23,27 @@ NC='\033[0m' # No Color
 
 # Logging functions
 log_info() {
-  echo -e "${BLUE}[INFO]${NC} $1"
+  local message="$1"
+  echo -e "${BLUE}[INFO]${NC} ${message}"
+  return 0
 }
 
 log_success() {
-  echo -e "${GREEN}[SUCCESS]${NC} $1"
+  local message="$1"
+  echo -e "${GREEN}[SUCCESS]${NC} ${message}"
+  return 0
 }
 
 log_error() {
-  echo -e "${RED}[ERROR]${NC} $1"
+  local message="$1"
+  echo -e "${RED}[ERROR]${NC} ${message}" >&2
+  return 0
 }
 
 log_warn() {
-  echo -e "${YELLOW}[WARN]${NC} $1"
+  local message="$1"
+  echo -e "${YELLOW}[WARN]${NC} ${message}"
+  return 0
 }
 
 # Parse command line arguments
@@ -70,8 +78,9 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      log_error "Unknown option: $1"
-      echo "Use --help for usage information"
+      local unknown_arg="$1"
+      log_error "Unknown option: ${unknown_arg}"
+      echo "Use --help for usage information" >&2
       exit 1
       ;;
   esac
@@ -105,7 +114,7 @@ log_info "Using cargo: $(which cargo)"
 log_info "Using rustc: $(which rustc)"
 
 # Clean if requested
-if [ "${CLEAN}" = true ]; then
+if [[ "${CLEAN}" = true ]]; then
   log_info "Cleaning build artifacts..."
   cargo clean
 fi
@@ -113,7 +122,7 @@ fi
 # Build the project
 log_info "Building for target ${TARGET} in ${BUILD_MODE} mode..."
 
-if [ "${BUILD_MODE}" = "release" ]; then
+if [[ "${BUILD_MODE}" = "release" ]]; then
   cargo build --release --target "${TARGET}"
   BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/release/onvif-rust"
 else
@@ -122,7 +131,7 @@ else
 fi
 
 # Check if build succeeded
-if [ ! -f "${BINARY_PATH}" ]; then
+if [[ ! -f "${BINARY_PATH}" ]]; then
   log_error "Build failed - binary not found at expected location: ${BINARY_PATH}"
   exit 1
 fi

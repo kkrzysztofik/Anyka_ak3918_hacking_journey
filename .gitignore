@@ -241,3 +241,6 @@ verbose
 off
 
 cross-compile/ONVIF-Device-Manager/**/*
+
+# Snyk Security Extension - AI Rules (auto-generated)
+.github/instructions/snyk_rules.instructions.md

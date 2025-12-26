@@ -1,0 +1,145 @@
+name: Shared Security Scans
+
+on:
+  workflow_call:
+    inputs:
+      project_type:
+        required: true
+        type: string
+      working_directory:
+        required: true
+        type: string
+    outputs:
+      snyk_code_status:
+        description: "Status of Snyk Code scan"
+        value: ${{ jobs.snyk-code.outputs.snyk_code_status }}
+      snyk_oss_status:
+        description: "Status of Snyk Open Source scan"
+        value: ${{ jobs.snyk-oss.outputs.snyk_oss_status }}
+      snyk_issues:
+        description: "Number of Snyk issues found"
+        value: ${{ jobs.snyk-oss.outputs.snyk_issues }}
+    secrets:
+      SNYK_TOKEN:
+        required: true
+
+jobs:
+  snyk-code:
+    name: Snyk Code Analysis
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    outputs:
+      snyk_code_status: ${{ steps.snyk-code.outcome }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Setup Snyk CLI
+        uses: snyk/actions/setup@v1.0.0
+
+      - name: Run Snyk Code Test
+        id: snyk-code
+        continue-on-error: true
+        working-directory: ${{ inputs.working_directory }}
+        run: snyk code test --sarif-file-output=snyk-code.sarif
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Check if Snyk Code SARIF exists
+        id: check-snyk-code-sarif
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        run: |
+          if [ -f "${WORKING_DIRECTORY}/snyk-code.sarif" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Snyk Code SARIF to GitHub
+        if: steps.check-snyk-code-sarif.outputs.exists == 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: ${{ inputs.working_directory }}/snyk-code.sarif
+
+  snyk-oss:
+    name: Snyk Open Source
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    outputs:
+      snyk_oss_status: ${{ steps.snyk-oss.outcome }}
+      snyk_issues: ${{ steps.count-issues.outputs.snyk_issues }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: ${{ inputs.working_directory }}/package-lock.json
+
+      - name: Install dependencies
+        if: hashFiles(format('{0}/package.json', inputs.working_directory)) != ''
+        working-directory: ${{ inputs.working_directory }}
+        run: npm ci
+
+      - name: Run Snyk OSS for Node.js
+        id: snyk-oss
+        if: hashFiles(format('{0}/package.json', inputs.working_directory)) != ''
+        uses: snyk/actions/node@v1.0.0
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --file=${{ inputs.working_directory }}/package.json --sarif-file-output=${{ inputs.working_directory }}/snyk-oss.sarif
+          command: test
+
+      - name: Check if Snyk OSS SARIF exists
+        id: check-snyk-oss-sarif
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        run: |
+          if [ -f "${WORKING_DIRECTORY}/snyk-oss.sarif" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Snyk OSS SARIF to GitHub
+        if: steps.check-snyk-oss-sarif.outputs.exists == 'true'
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: ${{ inputs.working_directory }}/snyk-oss.sarif
+
+      - name: Count Snyk Issues
+        id: count-issues
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        run: |
+          # Count issues from SARIF file if it exists
+          if [ -f "${WORKING_DIRECTORY}/snyk-oss.sarif" ]; then
+            SNYK_ISSUES=$(jq '.runs[0].results | length' "${WORKING_DIRECTORY}/snyk-oss.sarif" 2>/dev/null || echo "0")
+          else
+            SNYK_ISSUES=0
+          fi
+          echo "snyk_issues=$SNYK_ISSUES" >> $GITHUB_OUTPUT
+
+      - name: Run Snyk Monitor
+        if: steps.snyk-oss.outcome == 'success' || steps.snyk-oss.outcome == 'failure'
+        uses: snyk/actions/node@v1.0.0
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --file=${{ inputs.working_directory }}/package.json
+          command: monitor

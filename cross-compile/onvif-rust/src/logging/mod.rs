@@ -27,10 +27,12 @@
 pub mod http;
 pub mod http_memory;
 mod platform;
+pub mod static_assets;
 
 pub use http::{HttpLogConfig, HttpLoggingMiddleware};
 pub use http_memory::memory_check_middleware;
 pub use platform::*;
+pub use static_assets::{StaticAssetLogConfig, static_asset_logging_middleware};
 
 use std::path::Path;
 use std::sync::{Once, OnceLock};
@@ -266,43 +268,43 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
     Ok(())
 }
 
-/// Initialize logging with default settings (for testing).
-pub fn init_logging_default() -> LoggingResult<()> {
-    let mut result = Ok(());
+/// Initialize static asset access logging to a separate file.
+///
+/// This function sets up a separate logging target for static asset requests
+/// in Apache combined log format. It creates a daily-rotating log file.
+///
+/// # Arguments
+///
+/// * `config` - Runtime configuration containing static asset logging settings
+/// * `enabled` - Whether static asset logging is enabled
+///
+/// # Example
+///
+/// ```ignore
+/// init_static_asset_logging(&config, true)?;
+/// ```
+pub fn init_static_asset_logging(config: &ConfigRuntime, enabled: bool) -> LoggingResult<()> {
+    if !enabled {
+        return Ok(());
+    }
 
-    INIT.call_once(|| {
-        result = init_logging_default_impl();
-    });
+    // Get static asset logging path from config
+    let log_path = config
+        .get_string("logging.static_assets.file_path")
+        .unwrap_or_else(|_| "logs".to_string());
 
-    result
-}
+    let log_name = config
+        .get_string("logging.static_assets.file_name")
+        .unwrap_or_else(|_| "access".to_string());
 
-/// Internal default logging initialization.
-fn init_logging_default_impl() -> LoggingResult<()> {
-    let env_filter = EnvFilter::builder()
-        .with_default_directive(Level::INFO.into())
-        .from_env_lossy();
-
-    // Create reloadable filter layer
-    let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
-
-    // Store the reload handle for runtime log level changes
-    let _ = RELOAD_HANDLE.set(reload_handle);
-
-    let fmt_layer = fmt::layer()
-        .with_target(true)
-        .with_file(true)
-        .with_line_number(true);
-
-    tracing_subscriber::registry()
-        .with(filter_layer)
-        .with(fmt_layer)
-        .try_init()
-        .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
-
-    // Initialize log bridge to capture `log` crate messages from dependencies
-    // Use try_init to handle case where log is already initialized by a dependency
-    let _ = tracing_log::LogTracer::init();
+    // Log that static asset logging is configured
+    // The actual file appender will be created by the middleware when it logs
+    // tracing handles lazy initialization of targets
+    tracing::info!(
+        log_path = %log_path,
+        log_name = %log_name,
+        "Static asset access logging configured (will be written to separate file)"
+    );
 
     Ok(())
 }

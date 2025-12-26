@@ -320,34 +320,43 @@ mod ffi_impl {
         Ok(())
     }
 
+    /// RAII Wrapper for Video Input Device
+    pub struct VideoInput {
+        handle: *mut c_void,
+    }
+
+    // SAFETY: The handle is thread-safe within the SDK context for these operations
+    unsafe impl Send for VideoInput {}
+    unsafe impl Sync for VideoInput {}
+
+    impl Drop for VideoInput {
+        fn drop(&mut self) {
+            if !self.handle.is_null() {
+                // SAFETY: We own the handle and checking for null
+                unsafe {
+                    ak_vi_close(self.handle);
+                }
+            }
+        }
+    }
+
     /// Open video input device.
-    pub fn video_input_open(device: VideoDevice) -> AnykaResult<*mut c_void> {
-        // SAFETY: Calling FFI function with valid device ID
+    ///
+    /// # Safety
+    ///
+    /// The transmute is safe because:
+    /// - `device.0` is a u32 containing only values 0 (DEV0)
+    /// - Casting to i32 preserves the bit pattern for values in this range
+    /// - The resulting i32 matches the C enum `video_dev_type` representation exactly
+    /// - `video_dev_type` is a C enum with variants 0-N, and our value 0 is valid
+    /// - NOSONAR: S5343 - transmute is safe for enum value mapping with known bounds
+    pub fn video_input_open(device: VideoDevice) -> AnykaResult<VideoInput> {
         let sdk_device: video_dev_type = unsafe { std::mem::transmute(device.0 as i32) };
         let handle = unsafe { ak_vi_open(sdk_device) };
         if handle.is_null() {
             Err(AnykaError::ResourceUnavailable("Video input".to_string()))
         } else {
-            Ok(handle)
-        }
-    }
-
-    /// Close video input device.
-    /// Close video input device.
-    ///
-    /// # Safety
-    /// Caller must ensure `handle` was obtained from `video_input_open` and is valid for the
-    /// underlying SDK. Passing an arbitrary or freed pointer is undefined behavior.
-    pub unsafe fn video_input_close(handle: *mut c_void) -> AnykaResult<()> {
-        if handle.is_null() {
-            return Err(AnykaError::InvalidParameter("Null handle".to_string()));
-        }
-        // SAFETY: Calling FFI function with valid handle
-        let result = unsafe { ak_vi_close(handle) };
-        if result < 0 {
-            Err(AnykaError::SdkError(result))
-        } else {
-            Ok(())
+            Ok(VideoInput { handle })
         }
     }
 
@@ -374,8 +383,16 @@ mod ffi_impl {
     }
 
     /// Turn PTZ motor in a direction.
+    ///
+    /// # Safety
+    ///
+    /// The transmute is safe because:
+    /// - `to_direction_code()` returns only values 1, 2, 3, 4 (Left, Right, Up, Down)
+    /// - These values match the C enum `ptz_turn_direction` variants exactly
+    /// - The i32 bit pattern is reinterpreted as the C enum type
+    /// - All possible return values are valid C enum variants
+    /// - NOSONAR: S5343 - transmute is safe for enum value mapping with known bounds
     pub fn ptz_turn(direction: PtzDirection) -> AnykaResult<()> {
-        // SAFETY: Calling FFI function with valid direction code
         let sdk_direction: ptz_turn_direction =
             unsafe { std::mem::transmute(direction.to_direction_code()) };
         let result = unsafe { ak_drv_ptz_turn(sdk_direction, 0) };
@@ -398,8 +415,16 @@ mod ffi_impl {
     }
 
     /// Get PTZ motor step position.
+    ///
+    /// # Safety
+    ///
+    /// The transmute is safe because:
+    /// - `to_device_id()` returns only values 0 (Horizontal) or 1 (Vertical)
+    /// - These values match the C enum `ptz_device` variants exactly
+    /// - The i32 bit pattern is reinterpreted as the C enum type
+    /// - All possible return values are valid C enum variants
+    /// - NOSONAR: S5343 - transmute is safe for enum value mapping with known bounds
     pub fn ptz_get_position(motor: PtzMotor) -> AnykaResult<i32> {
-        // SAFETY: Calling FFI function with valid motor ID
         let sdk_motor: ptz_device = unsafe { std::mem::transmute(motor.to_device_id()) };
         let result = unsafe { ak_drv_ptz_get_step_pos(sdk_motor) };
         if result < 0 {
@@ -416,7 +441,7 @@ pub use ffi_impl::*;
 // Stub implementations for native builds (testing)
 #[cfg(use_stubs)]
 mod stub_impl {
-    use super::*;
+    use super::{AnykaResult, LogLevel, PtzDirection, PtzMotor, VideoDevice};
 
     /// Print a message (stub - does nothing).
     pub fn ak_log(_level: LogLevel, _message: &str) -> AnykaResult<()> {

@@ -1,27 +1,37 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@500&display=swap"
+      rel="stylesheet"
+    />
     <title>ONVIF Camera Web Interface</title>
-    
-    <!-- React CDN - Production -->
-    <script crossorigin src="https://unpkg.com/react@19.1.0/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@19.1.0/umd/react-dom.production.min.js"></script>
-    
+
     <style>
+      /* Reset margin/padding to eliminate white borders */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
       /* Loading styles */
       .loading-container {
         display: flex;
         align-items: center;
         justify-content: center;
         height: 100vh;
-        background: #1a1a1a;
+        background: #0d0d0d;
         color: #fff;
-        font-family: Arial, sans-serif;
+        font-family: 'Inter', sans-serif;
+        font-weight: 500;
       }
-      
+
       .loading-spinner {
         width: 40px;
         height: 40px;
@@ -31,13 +41,19 @@
         animation: spin 1s linear infinite;
         margin-right: 15px;
       }
-      
+
       @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
+        0% {
+          transform: rotate(0deg);
+        }
+
+        100% {
+          transform: rotate(360deg);
+        }
       }
     </style>
   </head>
+
   <body>
     <div id="root">
       <!-- Loading fallback while React loads -->
@@ -46,7 +62,7 @@
         <span>Loading application...</span>
       </div>
     </div>
-    
+
     <!-- Application bundle will be loaded here -->
     <script type="module" src="/src/main.tsx"></script>
   </body>

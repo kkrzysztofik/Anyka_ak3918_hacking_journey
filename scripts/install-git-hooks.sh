@@ -10,7 +10,7 @@ mkdir -p "$HOOKS_DIR"
 chmod +x "$HOOKS_DIR" || true
 
 # Ensure our pre-commit is executable
-if [ -f "$HOOKS_DIR/pre-commit" ]; then
+if [[ -f "$HOOKS_DIR/pre-commit" ]]; then
   chmod +x "$HOOKS_DIR/pre-commit" || true
 fi
 

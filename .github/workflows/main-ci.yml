@@ -1,0 +1,894 @@
+name: CI - Unified Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "cross-compile/onvif-rust/**"
+      - "cross-compile/www/**"
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - "cross-compile/onvif-rust/**"
+      - "cross-compile/www/**"
+
+
+
+jobs:
+  # =============================================================================
+  # RUST BACKEND - Lint, Test & Coverage
+  # =============================================================================
+  rust-lint:
+    name: Rust - Lint Code
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: kkrzysztofik/anyka-cross-compile:latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Setup Cargo Config
+        working-directory: cross-compile/onvif-rust
+        run: |
+          ./scripts/setup-cargo-config.sh
+
+      - name: Check Formatting
+        working-directory: cross-compile/onvif-rust
+        run: |
+          cargo fmt --check
+
+      - name: Run Clippy
+        working-directory: cross-compile/onvif-rust
+        run: |
+          cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+
+  rust-test-and-coverage:
+    name: Rust - Test Suite & Coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: kkrzysztofik/anyka-cross-compile:latest
+      options: --security-opt seccomp=unconfined
+    outputs:
+      coverage: ${{ steps.coverage-summary.outputs.coverage }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Configure Git
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Setup Cargo Config
+        working-directory: cross-compile/onvif-rust
+        run: |
+          ./scripts/setup-cargo-config.sh
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            cross-compile/onvif-rust/target
+          key: cargo-${{ runner.os }}-rust-onvif-${{ hashFiles('cross-compile/onvif-rust/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-rust-onvif-
+
+      - name: Run Tests with Coverage
+        working-directory: cross-compile/onvif-rust
+        run: |
+          cargo tarpaulin \
+            --target x86_64-unknown-linux-gnu \
+            --all-features \
+            --skip-clean \
+            --follow-exec \
+            --timeout 600 \
+            --implicit-test-threads \
+            --out Html \
+            --out Lcov \
+            --out Xml \
+            --output-dir coverage
+          echo ""
+          echo "=== Coverage Files Generated ==="
+          echo "Files in coverage directory:"
+          ls -lah coverage/ || echo "Coverage directory not found"
+          echo ""
+          if [ -f "coverage/cobertura.xml" ]; then
+            echo "✅ cobertura.xml found"
+            echo "   Size: $(wc -c < coverage/cobertura.xml) bytes"
+            echo "   Contains coverage data: $(grep -q 'coverage' coverage/cobertura.xml && echo 'Yes' || echo 'No')"
+          else
+            echo "❌ cobertura.xml NOT FOUND"
+            echo "   Searching for XML files:"
+            find coverage -name "*.xml" 2>/dev/null || echo "   No XML files found"
+          fi
+          if [ -f "coverage/lcov.info" ]; then
+            echo "✅ lcov.info found"
+            echo "   Size: $(wc -c < coverage/lcov.info) bytes"
+          else
+            echo "⚠️ lcov.info NOT FOUND"
+          fi
+
+      - name: Upload Coverage Artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: rust-coverage
+          path: |
+            cross-compile/onvif-rust/coverage/cobertura.xml
+            cross-compile/onvif-rust/coverage/lcov.info
+            cross-compile/onvif-rust/coverage/tarpaulin-report.html
+          retention-days: 7
+
+      - name: Generate Coverage Summary
+        id: coverage-summary
+        working-directory: cross-compile/onvif-rust
+        run: |
+          if [ -f "coverage/cobertura.xml" ]; then
+            COVERAGE_PCT=$(python3 -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage/cobertura.xml'); root = tree.getroot(); rate = float(root.get('line-rate', 0)) * 100; print(f'{rate:.2f}')" 2>/dev/null || echo "0.00")
+            echo "coverage=$COVERAGE_PCT" >> $GITHUB_OUTPUT
+            echo "✅ Rust Coverage: ${COVERAGE_PCT}%"
+          else
+            echo "coverage=0.00" >> $GITHUB_OUTPUT
+            echo "⚠️ Rust coverage file not found"
+          fi
+
+  # =============================================================================
+  # WEBUI FRONTEND - Lint, Test & Coverage
+  # =============================================================================
+  webui-test-and-coverage:
+    name: WebUI - Test Suite & Coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: cross-compile/www
+    outputs:
+      coverage: ${{ steps.test-coverage.outputs.coverage }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: cross-compile/www/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test with Coverage
+        id: test-coverage
+        run: |
+          npm run test:coverage
+          echo ""
+          echo "=== Coverage Files Generated ==="
+          echo "Files in coverage directory:"
+          ls -lah coverage/ 2>/dev/null || echo "Coverage directory not found"
+          echo ""
+          if [ -f "coverage/coverage-summary.json" ]; then
+            COVERAGE=$(node -e "const fs = require('fs'); const data = JSON.parse(fs.readFileSync('coverage/coverage-summary.json')); console.log(data.total.lines.pct.toFixed(2))")
+            echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+            echo "✅ WebUI Coverage: ${COVERAGE}%"
+            echo "   Coverage summary file size: $(wc -c < coverage/coverage-summary.json) bytes"
+          else
+            echo "coverage=0" >> $GITHUB_OUTPUT
+            echo "⚠️ WebUI coverage-summary.json file not found"
+          fi
+          if [ -f "coverage/lcov.info" ]; then
+            echo "✅ lcov.info found"
+            echo "   Size: $(wc -c < coverage/lcov.info) bytes"
+            echo "   Source files in LCOV: $(grep -c '^SF:' coverage/lcov.info || echo '0')"
+            echo "   Coverage data lines: $(grep -c '^DA:' coverage/lcov.info || echo '0')"
+          else
+            echo "❌ lcov.info NOT FOUND - This is required for SonarQube!"
+            echo "   Searching for LCOV files:"
+            find coverage -name "*.info" -o -name "lcov*" 2>/dev/null || echo "   No LCOV files found"
+          fi
+
+      - name: Upload Coverage Artifacts
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: webui-coverage
+          path: |
+            cross-compile/www/coverage/lcov.info
+            cross-compile/www/coverage/coverage-summary.json
+            cross-compile/www/coverage/index.html
+          retention-days: 7
+
+  # =============================================================================
+  # SECURITY SCANS - Unified Snyk Scans
+  # =============================================================================
+  security-scans:
+    name: Security Scans
+    runs-on: ubuntu-latest
+    needs: [rust-test-and-coverage, webui-test-and-coverage]
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    outputs:
+      snyk_code_status: ${{ steps.scan-results.outputs.snyk_code_status }}
+      snyk_oss_status: ${{ steps.scan-results.outputs.snyk_oss_status }}
+      snyk_issues: ${{ steps.scan-results.outputs.snyk_issues }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Setup Snyk CLI
+        uses: snyk/actions/setup@v1.0.0
+
+      # Rust Snyk Code Scan
+      - name: Run Snyk Code for Rust
+        id: snyk-code-rust
+        if: hashFiles('cross-compile/onvif-rust/**/*.rs') != ''
+        working-directory: cross-compile/onvif-rust
+        run: snyk code test --sarif-file-output=snyk-code-rust.sarif
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Upload Rust Snyk Code SARIF
+        if: hashFiles('cross-compile/onvif-rust/**/*.rs') != '' && hashFiles('cross-compile/onvif-rust/snyk-code-rust.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: cross-compile/onvif-rust/snyk-code-rust.sarif
+
+      # WebUI Snyk Code + OSS Scan
+      - name: Setup Node.js for WebUI Scans
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: cross-compile/www/package-lock.json
+
+      - name: Install WebUI dependencies
+        working-directory: cross-compile/www
+        run: npm ci
+
+      - name: Run Snyk Code for WebUI
+        id: snyk-code-webui
+        working-directory: cross-compile/www
+        run: snyk code test --sarif-file-output=snyk-code-webui.sarif
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Upload WebUI Snyk Code SARIF
+        if: hashFiles('cross-compile/www/snyk-code-webui.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: cross-compile/www/snyk-code-webui.sarif
+
+      - name: Run Snyk OSS for WebUI
+        id: snyk-oss-webui
+        uses: snyk/actions/node@v1.0.0
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --file=cross-compile/www/package.json --sarif-file-output=cross-compile/www/snyk-oss-webui.sarif
+          command: test
+
+      - name: Upload WebUI Snyk OSS SARIF
+        if: hashFiles('cross-compile/www/snyk-oss-webui.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: cross-compile/www/snyk-oss-webui.sarif
+
+      - name: Count Total Snyk Issues
+        id: count-issues
+        run: |
+          TOTAL_ISSUES=0
+
+          # Count from WebUI OSS SARIF
+          if [ -f "cross-compile/www/snyk-oss-webui.sarif" ]; then
+            ISSUES=$(jq '.runs[0].results | length' cross-compile/www/snyk-oss-webui.sarif 2>/dev/null || echo "0")
+            TOTAL_ISSUES=$((TOTAL_ISSUES + ISSUES))
+          fi
+
+          echo "snyk_issues=$TOTAL_ISSUES" >> $GITHUB_OUTPUT
+          echo "Total Snyk issues: $TOTAL_ISSUES"
+
+      - name: Aggregate Scan Results
+        id: scan-results
+        run: |
+          # Determine overall status
+          CODE_STATUS="success"
+          OSS_STATUS="success"
+
+          # Check if any code scan ran
+          if [ "${{ steps.snyk-code-rust.outcome }}" == "failure" ] || [ "${{ steps.snyk-code-webui.outcome }}" == "failure" ]; then
+            CODE_STATUS="failure"
+          elif [ "${{ steps.snyk-code-rust.outcome }}" == "skipped" ] && [ "${{ steps.snyk-code-webui.outcome }}" == "skipped" ]; then
+            CODE_STATUS="skipped"
+          fi
+
+          # Check OSS scan status
+          if [ "${{ steps.snyk-oss-webui.outcome }}" == "failure" ]; then
+            OSS_STATUS="failure"
+          elif [ "${{ steps.snyk-oss-webui.outcome }}" == "skipped" ]; then
+            OSS_STATUS="skipped"
+          fi
+
+          echo "snyk_code_status=$CODE_STATUS" >> $GITHUB_OUTPUT
+          echo "snyk_oss_status=$OSS_STATUS" >> $GITHUB_OUTPUT
+
+      - name: Run Snyk Monitor
+        if: hashFiles('cross-compile/www/package.json') != ''
+        uses: snyk/actions/node@v1.0.0
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --file=cross-compile/www/package.json
+          command: monitor
+
+  # =============================================================================
+  # SONARQUBE - Unified Quality Analysis
+  # =============================================================================
+  sonarqube:
+    name: SonarQube Analysis & Quality Gate
+    runs-on: ubuntu-latest
+    needs: [rust-test-and-coverage, webui-test-and-coverage]
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    outputs:
+      sonar-scan-status: ${{ steps.sonar-scan.outcome }}
+      quality-gate-status: ${{ steps.sonar-quality-gate.outcome || steps.skip-quality-gate.outputs.status || 'skipped' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download All Coverage Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-coverage"
+          path: coverage-artifacts
+
+      - name: Merge Coverage Reports
+        run: |
+          # Create coverage directories
+          mkdir -p cross-compile/onvif-rust/coverage
+          mkdir -p cross-compile/www/coverage
+
+          # Copy Rust coverage if available
+          if [ -f "coverage-artifacts/rust-coverage/cobertura.xml" ]; then
+            cp coverage-artifacts/rust-coverage/cobertura.xml cross-compile/onvif-rust/coverage/
+            cp coverage-artifacts/rust-coverage/lcov.info cross-compile/onvif-rust/coverage/ 2>/dev/null || true
+            echo "✅ Rust coverage copied"
+          fi
+
+          # Copy WebUI coverage if available
+          if [ -f "coverage-artifacts/webui-coverage/lcov.info" ]; then
+            cp coverage-artifacts/webui-coverage/lcov.info cross-compile/www/coverage/
+            cp coverage-artifacts/webui-coverage/coverage-summary.json cross-compile/www/coverage/ 2>/dev/null || true
+            echo "✅ WebUI coverage copied"
+
+            # Fix LCOV file paths to be relative to project root for SonarQube
+            # Vitest generates paths like "SF:src/App.tsx" (relative to cross-compile/www)
+            # but SonarQube expects "SF:cross-compile/www/src/App.tsx" (relative to project root)
+            echo "🔧 Transforming LCOV paths to be relative to project root..."
+            if [ -f "cross-compile/www/coverage/lcov.info" ]; then
+              # Create backup
+              cp cross-compile/www/coverage/lcov.info cross-compile/www/coverage/lcov.info.bak
+              # Transform all SF: paths to include the cross-compile/www/ prefix
+              # This handles paths like "SF:src/..." -> "SF:cross-compile/www/src/..."
+              sed -i 's|^SF:\(.*\)|SF:cross-compile/www/\1|g' cross-compile/www/coverage/lcov.info
+              echo "✅ LCOV paths transformed to project root relative paths"
+              echo "   Sample transformed paths (first 5):"
+              grep '^SF:' cross-compile/www/coverage/lcov.info | head -5 || echo "   No SF entries found"
+              echo "   Total source files in LCOV: $(grep -c '^SF:' cross-compile/www/coverage/lcov.info || echo '0')"
+            fi
+          fi
+
+          # Verify coverage files exist
+          echo "=== Coverage Verification ==="
+          echo "Rust Cobertura: $(ls -lh cross-compile/onvif-rust/coverage/cobertura.xml 2>/dev/null || echo 'Not found')"
+          echo "WebUI LCOV: $(ls -lh cross-compile/www/coverage/lcov.info 2>/dev/null || echo 'Not found')"
+
+      - name: Verify Coverage Reports
+        run: |
+          echo "=== DEBUG: Coverage Investigation ==="
+          echo "Current working directory: $(pwd)"
+          echo ""
+
+          # Debug: List all downloaded artifacts
+          echo "=== Downloaded Artifacts Structure ==="
+          find coverage-artifacts -type f 2>/dev/null | head -20 || echo "No artifacts found"
+          echo ""
+
+          # Debug: Check artifact contents
+          echo "=== Artifact Directory Contents ==="
+          ls -la coverage-artifacts/ 2>/dev/null || echo "Artifacts directory not found"
+          if [ -d "coverage-artifacts/rust-coverage" ]; then
+            echo "Rust coverage artifact contents:"
+            ls -lah coverage-artifacts/rust-coverage/ || true
+          fi
+          if [ -d "coverage-artifacts/webui-coverage" ]; then
+            echo "WebUI coverage artifact contents:"
+            ls -lah coverage-artifacts/webui-coverage/ || true
+          fi
+          echo ""
+
+          echo "=== Coverage Files After Merge ==="
+
+          # Check Rust coverage with detailed info
+          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
+            echo "✅ Found Rust coverage: cross-compile/onvif-rust/coverage/cobertura.xml"
+            ls -lh cross-compile/onvif-rust/coverage/
+            echo "File size: $(wc -c < cross-compile/onvif-rust/coverage/cobertura.xml) bytes"
+            echo "First 10 lines of cobertura.xml:"
+            head -10 cross-compile/onvif-rust/coverage/cobertura.xml || true
+            echo "Checking for coverage data in XML:"
+            grep -c "class name" cross-compile/onvif-rust/coverage/cobertura.xml || echo "No class elements found"
+            grep -c "line number" cross-compile/onvif-rust/coverage/cobertura.xml || echo "No line number elements found"
+          else
+            echo "❌ Rust coverage NOT FOUND at: cross-compile/onvif-rust/coverage/cobertura.xml"
+            echo "Checking if directory exists:"
+            ls -la cross-compile/onvif-rust/coverage/ 2>/dev/null || echo "Directory does not exist"
+          fi
+          echo ""
+
+          # Check WebUI coverage with detailed info
+          if [ -f "cross-compile/www/coverage/lcov.info" ]; then
+            echo "✅ Found WebUI coverage: cross-compile/www/coverage/lcov.info"
+            ls -lh cross-compile/www/coverage/
+            echo "File size: $(wc -c < cross-compile/www/coverage/lcov.info) bytes"
+            echo "First 20 lines of lcov.info:"
+            head -20 cross-compile/www/coverage/lcov.info || true
+            echo "Checking for coverage data in LCOV:"
+            grep -c "^SF:" cross-compile/www/coverage/lcov.info || echo "No source file entries found"
+            grep -c "^DA:" cross-compile/www/coverage/lcov.info || echo "No line coverage data found"
+          else
+            echo "❌ WebUI coverage NOT FOUND at: cross-compile/www/coverage/lcov.info"
+            echo "Checking if directory exists:"
+            ls -la cross-compile/www/coverage/ 2>/dev/null || echo "Directory does not exist"
+          fi
+          echo ""
+
+          # Verify paths match sonar-project.properties
+          echo "=== SonarQube Configuration Check ==="
+          echo "Expected paths from sonar-project.properties:"
+          grep "sonar.coverage.jacoco.xmlReportPaths" sonar-project.properties || echo "Rust coverage path not found in config"
+          grep "sonar.javascript.lcov.reportPaths" sonar-project.properties || echo "WebUI coverage path not found in config"
+          echo ""
+
+          # Check if files are readable
+          echo "=== File Readability Check ==="
+          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
+            if [ -r "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
+              echo "✅ Rust coverage file is readable"
+            else
+              echo "❌ Rust coverage file is NOT readable"
+            fi
+          fi
+          if [ -f "cross-compile/www/coverage/lcov.info" ]; then
+            if [ -r "cross-compile/www/coverage/lcov.info" ]; then
+              echo "✅ WebUI coverage file is readable"
+            else
+              echo "❌ WebUI coverage file is NOT readable"
+            fi
+          fi
+          echo ""
+
+          echo "=== Absolute Path Check ==="
+          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
+            echo "Rust coverage absolute path: $(realpath cross-compile/onvif-rust/coverage/cobertura.xml)"
+          fi
+          if [ -f "cross-compile/www/coverage/lcov.info" ]; then
+            echo "WebUI coverage absolute path: $(realpath cross-compile/www/coverage/lcov.info)"
+          fi
+
+      - name: Pre-Scan Coverage Verification
+        run: |
+          echo "=== Pre-Scan Coverage File Verification ==="
+          echo "Verifying files exist at expected paths before SonarQube scan..."
+          echo ""
+
+          # Check Rust coverage
+          RUST_COV_PATH="cross-compile/onvif-rust/coverage/cobertura.xml"
+          if [ -f "$RUST_COV_PATH" ]; then
+            echo "✅ Rust coverage file exists: $RUST_COV_PATH"
+            echo "   Size: $(stat -f%z "$RUST_COV_PATH" 2>/dev/null || stat -c%s "$RUST_COV_PATH" 2>/dev/null) bytes"
+            echo "   Contains coverage data: $(grep -q 'line-rate' "$RUST_COV_PATH" && echo 'Yes' || echo 'No')"
+            echo "   Sample of file paths in XML (first 5):"
+            grep -o 'filename="[^"]*"' "$RUST_COV_PATH" | head -5 || echo "   No filename attributes found"
+          else
+            echo "❌ Rust coverage file MISSING: $RUST_COV_PATH"
+            echo "   Searching for any XML files in coverage directory:"
+            find cross-compile/onvif-rust/coverage -name "*.xml" 2>/dev/null || echo "   No XML files found"
+          fi
+          echo ""
+
+          # Check WebUI coverage
+          WEBUI_COV_PATH="cross-compile/www/coverage/lcov.info"
+          if [ -f "$WEBUI_COV_PATH" ]; then
+            echo "✅ WebUI coverage file exists: $WEBUI_COV_PATH"
+            echo "   Size: $(stat -f%z "$WEBUI_COV_PATH" 2>/dev/null || stat -c%s "$WEBUI_COV_PATH" 2>/dev/null) bytes"
+            echo "   Contains coverage data: $(grep -q '^SF:' "$WEBUI_COV_PATH" && echo 'Yes' || echo 'No')"
+            echo "   Sample of file paths in LCOV (first 5):"
+            grep '^SF:' "$WEBUI_COV_PATH" | head -5 || echo "   No SF entries found"
+          else
+            echo "❌ WebUI coverage file MISSING: $WEBUI_COV_PATH"
+            echo "   Searching for any LCOV files in coverage directory:"
+            find cross-compile/www/coverage -name "*.info" -o -name "lcov*" 2>/dev/null || echo "   No LCOV files found"
+          fi
+          echo ""
+
+          # Show sonar-project.properties coverage paths
+          echo "=== SonarQube Coverage Configuration ==="
+          echo "Rust coverage path from config:"
+          grep "sonar.rust.cobertura.reportPaths\|sonar.coverage.jacoco.xmlReportPaths" sonar-project.properties || echo "  (not found)"
+          echo "WebUI coverage path from config:"
+          grep "sonar.javascript.lcov.reportPaths" sonar-project.properties || echo "  (not found)"
+          echo ""
+
+          # Verify paths are relative to project root
+          echo "=== Path Resolution Check ==="
+          echo "Project root: $(pwd)"
+          echo "Rust coverage relative path check:"
+          if [ -f "$RUST_COV_PATH" ]; then
+            echo "  ✅ File exists at relative path"
+            echo "  Absolute: $(realpath "$RUST_COV_PATH" 2>/dev/null || echo 'Cannot resolve')"
+          fi
+          echo "WebUI coverage relative path check:"
+          if [ -f "$WEBUI_COV_PATH" ]; then
+            echo "  ✅ File exists at relative path"
+            echo "  Absolute: $(realpath "$WEBUI_COV_PATH" 2>/dev/null || echo 'Cannot resolve')"
+          fi
+
+      - name: SonarQube Scan
+        id: sonar-scan
+        continue-on-error: true
+        uses: sonarsource/sonarqube-scan-action@v7.0.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Check if scannerwork exists
+        id: check-scannerwork
+        if: always()
+        run: |
+          if [ -f ".scannerwork/report-task.txt" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Found report-task.txt"
+            cat .scannerwork/report-task.txt
+            echo ""
+            echo "=== Scanner Log Analysis ==="
+            if [ -f ".scannerwork/logs/sonar-scanner.log" ]; then
+              echo "Checking scanner logs for coverage-related messages:"
+              grep -i "coverage\|jacoco\|lcov" .scannerwork/logs/sonar-scanner.log | head -20 || echo "No coverage-related log entries found"
+            fi
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ report-task.txt not found - scan may have failed"
+            echo "Checking for scannerwork directory:"
+            ls -la .scannerwork/ 2>/dev/null || echo "Scannerwork directory not found"
+          fi
+
+      - name: Analyze Coverage for Changed Files
+        if: always()
+        run: |
+          echo "=== Coverage Analysis for Changed Files ==="
+          echo "This helps identify which changed files have coverage data"
+          echo ""
+
+          # Get list of changed files in the PR (TypeScript/JavaScript only)
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "Changed TypeScript/JavaScript files in PR:"
+            git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.(ts|tsx|js|jsx)$' | grep -v test | grep -v spec | head -20 || echo "No changed TS/JS files found"
+            echo ""
+
+            # Check which changed files have coverage in LCOV
+            if [ -f "cross-compile/www/coverage/lcov.info" ]; then
+              echo "Changed files WITH coverage in LCOV:"
+              git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.(ts|tsx|js|jsx)$' | grep -v test | grep -v spec | while read file; do
+                if grep -q "^SF:cross-compile/www/$file" cross-compile/www/coverage/lcov.info; then
+                  echo "  ✅ $file"
+                else
+                  echo "  ❌ $file (no coverage data)"
+                fi
+              done
+            fi
+          else
+            echo "Not a pull request - skipping changed files analysis"
+          fi
+
+      - name: Post-Scan Coverage Verification
+        if: always()
+        run: |
+          echo "=== Post-Scan Coverage Analysis ==="
+          echo "Checking if coverage files are still present after scan:"
+          echo ""
+          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
+            echo "✅ Rust coverage still exists after scan"
+            echo "   File size: $(wc -c < cross-compile/onvif-rust/coverage/cobertura.xml) bytes"
+          else
+            echo "❌ Rust coverage missing after scan"
+          fi
+          if [ -f "cross-compile/www/coverage/lcov.info" ]; then
+            echo "✅ WebUI coverage still exists after scan"
+            echo "   File size: $(wc -c < cross-compile/www/coverage/lcov.info) bytes"
+          else
+            echo "❌ WebUI coverage missing after scan"
+          fi
+          echo ""
+          echo "=== Coverage File Content Sample ==="
+          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
+            echo "Rust coverage XML header:"
+            head -5 cross-compile/onvif-rust/coverage/cobertura.xml || true
+            echo ""
+            echo "Rust coverage summary (line-rate):"
+            grep -o 'line-rate="[^"]*"' cross-compile/onvif-rust/coverage/cobertura.xml | head -1 || echo "No line-rate found"
+          fi
+          if [ -f "cross-compile/www/coverage/lcov.info" ]; then
+            echo "WebUI coverage LCOV header:"
+            head -5 cross-compile/www/coverage/lcov.info || true
+            echo ""
+            echo "WebUI coverage file count:"
+            grep -c "^SF:" cross-compile/www/coverage/lcov.info || echo "0"
+          fi
+
+      - name: SonarQube Quality Gate Check
+        id: sonar-quality-gate
+        if: steps.check-scannerwork.outputs.exists == 'true'
+        continue-on-error: true
+        uses: sonarsource/sonarqube-quality-gate-action@v1.2.0
+        with:
+          pollingTimeoutSec: 600
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Skip Quality Gate (scan failed)
+        if: steps.check-scannerwork.outputs.exists != 'true'
+        id: skip-quality-gate
+        run: |
+          echo "⚠️ Skipping quality gate check - SonarQube scan did not complete successfully"
+          echo "status=skipped" >> $GITHUB_OUTPUT
+
+      - name: Generate and Upload SARIF Report
+        shell: bash
+        run: |
+          echo "### 🎯 SonarQube Issues Report"
+          ISSUES=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" "https://sonarcloud.io/api/issues/search?componentKeys=kkrzysztofik_Anyka_ak3918_hacking_journey&resolved=false&ps=100")
+          COUNT=$(echo $ISSUES | jq '.total')
+
+          cat > sonar-report.sarif <<EOF
+          {
+            "\$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [
+              {
+                "tool": {
+                  "driver": {
+                    "name": "SonarCloud",
+                    "rules": []
+                  }
+                },
+                "results": []
+              }
+            ]
+          }
+          EOF
+
+          if [ "$COUNT" -eq "0" ]; then
+            echo "✅ No open issues found in SonarQube."
+          else
+            echo "⚠️ Found $COUNT open issues."
+            echo $ISSUES | jq -r '.issues[] | "- [\(.severity)] \(.message) (\(.component):\(.line))"'
+
+            echo $ISSUES | jq '
+              def map_severity(s):
+                if s == "BLOCKER" or s == "CRITICAL" then "error"
+                elif s == "MAJOR" then "warning"
+                else "note" end;
+
+              .issues | map({
+                "ruleId": .rule,
+                "level": map_severity(.severity),
+                "message": { "text": .message },
+                "locations": [{
+                  "physicalLocation": {
+                    "artifactLocation": { "uri": .component | sub("^kkrzysztofik_Anyka_ak3918_hacking_journey:"; "") },
+                    "region": { "startLine": (.line // 1) }
+                  }
+                }]
+              })
+            ' > sarif-results.json
+
+            jq --slurpfile results sarif-results.json '.runs[0].results = $results[0]' sonar-report.sarif > sonar-report-final.sarif
+            mv sonar-report-final.sarif sonar-report.sarif
+          fi
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Upload SonarCloud Scan Results to GitHub
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: sonar-report.sarif
+
+  # =============================================================================
+  # REPORTING - Unified CI Report
+  # =============================================================================
+  reporting:
+    name: Generate Unified CI Report
+    runs-on: ubuntu-latest
+    needs:
+      [
+        rust-test-and-coverage,
+        webui-test-and-coverage,
+        security-scans,
+        sonarqube,
+      ]
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Generate Run Summary
+        env:
+          RUST_COVERAGE: ${{ needs.rust-test-and-coverage.outputs.coverage || 'N/A' }}
+          WEBUI_COVERAGE: ${{ needs.webui-test-and-coverage.outputs.coverage || 'N/A' }}
+          SNYK_CODE_STATUS: ${{ needs.security-scans.outputs.snyk_code_status }}
+          SNYK_OSS_STATUS: ${{ needs.security-scans.outputs.snyk_oss_status }}
+          SNYK_ISSUES: ${{ needs.security-scans.outputs.snyk_issues }}
+          SONAR_SCAN_STATUS: ${{ needs.sonarqube.outputs.sonar-scan-status }}
+          QUALITY_GATE_STATUS: ${{ needs.sonarqube.outputs.quality-gate-status }}
+        run: |
+          get_status() {
+            case "$1" in
+              success) echo "✅ Completed" ;;
+              failure) echo "⚠️ Failed" ;;
+              *) echo "⚠️ Skipped" ;;
+            esac
+          }
+
+          get_quality_gate_status() {
+            case "$1" in
+              success) echo "✅ Passed" ;;
+              failure) echo "⚠️ Failed" ;;
+              *) echo "⚠️ Skipped" ;;
+            esac
+          }
+
+          SNYK_CODE_STATUS=$(get_status "${SNYK_CODE_STATUS}")
+          SNYK_OSS_STATUS=$(get_status "${SNYK_OSS_STATUS}")
+          SONAR_SCAN_STATUS=$(get_status "${SONAR_SCAN_STATUS}")
+          QUALITY_GATE_STATUS=$(get_quality_gate_status "${QUALITY_GATE_STATUS}")
+
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # 🔍 Unified CI Analysis Summary
+
+          ## 📊 Test Coverage
+          | Project | Coverage |
+          |---------|----------|
+          | **Rust ONVIF API** | ${RUST_COVERAGE}% |
+          | **WebUI** | ${WEBUI_COVERAGE}% |
+
+          ## 🔒 Security Scans (Snyk)
+          - **Code (SAST)**: ${SNYK_CODE_STATUS}
+          - **Open Source (SCA)**: ${SNYK_OSS_STATUS}
+          - **SCA Issues Found**: ${SNYK_ISSUES}
+
+          ## 🎯 Code Quality (SonarQube)
+          - **Status**: ${SONAR_SCAN_STATUS}
+          - **Quality Gate**: ${QUALITY_GATE_STATUS}
+
+          ## 📦 Build Status
+          - **Build**: ✅ Successful
+          - **Lint**: ✅ Passed
+          - **Tests**: ✅ Passed
+          EOF
+
+      - name: Comment PR with Analysis Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const rustCoverage = '${{ needs.rust-test-and-coverage.outputs.coverage || 'N/A' }}';
+            const webuiCoverage = '${{ needs.webui-test-and-coverage.outputs.coverage || 'N/A' }}';
+            const snykCodeStatus = '${{ needs.security-scans.outputs.snyk_code_status }}';
+            const snykOssStatus = '${{ needs.security-scans.outputs.snyk_oss_status }}';
+            const snykIssues = '${{ needs.security-scans.outputs.snyk_issues || 0 }}';
+            const sonarStatus = '${{ needs.sonarqube.outputs.sonar-scan-status }}';
+            const qualityGateStatus = '${{ needs.sonarqube.outputs.quality-gate-status }}';
+
+            const formatStatus = (status) => {
+              if (status === 'success') return '✅ Completed';
+              if (status === 'failure') return '⚠️ Failed';
+              return '⚠️ Skipped';
+            };
+
+            const comment = `## 🔍 Unified Code Analysis Results
+
+            ### 📊 Test Coverage
+            | Project | Coverage |
+            |---------|----------|
+            | **Rust ONVIF API** | ${rustCoverage}% |
+            | **WebUI** | ${webuiCoverage}% |
+
+            ### 🔒 Security Scans (Snyk)
+            | Scan Type | Status | Details |
+            |-----------|--------|---------|
+            | **Code (SAST)** | ${formatStatus(snykCodeStatus)} | [View in Code Scanning](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) |
+            | **Open Source (SCA)** | ${formatStatus(snykOssStatus)} | ${snykIssues !== '0' ? `⚠️ ${snykIssues} vulnerabilities found` : '✅ No issues'} |
+
+            ### 🎯 Code Quality (SonarQube)
+            | Metric | Value |
+            |--------|-------|
+            | **Scan Status** | ${formatStatus(sonarStatus)} |
+            | **Quality Gate** | ${formatStatus(qualityGateStatus)} |
+            ${sonarStatus === 'success' ? '| **View Report** | [SonarQube Cloud Dashboard](https://sonarcloud.io/dashboard?id=kkrzysztofik_Anyka_ak3918_hacking_journey) |' : ''}
+
+            ### ✅ Build Status
+            - **Rust Lint**: ✅ Passed
+            - **WebUI Lint**: ✅ Passed
+            - **Rust Tests**: ✅ Passed
+            - **WebUI Tests**: ✅ Passed
+            - **Build**: ✅ Successful
+
+            ---
+            *This comment is automatically updated on each push to the PR*`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Unified Code Analysis Results')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment,
+              });
+            }

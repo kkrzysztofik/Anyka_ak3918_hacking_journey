@@ -23,15 +23,21 @@ TARGET_SPEC="${BUILD_DIR}/${TARGET_NAME}.json"
 
 # Logging functions
 log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    local message="$1"
+    echo -e "${GREEN}[INFO]${NC} ${message}"
+    return 0
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    local message="$1"
+    echo -e "${YELLOW}[WARN]${NC} ${message}"
+    return 0
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    local message="$1"
+    echo -e "${RED}[ERROR]${NC} ${message}" >&2
+    return 0
 }
 
 # Check dependencies
@@ -63,7 +69,7 @@ check_dependencies() {
         fi
     done
 
-    if [ ${#missing[@]} -ne 0 ]; then
+    if [[ ${#missing[@]} -ne 0 ]]; then
         log_error "Missing dependencies: ${missing[*]}"
         log_info "Install with: sudo apt-get install -y ${missing[*]}"
         exit 1
@@ -71,29 +77,30 @@ check_dependencies() {
 
     # Check for LLVM
     local llvm_config="${INSTALL_DIR}/bin/llvm-config"
-    if [ ! -f "${llvm_config}" ]; then
+    if [[ ! -f "${llvm_config}" ]]; then
         log_error "LLVM not found at: ${llvm_config}"
         log_error "Please build LLVM first using build_llvm.sh"
         exit 1
     fi
 
     # Check for target spec file
-    if [ ! -f "${TARGET_SPEC}" ]; then
+    if [[ ! -f "${TARGET_SPEC}" ]]; then
         log_error "Target specification not found: ${TARGET_SPEC}"
         exit 1
     fi
 
     log_info "All dependencies satisfied"
+    return 0
 }
 
 # Clone Rust source
 clone_rust() {
     log_info "Cloning Rust source (version ${RUST_VERSION})..."
 
-    if [ -d "${RUST_SRC_DIR}" ]; then
+    if [[ -d "${RUST_SRC_DIR}" ]]; then
         log_warn "Rust source directory exists, skipping clone"
         log_info "To re-clone, remove: ${RUST_SRC_DIR}"
-        return
+        return 0
     fi
 
     cd "${BUILD_DIR}"
@@ -126,15 +133,15 @@ add_target_spec() {
     local target_spec_file="${target_spec_dir}/${target_module_name}.rs"
 
     # Create directory if it doesn't exist
-    if [ ! -d "${target_spec_dir}" ]; then
+    if [[ ! -d "${target_spec_dir}" ]]; then
         log_error "Target spec directory not found: ${target_spec_dir}"
         log_error "Rust source structure may have changed. Please check the Rust version."
         exit 1
     fi
 
-    if [ -f "${target_spec_file}" ]; then
+    if [[ -f "${target_spec_file}" ]]; then
         log_warn "Target spec already exists, skipping"
-        return
+        return 0
     fi
 
     # Convert JSON to Rust code (modern Rust structure)
@@ -219,7 +226,7 @@ create_rust_config() {
     local system_rustc=$(which rustc 2>/dev/null || echo "rustc")
     local system_cargo=$(which cargo 2>/dev/null || echo "cargo")
 
-    if [ "${system_rustc}" = "rustc" ] || [ "${system_cargo}" = "cargo" ]; then
+    if [[ "${system_rustc}" = "rustc" ]] || [[ "${system_cargo}" = "cargo" ]]; then
         log_warn "System rustc/cargo not found in PATH"
         log_warn "Rust bootstrap requires an existing Rust toolchain"
         log_warn "Install with: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
@@ -292,7 +299,7 @@ EOF
     log_info "Rust config.toml created: ${config_file}"
 
     # Ensure install directory is writable
-    if [ ! -w "${INSTALL_DIR}" ]; then
+    if [[ ! -w "${INSTALL_DIR}" ]]; then
         log_warn "Install directory is not writable. Attempting to fix permissions..."
         chmod -R u+w "${INSTALL_DIR}" 2>/dev/null || {
             log_warn "Could not fix permissions automatically. Trying with sudo..."
@@ -303,6 +310,7 @@ EOF
             }
         }
     fi
+    return 0
 }
 
 # Build Rust
@@ -325,7 +333,7 @@ build_rust() {
 
     # Set LLVM_CONFIG for custom LLVM (must be absolute path)
     export LLVM_CONFIG="${INSTALL_DIR}/bin/llvm-config"
-    if [ ! -f "${LLVM_CONFIG}" ]; then
+    if [[ ! -f "${LLVM_CONFIG}" ]]; then
         log_error "LLVM_CONFIG not found: ${LLVM_CONFIG}"
         exit 1
     fi
@@ -372,6 +380,7 @@ EOF
     }
 
     log_info "Rust build completed successfully!"
+    return 0
 }
 
 # Install Rust
@@ -394,7 +403,7 @@ install_rust() {
 
     # Set LLVM_CONFIG for custom LLVM (must be absolute path)
     export LLVM_CONFIG="${INSTALL_DIR}/bin/llvm-config"
-    if [ ! -f "${LLVM_CONFIG}" ]; then
+    if [[ ! -f "${LLVM_CONFIG}" ]]; then
         log_error "LLVM_CONFIG not found: ${LLVM_CONFIG}"
         exit 1
     fi
@@ -413,7 +422,7 @@ install_rust() {
 
     # Verify cargo was installed
     local cargo_path="${INSTALL_DIR}/bin/cargo"
-    if [ ! -f "${cargo_path}" ]; then
+    if [[ ! -f "${cargo_path}" ]]; then
         log_warn "cargo not found at ${cargo_path} after install"
         log_info "Attempting to install cargo explicitly..."
 
@@ -424,7 +433,7 @@ install_rust() {
 
             # Check if cargo was built but not installed
             local cargo_build="${RUST_SRC_DIR}/build/${TARGET_NAME}/stage2-tools-bin/cargo"
-            if [ -f "${cargo_build}" ]; then
+            if [[ -f "${cargo_build}" ]]; then
                 log_info "Found cargo in build directory, copying to install location..."
                 cp "${cargo_build}" "${cargo_path}"
                 chmod +x "${cargo_path}"
@@ -438,6 +447,7 @@ install_rust() {
     fi
 
     log_info "Rust installed successfully!"
+    return 0
 }
 
 # Verify installation
@@ -445,7 +455,7 @@ verify_installation() {
     log_info "Verifying Rust installation..."
 
     local rustc_path="${INSTALL_DIR}/bin/rustc"
-    if [ ! -f "${rustc_path}" ]; then
+    if [[ ! -f "${rustc_path}" ]]; then
         log_error "rustc not found at expected location: ${rustc_path}"
         exit 1
     fi
@@ -461,6 +471,7 @@ verify_installation() {
     fi
 
     log_info "Rust verification completed"
+    return 0
 }
 
 # Main execution

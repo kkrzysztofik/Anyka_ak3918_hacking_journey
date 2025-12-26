@@ -559,6 +559,10 @@ impl Application {
         let http_verbose = config_runtime
             .get_bool("logging.http_verbose")
             .unwrap_or(false);
+        let static_root = config_runtime
+            .get_string("server.static_root")
+            .ok()
+            .or_else(|| Some("www".to_string()));
 
         let server_config = OnvifServerConfig {
             bind_address,
@@ -566,6 +570,7 @@ impl Application {
             request_timeout_secs: request_timeout,
             max_body_size,
             enable_cors: false,
+            static_root,
             http_verbose,
         };
 
@@ -652,18 +657,31 @@ impl Application {
         tracing::info!("Application running. Press Ctrl+C to stop.");
 
         // Wait for shutdown signal
+        // Wait for shutdown signal
         let ctrl_c = async {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("Failed to install Ctrl+C handler");
+            if let Err(e) = tokio::signal::ctrl_c().await {
+                tracing::error!("Failed to install Ctrl+C handler: {}", e);
+                // We don't panic here, just log. The termination signal might still work.
+                // Or we could return an error effectively, but we are inside an async block.
+                // For this structure, logging and proceeding (effectively waiting forever on this branch)
+                // is safer than crashing, though maybe we want to exit.
+                // Let's rely on the other signal or just log.
+                // To be strictly correct according to review:
+                std::future::pending::<()>().await;
+            }
         };
 
         #[cfg(unix)]
         let terminate = async {
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("Failed to install SIGTERM handler")
-                .recv()
-                .await;
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(mut signal) => {
+                    signal.recv().await;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to install SIGTERM handler: {}", e);
+                    std::future::pending::<()>().await;
+                }
+            }
         };
 
         #[cfg(not(unix))]

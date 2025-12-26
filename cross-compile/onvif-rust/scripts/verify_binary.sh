@@ -17,21 +17,21 @@ BINARY_PATH=""
 
 # Check release build first
 RELEASE_BINARY="${PROJECT_DIR}/target/armv5te-unknown-linux-uclibceabi/release/${BINARY_NAME}"
-if [ -f "${RELEASE_BINARY}" ]; then
+if [[ -f "${RELEASE_BINARY}" ]]; then
   BINARY_PATH="${RELEASE_BINARY}"
 else
   # Check debug build
   DEBUG_BINARY="${PROJECT_DIR}/target/armv5te-unknown-linux-uclibceabi/debug/${BINARY_NAME}"
-  if [ -f "${DEBUG_BINARY}" ]; then
+  if [[ -f "${DEBUG_BINARY}" ]]; then
     BINARY_PATH="${DEBUG_BINARY}"
   else
     # Try alternative target name
     ALT_RELEASE="${PROJECT_DIR}/target/arm-unknown-linux-uclibcgnueabi/release/${BINARY_NAME}"
-    if [ -f "${ALT_RELEASE}" ]; then
+    if [[ -f "${ALT_RELEASE}" ]]; then
       BINARY_PATH="${ALT_RELEASE}"
     else
       ALT_DEBUG="${PROJECT_DIR}/target/arm-unknown-linux-uclibcgnueabi/debug/${BINARY_NAME}"
-      if [ -f "${ALT_DEBUG}" ]; then
+      if [[ -f "${ALT_DEBUG}" ]]; then
         BINARY_PATH="${ALT_DEBUG}"
       fi
     fi
@@ -39,8 +39,11 @@ else
 fi
 
 # Allow override via command line
-if [ -n "$1" ] && [ -f "$1" ]; then
-  BINARY_PATH="$1"
+if [[ $# -gt 0 ]]; then
+  BINARY_ARG="$1"
+  if [[ -n "${BINARY_ARG}" ]] && [[ -f "${BINARY_ARG}" ]]; then
+    BINARY_PATH="${BINARY_ARG}"
+  fi
 fi
 
 # Colors for output
@@ -56,27 +59,35 @@ TESTS_FAILED=0
 
 # Logging functions
 log_info() {
-  echo -e "${BLUE}[INFO]${NC} $1"
+  local message="$1"
+  echo -e "${BLUE}[INFO]${NC} ${message}"
+  return 0
 }
 
 log_success() {
-  echo -e "${GREEN}[PASS]${NC} $1"
+  local message="$1"
+  echo -e "${GREEN}[PASS]${NC} ${message}"
   TESTS_PASSED=$((TESTS_PASSED + 1))
+  return 0
 }
 
 log_error() {
-  echo -e "${RED}[FAIL]${NC} $1"
+  local message="$1"
+  echo -e "${RED}[FAIL]${NC} ${message}"
   TESTS_FAILED=$((TESTS_FAILED + 1))
+  return 0
 }
 
 log_warn() {
-  echo -e "${YELLOW}[WARN]${NC} $1"
+  local message="$1"
+  echo -e "${YELLOW}[WARN]${NC} ${message}"
+  return 0
 }
 
 # Test 1: Check if binary exists
 test_binary_exists() {
   log_info "Test 1: Checking if binary exists..."
-  if [ -f "${BINARY_PATH}" ]; then
+  if [[ -f "${BINARY_PATH}" ]]; then
     log_success "Binary found at: ${BINARY_PATH}"
     return 0
   else
@@ -119,7 +130,7 @@ test_elf_architecture() {
   fi
 
   MACHINE=$(readelf -h "${BINARY_PATH}" 2>/dev/null | grep "Machine:" | awk '{print $2}')
-  if [ "${MACHINE}" = "ARM" ]; then
+  if [[ "${MACHINE}" = "ARM" ]]; then
     log_success "ELF Machine: ${MACHINE}"
     return 0
   else
@@ -170,7 +181,7 @@ test_no_vfp_instructions() {
   # Disassemble and search for VFP instructions
   VFP_COUNT=$(${OBJDUMP} -d "${BINARY_PATH}" 2>/dev/null | grep -E "vldr|vstr|vmrs|vmsr|vadd\.f|vmul\.f|vmov.*s[0-9]|vmov.*d[0-9]" | wc -l)
 
-  if [ "${VFP_COUNT}" -eq 0 ]; then
+  if [[ "${VFP_COUNT}" -eq 0 ]]; then
     log_success "No VFP instructions found (correct for ARMv5TEJ)"
     return 0
   else
@@ -201,7 +212,7 @@ test_no_neon_instructions() {
   # Disassemble and search for NEON instructions
   NEON_COUNT=$(${OBJDUMP} -d "${BINARY_PATH}" 2>/dev/null | grep -E "vld1|vst1|vadd|vsub|vmul|vqadd|vqsub|vshl|vshr" | grep -v "vadd\.f\|vsub\.f\|vmul\.f" | wc -l)
 
-  if [ "${NEON_COUNT}" -eq 0 ]; then
+  if [[ "${NEON_COUNT}" -eq 0 ]]; then
     log_success "No NEON instructions found (correct for ARMv5TEJ)"
     return 0
   else
@@ -234,7 +245,7 @@ test_abi_attributes() {
   # Check for ABI FP attributes
   ABI_ATTRS=$(${READELF} -A "${BINARY_PATH}" 2>/dev/null | grep -i "Tag_ABI_FP" || true)
 
-  if [ -n "${ABI_ATTRS}" ]; then
+  if [[ -n "${ABI_ATTRS}" ]]; then
     log_success "ABI FP attributes found:"
     echo "${ABI_ATTRS}" | sed 's/^/  /'
   else
@@ -263,7 +274,7 @@ test_dynamic_linking() {
 
   DYNAMIC=$(${READELF} -d "${BINARY_PATH}" 2>/dev/null | grep -q "NEEDED" && echo "dynamic" || echo "static")
 
-  if [ "${DYNAMIC}" = "static" ]; then
+  if [[ "${DYNAMIC}" = "static" ]]; then
     log_success "Binary is statically linked (good for deployment)"
   else
     log_info "Binary is dynamically linked"
@@ -278,7 +289,7 @@ test_dynamic_linking() {
 test_binary_size() {
   log_info "Test 9: Checking binary size..."
 
-  if [ ! -f "${BINARY_PATH}" ]; then
+  if [[ ! -f "${BINARY_PATH}" ]]; then
     return 1
   fi
 
@@ -288,7 +299,7 @@ test_binary_size() {
   log_info "Binary size: ${SIZE_BYTES} bytes (${SIZE_MB} MB)"
 
   # Warn if binary is very large (> 10MB)
-  if [ "${SIZE_BYTES}" -gt 10485760 ]; then
+  if [[ "${SIZE_BYTES}" -gt 10485760 ]]; then
     log_warn "Binary is larger than 10MB - consider optimizing"
   else
     log_success "Binary size is reasonable"
@@ -300,7 +311,7 @@ test_binary_size() {
 # Main execution
 main() {
   echo "=== Verifying ONVIF Rust Binary for ARMv5TEJ ==="
-  if [ -n "${BINARY_PATH}" ]; then
+  if [[ -n "${BINARY_PATH}" ]]; then
     echo "Binary path: ${BINARY_PATH}"
   else
     echo "Binary path: (not found - will search)"
@@ -328,7 +339,7 @@ main() {
   echo "Tests passed: ${TESTS_PASSED}"
   echo "Tests failed: ${TESTS_FAILED}"
 
-  if [ ${TESTS_FAILED} -eq 0 ]; then
+  if [[ ${TESTS_FAILED} -eq 0 ]]; then
     echo ""
     log_success "All tests passed! Binary is correctly configured for ARMv5TEJ."
     return 0

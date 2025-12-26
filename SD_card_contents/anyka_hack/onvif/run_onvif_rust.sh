@@ -15,7 +15,7 @@ start_onvif_rust() {
   export LD_LIBRARY_PATH=/mnt/anyka_hack/lib:/mnt/anyka_hack/onvif/lib:$LD_LIBRARY_PATH
 
   # Check if configuration file exists
-  if [ ! -f /mnt/anyka_hack/onvif/config.toml ]; then
+  if [[ ! -f /mnt/anyka_hack/onvif/config.toml ]]; then
     log WARN "Configuration file not found: /mnt/anyka_hack/onvif/config.toml"
     # Optionally create a default or exit
   fi
@@ -24,11 +24,12 @@ start_onvif_rust() {
   /mnt/anyka_hack/onvif/onvif-rust /mnt/anyka_hack/onvif/config.toml
   rc=$?
 
-  if [ $rc -ne 0 ]; then
+  if [[ $rc -ne 0 ]]; then
     log ERROR "ONVIF Rust server (onvif-rust) exited with code $rc"
   else
     log INFO 'ONVIF Rust server (onvif-rust) exited normally'
   fi
+  return 0
 }
 
 # Check if ONVIF Rust server is already running
@@ -42,7 +43,7 @@ fi
 
 # Validate shared library directory
 SHARED_LIB_DIR="/mnt/anyka_hack/lib"
-if [ ! -d "${SHARED_LIB_DIR}" ]; then
+if [[ ! -d "${SHARED_LIB_DIR}" ]]; then
   log ERROR "Shared library directory not found at: ${SHARED_LIB_DIR}"
   exit 1
 fi

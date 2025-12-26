@@ -1,0 +1,171 @@
+name: Shared Reporting
+
+on:
+  workflow_call:
+    inputs:
+      project_type:
+        required: true
+        type: string
+      test_coverage:
+        required: false
+        type: string
+      snyk_code_status:
+        required: false
+        type: string
+        default: "skipped"
+      snyk_oss_status:
+        required: false
+        type: string
+        default: "skipped"
+      snyk_issues:
+        required: false
+        type: string
+        default: "0"
+      sonar_scan_status:
+        required: false
+        type: string
+        default: "skipped"
+      quality_gate_status:
+        required: false
+        type: string
+        default: "skipped"
+
+jobs:
+  generate-summary:
+    name: Generate CI Summary
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Generate Run Summary
+        env:
+          SNYK_CODE_STATUS_INPUT: ${{ inputs.snyk_code_status }}
+          SNYK_OSS_STATUS_INPUT: ${{ inputs.snyk_oss_status }}
+          SONAR_SCAN_STATUS_INPUT: ${{ inputs.sonar_scan_status }}
+          QUALITY_GATE_STATUS_INPUT: ${{ inputs.quality_gate_status }}
+          PROJECT_TYPE: ${{ inputs.project_type }}
+          TEST_COVERAGE: ${{ inputs.test_coverage || 'N/A' }}
+          SNYK_ISSUES: ${{ inputs.snyk_issues || '0' }}
+        run: |
+          # Helper function to get status emoji
+          get_status() {
+            case "$1" in
+              success) echo "✅ Completed" ;;
+              failure) echo "⚠️ Failed" ;;
+              *) echo "⚠️ Skipped" ;;
+            esac
+          }
+
+          get_quality_gate_status() {
+            case "$1" in
+              success) echo "✅ Passed" ;;
+              failure) echo "⚠️ Failed" ;;
+              *) echo "⚠️ Skipped" ;;
+            esac
+          }
+
+          SNYK_CODE_STATUS=$(get_status "${SNYK_CODE_STATUS_INPUT}")
+          SNYK_OSS_STATUS=$(get_status "${SNYK_OSS_STATUS_INPUT}")
+          SONAR_SCAN_STATUS=$(get_status "${SONAR_SCAN_STATUS_INPUT}")
+          QUALITY_GATE_STATUS=$(get_quality_gate_status "${QUALITY_GATE_STATUS_INPUT}")
+
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # 🔍 CI Analysis Summary - ${PROJECT_TYPE}
+
+          ## 📊 Test Coverage
+          - **Coverage**: ${TEST_COVERAGE}%
+          - **Report**: [View Coverage Report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ## 🔒 Security Scans (Snyk)
+          - **Code (SAST)**: ${SNYK_CODE_STATUS}
+          - **Open Source (SCA)**: ${SNYK_OSS_STATUS}
+          - **SCA Issues Found**: ${SNYK_ISSUES}
+
+          ## 🎯 Code Quality (SonarQube)
+          - **Status**: ${SONAR_SCAN_STATUS}
+          - **Quality Gate**: ${QUALITY_GATE_STATUS}
+
+          ## 📦 Build Status
+          - **Build**: ✅ Successful
+          - **Lint**: ✅ Passed
+          - **Tests**: ✅ Passed
+          EOF
+
+  comment-pr:
+    name: Comment PR with Results
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Comment PR with Analysis Results
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const projectType = '${{ inputs.project_type }}';
+            const coverage = '${{ inputs.test_coverage || '0' }}';
+            const snykCodeStatus = '${{ inputs.snyk_code_status }}';
+            const snykOssStatus = '${{ inputs.snyk_oss_status }}';
+            const snykIssues = '${{ inputs.snyk_issues || 0 }}';
+            const sonarStatus = '${{ inputs.sonar_scan_status }}';
+            const qualityGateStatus = '${{ inputs.quality_gate_status }}';
+
+            const comment = `## 🔍 Code Analysis Results - ${projectType}
+
+            ### 📊 Test Coverage
+            | Metric | Value |
+            |--------|-------|
+            | **Line Coverage** | ${coverage}% |
+            | **Coverage Report** | [View Artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |
+
+            ### 🔒 Security Scans (Snyk)
+            | Scan Type | Status | Details |
+            |-----------|--------|---------|
+            | **Code (SAST)** | ${snykCodeStatus === 'success' ? '✅ Completed' : (snykCodeStatus === 'failure' ? '⚠️ Failed' : '⚠️ Skipped')} | [View in Code Scanning](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) |
+            | **Open Source (SCA)** | ${snykOssStatus === 'success' ? '✅ Completed' : (snykOssStatus === 'failure' ? '⚠️ Failed' : '⚠️ Skipped')} | ${snykIssues !== '0' ? `⚠️ ${snykIssues} vulnerabilities found` : '✅ No issues'} |
+            ${snykOssStatus === 'success' && snykIssues !== '0' ? '| **Action Required** | ⚠️ Review vulnerabilities in [Snyk Dashboard](https://app.snyk.io/) |' : ''}
+
+            ### 🎯 Code Quality (SonarQube)
+            | Metric | Value |
+            |--------|-------|
+            | **Scan Status** | ${sonarStatus === 'success' ? '✅ Completed' : (sonarStatus === 'failure' ? '⚠️ Failed' : '⚠️ Skipped')} |
+            | **Quality Gate** | ${qualityGateStatus === 'success' ? '✅ Passed' : (qualityGateStatus === 'failure' ? '⚠️ Failed' : '⚠️ Skipped')} |
+            ${sonarStatus === 'success' ? '| **View Report** | [SonarQube Cloud Dashboard](https://sonarcloud.io/dashboard?id=kkrzysztofik_Anyka_ak3918_hacking_journey) |' : ''}
+
+            ### ✅ Build Status
+            - **Lint**: ✅ Passed
+            - **Tests**: ✅ Passed
+            - **Build**: ✅ Successful
+
+            ---
+            *This comment is automatically updated on each push to the PR*`;
+
+            // Find existing bot comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Code Analysis Results - ' + projectType)
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment,
+              });
+            }

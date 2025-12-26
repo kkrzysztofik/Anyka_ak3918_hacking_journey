@@ -12,19 +12,27 @@ readonly BLUE='\033[0;34m'
 readonly NC='\033[0m' # No Color
 
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    local message="$1"
+    echo -e "${BLUE}[INFO]${NC} ${message}"
+    return 0
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    local message="$1"
+    echo -e "${GREEN}[SUCCESS]${NC} ${message}"
+    return 0
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    local message="$1"
+    echo -e "${RED}[ERROR]${NC} ${message}" >&2
+    return 0
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    local message="$1"
+    echo -e "${YELLOW}[WARN]${NC} ${message}"
+    return 0
 }
 
 # Configuration
@@ -111,7 +119,8 @@ echo ""
 log_info "=== Test 7: Verify rustc is from toolchain ==="
 RUSTC_PATH=$(docker run --rm -v "${PROJECT_ROOT}:/workspace" "${IMAGE_TAG}" \
   bash -c "which rustc")
-if [ "${RUSTC_PATH}" = "/opt/arm-anykav200-crosstool-ng/bin/rustc" ]; then
+EXPECTED_PATH="/opt/arm-anykav200-crosstool-ng/bin/rustc"
+if [[ "${RUSTC_PATH}" = "${EXPECTED_PATH}" ]]; then
     log_success "rustc is from toolchain: ${RUSTC_PATH}"
 else
     log_error "rustc is NOT from toolchain! Found: ${RUSTC_PATH}"

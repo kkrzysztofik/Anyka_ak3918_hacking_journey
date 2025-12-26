@@ -1,0 +1,336 @@
+@import 'tailwindcss';
+/* NOSONAR: S4662 - Tailwind CSS v4 @config directive */
+@config '../../tailwind.config.js';
+
+@layer base {
+  :root {
+    /* Industrial Dark Theme - Enhanced for camera management */
+    --background: 220 10% 4%;
+    --foreground: 210 20% 98%;
+
+    /* Surface hierarchy for depth */
+    --card: 220 10% 10%;
+    --card-foreground: 210 20% 98%;
+    --popover: 220 10% 8%;
+    --popover-foreground: 210 20% 98%;
+
+    /* Primary action - authoritative blue */
+    --primary: 217 91% 60%;
+    --primary-foreground: 210 20% 98%;
+
+    /* Secondary surfaces */
+    --secondary: 220 10% 15%;
+    --secondary-foreground: 210 20% 98%;
+
+    /* Muted/subtle elements */
+    --muted: 220 10% 18%;
+    --muted-foreground: 215 16% 65%;
+
+    /* Accent - attention-grabbing red */
+    --accent: 0 84% 60%;
+    --accent-foreground: 210 20% 98%;
+
+    /* Destructive actions */
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 20% 98%;
+
+    /* Borders and inputs */
+    --border: 220 5% 22%;
+    --input: 220 5% 22%;
+    --ring: 217 91% 60%;
+
+    /* Text hierarchy */
+    --text-primary: 210 20% 98%;
+    --text-secondary: 215 16% 65%;
+    --text-tertiary: 215 10% 45%;
+    --text-technical: 210 20% 92%;
+
+    /* Status colors - high contrast for WCAG AA */
+    --status-connected: 142 71% 45%;
+    --status-disconnected: 215 10% 45%;
+    --status-warning: 38 92% 50%;
+    --status-error: 0 84% 60%;
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    /* Firefox scrollbar */
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) hsl(var(--muted) / 0.3);
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1;
+  }
+
+  /* Enhanced focus states for accessibility */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Custom scrollbar styling for dark theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--muted) / 0.3);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+@layer components {
+  .sidebar-icon {
+    @apply h-6 w-6 fill-none stroke-current stroke-2;
+  }
+
+  .ptz-button {
+    @apply flex h-12 w-12 items-center justify-center rounded-lg text-xl font-bold transition-colors;
+  }
+
+  .card {
+    @apply bg-card rounded-lg p-6;
+  }
+
+  /* Technical data styling - for IP addresses, MAC addresses, etc. */
+  .technical-data {
+    @apply font-mono text-[13px] leading-relaxed tracking-wide;
+    color: hsl(var(--text-technical));
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Status indicator colors */
+  .status-connected {
+    color: hsl(var(--status-connected));
+  }
+
+  .status-warning {
+    color: hsl(var(--status-warning));
+  }
+
+  .status-error {
+    color: hsl(var(--status-error));
+  }
+
+  /* Focus ring utility */
+  .focus-ring {
+    @apply ring-ring ring-offset-background ring-2 ring-offset-2;
+  }
+
+  /* ========================================
+     PHASE 2: ANIMATIONS & VISUAL DETAILS
+     ======================================== */
+
+  /* Page enter animation */
+  .page-enter {
+    animation: pageEnter 300ms ease-out;
+  }
+
+  @keyframes pageEnter {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Staggered content reveal */
+  .stagger-1 {
+    animation-delay: 50ms;
+  }
+
+  .stagger-2 {
+    animation-delay: 100ms;
+  }
+
+  .stagger-3 {
+    animation-delay: 150ms;
+  }
+
+  .stagger-4 {
+    animation-delay: 200ms;
+  }
+
+  /* Button press micro-interaction */
+  .btn-press:active {
+    transform: scale(0.98);
+    transition: transform 50ms ease-out;
+  }
+
+  /* Status pulse animation */
+  .status-pulse {
+    animation: statusPulse 2s ease-in-out infinite;
+  }
+
+  @keyframes statusPulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0.6;
+    }
+  }
+
+  /* Skeleton loading animation */
+  .skeleton {
+    @apply bg-muted animate-pulse rounded;
+  }
+
+  .skeleton-text {
+    @apply bg-muted h-4 w-full animate-pulse rounded;
+  }
+
+  .skeleton-title {
+    @apply bg-muted h-6 w-3/4 animate-pulse rounded;
+  }
+
+  .skeleton-avatar {
+    @apply bg-muted h-10 w-10 animate-pulse rounded-full;
+  }
+
+  /* Card elevation - enhanced depth */
+  .card-elevated {
+    box-shadow:
+      0 1px 3px rgba(0, 0, 0, 0.3),
+      0 4px 12px rgba(0, 0, 0, 0.2);
+    border: 1px solid hsl(var(--border));
+  }
+
+  /* Technical section with grid overlay */
+  .technical-section {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 24px 24px;
+    border: 1.5px solid hsl(var(--border));
+  }
+
+  /* Technical panel - monospace-friendly container */
+  .technical-panel {
+    @apply border-border bg-card rounded-lg border p-4 font-mono text-[13px];
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Live indicator with glow effect */
+  .live-indicator {
+    @apply inline-flex items-center gap-1.5 rounded-md bg-red-600/20 px-2 py-1 text-[10px] font-bold tracking-widest text-red-500 uppercase;
+  }
+
+  .live-indicator::before {
+    content: '';
+    @apply h-2 w-2 rounded-full bg-red-500;
+    animation: statusPulse 1.5s ease-in-out infinite;
+  }
+
+  /* Connected status badge with pulse */
+  .status-badge-connected {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/20 px-3 py-1 text-xs font-medium text-green-500;
+  }
+
+  .status-badge-connected::before {
+    content: '';
+    @apply h-1.5 w-1.5 rounded-full bg-green-500;
+    animation: statusPulse 2s ease-in-out infinite;
+  }
+
+  /* Subtle noise texture for backgrounds */
+  .bg-noise {
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='4' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.015'/%3E%3C/svg%3E");
+  }
+
+  /* Gradient mesh overlay for depth */
+  .bg-gradient-mesh {
+    background-image:
+      radial-gradient(at 40% 20%, hsla(220, 70%, 50%, 0.03) 0px, transparent 50%),
+      radial-gradient(at 80% 80%, hsla(0, 70%, 50%, 0.02) 0px, transparent 50%);
+  }
+
+  /* ========================================
+     PHASE 3: POLISH & REFINEMENT
+     ======================================== */
+
+  /* Empty state container */
+  .empty-state {
+    @apply border-border bg-muted/30 flex flex-col items-center justify-center gap-4 rounded-lg border border-dashed px-8 py-12 text-center;
+  }
+
+  .empty-state-icon {
+    @apply text-muted-foreground opacity-50;
+  }
+
+  .empty-state-title {
+    @apply text-foreground text-lg font-medium;
+  }
+
+  .empty-state-description {
+    @apply text-muted-foreground max-w-sm text-sm;
+  }
+
+  /* Data highlight for important values */
+  .data-highlight {
+    @apply bg-primary/10 text-primary inline-block rounded px-1.5 py-0.5 font-mono;
+  }
+
+  /* Smooth value transitions for counters/stats */
+  .value-transition {
+    transition: all 300ms ease-out;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Section divider */
+  .section-divider {
+    @apply via-border my-6 h-px w-full border-0 bg-gradient-to-r from-transparent to-transparent;
+  }
+
+  /* Interactive list item */
+  .list-item-interactive {
+    @apply flex items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 transition-colors;
+    @apply hover:border-border hover:bg-muted/50;
+  }
+
+  /* Badge variants for technical info */
+  .badge-technical {
+    @apply border-border bg-muted text-muted-foreground inline-flex items-center gap-1.5 rounded border px-2 py-0.5 font-mono text-xs;
+  }
+
+  /* Mono value display */
+  .mono-value {
+    @apply font-mono text-[13px] tracking-wide tabular-nums;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

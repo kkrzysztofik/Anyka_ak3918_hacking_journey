@@ -50,33 +50,21 @@ Removed the "Camera List" sidebar. The dashboard is now a clean, immersive view 
 - **Layout**: 2-Columns (Icon Nav | Main Video).
 - **Controls**: Floating/Overlay PTZ controls and status pills to maximize video area.
 
-<div align="center">
-
 ![Dashboard Mockup (First Iteration)](./img/dashboard_mockup.png)
 
 ![Dashboard Design (Figma)](./img/dashboard_figma.png)
 
-</div>
-
 ### 2. Login Screen
-
-<div align="center">
 
 ![Login Mockup (First Iteration)](./img/login_mockup.png)
 
 ![Login Design (Figma)](./img/login_figma.png)
 
-</div>
-
 ### 3. Diagnostics
 
 The Diagnostics view provides system monitoring and diagnostic information.
 
-<div align="center">
-
 ![Diagnostics Design (Figma)](./img/diagnostics_figma.png)
-
-</div>
 
 ### 4. About Modal
 
@@ -89,11 +77,7 @@ The About modal is accessible from the user profile menu and displays:
 - Device serial number and MAC address
 - OK button to close the modal
 
-<div align="center">
-
 ![About Modal Design (Figma)](./img/about_modal_figma.png)
-
-</div>
 
 ### 3. Settings Interface
 
@@ -103,11 +87,7 @@ Uses a 3-column layout to organize the configuration categories effectively:
 - Middle settings category sidebar with icons and descriptions
 - Right main content area with settings forms
 
-<div align="center">
-
 ![Settings Mockup (First Iteration)](./img/settings_mockup.png)
-
-</div>
 
 #### Identification Settings
 
@@ -120,71 +100,43 @@ The Identification Settings page provides device information and configuration:
 - **Action Buttons**: Save Changes (primary red button) and Reset to Default (secondary button)
 - **Information Notice**: Explains which fields are editable vs read-only
 
-<div align="center">
-
 ![Settings Design - Identification (Figma)](./img/settings_identification_figma.png)
-
-</div>
 
 #### Network Settings
 
 Configure IP address, DNS settings, and network ports.
 
-<div align="center">
-
 ![Settings Design - Network (Figma)](./img/settings_network_figma.png)
-
-</div>
 
 #### Time Settings
 
 Set timezone and configure NTP server settings.
 
-<div align="center">
-
 ![Settings Design - Time (Figma)](./img/settings_time_figma.png)
-
-</div>
 
 #### Maintenance Settings
 
 Manage system updates, backups, and view system logs.
 
-<div align="center">
-
 ![Settings Design - Maintenance (Figma)](./img/settings_maintenance_figma.png)
-
-</div>
 
 #### Imaging Settings
 
 Control camera image settings and exposure parameters.
 
-<div align="center">
-
 ![Settings Design - Imaging (Figma)](./img/settings_imaging_figma.png)
-
-</div>
 
 #### User Management Settings
 
 Manage user accounts and permissions.
 
-<div align="center">
-
 ![Settings Design - User Management (Figma)](./img/settings_user_management_figma.png)
-
-</div>
 
 #### Profiles Settings
 
 Configure and manage configuration profiles and presets.
 
-<div align="center">
-
 ![Settings Design - Profiles (Figma)](./img/settings_profiles_figma.png)
-
-</div>
 
 ### 5. Modals & Popups
 
@@ -192,41 +144,25 @@ Configure and manage configuration profiles and presets.
 
 The current user popup menu appears when clicking the user profile button at the bottom of the icon sidebar.
 
-<div align="center">
-
 ![Current User Popup (Figma)](./img/current_user_popup_figma.png)
-
-</div>
 
 #### Change Password Modal
 
 Modal for changing the current user's password.
 
-<div align="center">
-
 ![Change Password Modal (Figma)](./img/change_password_modal_figma.png)
-
-</div>
 
 #### User Modal
 
 Modal for creating or editing user accounts.
 
-<div align="center">
-
 ![User Modal (Figma)](./img/user_modal_figma.png)
-
-</div>
 
 #### Profiles Modal
 
 Modal for creating or editing configuration profiles.
 
-<div align="center">
-
 ![Profiles Modal (Figma)](./img/profiles_modal_figma.png)
-
-</div>
 
 ---
 

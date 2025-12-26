@@ -3,10 +3,6 @@
 #  * For JavaScript, use typescript
 # Special requirements:
 #  * csharp: Requires the presence of a .sln file in the project folder.
-language: cpp
-
-# whether to use the project's gitignore file to ignore files
-# Added on 2025-04-07
 ignore_all_files_in_gitignore: true
 # list of additional paths to ignore
 # same syntax as gitignore, so you can use * and **
@@ -65,3 +61,11 @@ excluded_tools: []
 initial_prompt: "This is a C project using clangd for language server support."
 
 project_name: "anyka-dev"
+languages:
+- cpp
+- rust
+- python
+- bash
+- typescript
+included_optional_tools: []
+encoding: utf-8

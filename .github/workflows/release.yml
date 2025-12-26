@@ -1,0 +1,146 @@
+name: Release - Anyka ONVIF
+
+on:
+  push:
+    tags:
+      - "v*"
+    paths:
+      - "cross-compile/onvif-rust/**"
+      - "cross-compile/www/**"
+
+jobs:
+  build_webui:
+    name: Build WebUI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: cross-compile/www
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Use Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: cross-compile/www/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Archive WebUI Build
+        uses: actions/upload-artifact@v6
+        with:
+          name: webui-build
+          path: SD_card_contents/anyka_hack/onvif/www/
+
+  build_rust:
+    name: Build Rust ONVIF
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: kkrzysztofik/anyka-cross-compile:latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global --add safe.directory $GITHUB_WORKSPACE
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Setup Cargo Config
+        working-directory: cross-compile/onvif-rust
+        run: |
+          ./scripts/setup-cargo-config.sh
+
+      - name: Extract Tag Information
+        id: tag_info
+        run: |
+          if [[ "${{ github.ref }}" =~ refs/tags/(.+) ]]; then
+            TAG_NAME="${BASH_REMATCH[1]}"
+            echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Cross-Compile for ARM
+        working-directory: cross-compile/onvif-rust
+        run: |
+          ./scripts/build.sh --release --target armv5te-unknown-linux-uclibceabi
+
+      - name: Verify Binary
+        working-directory: cross-compile/onvif-rust
+        run: |
+          ./scripts/verify_binary.sh
+
+      - name: Prepare Rust SD Card Content
+        run: |
+          mkdir -p release-artifacts/SD_card_contents/anyka_hack/onvif
+          cp cross-compile/onvif-rust/target/armv5te-unknown-linux-uclibceabi/release/onvif-rust \
+             release-artifacts/SD_card_contents/anyka_hack/onvif/onvif-rust
+          chmod +x release-artifacts/SD_card_contents/anyka_hack/onvif/onvif-rust
+
+      - name: Archive Rust Build
+        uses: actions/upload-artifact@v6
+        with:
+          name: rust-build
+          path: release-artifacts/SD_card_contents/anyka_hack/onvif/onvif-rust
+
+  release:
+    name: Create Release
+    needs: [build_webui, build_rust]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Extract Tag Information
+        id: tag_info
+        run: |
+          if [[ "${{ github.ref }}" =~ refs/tags/(.+) ]]; then
+            TAG_NAME="${BASH_REMATCH[1]}"
+            echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Prepare Release Directory
+        run: mkdir -p release-final/SD_card_contents/anyka_hack/onvif/www
+
+      - name: Download Rust Artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: rust-build
+          path: release-final/SD_card_contents/anyka_hack/onvif/
+
+      - name: Download WebUI Artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: webui-build
+          path: release-final/SD_card_contents/anyka_hack/onvif/www
+
+      - name: Create Release Archive
+        run: |
+          cd release-final
+          chmod +x SD_card_contents/anyka_hack/onvif/onvif-rust
+          zip -r ../anyka-onvif-complete-${{ steps.tag_info.outputs.tag_name }}.zip SD_card_contents
+          cd ..
+          ls -la anyka-onvif-complete-${{ steps.tag_info.outputs.tag_name }}.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2.5.0
+        with:
+          tag_name: ${{ steps.tag_info.outputs.tag_name }}
+          name: Anyka ONVIF Complete Release ${{ steps.tag_info.outputs.tag_name }}
+          files: |
+            anyka-onvif-complete-${{ steps.tag_info.outputs.tag_name }}.zip
+          generate_release_notes: true
