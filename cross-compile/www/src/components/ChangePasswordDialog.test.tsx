@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { LoginResult } from '@/services/authService';
 import type { OnvifUser } from '@/services/userService';
+import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import { ChangePasswordDialog } from './ChangePasswordDialog';
 
@@ -23,14 +24,7 @@ vi.mock('@/services/userService', () => ({
 // Mock useAuth hook
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: vi.fn(),
-}));
-
-// Mock toast
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
+  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 // Mock UI components
@@ -150,12 +144,12 @@ describe('ChangePasswordDialog', () => {
 
   describe('Dialog Open/Close', () => {
     it('should render dialog when open is true', () => {
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
       expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'true');
     });
 
     it('should not render dialog content when open is false', () => {
-      render(<ChangePasswordDialog open={false} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={false} onOpenChange={vi.fn()} />);
       expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'false');
     });
 
@@ -163,7 +157,7 @@ describe('ChangePasswordDialog', () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();
 
-      render(<ChangePasswordDialog open={true} onOpenChange={onOpenChange} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={onOpenChange} />);
 
       const cancelButton = screen.getByTestId('change-password-dialog-cancel-button');
       await act(async () => {
@@ -226,7 +220,7 @@ describe('ChangePasswordDialog', () => {
   describe('Form Validation', () => {
     it('should show error for empty current password', async () => {
       const user = userEvent.setup();
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const submitButton = screen.getByTestId('change-password-dialog-submit-button');
       await act(async () => {
@@ -242,7 +236,7 @@ describe('ChangePasswordDialog', () => {
 
     it('should show error for password too short', async () => {
       const user = userEvent.setup();
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const currentPasswordInput = screen.getByTestId(
         'change-password-dialog-current-password-input',
@@ -267,7 +261,7 @@ describe('ChangePasswordDialog', () => {
 
     it('should show error for password too long', async () => {
       const user = userEvent.setup();
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const currentPasswordInput = screen.getByTestId(
         'change-password-dialog-current-password-input',
@@ -292,7 +286,7 @@ describe('ChangePasswordDialog', () => {
 
     it('should show error when passwords do not match', async () => {
       const user = userEvent.setup();
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const currentPasswordInput = screen.getByTestId(
         'change-password-dialog-current-password-input',
@@ -323,7 +317,7 @@ describe('ChangePasswordDialog', () => {
   describe('Password Visibility Toggle', () => {
     it('should toggle current password visibility', async () => {
       const user = userEvent.setup();
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const currentPasswordInput = screen.getByTestId(
         'change-password-dialog-current-password-input',
@@ -344,7 +338,7 @@ describe('ChangePasswordDialog', () => {
 
     it('should toggle new password visibility', async () => {
       const user = userEvent.setup();
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const newPasswordInput = screen.getByTestId('change-password-dialog-new-password-input');
 
@@ -370,10 +364,9 @@ describe('ChangePasswordDialog', () => {
       const { getUsers } = await import('@/services/userService');
       const { setUser } = await import('@/services/userService');
       const { useAuth } = await import('@/hooks/useAuth');
-      const { toast } = await import('sonner');
       vi.mocked(verifyCredentials).mockResolvedValue({ success: true });
 
-      render(<ChangePasswordDialog open={true} onOpenChange={onOpenChange} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={onOpenChange} />);
 
       const currentPasswordInput = screen.getByTestId(
         'change-password-dialog-current-password-input',
@@ -412,7 +405,7 @@ describe('ChangePasswordDialog', () => {
           expect(setUser).toHaveBeenCalledWith('admin', 'newpass123', 'Administrator');
           const authHook = vi.mocked(useAuth)();
           expect(authHook.login).toHaveBeenCalledWith('admin', 'newpass123');
-          expect(toast.success).toHaveBeenCalledWith('Password updated successfully');
+          expect(mockToast.success).toHaveBeenCalledWith('Password updated successfully');
           expect(onOpenChange).toHaveBeenCalledWith(false);
         },
         { timeout: 3000 },
@@ -425,7 +418,7 @@ describe('ChangePasswordDialog', () => {
       const { verifyCredentials } = await import('@/services/authService');
       vi.mocked(verifyCredentials).mockResolvedValue({ success: true });
 
-      render(<ChangePasswordDialog open={true} onOpenChange={onOpenChange} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={onOpenChange} />);
 
       const currentPasswordInput = screen.getByTestId(
         'change-password-dialog-current-password-input',
@@ -474,7 +467,7 @@ describe('ChangePasswordDialog', () => {
       const { setUser } = await import('@/services/userService');
       vi.mocked(verifyCredentials).mockResolvedValue({ success: false });
 
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const currentPasswordInput = screen.getByTestId(
         'change-password-dialog-current-password-input',
@@ -519,11 +512,10 @@ describe('ChangePasswordDialog', () => {
       const { verifyCredentials } = await import('@/services/authService');
       const { getUsers } = await import('@/services/userService');
       const { setUser } = await import('@/services/userService');
-      const { toast } = await import('sonner');
       vi.mocked(verifyCredentials).mockResolvedValue({ success: true });
       vi.mocked(getUsers).mockResolvedValue([]); // No users
 
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const currentPasswordInput = screen.getByTestId(
         'change-password-dialog-current-password-input',
@@ -555,7 +547,7 @@ describe('ChangePasswordDialog', () => {
 
       await waitFor(
         () => {
-          expect(toast.error).toHaveBeenCalledWith('Could not find user information');
+          expect(mockToast.error).toHaveBeenCalledWith('Could not find user information');
           expect(setUser).not.toHaveBeenCalled();
         },
         { timeout: 3000 },
@@ -566,7 +558,6 @@ describe('ChangePasswordDialog', () => {
       const user = userEvent.setup();
       const error = new Error('Network error');
       const { verifyCredentials } = await import('@/services/authService');
-      const { toast } = await import('sonner');
       vi.mocked(verifyCredentials).mockRejectedValue(error);
 
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -603,7 +594,7 @@ describe('ChangePasswordDialog', () => {
 
       await waitFor(
         () => {
-          expect(toast.error).toHaveBeenCalledWith(
+          expect(mockToast.error).toHaveBeenCalledWith(
             'Failed to update password. Please check your connection.',
           );
           expect(consoleSpy).toHaveBeenCalledWith('Failed to change password:', error);
@@ -625,7 +616,7 @@ describe('ChangePasswordDialog', () => {
       const { verifyCredentials } = await import('@/services/authService');
       vi.mocked(verifyCredentials).mockReturnValue(verifyPromise);
 
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const currentPasswordInput = screen.getByTestId(
         'change-password-dialog-current-password-input',
@@ -679,7 +670,7 @@ describe('ChangePasswordDialog', () => {
       const { verifyCredentials } = await import('@/services/authService');
       vi.mocked(verifyCredentials).mockReturnValue(verifyPromise);
 
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const currentPasswordInput = screen.getByTestId(
         'change-password-dialog-current-password-input',
@@ -735,7 +726,7 @@ describe('ChangePasswordDialog', () => {
         getBasicAuthHeader: vi.fn(),
       });
 
-      render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
       expect(screen.getByTestId('change-password-dialog-description')).toHaveTextContent(
         `Update your account password for testuser`,
       );

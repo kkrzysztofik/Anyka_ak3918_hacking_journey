@@ -1,9 +1,11 @@
 /**
  * UserDialogs Component Tests
  */
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithProviders } from '@/test/componentTestHelpers';
 
 import { AddUserDialog, ChangePasswordDialog } from './UserDialogs';
 
@@ -84,7 +86,9 @@ describe('AddUserDialog', () => {
 
   describe('Rendering', () => {
     it('should render dialog when open', () => {
-      render(<AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
+      );
       expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'true');
       expect(screen.getByTestId('add-user-dialog-title')).toHaveTextContent('Add User');
       expect(screen.getByTestId('add-user-dialog-description')).toHaveTextContent(
@@ -93,14 +97,18 @@ describe('AddUserDialog', () => {
     });
 
     it('should not render dialog content when closed', () => {
-      render(<AddUserDialog open={false} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={false} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
+      );
       expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'false');
     });
   });
 
   describe('Form Fields', () => {
     it('should render all form fields', () => {
-      render(<AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
+      );
       expect(screen.getByTestId('add-user-username-input')).toBeInTheDocument();
       expect(screen.getByTestId('add-user-level-select')).toBeInTheDocument();
       expect(screen.getByTestId('add-user-password-input')).toBeInTheDocument();
@@ -108,7 +116,9 @@ describe('AddUserDialog', () => {
     });
 
     it('should have default user level of User', () => {
-      render(<AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
+      );
       expect(screen.getByText('User Level')).toBeInTheDocument();
     });
   });
@@ -116,7 +126,9 @@ describe('AddUserDialog', () => {
   describe('Form Validation', () => {
     it('should validate required username', async () => {
       const user = userEvent.setup();
-      render(<AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
+      );
 
       const submitButton = screen.getByTestId('add-user-submit-button');
       await act(async () => {
@@ -133,7 +145,9 @@ describe('AddUserDialog', () => {
 
     it('should validate password minimum length', async () => {
       const user = userEvent.setup();
-      render(<AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
+      );
 
       const usernameInput = screen.getByTestId('add-user-username-input');
       const passwordInput = screen.getByTestId('add-user-password-input');
@@ -158,7 +172,9 @@ describe('AddUserDialog', () => {
 
     it('should validate password maximum length', async () => {
       const user = userEvent.setup();
-      render(<AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
+      );
 
       const usernameInput = screen.getByTestId('add-user-username-input');
       const passwordInput = screen.getByTestId('add-user-password-input');
@@ -183,7 +199,9 @@ describe('AddUserDialog', () => {
 
     it('should validate password match', async () => {
       const user = userEvent.setup();
-      render(<AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
+      );
 
       const usernameInput = screen.getByTestId('add-user-username-input');
       const passwordInput = screen.getByTestId('add-user-password-input');
@@ -212,7 +230,9 @@ describe('AddUserDialog', () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();
 
-      render(<AddUserDialog open={true} onOpenChange={onOpenChange} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={true} onOpenChange={onOpenChange} onSubmit={mockOnSubmit} />,
+      );
 
       const usernameInput = screen.getByTestId('add-user-username-input');
       const userLevelSelect = screen.getByTestId('add-user-level-select');
@@ -253,7 +273,9 @@ describe('AddUserDialog', () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();
 
-      render(<AddUserDialog open={true} onOpenChange={onOpenChange} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={true} onOpenChange={onOpenChange} onSubmit={mockOnSubmit} />,
+      );
 
       const usernameInput = screen.getByTestId('add-user-username-input');
       const passwordInput = screen.getByTestId('add-user-password-input');
@@ -295,7 +317,9 @@ describe('AddUserDialog', () => {
       });
       mockOnSubmit.mockReturnValue(submitPromise);
 
-      render(<AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
+      );
 
       const usernameInput = screen.getByTestId('add-user-username-input');
       const passwordInput = screen.getByTestId('add-user-password-input');
@@ -342,7 +366,9 @@ describe('AddUserDialog', () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();
 
-      render(<AddUserDialog open={true} onOpenChange={onOpenChange} onSubmit={mockOnSubmit} />);
+      renderWithProviders(
+        <AddUserDialog open={true} onOpenChange={onOpenChange} onSubmit={mockOnSubmit} />,
+      );
 
       const cancelButton = screen.getByTestId('add-user-cancel-button');
       await act(async () => {
@@ -364,7 +390,7 @@ describe('ChangePasswordDialog', () => {
 
   describe('Rendering', () => {
     it('should render dialog when open', () => {
-      render(
+      renderWithProviders(
         <ChangePasswordDialog
           open={true}
           onOpenChange={vi.fn()}
@@ -385,7 +411,7 @@ describe('ChangePasswordDialog', () => {
     });
 
     it('should display username in description', () => {
-      render(
+      renderWithProviders(
         <ChangePasswordDialog
           open={true}
           onOpenChange={vi.fn()}
@@ -400,7 +426,7 @@ describe('ChangePasswordDialog', () => {
 
   describe('Form Fields', () => {
     it('should render password fields', () => {
-      render(
+      renderWithProviders(
         <ChangePasswordDialog
           open={true}
           onOpenChange={vi.fn()}
@@ -416,7 +442,7 @@ describe('ChangePasswordDialog', () => {
   describe('Form Validation', () => {
     it('should validate password minimum length', async () => {
       const user = userEvent.setup();
-      render(
+      renderWithProviders(
         <ChangePasswordDialog
           open={true}
           onOpenChange={vi.fn()}
@@ -447,7 +473,7 @@ describe('ChangePasswordDialog', () => {
 
     it('should validate password match', async () => {
       const user = userEvent.setup();
-      render(
+      renderWithProviders(
         <ChangePasswordDialog
           open={true}
           onOpenChange={vi.fn()}
@@ -485,7 +511,7 @@ describe('ChangePasswordDialog', () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();
 
-      render(
+      renderWithProviders(
         <ChangePasswordDialog
           open={true}
           onOpenChange={onOpenChange}
@@ -529,7 +555,7 @@ describe('ChangePasswordDialog', () => {
       });
       mockOnSubmit.mockReturnValue(submitPromise);
 
-      render(
+      renderWithProviders(
         <ChangePasswordDialog
           open={true}
           onOpenChange={vi.fn()}
@@ -577,7 +603,7 @@ describe('ChangePasswordDialog', () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();
 
-      render(
+      renderWithProviders(
         <ChangePasswordDialog
           open={true}
           onOpenChange={onOpenChange}

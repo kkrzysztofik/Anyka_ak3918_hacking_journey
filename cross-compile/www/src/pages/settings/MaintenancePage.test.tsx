@@ -1,12 +1,11 @@
 /**
  * MaintenancePage Tests
  */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthProvider } from '@/hooks/useAuth';
+import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import MaintenancePage from './MaintenancePage';
 
@@ -16,15 +15,6 @@ vi.mock('@/services/maintenanceService', () => ({
   setSystemFactoryDefault: vi.fn(),
   getSystemBackup: vi.fn(),
   restoreSystem: vi.fn(),
-}));
-
-// Mock sonner toast
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-  },
 }));
 
 // Mock URL.createObjectURL and document methods
@@ -51,25 +41,9 @@ globalThis.document.createElement = vi.fn((tag: string) => {
 }) as typeof document.createElement;
 
 describe('MaintenancePage', () => {
-  let queryClient: QueryClient;
-
   beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
     vi.clearAllMocks();
   });
-
-  const renderWithProviders = (component: React.ReactElement) => {
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>{component}</AuthProvider>
-      </QueryClientProvider>,
-    );
-  };
 
   it('should render all maintenance operation cards', () => {
     renderWithProviders(<MaintenancePage />);
@@ -104,7 +78,6 @@ describe('MaintenancePage', () => {
     const { systemReboot } = await import('@/services/maintenanceService');
     vi.mocked(systemReboot).mockResolvedValue(undefined);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -120,7 +93,7 @@ describe('MaintenancePage', () => {
 
     await waitFor(() => {
       expect(systemReboot).toHaveBeenCalled();
-      expect(toast.success).toHaveBeenCalledWith('Device is rebooting', {
+      expect(mockToast.success).toHaveBeenCalledWith('Device is rebooting', {
         description: 'Please wait for the device to restart...',
         duration: 10000,
       });
@@ -131,7 +104,6 @@ describe('MaintenancePage', () => {
     const { systemReboot } = await import('@/services/maintenanceService');
     vi.mocked(systemReboot).mockRejectedValue(new Error('Network error'));
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -146,7 +118,7 @@ describe('MaintenancePage', () => {
     await user.click(confirmButton);
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Failed to reboot device', {
+      expect(mockToast.error).toHaveBeenCalledWith('Failed to reboot device', {
         description: 'Network error',
       });
     });
@@ -175,7 +147,6 @@ describe('MaintenancePage', () => {
     const { setSystemFactoryDefault } = await import('@/services/maintenanceService');
     vi.mocked(setSystemFactoryDefault).mockResolvedValue(undefined);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -191,7 +162,7 @@ describe('MaintenancePage', () => {
 
     await waitFor(() => {
       expect(setSystemFactoryDefault).toHaveBeenCalledWith('Soft');
-      expect(toast.success).toHaveBeenCalledWith('Device is resetting', {
+      expect(mockToast.success).toHaveBeenCalledWith('Device is resetting', {
         description: 'Settings returned to defaults. Device will reboot.',
         duration: 10000,
       });
@@ -227,7 +198,6 @@ describe('MaintenancePage', () => {
     const { setSystemFactoryDefault } = await import('@/services/maintenanceService');
     vi.mocked(setSystemFactoryDefault).mockResolvedValue(undefined);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -245,7 +215,7 @@ describe('MaintenancePage', () => {
 
     await waitFor(() => {
       expect(setSystemFactoryDefault).toHaveBeenCalledWith('Hard');
-      expect(toast.success).toHaveBeenCalledWith('Factory reset initiated', {
+      expect(mockToast.success).toHaveBeenCalledWith('Factory reset initiated', {
         description: 'All data will be erased. Device will reboot.',
         duration: 15000,
       });
@@ -262,7 +232,6 @@ describe('MaintenancePage', () => {
     ];
     vi.mocked(getSystemBackup).mockResolvedValue(mockBackupFiles);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -271,7 +240,7 @@ describe('MaintenancePage', () => {
 
     await waitFor(() => {
       expect(getSystemBackup).toHaveBeenCalled();
-      expect(toast.success).toHaveBeenCalled();
+      expect(mockToast.success).toHaveBeenCalled();
     });
   });
 
@@ -279,7 +248,6 @@ describe('MaintenancePage', () => {
     const { getSystemBackup } = await import('@/services/maintenanceService');
     vi.mocked(getSystemBackup).mockResolvedValue([]);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -287,7 +255,7 @@ describe('MaintenancePage', () => {
     await user.click(backupButton);
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Backup failed', {
+      expect(mockToast.error).toHaveBeenCalledWith('Backup failed', {
         description: 'No backup files received from device',
       });
     });
@@ -310,7 +278,6 @@ describe('MaintenancePage', () => {
   });
 
   it('should show upgrade info when upgrade button is clicked', async () => {
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -318,7 +285,7 @@ describe('MaintenancePage', () => {
     await user.click(upgradeButton);
 
     await waitFor(() => {
-      expect(toast.info).toHaveBeenCalledWith('Firmware upgrade not available');
+      expect(mockToast.info).toHaveBeenCalledWith('Firmware upgrade not available');
     });
   });
 
@@ -326,7 +293,6 @@ describe('MaintenancePage', () => {
     const { setSystemFactoryDefault } = await import('@/services/maintenanceService');
     vi.mocked(setSystemFactoryDefault).mockRejectedValue(new Error('Reset failed'));
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -341,7 +307,7 @@ describe('MaintenancePage', () => {
     await user.click(confirmButton);
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Failed to reset settings', {
+      expect(mockToast.error).toHaveBeenCalledWith('Failed to reset settings', {
         description: 'Reset failed',
       });
     });
@@ -351,7 +317,6 @@ describe('MaintenancePage', () => {
     const { setSystemFactoryDefault } = await import('@/services/maintenanceService');
     vi.mocked(setSystemFactoryDefault).mockRejectedValue(new Error('Factory reset failed'));
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -379,7 +344,7 @@ describe('MaintenancePage', () => {
     }
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Failed to factory reset', {
+      expect(mockToast.error).toHaveBeenCalledWith('Failed to factory reset', {
         description: 'Factory reset failed',
       });
     });

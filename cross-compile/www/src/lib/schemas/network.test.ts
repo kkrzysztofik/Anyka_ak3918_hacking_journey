@@ -73,45 +73,20 @@ describe('networkSchema', () => {
   });
 
   describe('invalid IP addresses', () => {
-    it('should reject invalid IP format in address', () => {
+    const invalidIPCases = [
+      { field: 'address', value: '256.1.1.1', description: 'invalid IP format in address' },
+      { field: 'gateway', value: 'invalid', description: 'invalid IP format in gateway' },
+      { field: 'dns1', value: 'not.an.ip', description: 'invalid IP format in dns1' },
+      { field: 'dns2', value: '999.999.999.999', description: 'invalid IP format in dns2' },
+    ];
+
+    it.each(invalidIPCases)('should reject $description', ({ field, value }) => {
       const config = {
-        dhcp: false,
-        address: '256.1.1.1',
+        dhcp: field !== 'address' && field !== 'gateway',
+        address: field === 'address' ? value : '192.168.1.1',
         prefixLength: 24,
-      };
-
-      const result = networkSchema.safeParse(config);
-      expect(result.success).toBe(false);
-    });
-
-    it('should reject invalid IP format in gateway', () => {
-      const config = {
-        dhcp: false,
-        address: '192.168.1.1',
-        prefixLength: 24,
-        gateway: 'invalid',
-      };
-
-      const result = networkSchema.safeParse(config);
-      expect(result.success).toBe(false);
-    });
-
-    it('should reject invalid IP format in dns1', () => {
-      const config = {
-        dhcp: true,
+        [field]: value,
         dnsFromDHCP: false,
-        dns1: 'not.an.ip',
-      };
-
-      const result = networkSchema.safeParse(config);
-      expect(result.success).toBe(false);
-    });
-
-    it('should reject invalid IP format in dns2', () => {
-      const config = {
-        dhcp: true,
-        dnsFromDHCP: false,
-        dns2: '999.999.999.999',
       };
 
       const result = networkSchema.safeParse(config);
@@ -120,42 +95,24 @@ describe('networkSchema', () => {
   });
 
   describe('prefixLength validation', () => {
-    it('should reject prefixLength less than 1', () => {
+    it.each([
+      { prefix: 0, expected: false, description: 'prefixLength less than 1' },
+      { prefix: 33, expected: false, description: 'prefixLength greater than 32' },
+      { prefix: 1, expected: true, description: 'valid prefixLength 1' },
+      { prefix: 8, expected: true, description: 'valid prefixLength 8' },
+      { prefix: 16, expected: true, description: 'valid prefixLength 16' },
+      { prefix: 24, expected: true, description: 'valid prefixLength 24' },
+      { prefix: 32, expected: true, description: 'valid prefixLength 32' },
+    ])('should $description', ({ prefix, expected }) => {
       const config = {
         dhcp: false,
         address: '192.168.1.1',
-        prefixLength: 0,
+        prefixLength: prefix,
+        dnsFromDHCP: false,
       };
 
       const result = networkSchema.safeParse(config);
-      expect(result.success).toBe(false);
-    });
-
-    it('should reject prefixLength greater than 32', () => {
-      const config = {
-        dhcp: false,
-        address: '192.168.1.1',
-        prefixLength: 33,
-      };
-
-      const result = networkSchema.safeParse(config);
-      expect(result.success).toBe(false);
-    });
-
-    it('should accept valid prefixLength range', () => {
-      const validPrefixes = [1, 8, 16, 24, 32];
-
-      for (const prefix of validPrefixes) {
-        const config = {
-          dhcp: false,
-          address: '192.168.1.1',
-          prefixLength: prefix,
-          dnsFromDHCP: false,
-        };
-
-        const result = networkSchema.safeParse(config);
-        expect(result.success).toBe(true);
-      }
+      expect(result.success).toBe(expected);
     });
   });
 
@@ -255,17 +212,9 @@ describe('networkSchema', () => {
   });
 
   describe('valid IP addresses', () => {
-    it('should accept various valid IP formats', () => {
-      const validIPs = [
-        '0.0.0.0',
-        '127.0.0.1',
-        '192.168.1.1',
-        '10.0.0.1',
-        '172.16.0.1',
-        '255.255.255.255',
-      ];
-
-      for (const ip of validIPs) {
+    it.each(['0.0.0.0', '127.0.0.1', '192.168.1.1', '10.0.0.1', '172.16.0.1', '255.255.255.255'])(
+      'should accept valid IP: %s',
+      (ip) => {
         const config = {
           dhcp: false,
           address: ip,
@@ -275,7 +224,7 @@ describe('networkSchema', () => {
 
         const result = networkSchema.safeParse(config);
         expect(result.success).toBe(true);
-      }
-    });
+      },
+    );
   });
 });

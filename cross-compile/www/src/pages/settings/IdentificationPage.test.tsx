@@ -1,12 +1,11 @@
 /**
  * IdentificationPage Tests
  */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthProvider } from '@/hooks/useAuth';
+import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import IdentificationPage from './IdentificationPage';
 
@@ -20,35 +19,10 @@ vi.mock('@/services/networkService', () => ({
   getNetworkInterfaces: vi.fn(),
 }));
 
-// Mock sonner toast
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-  },
-}));
-
 describe('IdentificationPage', () => {
-  let queryClient: QueryClient;
-
   beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
     vi.clearAllMocks();
   });
-
-  const renderWithProviders = (component: React.ReactElement) => {
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>{component}</AuthProvider>
-      </QueryClientProvider>,
-    );
-  };
 
   it('should render identification form', async () => {
     const { getDeviceIdentification } = await import('@/services/deviceService');
@@ -184,7 +158,6 @@ describe('IdentificationPage', () => {
     const { getNetworkInterfaces } = await import('@/services/networkService');
     vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<IdentificationPage />);
 
@@ -201,7 +174,7 @@ describe('IdentificationPage', () => {
 
     await waitFor(() => {
       expect(setDeviceInformation).toHaveBeenCalled();
-      expect(toast.success).toHaveBeenCalledWith('Device information saved');
+      expect(mockToast.success).toHaveBeenCalledWith('Device information saved');
     });
   });
 
@@ -224,7 +197,6 @@ describe('IdentificationPage', () => {
     const { getNetworkInterfaces } = await import('@/services/networkService');
     vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<IdentificationPage />);
 
@@ -242,7 +214,7 @@ describe('IdentificationPage', () => {
     await waitFor(
       () => {
         expect(setDeviceInformation).toHaveBeenCalled();
-        expect(toast.error).toHaveBeenCalledWith('Failed to save device information', {
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to save device information', {
           description: 'Network error',
         });
       },
@@ -268,7 +240,6 @@ describe('IdentificationPage', () => {
     const { getNetworkInterfaces } = await import('@/services/networkService');
     vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<IdentificationPage />);
 
@@ -284,7 +255,7 @@ describe('IdentificationPage', () => {
     await user.click(resetButton);
 
     await waitFor(() => {
-      expect(toast.info).toHaveBeenCalledWith('Form reset to current device values');
+      expect(mockToast.info).toHaveBeenCalledWith('Form reset to current device values');
       expect(nameInput).toHaveValue('Test Device');
     });
   });

@@ -1,12 +1,11 @@
 /**
  * UserManagementPage Tests
  */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthProvider } from '@/hooks/useAuth';
+import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import UserManagementPage from './UserManagementPage';
 
@@ -18,35 +17,10 @@ vi.mock('@/services/userService', () => ({
   deleteUser: vi.fn(),
 }));
 
-// Mock sonner toast
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-  },
-}));
-
 describe('UserManagementPage', () => {
-  let queryClient: QueryClient;
-
   beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
     vi.clearAllMocks();
   });
-
-  const renderWithProviders = (component: React.ReactElement) => {
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>{component}</AuthProvider>
-      </QueryClientProvider>,
-    );
-  };
 
   const mockUsers = [
     {
@@ -131,7 +105,6 @@ describe('UserManagementPage', () => {
     vi.mocked(getUsers).mockResolvedValue(mockUsers);
     vi.mocked(createUser).mockResolvedValue(undefined);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<UserManagementPage />);
 
@@ -172,7 +145,7 @@ describe('UserManagementPage', () => {
 
     await waitFor(() => {
       expect(createUser).toHaveBeenCalledWith('newuser', 'password123', 'User');
-      expect(toast.success).toHaveBeenCalledWith('User created successfully');
+      expect(mockToast.success).toHaveBeenCalledWith('User created successfully');
     });
   });
 
@@ -181,7 +154,6 @@ describe('UserManagementPage', () => {
     vi.mocked(getUsers).mockResolvedValue(mockUsers);
     vi.mocked(createUser).mockRejectedValue(new Error('Network error'));
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<UserManagementPage />);
 
@@ -206,7 +178,7 @@ describe('UserManagementPage', () => {
     await user.click(submitButton);
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Failed to create user', {
+      expect(mockToast.error).toHaveBeenCalledWith('Failed to create user', {
         description: 'Network error',
       });
     });
@@ -390,7 +362,6 @@ describe('UserManagementPage', () => {
     vi.mocked(getUsers).mockResolvedValue(mockUsers);
     vi.mocked(setUser).mockRejectedValue(new Error('Update failed'));
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<UserManagementPage />);
 
@@ -432,7 +403,7 @@ describe('UserManagementPage', () => {
 
     await waitFor(
       () => {
-        expect(toast.error).toHaveBeenCalledWith('Failed to update user', {
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to update user', {
           description: 'Update failed',
         });
       },
@@ -445,7 +416,6 @@ describe('UserManagementPage', () => {
     vi.mocked(getUsers).mockResolvedValue(mockUsers);
     vi.mocked(deleteUser).mockRejectedValue(new Error('Delete failed'));
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<UserManagementPage />);
 
@@ -476,7 +446,7 @@ describe('UserManagementPage', () => {
 
     await waitFor(
       () => {
-        expect(toast.error).toHaveBeenCalledWith('Failed to delete user', {
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to delete user', {
           description: 'Delete failed',
         });
       },

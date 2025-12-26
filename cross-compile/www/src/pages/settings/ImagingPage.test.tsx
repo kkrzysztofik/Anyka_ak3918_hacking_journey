@@ -1,17 +1,16 @@
 /**
  * ImagingPage Tests
  */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthProvider } from '@/hooks/useAuth';
 import type {
   BacklightCompensationMode,
   IrCutFilterMode,
   WideDynamicMode,
 } from '@/services/imagingService';
+import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import ImagingPage from './ImagingPage';
 
@@ -22,35 +21,10 @@ vi.mock('@/services/imagingService', () => ({
   setImagingSettings: vi.fn(),
 }));
 
-// Mock sonner toast
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-  },
-}));
-
 describe('ImagingPage', () => {
-  let queryClient: QueryClient;
-
   beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
     vi.clearAllMocks();
   });
-
-  const renderWithProviders = (component: React.ReactElement) => {
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>{component}</AuthProvider>
-      </QueryClientProvider>,
-    );
-  };
 
   const mockSettings = {
     brightness: 60,
@@ -183,7 +157,6 @@ describe('ImagingPage', () => {
     vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
     vi.mocked(setImagingSettings).mockResolvedValue(undefined);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<ImagingPage />);
 
@@ -196,7 +169,7 @@ describe('ImagingPage', () => {
 
     await waitFor(() => {
       expect(setImagingSettings).toHaveBeenCalled();
-      expect(toast.success).toHaveBeenCalledWith('Image settings saved');
+      expect(mockToast.success).toHaveBeenCalledWith('Image settings saved');
     });
   });
 
@@ -207,7 +180,6 @@ describe('ImagingPage', () => {
     vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
     vi.mocked(setImagingSettings).mockRejectedValue(new Error('Network error'));
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<ImagingPage />);
 
@@ -219,7 +191,7 @@ describe('ImagingPage', () => {
     await user.click(saveButton);
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Failed to save image settings', {
+      expect(mockToast.error).toHaveBeenCalledWith('Failed to save image settings', {
         description: 'Network error',
       });
     });
@@ -230,7 +202,6 @@ describe('ImagingPage', () => {
     vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
     vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<ImagingPage />);
 
@@ -242,7 +213,7 @@ describe('ImagingPage', () => {
     await user.click(resetButton);
 
     await waitFor(() => {
-      expect(toast.info).toHaveBeenCalledWith('Reset to current saved values');
+      expect(mockToast.info).toHaveBeenCalledWith('Reset to current saved values');
     });
   });
 
@@ -292,7 +263,6 @@ describe('ImagingPage', () => {
     vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
     vi.mocked(setImagingSettings).mockResolvedValue(undefined);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<ImagingPage />);
 
@@ -310,7 +280,7 @@ describe('ImagingPage', () => {
 
     await waitFor(() => {
       expect(setImagingSettings).toHaveBeenCalled();
-      expect(toast.success).toHaveBeenCalled();
+      expect(mockToast.success).toHaveBeenCalled();
     });
   });
 });

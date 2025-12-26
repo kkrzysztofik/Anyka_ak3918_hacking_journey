@@ -1,12 +1,11 @@
 /**
  * NetworkPage Tests
  */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthProvider } from '@/hooks/useAuth';
+import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import NetworkPage from './NetworkPage';
 
@@ -17,35 +16,10 @@ vi.mock('@/services/networkService', () => ({
   setDNS: vi.fn(),
 }));
 
-// Mock sonner toast
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-  },
-}));
-
 describe('NetworkPage', () => {
-  let queryClient: QueryClient;
-
   beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
     vi.clearAllMocks();
   });
-
-  const renderWithProviders = (component: React.ReactElement) => {
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>{component}</AuthProvider>
-      </QueryClientProvider>,
-    );
-  };
 
   const mockNetworkConfig = {
     interfaces: [
@@ -53,6 +27,7 @@ describe('NetworkPage', () => {
         token: 'eth0',
         name: 'eth0',
         enabled: true,
+        ipv4Enabled: true,
         dhcp: false,
         address: '192.168.1.100',
         prefixLength: 24,
@@ -63,6 +38,7 @@ describe('NetworkPage', () => {
     dns: {
       fromDHCP: false,
       dnsServers: ['8.8.8.8', '8.8.4.4'],
+      searchDomain: [],
     },
   };
 
@@ -205,7 +181,6 @@ describe('NetworkPage', () => {
     vi.mocked(setNetworkInterface).mockResolvedValue(undefined);
     vi.mocked(setDNS).mockResolvedValue(undefined);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<NetworkPage />);
 
@@ -236,7 +211,7 @@ describe('NetworkPage', () => {
     await waitFor(() => {
       expect(setNetworkInterface).toHaveBeenCalled();
       expect(setDNS).toHaveBeenCalled();
-      expect(toast.success).toHaveBeenCalledWith('Network settings saved', {
+      expect(mockToast.success).toHaveBeenCalledWith('Network settings saved', {
         description: 'The device may lose connectivity if IP settings changed.',
       });
     });
@@ -247,7 +222,6 @@ describe('NetworkPage', () => {
     vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
     vi.mocked(setNetworkInterface).mockRejectedValue(new Error('Network error'));
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<NetworkPage />);
 
@@ -274,7 +248,7 @@ describe('NetworkPage', () => {
     await user.click(confirmButton);
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Failed to save settings', {
+      expect(mockToast.error).toHaveBeenCalledWith('Failed to save settings', {
         description: 'Network error',
       });
     });
@@ -284,7 +258,6 @@ describe('NetworkPage', () => {
     const { getNetworkConfig } = await import('@/services/networkService');
     vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<NetworkPage />);
 
@@ -300,7 +273,7 @@ describe('NetworkPage', () => {
     await user.click(resetButton);
 
     await waitFor(() => {
-      expect(toast.info).toHaveBeenCalledWith('Form reset to current values');
+      expect(mockToast.info).toHaveBeenCalledWith('Form reset to current values');
       expect(ipInput).toHaveValue('192.168.1.100');
     });
   });

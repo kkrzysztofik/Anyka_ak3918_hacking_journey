@@ -1,9 +1,11 @@
 /**
  * DiagnosticsPage Component Tests
  */
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+
+import { renderWithProviders } from '@/test/componentTestHelpers';
 
 import DiagnosticsPage from './DiagnosticsPage';
 
@@ -24,7 +26,7 @@ vi.mock('recharts', () => ({
 
 describe('DiagnosticsPage', () => {
   it('should render page title and description', () => {
-    render(<DiagnosticsPage />);
+    renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByText('Diagnostics & Statistics')).toBeInTheDocument();
     expect(
       screen.getByText('Real-time system monitoring and performance metrics'),
@@ -32,7 +34,7 @@ describe('DiagnosticsPage', () => {
   });
 
   it('should render all system health stat cards', () => {
-    render(<DiagnosticsPage />);
+    renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByText('System Status')).toBeInTheDocument();
     expect(screen.getByText('Healthy')).toBeInTheDocument();
     const cpuUsageTexts = screen.getAllByText('CPU Usage');
@@ -45,7 +47,7 @@ describe('DiagnosticsPage', () => {
   });
 
   it('should render CPU usage chart', () => {
-    render(<DiagnosticsPage />);
+    renderWithProviders(<DiagnosticsPage />);
     const cpuUsageTexts = screen.getAllByText('CPU Usage');
     expect(cpuUsageTexts.length).toBeGreaterThan(0);
     expect(screen.getByText('Processor load over time')).toBeInTheDocument();
@@ -53,13 +55,13 @@ describe('DiagnosticsPage', () => {
   });
 
   it('should render memory usage chart', () => {
-    render(<DiagnosticsPage />);
+    renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByText('Memory Usage')).toBeInTheDocument();
     expect(screen.getByText('RAM utilization over time')).toBeInTheDocument();
   });
 
   it('should render network throughput chart', () => {
-    render(<DiagnosticsPage />);
+    renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByText('Network Throughput')).toBeInTheDocument();
     expect(screen.getByText('Upload and download bandwidth')).toBeInTheDocument();
     expect(screen.getByText('Download')).toBeInTheDocument();
@@ -67,7 +69,7 @@ describe('DiagnosticsPage', () => {
   });
 
   it('should render device information card', () => {
-    render(<DiagnosticsPage />);
+    renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByText('Device Information')).toBeInTheDocument();
     expect(screen.getByText('Hardware and firmware details')).toBeInTheDocument();
     expect(screen.getByText('Model')).toBeInTheDocument();
@@ -77,7 +79,7 @@ describe('DiagnosticsPage', () => {
   });
 
   it('should render system metrics card', () => {
-    render(<DiagnosticsPage />);
+    renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByText('System Metrics')).toBeInTheDocument();
     expect(screen.getByText('Performance and storage statistics')).toBeInTheDocument();
     expect(screen.getByText('Storage Used')).toBeInTheDocument();
@@ -85,7 +87,7 @@ describe('DiagnosticsPage', () => {
   });
 
   it('should render system logs section', () => {
-    render(<DiagnosticsPage />);
+    renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByText('System Logs')).toBeInTheDocument();
     expect(screen.getByText('Recent activity and events')).toBeInTheDocument();
     expect(screen.getByText('Timestamp')).toBeInTheDocument();
@@ -95,7 +97,7 @@ describe('DiagnosticsPage', () => {
   });
 
   it('should render log filter buttons', () => {
-    render(<DiagnosticsPage />);
+    renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByText('All')).toBeInTheDocument();
     const infoTexts = screen.getAllByText('Info');
     expect(infoTexts.length).toBeGreaterThan(0);
@@ -106,12 +108,12 @@ describe('DiagnosticsPage', () => {
   });
 
   it('should render export button', () => {
-    render(<DiagnosticsPage />);
+    renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByText('Export')).toBeInTheDocument();
   });
 
   it('should render log entries', () => {
-    render(<DiagnosticsPage />);
+    renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByText('Main stream started successfully')).toBeInTheDocument();
     expect(screen.getByText('High latency detected: 125ms')).toBeInTheDocument();
     expect(screen.getByText('Preset position 1 updated')).toBeInTheDocument();
@@ -123,7 +125,7 @@ describe('DiagnosticsPage', () => {
     // Direct testing would require exporting it or using a different approach
 
     it('should render charts with tooltip support', () => {
-      render(<DiagnosticsPage />);
+      renderWithProviders(<DiagnosticsPage />);
       // Verify charts are rendered (which use CustomTooltip internally)
       const charts = screen.getAllByTestId('area-chart');
       expect(charts.length).toBeGreaterThan(0);
@@ -133,7 +135,7 @@ describe('DiagnosticsPage', () => {
     });
 
     it('should have tooltip configured for CPU chart', () => {
-      render(<DiagnosticsPage />);
+      renderWithProviders(<DiagnosticsPage />);
       // Charts with tooltips are rendered
       const cpuUsageTexts = screen.getAllByText('CPU Usage');
       expect(cpuUsageTexts.length).toBeGreaterThan(0);
@@ -141,13 +143,13 @@ describe('DiagnosticsPage', () => {
     });
 
     it('should have tooltip configured for memory chart', () => {
-      render(<DiagnosticsPage />);
+      renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByText('Memory Usage')).toBeInTheDocument();
       expect(screen.getAllByTestId('tooltip').length).toBeGreaterThan(0);
     });
 
     it('should have tooltip configured for network chart', () => {
-      render(<DiagnosticsPage />);
+      renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByText('Network Throughput')).toBeInTheDocument();
       expect(screen.getAllByTestId('tooltip').length).toBeGreaterThan(0);
     });
@@ -156,7 +158,7 @@ describe('DiagnosticsPage', () => {
   describe('Button interactions', () => {
     it('should handle log filter button clicks', async () => {
       const user = userEvent.setup();
-      render(<DiagnosticsPage />);
+      renderWithProviders(<DiagnosticsPage />);
 
       const infoButton = screen.getByTestId('diagnostics-log-filter-info');
       await user.click(infoButton);
@@ -173,7 +175,7 @@ describe('DiagnosticsPage', () => {
 
     it('should handle export button click', async () => {
       const user = userEvent.setup();
-      render(<DiagnosticsPage />);
+      renderWithProviders(<DiagnosticsPage />);
 
       const exportButton = screen.getByTestId('diagnostics-export-button');
       expect(exportButton).toBeInTheDocument();
@@ -185,7 +187,7 @@ describe('DiagnosticsPage', () => {
 
     it('should handle chart button clicks', async () => {
       const user = userEvent.setup();
-      render(<DiagnosticsPage />);
+      renderWithProviders(<DiagnosticsPage />);
 
       // Find clock icon buttons (time range selectors)
       const clockButtons = screen.getAllByTestId('diagnostics-chart-time-button');

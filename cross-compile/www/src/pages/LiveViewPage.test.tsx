@@ -1,12 +1,11 @@
 /**
  * LiveViewPage Tests
  */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthProvider } from '@/hooks/useAuth';
+import { renderWithProviders } from '@/test/componentTestHelpers';
 
 import LiveViewPage from './LiveViewPage';
 
@@ -21,25 +20,9 @@ Object.defineProperty(navigator, 'clipboard', {
 });
 
 describe('LiveViewPage', () => {
-  let queryClient: QueryClient;
-
   beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
     vi.clearAllMocks();
   });
-
-  const renderWithProviders = (component: React.ReactElement) => {
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>{component}</AuthProvider>
-      </QueryClientProvider>,
-    );
-  };
 
   it('should render page title and description', () => {
     renderWithProviders(<LiveViewPage />);

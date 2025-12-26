@@ -1,11 +1,11 @@
 /**
  * LoginPage Tests
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthProvider } from '@/hooks/useAuth';
+import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import LoginPage from './LoginPage';
 
@@ -28,14 +28,6 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-// Mock sonner toast
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}));
-
 // Helper function to create delayed promise for testing loading states
 const createDelayedPromise = (delay = 100): Promise<{ success: boolean }> => {
   return new Promise((resolve) => {
@@ -51,11 +43,7 @@ describe('LoginPage', () => {
   });
 
   it('should render login form', async () => {
-    render(
-      <AuthProvider>
-        <LoginPage />
-      </AuthProvider>,
-    );
+    renderWithProviders(<LoginPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('login-page-title')).toHaveTextContent('ONVIF Device Manager');
@@ -67,11 +55,7 @@ describe('LoginPage', () => {
 
   it('should show validation error for empty username', async () => {
     const user = userEvent.setup();
-    render(
-      <AuthProvider>
-        <LoginPage />
-      </AuthProvider>,
-    );
+    renderWithProviders(<LoginPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
@@ -87,11 +71,7 @@ describe('LoginPage', () => {
 
   it('should show validation error for empty password', async () => {
     const user = userEvent.setup();
-    render(
-      <AuthProvider>
-        <LoginPage />
-      </AuthProvider>,
-    );
+    renderWithProviders(<LoginPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
@@ -110,11 +90,7 @@ describe('LoginPage', () => {
 
   it('should toggle password visibility', async () => {
     const user = userEvent.setup();
-    render(
-      <AuthProvider>
-        <LoginPage />
-      </AuthProvider>,
-    );
+    renderWithProviders(<LoginPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('login-form-password-input')).toBeInTheDocument();
@@ -146,11 +122,7 @@ describe('LoginPage', () => {
     vi.mocked(verifyCredentials).mockResolvedValue({ success: true });
 
     const user = userEvent.setup();
-    render(
-      <AuthProvider>
-        <LoginPage />
-      </AuthProvider>,
-    );
+    renderWithProviders(<LoginPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
@@ -174,11 +146,7 @@ describe('LoginPage', () => {
     vi.mocked(verifyCredentials).mockImplementation(() => createDelayedPromise(100));
 
     const user = userEvent.setup();
-    render(
-      <AuthProvider>
-        <LoginPage />
-      </AuthProvider>,
-    );
+    renderWithProviders(<LoginPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
@@ -209,11 +177,7 @@ describe('LoginPage', () => {
       }),
     );
 
-    render(
-      <AuthProvider>
-        <LoginPage />
-      </AuthProvider>,
-    );
+    renderWithProviders(<LoginPage />);
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
@@ -233,11 +197,7 @@ describe('LoginPage', () => {
     // Mock location with safe path
     mockLocation.state = { from: { pathname: '/settings' } };
 
-    render(
-      <AuthProvider>
-        <LoginPage />
-      </AuthProvider>,
-    );
+    renderWithProviders(<LoginPage />);
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/settings', { replace: true });
@@ -257,11 +217,7 @@ describe('LoginPage', () => {
     // Mock location with unsafe path
     mockLocation.state = { from: { pathname: '//evil.com' } };
 
-    render(
-      <AuthProvider>
-        <LoginPage />
-      </AuthProvider>,
-    );
+    renderWithProviders(<LoginPage />);
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
@@ -270,18 +226,13 @@ describe('LoginPage', () => {
 
   it('should show error toast when authentication fails', async () => {
     const { verifyCredentials } = await import('@/services/authService');
-    const { toast } = await import('sonner');
     vi.mocked(verifyCredentials).mockResolvedValue({
       success: false,
       error: 'Invalid credentials',
     });
 
     const user = userEvent.setup();
-    render(
-      <AuthProvider>
-        <LoginPage />
-      </AuthProvider>,
-    );
+    renderWithProviders(<LoginPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
@@ -296,21 +247,16 @@ describe('LoginPage', () => {
     await user.click(submitButton);
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Invalid credentials');
+      expect(mockToast.error).toHaveBeenCalledWith('Invalid credentials');
     });
   });
 
   it('should show error toast when verifyCredentials throws', async () => {
     const { verifyCredentials } = await import('@/services/authService');
-    const { toast } = await import('sonner');
     vi.mocked(verifyCredentials).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
-    render(
-      <AuthProvider>
-        <LoginPage />
-      </AuthProvider>,
-    );
+    renderWithProviders(<LoginPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
@@ -325,7 +271,7 @@ describe('LoginPage', () => {
     await user.click(submitButton);
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('An error occurred during sign in');
+      expect(mockToast.error).toHaveBeenCalledWith('An error occurred during sign in');
     });
   });
 });

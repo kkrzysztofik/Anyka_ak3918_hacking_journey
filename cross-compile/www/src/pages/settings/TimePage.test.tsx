@@ -1,12 +1,11 @@
 /**
  * TimePage Tests
  */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthProvider } from '@/hooks/useAuth';
+import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import TimePage from './TimePage';
 
@@ -17,37 +16,12 @@ vi.mock('@/services/timeService', () => ({
   setNTP: vi.fn(),
 }));
 
-// Mock sonner toast
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-  },
-}));
-
 // Note: Timer mocking will be handled per test
 
 describe('TimePage', () => {
-  let queryClient: QueryClient;
-
   beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false },
-        mutations: { retry: false },
-      },
-    });
     vi.clearAllMocks();
   });
-
-  const renderWithProviders = (component: React.ReactElement) => {
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>{component}</AuthProvider>
-      </QueryClientProvider>,
-    );
-  };
 
   const mockTimeConfig = {
     ntp: {
@@ -173,7 +147,6 @@ describe('TimePage', () => {
     const { getDateTime } = await import('@/services/timeService');
     vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<TimePage />);
 
@@ -188,7 +161,7 @@ describe('TimePage', () => {
     await user.click(computerRadio);
     await waitFor(
       () => {
-        expect(toast.info).toHaveBeenCalledWith('Selected computer time');
+        expect(mockToast.info).toHaveBeenCalledWith('Selected computer time');
       },
       { timeout: 3000 },
     );
@@ -301,7 +274,6 @@ describe('TimePage', () => {
     vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
     vi.mocked(setNTP).mockResolvedValue(undefined);
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<TimePage />);
 
@@ -331,7 +303,7 @@ describe('TimePage', () => {
     await waitFor(
       () => {
         expect(setNTP).toHaveBeenCalled();
-        expect(toast.success).toHaveBeenCalledWith('Time settings saved');
+        expect(mockToast.success).toHaveBeenCalledWith('Time settings saved');
       },
       { timeout: 5000 },
     );
@@ -342,7 +314,6 @@ describe('TimePage', () => {
     vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
     vi.mocked(setNTP).mockRejectedValue(new Error('Network error'));
 
-    const { toast } = await import('sonner');
     const user = userEvent.setup();
     renderWithProviders(<TimePage />);
 
@@ -371,7 +342,7 @@ describe('TimePage', () => {
 
     await waitFor(
       () => {
-        expect(toast.error).toHaveBeenCalledWith('Failed to save time settings', {
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to save time settings', {
           description: 'Network error',
         });
       },

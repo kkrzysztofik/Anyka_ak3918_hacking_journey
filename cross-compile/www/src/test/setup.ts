@@ -39,3 +39,16 @@ if (typeof Element !== 'undefined') {
   Element.prototype.hasPointerCapture = vi.fn().mockReturnValue(false);
   Element.prototype.scrollIntoView = vi.fn();
 }
+
+// Global mock for sonner
+vi.mock('sonner', () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+    loading: vi.fn(),
+    dismiss: vi.fn(),
+    promise: vi.fn(),
+  },
+}));

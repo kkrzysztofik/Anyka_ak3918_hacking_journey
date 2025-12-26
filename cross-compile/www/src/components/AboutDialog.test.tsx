@@ -1,22 +1,17 @@
 /**
  * AboutDialog Component Tests
  */
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import { AboutDialog } from './AboutDialog';
 
 // Mock deviceService
 vi.mock('@/services/deviceService', () => ({
   getDeviceInformation: vi.fn(),
-}));
-
-// Mock toast
-vi.mock('sonner', () => ({
-  toast: {
-    error: vi.fn(),
-  },
 }));
 
 // Mock UI components
@@ -109,12 +104,12 @@ describe('AboutDialog', () => {
 
   describe('Dialog Open/Close', () => {
     it('should render dialog when open is true', () => {
-      render(<AboutDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
       expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'true');
     });
 
     it('should not render dialog content when open is false', () => {
-      render(<AboutDialog open={false} onOpenChange={vi.fn()} />);
+      renderWithProviders(<AboutDialog open={false} onOpenChange={vi.fn()} />);
       expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'false');
     });
 
@@ -122,7 +117,7 @@ describe('AboutDialog', () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();
 
-      render(<AboutDialog open={true} onOpenChange={onOpenChange} />);
+      renderWithProviders(<AboutDialog open={true} onOpenChange={onOpenChange} />);
 
       const closeButton = screen.getByTestId('dialog-close-button');
       await act(async () => {
@@ -136,7 +131,7 @@ describe('AboutDialog', () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();
 
-      render(<AboutDialog open={true} onOpenChange={onOpenChange} />);
+      renderWithProviders(<AboutDialog open={true} onOpenChange={onOpenChange} />);
 
       const overlay = screen.getByTestId('dialog-overlay');
       await act(async () => {
@@ -158,7 +153,7 @@ describe('AboutDialog', () => {
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockReturnValue(promise);
 
-      render(<AboutDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
       // Should show loading
       await waitFor(() => {
@@ -176,7 +171,7 @@ describe('AboutDialog', () => {
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
 
-      render(<AboutDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
       await waitFor(() => {
         expect(screen.getByTestId('about-manufacturer-value')).toHaveTextContent('Anyka');
@@ -191,7 +186,7 @@ describe('AboutDialog', () => {
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
 
-      render(<AboutDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
       await waitFor(() => {
         expect(screen.getByText('Manufacturer')).toBeInTheDocument();
@@ -206,7 +201,7 @@ describe('AboutDialog', () => {
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
 
-      render(<AboutDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
       await waitFor(() => {
         expect(screen.getByTestId('about-dialog-title')).toBeInTheDocument();
@@ -218,7 +213,7 @@ describe('AboutDialog', () => {
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
 
-      render(<AboutDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
       await waitFor(() => {
         const githubLink = screen.getByTestId('about-github-link');
@@ -235,7 +230,7 @@ describe('AboutDialog', () => {
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
 
-      render(<AboutDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
       await waitFor(() => {
         const licenseLink = screen.getByTestId('about-license-link');
@@ -251,7 +246,7 @@ describe('AboutDialog', () => {
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
 
-      render(<AboutDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
       await waitFor(() => {
         expect(screen.getByTestId('about-copyright')).toBeInTheDocument();
@@ -264,14 +259,12 @@ describe('AboutDialog', () => {
       const error = new Error('Network error');
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockRejectedValue(error);
-      const { toast } = await import('sonner');
-
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      render(<AboutDialog open={true} onOpenChange={vi.fn()} />);
+      renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
       await waitFor(() => {
-        expect(toast.error).toHaveBeenCalledWith('Failed to load device information');
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to load device information');
         expect(consoleSpy).toHaveBeenCalledWith('Failed to fetch device info:', error);
       });
 
@@ -282,7 +275,7 @@ describe('AboutDialog', () => {
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
 
-      const { rerender } = render(<AboutDialog open={false} onOpenChange={vi.fn()} />);
+      const { rerender } = renderWithProviders(<AboutDialog open={false} onOpenChange={vi.fn()} />);
 
       // Open dialog
       rerender(<AboutDialog open={true} onOpenChange={vi.fn()} />);
@@ -306,7 +299,7 @@ describe('AboutDialog', () => {
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
 
-      const { rerender } = render(<AboutDialog open={false} onOpenChange={vi.fn()} />);
+      const { rerender } = renderWithProviders(<AboutDialog open={false} onOpenChange={vi.fn()} />);
 
       // Should not fetch when closed
       const deviceService = await import('@/services/deviceService');
