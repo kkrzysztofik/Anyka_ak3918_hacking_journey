@@ -5,6 +5,8 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getDeviceIdentification, setDeviceInformation } from '@/services/deviceService';
+import { getNetworkInterfaces } from '@/services/networkService';
 import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import IdentificationPage from './IdentificationPage';
@@ -22,15 +24,11 @@ vi.mock('@/services/networkService', () => ({
 describe('IdentificationPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
+    vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
   });
 
   it('should render identification form', async () => {
-    const { getDeviceIdentification } = await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
-
-    const { getNetworkInterfaces } = await import('@/services/networkService');
-    vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
-
     renderWithProviders(<IdentificationPage />);
 
     await waitFor(() => {
@@ -39,12 +37,6 @@ describe('IdentificationPage', () => {
   });
 
   it('should display device information when loaded', async () => {
-    const { getDeviceIdentification } = await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
-
-    const { getNetworkInterfaces } = await import('@/services/networkService');
-    vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
-
     renderWithProviders(<IdentificationPage />);
 
     await waitFor(() => {
@@ -56,12 +48,6 @@ describe('IdentificationPage', () => {
   });
 
   it('should allow editing device name', async () => {
-    const { getDeviceIdentification } = await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
-
-    const { getNetworkInterfaces } = await import('@/services/networkService');
-    vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
-
     const user = userEvent.setup();
     renderWithProviders(<IdentificationPage />);
 
@@ -77,12 +63,6 @@ describe('IdentificationPage', () => {
   });
 
   it('should allow editing device location', async () => {
-    const { getDeviceIdentification } = await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
-
-    const { getNetworkInterfaces } = await import('@/services/networkService');
-    vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
-
     const user = userEvent.setup();
     renderWithProviders(<IdentificationPage />);
 
@@ -100,13 +80,7 @@ describe('IdentificationPage', () => {
   });
 
   it('should submit form with valid data', async () => {
-    const { getDeviceIdentification, setDeviceInformation } =
-      await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
     vi.mocked(setDeviceInformation).mockResolvedValue(undefined);
-
-    const { getNetworkInterfaces } = await import('@/services/networkService');
-    vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
 
     const user = userEvent.setup();
     renderWithProviders(<IdentificationPage />);
@@ -129,13 +103,7 @@ describe('IdentificationPage', () => {
   });
 
   it('should show error toast when mutation fails', async () => {
-    const { getDeviceIdentification, setDeviceInformation } =
-      await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
     vi.mocked(setDeviceInformation).mockRejectedValue(new Error('Network error'));
-
-    const { getNetworkInterfaces } = await import('@/services/networkService');
-    vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
 
     const user = userEvent.setup();
     renderWithProviders(<IdentificationPage />);
@@ -163,12 +131,6 @@ describe('IdentificationPage', () => {
   });
 
   it('should reset form when handleReset is called', async () => {
-    const { getDeviceIdentification } = await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
-
-    const { getNetworkInterfaces } = await import('@/services/networkService');
-    vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
-
     const user = userEvent.setup();
     renderWithProviders(<IdentificationPage />);
 
@@ -190,13 +152,9 @@ describe('IdentificationPage', () => {
   });
 
   it('should show loading state when device info is loading', async () => {
-    const { getDeviceIdentification } = await import('@/services/deviceService');
     vi.mocked(getDeviceIdentification).mockImplementation(
       () => new Promise(() => {}), // Never resolves
     );
-
-    const { getNetworkInterfaces } = await import('@/services/networkService');
-    vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
 
     renderWithProviders(<IdentificationPage />);
 

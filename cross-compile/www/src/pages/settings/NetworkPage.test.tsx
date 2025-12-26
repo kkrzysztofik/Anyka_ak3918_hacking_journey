@@ -5,6 +5,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getNetworkConfig, setDNS, setNetworkInterface } from '@/services/networkService';
 import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import NetworkPage from './NetworkPage';
@@ -19,12 +20,10 @@ vi.mock('@/services/networkService', () => ({
 describe('NetworkPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getNetworkConfig).mockResolvedValue(MOCK_DATA.network);
   });
 
-  const mockNetworkConfig = MOCK_DATA.network;
-
   it('should render page with loading state', async () => {
-    const { getNetworkConfig } = await import('@/services/networkService');
     vi.mocked(getNetworkConfig).mockImplementation(() => new Promise(() => {}));
 
     renderWithProviders(<NetworkPage />);
@@ -32,9 +31,6 @@ describe('NetworkPage', () => {
   });
 
   it('should render form with fetched network config', async () => {
-    const { getNetworkConfig } = await import('@/services/networkService');
-    vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
-
     renderWithProviders(<NetworkPage />);
 
     await waitFor(() => {
@@ -46,9 +42,6 @@ describe('NetworkPage', () => {
   });
 
   it('should toggle DHCP and show/hide static IP fields', async () => {
-    const { getNetworkConfig } = await import('@/services/networkService');
-    vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
-
     const user = userEvent.setup();
     renderWithProviders(<NetworkPage />);
 
@@ -71,9 +64,6 @@ describe('NetworkPage', () => {
   });
 
   it('should validate IP address format', async () => {
-    const { getNetworkConfig } = await import('@/services/networkService');
-    vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
-
     const user = userEvent.setup();
     renderWithProviders(<NetworkPage />);
 
@@ -95,9 +85,6 @@ describe('NetworkPage', () => {
   });
 
   it('should toggle DNS from DHCP', async () => {
-    const { getNetworkConfig } = await import('@/services/networkService');
-    vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
-
     const user = userEvent.setup();
     renderWithProviders(<NetworkPage />);
 
@@ -115,9 +102,6 @@ describe('NetworkPage', () => {
   });
 
   it('should show DNS input fields when DNS from DHCP is off', async () => {
-    const { getNetworkConfig } = await import('@/services/networkService');
-    vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
-
     renderWithProviders(<NetworkPage />);
 
     await waitFor(() => {
@@ -127,9 +111,6 @@ describe('NetworkPage', () => {
   });
 
   it('should show confirmation dialog on form submission', async () => {
-    const { getNetworkConfig } = await import('@/services/networkService');
-    vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
-
     const user = userEvent.setup();
     renderWithProviders(<NetworkPage />);
 
@@ -156,12 +137,6 @@ describe('NetworkPage', () => {
   });
 
   it('should call mutation on confirmation', async () => {
-    const { getNetworkConfig, setNetworkInterface, setDNS } =
-      await import('@/services/networkService');
-    vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
-    vi.mocked(setNetworkInterface).mockResolvedValue(undefined);
-    vi.mocked(setDNS).mockResolvedValue(undefined);
-
     const user = userEvent.setup();
     renderWithProviders(<NetworkPage />);
 
@@ -199,8 +174,6 @@ describe('NetworkPage', () => {
   });
 
   it('should show error toast when mutation fails', async () => {
-    const { getNetworkConfig, setNetworkInterface } = await import('@/services/networkService');
-    vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
     vi.mocked(setNetworkInterface).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
@@ -236,9 +209,6 @@ describe('NetworkPage', () => {
   });
 
   it('should reset form when reset button is clicked', async () => {
-    const { getNetworkConfig } = await import('@/services/networkService');
-    vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
-
     const user = userEvent.setup();
     renderWithProviders(<NetworkPage />);
 
@@ -260,9 +230,6 @@ describe('NetworkPage', () => {
   });
 
   it('should render connection status card', async () => {
-    const { getNetworkConfig } = await import('@/services/networkService');
-    vi.mocked(getNetworkConfig).mockResolvedValue(mockNetworkConfig);
-
     renderWithProviders(<NetworkPage />);
 
     await waitFor(() => {

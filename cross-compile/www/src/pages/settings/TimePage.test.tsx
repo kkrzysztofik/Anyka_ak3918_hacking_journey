@@ -5,6 +5,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getDateTime, setNTP } from '@/services/timeService';
 import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import TimePage from './TimePage';
@@ -21,6 +22,8 @@ vi.mock('@/services/timeService', () => ({
 describe('TimePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
+    vi.mocked(setNTP).mockResolvedValue(undefined);
   });
 
   const mockTimeConfig = {
@@ -34,7 +37,6 @@ describe('TimePage', () => {
   };
 
   it('should render page with loading state', async () => {
-    const { getDateTime } = await import('@/services/timeService');
     vi.mocked(getDateTime).mockImplementation(() => new Promise(() => {}));
 
     renderWithProviders(<TimePage />);
@@ -42,9 +44,6 @@ describe('TimePage', () => {
   });
 
   it('should render form with fetched time config', async () => {
-    const { getDateTime } = await import('@/services/timeService');
-    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
-
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {
@@ -55,9 +54,6 @@ describe('TimePage', () => {
   });
 
   it('should display device time', async () => {
-    const { getDateTime } = await import('@/services/timeService');
-    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
-
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {
@@ -73,9 +69,6 @@ describe('TimePage', () => {
   });
 
   it('should update device time display on interval', async () => {
-    const { getDateTime } = await import('@/services/timeService');
-    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
-
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {
@@ -88,9 +81,6 @@ describe('TimePage', () => {
   });
 
   it('should select NTP mode', async () => {
-    const { getDateTime } = await import('@/services/timeService');
-    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
-
     const user = userEvent.setup();
     renderWithProviders(<TimePage />);
 
@@ -114,7 +104,6 @@ describe('TimePage', () => {
   });
 
   it('should show NTP server fields when NTP mode is selected and not from DHCP', async () => {
-    const { getDateTime } = await import('@/services/timeService');
     vi.mocked(getDateTime).mockResolvedValue({
       ...mockTimeConfig,
       ntp: { enabled: true, fromDHCP: false },
@@ -144,9 +133,6 @@ describe('TimePage', () => {
   });
 
   it('should select Computer mode', async () => {
-    const { getDateTime } = await import('@/services/timeService');
-    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
-
     const user = userEvent.setup();
     renderWithProviders(<TimePage />);
 
@@ -168,9 +154,6 @@ describe('TimePage', () => {
   });
 
   it('should select Manual mode and show date/time inputs', async () => {
-    const { getDateTime } = await import('@/services/timeService');
-    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
-
     const user = userEvent.setup();
     renderWithProviders(<TimePage />);
 
@@ -198,9 +181,6 @@ describe('TimePage', () => {
   });
 
   it('should toggle NTP from DHCP', async () => {
-    const { getDateTime } = await import('@/services/timeService');
-    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
-
     const user = userEvent.setup();
     renderWithProviders(<TimePage />);
 
@@ -246,9 +226,6 @@ describe('TimePage', () => {
   });
 
   it('should select timezone', async () => {
-    const { getDateTime } = await import('@/services/timeService');
-    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
-
     const user = userEvent.setup();
     renderWithProviders(<TimePage />);
 
@@ -270,10 +247,6 @@ describe('TimePage', () => {
   });
 
   it('should submit form and call mutation', async () => {
-    const { getDateTime, setNTP } = await import('@/services/timeService');
-    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
-    vi.mocked(setNTP).mockResolvedValue(undefined);
-
     const user = userEvent.setup();
     renderWithProviders(<TimePage />);
 
@@ -310,8 +283,6 @@ describe('TimePage', () => {
   });
 
   it('should show error toast when mutation fails', async () => {
-    const { getDateTime, setNTP } = await import('@/services/timeService');
-    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
     vi.mocked(setNTP).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
@@ -351,9 +322,6 @@ describe('TimePage', () => {
   });
 
   it('should render timezone configuration card', async () => {
-    const { getDateTime } = await import('@/services/timeService');
-    vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
-
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {

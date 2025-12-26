@@ -5,6 +5,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { verifyCredentials } from '@/services/authService';
 import {
   createDelayedPromise,
   // This import should remain as createDelayedPromise is now exported from componentTestHelpers
@@ -116,7 +117,6 @@ describe('LoginPage', () => {
   });
 
   it('should submit form with valid credentials', async () => {
-    const { verifyCredentials } = await import('@/services/authService');
     vi.mocked(verifyCredentials).mockResolvedValue({ success: true });
 
     const user = userEvent.setup();
@@ -140,7 +140,6 @@ describe('LoginPage', () => {
   });
 
   it('should show loading state during submission', async () => {
-    const { verifyCredentials } = await import('@/services/authService');
     vi.mocked(verifyCredentials).mockImplementation(() =>
       createDelayedPromise({ success: true }, 100),
     );
@@ -225,7 +224,6 @@ describe('LoginPage', () => {
   });
 
   it('should show error toast when authentication fails', async () => {
-    const { verifyCredentials } = await import('@/services/authService');
     vi.mocked(verifyCredentials).mockResolvedValue({
       success: false,
       error: 'Invalid credentials',
@@ -252,7 +250,6 @@ describe('LoginPage', () => {
   });
 
   it('should handle login error', async () => {
-    const { verifyCredentials } = await import('@/services/authService');
     vi.mocked(verifyCredentials).mockRejectedValue(new Error('Invalid credentials'));
 
     const user = userEvent.setup();

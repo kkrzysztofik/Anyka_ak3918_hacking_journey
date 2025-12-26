@@ -5,6 +5,14 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  createProfile,
+  deleteProfile,
+  getProfiles,
+  getVideoEncoderConfiguration,
+  getVideoEncoderConfigurationOptions,
+  setVideoEncoderConfiguration,
+} from '@/services/profileService';
 import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import ProfilesPage from './ProfilesPage';
@@ -20,14 +28,15 @@ vi.mock('@/services/profileService', () => ({
 }));
 
 describe('ProfilesPage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   const mockProfiles = MOCK_DATA.profiles;
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Setup default successful response since most tests use it
+    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
+  });
+
   it('should render page with loading state', async () => {
-    const { getProfiles } = await import('@/services/profileService');
     vi.mocked(getProfiles).mockImplementation(() => new Promise(() => {}));
 
     renderWithProviders(<ProfilesPage />);
@@ -35,9 +44,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should render profiles list when loaded', async () => {
-    const { getProfiles } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
-
     renderWithProviders(<ProfilesPage />);
 
     await waitFor(() => {
@@ -48,7 +54,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should render error state when query fails', async () => {
-    const { getProfiles } = await import('@/services/profileService');
     vi.mocked(getProfiles).mockRejectedValue(new Error('Network error'));
 
     renderWithProviders(<ProfilesPage />);
@@ -59,9 +64,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should open and close create profile dialog', async () => {
-    const { getProfiles } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
-
     const user = userEvent.setup();
     renderWithProviders(<ProfilesPage />);
 
@@ -89,8 +91,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should create profile on form submission', async () => {
-    const { getProfiles, createProfile } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
     vi.mocked(createProfile).mockResolvedValue('NewProfileToken');
 
     const user = userEvent.setup();
@@ -121,8 +121,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should show error when profile creation fails', async () => {
-    const { getProfiles, createProfile } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
     vi.mocked(createProfile).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
@@ -154,9 +152,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should open delete confirmation dialog', async () => {
-    const { getProfiles } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
-
     renderWithProviders(<ProfilesPage />);
 
     await waitFor(() => {
@@ -169,8 +164,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should delete profile on confirmation', async () => {
-    const { getProfiles, deleteProfile } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
     vi.mocked(deleteProfile).mockResolvedValue(undefined);
 
     renderWithProviders(<ProfilesPage />);
@@ -184,9 +177,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should toggle profile card expand/collapse', async () => {
-    const { getProfiles } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
-
     const user = userEvent.setup();
     renderWithProviders(<ProfilesPage />);
 
@@ -205,7 +195,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should render empty state when no profiles exist', async () => {
-    const { getProfiles } = await import('@/services/profileService');
     vi.mocked(getProfiles).mockResolvedValue([]);
 
     renderWithProviders(<ProfilesPage />);
@@ -216,9 +205,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should display profile information correctly', async () => {
-    const { getProfiles } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
-
     renderWithProviders(<ProfilesPage />);
 
     await waitFor(() => {
@@ -228,9 +214,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should not show delete button for fixed profiles', async () => {
-    const { getProfiles } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
-
     renderWithProviders(<ProfilesPage />);
 
     await waitFor(() => {
@@ -245,8 +228,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should handle delete error', async () => {
-    const { getProfiles, deleteProfile } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
     vi.mocked(deleteProfile).mockRejectedValue(new Error('Delete failed'));
 
     const user = userEvent.setup();
@@ -285,9 +266,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should toggle profile expand/collapse multiple times', async () => {
-    const { getProfiles } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
-
     const user = userEvent.setup();
     renderWithProviders(<ProfilesPage />);
 
@@ -324,9 +302,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should open VideoEncoderEditDialog when edit button is clicked', async () => {
-    const { getProfiles, getVideoEncoderConfiguration, getVideoEncoderConfigurationOptions } =
-      await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
     vi.mocked(getVideoEncoderConfiguration).mockResolvedValue({
       token: 'VideoEncoderToken1',
       name: 'H.264 Encoder',
@@ -395,9 +370,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should handle VideoEncoderEditDialog loading state', async () => {
-    const { getProfiles, getVideoEncoderConfiguration, getVideoEncoderConfigurationOptions } =
-      await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
     vi.mocked(getVideoEncoderConfiguration).mockImplementation(
       () => new Promise(() => {}), // Never resolves
     );
@@ -439,8 +411,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should handle VideoEncoderEditDialog error', async () => {
-    const { getProfiles, getVideoEncoderConfiguration } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
     vi.mocked(getVideoEncoderConfiguration).mockRejectedValue(new Error('Load failed'));
 
     const user = userEvent.setup();
@@ -478,9 +448,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should render ConfigSection with active state', async () => {
-    const { getProfiles } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
-
     const user = userEvent.setup();
     renderWithProviders(<ProfilesPage />);
 
@@ -504,7 +471,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should render ConfigSection with inactive state', async () => {
-    const { getProfiles } = await import('@/services/profileService');
     const profileWithoutConfig = {
       token: 'ProfileToken3',
       name: 'EmptyProfile',
@@ -535,13 +501,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should save VideoEncoderEditDialog changes', async () => {
-    const {
-      getProfiles,
-      getVideoEncoderConfiguration,
-      getVideoEncoderConfigurationOptions,
-      setVideoEncoderConfiguration,
-    } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
     vi.mocked(getVideoEncoderConfiguration).mockResolvedValue({
       token: 'VideoEncoderToken1',
       name: 'H.264 Encoder',
@@ -621,9 +580,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should cancel VideoEncoderEditDialog', async () => {
-    const { getProfiles, getVideoEncoderConfiguration, getVideoEncoderConfigurationOptions } =
-      await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
     vi.mocked(getVideoEncoderConfiguration).mockResolvedValue({
       token: 'VideoEncoderToken1',
       name: 'H.264 Encoder',
@@ -698,13 +654,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should handle VideoEncoderEditDialog save error', async () => {
-    const {
-      getProfiles,
-      getVideoEncoderConfiguration,
-      getVideoEncoderConfigurationOptions,
-      setVideoEncoderConfiguration,
-    } = await import('@/services/profileService');
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
     vi.mocked(getVideoEncoderConfiguration).mockResolvedValue({
       token: 'VideoEncoderToken1',
       name: 'H.264 Encoder',

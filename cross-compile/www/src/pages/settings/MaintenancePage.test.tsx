@@ -5,6 +5,12 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  getSystemBackup,
+  restoreSystem,
+  setSystemFactoryDefault,
+  systemReboot,
+} from '@/services/maintenanceService';
 import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import MaintenancePage from './MaintenancePage';
@@ -43,6 +49,10 @@ globalThis.document.createElement = vi.fn((tag: string) => {
 describe('MaintenancePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(systemReboot).mockResolvedValue(undefined);
+    vi.mocked(setSystemFactoryDefault).mockResolvedValue(undefined);
+    vi.mocked(restoreSystem).mockResolvedValue(undefined);
+    vi.mocked(getSystemBackup).mockResolvedValue([]);
   });
 
   it('should render all maintenance operation cards', () => {
@@ -75,9 +85,6 @@ describe('MaintenancePage', () => {
   });
 
   it('should call reboot mutation on confirm', async () => {
-    const { systemReboot } = await import('@/services/maintenanceService');
-    vi.mocked(systemReboot).mockResolvedValue(undefined);
-
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -101,7 +108,6 @@ describe('MaintenancePage', () => {
   });
 
   it('should show error toast when reboot fails', async () => {
-    const { systemReboot } = await import('@/services/maintenanceService');
     vi.mocked(systemReboot).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
@@ -144,9 +150,6 @@ describe('MaintenancePage', () => {
   });
 
   it('should call soft reset mutation on confirm', async () => {
-    const { setSystemFactoryDefault } = await import('@/services/maintenanceService');
-    vi.mocked(setSystemFactoryDefault).mockResolvedValue(undefined);
-
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -195,9 +198,6 @@ describe('MaintenancePage', () => {
   });
 
   it('should call hard reset mutation on confirm', async () => {
-    const { setSystemFactoryDefault } = await import('@/services/maintenanceService');
-    vi.mocked(setSystemFactoryDefault).mockResolvedValue(undefined);
-
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -223,7 +223,6 @@ describe('MaintenancePage', () => {
   });
 
   it('should trigger backup download', async () => {
-    const { getSystemBackup } = await import('@/services/maintenanceService');
     const mockBackupFiles = [
       {
         Name: 'config.toml',
@@ -245,9 +244,6 @@ describe('MaintenancePage', () => {
   });
 
   it('should show error when backup fails', async () => {
-    const { getSystemBackup } = await import('@/services/maintenanceService');
-    vi.mocked(getSystemBackup).mockResolvedValue([]);
-
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -262,9 +258,6 @@ describe('MaintenancePage', () => {
   });
 
   it('should trigger restore upload', async () => {
-    const { restoreSystem } = await import('@/services/maintenanceService');
-    vi.mocked(restoreSystem).mockResolvedValue(undefined);
-
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
@@ -290,7 +283,6 @@ describe('MaintenancePage', () => {
   });
 
   it('should show error when soft reset fails', async () => {
-    const { setSystemFactoryDefault } = await import('@/services/maintenanceService');
     vi.mocked(setSystemFactoryDefault).mockRejectedValue(new Error('Reset failed'));
 
     const user = userEvent.setup();
@@ -314,7 +306,6 @@ describe('MaintenancePage', () => {
   });
 
   it('should show error when hard reset fails', async () => {
-    const { setSystemFactoryDefault } = await import('@/services/maintenanceService');
     vi.mocked(setSystemFactoryDefault).mockRejectedValue(new Error('Factory reset failed'));
 
     const user = userEvent.setup();
@@ -351,9 +342,6 @@ describe('MaintenancePage', () => {
   });
 
   it('should handle restore system flow', async () => {
-    const { restoreSystem } = await import('@/services/maintenanceService');
-    vi.mocked(restoreSystem).mockResolvedValue(undefined);
-
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 

@@ -5,6 +5,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createUser, deleteUser, getUsers, setUser } from '@/services/userService';
 import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import UserManagementPage from './UserManagementPage';
@@ -18,10 +19,6 @@ vi.mock('@/services/userService', () => ({
 }));
 
 describe('UserManagementPage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   const mockUsers = [
     {
       username: 'admin',
@@ -37,8 +34,15 @@ describe('UserManagementPage', () => {
     },
   ];
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getUsers).mockResolvedValue(mockUsers);
+    vi.mocked(createUser).mockResolvedValue(undefined);
+    vi.mocked(setUser).mockResolvedValue(undefined);
+    vi.mocked(deleteUser).mockResolvedValue(undefined);
+  });
+
   it('should render page with loading state', async () => {
-    const { getUsers } = await import('@/services/userService');
     vi.mocked(getUsers).mockImplementation(() => new Promise(() => {}));
 
     renderWithProviders(<UserManagementPage />);
@@ -46,9 +50,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should render users list when loaded', async () => {
-    const { getUsers } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
-
     renderWithProviders(<UserManagementPage />);
 
     await waitFor(() => {
@@ -60,7 +61,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should render error state when query fails', async () => {
-    const { getUsers } = await import('@/services/userService');
     vi.mocked(getUsers).mockRejectedValue(new Error('Network error'));
 
     renderWithProviders(<UserManagementPage />);
@@ -71,9 +71,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should open and close add user dialog', async () => {
-    const { getUsers } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
-
     const user = userEvent.setup();
     renderWithProviders(<UserManagementPage />);
 
@@ -101,10 +98,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should create user on form submission', async () => {
-    const { getUsers, createUser } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
-    vi.mocked(createUser).mockResolvedValue(undefined);
-
     const user = userEvent.setup();
     renderWithProviders(<UserManagementPage />);
 
@@ -150,8 +143,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should show error when user creation fails', async () => {
-    const { getUsers, createUser } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
     vi.mocked(createUser).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
@@ -185,9 +176,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should open edit user dialog', async () => {
-    const { getUsers } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
-
     renderWithProviders(<UserManagementPage />);
 
     await waitFor(() => {
@@ -200,10 +188,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should update user on form submission', async () => {
-    const { getUsers, setUser } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
-    vi.mocked(setUser).mockResolvedValue(undefined);
-
     renderWithProviders(<UserManagementPage />);
 
     await waitFor(() => {
@@ -216,9 +200,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should toggle password visibility', async () => {
-    const { getUsers } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
-
     const user = userEvent.setup();
     renderWithProviders(<UserManagementPage />);
 
@@ -248,9 +229,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should open delete confirmation dialog', async () => {
-    const { getUsers } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
-
     renderWithProviders(<UserManagementPage />);
 
     await waitFor(() => {
@@ -264,10 +242,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should delete user on confirmation', async () => {
-    const { getUsers, deleteUser } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
-    vi.mocked(deleteUser).mockResolvedValue(undefined);
-
     renderWithProviders(<UserManagementPage />);
 
     await waitFor(() => {
@@ -279,8 +253,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should show error when user deletion fails', async () => {
-    const { getUsers, deleteUser } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
     vi.mocked(deleteUser).mockRejectedValue(new Error('Network error'));
 
     renderWithProviders(<UserManagementPage />);
@@ -294,7 +266,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should disable delete button when only one user exists', async () => {
-    const { getUsers } = await import('@/services/userService');
     vi.mocked(getUsers).mockResolvedValue([mockUsers[0]]); // Only admin
 
     renderWithProviders(<UserManagementPage />);
@@ -310,9 +281,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should display user roles with correct badges', async () => {
-    const { getUsers } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
-
     renderWithProviders(<UserManagementPage />);
 
     await waitFor(() => {
@@ -327,9 +295,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should validate form fields', async () => {
-    const { getUsers } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
-
     const user = userEvent.setup();
     renderWithProviders(<UserManagementPage />);
 
@@ -358,8 +323,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should handle edit user error', async () => {
-    const { getUsers, setUser } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
     vi.mocked(setUser).mockRejectedValue(new Error('Update failed'));
 
     const user = userEvent.setup();
@@ -412,8 +375,6 @@ describe('UserManagementPage', () => {
   });
 
   it('should handle delete user error properly', async () => {
-    const { getUsers, deleteUser } = await import('@/services/userService');
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
     vi.mocked(deleteUser).mockRejectedValue(new Error('Delete failed'));
 
     const user = userEvent.setup();

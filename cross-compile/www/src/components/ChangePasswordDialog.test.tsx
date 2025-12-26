@@ -5,8 +5,11 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useAuth } from '@/hooks/useAuth';
 import type { LoginResult } from '@/services/authService';
+import { verifyCredentials } from '@/services/authService';
 import type { OnvifUser } from '@/services/userService';
+import { getUsers, setUser } from '@/services/userService';
 import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import { ChangePasswordDialog } from './ChangePasswordDialog';
@@ -56,7 +59,6 @@ describe('ChangePasswordDialog', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    const { useAuth } = await import('@/hooks/useAuth');
     vi.mocked(useAuth).mockReturnValue({
       username: 'admin',
       login: vi.fn(),
@@ -65,9 +67,7 @@ describe('ChangePasswordDialog', () => {
       getCredentials: vi.fn(),
       getBasicAuthHeader: vi.fn(),
     });
-    const { getUsers } = await import('@/services/userService');
     vi.mocked(getUsers).mockResolvedValue([mockUser]);
-    const { setUser } = await import('@/services/userService');
     vi.mocked(setUser).mockResolvedValue(undefined);
   });
 
@@ -99,7 +99,6 @@ describe('ChangePasswordDialog', () => {
     it('should not close dialog when loading', async () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();
-      const { verifyCredentials } = await import('@/services/authService');
       // Mock that never resolves to keep loading state
       const neverResolvingPromise = new Promise<LoginResult>(() => {});
       vi.mocked(verifyCredentials).mockImplementation(() => neverResolvingPromise);
@@ -157,7 +156,6 @@ describe('ChangePasswordDialog', () => {
       });
 
       // Form validation should prevent submission
-      const { verifyCredentials } = await import('@/services/authService');
       await waitFor(() => {
         expect(verifyCredentials).not.toHaveBeenCalled();
       });
@@ -182,7 +180,6 @@ describe('ChangePasswordDialog', () => {
         await user.click(submitButton);
       });
 
-      const { verifyCredentials } = await import('@/services/authService');
       await waitFor(() => {
         expect(verifyCredentials).not.toHaveBeenCalled();
       });
@@ -207,7 +204,6 @@ describe('ChangePasswordDialog', () => {
         await user.click(submitButton);
       });
 
-      const { verifyCredentials } = await import('@/services/authService');
       await waitFor(() => {
         expect(verifyCredentials).not.toHaveBeenCalled();
       });
@@ -236,7 +232,6 @@ describe('ChangePasswordDialog', () => {
         await user.click(submitButton);
       });
 
-      const { verifyCredentials } = await import('@/services/authService');
       await waitFor(() => {
         expect(verifyCredentials).not.toHaveBeenCalled();
       });
@@ -289,10 +284,6 @@ describe('ChangePasswordDialog', () => {
     it('should successfully change password with valid inputs', async () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();
-      const { verifyCredentials } = await import('@/services/authService');
-      const { getUsers } = await import('@/services/userService');
-      const { setUser } = await import('@/services/userService');
-      const { useAuth } = await import('@/hooks/useAuth');
       vi.mocked(verifyCredentials).mockResolvedValue({ success: true });
 
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={onOpenChange} />);
@@ -344,7 +335,6 @@ describe('ChangePasswordDialog', () => {
     it('should reset form after successful password change', async () => {
       const user = userEvent.setup();
       const onOpenChange = vi.fn();
-      const { verifyCredentials } = await import('@/services/authService');
       vi.mocked(verifyCredentials).mockResolvedValue({ success: true });
 
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={onOpenChange} />);
@@ -391,9 +381,6 @@ describe('ChangePasswordDialog', () => {
   describe('Error Handling', () => {
     it('should show error for invalid current password', async () => {
       const user = userEvent.setup();
-      const { verifyCredentials } = await import('@/services/authService');
-      const { getUsers } = await import('@/services/userService');
-      const { setUser } = await import('@/services/userService');
       vi.mocked(verifyCredentials).mockResolvedValue({ success: false });
 
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
@@ -438,9 +425,6 @@ describe('ChangePasswordDialog', () => {
 
     it('should show error when user is not found', async () => {
       const user = userEvent.setup();
-      const { verifyCredentials } = await import('@/services/authService');
-      const { getUsers } = await import('@/services/userService');
-      const { setUser } = await import('@/services/userService');
       vi.mocked(verifyCredentials).mockResolvedValue({ success: true });
       vi.mocked(getUsers).mockResolvedValue([]); // No users
 
@@ -486,7 +470,6 @@ describe('ChangePasswordDialog', () => {
     it('should show error toast on network failure', async () => {
       const user = userEvent.setup();
       const error = new Error('Network error');
-      const { verifyCredentials } = await import('@/services/authService');
       vi.mocked(verifyCredentials).mockRejectedValue(error);
 
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -542,7 +525,6 @@ describe('ChangePasswordDialog', () => {
       const verifyPromise = new Promise<{ success: boolean }>((resolve) => {
         resolveVerify = resolve;
       });
-      const { verifyCredentials } = await import('@/services/authService');
       vi.mocked(verifyCredentials).mockReturnValue(verifyPromise);
 
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
@@ -596,7 +578,6 @@ describe('ChangePasswordDialog', () => {
       const verifyPromise = new Promise<{ success: boolean }>((resolve) => {
         resolveVerify = resolve;
       });
-      const { verifyCredentials } = await import('@/services/authService');
       vi.mocked(verifyCredentials).mockReturnValue(verifyPromise);
 
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
@@ -645,7 +626,6 @@ describe('ChangePasswordDialog', () => {
 
   describe('Dialog Description', () => {
     it('should display username in description', async () => {
-      const { useAuth } = await import('@/hooks/useAuth');
       vi.mocked(useAuth).mockReturnValue({
         username: 'testuser',
         login: vi.fn(),
