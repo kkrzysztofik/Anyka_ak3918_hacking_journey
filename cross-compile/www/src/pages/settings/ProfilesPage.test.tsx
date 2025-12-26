@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  type VideoEncoderConfiguration,
   createProfile,
   deleteProfile,
   getProfiles,
@@ -34,6 +35,12 @@ describe('ProfilesPage', () => {
     vi.clearAllMocks();
     // Setup default successful response since most tests use it
     vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
+    vi.mocked(getVideoEncoderConfiguration).mockResolvedValue(
+      MOCK_DATA.videoEncoder.configuration as unknown as VideoEncoderConfiguration,
+    );
+    vi.mocked(getVideoEncoderConfigurationOptions).mockResolvedValue(
+      MOCK_DATA.videoEncoder.options,
+    );
   });
 
   it('should render page with loading state', async () => {
@@ -302,38 +309,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should open VideoEncoderEditDialog when edit button is clicked', async () => {
-    vi.mocked(getVideoEncoderConfiguration).mockResolvedValue({
-      token: 'VideoEncoderToken1',
-      name: 'H.264 Encoder',
-      encoding: 'H264',
-      resolution: { width: 1920, height: 1080 },
-      quality: 80,
-      rateControl: {
-        frameRateLimit: 30,
-        encodingInterval: 1,
-        bitrateLimit: 4000,
-      },
-      h264: {
-        govLength: 30,
-        h264Profile: 'Main',
-      },
-      sessionTimeout: 'PT60S',
-    });
-    vi.mocked(getVideoEncoderConfigurationOptions).mockResolvedValue({
-      qualityRange: { min: 0, max: 100 },
-      h264: {
-        resolutionsAvailable: [
-          { width: 1920, height: 1080 },
-          { width: 1280, height: 720 },
-        ],
-        frameRateRange: { min: 1, max: 30 },
-        encodingIntervalRange: { min: 1, max: 30 },
-        bitrateRange: { min: 64, max: 8192 },
-        h264ProfilesSupported: ['Main', 'High'],
-        govLengthRange: { min: 1, max: 300 },
-      },
-    });
-
     const user = userEvent.setup();
     renderWithProviders(<ProfilesPage />);
 
@@ -501,37 +476,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should save VideoEncoderEditDialog changes', async () => {
-    vi.mocked(getVideoEncoderConfiguration).mockResolvedValue({
-      token: 'VideoEncoderToken1',
-      name: 'H.264 Encoder',
-      encoding: 'H264',
-      resolution: { width: 1920, height: 1080 },
-      quality: 80,
-      rateControl: {
-        frameRateLimit: 30,
-        encodingInterval: 1,
-        bitrateLimit: 4000,
-      },
-      h264: {
-        govLength: 30,
-        h264Profile: 'Main',
-      },
-      sessionTimeout: 'PT60S',
-    });
-    vi.mocked(getVideoEncoderConfigurationOptions).mockResolvedValue({
-      qualityRange: { min: 0, max: 100 },
-      h264: {
-        resolutionsAvailable: [
-          { width: 1920, height: 1080 },
-          { width: 1280, height: 720 },
-        ],
-        frameRateRange: { min: 1, max: 30 },
-        encodingIntervalRange: { min: 1, max: 30 },
-        bitrateRange: { min: 64, max: 8192 },
-        h264ProfilesSupported: ['Main', 'High'],
-        govLengthRange: { min: 1, max: 300 },
-      },
-    });
     vi.mocked(setVideoEncoderConfiguration).mockResolvedValue(undefined);
 
     const user = userEvent.setup();
@@ -580,35 +524,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should cancel VideoEncoderEditDialog', async () => {
-    vi.mocked(getVideoEncoderConfiguration).mockResolvedValue({
-      token: 'VideoEncoderToken1',
-      name: 'H.264 Encoder',
-      encoding: 'H264',
-      resolution: { width: 1920, height: 1080 },
-      quality: 80,
-      rateControl: {
-        frameRateLimit: 30,
-        encodingInterval: 1,
-        bitrateLimit: 4000,
-      },
-      h264: {
-        govLength: 30,
-        h264Profile: 'Main',
-      },
-      sessionTimeout: 'PT60S',
-    });
-    vi.mocked(getVideoEncoderConfigurationOptions).mockResolvedValue({
-      qualityRange: { min: 0, max: 100 },
-      h264: {
-        resolutionsAvailable: [{ width: 1920, height: 1080 }],
-        frameRateRange: { min: 1, max: 30 },
-        encodingIntervalRange: { min: 1, max: 30 },
-        bitrateRange: { min: 64, max: 8192 },
-        h264ProfilesSupported: ['Main'],
-        govLengthRange: { min: 1, max: 300 },
-      },
-    });
-
     const user = userEvent.setup();
     renderWithProviders(<ProfilesPage />);
 
@@ -654,34 +569,6 @@ describe('ProfilesPage', () => {
   });
 
   it('should handle VideoEncoderEditDialog save error', async () => {
-    vi.mocked(getVideoEncoderConfiguration).mockResolvedValue({
-      token: 'VideoEncoderToken1',
-      name: 'H.264 Encoder',
-      encoding: 'H264',
-      resolution: { width: 1920, height: 1080 },
-      quality: 80,
-      rateControl: {
-        frameRateLimit: 30,
-        encodingInterval: 1,
-        bitrateLimit: 4000,
-      },
-      h264: {
-        govLength: 30,
-        h264Profile: 'Main',
-      },
-      sessionTimeout: 'PT60S',
-    });
-    vi.mocked(getVideoEncoderConfigurationOptions).mockResolvedValue({
-      qualityRange: { min: 0, max: 100 },
-      h264: {
-        resolutionsAvailable: [{ width: 1920, height: 1080 }],
-        frameRateRange: { min: 1, max: 30 },
-        encodingIntervalRange: { min: 1, max: 30 },
-        bitrateRange: { min: 64, max: 8192 },
-        h264ProfilesSupported: ['Main'],
-        govLengthRange: { min: 1, max: 300 },
-      },
-    });
     vi.mocked(setVideoEncoderConfiguration).mockRejectedValue(new Error('Save failed'));
 
     const user = userEvent.setup();

@@ -1,17 +1,51 @@
 /**
  * SOAP Client Tests
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { apiClient } from '@/services/api';
 import {
   createSOAPEnvelope,
   escapeXml,
   escapeXmlAttribute,
   parseSOAPResponse,
   soapBodies,
+  soapRequest,
 } from '@/services/soap/client';
 
+vi.mock('@/services/api', () => ({
+  apiClient: {
+    post: vi.fn(),
+  },
+}));
+
 describe('SOAP Client', () => {
+  describe('soapRequest', () => {
+    it('should make a request and return partial response', async () => {
+      vi.mocked(apiClient.post).mockResolvedValue({
+        data: '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><GetProfilesResponse><Profiles><Name>Profile1</Name></Profiles></GetProfilesResponse></soap:Body></soap:Envelope>',
+      });
+
+      const result = await soapRequest<Record<string, unknown>>(
+        '/test-endpoint',
+        '<test />',
+        'GetProfilesResponse',
+      );
+
+      expect(apiClient.post).toHaveBeenCalled();
+      expect(result).toEqual({ Profiles: { Name: 'Profile1' } });
+    });
+
+    it('should throw error on failure', async () => {
+      vi.mocked(apiClient.post).mockResolvedValue({
+        data: '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><soap:Fault><soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code><soap:Reason><soap:Text>Error</soap:Text></soap:Reason></soap:Fault></soap:Body></soap:Envelope>',
+      });
+
+      await expect(
+        soapRequest('/test-endpoint', '<test />', 'GetProfilesResponse'),
+      ).rejects.toThrow('Error');
+    });
+  });
   describe('createSOAPEnvelope', () => {
     it('should create a valid SOAP envelope with body content', () => {
       const body = '<tds:GetDeviceInformation />';

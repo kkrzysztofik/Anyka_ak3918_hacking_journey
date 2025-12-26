@@ -11,6 +11,7 @@ import {
   // This import should remain as createDelayedPromise is now exported from componentTestHelpers
   mockToast,
   renderWithProviders,
+  verifyPasswordVisibilityToggle,
 } from '@/test/componentTestHelpers';
 
 import LoginPage from './LoginPage';
@@ -98,22 +99,11 @@ describe('LoginPage', () => {
     const passwordInput = screen.getByTestId('login-form-password-input');
     await user.type(passwordInput, 'testpassword');
 
-    // Password should be hidden by default
-    expect(passwordInput).toHaveAttribute('type', 'password');
-
-    // Find and click the toggle button
-    const toggleButton = screen.getByTestId('login-form-password-toggle-button');
-    expect(toggleButton).toBeInTheDocument();
-
-    await user.click(toggleButton);
-    await waitFor(() => {
-      expect(passwordInput).toHaveAttribute('type', 'text');
-    });
-
-    await user.click(toggleButton);
-    await waitFor(() => {
-      expect(passwordInput).toHaveAttribute('type', 'password');
-    });
+    await verifyPasswordVisibilityToggle(
+      user,
+      'login-form-password-input',
+      'login-form-password-toggle-button',
+    );
   });
 
   it('should submit form with valid credentials', async () => {

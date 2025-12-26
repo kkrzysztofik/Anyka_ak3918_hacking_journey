@@ -5,8 +5,13 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createUser, deleteUser, getUsers, setUser } from '@/services/userService';
-import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import { type OnvifUser, createUser, deleteUser, getUsers, setUser } from '@/services/userService';
+import {
+  MOCK_DATA,
+  mockToast,
+  renderWithProviders,
+  verifyPasswordVisibilityToggle,
+} from '@/test/componentTestHelpers';
 
 import UserManagementPage from './UserManagementPage';
 
@@ -19,24 +24,9 @@ vi.mock('@/services/userService', () => ({
 }));
 
 describe('UserManagementPage', () => {
-  const mockUsers = [
-    {
-      username: 'admin',
-      userLevel: 'Administrator' as const,
-    },
-    {
-      username: 'operator',
-      userLevel: 'Operator' as const,
-    },
-    {
-      username: 'user1',
-      userLevel: 'User' as const,
-    },
-  ];
-
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getUsers).mockResolvedValue(mockUsers);
+    vi.mocked(getUsers).mockResolvedValue([...MOCK_DATA.users] as OnvifUser[]);
     vi.mocked(createUser).mockResolvedValue(undefined);
     vi.mocked(setUser).mockResolvedValue(undefined);
     vi.mocked(deleteUser).mockResolvedValue(undefined);
@@ -215,17 +205,11 @@ describe('UserManagementPage', () => {
       expect(addUserTexts.length).toBeGreaterThan(0);
     });
 
-    const passwordInput = screen.getByTestId('add-user-dialog-password-input');
-    expect(passwordInput.getAttribute('type')).toBe('password');
-
-    // Find password visibility toggle button
-    const toggleButton = screen.getByTestId('add-user-dialog-password-toggle-button');
-    expect(toggleButton).toBeInTheDocument();
-
-    await user.click(toggleButton);
-    await waitFor(() => {
-      expect(passwordInput.getAttribute('type')).toBe('text');
-    });
+    await verifyPasswordVisibilityToggle(
+      user,
+      'add-user-dialog-password-input',
+      'add-user-dialog-password-toggle-button',
+    );
   });
 
   it('should open delete confirmation dialog', async () => {
@@ -266,7 +250,7 @@ describe('UserManagementPage', () => {
   });
 
   it('should disable delete button when only one user exists', async () => {
-    vi.mocked(getUsers).mockResolvedValue([mockUsers[0]]); // Only admin
+    vi.mocked(getUsers).mockResolvedValue([MOCK_DATA.users[0]] as OnvifUser[]); // Only admin
 
     renderWithProviders(<UserManagementPage />);
 

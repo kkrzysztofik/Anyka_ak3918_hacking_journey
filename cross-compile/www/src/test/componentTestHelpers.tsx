@@ -6,7 +6,15 @@
 import type { ReactElement, ReactNode } from 'react';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { type RenderOptions, type RenderResult, render } from '@testing-library/react';
+import {
+  type RenderOptions,
+  type RenderResult,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { expect } from 'vitest';
 
 import { AuthProvider } from '@/hooks/useAuth';
 import type { ImagingOptions, ImagingSettings } from '@/services/imagingService';
@@ -174,7 +182,79 @@ export const MOCK_DATA = {
       },
     } as ImagingOptions,
   },
+  videoEncoder: {
+    configuration: {
+      token: 'VideoEncoderToken1',
+      name: 'H.264 Encoder',
+      encoding: 'H264',
+      resolution: { width: 1920, height: 1080 },
+      quality: 80,
+      rateControl: {
+        frameRateLimit: 30,
+        encodingInterval: 1,
+        bitrateLimit: 4000,
+      },
+      h264: {
+        govLength: 30,
+        h264Profile: 'Main',
+      },
+      sessionTimeout: 'PT60S',
+    },
+    options: {
+      qualityRange: { min: 0, max: 100 },
+      h264: {
+        resolutionsAvailable: [
+          { width: 1920, height: 1080 },
+          { width: 1280, height: 720 },
+        ],
+        frameRateRange: { min: 1, max: 30 },
+        encodingIntervalRange: { min: 1, max: 30 },
+        bitrateRange: { min: 64, max: 8192 },
+        h264ProfilesSupported: ['Main', 'High'],
+        govLengthRange: { min: 1, max: 300 },
+      },
+    },
+  },
+  users: [
+    {
+      username: 'admin',
+      userLevel: 'Administrator',
+    },
+    {
+      username: 'operator',
+      userLevel: 'Operator',
+    },
+    {
+      username: 'user1',
+      userLevel: 'User',
+    },
+  ] as const,
 };
+
+/**
+ * Helper to verify password visibility toggle behavior
+ */
+export async function verifyPasswordVisibilityToggle(
+  user: ReturnType<typeof userEvent.setup>,
+  passwordInputTestId: string,
+  toggleButtonTestId: string,
+) {
+  const passwordInput = screen.getByTestId(passwordInputTestId);
+  expect(passwordInput).toHaveAttribute('type', 'password');
+
+  const toggleButton = screen.getByTestId(toggleButtonTestId);
+  await user.click(toggleButton);
+
+  await waitFor(() => {
+    expect(passwordInput).toHaveAttribute('type', 'text');
+  });
+
+  await user.click(toggleButton);
+
+  await waitFor(() => {
+    expect(passwordInput).toHaveAttribute('type', 'password');
+  });
+}
 
 /**
  * Helper function to create delayed promise for testing loading states

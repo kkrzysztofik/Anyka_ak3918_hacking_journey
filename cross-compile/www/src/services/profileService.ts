@@ -3,13 +3,8 @@
  *
  * SOAP operations for media profiles management.
  */
-import { ENDPOINTS, apiClient } from '@/services/api';
-import {
-  createSOAPEnvelope,
-  escapeXml,
-  escapeXmlAttribute,
-  parseSOAPResponse,
-} from '@/services/soap/client';
+import { ENDPOINTS } from '@/services/api';
+import { escapeXml, escapeXmlAttribute, soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 export interface MediaProfile {
@@ -94,16 +89,12 @@ export interface VideoEncoderConfigurationOptions {
  * Get all media profiles
  */
 export async function getProfiles(): Promise<MediaProfile[]> {
-  const envelope = createSOAPEnvelope('<trt:GetProfiles />');
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.media,
+    '<trt:GetProfiles />',
+    'GetProfilesResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.media, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get profiles');
-  }
-
-  const data = parsed.data?.GetProfilesResponse as Record<string, unknown> | undefined;
   const profiles = data?.Profiles;
 
   if (!profiles) {
@@ -178,26 +169,25 @@ export async function getProfile(token: string): Promise<MediaProfile | null> {
     <trt:ProfileToken>${token}</trt:ProfileToken>
   </trt:GetProfile>`;
 
-  const envelope = createSOAPEnvelope(body);
+  try {
+    const data = await soapRequest<Record<string, unknown>>(
+      ENDPOINTS.media,
+      body,
+      'GetProfileResponse',
+    );
+    const profile = data?.Profile as Record<string, unknown> | undefined;
 
-  const response = await apiClient.post(ENDPOINTS.media, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
+    if (!profile) {
+      return null;
+    }
 
-  if (!parsed.success) {
+    return {
+      token: safeString(profile['@_token'], ''),
+      name: safeString(profile.Name, ''),
+    };
+  } catch {
     return null;
   }
-
-  const data = parsed.data?.GetProfileResponse as Record<string, unknown> | undefined;
-  const profile = data?.Profile as Record<string, unknown> | undefined;
-
-  if (!profile) {
-    return null;
-  }
-
-  return {
-    token: safeString(profile['@_token'], ''),
-    name: safeString(profile.Name, ''),
-  };
 }
 
 /**
@@ -210,16 +200,12 @@ export async function createProfile(name: string): Promise<string> {
     <trt:Name>${escapedName}</trt:Name>
   </trt:CreateProfile>`;
 
-  const envelope = createSOAPEnvelope(body);
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.media,
+    body,
+    'CreateProfileResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.media, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to create profile');
-  }
-
-  const data = parsed.data?.CreateProfileResponse as Record<string, unknown> | undefined;
   const profile = data?.Profile as Record<string, unknown> | undefined;
 
   return safeString(profile?.['@_token'], '');
@@ -234,32 +220,19 @@ export async function deleteProfile(token: string): Promise<void> {
     <trt:ProfileToken>${token}</trt:ProfileToken>
   </trt:DeleteProfile>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.media, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to delete profile');
-  }
+  await soapRequest(ENDPOINTS.media, body, 'DeleteProfileResponse');
 }
 
 /**
  * Get video encoder configurations
  */
 export async function getVideoEncoderConfigurations(): Promise<VideoEncoderConfiguration[]> {
-  const envelope = createSOAPEnvelope('<trt:GetVideoEncoderConfigurations />');
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.media,
+    '<trt:GetVideoEncoderConfigurations />',
+    'GetVideoEncoderConfigurationsResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.media, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get video encoder configurations');
-  }
-
-  const data = parsed.data?.GetVideoEncoderConfigurationsResponse as
-    | Record<string, unknown>
-    | undefined;
   const configs = data?.Configurations;
 
   if (!configs) {
@@ -311,52 +284,49 @@ export async function getVideoEncoderConfiguration(
     <trt:ConfigurationToken>${token}</trt:ConfigurationToken>
   </trt:GetVideoEncoderConfiguration>`;
 
-  const envelope = createSOAPEnvelope(body);
+  try {
+    const data = await soapRequest<Record<string, unknown>>(
+      ENDPOINTS.media,
+      body,
+      'GetVideoEncoderConfigurationResponse',
+    );
+    const config = data?.Configuration as Record<string, unknown> | undefined;
 
-  const response = await apiClient.post(ENDPOINTS.media, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
+    if (!config) {
+      return null;
+    }
 
-  if (!parsed.success) {
+    const resolution = config.Resolution as Record<string, unknown> | undefined;
+    const rateControl = config.RateControl as Record<string, unknown> | undefined;
+    const h264 = config.H264 as Record<string, unknown> | undefined;
+
+    return {
+      token: safeString(config['@_token'], ''),
+      name: safeString(config.Name, ''),
+      encoding: safeString(config.Encoding, 'H264') as VideoEncoding,
+      resolution: {
+        width: Number(resolution?.Width || 1920),
+        height: Number(resolution?.Height || 1080),
+      },
+      quality: Number(config.Quality || 80),
+      rateControl: rateControl
+        ? {
+            frameRateLimit: Number(rateControl.FrameRateLimit || 30),
+            encodingInterval: Number(rateControl.EncodingInterval || 1),
+            bitrateLimit: Number(rateControl.BitrateLimit || 4000),
+          }
+        : undefined,
+      h264: h264
+        ? {
+            govLength: Number(h264.GovLength || 30),
+            h264Profile: safeString(h264.H264Profile, 'Main'),
+          }
+        : undefined,
+      sessionTimeout: safeString(config.SessionTimeout, 'PT60S'),
+    };
+  } catch {
     return null;
   }
-
-  const data = parsed.data?.GetVideoEncoderConfigurationResponse as
-    | Record<string, unknown>
-    | undefined;
-  const config = data?.Configuration as Record<string, unknown> | undefined;
-
-  if (!config) {
-    return null;
-  }
-
-  const resolution = config.Resolution as Record<string, unknown> | undefined;
-  const rateControl = config.RateControl as Record<string, unknown> | undefined;
-  const h264 = config.H264 as Record<string, unknown> | undefined;
-
-  return {
-    token: safeString(config['@_token'], ''),
-    name: safeString(config.Name, ''),
-    encoding: safeString(config.Encoding, 'H264') as VideoEncoding,
-    resolution: {
-      width: Number(resolution?.Width || 1920),
-      height: Number(resolution?.Height || 1080),
-    },
-    quality: Number(config.Quality || 80),
-    rateControl: rateControl
-      ? {
-          frameRateLimit: Number(rateControl.FrameRateLimit || 30),
-          encodingInterval: Number(rateControl.EncodingInterval || 1),
-          bitrateLimit: Number(rateControl.BitrateLimit || 4000),
-        }
-      : undefined,
-    h264: h264
-      ? {
-          govLength: Number(h264.GovLength || 30),
-          h264Profile: safeString(h264.H264Profile, 'Main'),
-        }
-      : undefined,
-    sessionTimeout: safeString(config.SessionTimeout, 'PT60S'),
-  };
 }
 
 /**
@@ -408,14 +378,7 @@ export async function setVideoEncoderConfiguration(
     <trt:ForcePersistence>${forcePersistence}</trt:ForcePersistence>
   </trt:SetVideoEncoderConfiguration>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.media, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to set video encoder configuration');
-  }
+  await soapRequest(ENDPOINTS.media, body, 'SetVideoEncoderConfigurationResponse');
 }
 
 /**
@@ -521,18 +484,11 @@ export async function getVideoEncoderConfigurationOptions(
     ${profileXml}
   </trt:GetVideoEncoderConfigurationOptions>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.media, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get video encoder configuration options');
-  }
-
-  const data = parsed.data?.GetVideoEncoderConfigurationOptionsResponse as
-    | Record<string, unknown>
-    | undefined;
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.media,
+    body,
+    'GetVideoEncoderConfigurationOptionsResponse',
+  );
   const options = data?.Options as Record<string, unknown> | undefined;
 
   if (!options) {

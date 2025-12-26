@@ -10,7 +10,12 @@ import type { LoginResult } from '@/services/authService';
 import { verifyCredentials } from '@/services/authService';
 import type { OnvifUser } from '@/services/userService';
 import { getUsers, setUser } from '@/services/userService';
-import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import {
+  MOCK_DATA,
+  mockToast,
+  renderWithProviders,
+  verifyPasswordVisibilityToggle,
+} from '@/test/componentTestHelpers';
 
 import { ChangePasswordDialog } from './ChangePasswordDialog';
 
@@ -52,11 +57,6 @@ vi.mock('@/components/ui/input', async () => {
 });
 
 describe('ChangePasswordDialog', () => {
-  const mockUser: OnvifUser = {
-    username: 'admin',
-    userLevel: 'Administrator' as const,
-  };
-
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.mocked(useAuth).mockReturnValue({
@@ -67,7 +67,7 @@ describe('ChangePasswordDialog', () => {
       getCredentials: vi.fn(),
       getBasicAuthHeader: vi.fn(),
     });
-    vi.mocked(getUsers).mockResolvedValue([mockUser]);
+    vi.mocked(getUsers).mockResolvedValue([...MOCK_DATA.users] as OnvifUser[]);
     vi.mocked(setUser).mockResolvedValue(undefined);
   });
 
@@ -243,40 +243,22 @@ describe('ChangePasswordDialog', () => {
       const user = userEvent.setup();
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
-      const currentPasswordInput = screen.getByTestId(
+      await verifyPasswordVisibilityToggle(
+        user,
         'change-password-dialog-current-password-input',
+        'change-password-dialog-current-toggle',
       );
-
-      // Initially should be password type
-      expect(currentPasswordInput).toHaveAttribute('type', 'password');
-
-      // Find toggle button (Eye icon)
-      const currentPasswordToggle = screen.getByTestId('change-password-dialog-current-toggle');
-      await act(async () => {
-        await user.click(currentPasswordToggle);
-      });
-      await waitFor(() => {
-        expect(currentPasswordInput).toHaveAttribute('type', 'text');
-      });
     });
 
     it('should toggle new password visibility', async () => {
       const user = userEvent.setup();
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
-      const newPasswordInput = screen.getByTestId('change-password-dialog-new-password-input');
-
-      // Initially should be password type
-      expect(newPasswordInput).toHaveAttribute('type', 'password');
-
-      // Find toggle button
-      const newPasswordToggle = screen.getByTestId('change-password-dialog-new-toggle');
-      await act(async () => {
-        await user.click(newPasswordToggle);
-      });
-      await waitFor(() => {
-        expect(newPasswordInput).toHaveAttribute('type', 'text');
-      });
+      await verifyPasswordVisibilityToggle(
+        user,
+        'change-password-dialog-new-password-input',
+        'change-password-dialog-new-toggle',
+      );
     });
   });
 

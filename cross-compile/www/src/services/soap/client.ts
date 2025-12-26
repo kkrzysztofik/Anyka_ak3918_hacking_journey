@@ -6,6 +6,9 @@
  */
 import { XMLBuilder, XMLParser } from 'fast-xml-parser';
 
+// NOSONAR
+
+import { apiClient } from '@/services/api';
 import { safeString } from '@/utils/safeString';
 
 // SOAP namespace declarations
@@ -15,7 +18,38 @@ const SOAP_NS = 'http://www.w3.org/2003/05/soap-envelope'; // NOSONAR
 const DEVICE_NS = 'http://www.onvif.org/ver10/device/wsdl'; // NOSONAR
 const MEDIA_NS = 'http://www.onvif.org/ver10/media/wsdl'; // NOSONAR
 const IMAGING_NS = 'http://www.onvif.org/ver20/imaging/wsdl'; // NOSONAR
-const PTZ_NS = 'http://www.onvif.org/ver20/ptz/wsdl'; // NOSONAR
+const PTZ_NS = 'http://www.onvif.org/ver20/ptz/wsdl';
+
+/**
+ * Performs a SOAP request to the specified endpoint.
+ *
+ * @param endpoint - The API endpoint URL (e.g., ENDPOINTS.media)
+ * @param body - The XML body content (inside the <soap:Body>)
+ * @param responseTarget - Optional key to extract from the response body (e.g., 'GetProfilesResponse'). If omitted, returns the whole body.
+ * @returns The extracted data or the whole body
+ */
+export async function soapRequest<T>(
+  endpoint: string,
+  body: string,
+  responseTarget?: string,
+): Promise<T> {
+  const envelope = createSOAPEnvelope(body);
+  const response = await apiClient.post(endpoint, envelope);
+  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
+
+  if (!parsed.success) {
+    throw new Error(
+      parsed.fault?.reason || `Failed to perform SOAP request: ${responseTarget ?? 'Unknown'}`,
+    );
+  }
+
+  const data = parsed.data;
+  if (responseTarget && data) {
+    return data[responseTarget] as T;
+  }
+
+  return data as T;
+}
 
 export interface SOAPFault {
   code: string;
