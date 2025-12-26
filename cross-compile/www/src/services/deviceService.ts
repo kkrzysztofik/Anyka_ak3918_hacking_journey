@@ -3,8 +3,8 @@
  *
  * SOAP operations for device management (GetDeviceInformation, GetScopes, SetScopes).
  */
-import { ENDPOINTS, apiClient } from '@/services/api';
-import { createSOAPEnvelope, parseSOAPResponse, soapBodies } from '@/services/soap/client';
+import { ENDPOINTS } from '@/services/api';
+import { soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 export interface DeviceInfo {
@@ -33,26 +33,22 @@ export async function setDeviceInformation(data: DeviceIdentification): Promise<
  * Get device information (manufacturer, model, firmware, serial, hardware ID)
  */
 export async function getDeviceInformation(): Promise<DeviceInfo> {
-  const envelope = createSOAPEnvelope(soapBodies.getDeviceInformation());
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetDeviceInformation />',
+    'GetDeviceInformationResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get device information');
-  }
-
-  const data = parsed.data?.GetDeviceInformationResponse as Record<string, unknown> | undefined;
   if (!data) {
     throw new Error('Invalid response: missing GetDeviceInformationResponse');
   }
 
   return {
-    manufacturer: safeString(data.Manufacturer, 'Unknown'),
-    model: safeString(data.Model, 'Unknown'),
-    firmwareVersion: safeString(data.FirmwareVersion, 'Unknown'),
-    serialNumber: safeString(data.SerialNumber, 'Unknown'),
-    hardwareId: safeString(data.HardwareId, 'Unknown'),
+    manufacturer: safeString(data?.Manufacturer, 'Unknown'),
+    model: safeString(data?.Model, 'Unknown'),
+    firmwareVersion: safeString(data?.FirmwareVersion, 'Unknown'),
+    serialNumber: safeString(data?.SerialNumber, 'Unknown'),
+    hardwareId: safeString(data?.HardwareId, 'Unknown'),
   };
 }
 
@@ -60,16 +56,12 @@ export async function getDeviceInformation(): Promise<DeviceInfo> {
  * Get device scopes (name, location, etc.)
  */
 export async function getScopes(): Promise<{ name: string; location: string }> {
-  const envelope = createSOAPEnvelope('<tds:GetScopes />');
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetScopes />',
+    'GetScopesResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get scopes');
-  }
-
-  const data = parsed.data?.GetScopesResponse as Record<string, unknown> | undefined;
   const scopes = data?.Scopes as Array<{ ScopeDef?: string; ScopeItem?: string }> | undefined;
 
   let name = '';
@@ -105,14 +97,7 @@ export async function setScopes(name: string, location: string): Promise<void> {
     <tds:Scopes>onvif://www.onvif.org/location/${encodedLocation}</tds:Scopes>
   </tds:SetScopes>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to set scopes');
-  }
+  await soapRequest(ENDPOINTS.device, body);
 }
 
 /**

@@ -266,6 +266,20 @@ export async function createDelayedPromise<T>(value: T, delay = 100): Promise<T>
 }
 
 /**
+ * Helper function to create a promise that can be resolved/rejected manually.
+ * Useful for testing loading states where you need precise control over when the promise completes.
+ */
+export function createControllablePromise<T>() {
+  let resolve: (value: T | PromiseLike<T>) => void;
+  let reject: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve: resolve!, reject: reject! };
+}
+
+/**
  * Common mock for Dialog components to be used in vi.mock
  */
 export const MockDialog = {
@@ -289,8 +303,16 @@ export const MockDialog = {
       )}
     </div>
   ),
-  DialogContent: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div data-testid="dialog-content" className={className}>
+  DialogContent: ({
+    children,
+    className,
+    ...props
+  }: {
+    children: React.ReactNode;
+    className?: string;
+    [key: string]: unknown;
+  }) => (
+    <div data-testid="dialog-content" className={className} {...props}>
       {children}
     </div>
   ),
@@ -302,13 +324,29 @@ export const MockDialog = {
       {children}
     </div>
   ),
-  DialogFooter: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div data-testid="dialog-footer" className={className}>
+  DialogFooter: ({
+    children,
+    className,
+    ...props
+  }: {
+    children: React.ReactNode;
+    className?: string;
+    [key: string]: unknown;
+  }) => (
+    <div data-testid="dialog-footer" className={className} {...props}>
       {children}
     </div>
   ),
-  DialogHeader: ({ children, className }: { children: React.ReactNode; className?: string }) => (
-    <div data-testid="dialog-header" className={className}>
+  DialogHeader: ({
+    children,
+    className,
+    ...props
+  }: {
+    children: React.ReactNode;
+    className?: string;
+    [key: string]: unknown;
+  }) => (
+    <div data-testid="dialog-header" className={className} {...props}>
       {children}
     </div>
   ),
@@ -332,6 +370,8 @@ export const MockButton = {
     disabled,
     type,
     variant,
+    size,
+    asChild: _asChild,
     className,
     ...props
   }: {
@@ -340,6 +380,8 @@ export const MockButton = {
     disabled?: boolean;
     type?: 'submit' | 'reset' | 'button';
     variant?: string;
+    size?: string;
+    asChild?: boolean;
     className?: string;
     [key: string]: unknown;
   }) => (
@@ -348,10 +390,12 @@ export const MockButton = {
       disabled={disabled}
       type={type}
       data-variant={variant}
+      data-size={size}
       className={className}
       {...props}
     >
       {children}
     </button>
   ),
+  buttonVariants: () => 'mock-button-variant',
 };

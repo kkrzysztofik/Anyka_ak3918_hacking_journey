@@ -5,20 +5,11 @@ import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { renderWithProviders } from '@/test/componentTestHelpers';
+import { createControllablePromise, renderWithProviders } from '@/test/componentTestHelpers';
 
 import { AddUserDialog } from './UserDialogs';
 
-// Mock UI components using shared mock helpers
-vi.mock('@/components/ui/dialog', async () => {
-  const helpers = await import('@/test/componentTestHelpers');
-  return { ...helpers.MockDialog };
-});
-
-vi.mock('@/components/ui/button', async () => {
-  const helpers = await import('@/test/componentTestHelpers');
-  return { ...helpers.MockButton };
-});
+// Mock UI components using shared mock helpers in setup.ts
 
 // Use real Form component - it works with react-hook-form
 
@@ -259,10 +250,7 @@ describe('AddUserDialog', () => {
 
     it('should show loading state during submission', async () => {
       const user = userEvent.setup();
-      let resolveSubmit: () => void;
-      const submitPromise = new Promise<void>((resolve) => {
-        resolveSubmit = resolve;
-      });
+      const { promise: submitPromise, resolve: resolveSubmit } = createControllablePromise<void>();
       mockOnSubmit.mockReturnValue(submitPromise);
 
       renderWithProviders(
@@ -304,7 +292,7 @@ describe('AddUserDialog', () => {
         { timeout: 3000 },
       );
 
-      resolveSubmit!();
+      resolveSubmit();
       await submitPromise;
     });
   });

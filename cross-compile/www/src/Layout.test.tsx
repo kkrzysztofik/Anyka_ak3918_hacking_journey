@@ -86,22 +86,6 @@ vi.mock('@/components/ui/sheet', () => ({
   }) => <div data-testid="sheet-trigger">{children}</div>,
 }));
 
-vi.mock('@/components/ui/button', () => ({
-  Button: ({
-    children,
-    onClick,
-    ...props
-  }: {
-    children: React.ReactNode;
-    onClick?: () => void;
-    [key: string]: unknown;
-  }) => (
-    <button onClick={onClick} {...props}>
-      {children}
-    </button>
-  ),
-}));
-
 describe('Layout', () => {
   beforeEach(() => {
     vi.clearAllMocks();

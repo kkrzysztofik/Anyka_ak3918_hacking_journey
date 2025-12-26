@@ -3,8 +3,8 @@
  *
  * SOAP operations for imaging settings (brightness, contrast, saturation, IR cut filter, WDR, backlight compensation).
  */
-import { ENDPOINTS, apiClient } from '@/services/api';
-import { createSOAPEnvelope, parseSOAPResponse } from '@/services/soap/client';
+import { ENDPOINTS } from '@/services/api';
+import { soapRequest } from '@/services/soap/client';
 
 export type IrCutFilterMode = 'ON' | 'OFF' | 'AUTO';
 export type WideDynamicMode = 'ON' | 'OFF';
@@ -114,16 +114,12 @@ export async function getImagingSettings(
     <timg:VideoSourceToken>${videoSourceToken}</timg:VideoSourceToken>
   </timg:GetImagingSettings>`;
 
-  const envelope = createSOAPEnvelope(body);
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.imaging,
+    body,
+    'GetImagingSettingsResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.imaging, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get imaging settings');
-  }
-
-  const data = parsed.data?.GetImagingSettingsResponse as Record<string, unknown> | undefined;
   const settings = data?.ImagingSettings as Record<string, unknown> | undefined;
 
   // Handle case where ImagingSettings exists but is empty (will use defaults)
@@ -200,14 +196,7 @@ export async function setImagingSettings(
     </timg:ImagingSettings>
   </timg:SetImagingSettings>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.imaging, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to set imaging settings');
-  }
+  await soapRequest(ENDPOINTS.imaging, body);
 }
 
 /**
@@ -288,16 +277,12 @@ export async function getImagingOptions(
     <timg:VideoSourceToken>${videoSourceToken}</timg:VideoSourceToken>
   </timg:GetOptions>`;
 
-  const envelope = createSOAPEnvelope(body);
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.imaging,
+    body,
+    'GetOptionsResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.imaging, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get imaging options');
-  }
-
-  const data = parsed.data?.GetOptionsResponse as Record<string, unknown> | undefined;
   const options = data?.ImagingOptions as Record<string, unknown> | undefined;
 
   if (!options) {

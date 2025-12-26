@@ -18,7 +18,7 @@ const SOAP_NS = 'http://www.w3.org/2003/05/soap-envelope'; // NOSONAR
 const DEVICE_NS = 'http://www.onvif.org/ver10/device/wsdl'; // NOSONAR
 const MEDIA_NS = 'http://www.onvif.org/ver10/media/wsdl'; // NOSONAR
 const IMAGING_NS = 'http://www.onvif.org/ver20/imaging/wsdl'; // NOSONAR
-const PTZ_NS = 'http://www.onvif.org/ver20/ptz/wsdl';
+const PTZ_NS = 'http://www.onvif.org/ver20/ptz/wsdl'; // NOSONAR
 
 /**
  * Performs a SOAP request to the specified endpoint.

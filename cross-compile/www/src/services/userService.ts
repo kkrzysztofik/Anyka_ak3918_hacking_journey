@@ -3,8 +3,8 @@
  *
  * SOAP operations for user management.
  */
-import { ENDPOINTS, apiClient } from '@/services/api';
-import { createSOAPEnvelope, parseSOAPResponse } from '@/services/soap/client';
+import { ENDPOINTS } from '@/services/api';
+import { soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 export type UserLevel = 'Administrator' | 'Operator' | 'User' | 'Anonymous';
@@ -18,16 +18,12 @@ export interface OnvifUser {
  * Get list of users
  */
 export async function getUsers(): Promise<OnvifUser[]> {
-  const envelope = createSOAPEnvelope('<tds:GetUsers />');
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetUsers />',
+    'GetUsersResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get users');
-  }
-
-  const data = parsed.data?.GetUsersResponse as Record<string, unknown> | undefined;
   const users = data?.User;
 
   if (!users) {
@@ -58,14 +54,7 @@ export async function createUser(
     </tds:User>
   </tds:CreateUsers>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to create user');
-  }
+  await soapRequest(ENDPOINTS.device, body);
 }
 
 /**
@@ -76,14 +65,7 @@ export async function deleteUser(username: string): Promise<void> {
     <tds:Username>${username}</tds:Username>
   </tds:DeleteUsers>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to delete user');
-  }
+  await soapRequest(ENDPOINTS.device, body);
 }
 
 /**
@@ -102,12 +84,5 @@ export async function setUser(
     </tds:User>
   </tds:SetUser>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to update user');
-  }
+  await soapRequest(ENDPOINTS.device, body);
 }

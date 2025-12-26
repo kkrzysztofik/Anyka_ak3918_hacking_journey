@@ -12,6 +12,7 @@ import type { OnvifUser } from '@/services/userService';
 import { getUsers, setUser } from '@/services/userService';
 import {
   MOCK_DATA,
+  createControllablePromise,
   mockToast,
   renderWithProviders,
   verifyPasswordVisibilityToggle,
@@ -34,27 +35,6 @@ vi.mock('@/hooks/useAuth', () => ({
   useAuth: vi.fn(),
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-
-// Mock UI components using shared mock helpers
-vi.mock('@/components/ui/dialog', async () => {
-  const helpers = await import('@/test/componentTestHelpers');
-  return { ...helpers.MockDialog };
-});
-
-vi.mock('@/components/ui/button', async () => {
-  const helpers = await import('@/test/componentTestHelpers');
-  return { ...helpers.MockButton };
-});
-
-// Use real Form component - it's needed for react-hook-form to work
-vi.mock('@/components/ui/form', async () => {
-  return await vi.importActual('@/components/ui/form');
-});
-
-// Use real Input component - it should work with react-hook-form
-vi.mock('@/components/ui/input', async () => {
-  return await vi.importActual('@/components/ui/input');
-});
 
 describe('ChangePasswordDialog', () => {
   beforeEach(async () => {
@@ -503,10 +483,9 @@ describe('ChangePasswordDialog', () => {
   describe('Loading States', () => {
     it('should show loading state during submission', async () => {
       const user = userEvent.setup();
-      let resolveVerify: (value: { success: boolean }) => void;
-      const verifyPromise = new Promise<{ success: boolean }>((resolve) => {
-        resolveVerify = resolve;
-      });
+      const { promise: verifyPromise, resolve: resolveVerify } = createControllablePromise<{
+        success: boolean;
+      }>();
       vi.mocked(verifyCredentials).mockReturnValue(verifyPromise);
 
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
@@ -550,16 +529,15 @@ describe('ChangePasswordDialog', () => {
       );
 
       // Resolve the promise
-      resolveVerify!({ success: true });
+      resolveVerify({ success: true });
       await verifyPromise;
     });
 
     it('should disable form inputs during loading', async () => {
       const user = userEvent.setup();
-      let resolveVerify: (value: { success: boolean }) => void;
-      const verifyPromise = new Promise<{ success: boolean }>((resolve) => {
-        resolveVerify = resolve;
-      });
+      const { promise: verifyPromise, resolve: resolveVerify } = createControllablePromise<{
+        success: boolean;
+      }>();
       vi.mocked(verifyCredentials).mockReturnValue(verifyPromise);
 
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
@@ -601,7 +579,7 @@ describe('ChangePasswordDialog', () => {
         { timeout: 3000 },
       );
 
-      resolveVerify!({ success: true });
+      resolveVerify({ success: true });
       await verifyPromise;
     });
   });

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   type VideoEncoderConfiguration,
+  type VideoEncoderConfigurationOptions,
   createProfile,
   deleteProfile,
   getProfiles,
@@ -39,7 +40,7 @@ describe('ProfilesPage', () => {
       MOCK_DATA.videoEncoder.configuration as unknown as VideoEncoderConfiguration,
     );
     vi.mocked(getVideoEncoderConfigurationOptions).mockResolvedValue(
-      MOCK_DATA.videoEncoder.options,
+      MOCK_DATA.videoEncoder.options as unknown as VideoEncoderConfigurationOptions,
     );
   });
 

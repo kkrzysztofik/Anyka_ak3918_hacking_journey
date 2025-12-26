@@ -16,6 +16,9 @@ import {
   DialogTrigger,
 } from './dialog';
 
+// Unmock the dialog component for this specific test file
+vi.unmock('@/components/ui/dialog');
+
 describe('Dialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();

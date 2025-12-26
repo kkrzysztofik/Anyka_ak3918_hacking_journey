@@ -5,7 +5,11 @@ import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import {
+  createControllablePromise,
+  mockToast,
+  renderWithProviders,
+} from '@/test/componentTestHelpers';
 
 import { AboutDialog } from './AboutDialog';
 
@@ -14,78 +18,7 @@ vi.mock('@/services/deviceService', () => ({
   getDeviceInformation: vi.fn(),
 }));
 
-// Mock UI components
-vi.mock('@/components/ui/dialog', () => ({
-  Dialog: ({
-    children,
-    open,
-    onOpenChange,
-  }: {
-    children: React.ReactNode;
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
-  }) => (
-    <div data-testid="dialog" data-open={open}>
-      {open && (
-        <div>
-          <button onClick={() => onOpenChange(false)} data-testid="dialog-overlay">
-            Close
-          </button>
-          {children}
-        </div>
-      )}
-    </div>
-  ),
-  DialogContent: ({
-    children,
-    className,
-    ...props
-  }: React.ComponentPropsWithoutRef<'div'> & { 'data-testid'?: string }) => (
-    <div data-testid={props['data-testid'] || 'dialog-content'} className={className}>
-      {children}
-    </div>
-  ),
-  DialogDescription: ({
-    children,
-    ...props
-  }: React.ComponentPropsWithoutRef<'div'> & { 'data-testid'?: string }) => (
-    <div data-testid={props['data-testid'] || 'dialog-description'}>{children}</div>
-  ),
-  DialogFooter: ({
-    children,
-    ...props
-  }: React.ComponentPropsWithoutRef<'div'> & { 'data-testid'?: string }) => (
-    <div data-testid={props['data-testid'] || 'dialog-footer'}>{children}</div>
-  ),
-  DialogHeader: ({
-    children,
-    ...props
-  }: React.ComponentPropsWithoutRef<'div'> & { 'data-testid'?: string }) => (
-    <div data-testid={props['data-testid'] || 'dialog-header'}>{children}</div>
-  ),
-  DialogTitle: ({
-    children,
-    ...props
-  }: React.ComponentPropsWithoutRef<'h2'> & { 'data-testid'?: string }) => (
-    <h2 data-testid={props['data-testid'] || 'dialog-title'}>{children}</h2>
-  ),
-}));
-
-vi.mock('@/components/ui/button', () => ({
-  Button: ({
-    children,
-    onClick,
-    className,
-  }: {
-    children: React.ReactNode;
-    onClick?: () => void;
-    className?: string;
-  }) => (
-    <button onClick={onClick} className={className} data-testid="dialog-close-button">
-      {children}
-    </button>
-  ),
-}));
+// Mock UI components using shared mock helpers in setup.ts
 
 describe('AboutDialog', () => {
   const mockDeviceInfo = {
@@ -119,7 +52,7 @@ describe('AboutDialog', () => {
 
       renderWithProviders(<AboutDialog open={true} onOpenChange={onOpenChange} />);
 
-      const closeButton = screen.getByTestId('dialog-close-button');
+      const closeButton = screen.getByTestId('about-close-button');
       await act(async () => {
         await user.click(closeButton);
       });
@@ -145,10 +78,7 @@ describe('AboutDialog', () => {
   describe('Loading State', () => {
     it('should show loading state when fetching device info', async () => {
       // Create a promise that we can control
-      let resolvePromise: (value: typeof mockDeviceInfo) => void;
-      const promise = new Promise<typeof mockDeviceInfo>((resolve) => {
-        resolvePromise = resolve;
-      });
+      const { promise, resolve } = createControllablePromise<typeof mockDeviceInfo>();
 
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockReturnValue(promise);
@@ -161,7 +91,7 @@ describe('AboutDialog', () => {
       });
 
       // Resolve the promise
-      resolvePromise!(mockDeviceInfo);
+      resolve(mockDeviceInfo);
       await promise;
     });
   });

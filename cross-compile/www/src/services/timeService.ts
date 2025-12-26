@@ -3,8 +3,8 @@
  *
  * SOAP operations for system date/time configuration.
  */
-import { ENDPOINTS, apiClient } from '@/services/api';
-import { createSOAPEnvelope, parseSOAPResponse, soapBodies } from '@/services/soap/client';
+import { ENDPOINTS } from '@/services/api';
+import { soapBodies, soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 export type DateTimeType = 'NTP' | 'Manual';
@@ -29,16 +29,12 @@ export interface DateTimeConfig {
  * Get system date and time configuration
  */
 export async function getSystemDateAndTime(): Promise<SystemDateTime> {
-  const envelope = createSOAPEnvelope(soapBodies.getSystemDateAndTime());
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    soapBodies.getSystemDateAndTime(),
+    'GetSystemDateAndTimeResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get system date/time');
-  }
-
-  const data = parsed.data?.GetSystemDateAndTimeResponse as Record<string, unknown> | undefined;
   const sdt = data?.SystemDateAndTime as Record<string, unknown> | undefined;
 
   if (!sdt) {
@@ -104,14 +100,7 @@ export async function setSystemDateAndTime(
     ${utcDateTimeXml}
   </tds:SetSystemDateAndTime>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to set system date/time');
-  }
+  await soapRequest(ENDPOINTS.device, body);
 }
 
 /**

@@ -52,3 +52,14 @@ vi.mock('sonner', () => ({
     promise: vi.fn(),
   },
 }));
+
+// Global mocks for common UI components
+vi.mock('@/components/ui/dialog', async () => {
+  const helpers = await import('@/test/componentTestHelpers');
+  return { ...helpers.MockDialog };
+});
+
+vi.mock('@/components/ui/button', async () => {
+  const helpers = await import('@/test/componentTestHelpers');
+  return { ...helpers.MockButton };
+});

@@ -3,8 +3,8 @@
  *
  * SOAP operations for network configuration.
  */
-import { ENDPOINTS, apiClient } from '@/services/api';
-import { createSOAPEnvelope, parseSOAPResponse } from '@/services/soap/client';
+import { ENDPOINTS } from '@/services/api';
+import { soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 export interface NetworkInterface {
@@ -34,16 +34,12 @@ export interface NetworkConfig {
  * Get network interfaces
  */
 export async function getNetworkInterfaces(): Promise<NetworkInterface[]> {
-  const envelope = createSOAPEnvelope('<tds:GetNetworkInterfaces />');
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetNetworkInterfaces />',
+    'GetNetworkInterfacesResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get network interfaces');
-  }
-
-  const data = parsed.data?.GetNetworkInterfacesResponse as Record<string, unknown> | undefined;
   const interfaces = data?.NetworkInterfaces;
 
   if (!interfaces) {
@@ -77,16 +73,12 @@ export async function getNetworkInterfaces(): Promise<NetworkInterface[]> {
  * Get DNS configuration
  */
 export async function getDNS(): Promise<DNSConfig> {
-  const envelope = createSOAPEnvelope('<tds:GetDNS />');
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetDNS />',
+    'GetDNSResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get DNS configuration');
-  }
-
-  const data = parsed.data?.GetDNSResponse as Record<string, unknown> | undefined;
   const dnsInfo = data?.DNSInformation as Record<string, unknown> | undefined;
 
   const searchDomain = dnsInfo?.SearchDomain;
@@ -147,14 +139,7 @@ export async function setNetworkInterface(
     </tds:NetworkInterface>
   </tds:SetNetworkInterfaces>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to set network interface');
-  }
+  await soapRequest(ENDPOINTS.device, body);
 }
 
 /**
@@ -176,12 +161,5 @@ export async function setDNS(_fromDHCP: boolean, dnsServers?: string[]): Promise
     ${manualDNS}
   </tds:SetDNS>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to set DNS');
-  }
+  await soapRequest(ENDPOINTS.device, body);
 }

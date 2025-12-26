@@ -3,8 +3,8 @@
  *
  * SOAP operations for device maintenance (reboot, factory reset, backup, restore).
  */
-import { ENDPOINTS, apiClient } from '@/services/api';
-import { createSOAPEnvelope, parseSOAPResponse } from '@/services/soap/client';
+import { ENDPOINTS } from '@/services/api';
+import { soapRequest } from '@/services/soap/client';
 
 export type FactoryDefaultType = 'Soft' | 'Hard';
 
@@ -20,10 +20,8 @@ export interface BackupFile {
  * GetSystemBackup response structure
  */
 export interface GetSystemBackupResponse {
-  GetSystemBackupResponse?: {
-    BackupFiles?: {
-      BackupFile?: BackupFile | BackupFile[];
-    };
+  BackupFiles?: {
+    BackupFile?: BackupFile | BackupFile[];
   };
 }
 
@@ -31,14 +29,7 @@ export interface GetSystemBackupResponse {
  * Reboot the device
  */
 export async function systemReboot(): Promise<void> {
-  const envelope = createSOAPEnvelope('<tds:SystemReboot />');
-
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to reboot system');
-  }
+  await soapRequest(ENDPOINTS.device, '<tds:SystemReboot />');
 }
 
 /**
@@ -49,14 +40,7 @@ export async function setSystemFactoryDefault(type: FactoryDefaultType): Promise
     <tds:FactoryDefault>${type}</tds:FactoryDefault>
   </tds:SetSystemFactoryDefault>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to reset to factory defaults');
-  }
+  await soapRequest(ENDPOINTS.device, body);
 }
 
 /**
@@ -65,23 +49,18 @@ export async function setSystemFactoryDefault(type: FactoryDefaultType): Promise
  * Returns backup data containing base64-encoded TOML configuration.
  */
 export async function getSystemBackup(): Promise<BackupFile[]> {
-  const envelope = createSOAPEnvelope('<tds:GetSystemBackup />');
+  const data = await soapRequest<GetSystemBackupResponse>(
+    ENDPOINTS.device,
+    '<tds:GetSystemBackup />',
+    'GetSystemBackupResponse',
+  );
 
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<GetSystemBackupResponse>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to get system backup');
-  }
-
-  // Extract backup files from response
-  const backupResponse = parsed.data?.GetSystemBackupResponse;
-  if (!backupResponse) {
+  if (!data) {
     throw new Error('Invalid backup response: missing GetSystemBackupResponse');
   }
 
   // BackupFiles might be missing, empty object, or contain BackupFile
-  const backupFiles = backupResponse.BackupFiles;
+  const backupFiles = data?.BackupFiles;
   if (!backupFiles) {
     return [];
   }
@@ -120,12 +99,5 @@ export async function restoreSystem(backupFile: File): Promise<void> {
     </tds:BackupFiles>
   </tds:RestoreSystem>`;
 
-  const envelope = createSOAPEnvelope(body);
-
-  const response = await apiClient.post(ENDPOINTS.device, envelope);
-  const parsed = parseSOAPResponse<Record<string, unknown>>(response.data);
-
-  if (!parsed.success) {
-    throw new Error(parsed.fault?.reason || 'Failed to restore system');
-  }
+  await soapRequest(ENDPOINTS.device, body);
 }
