@@ -160,6 +160,8 @@ jobs:
   webui-test-and-coverage:
     name: WebUI - Test Suite & Coverage
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: cross-compile/www

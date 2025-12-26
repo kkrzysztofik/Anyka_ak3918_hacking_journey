@@ -5,7 +5,14 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Sheet, SheetClose, SheetContent, SheetTrigger } from './sheet';
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+  SheetTrigger,
+} from './sheet';
 
 describe('Sheet', () => {
   beforeEach(() => {
@@ -27,7 +34,11 @@ describe('Sheet', () => {
     it('should render sheet content when open', async () => {
       render(
         <Sheet defaultOpen>
-          <SheetContent>Sheet Content</SheetContent>
+          <SheetContent>
+            <SheetTitle>Sheet Title</SheetTitle>
+            <SheetDescription>Sheet Description</SheetDescription>
+            Sheet Content
+          </SheetContent>
         </Sheet>,
       );
 
@@ -43,7 +54,11 @@ describe('Sheet', () => {
       render(
         <Sheet>
           <SheetTrigger data-testid="sheet-trigger">Open Sheet</SheetTrigger>
-          <SheetContent>Sheet Content</SheetContent>
+          <SheetContent>
+            <SheetTitle>Sheet Title</SheetTitle>
+            <SheetDescription>Sheet Description</SheetDescription>
+            Sheet Content
+          </SheetContent>
         </Sheet>,
       );
 
@@ -59,6 +74,8 @@ describe('Sheet', () => {
       render(
         <Sheet defaultOpen>
           <SheetContent>
+            <SheetTitle>Sheet Title</SheetTitle>
+            <SheetDescription>Sheet Description</SheetDescription>
             <SheetClose>Close</SheetClose>
             Sheet Content
           </SheetContent>
@@ -75,6 +92,8 @@ describe('Sheet', () => {
       render(
         <Sheet defaultOpen>
           <SheetContent>
+            <SheetTitle>Sheet Title</SheetTitle>
+            <SheetDescription>Sheet Description</SheetDescription>
             <SheetClose>Close</SheetClose>
             Sheet Content
           </SheetContent>
@@ -98,7 +117,11 @@ describe('Sheet', () => {
     it('should render sheet on left side', () => {
       render(
         <Sheet defaultOpen>
-          <SheetContent side="left">Left Sheet</SheetContent>
+          <SheetContent side="left">
+            <SheetTitle>Sheet Title</SheetTitle>
+            <SheetDescription>Sheet Description</SheetDescription>
+            Left Sheet
+          </SheetContent>
         </Sheet>,
       );
 

@@ -1,7 +1,7 @@
 /**
  * UserDialogs Component Tests
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -119,7 +119,9 @@ describe('AddUserDialog', () => {
       render(<AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />);
 
       const submitButton = screen.getByTestId('add-user-submit-button');
-      await user.click(submitButton);
+      await act(async () => {
+        await user.click(submitButton);
+      });
 
       await waitFor(
         () => {
@@ -136,11 +138,15 @@ describe('AddUserDialog', () => {
       const usernameInput = screen.getByTestId('add-user-username-input');
       const passwordInput = screen.getByTestId('add-user-password-input');
 
-      await user.type(usernameInput, 'testuser');
-      await user.type(passwordInput, '123'); // Too short
+      await act(async () => {
+        await user.type(usernameInput, 'testuser');
+        await user.type(passwordInput, '123'); // Too short
+      });
 
       const submitButton = screen.getByTestId('add-user-submit-button');
-      await user.click(submitButton);
+      await act(async () => {
+        await user.click(submitButton);
+      });
 
       await waitFor(
         () => {
@@ -157,11 +163,15 @@ describe('AddUserDialog', () => {
       const usernameInput = screen.getByTestId('add-user-username-input');
       const passwordInput = screen.getByTestId('add-user-password-input');
 
-      await user.type(usernameInput, 'testuser');
-      await user.type(passwordInput, 'a'.repeat(65)); // Too long
+      await act(async () => {
+        await user.type(usernameInput, 'testuser');
+        await user.type(passwordInput, 'a'.repeat(65)); // Too long
+      });
 
       const submitButton = screen.getByTestId('add-user-submit-button');
-      await user.click(submitButton);
+      await act(async () => {
+        await user.click(submitButton);
+      });
 
       await waitFor(
         () => {
@@ -179,9 +189,11 @@ describe('AddUserDialog', () => {
       const passwordInput = screen.getByTestId('add-user-password-input');
       const confirmPasswordInput = screen.getByTestId('add-user-confirm-password-input');
 
-      await user.type(usernameInput, 'testuser');
-      await user.type(passwordInput, 'password123');
-      await user.type(confirmPasswordInput, 'different');
+      await act(async () => {
+        await user.type(usernameInput, 'testuser');
+        await user.type(passwordInput, 'password123');
+        await user.type(confirmPasswordInput, 'different');
+      });
 
       const submitButton = screen.getByTestId('add-user-submit-button');
       await user.click(submitButton);
@@ -221,10 +233,12 @@ describe('AddUserDialog', () => {
         { timeout: 2000 },
       );
 
-      // Submit form directly
+      // Submit form directly - wrap in act()
       const form = usernameInput.closest('form');
       const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -258,10 +272,12 @@ describe('AddUserDialog', () => {
         { timeout: 2000 },
       );
 
-      // Submit form directly
+      // Submit form directly - wrap in act()
       const form = usernameInput.closest('form');
       const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -285,9 +301,11 @@ describe('AddUserDialog', () => {
       const passwordInput = screen.getByTestId('add-user-password-input');
       const confirmPasswordInput = screen.getByTestId('add-user-confirm-password-input');
 
-      await user.type(usernameInput, 'newuser');
-      await user.type(passwordInput, 'password123');
-      await user.type(confirmPasswordInput, 'password123');
+      await act(async () => {
+        await user.type(usernameInput, 'newuser');
+        await user.type(passwordInput, 'password123');
+        await user.type(confirmPasswordInput, 'password123');
+      });
 
       // Wait for form state to update - react-hook-form needs time to sync
       await waitFor(
@@ -298,12 +316,14 @@ describe('AddUserDialog', () => {
         { timeout: 2000 },
       );
 
-      // Submit form directly
+      // Submit form directly - wrap in act()
       const form = usernameInput.closest('form');
       const submitButton = screen.getByTestId('add-user-submit-button');
 
       const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -325,7 +345,9 @@ describe('AddUserDialog', () => {
       render(<AddUserDialog open={true} onOpenChange={onOpenChange} onSubmit={mockOnSubmit} />);
 
       const cancelButton = screen.getByTestId('add-user-cancel-button');
-      await user.click(cancelButton);
+      await act(async () => {
+        await user.click(cancelButton);
+      });
 
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
@@ -404,12 +426,16 @@ describe('ChangePasswordDialog', () => {
       );
 
       const passwordInput = screen.getByTestId('change-password-new-input');
-      await user.type(passwordInput, '123'); // Too short
+      await act(async () => {
+        await user.type(passwordInput, '123'); // Too short
+      });
 
       // Submit form directly
       const form = passwordInput.closest('form');
       const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -433,13 +459,17 @@ describe('ChangePasswordDialog', () => {
       const passwordInput = screen.getByTestId('change-password-new-input');
       const confirmPasswordInput = screen.getByTestId('change-password-confirm-input');
 
-      await user.type(passwordInput, 'password123');
-      await user.type(confirmPasswordInput, 'different');
+      await act(async () => {
+        await user.type(passwordInput, 'password123');
+        await user.type(confirmPasswordInput, 'different');
+      });
 
       // Submit form directly
       const form = passwordInput.closest('form');
       const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -475,10 +505,12 @@ describe('ChangePasswordDialog', () => {
         expect(passwordInput).toHaveValue('newpassword123');
       });
 
-      // Submit form directly
+      // Submit form directly - wrap in act()
       const form = passwordInput.closest('form');
       const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -509,20 +541,24 @@ describe('ChangePasswordDialog', () => {
       const passwordInput = screen.getByTestId('change-password-new-input');
       const confirmPasswordInput = screen.getByTestId('change-password-confirm-input');
 
-      await user.type(passwordInput, 'newpassword123');
-      await user.type(confirmPasswordInput, 'newpassword123');
+      await act(async () => {
+        await user.type(passwordInput, 'newpassword123');
+        await user.type(confirmPasswordInput, 'newpassword123');
+      });
 
       // Wait for form state to update
       await waitFor(() => {
         expect(passwordInput).toHaveValue('newpassword123');
       });
 
-      // Submit form directly
+      // Submit form directly - wrap in act()
       const form = passwordInput.closest('form');
       const submitButton = screen.getByTestId('change-password-submit-button');
 
       const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -551,7 +587,9 @@ describe('ChangePasswordDialog', () => {
       );
 
       const cancelButton = screen.getByTestId('change-password-cancel-button');
-      await user.click(cancelButton);
+      await act(async () => {
+        await user.click(cancelButton);
+      });
 
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });

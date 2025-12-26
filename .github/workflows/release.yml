@@ -12,6 +12,8 @@ jobs:
   build_webui:
     name: Build WebUI
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: cross-compile/www
@@ -41,6 +43,8 @@ jobs:
   build_rust:
     name: Build Rust ONVIF
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     container:
       image: kkrzysztofik/anyka-cross-compile:latest
     steps:

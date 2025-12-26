@@ -4,7 +4,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthProvider, useAuth } from './useAuth';
+import { type AuthContextValue, AuthProvider, useAuth } from './useAuth';
 
 // Mock crypto utilities
 const mockEncrypt = vi.fn();
@@ -14,6 +14,33 @@ vi.mock('../utils/crypto', () => ({
   encrypt: (password: string) => mockEncrypt(password),
   decrypt: (encrypted: unknown) => mockDecrypt(encrypted),
 }));
+
+// Helper functions to reduce nesting depth
+async function loginUser(
+  result: { current: AuthContextValue },
+  username: string,
+  password: string,
+) {
+  await act(async () => {
+    await result.current.login(username, password);
+  });
+}
+
+async function getCredentialsWithAct(result: { current: AuthContextValue }) {
+  return await act(async () => {
+    return await result.current.getCredentials();
+  });
+}
+
+async function getBasicAuthHeaderWithAct(result: { current: AuthContextValue }) {
+  return await act(async () => {
+    return await result.current.getBasicAuthHeader();
+  });
+}
+
+function renderHookOutsideProvider() {
+  renderHook(() => useAuth());
+}
 
 describe('useAuth', () => {
   beforeEach(() => {
@@ -78,9 +105,7 @@ describe('useAuth', () => {
         wrapper: AuthProvider,
       });
 
-      await act(async () => {
-        await result.current.login('testuser', 'testpassword');
-      });
+      await loginUser(result, 'testuser', 'testpassword');
 
       await waitFor(() => {
         expect(result.current.isAuthenticated).toBe(true);
@@ -102,9 +127,7 @@ describe('useAuth', () => {
         wrapper: AuthProvider,
       });
 
-      await act(async () => {
-        await result.current.login('testuser', 'testpassword');
-      });
+      await loginUser(result, 'testuser', 'testpassword');
 
       await waitFor(() => {
         expect(result.current.isAuthenticated).toBe(true);
@@ -126,17 +149,13 @@ describe('useAuth', () => {
         wrapper: AuthProvider,
       });
 
-      await act(async () => {
-        await result.current.login('testuser', 'testpassword');
-      });
+      await loginUser(result, 'testuser', 'testpassword');
 
       await waitFor(() => {
         expect(result.current.isAuthenticated).toBe(true);
       });
 
-      const credentials = await act(async () => {
-        return await result.current.getCredentials();
-      });
+      const credentials = await getCredentialsWithAct(result);
 
       expect(credentials).toEqual({
         username: 'testuser',
@@ -150,9 +169,7 @@ describe('useAuth', () => {
         wrapper: AuthProvider,
       });
 
-      const credentials = await act(async () => {
-        return await result.current.getCredentials();
-      });
+      const credentials = await getCredentialsWithAct(result);
 
       expect(credentials).toBeNull();
       expect(mockDecrypt).not.toHaveBeenCalled();
@@ -163,9 +180,7 @@ describe('useAuth', () => {
         wrapper: AuthProvider,
       });
 
-      await act(async () => {
-        await result.current.login('testuser', 'testpassword');
-      });
+      await loginUser(result, 'testuser', 'testpassword');
 
       await waitFor(() => {
         expect(result.current.isAuthenticated).toBe(true);
@@ -173,9 +188,7 @@ describe('useAuth', () => {
 
       mockDecrypt.mockRejectedValue(new Error('Decryption failed'));
 
-      const credentials = await act(async () => {
-        return await result.current.getCredentials();
-      });
+      const credentials = await getCredentialsWithAct(result);
 
       expect(credentials).toBeNull();
     });
@@ -187,17 +200,13 @@ describe('useAuth', () => {
         wrapper: AuthProvider,
       });
 
-      await act(async () => {
-        await result.current.login('testuser', 'testpassword');
-      });
+      await loginUser(result, 'testuser', 'testpassword');
 
       await waitFor(() => {
         expect(result.current.isAuthenticated).toBe(true);
       });
 
-      const header = await act(async () => {
-        return await result.current.getBasicAuthHeader();
-      });
+      const header = await getBasicAuthHeaderWithAct(result);
 
       expect(header).toBe('Basic ' + btoa('testuser:decrypted-password'));
       expect(mockDecrypt).toHaveBeenCalled();
@@ -208,9 +217,7 @@ describe('useAuth', () => {
         wrapper: AuthProvider,
       });
 
-      const header = await act(async () => {
-        return await result.current.getBasicAuthHeader();
-      });
+      const header = await getBasicAuthHeaderWithAct(result);
 
       expect(header).toBeNull();
       expect(mockDecrypt).not.toHaveBeenCalled();
@@ -221,9 +228,7 @@ describe('useAuth', () => {
         wrapper: AuthProvider,
       });
 
-      await act(async () => {
-        await result.current.login('testuser', 'testpassword');
-      });
+      await loginUser(result, 'testuser', 'testpassword');
 
       await waitFor(() => {
         expect(result.current.isAuthenticated).toBe(true);
@@ -231,9 +236,7 @@ describe('useAuth', () => {
 
       mockDecrypt.mockRejectedValue(new Error('Decryption failed'));
 
-      const header = await act(async () => {
-        return await result.current.getBasicAuthHeader();
-      });
+      const header = await getBasicAuthHeaderWithAct(result);
 
       expect(header).toBeNull();
     });
@@ -244,9 +247,7 @@ describe('useAuth', () => {
       // Suppress console.error for this test
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      expect(() => {
-        renderHook(() => useAuth());
-      }).toThrow('useAuth must be used within an AuthProvider');
+      expect(renderHookOutsideProvider).toThrow('useAuth must be used within an AuthProvider');
 
       consoleSpy.mockRestore();
     });

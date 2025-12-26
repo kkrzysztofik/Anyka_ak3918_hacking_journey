@@ -1,7 +1,7 @@
 /**
  * ChangePasswordDialog Component Tests
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -166,7 +166,9 @@ describe('ChangePasswordDialog', () => {
       render(<ChangePasswordDialog open={true} onOpenChange={onOpenChange} />);
 
       const cancelButton = screen.getByTestId('change-password-dialog-cancel-button');
-      await user.click(cancelButton);
+      await act(async () => {
+        await user.click(cancelButton);
+      });
 
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
@@ -190,9 +192,11 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await user.type(currentPasswordInput, 'oldpass');
-      await user.type(newPasswordInput, 'newpass123');
-      await user.type(confirmPasswordInput, 'newpass123');
+      await act(async () => {
+        await user.type(currentPasswordInput, 'oldpass');
+        await user.type(newPasswordInput, 'newpass123');
+        await user.type(confirmPasswordInput, 'newpass123');
+      });
 
       // Wait for form state to update
       await waitFor(() => {
@@ -203,8 +207,10 @@ describe('ChangePasswordDialog', () => {
       const form = currentPasswordInput.closest('form');
       expect(form).toBeTruthy();
 
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+        form?.dispatchEvent(submitEvent);
+      });
 
       // Now check if cancel button is disabled during loading
       await waitFor(
@@ -223,7 +229,9 @@ describe('ChangePasswordDialog', () => {
       render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const submitButton = screen.getByTestId('change-password-dialog-submit-button');
-      await user.click(submitButton);
+      await act(async () => {
+        await user.click(submitButton);
+      });
 
       // Form validation should prevent submission
       const { verifyCredentials } = await import('@/services/authService');
@@ -241,11 +249,15 @@ describe('ChangePasswordDialog', () => {
       );
       const newPasswordInput = screen.getByTestId('change-password-dialog-new-password-input');
 
-      await user.type(currentPasswordInput, 'oldpass');
-      await user.type(newPasswordInput, '12345'); // Too short
+      await act(async () => {
+        await user.type(currentPasswordInput, 'oldpass');
+        await user.type(newPasswordInput, '12345'); // Too short
+      });
 
       const submitButton = screen.getByTestId('change-password-dialog-submit-button');
-      await user.click(submitButton);
+      await act(async () => {
+        await user.click(submitButton);
+      });
 
       const { verifyCredentials } = await import('@/services/authService');
       await waitFor(() => {
@@ -262,11 +274,15 @@ describe('ChangePasswordDialog', () => {
       );
       const newPasswordInput = screen.getByTestId('change-password-dialog-new-password-input');
 
-      await user.type(currentPasswordInput, 'oldpass');
-      await user.type(newPasswordInput, 'a'.repeat(33)); // Too long
+      await act(async () => {
+        await user.type(currentPasswordInput, 'oldpass');
+        await user.type(newPasswordInput, 'a'.repeat(33)); // Too long
+      });
 
       const submitButton = screen.getByTestId('change-password-dialog-submit-button');
-      await user.click(submitButton);
+      await act(async () => {
+        await user.click(submitButton);
+      });
 
       const { verifyCredentials } = await import('@/services/authService');
       await waitFor(() => {
@@ -286,12 +302,16 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await user.type(currentPasswordInput, 'oldpass');
-      await user.type(newPasswordInput, 'newpass123');
-      await user.type(confirmPasswordInput, 'different');
+      await act(async () => {
+        await user.type(currentPasswordInput, 'oldpass');
+        await user.type(newPasswordInput, 'newpass123');
+        await user.type(confirmPasswordInput, 'different');
+      });
 
       const submitButton = screen.getByTestId('change-password-dialog-submit-button');
-      await user.click(submitButton);
+      await act(async () => {
+        await user.click(submitButton);
+      });
 
       const { verifyCredentials } = await import('@/services/authService');
       await waitFor(() => {
@@ -314,7 +334,9 @@ describe('ChangePasswordDialog', () => {
 
       // Find toggle button (Eye icon)
       const currentPasswordToggle = screen.getByTestId('change-password-dialog-current-toggle');
-      await user.click(currentPasswordToggle);
+      await act(async () => {
+        await user.click(currentPasswordToggle);
+      });
       await waitFor(() => {
         expect(currentPasswordInput).toHaveAttribute('type', 'text');
       });
@@ -331,7 +353,9 @@ describe('ChangePasswordDialog', () => {
 
       // Find toggle button
       const newPasswordToggle = screen.getByTestId('change-password-dialog-new-toggle');
-      await user.click(newPasswordToggle);
+      await act(async () => {
+        await user.click(newPasswordToggle);
+      });
       await waitFor(() => {
         expect(newPasswordInput).toHaveAttribute('type', 'text');
       });
@@ -359,9 +383,11 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await user.type(currentPasswordInput, 'oldpass');
-      await user.type(newPasswordInput, 'newpass123');
-      await user.type(confirmPasswordInput, 'newpass123');
+      await act(async () => {
+        await user.type(currentPasswordInput, 'oldpass');
+        await user.type(newPasswordInput, 'newpass123');
+        await user.type(confirmPasswordInput, 'newpass123');
+      });
 
       // Wait a bit for form state to update
       await waitFor(() => {
@@ -374,8 +400,10 @@ describe('ChangePasswordDialog', () => {
       const form = currentPasswordInput.closest('form');
       expect(form).toBeTruthy();
 
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -407,9 +435,11 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await user.type(currentPasswordInput, 'oldpass');
-      await user.type(newPasswordInput, 'newpass123');
-      await user.type(confirmPasswordInput, 'newpass123');
+      await act(async () => {
+        await user.type(currentPasswordInput, 'oldpass');
+        await user.type(newPasswordInput, 'newpass123');
+        await user.type(confirmPasswordInput, 'newpass123');
+      });
 
       // Wait for form state to update
       await waitFor(() => {
@@ -422,8 +452,10 @@ describe('ChangePasswordDialog', () => {
       const form = currentPasswordInput.closest('form');
       expect(form).toBeTruthy();
 
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -452,9 +484,11 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await user.type(currentPasswordInput, 'wrongpass');
-      await user.type(newPasswordInput, 'newpass123');
-      await user.type(confirmPasswordInput, 'newpass123');
+      await act(async () => {
+        await user.type(currentPasswordInput, 'wrongpass');
+        await user.type(newPasswordInput, 'newpass123');
+        await user.type(confirmPasswordInput, 'newpass123');
+      });
 
       // Wait for form state to update
       await waitFor(() => {
@@ -465,8 +499,10 @@ describe('ChangePasswordDialog', () => {
       const form = currentPasswordInput.closest('form');
       expect(form).toBeTruthy();
 
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -497,9 +533,11 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await user.type(currentPasswordInput, 'oldpass');
-      await user.type(newPasswordInput, 'newpass123');
-      await user.type(confirmPasswordInput, 'newpass123');
+      await act(async () => {
+        await user.type(currentPasswordInput, 'oldpass');
+        await user.type(newPasswordInput, 'newpass123');
+        await user.type(confirmPasswordInput, 'newpass123');
+      });
 
       // Wait for form state to update
       await waitFor(() => {
@@ -510,8 +548,10 @@ describe('ChangePasswordDialog', () => {
       const form = currentPasswordInput.closest('form');
       expect(form).toBeTruthy();
 
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -541,9 +581,11 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await user.type(currentPasswordInput, 'oldpass');
-      await user.type(newPasswordInput, 'newpass123');
-      await user.type(confirmPasswordInput, 'newpass123');
+      await act(async () => {
+        await user.type(currentPasswordInput, 'oldpass');
+        await user.type(newPasswordInput, 'newpass123');
+        await user.type(confirmPasswordInput, 'newpass123');
+      });
 
       // Wait for form state to update
       await waitFor(() => {
@@ -554,8 +596,10 @@ describe('ChangePasswordDialog', () => {
       const form = currentPasswordInput.closest('form');
       expect(form).toBeTruthy();
 
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -591,9 +635,11 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await user.type(currentPasswordInput, 'oldpass');
-      await user.type(newPasswordInput, 'newpass123');
-      await user.type(confirmPasswordInput, 'newpass123');
+      await act(async () => {
+        await user.type(currentPasswordInput, 'oldpass');
+        await user.type(newPasswordInput, 'newpass123');
+        await user.type(confirmPasswordInput, 'newpass123');
+      });
 
       // Wait for form state to update
       await waitFor(() => {
@@ -606,8 +652,10 @@ describe('ChangePasswordDialog', () => {
 
       const submitButton = screen.getByTestId('change-password-dialog-submit-button');
 
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {
@@ -641,9 +689,11 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await user.type(currentPasswordInput, 'oldpass');
-      await user.type(newPasswordInput, 'newpass123');
-      await user.type(confirmPasswordInput, 'newpass123');
+      await act(async () => {
+        await user.type(currentPasswordInput, 'oldpass');
+        await user.type(newPasswordInput, 'newpass123');
+        await user.type(confirmPasswordInput, 'newpass123');
+      });
 
       // Wait for form state to update
       await waitFor(() => {
@@ -654,8 +704,10 @@ describe('ChangePasswordDialog', () => {
       const form = currentPasswordInput.closest('form');
       expect(form).toBeTruthy();
 
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      form?.dispatchEvent(submitEvent);
+      await act(async () => {
+        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+        form?.dispatchEvent(submitEvent);
+      });
 
       await waitFor(
         () => {

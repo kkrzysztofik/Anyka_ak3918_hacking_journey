@@ -72,6 +72,7 @@ describe('Dialog', () => {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Test Dialog</DialogTitle>
+              <DialogDescription>Test description</DialogDescription>
             </DialogHeader>
           </DialogContent>
         </Dialog>,
@@ -93,6 +94,7 @@ describe('Dialog', () => {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Test Dialog</DialogTitle>
+              <DialogDescription>Test description</DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <DialogClose>Close</DialogClose>
@@ -120,6 +122,7 @@ describe('Dialog', () => {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Test Dialog</DialogTitle>
+              <DialogDescription>Test description</DialogDescription>
             </DialogHeader>
           </DialogContent>
         </Dialog>,
@@ -145,6 +148,7 @@ describe('Dialog', () => {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Controlled Dialog</DialogTitle>
+              <DialogDescription>Test description</DialogDescription>
             </DialogHeader>
           </DialogContent>
         </Dialog>,
@@ -157,6 +161,7 @@ describe('Dialog', () => {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Controlled Dialog</DialogTitle>
+              <DialogDescription>Test description</DialogDescription>
             </DialogHeader>
           </DialogContent>
         </Dialog>,
@@ -174,6 +179,7 @@ describe('Dialog', () => {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Controlled Dialog</DialogTitle>
+              <DialogDescription>Test description</DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <DialogClose>Close</DialogClose>
@@ -214,6 +220,7 @@ describe('Dialog', () => {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Test</DialogTitle>
+              <DialogDescription>Test description</DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <button data-testid="footer-action">Action</button>

@@ -77,6 +77,7 @@ describe('AlertDialog', () => {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Alert Title</AlertDialogTitle>
+              <AlertDialogDescription>Are you sure you want to continue?</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -102,6 +103,7 @@ describe('AlertDialog', () => {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Alert Title</AlertDialogTitle>
+              <AlertDialogDescription>Are you sure you want to cancel?</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -130,6 +132,8 @@ describe('AlertDialog', () => {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Alert Title</AlertDialogTitle>
+
+              <AlertDialogDescription>Are you sure?</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -181,6 +185,7 @@ describe('AlertDialog', () => {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Test</AlertDialogTitle>
+              <AlertDialogDescription>Test description</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>

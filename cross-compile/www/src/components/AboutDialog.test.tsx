@@ -1,7 +1,7 @@
 /**
  * AboutDialog Component Tests
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -41,21 +41,37 @@ vi.mock('@/components/ui/dialog', () => ({
       )}
     </div>
   ),
-  DialogContent: ({ children, className, ...props }: React.ComponentPropsWithoutRef<'div'>) => (
+  DialogContent: ({
+    children,
+    className,
+    ...props
+  }: React.ComponentPropsWithoutRef<'div'> & { 'data-testid'?: string }) => (
     <div data-testid={props['data-testid'] || 'dialog-content'} className={className}>
       {children}
     </div>
   ),
-  DialogDescription: ({ children, ...props }: React.ComponentPropsWithoutRef<'div'>) => (
+  DialogDescription: ({
+    children,
+    ...props
+  }: React.ComponentPropsWithoutRef<'div'> & { 'data-testid'?: string }) => (
     <div data-testid={props['data-testid'] || 'dialog-description'}>{children}</div>
   ),
-  DialogFooter: ({ children, ...props }: React.ComponentPropsWithoutRef<'div'>) => (
+  DialogFooter: ({
+    children,
+    ...props
+  }: React.ComponentPropsWithoutRef<'div'> & { 'data-testid'?: string }) => (
     <div data-testid={props['data-testid'] || 'dialog-footer'}>{children}</div>
   ),
-  DialogHeader: ({ children, ...props }: React.ComponentPropsWithoutRef<'div'>) => (
+  DialogHeader: ({
+    children,
+    ...props
+  }: React.ComponentPropsWithoutRef<'div'> & { 'data-testid'?: string }) => (
     <div data-testid={props['data-testid'] || 'dialog-header'}>{children}</div>
   ),
-  DialogTitle: ({ children, ...props }: React.ComponentPropsWithoutRef<'h2'>) => (
+  DialogTitle: ({
+    children,
+    ...props
+  }: React.ComponentPropsWithoutRef<'h2'> & { 'data-testid'?: string }) => (
     <h2 data-testid={props['data-testid'] || 'dialog-title'}>{children}</h2>
   ),
 }));
@@ -109,7 +125,9 @@ describe('AboutDialog', () => {
       render(<AboutDialog open={true} onOpenChange={onOpenChange} />);
 
       const closeButton = screen.getByTestId('dialog-close-button');
-      await user.click(closeButton);
+      await act(async () => {
+        await user.click(closeButton);
+      });
 
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
@@ -121,7 +139,9 @@ describe('AboutDialog', () => {
       render(<AboutDialog open={true} onOpenChange={onOpenChange} />);
 
       const overlay = screen.getByTestId('dialog-overlay');
-      await user.click(overlay);
+      await act(async () => {
+        await user.click(overlay);
+      });
 
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
