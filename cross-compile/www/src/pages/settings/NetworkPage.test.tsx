@@ -5,7 +5,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import NetworkPage from './NetworkPage';
 
@@ -21,26 +21,7 @@ describe('NetworkPage', () => {
     vi.clearAllMocks();
   });
 
-  const mockNetworkConfig = {
-    interfaces: [
-      {
-        token: 'eth0',
-        name: 'eth0',
-        enabled: true,
-        ipv4Enabled: true,
-        dhcp: false,
-        address: '192.168.1.100',
-        prefixLength: 24,
-        gateway: '192.168.1.1',
-        hwAddress: '00:11:22:33:44:55',
-      },
-    ],
-    dns: {
-      fromDHCP: false,
-      dnsServers: ['8.8.8.8', '8.8.4.4'],
-      searchDomain: [],
-    },
-  };
+  const mockNetworkConfig = MOCK_DATA.network;
 
   it('should render page with loading state', async () => {
     const { getNetworkConfig } = await import('@/services/networkService');

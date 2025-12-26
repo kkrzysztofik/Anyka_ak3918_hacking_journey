@@ -5,7 +5,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import IdentificationPage from './IdentificationPage';
 
@@ -26,17 +26,7 @@ describe('IdentificationPage', () => {
 
   it('should render identification form', async () => {
     const { getDeviceIdentification } = await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue({
-      deviceInfo: {
-        manufacturer: 'Test Manufacturer',
-        model: 'Test Model',
-        firmwareVersion: '1.0.0',
-        serialNumber: 'SN123',
-        hardwareId: 'HW456',
-      },
-      name: 'Test Device',
-      location: 'Test Location',
-    });
+    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
 
     const { getNetworkInterfaces } = await import('@/services/networkService');
     vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
@@ -50,17 +40,7 @@ describe('IdentificationPage', () => {
 
   it('should display device information when loaded', async () => {
     const { getDeviceIdentification } = await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue({
-      deviceInfo: {
-        manufacturer: 'Test Manufacturer',
-        model: 'Test Model',
-        firmwareVersion: '1.0.0',
-        serialNumber: 'SN123',
-        hardwareId: 'HW456',
-      },
-      name: 'Test Device',
-      location: 'Test Location',
-    });
+    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
 
     const { getNetworkInterfaces } = await import('@/services/networkService');
     vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
@@ -77,17 +57,7 @@ describe('IdentificationPage', () => {
 
   it('should allow editing device name', async () => {
     const { getDeviceIdentification } = await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue({
-      deviceInfo: {
-        manufacturer: 'Test Manufacturer',
-        model: 'Test Model',
-        firmwareVersion: '1.0.0',
-        serialNumber: 'SN123',
-        hardwareId: 'HW456',
-      },
-      name: 'Test Device',
-      location: 'Test Location',
-    });
+    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
 
     const { getNetworkInterfaces } = await import('@/services/networkService');
     vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
@@ -108,17 +78,7 @@ describe('IdentificationPage', () => {
 
   it('should allow editing device location', async () => {
     const { getDeviceIdentification } = await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue({
-      deviceInfo: {
-        manufacturer: 'Test Manufacturer',
-        model: 'Test Model',
-        firmwareVersion: '1.0.0',
-        serialNumber: 'SN123',
-        hardwareId: 'HW456',
-      },
-      name: 'Test Device',
-      location: 'Test Location',
-    });
+    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
 
     const { getNetworkInterfaces } = await import('@/services/networkService');
     vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
@@ -142,17 +102,7 @@ describe('IdentificationPage', () => {
   it('should submit form with valid data', async () => {
     const { getDeviceIdentification, setDeviceInformation } =
       await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue({
-      deviceInfo: {
-        manufacturer: 'Test Manufacturer',
-        model: 'Test Model',
-        firmwareVersion: '1.0.0',
-        serialNumber: 'SN123',
-        hardwareId: 'HW456',
-      },
-      name: 'Test Device',
-      location: 'Test Location',
-    });
+    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
     vi.mocked(setDeviceInformation).mockResolvedValue(undefined);
 
     const { getNetworkInterfaces } = await import('@/services/networkService');
@@ -181,17 +131,7 @@ describe('IdentificationPage', () => {
   it('should show error toast when mutation fails', async () => {
     const { getDeviceIdentification, setDeviceInformation } =
       await import('@/services/deviceService');
-    vi.mocked(getDeviceIdentification).mockResolvedValue({
-      deviceInfo: {
-        manufacturer: 'Test Manufacturer',
-        model: 'Test Model',
-        firmwareVersion: '1.0.0',
-        serialNumber: 'SN123',
-        hardwareId: 'HW456',
-      },
-      name: 'Test Device',
-      location: 'Test Location',
-    });
+    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
     vi.mocked(setDeviceInformation).mockRejectedValue(new Error('Network error'));
 
     const { getNetworkInterfaces } = await import('@/services/networkService');
@@ -224,18 +164,7 @@ describe('IdentificationPage', () => {
 
   it('should reset form when handleReset is called', async () => {
     const { getDeviceIdentification } = await import('@/services/deviceService');
-    const deviceInfo = {
-      deviceInfo: {
-        manufacturer: 'Test Manufacturer',
-        model: 'Test Model',
-        firmwareVersion: '1.0.0',
-        serialNumber: 'SN123',
-        hardwareId: 'HW456',
-      },
-      name: 'Test Device',
-      location: 'Test Location',
-    };
-    vi.mocked(getDeviceIdentification).mockResolvedValue(deviceInfo);
+    vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
 
     const { getNetworkInterfaces } = await import('@/services/networkService');
     vi.mocked(getNetworkInterfaces).mockResolvedValue([]);

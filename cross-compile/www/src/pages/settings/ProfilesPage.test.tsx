@@ -5,7 +5,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import ProfilesPage from './ProfilesPage';
 
@@ -24,31 +24,7 @@ describe('ProfilesPage', () => {
     vi.clearAllMocks();
   });
 
-  const mockProfiles = [
-    {
-      token: 'ProfileToken1',
-      name: 'MainStream',
-      fixed: false,
-      videoSourceConfiguration: {
-        token: 'VideoSourceToken1',
-        name: 'Video Source 1',
-      },
-      videoEncoderConfiguration: {
-        token: 'VideoEncoderToken1',
-        name: 'H.264 Encoder',
-        encoding: 'H264',
-      },
-    },
-    {
-      token: 'ProfileToken2',
-      name: 'SubStream',
-      fixed: true,
-      videoSourceConfiguration: {
-        token: 'VideoSourceToken2',
-        name: 'Video Source 2',
-      },
-    },
-  ];
+  const mockProfiles = MOCK_DATA.profiles;
 
   it('should render page with loading state', async () => {
     const { getProfiles } = await import('@/services/profileService');

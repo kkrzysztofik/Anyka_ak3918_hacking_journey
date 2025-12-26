@@ -5,12 +5,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type {
-  BacklightCompensationMode,
-  IrCutFilterMode,
-  WideDynamicMode,
-} from '@/services/imagingService';
-import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import ImagingPage from './ImagingPage';
 
@@ -26,42 +21,10 @@ describe('ImagingPage', () => {
     vi.clearAllMocks();
   });
 
-  const mockSettings = {
-    brightness: 60,
-    contrast: 70,
-    saturation: 50,
-    sharpness: 55,
-    irCutFilter: 'AUTO' as const,
-    wideDynamicRange: {
-      mode: 'ON' as const,
-      level: 60,
-    },
-    backlightCompensation: {
-      mode: 'ON' as const,
-      level: 45,
-    },
-  };
-
-  const mockOptions = {
-    brightness: { min: 0, max: 100 },
-    contrast: { min: 0, max: 100 },
-    saturation: { min: 0, max: 100 },
-    sharpness: { min: 0, max: 100 },
-    irCutFilterModes: ['AUTO', 'ON', 'OFF'] as IrCutFilterMode[],
-    wideDynamicRange: {
-      modes: ['ON', 'OFF'] as WideDynamicMode[],
-      level: { min: 0, max: 100 },
-    },
-    backlightCompensation: {
-      modes: ['ON', 'OFF'] as BacklightCompensationMode[],
-      level: { min: 0, max: 100 },
-    },
-  };
-
   it('should render page with loading state', async () => {
     const { getImagingSettings, getImagingOptions } = await import('@/services/imagingService');
     vi.mocked(getImagingSettings).mockImplementation(() => new Promise(() => {}));
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
 
     renderWithProviders(<ImagingPage />);
     expect(screen.getByText('Loading...')).toBeInTheDocument();
@@ -69,8 +32,8 @@ describe('ImagingPage', () => {
 
   it('should render form with fetched settings', async () => {
     const { getImagingSettings, getImagingOptions } = await import('@/services/imagingService');
-    vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
 
     renderWithProviders(<ImagingPage />);
 
@@ -87,8 +50,8 @@ describe('ImagingPage', () => {
 
   it('should render brightness slider', async () => {
     const { getImagingSettings, getImagingOptions } = await import('@/services/imagingService');
-    vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
 
     renderWithProviders(<ImagingPage />);
 
@@ -104,8 +67,8 @@ describe('ImagingPage', () => {
 
   it('should render IR cut filter selection', async () => {
     const { getImagingSettings, getImagingOptions } = await import('@/services/imagingService');
-    vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
 
     renderWithProviders(<ImagingPage />);
 
@@ -123,8 +86,8 @@ describe('ImagingPage', () => {
 
   it('should show WDR level slider when WDR mode is ON', async () => {
     const { getImagingSettings, getImagingOptions } = await import('@/services/imagingService');
-    vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
 
     renderWithProviders(<ImagingPage />);
 
@@ -139,8 +102,8 @@ describe('ImagingPage', () => {
 
   it('should show backlight level slider when backlight compensation is ON', async () => {
     const { getImagingSettings, getImagingOptions } = await import('@/services/imagingService');
-    vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
 
     renderWithProviders(<ImagingPage />);
 
@@ -153,8 +116,8 @@ describe('ImagingPage', () => {
   it('should submit form and call mutation', async () => {
     const { getImagingSettings, getImagingOptions, setImagingSettings } =
       await import('@/services/imagingService');
-    vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
     vi.mocked(setImagingSettings).mockResolvedValue(undefined);
 
     const user = userEvent.setup();
@@ -176,8 +139,8 @@ describe('ImagingPage', () => {
   it('should show error toast when mutation fails', async () => {
     const { getImagingSettings, getImagingOptions, setImagingSettings } =
       await import('@/services/imagingService');
-    vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
     vi.mocked(setImagingSettings).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
@@ -199,8 +162,8 @@ describe('ImagingPage', () => {
 
   it('should reset form when reset button is clicked', async () => {
     const { getImagingSettings, getImagingOptions } = await import('@/services/imagingService');
-    vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
 
     const user = userEvent.setup();
     renderWithProviders(<ImagingPage />);
@@ -219,8 +182,8 @@ describe('ImagingPage', () => {
 
   it('should render all settings cards', async () => {
     const { getImagingSettings, getImagingOptions } = await import('@/services/imagingService');
-    vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
 
     renderWithProviders(<ImagingPage />);
 
@@ -234,8 +197,8 @@ describe('ImagingPage', () => {
 
   it('should update slider values when changed', async () => {
     const { getImagingSettings, getImagingOptions } = await import('@/services/imagingService');
-    vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
 
     renderWithProviders(<ImagingPage />);
 
@@ -259,8 +222,8 @@ describe('ImagingPage', () => {
   it('should handle save with updated values', async () => {
     const { getImagingSettings, getImagingOptions, setImagingSettings } =
       await import('@/services/imagingService');
-    vi.mocked(getImagingSettings).mockResolvedValue(mockSettings);
-    vi.mocked(getImagingOptions).mockResolvedValue(mockOptions);
+    vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
+    vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
     vi.mocked(setImagingSettings).mockResolvedValue(undefined);
 
     const user = userEvent.setup();

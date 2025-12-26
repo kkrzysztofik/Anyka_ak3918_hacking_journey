@@ -9,68 +9,16 @@ import { renderWithProviders } from '@/test/componentTestHelpers';
 
 import { AddUserDialog, ChangePasswordDialog } from './UserDialogs';
 
-// Mock UI components
-vi.mock('@/components/ui/dialog', () => ({
-  Dialog: ({
-    children,
-    open,
-    onOpenChange: _,
-  }: {
-    children: React.ReactNode;
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
-  }) => (
-    <div data-testid="dialog" data-open={open}>
-      {open && children}
-    </div>
-  ),
-  DialogContent: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="dialog-content">{children}</div>
-  ),
-  DialogDescription: ({
-    children,
-    ...props
-  }: { children: React.ReactNode } & Record<string, unknown>) => (
-    <div data-testid="dialog-description" {...props}>
-      {children}
-    </div>
-  ),
-  DialogFooter: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="dialog-footer">{children}</div>
-  ),
-  DialogHeader: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="dialog-header">{children}</div>
-  ),
-  DialogTitle: ({
-    children,
-    ...props
-  }: { children: React.ReactNode } & Record<string, unknown>) => (
-    <h2 data-testid="dialog-title" {...props}>
-      {children}
-    </h2>
-  ),
-}));
+// Mock UI components using shared mock helpers
+vi.mock('@/components/ui/dialog', async () => {
+  const helpers = await import('@/test/componentTestHelpers');
+  return { ...helpers.MockDialog };
+});
 
-vi.mock('@/components/ui/button', () => ({
-  Button: ({
-    children,
-    onClick,
-    disabled,
-    type,
-    variant,
-    ...props
-  }: {
-    children: React.ReactNode;
-    onClick?: () => void;
-    disabled?: boolean;
-    type?: 'submit' | 'reset' | 'button';
-    variant?: string;
-  } & Record<string, unknown>) => (
-    <button onClick={onClick} disabled={disabled} type={type} data-variant={variant} {...props}>
-      {children}
-    </button>
-  ),
-}));
+vi.mock('@/components/ui/button', async () => {
+  const helpers = await import('@/test/componentTestHelpers');
+  return { ...helpers.MockButton };
+});
 
 // Use real Form component - it works with react-hook-form
 

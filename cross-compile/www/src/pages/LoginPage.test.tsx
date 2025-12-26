@@ -5,7 +5,12 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import {
+  createDelayedPromise,
+  // This import should remain as createDelayedPromise is now exported from componentTestHelpers
+  mockToast,
+  renderWithProviders,
+} from '@/test/componentTestHelpers';
 
 import LoginPage from './LoginPage';
 
@@ -27,13 +32,6 @@ vi.mock('react-router-dom', async () => {
     useLocation: () => mockLocation,
   };
 });
-
-// Helper function to create delayed promise for testing loading states
-const createDelayedPromise = (delay = 100): Promise<{ success: boolean }> => {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve({ success: true }), delay);
-  });
-};
 
 describe('LoginPage', () => {
   beforeEach(() => {
@@ -143,7 +141,9 @@ describe('LoginPage', () => {
 
   it('should show loading state during submission', async () => {
     const { verifyCredentials } = await import('@/services/authService');
-    vi.mocked(verifyCredentials).mockImplementation(() => createDelayedPromise(100));
+    vi.mocked(verifyCredentials).mockImplementation(() =>
+      createDelayedPromise({ success: true }, 100),
+    );
 
     const user = userEvent.setup();
     renderWithProviders(<LoginPage />);
@@ -251,23 +251,19 @@ describe('LoginPage', () => {
     });
   });
 
-  it('should show error toast when verifyCredentials throws', async () => {
+  it('should handle login error', async () => {
     const { verifyCredentials } = await import('@/services/authService');
-    vi.mocked(verifyCredentials).mockRejectedValue(new Error('Network error'));
+    vi.mocked(verifyCredentials).mockRejectedValue(new Error('Invalid credentials'));
 
     const user = userEvent.setup();
     renderWithProviders(<LoginPage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('login-form-username-input')).toBeInTheDocument();
-    });
 
     const usernameInput = screen.getByTestId('login-form-username-input');
     const passwordInput = screen.getByTestId('login-form-password-input');
     const submitButton = screen.getByTestId('login-form-submit-button');
 
-    await user.type(usernameInput, 'testuser');
-    await user.type(passwordInput, 'testpassword');
+    await user.type(usernameInput, 'admin');
+    await user.type(passwordInput, 'wrongpassword');
     await user.click(submitButton);
 
     await waitFor(() => {
