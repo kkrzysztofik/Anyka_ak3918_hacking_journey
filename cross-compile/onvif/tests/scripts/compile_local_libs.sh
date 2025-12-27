@@ -13,7 +13,7 @@ CPP=g++
 echo "=== Checking Dependencies ==="
 for cmd in gcc g++ make wget unzip tar; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
-        echo "❌ Error: $cmd not found. Install with: sudo apt-get install build-essential wget unzip"
+        echo "❌ Error: $cmd not found. Install with: sudo apt-get install build-essential wget unzip" >&2
         exit 1
     fi
 done
@@ -38,7 +38,7 @@ if compgen -G "${NATIVE_LIB_DIR}/libgsoap*.a" >/dev/null || compgen -G "${NATIVE
     BUILD_GSOAP=0
 fi
 
-if [ -f "${NATIVE_LIB_DIR}/libb64.a" ]; then
+if [[ -f "${NATIVE_LIB_DIR}/libb64.a" ]]; then
     echo "=== libb64 already compiled; skipping rebuild ==="
     BUILD_LIBB64=0
 fi
@@ -54,25 +54,25 @@ download_and_extract() {
     local filename="$2"
     local extract_dir="$3"
 
-    if [ ! -f "${BUILD_DIR}/${filename}" ]; then
+    if [[ ! -f "${BUILD_DIR}/${filename}" ]]; then
         echo "Downloading ${filename}..."
-        wget -q -O "${BUILD_DIR}/${filename}" "${url}" || { echo "❌ Download failed"; exit 1; }
+        wget -q -O "${BUILD_DIR}/${filename}" "${url}" || { echo "❌ Download failed" >&2; exit 1; }
     fi
 
-    if [ ! -d "${BUILD_DIR}/${extract_dir}" ]; then
+    if [[ ! -d "${BUILD_DIR}/${extract_dir}" ]]; then
         echo "Extracting ${filename}..."
         cd "${BUILD_DIR}"
         if [[ "$filename" == *.tar.gz ]]; then
-            tar -xzf "${filename}" || { echo "❌ Extract failed"; exit 1; }
+            tar -xzf "${filename}" || { echo "❌ Extract failed" >&2; exit 1; }
         elif [[ "$filename" == *.tar.bz2 ]]; then
-            tar -xjf "${filename}" || { echo "❌ Extract failed"; exit 1; }
+            tar -xjf "${filename}" || { echo "❌ Extract failed" >&2; exit 1; }
         elif [[ "$filename" == *.zip ]]; then
-            unzip -q "${filename}" || { echo "❌ Extract failed"; exit 1; }
+            unzip -q "${filename}" || { echo "❌ Extract failed" >&2; exit 1; }
         fi
     fi
 }
 
-if [ "${BUILD_GSOAP}" -eq 1 ]; then
+if [[ "${BUILD_GSOAP}" -eq 1 ]]; then
     echo ""
     echo "=== Compiling gSOAP 2.8.139 ==="
     GSOAP_VERSION="2.8.139"
@@ -102,9 +102,9 @@ if [ "${BUILD_GSOAP}" -eq 1 ]; then
     echo "Configuring and building gSOAP with -fPIC for shared library support..."
     export CFLAGS="-fPIC -O2"
     export CXXFLAGS="-fPIC -O2"
-    ./configure --prefix="${BUILD_DIR}/gsoap_install" --enable-debug --disable-ssl || { echo "❌ Configure failed"; exit 1; }
-    make -j$(nproc) || { echo "❌ Build failed"; exit 1; }
-    make install || { echo "❌ Install failed"; exit 1; }
+    ./configure --prefix="${BUILD_DIR}/gsoap_install" --enable-debug --disable-ssl || { echo "❌ Configure failed" >&2; exit 1; }
+    make -j$(nproc) || { echo "❌ Build failed" >&2; exit 1; }
+    make install || { echo "❌ Install failed" >&2; exit 1; }
 
     # Copy only library files to lib directory (no includes - they're in main project)
     echo "Installing gSOAP libraries..."
@@ -116,7 +116,7 @@ else
     echo "=== Using existing gSOAP libraries ==="
 fi
 
-if [ "${BUILD_LIBB64}" -eq 1 ]; then
+if [[ "${BUILD_LIBB64}" -eq 1 ]]; then
     echo ""
     echo "=== Compiling libb64 v2.0.0.1 ==="
     LIBB64_URL="https://github.com/libb64/libb64/archive/refs/tags/v2.0.0.1.zip"
@@ -130,11 +130,11 @@ if [ "${BUILD_LIBB64}" -eq 1 ]; then
     # Build and install libb64 with -fPIC
     echo "Building libb64 with -fPIC for shared library support..."
     export CFLAGS="-fPIC -O2"
-    make -C src || { echo "❌ Build failed"; exit 1; }
+    make -C src || { echo "❌ Build failed" >&2; exit 1; }
 
     echo "Installing libb64..."
     mkdir -p "${NATIVE_LIB_DIR}"
-    cp src/libb64.a "${NATIVE_LIB_DIR}/" || { echo "❌ Library copy failed"; exit 1; }
+    cp src/libb64.a "${NATIVE_LIB_DIR}/" || { echo "❌ Library copy failed" >&2; exit 1; }
 else
     echo ""
     echo "=== Using existing libb64 library ==="

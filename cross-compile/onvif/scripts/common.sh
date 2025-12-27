@@ -27,23 +27,33 @@ readonly NC='\033[0m'
 # =============================================================================
 
 log_info() {
-    echo -e "${BLUE}$1${NC}" >&2
+    local message="$1"
+    echo -e "${BLUE}${message}${NC}" >&2
+    return 0
 }
 
 log_success() {
-    echo -e "${GREEN}$1${NC}" >&2
+    local message="$1"
+    echo -e "${GREEN}${message}${NC}" >&2
+    return 0
 }
 
 log_warning() {
-    echo -e "${YELLOW}$1${NC}" >&2
+    local message="$1"
+    echo -e "${YELLOW}${message}${NC}" >&2
+    return 0
 }
 
 log_error() {
-    echo -e "${RED}$1${NC}" >&2
+    local message="$1"
+    echo -e "${RED}${message}${NC}" >&2
+    return 0
 }
 
 log_debug() {
-    echo -e "${CYAN}$1${NC}" >&2
+    local message="$1"
+    echo -e "${CYAN}${message}${NC}" >&2
+    return 0
 }
 
 # =============================================================================
@@ -71,6 +81,7 @@ find_specific_files() {
     done
 
     printf '%s\n' "${files[@]}"
+    return 0
 }
 
 find_all_c_files() {
@@ -78,6 +89,7 @@ find_all_c_files() {
         while IFS= read -r -d '' file; do
             echo "$file"
         done
+    return 0
 }
 
 find_global_c_files() {
@@ -85,6 +97,7 @@ find_global_c_files() {
         while IFS= read -r -d '' file; do
             echo "$file"
         done
+    return 0
 }
 
 find_test_c_files() {
@@ -92,6 +105,7 @@ find_test_c_files() {
         while IFS= read -r -d '' file; do
             echo "$file"
         done
+    return 0
 }
 
 find_c_files() {
@@ -100,6 +114,7 @@ find_c_files() {
     else
         find_all_c_files
     fi
+    return 0
 }
 
 # =============================================================================
@@ -107,11 +122,15 @@ find_c_files() {
 # =============================================================================
 
 is_generated_file() {
-    [[ "$1" == *"/generated/"* ]] || [[ "$1" == *"/build_native/"* ]]
+    local file="$1"
+    [[ "$file" == *"/generated/"* ]] || [[ "$file" == *"/build_native/"* ]]
+    return 0
 }
 
 get_relative_path() {
-    echo "${1#$PROJECT_ROOT/}"
+    local file="$1"
+    echo "${file#$PROJECT_ROOT/}"
+    return 0
 }
 
 # =============================================================================
@@ -257,6 +276,7 @@ run_common_main() {
 
     # Process the files
     "$process_files_func" "${files[@]}"
+    return 0
 }
 
 # =============================================================================
@@ -265,7 +285,9 @@ run_common_main() {
 
 # Function to check if a command exists
 command_exists() {
-    command -v "$1" &> /dev/null
+    local cmd="$1"
+    command -v "$cmd" &> /dev/null
+    return 0
 }
 
 # Function to get version of a command
@@ -277,8 +299,10 @@ get_command_version() {
         local version
         version=$($cmd --version 2>/dev/null | grep -o "$version_pattern" | head -1)
         echo "$version"
+        return 0
     else
         echo ""
+        return 0
     fi
 }
 
@@ -298,6 +322,7 @@ EOF
     if [[ -n "$download_url" ]]; then
         echo "  Or download from: $download_url"
     fi
+    return 0
 }
 
 # Function to check if compile_commands.json exists and generate if needed

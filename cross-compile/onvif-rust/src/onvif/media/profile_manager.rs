@@ -244,9 +244,10 @@ impl ProfileManager {
                 &video_encoding,
                 h264_profile,
             );
-            self.video_encoder_configs
-                .write()
-                .insert(video_encoder_config.token.clone(), video_encoder_config.clone());
+            self.video_encoder_configs.write().insert(
+                video_encoder_config.token.clone(),
+                video_encoder_config.clone(),
+            );
 
             let audio_encoder_config = if profile_config.audio_enabled {
                 let config = Self::create_audio_encoder_config(
@@ -288,15 +289,25 @@ impl ProfileManager {
     }
 
     /// Read profile configuration from config.
-    fn read_profile_config(config: &ConfigRuntime, prefix: &str, profile_num: u32) -> ProfileConfig {
+    fn read_profile_config(
+        config: &ConfigRuntime,
+        prefix: &str,
+        profile_num: u32,
+    ) -> ProfileConfig {
         ProfileConfig {
             name: config
                 .get_string(&format!("{}.name", prefix))
                 .unwrap_or_else(|_| format!("Stream{}", profile_num)),
             width: config.get_int(&format!("{}.width", prefix)).unwrap_or(1920) as u32,
-            height: config.get_int(&format!("{}.height", prefix)).unwrap_or(1080) as u32,
-            framerate: config.get_int(&format!("{}.framerate", prefix)).unwrap_or(30) as u32,
-            bitrate: config.get_int(&format!("{}.bitrate", prefix)).unwrap_or(4000) as u32,
+            height: config
+                .get_int(&format!("{}.height", prefix))
+                .unwrap_or(1080) as u32,
+            framerate: config
+                .get_int(&format!("{}.framerate", prefix))
+                .unwrap_or(30) as u32,
+            bitrate: config
+                .get_int(&format!("{}.bitrate", prefix))
+                .unwrap_or(4000) as u32,
             encoding_str: config
                 .get_string(&format!("{}.encoding", prefix))
                 .unwrap_or_else(|_| "h264".to_string()),
@@ -1221,7 +1232,11 @@ impl ProfileManager {
     fn persist_to_config(&self, config: &ConfigRuntime) -> Result<(), ConfigError> {
         let snapshot = self.collect_snapshot();
         Self::persist_profile_list(config, &snapshot.profiles_data)?;
-        Self::persist_sources(config, &snapshot.video_sources_data, &snapshot.audio_sources_data)?;
+        Self::persist_sources(
+            config,
+            &snapshot.video_sources_data,
+            &snapshot.audio_sources_data,
+        )?;
         Self::persist_configurations(
             config,
             &snapshot.video_source_configs_data,
@@ -1244,9 +1259,18 @@ impl ProfileManager {
         let audio_encoder_configs = self.audio_encoder_configs.read();
 
         PersistSnapshot {
-            profiles_data: profiles.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-            video_sources_data: video_sources.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-            audio_sources_data: audio_sources.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            profiles_data: profiles
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            video_sources_data: video_sources
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            audio_sources_data: audio_sources
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             video_source_configs_data: video_source_configs
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
@@ -1285,9 +1309,15 @@ impl ProfileManager {
     ) -> Result<(), ConfigError> {
         for (token, source) in video_sources_data.iter() {
             let prefix = format!("media.video_source.{token}");
-            config.set_float(&format!("{}.framerate", prefix), f64::from(source.framerate))?;
+            config.set_float(
+                &format!("{}.framerate", prefix),
+                f64::from(source.framerate),
+            )?;
             config.set_int(&format!("{}.width", prefix), source.resolution.width as i64)?;
-            config.set_int(&format!("{}.height", prefix), source.resolution.height as i64)?;
+            config.set_int(
+                &format!("{}.height", prefix),
+                source.resolution.height as i64,
+            )?;
         }
 
         for (token, source) in audio_sources_data.iter() {
@@ -1352,9 +1382,18 @@ impl ProfileManager {
             config.set_float(&format!("{}.quality", prefix), f64::from(cfg.quality))?;
 
             if let Some(rc) = &cfg.rate_control {
-                config.set_int(&format!("{}.frame_rate_limit", prefix), rc.frame_rate_limit as i64)?;
-                config.set_int(&format!("{}.encoding_interval", prefix), rc.encoding_interval as i64)?;
-                config.set_int(&format!("{}.bitrate_limit", prefix), rc.bitrate_limit as i64)?;
+                config.set_int(
+                    &format!("{}.frame_rate_limit", prefix),
+                    rc.frame_rate_limit as i64,
+                )?;
+                config.set_int(
+                    &format!("{}.encoding_interval", prefix),
+                    rc.encoding_interval as i64,
+                )?;
+                config.set_int(
+                    &format!("{}.bitrate_limit", prefix),
+                    rc.bitrate_limit as i64,
+                )?;
             }
 
             if let Some(h264) = &cfg.h264 {
@@ -1459,7 +1498,8 @@ impl ProfileManager {
         self.clear_state();
         let loaded_count = self.load_profiles_from_tokens(&snapshot, &tokens);
 
-        self.profile_counter.store(loaded_count as u32, Ordering::SeqCst);
+        self.profile_counter
+            .store(loaded_count as u32, Ordering::SeqCst);
         loaded_count > 0
     }
 
@@ -1494,11 +1534,7 @@ impl ProfileManager {
     }
 
     /// Load profiles from tokens and return the count of successfully loaded profiles.
-    fn load_profiles_from_tokens(
-        &self,
-        snapshot: &ApplicationConfig,
-        tokens: &[String],
-    ) -> usize {
+    fn load_profiles_from_tokens(&self, snapshot: &ApplicationConfig, tokens: &[String]) -> usize {
         let mut profiles_guard = self.profiles.write();
         let mut video_sources = self.video_sources.write();
         let mut audio_sources = self.audio_sources.write();

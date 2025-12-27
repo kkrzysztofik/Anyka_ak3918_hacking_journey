@@ -8,7 +8,7 @@ echo "Generating compile_commands.json for test files using Bear..."
 
 # Change to tests directory
 cd "$(dirname "$0")/.." || {
-    echo "Error: Cannot change to tests directory"
+    echo "Error: Cannot change to tests directory" >&2
     exit 1
 }
 
@@ -19,8 +19,8 @@ make clean
 bear -- make
 
 # Check if compile_commands.json was generated
-if [ ! -f "compile_commands.json" ]; then
-    echo "Error: compile_commands.json was not generated in tests directory"
+if [[ ! -f "compile_commands.json" ]]; then
+    echo "Error: compile_commands.json was not generated in tests directory" >&2
     exit 1
 fi
 

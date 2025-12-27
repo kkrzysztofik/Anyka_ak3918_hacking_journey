@@ -57,33 +57,33 @@ parse_args() {
 
 # Validate required arguments
 validate_args() {
-  if [ -z "$TEST_TYPE" ]; then
-    echo "Error: --type is required"
+  if [[ -z "$TEST_TYPE" ]]; then
+    echo "Error: --type is required" >&2
     exit 1
   fi
 
-  if [ -z "$TEST_OUTPUT" ]; then
-    echo "Error: --test-output is required"
+  if [[ -z "$TEST_OUTPUT" ]]; then
+    echo "Error: --test-output is required" >&2
     exit 1
   fi
 
-  if [ -z "$COVERAGE_INFO" ]; then
-    echo "Error: --coverage-info is required"
+  if [[ -z "$COVERAGE_INFO" ]]; then
+    echo "Error: --coverage-info is required" >&2
     exit 1
   fi
 
-  if [ -z "$OUTPUT_FILE" ]; then
-    echo "Error: --output is required"
+  if [[ -z "$OUTPUT_FILE" ]]; then
+    echo "Error: --output is required" >&2
     exit 1
   fi
 
-  if [ ! -f "$TEST_OUTPUT" ]; then
-    echo "Error: Test output file not found: $TEST_OUTPUT"
+  if [[ ! -f "$TEST_OUTPUT" ]]; then
+    echo "Error: Test output file not found: $TEST_OUTPUT" >&2
     exit 1
   fi
 
-  if [ ! -f "$COVERAGE_INFO" ]; then
-    echo "Error: Coverage info file not found: $COVERAGE_INFO"
+  if [[ ! -f "$COVERAGE_INFO" ]]; then
+    echo "Error: Coverage info file not found: $COVERAGE_INFO" >&2
     exit 1
   fi
 }
@@ -209,4 +209,3 @@ main() {
 
 # Run main function
 main "$@"
-

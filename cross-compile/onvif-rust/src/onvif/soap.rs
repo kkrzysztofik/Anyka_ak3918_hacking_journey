@@ -313,11 +313,7 @@ impl SoapParseState {
 }
 
 /// Handle a Start event during SOAP parsing.
-fn handle_start_event(
-    state: &mut SoapParseState,
-    name: &str,
-    e: &quick_xml::events::BytesStart,
-) {
+fn handle_start_event(state: &mut SoapParseState, name: &str, e: &quick_xml::events::BytesStart) {
     if name == "Body" && !state.in_body {
         state.in_body = true;
         state.in_header = false;
@@ -436,11 +432,7 @@ fn append_body_end_tag(state: &mut SoapParseState, name: &str) {
 }
 
 /// Handle an Empty event during SOAP parsing.
-fn handle_empty_event(
-    state: &mut SoapParseState,
-    name: &str,
-    e: &quick_xml::events::BytesStart,
-) {
+fn handle_empty_event(state: &mut SoapParseState, name: &str, e: &quick_xml::events::BytesStart) {
     if !state.in_body {
         return;
     }

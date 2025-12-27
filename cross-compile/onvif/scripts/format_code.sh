@@ -43,6 +43,7 @@ EXAMPLES:
   $0 --check          # Check if files are properly formatted
   $0 --files src/core/main.c,src/services/device/onvif_device.c
 EOF
+    return 0
 }
 
 check_clang_format() {
@@ -54,6 +55,7 @@ check_clang_format() {
     local version
     version=$(get_command_version clang-format '[0-9]\+\.[0-9]\+')
     log_info "Using clang-format version: $version"
+    return 0
 }
 
 check_file_formatting() {
@@ -127,6 +129,7 @@ process_file() {
         "format_regular_file" \
         "check_file_formatting" \
         "show_dry_run"
+    return 0
 }
 
 format_files() {
@@ -179,7 +182,8 @@ format_files() {
 
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
-        case $1 in
+        local arg="$1"
+        case "$arg" in
             -h|--help)
                 print_usage
                 exit 0
@@ -187,7 +191,7 @@ parse_arguments() {
             *)
                 # Try common argument parsing first
                 if ! parse_common_arguments "$@"; then
-                    log_error "Unknown option: $1"
+                    log_error "Unknown option: $arg"
                     print_usage
                     exit 1
                 fi
@@ -196,6 +200,7 @@ parse_arguments() {
                 ;;
         esac
     done
+    return 0
 }
 
 # =============================================================================

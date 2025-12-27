@@ -9,8 +9,8 @@ echo "Installing dependencies for ONVIF unit testing..."
 
 # Check if running on Ubuntu/Debian
 if ! command -v apt-get &> /dev/null; then
-    echo "Error: This script is designed for Ubuntu/Debian systems"
-    echo "Please install CMocka manually for your system"
+    echo "Error: This script is designed for Ubuntu/Debian systems" >&2
+    echo "Please install CMocka manually for your system" >&2
     exit 1
 fi
 
@@ -33,7 +33,7 @@ if pkg-config --exists cmocka; then
     echo "CMocka version: $(pkg-config --modversion cmocka)"
     echo "CMocka flags: $(pkg-config --cflags --libs cmocka)"
 else
-    echo "❌ CMocka installation failed"
+    echo "❌ CMocka installation failed" >&2
     exit 1
 fi
 
@@ -42,10 +42,10 @@ echo "Compiling native libraries..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TESTS_DIR="$(dirname "$SCRIPT_DIR")"
 
-if [ -f "${SCRIPT_DIR}/compile_local_libs.sh" ]; then
-    bash "${SCRIPT_DIR}/compile_local_libs.sh" || { echo "❌ Library compilation failed"; exit 1; }
+if [[ -f "${SCRIPT_DIR}/compile_local_libs.sh" ]]; then
+    bash "${SCRIPT_DIR}/compile_local_libs.sh" || { echo "❌ Library compilation failed" >&2; exit 1; }
 else
-    echo "❌ compile_local_libs.sh not found in ${SCRIPT_DIR}"
+    echo "❌ compile_local_libs.sh not found in ${SCRIPT_DIR}" >&2
     exit 1
 fi
 

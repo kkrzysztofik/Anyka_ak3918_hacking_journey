@@ -9,15 +9,15 @@ echo "ONVIF Project Coverage Report Generator"
 echo "======================================="
 
 # Check if we're in the right directory
-if [ ! -f "Makefile" ]; then
-    echo "Error: Please run this script from the tests directory"
+if [[ ! -f "Makefile" ]]; then
+    echo "Error: Please run this script from the tests directory" >&2
     exit 1
 fi
 
 # Check if lcov is installed
 if ! command -v lcov &> /dev/null; then
-    echo "Error: lcov is not installed. Please install it with:"
-    echo "  sudo apt-get install lcov"
+    echo "Error: lcov is not installed. Please install it with:" >&2
+    echo "  sudo apt-get install lcov" >&2
     exit 1
 fi
 

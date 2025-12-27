@@ -14,8 +14,8 @@ use parking_lot::RwLock;
 use super::traits::{
     AudioEncoder, AudioEncoderConfig, AudioEncoding, AudioInput, AudioSourceConfig, BitrateMode,
     DeviceInfo, DnsInfo, ImagingControl, ImagingOptions, ImagingSettings, NetworkInfo,
-    NetworkInterfaceInfo, NetworkProtocolInfo, NtpInfo, Platform, PlatformError, PlatformResult,
-    PTZControl, PtzLimits, PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoEncoder,
+    NetworkInterfaceInfo, NetworkProtocolInfo, NtpInfo, PTZControl, Platform, PlatformError,
+    PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoEncoder,
     VideoEncoderConfig, VideoEncoderOptions, VideoEncoding, VideoInput, VideoSourceConfig,
 };
 
@@ -162,7 +162,9 @@ impl StubPlatformBuilder {
         let device_info = self.device_info.unwrap_or_else(Self::default_device_info);
         let ptz_position = self.ptz_position.unwrap_or(PtzPosition::HOME);
         let ptz_limits = self.ptz_limits.unwrap_or(PtzLimits::DEFAULT);
-        let imaging_settings = self.imaging_settings.unwrap_or_else(Self::default_imaging_settings);
+        let imaging_settings = self
+            .imaging_settings
+            .unwrap_or_else(Self::default_imaging_settings);
         let presets: HashMap<String, PtzPreset> = self
             .ptz_presets
             .into_iter()
@@ -187,8 +189,10 @@ impl StubPlatformBuilder {
             configurations: RwLock::new(audio_encoders),
         });
 
-        let ptz_control = Self::create_ptz_control(self.ptz_supported, ptz_position, ptz_limits, presets);
-        let imaging_control = Self::create_imaging_control(self.imaging_supported, imaging_settings);
+        let ptz_control =
+            Self::create_ptz_control(self.ptz_supported, ptz_position, ptz_limits, presets);
+        let imaging_control =
+            Self::create_imaging_control(self.imaging_supported, imaging_settings);
         let network_info = Self::create_network_info(
             self.network_info_supported,
             self.mac_address,

@@ -15,12 +15,12 @@ mkdir -p "${GENERATED_DIR}"
 
 # Validate required tools are available
 if ! command -v wsdl2h &> /dev/null; then
-    echo "Error: wsdl2h not found. Please install gSOAP tools."
+    echo "Error: wsdl2h not found. Please install gSOAP tools." >&2
     exit 1
 fi
 
 if ! command -v soapcpp2 &> /dev/null; then
-    echo "Error: soapcpp2 not found. Please install gSOAP tools."
+    echo "Error: soapcpp2 not found. Please install gSOAP tools." >&2
     exit 1
 fi
 
@@ -41,7 +41,7 @@ cd "${WSDL_DIR}"
 
 for schema in "${REQUIRED_SCHEMAS[@]}"; do
     if [[ ! -f "${schema}" ]]; then
-        echo "Error: Required schema file ${schema} not found in ${WSDL_DIR}."
+        echo "Error: Required schema file ${schema} not found in ${WSDL_DIR}." >&2
         exit 1
     fi
 done
