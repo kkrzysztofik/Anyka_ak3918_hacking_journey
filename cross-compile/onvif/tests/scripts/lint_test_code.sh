@@ -59,6 +59,7 @@ EXAMPLES:
   $0 --format             # Also check code formatting
   $0 --severity error     # Only fail on errors
 EOF
+    return 0
 }
 
 check_clangd_tidy() {
@@ -86,6 +87,7 @@ EOF
     local clangd_version
     clangd_version=$(get_command_version clangd '[0-9]\+\.[0-9]\+\.[0-9]\+')
     log_info "Using clangd-tidy version: $clangd_tidy_version with clangd version: $clangd_version"
+    return 0
 }
 
 check_compile_commands() {
@@ -130,6 +132,7 @@ build_clangd_tidy_command() {
     done
 
     echo "$cmd"
+    return 0
 }
 
 run_clangd_tidy() {
@@ -200,6 +203,7 @@ find_test_c_files() {
         while IFS= read -r -d '' file; do
             echo "$file"
         done
+    return 0
 }
 
 find_changed_test_files() {
@@ -237,6 +241,7 @@ find_changed_test_files() {
 
     # Output the files (one per line)
     printf '%s\n' "${changed_files[@]}"
+    return 0
 }
 
 find_pr_diff_test_files() {
@@ -344,6 +349,7 @@ find_pr_diff_test_files() {
 
     # Output the files (one per line)
     printf '%s\n' "${pr_files[@]}"
+    return 0
 }
 
 # =============================================================================
@@ -352,13 +358,15 @@ find_pr_diff_test_files() {
 
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
-        case $1 in
+        local arg="$1"
+        case "$arg" in
             -h|--help)
                 print_usage
                 exit 0
                 ;;
             --file)
-                SINGLE_FILE="$2"
+                local file_arg="$2"
+                SINGLE_FILE="$file_arg"
                 shift 2
                 ;;
             --format)
@@ -366,7 +374,8 @@ parse_arguments() {
                 shift
                 ;;
             --severity)
-                SEVERITY_LEVEL="$2"
+                local severity_arg="$2"
+                SEVERITY_LEVEL="$severity_arg"
                 shift 2
                 ;;
             --changed)
@@ -380,7 +389,7 @@ parse_arguments() {
             *)
                 # Try common argument parsing first
                 if ! parse_common_arguments "$@"; then
-                    log_error "Unknown option: $1"
+                    log_error "Unknown option: $arg"
                     print_usage
                     exit 1
                 fi
@@ -389,6 +398,7 @@ parse_arguments() {
                 ;;
         esac
     done
+    return 0
 }
 
 # =============================================================================
@@ -471,6 +481,7 @@ main() {
 
     # Exit with appropriate code
     exit $exit_code
+    return 0
 }
 
 # Execute main function

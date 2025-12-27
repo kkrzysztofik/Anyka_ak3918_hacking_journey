@@ -283,7 +283,7 @@ pub struct PtzPreset {
 
 #[cfg(not(use_stubs))]
 mod ffi_impl {
-    use super::*;
+    use super::{AnykaError, AnykaResult, LogLevel, PtzDirection, PtzMotor, VideoDevice};
     use crate::ffi::generated::{
         audio_param, encode_param, pcm_param, ptz_device, ptz_turn_direction, video_dev_type,
     };

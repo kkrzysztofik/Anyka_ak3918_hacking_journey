@@ -151,6 +151,9 @@ format_files() {
         case $? in
             1) ((changed_files++)) ;;
             2) ((error_files++)) ;;
+            *)
+                # Default case for unexpected return values
+                ;;
         esac
     done
 
@@ -222,6 +225,7 @@ main() {
 
     # Exit with appropriate code
     exit $exit_code
+    return 0
 }
 
 # Execute main function

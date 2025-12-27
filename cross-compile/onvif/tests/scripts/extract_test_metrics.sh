@@ -14,45 +14,51 @@ OUTPUT_FILE=""
 # Parse command line arguments
 parse_args() {
   while [[ $# -gt 0 ]]; do
-    case $1 in
+    local arg="$1"
+    case "$arg" in
       --type=*)
-        TEST_TYPE="${1#*=}"
+        TEST_TYPE="${arg#*=}"
         shift
         ;;
       --type)
-        TEST_TYPE="$2"
+        local type_arg="$2"
+        TEST_TYPE="$type_arg"
         shift 2
         ;;
       --test-output=*)
-        TEST_OUTPUT="${1#*=}"
+        TEST_OUTPUT="${arg#*=}"
         shift
         ;;
       --test-output)
-        TEST_OUTPUT="$2"
+        local test_output_arg="$2"
+        TEST_OUTPUT="$test_output_arg"
         shift 2
         ;;
       --coverage-info=*)
-        COVERAGE_INFO="${1#*=}"
+        COVERAGE_INFO="${arg#*=}"
         shift
         ;;
       --coverage-info)
-        COVERAGE_INFO="$2"
+        local coverage_info_arg="$2"
+        COVERAGE_INFO="$coverage_info_arg"
         shift 2
         ;;
       --output=*)
-        OUTPUT_FILE="${1#*=}"
+        OUTPUT_FILE="${arg#*=}"
         shift
         ;;
       --output)
-        OUTPUT_FILE="$2"
+        local output_arg="$2"
+        OUTPUT_FILE="$output_arg"
         shift 2
         ;;
       *)
-        echo "Unknown option: $1"
+        echo "Unknown option: $arg" >&2
         exit 1
         ;;
     esac
   done
+  return 0
 }
 
 # Validate required arguments
@@ -86,6 +92,7 @@ validate_args() {
     echo "Error: Coverage info file not found: $COVERAGE_INFO" >&2
     exit 1
   fi
+  return 0
 }
 
 # Parse test output to extract metrics
@@ -137,6 +144,7 @@ parse_test_output() {
   export TESTS_PASSED=$tests_passed
   export TESTS_FAILED=$tests_failed
   export DURATION=$duration
+  return 0
 }
 
 # Parse coverage info to extract metrics
@@ -163,6 +171,7 @@ parse_coverage() {
   # Export variables
   export LINES_PCT=$lines_pct
   export FUNCTIONS_PCT=$functions_pct
+  return 0
 }
 
 # Generate JSON output
@@ -179,8 +188,9 @@ generate_json() {
     "lines": "$LINES_PCT",
     "functions": "$FUNCTIONS_PCT"
   }
-}
+  }
 EOF
+  return 0
 }
 
 # Main execution
@@ -205,6 +215,7 @@ main() {
   echo "Metrics extracted to: $OUTPUT_FILE"
   echo "Tests: $TESTS_TOTAL total, $TESTS_PASSED passed, $TESTS_FAILED failed"
   echo "Coverage: Lines=${LINES_PCT}%, Functions=${FUNCTIONS_PCT}%"
+  return 0
 }
 
 # Run main function

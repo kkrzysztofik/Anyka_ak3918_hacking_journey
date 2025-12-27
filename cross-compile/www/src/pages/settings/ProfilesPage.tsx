@@ -147,7 +147,11 @@ export default function ProfilesPage() {
   if (isLoading) return <div className="text-white">Loading profiles...</div>;
 
   if (error) {
-    return <div className="text-red-500">Error loading profiles: {(error as Error).message}</div>;
+    return (
+      <div className="text-red-500">
+        Error loading profiles: {error instanceof Error ? error.message : String(error)}
+      </div>
+    );
   }
 
   return (
@@ -434,13 +438,13 @@ function ConfigSection({
   onEdit,
   testId,
 }: {
-  title: string;
-  icon: React.ReactNode;
-  active: boolean;
-  token?: string;
-  details?: string;
-  onEdit?: () => void;
-  testId?: string;
+  readonly title: string;
+  readonly icon: React.ReactNode;
+  readonly active: boolean;
+  readonly token?: string;
+  readonly details?: string;
+  readonly onEdit?: () => void;
+  readonly testId?: string;
 }) {
   return (
     <div
@@ -476,8 +480,8 @@ function VideoEncoderEditDialog({
   encoderToken,
   onClose,
 }: {
-  encoderToken: string;
-  onClose: () => void;
+  readonly encoderToken: string;
+  readonly onClose: () => void;
 }) {
   const queryClient = useQueryClient();
   const [config, setConfig] = useState<VideoEncoderConfiguration | null>(null);

@@ -227,7 +227,8 @@ show_summary() {
 
 parse_common_arguments() {
     while [[ $# -gt 0 ]]; do
-        case $1 in
+        local arg="$1"
+        case "$arg" in
             -h|--help)
                 return 0  # Let calling script handle help
                 ;;
@@ -240,7 +241,8 @@ parse_common_arguments() {
                 shift
                 ;;
             -f|--files)
-                FILES_ONLY="$2"
+                local files_arg="$2"
+                FILES_ONLY="$files_arg"
                 shift 2
                 ;;
             *)

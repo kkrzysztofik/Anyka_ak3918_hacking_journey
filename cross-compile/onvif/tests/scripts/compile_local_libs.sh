@@ -70,6 +70,7 @@ download_and_extract() {
             unzip -q "${filename}" || { echo "❌ Extract failed" >&2; exit 1; }
         fi
     fi
+    return 0
 }
 
 if [[ "${BUILD_GSOAP}" -eq 1 ]]; then

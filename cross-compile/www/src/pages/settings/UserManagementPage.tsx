@@ -56,8 +56,7 @@ import {
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
 import {
-  type UserRole,
-  type User as UserType,
+  type OnvifUser as UserType,
   createUser,
   deleteUser,
   getUsers,
@@ -152,7 +151,7 @@ export default function UserManagementPage() {
     form.reset({
       username: user.username,
       password: '', // Password not retrieved for security
-      role: user.userLevel as UserRole,
+      role: user.userLevel,
     });
   };
 
@@ -168,7 +167,11 @@ export default function UserManagementPage() {
   if (isLoading) return <div className="text-white">Loading users...</div>;
 
   if (error) {
-    return <div className="text-red-500">Error loading users: {(error as Error).message}</div>;
+    return (
+      <div className="text-red-500">
+        Error loading users: {error instanceof Error ? error.message : String(error)}
+      </div>
+    );
   }
 
   return (
