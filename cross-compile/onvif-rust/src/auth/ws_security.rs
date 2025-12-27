@@ -263,50 +263,66 @@ impl Default for WsSecurityValidator {
 /// This is a lightweight extraction that doesn't require a full XML parser.
 /// It looks for patterns like `<tag>content</tag>` or `<ns:tag>content</ns:tag>`.
 fn extract_element(xml: &str, tag: &str) -> Option<String> {
-    // Try with namespace prefix (wsse:Tag, wsu:Tag, etc.)
     for prefix in ["wsse:", "wsu:", ""] {
-        let open_tag_start = format!("<{}{}", prefix, tag);
-        let close_tag = format!("</{}{}>", prefix, tag);
-
-        // Search through all occurrences of the opening tag pattern
-        let mut search_start = 0;
-        while let Some(relative_pos) = xml[search_start..].find(&open_tag_start) {
-            let tag_start_pos = search_start + relative_pos;
-            let remaining_after_tag_name = &xml[tag_start_pos + open_tag_start.len()..];
-
-            // Check next char is either '>' or whitespace (for attributes)
-            let next_char = match remaining_after_tag_name.chars().next() {
-                Some(c) => c,
-                None => {
-                    search_start = tag_start_pos + open_tag_start.len();
-                    continue;
-                }
-            };
-
-            if next_char != '>' && !next_char.is_whitespace() {
-                // Not a match - it's a longer tag name (e.g., UsernameToken vs Username)
-                // Move past this match and keep searching
-                search_start = tag_start_pos + open_tag_start.len();
-                continue;
-            }
-
-            // Find the closing '>' of the opening tag
-            if let Some(close_bracket_offset) = remaining_after_tag_name.find('>') {
-                let content_start = tag_start_pos + open_tag_start.len() + close_bracket_offset + 1;
-
-                // Find the closing tag
-                if let Some(close_offset) = xml[content_start..].find(&close_tag) {
-                    let content_end = content_start + close_offset;
-                    let content = &xml[content_start..content_end];
-                    return Some(content.trim().to_string());
-                }
-            }
-
-            // Couldn't find closing bracket or closing tag, move on
-            search_start = tag_start_pos + open_tag_start.len();
+        if let Some(content) = extract_element_with_prefix(xml, tag, prefix) {
+            return Some(content);
         }
     }
     None
+}
+
+/// Extract element content with a specific namespace prefix.
+fn extract_element_with_prefix(xml: &str, tag: &str, prefix: &str) -> Option<String> {
+    let open_tag_start = format!("<{}{}", prefix, tag);
+    let close_tag = format!("</{}{}>", prefix, tag);
+
+    let mut search_start = 0;
+    while let Some(relative_pos) = xml[search_start..].find(&open_tag_start) {
+        let tag_start_pos = search_start + relative_pos;
+        let remaining_after_tag_name = &xml[tag_start_pos + open_tag_start.len()..];
+
+        if !is_valid_tag_boundary(remaining_after_tag_name) {
+            search_start = tag_start_pos + open_tag_start.len();
+            continue;
+        }
+
+        if let Some(content) = extract_content_from_tag(
+            xml,
+            tag_start_pos,
+            &open_tag_start,
+            &close_tag,
+            remaining_after_tag_name,
+        ) {
+            return Some(content);
+        }
+
+        search_start = tag_start_pos + open_tag_start.len();
+    }
+    None
+}
+
+/// Check if the next character is a valid tag boundary ('>' or whitespace).
+fn is_valid_tag_boundary(remaining: &str) -> bool {
+    match remaining.chars().next() {
+        Some(c) => c == '>' || c.is_whitespace(),
+        None => false,
+    }
+}
+
+/// Extract content from a tag if found.
+fn extract_content_from_tag(
+    xml: &str,
+    tag_start_pos: usize,
+    open_tag_start: &str,
+    close_tag: &str,
+    remaining_after_tag_name: &str,
+) -> Option<String> {
+    let close_bracket_offset = remaining_after_tag_name.find('>')?;
+    let content_start = tag_start_pos + open_tag_start.len() + close_bracket_offset + 1;
+    let close_offset = xml[content_start..].find(close_tag)?;
+    let content_end = content_start + close_offset;
+    let content = &xml[content_start..content_end];
+    Some(content.trim().to_string())
 }
 
 #[cfg(test)]

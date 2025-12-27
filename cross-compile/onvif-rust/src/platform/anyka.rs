@@ -712,44 +712,64 @@ impl AnykaNetworkInfo {
 
     /// Read NTP configuration from /etc/ntp.conf or similar.
     fn read_ntp_config() -> NtpInfo {
-        use std::fs;
-
         let mut ntp_info = NtpInfo::default();
 
-        // Try /etc/ntp.conf
-        if let Ok(content) = fs::read_to_string("/etc/ntp.conf") {
-            for line in content.lines() {
-                let line = line.trim();
-
-                if line.starts_with('#') {
-                    continue;
-                }
-
-                if let Some(server) = line.strip_prefix("server ") {
-                    let server = server.split_whitespace().next().unwrap_or("").to_string();
-                    if !server.is_empty() {
-                        ntp_info.ntp_manual.push(server);
-                    }
-                }
-            }
-        }
-
-        // Try /etc/systemd/timesyncd.conf for systemd-based systems
-        if ntp_info.ntp_manual.is_empty()
-            && let Ok(content) = fs::read_to_string("/etc/systemd/timesyncd.conf")
-        {
-            for line in content.lines() {
-                let line = line.trim();
-
-                if let Some(servers) = line.strip_prefix("NTP=") {
-                    ntp_info
-                        .ntp_manual
-                        .extend(servers.split_whitespace().map(String::from));
-                }
-            }
+        if let Some(servers) = Self::parse_ntp_conf() {
+            ntp_info.ntp_manual = servers;
+        } else if let Some(servers) = Self::parse_timesyncd_conf() {
+            ntp_info.ntp_manual = servers;
         }
 
         ntp_info
+    }
+
+    /// Parse /etc/ntp.conf file.
+    fn parse_ntp_conf() -> Option<Vec<String>> {
+        use std::fs;
+
+        let content = fs::read_to_string("/etc/ntp.conf").ok()?;
+        let mut servers = Vec::new();
+
+        for line in content.lines() {
+            let line = line.trim();
+            if line.starts_with('#') {
+                continue;
+            }
+
+            if let Some(server) = line.strip_prefix("server ") {
+                let server = server.split_whitespace().next()?.to_string();
+                if !server.is_empty() {
+                    servers.push(server);
+                }
+            }
+        }
+
+        if servers.is_empty() {
+            None
+        } else {
+            Some(servers)
+        }
+    }
+
+    /// Parse /etc/systemd/timesyncd.conf file.
+    fn parse_timesyncd_conf() -> Option<Vec<String>> {
+        use std::fs;
+
+        let content = fs::read_to_string("/etc/systemd/timesyncd.conf").ok()?;
+        let mut servers = Vec::new();
+
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(servers_str) = line.strip_prefix("NTP=") {
+                servers.extend(servers_str.split_whitespace().map(String::from));
+            }
+        }
+
+        if servers.is_empty() {
+            None
+        } else {
+            Some(servers)
+        }
     }
 }
 

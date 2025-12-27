@@ -35,6 +35,32 @@ use super::types::{
     PTZ_CONFIG_PREFIX, VIDEO_ENCODER_CONFIG_PREFIX, VIDEO_SOURCE_CONFIG_PREFIX,
 };
 
+/// Profile configuration read from config file.
+struct ProfileConfig {
+    name: String,
+    width: u32,
+    height: u32,
+    framerate: u32,
+    bitrate: u32,
+    encoding_str: String,
+    profile_str: String,
+    audio_enabled: bool,
+    audio_encoding_str: String,
+    audio_bitrate: u32,
+    audio_sample_rate: u32,
+}
+
+/// Snapshot of all media state for persistence.
+struct PersistSnapshot {
+    profiles_data: Vec<(String, Profile)>,
+    video_sources_data: Vec<(String, VideoSource)>,
+    audio_sources_data: Vec<(String, AudioSource)>,
+    video_source_configs_data: Vec<(String, VideoSourceConfiguration)>,
+    video_encoder_configs_data: Vec<(String, VideoEncoderConfiguration)>,
+    audio_source_configs_data: Vec<(String, AudioSourceConfiguration)>,
+    audio_encoder_configs_data: Vec<(String, AudioEncoderConfiguration)>,
+}
+
 /// Profile Manager for managing media profiles.
 ///
 /// Provides thread-safe access to profiles and configurations.
@@ -197,214 +223,279 @@ impl ProfileManager {
     ) {
         let mut profile_count = 0;
 
-        // Iterate through stream_profile_1 to stream_profile_4
         for profile_num in 1..=4 {
             let prefix = format!("stream_profile_{}", profile_num);
-
-            // Read video configuration
-            // Default to enabled=true for better UX (profiles load unless explicitly disabled)
-            let enabled = config
-                .get_bool(&format!("{}.enabled", prefix))
-                .unwrap_or(true);
-            if !enabled {
+            if !Self::is_profile_enabled(config, &prefix) {
                 continue;
             }
 
-            let name = config
-                .get_string(&format!("{}.name", prefix))
-                .unwrap_or_else(|_| format!("Stream{}", profile_num));
-            let width = config.get_int(&format!("{}.width", prefix)).unwrap_or(1920) as u32;
-            let height = config
-                .get_int(&format!("{}.height", prefix))
-                .unwrap_or(1080) as u32;
-            let framerate = config
-                .get_int(&format!("{}.framerate", prefix))
-                .unwrap_or(30) as u32;
-            let bitrate = config
-                .get_int(&format!("{}.bitrate", prefix))
-                .unwrap_or(4000) as u32;
-            let encoding_str = config
-                .get_string(&format!("{}.encoding", prefix))
-                .unwrap_or_else(|_| "h264".to_string());
-            let profile_str = config
-                .get_string(&format!("{}.profile", prefix))
-                .unwrap_or_else(|_| "main".to_string());
+            let profile_config = Self::read_profile_config(config, &prefix, profile_num);
+            let video_encoding = Self::parse_video_encoding(&profile_config.encoding_str);
+            let h264_profile = Self::parse_h264_profile(&profile_config.profile_str);
+            let audio_encoding = Self::parse_audio_encoding(&profile_config.audio_encoding_str);
 
-            // Read audio configuration
-            let audio_enabled = config
-                .get_bool(&format!("{}.audio_enabled", prefix))
-                .unwrap_or(false);
-            let audio_encoding_str = config
-                .get_string(&format!("{}.audio_encoding", prefix))
-                .unwrap_or_else(|_| "g711".to_string());
-            let audio_bitrate = config
-                .get_int(&format!("{}.audio_bitrate", prefix))
-                .unwrap_or(64) as u32;
-            let audio_sample_rate = config
-                .get_int(&format!("{}.audio_sample_rate", prefix))
-                .unwrap_or(8000) as u32;
-
-            // Parse video encoding
-            let video_encoding = match encoding_str.to_lowercase().as_str() {
-                "h264" => crate::onvif::types::common::VideoEncoding::H264,
-                "mjpeg" | "jpeg" => crate::onvif::types::common::VideoEncoding::JPEG,
-                "mpeg4" => crate::onvif::types::common::VideoEncoding::MPEG4,
-                _ => {
-                    eprintln!(
-                        "[WARN] Unknown video encoding '{}', defaulting to H264",
-                        encoding_str
-                    );
-                    crate::onvif::types::common::VideoEncoding::H264
-                }
-            };
-
-            // Parse H.264 profile
-            let h264_profile = match profile_str.to_lowercase().as_str() {
-                "baseline" => crate::onvif::types::common::H264Profile::Baseline,
-                "main" => crate::onvif::types::common::H264Profile::Main,
-                "high" => crate::onvif::types::common::H264Profile::High,
-                _ => {
-                    eprintln!(
-                        "[WARN] Unknown H.264 profile '{}', defaulting to Main",
-                        profile_str
-                    );
-                    crate::onvif::types::common::H264Profile::Main
-                }
-            };
-
-            // Parse audio encoding
-            let audio_encoding = match audio_encoding_str.to_lowercase().as_str() {
-                "g711" => crate::onvif::types::common::AudioEncoding::G711,
-                "aac" => crate::onvif::types::common::AudioEncoding::AAC,
-                "g726" => crate::onvif::types::common::AudioEncoding::G726,
-                _ => {
-                    eprintln!(
-                        "[WARN] Unknown audio encoding '{}', defaulting to G711",
-                        audio_encoding_str
-                    );
-                    crate::onvif::types::common::AudioEncoding::G711
-                }
-            };
-
-            // Create video encoder configuration
-            let video_encoder_token = format!("{}{}", VIDEO_ENCODER_CONFIG_PREFIX, profile_count);
-            let video_encoder_config = VideoEncoderConfiguration {
-                token: video_encoder_token.clone(),
-                name: name.clone(),
-                use_count: 1,
-                encoding: video_encoding.clone(),
-                resolution: VideoResolution {
-                    width: width as i32,
-                    height: height as i32,
-                },
-                quality: 0.8,
-                rate_control: Some(VideoRateControl {
-                    frame_rate_limit: framerate as i32,
-                    encoding_interval: 1,
-                    bitrate_limit: bitrate as i32,
-                }),
-                mpeg4: None,
-                h264: if matches!(
-                    video_encoding,
-                    crate::onvif::types::common::VideoEncoding::H264
-                ) {
-                    Some(crate::onvif::types::common::H264Configuration {
-                        gov_length: framerate as i32,
-                        h264_profile,
-                    })
-                } else {
-                    None
-                },
-                multicast: Some(MulticastConfiguration {
-                    address: crate::onvif::types::common::IpAddress {
-                        address_type: crate::onvif::types::common::IpType::IPv4,
-                        ipv4_address: Some("0.0.0.0".to_string()),
-                        ipv6_address: None,
-                    },
-                    port: 0,
-                    ttl: 0,
-                    auto_start: false,
-                }),
-                session_timeout: "PT60S".to_string(),
-            };
+            let video_encoder_config = Self::create_video_encoder_config(
+                profile_count,
+                &profile_config.name,
+                profile_config.width,
+                profile_config.height,
+                profile_config.framerate,
+                profile_config.bitrate,
+                &video_encoding,
+                h264_profile,
+            );
             self.video_encoder_configs
                 .write()
-                .insert(video_encoder_token.clone(), video_encoder_config.clone());
+                .insert(video_encoder_config.token.clone(), video_encoder_config.clone());
 
-            // Create audio encoder configuration if audio is enabled
-            let audio_encoder_config = if audio_enabled {
-                let audio_encoder_token =
-                    format!("{}{}", AUDIO_ENCODER_CONFIG_PREFIX, profile_count);
-                let config = AudioEncoderConfiguration {
-                    token: audio_encoder_token.clone(),
-                    name: format!("AudioEncoderConfig_{}", profile_count),
-                    use_count: 1,
-                    encoding: audio_encoding,
-                    bitrate: audio_bitrate as i32,
-                    sample_rate: audio_sample_rate as i32,
-                    multicast: Some(MulticastConfiguration {
-                        address: crate::onvif::types::common::IpAddress {
-                            address_type: crate::onvif::types::common::IpType::IPv4,
-                            ipv4_address: Some("0.0.0.0".to_string()),
-                            ipv6_address: None,
-                        },
-                        port: 0,
-                        ttl: 0,
-                        auto_start: false,
-                    }),
-                    session_timeout: "PT60S".to_string(),
-                };
+            let audio_encoder_config = if profile_config.audio_enabled {
+                let config = Self::create_audio_encoder_config(
+                    profile_count,
+                    profile_config.audio_bitrate,
+                    profile_config.audio_sample_rate,
+                    audio_encoding,
+                );
                 self.audio_encoder_configs
                     .write()
-                    .insert(audio_encoder_token.clone(), config.clone());
+                    .insert(config.token.clone(), config.clone());
                 Some(config)
             } else {
                 None
             };
 
-            // Create profile
-            let profile_token = format!("{}{}", PROFILE_TOKEN_PREFIX, name);
-            let profile = Profile {
-                token: profile_token.clone(),
-                fixed: Some(true),
-                name: name.clone(),
-                video_source_configuration: Some(VideoSourceConfiguration {
-                    token: format!("{}0", VIDEO_SOURCE_CONFIG_PREFIX),
-                    source_token: DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
-                    name: "VideoSourceConfig_0".to_string(),
-                    use_count: profile_count + 1,
-                    view_mode: None,
-                    bounds: IntRectangle {
-                        x: 0,
-                        y: 0,
-                        width: width as i32,
-                        height: height as i32,
-                    },
-                    extension: None,
-                }),
-                audio_source_configuration: if audio_enabled {
-                    Some(AudioSourceConfiguration {
-                        token: format!("{}0", AUDIO_SOURCE_CONFIG_PREFIX),
-                        source_token: DEFAULT_AUDIO_SOURCE_TOKEN.to_string(),
-                        name: "AudioSourceConfig_0".to_string(),
-                        use_count: profile_count + 1,
-                    })
-                } else {
-                    None
-                },
-                video_encoder_configuration: Some(video_encoder_config),
-                audio_encoder_configuration: audio_encoder_config,
-                ptz_configuration: Some(default_ptz_config.clone()),
-                metadata_configuration: None,
-                extension: None,
-            };
-
-            self.profiles.write().insert(profile_token, profile);
+            let profile = Self::create_profile_from_config(
+                &profile_config.name,
+                profile_config.width,
+                profile_config.height,
+                profile_count,
+                profile_config.audio_enabled,
+                video_encoder_config,
+                audio_encoder_config,
+                &default_ptz_config,
+            );
+            self.profiles.write().insert(profile.token.clone(), profile);
             profile_count += 1;
         }
 
-        self.profile_counter
-            .store(profile_count as u32, Ordering::SeqCst);
+        self.profile_counter.store(profile_count, Ordering::SeqCst);
+    }
+
+    /// Check if a profile is enabled.
+    fn is_profile_enabled(config: &ConfigRuntime, prefix: &str) -> bool {
+        config
+            .get_bool(&format!("{}.enabled", prefix))
+            .unwrap_or(true)
+    }
+
+    /// Read profile configuration from config.
+    fn read_profile_config(config: &ConfigRuntime, prefix: &str, profile_num: u32) -> ProfileConfig {
+        ProfileConfig {
+            name: config
+                .get_string(&format!("{}.name", prefix))
+                .unwrap_or_else(|_| format!("Stream{}", profile_num)),
+            width: config.get_int(&format!("{}.width", prefix)).unwrap_or(1920) as u32,
+            height: config.get_int(&format!("{}.height", prefix)).unwrap_or(1080) as u32,
+            framerate: config.get_int(&format!("{}.framerate", prefix)).unwrap_or(30) as u32,
+            bitrate: config.get_int(&format!("{}.bitrate", prefix)).unwrap_or(4000) as u32,
+            encoding_str: config
+                .get_string(&format!("{}.encoding", prefix))
+                .unwrap_or_else(|_| "h264".to_string()),
+            profile_str: config
+                .get_string(&format!("{}.profile", prefix))
+                .unwrap_or_else(|_| "main".to_string()),
+            audio_enabled: config
+                .get_bool(&format!("{}.audio_enabled", prefix))
+                .unwrap_or(false),
+            audio_encoding_str: config
+                .get_string(&format!("{}.audio_encoding", prefix))
+                .unwrap_or_else(|_| "g711".to_string()),
+            audio_bitrate: config
+                .get_int(&format!("{}.audio_bitrate", prefix))
+                .unwrap_or(64) as u32,
+            audio_sample_rate: config
+                .get_int(&format!("{}.audio_sample_rate", prefix))
+                .unwrap_or(8000) as u32,
+        }
+    }
+
+    /// Parse video encoding string.
+    fn parse_video_encoding(encoding_str: &str) -> crate::onvif::types::common::VideoEncoding {
+        match encoding_str.to_lowercase().as_str() {
+            "h264" => crate::onvif::types::common::VideoEncoding::H264,
+            "mjpeg" | "jpeg" => crate::onvif::types::common::VideoEncoding::JPEG,
+            "mpeg4" => crate::onvif::types::common::VideoEncoding::MPEG4,
+            _ => {
+                eprintln!(
+                    "[WARN] Unknown video encoding '{}', defaulting to H264",
+                    encoding_str
+                );
+                crate::onvif::types::common::VideoEncoding::H264
+            }
+        }
+    }
+
+    /// Parse H.264 profile string.
+    fn parse_h264_profile(profile_str: &str) -> crate::onvif::types::common::H264Profile {
+        match profile_str.to_lowercase().as_str() {
+            "baseline" => crate::onvif::types::common::H264Profile::Baseline,
+            "main" => crate::onvif::types::common::H264Profile::Main,
+            "high" => crate::onvif::types::common::H264Profile::High,
+            _ => {
+                eprintln!(
+                    "[WARN] Unknown H.264 profile '{}', defaulting to Main",
+                    profile_str
+                );
+                crate::onvif::types::common::H264Profile::Main
+            }
+        }
+    }
+
+    /// Parse audio encoding string.
+    fn parse_audio_encoding(encoding_str: &str) -> crate::onvif::types::common::AudioEncoding {
+        match encoding_str.to_lowercase().as_str() {
+            "g711" => crate::onvif::types::common::AudioEncoding::G711,
+            "aac" => crate::onvif::types::common::AudioEncoding::AAC,
+            "g726" => crate::onvif::types::common::AudioEncoding::G726,
+            _ => {
+                eprintln!(
+                    "[WARN] Unknown audio encoding '{}', defaulting to G711",
+                    encoding_str
+                );
+                crate::onvif::types::common::AudioEncoding::G711
+            }
+        }
+    }
+
+    /// Create video encoder configuration.
+    #[allow(clippy::too_many_arguments)]
+    fn create_video_encoder_config(
+        profile_count: u32,
+        name: &str,
+        width: u32,
+        height: u32,
+        framerate: u32,
+        bitrate: u32,
+        video_encoding: &crate::onvif::types::common::VideoEncoding,
+        h264_profile: crate::onvif::types::common::H264Profile,
+    ) -> VideoEncoderConfiguration {
+        let token = format!("{}{}", VIDEO_ENCODER_CONFIG_PREFIX, profile_count);
+        VideoEncoderConfiguration {
+            token: token.clone(),
+            name: name.to_string(),
+            use_count: 1,
+            encoding: video_encoding.clone(),
+            resolution: VideoResolution {
+                width: width as i32,
+                height: height as i32,
+            },
+            quality: 0.8,
+            rate_control: Some(VideoRateControl {
+                frame_rate_limit: framerate as i32,
+                encoding_interval: 1,
+                bitrate_limit: bitrate as i32,
+            }),
+            mpeg4: None,
+            h264: if matches!(
+                video_encoding,
+                crate::onvif::types::common::VideoEncoding::H264
+            ) {
+                Some(crate::onvif::types::common::H264Configuration {
+                    gov_length: framerate as i32,
+                    h264_profile,
+                })
+            } else {
+                None
+            },
+            multicast: Some(MulticastConfiguration {
+                address: crate::onvif::types::common::IpAddress {
+                    address_type: crate::onvif::types::common::IpType::IPv4,
+                    ipv4_address: Some("0.0.0.0".to_string()),
+                    ipv6_address: None,
+                },
+                port: 0,
+                ttl: 0,
+                auto_start: false,
+            }),
+            session_timeout: "PT60S".to_string(),
+        }
+    }
+
+    /// Create audio encoder configuration.
+    fn create_audio_encoder_config(
+        profile_count: u32,
+        bitrate: u32,
+        sample_rate: u32,
+        encoding: crate::onvif::types::common::AudioEncoding,
+    ) -> AudioEncoderConfiguration {
+        let token = format!("{}{}", AUDIO_ENCODER_CONFIG_PREFIX, profile_count);
+        AudioEncoderConfiguration {
+            token: token.clone(),
+            name: format!("AudioEncoderConfig_{}", profile_count),
+            use_count: 1,
+            encoding,
+            bitrate: bitrate as i32,
+            sample_rate: sample_rate as i32,
+            multicast: Some(MulticastConfiguration {
+                address: crate::onvif::types::common::IpAddress {
+                    address_type: crate::onvif::types::common::IpType::IPv4,
+                    ipv4_address: Some("0.0.0.0".to_string()),
+                    ipv6_address: None,
+                },
+                port: 0,
+                ttl: 0,
+                auto_start: false,
+            }),
+            session_timeout: "PT60S".to_string(),
+        }
+    }
+
+    /// Create profile from configuration.
+    #[allow(clippy::too_many_arguments)]
+    fn create_profile_from_config(
+        name: &str,
+        width: u32,
+        height: u32,
+        profile_count: u32,
+        audio_enabled: bool,
+        video_encoder_config: VideoEncoderConfiguration,
+        audio_encoder_config: Option<AudioEncoderConfiguration>,
+        default_ptz_config: &PTZConfiguration,
+    ) -> Profile {
+        let profile_token = format!("{}{}", PROFILE_TOKEN_PREFIX, name);
+        Profile {
+            token: profile_token.clone(),
+            fixed: Some(true),
+            name: name.to_string(),
+            video_source_configuration: Some(VideoSourceConfiguration {
+                token: format!("{}0", VIDEO_SOURCE_CONFIG_PREFIX),
+                source_token: DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
+                name: "VideoSourceConfig_0".to_string(),
+                use_count: (profile_count + 1) as i32,
+                view_mode: None,
+                bounds: IntRectangle {
+                    x: 0,
+                    y: 0,
+                    width: width as i32,
+                    height: height as i32,
+                },
+                extension: None,
+            }),
+            audio_source_configuration: if audio_enabled {
+                Some(AudioSourceConfiguration {
+                    token: format!("{}0", AUDIO_SOURCE_CONFIG_PREFIX),
+                    source_token: DEFAULT_AUDIO_SOURCE_TOKEN.to_string(),
+                    name: "AudioSourceConfig_0".to_string(),
+                    use_count: (profile_count + 1) as i32,
+                })
+            } else {
+                None
+            },
+            video_encoder_configuration: Some(video_encoder_config),
+            audio_encoder_configuration: audio_encoder_config,
+            ptz_configuration: Some(default_ptz_config.clone()),
+            metadata_configuration: None,
+            extension: None,
+        }
     }
 
     /// Initialize hardcoded profiles (fallback when no config is available).
@@ -1128,73 +1219,75 @@ impl ProfileManager {
     }
 
     fn persist_to_config(&self, config: &ConfigRuntime) -> Result<(), ConfigError> {
-        // Snapshot all media state while holding read locks, then release before writing config
-        let (
-            profiles_data,
-            video_sources_data,
-            audio_sources_data,
-            video_source_configs_data,
-            video_encoder_configs_data,
-            audio_source_configs_data,
-            audio_encoder_configs_data,
-        ) = {
-            let profiles = self.profiles.read();
-            let video_sources = self.video_sources.read();
-            let audio_sources = self.audio_sources.read();
-            let video_source_configs = self.video_source_configs.read();
-            let video_encoder_configs = self.video_encoder_configs.read();
-            let audio_source_configs = self.audio_source_configs.read();
-            let audio_encoder_configs = self.audio_encoder_configs.read();
+        let snapshot = self.collect_snapshot();
+        Self::persist_profile_list(config, &snapshot.profiles_data)?;
+        Self::persist_sources(config, &snapshot.video_sources_data, &snapshot.audio_sources_data)?;
+        Self::persist_configurations(
+            config,
+            &snapshot.video_source_configs_data,
+            &snapshot.video_encoder_configs_data,
+            &snapshot.audio_source_configs_data,
+            &snapshot.audio_encoder_configs_data,
+        )?;
+        Self::persist_profiles(config, &snapshot.profiles_data)?;
+        Ok(())
+    }
 
-            (
-                profiles
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>(),
-                video_sources
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>(),
-                audio_sources
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>(),
-                video_source_configs
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>(),
-                video_encoder_configs
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>(),
-                audio_source_configs
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>(),
-                audio_encoder_configs
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>(),
-            )
-        };
+    /// Collect a snapshot of all media state.
+    fn collect_snapshot(&self) -> PersistSnapshot {
+        let profiles = self.profiles.read();
+        let video_sources = self.video_sources.read();
+        let audio_sources = self.audio_sources.read();
+        let video_source_configs = self.video_source_configs.read();
+        let video_encoder_configs = self.video_encoder_configs.read();
+        let audio_source_configs = self.audio_source_configs.read();
+        let audio_encoder_configs = self.audio_encoder_configs.read();
 
-        // Persist profile list
+        PersistSnapshot {
+            profiles_data: profiles.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            video_sources_data: video_sources.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            audio_sources_data: audio_sources.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            video_source_configs_data: video_source_configs
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            video_encoder_configs_data: video_encoder_configs
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            audio_source_configs_data: audio_source_configs
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            audio_encoder_configs_data: audio_encoder_configs
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        }
+    }
+
+    /// Persist the profile list.
+    fn persist_profile_list(
+        config: &ConfigRuntime,
+        profiles_data: &[(String, Profile)],
+    ) -> Result<(), ConfigError> {
         let mut tokens: Vec<String> = profiles_data.iter().map(|(k, _)| k.clone()).collect();
         tokens.sort();
         config.set_string("media.profiles", &tokens.join(","))?;
+        Ok(())
+    }
 
-        // Persist sources
+    /// Persist video and audio sources.
+    fn persist_sources(
+        config: &ConfigRuntime,
+        video_sources_data: &[(String, VideoSource)],
+        audio_sources_data: &[(String, AudioSource)],
+    ) -> Result<(), ConfigError> {
         for (token, source) in video_sources_data.iter() {
             let prefix = format!("media.video_source.{token}");
-            config.set_float(
-                &format!("{}.framerate", prefix),
-                f64::from(source.framerate),
-            )?;
+            config.set_float(&format!("{}.framerate", prefix), f64::from(source.framerate))?;
             config.set_int(&format!("{}.width", prefix), source.resolution.width as i64)?;
-            config.set_int(
-                &format!("{}.height", prefix),
-                source.resolution.height as i64,
-            )?;
+            config.set_int(&format!("{}.height", prefix), source.resolution.height as i64)?;
         }
 
         for (token, source) in audio_sources_data.iter() {
@@ -1202,8 +1295,30 @@ impl ProfileManager {
             config.set_int(&format!("{}.channels", prefix), source.channels as i64)?;
         }
 
-        // Persist configurations
-        for (token, cfg) in video_source_configs_data.iter() {
+        Ok(())
+    }
+
+    /// Persist video and audio configurations.
+    fn persist_configurations(
+        config: &ConfigRuntime,
+        video_source_configs_data: &[(String, VideoSourceConfiguration)],
+        video_encoder_configs_data: &[(String, VideoEncoderConfiguration)],
+        audio_source_configs_data: &[(String, AudioSourceConfiguration)],
+        audio_encoder_configs_data: &[(String, AudioEncoderConfiguration)],
+    ) -> Result<(), ConfigError> {
+        Self::persist_video_source_configs(config, video_source_configs_data)?;
+        Self::persist_video_encoder_configs(config, video_encoder_configs_data)?;
+        Self::persist_audio_source_configs(config, audio_source_configs_data)?;
+        Self::persist_audio_encoder_configs(config, audio_encoder_configs_data)?;
+        Ok(())
+    }
+
+    /// Persist video source configurations.
+    fn persist_video_source_configs(
+        config: &ConfigRuntime,
+        configs: &[(String, VideoSourceConfiguration)],
+    ) -> Result<(), ConfigError> {
+        for (token, cfg) in configs.iter() {
             let prefix = format!("media.video_source_config.{token}");
             config.set_string(&format!("{}.source_token", prefix), &cfg.source_token)?;
             config.set_string(&format!("{}.name", prefix), &cfg.name)?;
@@ -1213,8 +1328,15 @@ impl ProfileManager {
             config.set_int(&format!("{}.width", prefix), cfg.bounds.width as i64)?;
             config.set_int(&format!("{}.height", prefix), cfg.bounds.height as i64)?;
         }
+        Ok(())
+    }
 
-        for (token, cfg) in video_encoder_configs_data.iter() {
+    /// Persist video encoder configurations.
+    fn persist_video_encoder_configs(
+        config: &ConfigRuntime,
+        configs: &[(String, VideoEncoderConfiguration)],
+    ) -> Result<(), ConfigError> {
+        for (token, cfg) in configs.iter() {
             let prefix = format!("media.video_encoder_config.{token}");
             config.set_string(&format!("{}.name", prefix), &cfg.name)?;
             config.set_string(
@@ -1230,18 +1352,9 @@ impl ProfileManager {
             config.set_float(&format!("{}.quality", prefix), f64::from(cfg.quality))?;
 
             if let Some(rc) = &cfg.rate_control {
-                config.set_int(
-                    &format!("{}.frame_rate_limit", prefix),
-                    rc.frame_rate_limit as i64,
-                )?;
-                config.set_int(
-                    &format!("{}.encoding_interval", prefix),
-                    rc.encoding_interval as i64,
-                )?;
-                config.set_int(
-                    &format!("{}.bitrate_limit", prefix),
-                    rc.bitrate_limit as i64,
-                )?;
+                config.set_int(&format!("{}.frame_rate_limit", prefix), rc.frame_rate_limit as i64)?;
+                config.set_int(&format!("{}.encoding_interval", prefix), rc.encoding_interval as i64)?;
+                config.set_int(&format!("{}.bitrate_limit", prefix), rc.bitrate_limit as i64)?;
             }
 
             if let Some(h264) = &cfg.h264 {
@@ -1259,15 +1372,29 @@ impl ProfileManager {
 
             config.set_string(&format!("{}.session_timeout", prefix), &cfg.session_timeout)?;
         }
+        Ok(())
+    }
 
-        for (token, cfg) in audio_source_configs_data.iter() {
+    /// Persist audio source configurations.
+    fn persist_audio_source_configs(
+        config: &ConfigRuntime,
+        configs: &[(String, AudioSourceConfiguration)],
+    ) -> Result<(), ConfigError> {
+        for (token, cfg) in configs.iter() {
             let prefix = format!("media.audio_source_config.{token}");
             config.set_string(&format!("{}.source_token", prefix), &cfg.source_token)?;
             config.set_string(&format!("{}.name", prefix), &cfg.name)?;
             config.set_int(&format!("{}.use_count", prefix), cfg.use_count as i64)?;
         }
+        Ok(())
+    }
 
-        for (token, cfg) in audio_encoder_configs_data.iter() {
+    /// Persist audio encoder configurations.
+    fn persist_audio_encoder_configs(
+        config: &ConfigRuntime,
+        configs: &[(String, AudioEncoderConfiguration)],
+    ) -> Result<(), ConfigError> {
+        for (token, cfg) in configs.iter() {
             let prefix = format!("media.audio_encoder_config.{token}");
             config.set_string(&format!("{}.name", prefix), &cfg.name)?;
             config.set_string(
@@ -1282,8 +1409,14 @@ impl ProfileManager {
             config.set_int(&format!("{}.sample_rate", prefix), cfg.sample_rate as i64)?;
             config.set_string(&format!("{}.session_timeout", prefix), &cfg.session_timeout)?;
         }
+        Ok(())
+    }
 
-        // Persist profiles
+    /// Persist profiles.
+    fn persist_profiles(
+        config: &ConfigRuntime,
+        profiles_data: &[(String, Profile)],
+    ) -> Result<(), ConfigError> {
         for (token, profile) in profiles_data.iter() {
             let prefix = format!("media.profile.{token}");
             config.set_string(&format!("{}.name", prefix), &profile.name)?;
@@ -1305,7 +1438,6 @@ impl ProfileManager {
                 config.set_string(&format!("{}.ptz_config", prefix), &ptz.token)?;
             }
         }
-
         Ok(())
     }
 
@@ -1316,21 +1448,34 @@ impl ProfileManager {
         };
 
         let snapshot = config.snapshot();
-        let Some(tokens_raw) = snapshot.get("media.profiles") else {
+        let Some(tokens) = Self::parse_profile_tokens(&snapshot) else {
             return false;
         };
-
-        let tokens: Vec<String> = tokens_raw
-            .split(',')
-            .filter(|t| !t.trim().is_empty())
-            .map(|t| t.trim().to_string())
-            .collect();
 
         if tokens.is_empty() {
             return false;
         }
 
-        // Clear existing state before loading
+        self.clear_state();
+        let loaded_count = self.load_profiles_from_tokens(&snapshot, &tokens);
+
+        self.profile_counter.store(loaded_count as u32, Ordering::SeqCst);
+        loaded_count > 0
+    }
+
+    /// Parse profile tokens from configuration snapshot.
+    fn parse_profile_tokens(snapshot: &ApplicationConfig) -> Option<Vec<String>> {
+        let tokens_raw = snapshot.get("media.profiles")?;
+        let tokens: Vec<String> = tokens_raw
+            .split(',')
+            .filter(|t| !t.trim().is_empty())
+            .map(|t| t.trim().to_string())
+            .collect();
+        Some(tokens)
+    }
+
+    /// Clear all state before loading.
+    fn clear_state(&self) {
         let mut profiles_guard = self.profiles.write();
         let mut video_sources = self.video_sources.write();
         let mut audio_sources = self.audio_sources.write();
@@ -1346,42 +1491,82 @@ impl ProfileManager {
         video_encoder_configs.clear();
         audio_source_configs.clear();
         audio_encoder_configs.clear();
+    }
+
+    /// Load profiles from tokens and return the count of successfully loaded profiles.
+    fn load_profiles_from_tokens(
+        &self,
+        snapshot: &ApplicationConfig,
+        tokens: &[String],
+    ) -> usize {
+        let mut profiles_guard = self.profiles.write();
+        let mut video_sources = self.video_sources.write();
+        let mut audio_sources = self.audio_sources.write();
+        let mut video_source_configs = self.video_source_configs.write();
+        let mut video_encoder_configs = self.video_encoder_configs.write();
+        let mut audio_source_configs = self.audio_source_configs.write();
+        let mut audio_encoder_configs = self.audio_encoder_configs.write();
+
+        let mut loaded_count = 0;
 
         for token in tokens.iter() {
-            if let Some(profile) = self.load_profile(&snapshot, token) {
-                if let Some(ref cfg) = profile.video_source_configuration {
-                    video_source_configs.insert(cfg.token.clone(), cfg.clone());
-                    if let Some(source) = self.load_video_source(&snapshot, &cfg.source_token) {
-                        video_sources.insert(cfg.source_token.clone(), source);
-                    }
-                }
-
-                if let Some(ref cfg) = profile.audio_source_configuration {
-                    audio_source_configs.insert(cfg.token.clone(), cfg.clone());
-                    if let Some(source) = self.load_audio_source(&snapshot, &cfg.source_token) {
-                        audio_sources.insert(cfg.source_token.clone(), source);
-                    }
-                }
-
-                if let Some(ref cfg) = profile.video_encoder_configuration {
-                    video_encoder_configs.insert(cfg.token.clone(), cfg.clone());
-                }
-
-                if let Some(ref cfg) = profile.audio_encoder_configuration {
-                    audio_encoder_configs.insert(cfg.token.clone(), cfg.clone());
-                }
+            if let Some(profile) = self.load_profile(snapshot, token) {
+                Self::load_profile_associated_configs(
+                    snapshot,
+                    &profile,
+                    &mut video_sources,
+                    &mut audio_sources,
+                    &mut video_source_configs,
+                    &mut video_encoder_configs,
+                    &mut audio_source_configs,
+                    &mut audio_encoder_configs,
+                    self,
+                );
 
                 profiles_guard.insert(token.clone(), profile);
+                loaded_count += 1;
             } else {
                 tracing::warn!("Skipping profile '{token}' due to missing fields");
             }
         }
 
-        // Set counter for new tokens
-        self.profile_counter
-            .store(profiles_guard.len() as u32, Ordering::SeqCst);
+        loaded_count
+    }
 
-        !profiles_guard.is_empty()
+    /// Load configuration associated with a profile.
+    #[allow(clippy::too_many_arguments)]
+    fn load_profile_associated_configs(
+        snapshot: &ApplicationConfig,
+        profile: &Profile,
+        video_sources: &mut HashMap<String, VideoSource>,
+        audio_sources: &mut HashMap<String, AudioSource>,
+        video_source_configs: &mut HashMap<String, VideoSourceConfiguration>,
+        video_encoder_configs: &mut HashMap<String, VideoEncoderConfiguration>,
+        audio_source_configs: &mut HashMap<String, AudioSourceConfiguration>,
+        audio_encoder_configs: &mut HashMap<String, AudioEncoderConfiguration>,
+        manager: &ProfileManager,
+    ) {
+        if let Some(ref cfg) = profile.video_source_configuration {
+            video_source_configs.insert(cfg.token.clone(), cfg.clone());
+            if let Some(source) = manager.load_video_source(snapshot, &cfg.source_token) {
+                video_sources.insert(cfg.source_token.clone(), source);
+            }
+        }
+
+        if let Some(ref cfg) = profile.audio_source_configuration {
+            audio_source_configs.insert(cfg.token.clone(), cfg.clone());
+            if let Some(source) = manager.load_audio_source(snapshot, &cfg.source_token) {
+                audio_sources.insert(cfg.source_token.clone(), source);
+            }
+        }
+
+        if let Some(ref cfg) = profile.video_encoder_configuration {
+            video_encoder_configs.insert(cfg.token.clone(), cfg.clone());
+        }
+
+        if let Some(ref cfg) = profile.audio_encoder_configuration {
+            audio_encoder_configs.insert(cfg.token.clone(), cfg.clone());
+        }
     }
 
     fn load_profile(&self, snapshot: &ApplicationConfig, token: &str) -> Option<Profile> {

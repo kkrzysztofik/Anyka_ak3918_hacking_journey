@@ -228,163 +228,24 @@ pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
-    let mut header: Option<SoapHeader> = None;
-    let mut body_xml = String::new();
-    let mut in_body = false;
-    let mut body_depth = 0;
-    let mut action: Option<String> = None;
-
-    // WS-Security parsing state
-    let mut in_header = false;
-    let mut in_security = false;
-    let mut in_username_token = false;
-    let mut current_element: Option<String> = None;
-    let mut security_data = WsSecurityParseData::default();
+    let mut state = SoapParseState::new();
 
     loop {
         match reader.read_event() {
             Ok(Event::Start(e)) => {
                 let name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
-
-                if name == "Body" && !in_body {
-                    in_body = true;
-                    in_header = false;
-                    body_depth = 0;
-                } else if name == "Header" && !in_body {
-                    in_header = true;
-                    header = Some(SoapHeader::default());
-                } else if name == "Security" && in_header {
-                    in_security = true;
-                } else if name == "UsernameToken" && in_security {
-                    in_username_token = true;
-                } else if in_username_token {
-                    current_element = Some(name.clone());
-                    // Capture Password Type attribute
-                    if name == "Password" {
-                        for attr in e.attributes().flatten() {
-                            let key =
-                                String::from_utf8_lossy(attr.key.local_name().as_ref()).to_string();
-                            if key == "Type" {
-                                security_data.password_type =
-                                    Some(String::from_utf8_lossy(&attr.value).to_string());
-                            }
-                        }
-                    }
-                    // Capture Nonce EncodingType attribute
-                    if name == "Nonce" {
-                        for attr in e.attributes().flatten() {
-                            let key =
-                                String::from_utf8_lossy(attr.key.local_name().as_ref()).to_string();
-                            if key == "EncodingType" {
-                                security_data.nonce_encoding =
-                                    Some(String::from_utf8_lossy(&attr.value).to_string());
-                            }
-                        }
-                    }
-                } else if in_body {
-                    body_depth += 1;
-                    // Capture start tag
-                    body_xml.push('<');
-                    body_xml.push_str(&name);
-
-                    // Capture attributes
-                    for attr in e.attributes().flatten() {
-                        let local_name = attr.key.local_name();
-                        let key = String::from_utf8_lossy(local_name.as_ref());
-                        let value = String::from_utf8_lossy(&attr.value);
-                        body_xml.push(' ');
-                        body_xml.push_str(&key);
-                        body_xml.push_str("=\"");
-                        body_xml.push_str(&value);
-                        body_xml.push('"');
-                    }
-                    body_xml.push('>');
-
-                    // Extract action from first element in body
-                    if body_depth == 1 && action.is_none() {
-                        action = Some(name);
-                    }
-                }
+                handle_start_event(&mut state, &name, &e);
             }
             Ok(Event::End(e)) => {
                 let name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
-
-                if name == "Body" && in_body && body_depth == 0 {
-                    in_body = false;
-                } else if name == "Header" && in_header {
-                    in_header = false;
-                } else if name == "Security" && in_security {
-                    in_security = false;
-                } else if name == "UsernameToken" && in_username_token {
-                    in_username_token = false;
-                    // Build the UsernameToken from collected data
-                    if let Some(ref mut h) = header {
-                        h.security = Some(WsSecurity {
-                            username_token: Some(UsernameToken {
-                                username: security_data.username.take().unwrap_or_default(),
-                                password: PasswordElement {
-                                    password_type: security_data.password_type.take(),
-                                    value: security_data.password.take().unwrap_or_default(),
-                                },
-                                nonce: security_data.nonce.take().map(|v| NonceElement {
-                                    encoding_type: security_data.nonce_encoding.take(),
-                                    value: v,
-                                }),
-                                created: security_data.created.take(),
-                            }),
-                        });
-                    }
-                } else if in_username_token {
-                    current_element = None;
-                } else if in_body {
-                    body_xml.push_str("</");
-                    body_xml.push_str(&name);
-                    body_xml.push('>');
-                    body_depth -= 1;
-                }
+                handle_end_event(&mut state, &name);
             }
             Ok(Event::Empty(e)) => {
-                if in_body {
-                    let name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
-                    body_xml.push('<');
-                    body_xml.push_str(&name);
-
-                    for attr in e.attributes().flatten() {
-                        let local_name = attr.key.local_name();
-                        let key = String::from_utf8_lossy(local_name.as_ref());
-                        let value = String::from_utf8_lossy(&attr.value);
-                        body_xml.push(' ');
-                        body_xml.push_str(&key);
-                        body_xml.push_str("=\"");
-                        body_xml.push_str(&value);
-                        body_xml.push('"');
-                    }
-                    body_xml.push_str("/>");
-
-                    // Extract action from first element in body
-                    if body_depth == 0 && action.is_none() {
-                        action = Some(name);
-                    }
-                }
+                let name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
+                handle_empty_event(&mut state, &name, &e);
             }
             Ok(Event::Text(e)) => {
-                if in_body {
-                    // Use xml_content() for unescaping XML entities in quick-xml 0.38+
-                    let text = e.xml_content().unwrap_or_default();
-                    body_xml.push_str(&text);
-                } else if in_username_token {
-                    // Capture text content for UsernameToken elements
-                    let text = e.xml_content().unwrap_or_default().to_string();
-                    if let Some(ref elem) = current_element {
-                        match elem.as_str() {
-                            "Username" => security_data.username = Some(text),
-                            "Password" => security_data.password = Some(text),
-                            "Nonce" => security_data.nonce = Some(text),
-                            "Created" => security_data.created = Some(text),
-                            _ => {}
-                        }
-                    }
-                }
+                handle_text_event(&mut state, &e);
             }
             Ok(Event::Eof) => break,
             Err(e) => {
@@ -398,14 +259,14 @@ pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> 
         }
     }
 
-    if body_xml.is_empty() {
+    if state.body_xml.is_empty() {
         return Err(SoapParseError::MissingBody);
     }
 
     Ok(RawSoapEnvelope {
-        header,
-        body_xml,
-        action,
+        header: state.header,
+        body_xml: state.body_xml,
+        action: state.action,
     })
 }
 
@@ -418,6 +279,209 @@ struct WsSecurityParseData {
     nonce: Option<String>,
     nonce_encoding: Option<String>,
     created: Option<String>,
+}
+
+/// Parsing state for SOAP request parsing.
+struct SoapParseState {
+    header: Option<SoapHeader>,
+    body_xml: String,
+    in_body: bool,
+    body_depth: u32,
+    action: Option<String>,
+    in_header: bool,
+    in_security: bool,
+    in_username_token: bool,
+    current_element: Option<String>,
+    security_data: WsSecurityParseData,
+}
+
+impl SoapParseState {
+    fn new() -> Self {
+        Self {
+            header: None,
+            body_xml: String::new(),
+            in_body: false,
+            body_depth: 0,
+            action: None,
+            in_header: false,
+            in_security: false,
+            in_username_token: false,
+            current_element: None,
+            security_data: WsSecurityParseData::default(),
+        }
+    }
+}
+
+/// Handle a Start event during SOAP parsing.
+fn handle_start_event(
+    state: &mut SoapParseState,
+    name: &str,
+    e: &quick_xml::events::BytesStart,
+) {
+    if name == "Body" && !state.in_body {
+        state.in_body = true;
+        state.in_header = false;
+        state.body_depth = 0;
+    } else if name == "Header" && !state.in_body {
+        state.in_header = true;
+        state.header = Some(SoapHeader::default());
+    } else if name == "Security" && state.in_header {
+        state.in_security = true;
+    } else if name == "UsernameToken" && state.in_security {
+        state.in_username_token = true;
+    } else if state.in_username_token {
+        state.current_element = Some(name.to_string());
+        handle_security_attributes(state, name, e);
+    } else if state.in_body {
+        append_body_start_tag(state, name, e);
+    }
+}
+
+/// Handle security-related attributes during parsing.
+fn handle_security_attributes(
+    state: &mut SoapParseState,
+    name: &str,
+    e: &quick_xml::events::BytesStart,
+) {
+    if name == "Password" {
+        for attr in e.attributes().flatten() {
+            let key = String::from_utf8_lossy(attr.key.local_name().as_ref()).to_string();
+            if key == "Type" {
+                state.security_data.password_type =
+                    Some(String::from_utf8_lossy(&attr.value).to_string());
+            }
+        }
+    } else if name == "Nonce" {
+        for attr in e.attributes().flatten() {
+            let key = String::from_utf8_lossy(attr.key.local_name().as_ref()).to_string();
+            if key == "EncodingType" {
+                state.security_data.nonce_encoding =
+                    Some(String::from_utf8_lossy(&attr.value).to_string());
+            }
+        }
+    }
+}
+
+/// Append a body start tag to the body XML.
+fn append_body_start_tag(
+    state: &mut SoapParseState,
+    name: &str,
+    e: &quick_xml::events::BytesStart,
+) {
+    state.body_depth += 1;
+    state.body_xml.push('<');
+    state.body_xml.push_str(name);
+
+    for attr in e.attributes().flatten() {
+        let local_name = attr.key.local_name();
+        let key = String::from_utf8_lossy(local_name.as_ref());
+        let value = String::from_utf8_lossy(&attr.value);
+        state.body_xml.push(' ');
+        state.body_xml.push_str(&key);
+        state.body_xml.push_str("=\"");
+        state.body_xml.push_str(&value);
+        state.body_xml.push('"');
+    }
+    state.body_xml.push('>');
+
+    if state.body_depth == 1 && state.action.is_none() {
+        state.action = Some(name.to_string());
+    }
+}
+
+/// Handle an End event during SOAP parsing.
+fn handle_end_event(state: &mut SoapParseState, name: &str) {
+    if name == "Body" && state.in_body && state.body_depth == 0 {
+        state.in_body = false;
+    } else if name == "Header" && state.in_header {
+        state.in_header = false;
+    } else if name == "Security" && state.in_security {
+        state.in_security = false;
+    } else if name == "UsernameToken" && state.in_username_token {
+        state.in_username_token = false;
+        build_username_token(state);
+    } else if state.in_username_token {
+        state.current_element = None;
+    } else if state.in_body {
+        append_body_end_tag(state, name);
+    }
+}
+
+/// Build the UsernameToken from collected security data.
+fn build_username_token(state: &mut SoapParseState) {
+    if let Some(ref mut h) = state.header {
+        h.security = Some(WsSecurity {
+            username_token: Some(UsernameToken {
+                username: state.security_data.username.take().unwrap_or_default(),
+                password: PasswordElement {
+                    password_type: state.security_data.password_type.take(),
+                    value: state.security_data.password.take().unwrap_or_default(),
+                },
+                nonce: state.security_data.nonce.take().map(|v| NonceElement {
+                    encoding_type: state.security_data.nonce_encoding.take(),
+                    value: v,
+                }),
+                created: state.security_data.created.take(),
+            }),
+        });
+    }
+}
+
+/// Append a body end tag to the body XML.
+fn append_body_end_tag(state: &mut SoapParseState, name: &str) {
+    state.body_xml.push_str("</");
+    state.body_xml.push_str(name);
+    state.body_xml.push('>');
+    state.body_depth = state.body_depth.saturating_sub(1);
+}
+
+/// Handle an Empty event during SOAP parsing.
+fn handle_empty_event(
+    state: &mut SoapParseState,
+    name: &str,
+    e: &quick_xml::events::BytesStart,
+) {
+    if !state.in_body {
+        return;
+    }
+
+    state.body_xml.push('<');
+    state.body_xml.push_str(name);
+
+    for attr in e.attributes().flatten() {
+        let local_name = attr.key.local_name();
+        let key = String::from_utf8_lossy(local_name.as_ref());
+        let value = String::from_utf8_lossy(&attr.value);
+        state.body_xml.push(' ');
+        state.body_xml.push_str(&key);
+        state.body_xml.push_str("=\"");
+        state.body_xml.push_str(&value);
+        state.body_xml.push('"');
+    }
+    state.body_xml.push_str("/>");
+
+    if state.body_depth == 0 && state.action.is_none() {
+        state.action = Some(name.to_string());
+    }
+}
+
+/// Handle a Text event during SOAP parsing.
+fn handle_text_event(state: &mut SoapParseState, e: &quick_xml::events::BytesText) {
+    if state.in_body {
+        let text = e.xml_content().unwrap_or_default();
+        state.body_xml.push_str(&text);
+    } else if state.in_username_token {
+        let text = e.xml_content().unwrap_or_default().to_string();
+        if let Some(ref elem) = state.current_element {
+            match elem.as_str() {
+                "Username" => state.security_data.username = Some(text),
+                "Password" => state.security_data.password = Some(text),
+                "Nonce" => state.security_data.nonce = Some(text),
+                "Created" => state.security_data.created = Some(text),
+                _ => {}
+            }
+        }
+    }
 }
 
 /// Build a SOAP response envelope with the given body content.

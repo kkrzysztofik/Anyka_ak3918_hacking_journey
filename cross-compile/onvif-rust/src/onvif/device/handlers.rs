@@ -634,35 +634,10 @@ impl DeviceService {
     ) -> OnvifResult<GetNetworkInterfacesResponse> {
         tracing::debug!("GetNetworkInterfaces request");
 
-        // Try to get network info from platform first
-        let (ip_address, mac_address, dhcp_enabled) = if let Some(platform) = &self.platform {
-            if let Some(network_info) = platform.network_info() {
-                if let Ok(interfaces) = network_info.get_network_interfaces().await {
-                    if let Some(iface) = interfaces.first() {
-                        let ip = iface
-                            .ipv4_address
-                            .clone()
-                            .or_else(|| network_info.detect_local_ip())
-                            .unwrap_or_else(|| "192.168.1.100".to_string());
-                        let mac = iface
-                            .mac_address
-                            .clone()
-                            .unwrap_or_else(|| "00:00:00:00:00:00".to_string());
-                        let dhcp = iface.ipv4_dhcp;
-                        (ip, mac, dhcp)
-                    } else {
-                        // No interfaces from platform, use fallback
-                        self.get_network_info_fallback()
-                    }
-                } else {
-                    self.get_network_info_fallback()
-                }
-            } else {
-                self.get_network_info_fallback()
-            }
-        } else {
-            self.get_network_info_fallback()
-        };
+        let (ip_address, mac_address, dhcp_enabled) = self
+            .get_network_info_from_platform()
+            .await
+            .unwrap_or_else(|| self.get_network_info_fallback());
 
         // Create network interface
         let network_interface = NetworkInterface {
@@ -716,6 +691,27 @@ impl DeviceService {
         Ok(GetNetworkInterfacesResponse {
             network_interfaces: vec![network_interface],
         })
+    }
+
+    /// Get network info from platform if available.
+    async fn get_network_info_from_platform(&self) -> Option<(String, String, bool)> {
+        let platform = self.platform.as_ref()?;
+        let network_info = platform.network_info()?;
+        let interfaces = network_info.get_network_interfaces().await.ok()?;
+        let iface = interfaces.first()?;
+
+        let ip = iface
+            .ipv4_address
+            .clone()
+            .or_else(|| network_info.detect_local_ip())
+            .unwrap_or_else(|| "192.168.1.100".to_string());
+        let mac = iface
+            .mac_address
+            .clone()
+            .unwrap_or_else(|| "00:00:00:00:00:00".to_string());
+        let dhcp = iface.ipv4_dhcp;
+
+        Some((ip, mac, dhcp))
     }
 
     /// Fallback method to get network info from config when platform is unavailable.

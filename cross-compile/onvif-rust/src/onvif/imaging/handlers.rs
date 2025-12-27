@@ -148,40 +148,46 @@ impl ImagingService {
             .await
             .map_err(Self::map_settings_error)?;
 
-        // Apply individual settings to platform if available
-        if let Some(ref platform) = self.platform {
-            if let Some(imaging) = platform.imaging_control() {
-                // Apply brightness
-                if let Some(brightness) = request.imaging_settings.brightness {
-                    if let Err(e) = imaging.set_brightness(brightness).await {
-                        tracing::warn!("Failed to set brightness: {}", e);
-                    }
-                }
+        Self::apply_platform_settings(self.platform.as_ref(), &request.imaging_settings).await;
 
-                // Apply contrast
-                if let Some(contrast) = request.imaging_settings.contrast {
-                    if let Err(e) = imaging.set_contrast(contrast).await {
-                        tracing::warn!("Failed to set contrast: {}", e);
-                    }
-                }
+        Ok(SetImagingSettingsResponse {})
+    }
 
-                // Apply saturation
-                if let Some(saturation) = request.imaging_settings.color_saturation {
-                    if let Err(e) = imaging.set_saturation(saturation).await {
-                        tracing::warn!("Failed to set saturation: {}", e);
-                    }
-                }
+    /// Apply imaging settings to the platform if available.
+    async fn apply_platform_settings(
+        platform: Option<&Arc<dyn Platform>>,
+        settings: &crate::onvif::types::common::ImagingSettings20,
+    ) {
+        let Some(platform) = platform else {
+            return;
+        };
+        let Some(imaging) = platform.imaging_control() else {
+            return;
+        };
 
-                // Apply sharpness
-                if let Some(sharpness) = request.imaging_settings.sharpness {
-                    if let Err(e) = imaging.set_sharpness(sharpness).await {
-                        tracing::warn!("Failed to set sharpness: {}", e);
-                    }
-                }
+        if let Some(brightness) = settings.brightness {
+            if let Err(e) = imaging.set_brightness(brightness).await {
+                tracing::warn!("Failed to set brightness: {}", e);
             }
         }
 
-        Ok(SetImagingSettingsResponse {})
+        if let Some(contrast) = settings.contrast {
+            if let Err(e) = imaging.set_contrast(contrast).await {
+                tracing::warn!("Failed to set contrast: {}", e);
+            }
+        }
+
+        if let Some(saturation) = settings.color_saturation {
+            if let Err(e) = imaging.set_saturation(saturation).await {
+                tracing::warn!("Failed to set saturation: {}", e);
+            }
+        }
+
+        if let Some(sharpness) = settings.sharpness {
+            if let Err(e) = imaging.set_sharpness(sharpness).await {
+                tracing::warn!("Failed to set sharpness: {}", e);
+            }
+        }
     }
 
     // ========================================================================

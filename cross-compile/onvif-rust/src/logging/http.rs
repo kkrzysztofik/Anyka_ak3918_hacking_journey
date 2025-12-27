@@ -356,54 +356,70 @@ fn sanitize_soap_body(body: &str) -> String {
 fn sanitize_xml_element(body: &str, element_name: &str) -> String {
     let mut result = String::with_capacity(body.len());
     let mut remaining = body;
+    let open_pattern = format!("<{}", element_name);
 
     loop {
-        // Find opening tag (with potential attributes)
-        let open_pattern = format!("<{}", element_name);
         if let Some(open_start) = remaining.find(&open_pattern) {
-            // Add everything before the tag
             result.push_str(&remaining[..open_start]);
-
-            // Find the end of the opening tag
             let after_open = &remaining[open_start..];
-            if let Some(tag_end) = after_open.find('>') {
-                // Check if it's a self-closing tag
-                if tag_end > 0 && after_open.as_bytes()[tag_end - 1] == b'/' {
-                    // Self-closing tag, keep as is
+
+            match process_opening_tag(after_open, element_name) {
+                TagProcessResult::SelfClosing(tag_end) => {
                     result.push_str(&after_open[..=tag_end]);
                     remaining = &after_open[tag_end + 1..];
-                    continue;
                 }
-
-                // Find closing tag
-                let close_pattern = format!("</{}>", element_name);
-                let content_start = tag_end + 1;
-                let after_content = &after_open[content_start..];
-
-                if let Some(close_pos) = after_content.find(&close_pattern) {
-                    // Add opening tag with attributes
-                    result.push_str(&after_open[..content_start]);
-                    // Add masked content
-                    result.push_str("***");
-                    // Add closing tag
-                    result.push_str(&close_pattern);
-
-                    remaining = &after_content[close_pos + close_pattern.len()..];
-                    continue;
+                TagProcessResult::WithContent(processed_len, sanitized) => {
+                    result.push_str(&sanitized);
+                    remaining = &after_open[processed_len..];
+                }
+                TagProcessResult::Broken => {
+                    result.push_str(&remaining[..open_start + 1]);
+                    remaining = &remaining[open_start + 1..];
                 }
             }
-
-            // If we get here, tag structure is broken - just add the character and continue
-            result.push_str(&remaining[..open_start + 1]);
-            remaining = &remaining[open_start + 1..];
         } else {
-            // No more tags found, add remaining content
             result.push_str(remaining);
             break;
         }
     }
 
     result
+}
+
+/// Result of processing an opening tag.
+enum TagProcessResult {
+    SelfClosing(usize),
+    WithContent(usize, String),
+    Broken,
+}
+
+/// Process an opening tag and return the result.
+fn process_opening_tag(after_open: &str, element_name: &str) -> TagProcessResult {
+    let Some(tag_end) = after_open.find('>') else {
+        return TagProcessResult::Broken;
+    };
+
+    if tag_end > 0 && after_open.as_bytes()[tag_end - 1] == b'/' {
+        return TagProcessResult::SelfClosing(tag_end);
+    }
+
+    let close_pattern = format!("</{}>", element_name);
+    let content_start = tag_end + 1;
+    let after_content = &after_open[content_start..];
+
+    let Some(close_pos) = after_content.find(&close_pattern) else {
+        return TagProcessResult::Broken;
+    };
+
+    let processed_len = content_start + close_pos + close_pattern.len();
+    let sanitized = format!(
+        "{}{}{}",
+        &after_open[..content_start],
+        "***",
+        &close_pattern
+    );
+
+    TagProcessResult::WithContent(processed_len, sanitized)
 }
 
 #[cfg(test)]

@@ -11,7 +11,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
-use super::traits::*;
+use super::traits::{
+    AudioEncoder, AudioEncoderConfig, AudioEncoding, AudioInput, AudioSourceConfig, BitrateMode,
+    DeviceInfo, DnsInfo, ImagingControl, ImagingOptions, ImagingSettings, NetworkInfo,
+    NetworkInterfaceInfo, NetworkProtocolInfo, NtpInfo, Platform, PlatformError, PlatformResult,
+    PTZControl, PtzLimits, PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoEncoder,
+    VideoEncoderConfig, VideoEncoderOptions, VideoEncoding, VideoInput, VideoSourceConfig,
+};
 
 /// Builder for configuring stub platform behavior.
 #[derive(Debug, Clone, Default)]
@@ -149,7 +155,63 @@ impl StubPlatformBuilder {
 
     /// Build the stub platform with default video/audio if none specified.
     pub fn build(self) -> StubPlatform {
-        let video_sources = if self.video_sources.is_empty() {
+        let video_sources = Self::get_video_sources(self.video_sources);
+        let video_encoders = Self::get_video_encoders(self.video_encoders);
+        let audio_sources = Self::get_audio_sources(self.audio_sources);
+        let audio_encoders = Self::get_audio_encoders(self.audio_encoders);
+        let device_info = self.device_info.unwrap_or_else(Self::default_device_info);
+        let ptz_position = self.ptz_position.unwrap_or(PtzPosition::HOME);
+        let ptz_limits = self.ptz_limits.unwrap_or(PtzLimits::DEFAULT);
+        let imaging_settings = self.imaging_settings.unwrap_or_else(Self::default_imaging_settings);
+        let presets: HashMap<String, PtzPreset> = self
+            .ptz_presets
+            .into_iter()
+            .map(|p| (p.token.clone(), p))
+            .collect();
+
+        let video_input = Arc::new(StubVideoInput {
+            opened: AtomicBool::new(false),
+            sources: video_sources.clone(),
+        });
+
+        let video_encoder = Arc::new(StubVideoEncoder {
+            configurations: RwLock::new(video_encoders),
+        });
+
+        let audio_input = Arc::new(StubAudioInput {
+            opened: AtomicBool::new(false),
+            sources: audio_sources.clone(),
+        });
+
+        let audio_encoder = Arc::new(StubAudioEncoder {
+            configurations: RwLock::new(audio_encoders),
+        });
+
+        let ptz_control = Self::create_ptz_control(self.ptz_supported, ptz_position, ptz_limits, presets);
+        let imaging_control = Self::create_imaging_control(self.imaging_supported, imaging_settings);
+        let network_info = Self::create_network_info(
+            self.network_info_supported,
+            self.mac_address,
+            self.ip_address,
+        );
+
+        StubPlatform {
+            initialized: AtomicBool::new(false),
+            fail_init: self.fail_init,
+            device_info,
+            video_input,
+            video_encoder,
+            audio_input,
+            audio_encoder,
+            ptz_control,
+            imaging_control,
+            network_info,
+        }
+    }
+
+    /// Get video sources, using defaults if empty.
+    fn get_video_sources(sources: Vec<VideoSourceConfig>) -> Vec<VideoSourceConfig> {
+        if sources.is_empty() {
             vec![VideoSourceConfig {
                 token: "VideoSource_1".to_string(),
                 name: "Main Camera".to_string(),
@@ -157,10 +219,13 @@ impl StubPlatformBuilder {
                 max_framerate: 30.0,
             }]
         } else {
-            self.video_sources
-        };
+            sources
+        }
+    }
 
-        let video_encoders = if self.video_encoders.is_empty() {
+    /// Get video encoders, using defaults if empty.
+    fn get_video_encoders(encoders: Vec<VideoEncoderConfig>) -> Vec<VideoEncoderConfig> {
+        if encoders.is_empty() {
             vec![
                 VideoEncoderConfig {
                     token: "VideoEncoder_1".to_string(),
@@ -186,20 +251,26 @@ impl StubPlatformBuilder {
                 },
             ]
         } else {
-            self.video_encoders
-        };
+            encoders
+        }
+    }
 
-        let audio_sources = if self.audio_sources.is_empty() {
+    /// Get audio sources, using defaults if empty.
+    fn get_audio_sources(sources: Vec<AudioSourceConfig>) -> Vec<AudioSourceConfig> {
+        if sources.is_empty() {
             vec![AudioSourceConfig {
                 token: "AudioSource_1".to_string(),
                 name: "Microphone".to_string(),
                 channels: 1,
             }]
         } else {
-            self.audio_sources
-        };
+            sources
+        }
+    }
 
-        let audio_encoders = if self.audio_encoders.is_empty() {
+    /// Get audio encoders, using defaults if empty.
+    fn get_audio_encoders(encoders: Vec<AudioEncoderConfig>) -> Vec<AudioEncoderConfig> {
+        if encoders.is_empty() {
             vec![AudioEncoderConfig {
                 token: "AudioEncoder_1".to_string(),
                 name: "Audio Stream".to_string(),
@@ -209,20 +280,24 @@ impl StubPlatformBuilder {
                 bitrate: 64,
             }]
         } else {
-            self.audio_encoders
-        };
+            encoders
+        }
+    }
 
-        let device_info = self.device_info.unwrap_or(DeviceInfo {
+    /// Create default device info.
+    fn default_device_info() -> DeviceInfo {
+        DeviceInfo {
             manufacturer: "Anyka".to_string(),
             model: "AK3918".to_string(),
             firmware_version: "1.0.0".to_string(),
             serial_number: "STUB-001".to_string(),
             hardware_id: "ak3918-stub".to_string(),
-        });
+        }
+    }
 
-        let ptz_position = self.ptz_position.unwrap_or(PtzPosition::HOME);
-        let ptz_limits = self.ptz_limits.unwrap_or(PtzLimits::DEFAULT);
-        let imaging_settings = self.imaging_settings.unwrap_or(ImagingSettings {
+    /// Create default imaging settings.
+    fn default_imaging_settings() -> ImagingSettings {
+        ImagingSettings {
             brightness: 50.0,
             contrast: 50.0,
             saturation: 50.0,
@@ -231,34 +306,17 @@ impl StubPlatformBuilder {
             ir_led: false,
             wdr: false,
             backlight_compensation: false,
-        });
+        }
+    }
 
-        // Convert presets to HashMap
-        let presets: HashMap<String, PtzPreset> = self
-            .ptz_presets
-            .into_iter()
-            .map(|p| (p.token.clone(), p))
-            .collect();
-
-        let video_input = Arc::new(StubVideoInput {
-            opened: AtomicBool::new(false),
-            sources: video_sources.clone(),
-        });
-
-        let video_encoder = Arc::new(StubVideoEncoder {
-            configurations: RwLock::new(video_encoders),
-        });
-
-        let audio_input = Arc::new(StubAudioInput {
-            opened: AtomicBool::new(false),
-            sources: audio_sources.clone(),
-        });
-
-        let audio_encoder = Arc::new(StubAudioEncoder {
-            configurations: RwLock::new(audio_encoders),
-        });
-
-        let ptz_control = if self.ptz_supported {
+    /// Create PTZ control if supported.
+    fn create_ptz_control(
+        ptz_supported: bool,
+        ptz_position: PtzPosition,
+        ptz_limits: PtzLimits,
+        presets: HashMap<String, PtzPreset>,
+    ) -> Option<Arc<dyn PTZControl>> {
+        if ptz_supported {
             Some(Arc::new(StubPTZControl {
                 position: RwLock::new(ptz_position),
                 velocity: RwLock::new(PtzVelocity::STOP),
@@ -268,19 +326,32 @@ impl StubPlatformBuilder {
             }) as Arc<dyn PTZControl>)
         } else {
             None
-        };
+        }
+    }
 
-        let imaging_control = if self.imaging_supported {
+    /// Create imaging control if supported.
+    fn create_imaging_control(
+        imaging_supported: bool,
+        imaging_settings: ImagingSettings,
+    ) -> Option<Arc<dyn ImagingControl>> {
+        if imaging_supported {
             Some(Arc::new(StubImagingControl {
                 settings: RwLock::new(imaging_settings),
                 options: ImagingOptions::default_options(),
             }) as Arc<dyn ImagingControl>)
         } else {
             None
-        };
+        }
+    }
 
-        let network_info = if self.network_info_supported {
-            let stub = match (self.mac_address, self.ip_address) {
+    /// Create network info if supported.
+    fn create_network_info(
+        network_info_supported: bool,
+        mac_address: Option<String>,
+        ip_address: Option<String>,
+    ) -> Option<Arc<dyn NetworkInfo>> {
+        if network_info_supported {
+            let stub = match (mac_address, ip_address) {
                 (Some(mac), ip) => StubNetworkInfo::with_mac_and_ip(mac, ip),
                 (None, Some(ip)) => {
                     StubNetworkInfo::with_mac_and_ip("AA:BB:CC:DD:EE:FF".to_string(), Some(ip))
@@ -290,19 +361,6 @@ impl StubPlatformBuilder {
             Some(Arc::new(stub) as Arc<dyn NetworkInfo>)
         } else {
             None
-        };
-
-        StubPlatform {
-            initialized: AtomicBool::new(false),
-            fail_init: self.fail_init,
-            device_info,
-            video_input,
-            video_encoder,
-            audio_input,
-            audio_encoder,
-            ptz_control,
-            imaging_control,
-            network_info,
         }
     }
 }

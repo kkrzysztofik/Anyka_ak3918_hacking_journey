@@ -1,0 +1,11 @@
+name: "CodeQL Configuration"
+
+# Exclude paths from analysis
+# Reference: https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-advanced-setup-for-code-scanning#specifying-directories-to-scan
+
+paths-ignore:
+  - "cross-compile/anyka_reference/**"
+  - "**/node_modules/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/target/**"
