@@ -4,41 +4,46 @@
 
 The `cross-compile/www` directory contains the **Camera WebUI** — a React-based web administration panel for Anyka AK3918 ONVIF cameras. This is the frontend companion to the `onvif-rust` backend, providing a user-friendly interface for camera configuration and live viewing.
 
+**Current Status**: Active development following Spec 003 (Frontend ONVIF Spec).
+
 ## Technology Stack
 
 | Category | Technology | Version |
 |----------|------------|---------|
+| **Language** | TypeScript | 5.x (strict mode) |
 | **Framework** | React | 19.x |
 | **Build Tool** | Vite | 7.x |
-| **Language** | TypeScript | 5.x |
 | **Styling** | TailwindCSS | 4.x |
-| **State Management** | React Query (TanStack) | 5.x |
+| **UI Components** | shadcn/ui (Radix-based) | Latest |
+| **State Management** | TanStack Query | 5.x |
 | **Routing** | React Router | 7.x |
-| **UI Components** | shadcn/ui (Radix UI) | Latest |
 | **HTTP Client** | Axios | 1.x |
-| **XML Parsing** | fast-xml-parser | 5.x |
 | **Form Handling** | React Hook Form + Zod | 7.x / 4.x |
-| **Testing** | Vitest + React Testing Library + MSW | 4.x / 16.x / 2.x |
+| **XML Parsing** | fast-xml-parser | 5.x |
 | **Icons** | Lucide React | 0.5x |
+| **Testing** | Vitest + Testing Library + MSW | 4.x / 16.x / 2.x |
 
 ## Project Structure
 
-```text
+```
 cross-compile/www/
 ├── src/
-│   ├── App.tsx              # Main application component
-│   ├── Layout.tsx           # Application layout with sidebar navigation
 │   ├── main.tsx             # Entry point
-│   ├── index.css            # Global styles
+│   ├── App.tsx              # Main application component
+│   ├── Layout.tsx           # Application layout with sidebar
+│   ├── index.css            # Global styles (TailwindCSS)
+│   │
 │   ├── components/          # Reusable UI components
-│   │   ├── ui/              # Base UI components (Button, Dialog, etc.)
+│   │   ├── ui/              # shadcn/ui base components
 │   │   ├── common/          # Shared components (LoadingState, etc.)
-│   │   └── users/           # User-specific components
+│   │   └── users/           # Domain-specific components
+│   │
 │   ├── pages/               # Route pages
 │   │   ├── LiveViewPage.tsx
 │   │   ├── DiagnosticsPage.tsx
 │   │   ├── LoginPage.tsx
 │   │   └── settings/        # Settings sub-pages (7 categories)
+│   │
 │   ├── services/            # ONVIF SOAP service clients
 │   │   ├── soap/            # SOAP client and message builders
 │   │   ├── deviceService.ts
@@ -48,70 +53,146 @@ cross-compile/www/
 │   │   ├── userService.ts
 │   │   ├── profileService.ts
 │   │   └── authService.ts
+│   │
 │   ├── hooks/               # Custom React hooks
 │   ├── lib/                 # Utility libraries
 │   ├── types/               # TypeScript type definitions
+│   ├── config/              # Application configuration
+│   ├── router/              # Route definitions
 │   └── test/                # Test setup and utilities
-├── vite.config.ts           # Vite configuration with proxy and compression
+│
+├── vite.config.ts           # Vite configuration
 ├── tailwind.config.js       # TailwindCSS configuration
+├── tsconfig.json            # TypeScript configuration
+├── eslint.config.js         # ESLint configuration
 └── package.json             # Dependencies and scripts
 ```
 
-## Key Commands
+## Essential Commands
 
 ```bash
-# Development server (proxies to camera at http://192.168.2.198:80)
-npm run dev
+cd cross-compile/www
 
-# Connect to specific camera IP
-VITE_API_TARGET=http://192.168.1.50:8080 npm run dev
+# Install dependencies
+npm ci                             # Clean install (CI-style)
+npm install                        # Install/update
 
-# Production build (outputs to SD_card_contents/anyka_hack/onvif/www)
-npm run build
+# Development
+npm run dev                        # Start dev server (default proxy)
+VITE_API_TARGET=http://192.168.1.50:8080 npm run dev  # Custom camera
 
-# Run tests
-npm run test
+# Build
+npm run build                      # Production build
 
-# Run linting
-npm run lint
+# Testing
+npm run test                       # Run Vitest tests
+npm run test:coverage              # With coverage report
+
+# Code Quality
+npm run lint                       # ESLint check
+npm run lint:fix                   # Auto-fix issues
+npm run type-check                 # TypeScript validation
+npm run prettier                   # Format code
+```
+
+### Pre-Commit Command
+```bash
+npm run lint && npm run type-check && npm run test
 ```
 
 ## Build Configuration
 
-- **Output Directory**: `SD_card_contents/anyka_hack/onvif/www`
-- **Compression**: Gzip and Brotli pre-compression enabled
-- **Code Splitting**: Manual chunks for vendors, services, and components
-- **Minification**: Terser with console/debugger removal
-- **Proxy**: `/onvif`, `/utilization`, `/snapshot` routes proxied to camera
+| Setting | Value |
+|---------|-------|
+| Output Directory | `SD_card_contents/anyka_hack/onvif/www` |
+| Compression | Gzip + Brotli pre-compression |
+| Code Splitting | Manual chunks (vendors, services, components) |
+| Minification | Terser with console/debugger removal |
+| Proxy Routes | `/onvif`, `/utilization`, `/snapshot` |
 
-## Key Features & Phase 1 Scope (Spec: 003-frontend-onvif-spec)
+## Key Development Patterns
 
-Based on `specs/003-frontend-onvif-spec/spec.md`, the current phase includes:
+### Component Structure
+```typescript
+// 1. Imports (external → internal → types)
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import type { DeviceInfo } from '@/types';
 
-1. **Bootstrap & Authentication**:
-    - Initial connection handling
-    - HTTP Basic Authentication (Admin/Operator/User roles)
-2. **Settings Management** (Core functional area):
-    - **Identification**: Device name, location, read-only hardware IDs
-    - **Network**: IP, DNS, Ports, ONVIF Discovery
-    - **Time**: Manual/NTP server configuration
-    - **Imaging**: Brightness, Contrast, Saturation
-    - **Maintenance**: Reboot, Reset, Backup/Restore
-    - **User Management**: full CRUD for users
-    - **Profiles**: CRUD for media profiles
-3. **Placeholders (Future Phases)**:
-    - **Live View**: Shows connection status and disabled PTZ controls (Streaming not yet available)
-    - **Diagnostics**: UI scaffolding with mock data (Real-time metrics not yet available)
+// 2. Props interface
+interface Props {
+  deviceId: string;
+  onSave: (data: DeviceInfo) => void;
+}
 
-## Compliance & Specifications
+// 3. Component with hooks first
+export function DevicePanel({ deviceId, onSave }: Props) {
+  const { data, isLoading } = useDeviceInfo(deviceId);
+  const [editing, setEditing] = useState(false);
+  
+  // Event handlers
+  const handleSave = () => { /* ... */ };
+  
+  // Render
+  return (/* ... */);
+}
+```
 
-- **Functional Spec**: `specs/003-frontend-onvif-spec/spec.md`
-- **Implementation Plan**: `specs/003-frontend-onvif-spec/plan.md`
-- **Design Assets**: `.ai/design/` (Mandatory compliance)
+### Testing Pattern
+```typescript
+// ALWAYS use data-testid for selectors
+screen.getByTestId('device-panel-save-button');
+
+// NEVER use these
+screen.getByRole('button');  // ❌
+screen.getByText('Save');    // ❌
+```
+
+### State Management
+```typescript
+// Use React Query for server state
+const { data, error, isLoading } = useQuery({
+  queryKey: ['device', deviceId],
+  queryFn: () => deviceService.getInfo(deviceId),
+});
+
+// Use Zod for validation
+const schema = z.object({
+  name: z.string().min(1).max(64),
+});
+```
 
 ## Integration with Backend
 
-- Communicates via ONVIF SOAP over HTTP
-- Authentication via HTTP Basic Auth
-- Uses HashRouter for SPA routing compatibility
-- Session storage for auth state persistence
+| Aspect | Implementation |
+|--------|----------------|
+| Protocol | ONVIF SOAP over HTTP |
+| Authentication | HTTP Basic Auth |
+| Routing | HashRouter (SPA compatibility) |
+| Session | sessionStorage (cleared on close) |
+| XML Parsing | fast-xml-parser with safe defaults |
+
+## Specifications & Design
+
+| Document | Location |
+|----------|----------|
+| Functional Spec | `specs/003-frontend-onvif-spec/spec.md` |
+| Implementation Plan | `specs/003-frontend-onvif-spec/plan.md` |
+| Design Assets | `.ai/design/` (Figma + CSS) |
+| Design System | See `www-design-system` memory |
+
+## Performance Requirements
+
+| Metric | Target |
+|--------|--------|
+| Initial Load | < 3s on local network |
+| Page Transitions | < 500ms |
+| Asset Delivery | Gzip/Brotli compression |
+| Code Splitting | Per-route chunks |
+
+## Related Memories
+
+- `www-development-standards` - Coding standards and conventions
+- `www-design-system` - Visual design system and components
+- `review-prompt-www` - Code review guidelines
+- `testing-framework` - Testing patterns (shared with Rust)
