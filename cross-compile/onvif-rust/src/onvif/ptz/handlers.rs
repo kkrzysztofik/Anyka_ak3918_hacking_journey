@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use crate::config::ConfigRuntime;
 use crate::onvif::dispatcher::ServiceHandler;
+use crate::onvif::dispatcher::parse_body;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
     PTZConfiguration, PTZSpeed, PTZVector, PanTiltLimits, Vector1D, Vector2D, ZoomLimits,
@@ -348,6 +349,9 @@ impl PTZService {
 
         self.validate_profile_token(&request.profile_token)?;
 
+        // Validate PTZ position values before calling FFI
+        super::validation::validate_ptz_vector(&request.position)?;
+
         // Update state
         self.state.set_position(&request.position);
         self.state.set_moving(true, true);
@@ -375,6 +379,9 @@ impl PTZService {
         tracing::debug!("RelativeMove request for profile {}", request.profile_token);
 
         self.validate_profile_token(&request.profile_token)?;
+
+        // Validate PTZ translation values before applying
+        super::validation::validate_ptz_velocity_vector(&request.translation)?;
 
         // Get current position and apply translation
         let current = self.state.get_position();
@@ -425,6 +432,14 @@ impl PTZService {
         );
 
         self.validate_profile_token(&request.profile_token)?;
+
+        // Validate PTZ velocity values before calling FFI
+        // Convert PTZSpeed to PTZVector for validation
+        let velocity_vector = PTZVector {
+            pan_tilt: request.velocity.pan_tilt.clone(),
+            zoom: request.velocity.zoom.clone(),
+        };
+        super::validation::validate_ptz_velocity_vector(&velocity_vector)?;
 
         // Set moving state
         let pan_tilt_moving = request
@@ -688,8 +703,7 @@ impl ServiceHandler for PTZService {
         match action {
             // Node Operations
             "GetNodes" => {
-                let request: GetNodes = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetNodes = parse_body(body_xml)?;
                 let response = self.handle_get_nodes(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -697,8 +711,7 @@ impl ServiceHandler for PTZService {
             }
 
             "GetNode" => {
-                let request: GetNode = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetNode = parse_body(body_xml)?;
                 let response = self.handle_get_node(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -707,8 +720,7 @@ impl ServiceHandler for PTZService {
 
             // Configuration Operations
             "GetConfigurations" => {
-                let request: GetConfigurations = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetConfigurations = parse_body(body_xml)?;
                 let response = self.handle_get_configurations(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -716,8 +728,7 @@ impl ServiceHandler for PTZService {
             }
 
             "GetConfiguration" => {
-                let request: GetConfiguration = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetConfiguration = parse_body(body_xml)?;
                 let response = self.handle_get_configuration(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -725,8 +736,7 @@ impl ServiceHandler for PTZService {
             }
 
             "SetConfiguration" => {
-                let request: SetConfiguration = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetConfiguration = parse_body(body_xml)?;
                 let response = self.handle_set_configuration(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -734,8 +744,7 @@ impl ServiceHandler for PTZService {
             }
 
             "GetConfigurationOptions" => {
-                let request: GetConfigurationOptions = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetConfigurationOptions = parse_body(body_xml)?;
                 let response = self.handle_get_configuration_options(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -744,8 +753,7 @@ impl ServiceHandler for PTZService {
 
             // Movement Operations
             "AbsoluteMove" => {
-                let request: AbsoluteMove = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: AbsoluteMove = parse_body(body_xml)?;
                 let response = self.handle_absolute_move(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -753,8 +761,7 @@ impl ServiceHandler for PTZService {
             }
 
             "RelativeMove" => {
-                let request: RelativeMove = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: RelativeMove = parse_body(body_xml)?;
                 let response = self.handle_relative_move(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -762,8 +769,7 @@ impl ServiceHandler for PTZService {
             }
 
             "ContinuousMove" => {
-                let request: ContinuousMove = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: ContinuousMove = parse_body(body_xml)?;
                 let response = self.handle_continuous_move(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -771,8 +777,7 @@ impl ServiceHandler for PTZService {
             }
 
             "Stop" => {
-                let request: Stop = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: Stop = parse_body(body_xml)?;
                 let response = self.handle_stop(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -780,8 +785,7 @@ impl ServiceHandler for PTZService {
             }
 
             "GetStatus" => {
-                let request: GetStatus = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetStatus = parse_body(body_xml)?;
                 let response = self.handle_get_status(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -790,8 +794,7 @@ impl ServiceHandler for PTZService {
 
             // Home Position Operations
             "GotoHomePosition" => {
-                let request: GotoHomePosition = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GotoHomePosition = parse_body(body_xml)?;
                 let response = self.handle_goto_home_position(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -799,8 +802,7 @@ impl ServiceHandler for PTZService {
             }
 
             "SetHomePosition" => {
-                let request: SetHomePosition = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetHomePosition = parse_body(body_xml)?;
                 let response = self.handle_set_home_position(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -809,8 +811,7 @@ impl ServiceHandler for PTZService {
 
             // Preset Operations
             "GetPresets" => {
-                let request: GetPresets = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetPresets = parse_body(body_xml)?;
                 let response = self.handle_get_presets(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -818,8 +819,7 @@ impl ServiceHandler for PTZService {
             }
 
             "SetPreset" => {
-                let request: SetPreset = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetPreset = parse_body(body_xml)?;
                 let response = self.handle_set_preset(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -827,8 +827,7 @@ impl ServiceHandler for PTZService {
             }
 
             "GotoPreset" => {
-                let request: GotoPreset = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GotoPreset = parse_body(body_xml)?;
                 let response = self.handle_goto_preset(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -836,8 +835,7 @@ impl ServiceHandler for PTZService {
             }
 
             "RemovePreset" => {
-                let request: RemovePreset = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: RemovePreset = parse_body(body_xml)?;
                 let response = self.handle_remove_preset(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -846,8 +844,7 @@ impl ServiceHandler for PTZService {
 
             // Service Capabilities
             "GetServiceCapabilities" => {
-                let request: GetServiceCapabilities = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetServiceCapabilities = parse_body(body_xml)?;
                 let response = self.handle_get_service_capabilities(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -855,8 +852,7 @@ impl ServiceHandler for PTZService {
             }
 
             "GetCompatibleConfigurations" => {
-                let request: GetCompatibleConfigurations = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetCompatibleConfigurations = parse_body(body_xml)?;
                 let response = self.handle_get_compatible_configurations(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -864,8 +860,7 @@ impl ServiceHandler for PTZService {
             }
 
             "SendAuxiliaryCommand" => {
-                let request: SendAuxiliaryCommand = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SendAuxiliaryCommand = parse_body(body_xml)?;
                 let response = self.handle_send_auxiliary_command(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))

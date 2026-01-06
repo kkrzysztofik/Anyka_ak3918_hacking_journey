@@ -83,6 +83,35 @@ impl Default for AuthConfig {
     }
 }
 
+impl AuthConfig {
+    /// Validate configuration for production environment.
+    ///
+    /// CRIT-006: This method logs a warning if authentication is disabled,
+    /// which should only happen in development/testing environments.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if configuration is safe for production, or a warning message
+    /// if authentication is disabled.
+    pub fn validate_production_config(&self) -> Result<(), &'static str> {
+        if !self.enabled {
+            // Log warning for production deployments
+            tracing::warn!(
+                "SECURITY WARNING: Authentication is DISABLED. \
+                 This should ONLY be used in development/testing environments. \
+                 Set `server.auth_enabled = true` for production."
+            );
+            return Err("Authentication disabled - not suitable for production");
+        }
+        Ok(())
+    }
+
+    /// Check if running in a secure configuration.
+    pub fn is_secure(&self) -> bool {
+        self.enabled
+    }
+}
+
 /// Authentication state for axum middleware.
 ///
 /// This can be used with axum's Extension layer to provide
@@ -151,27 +180,6 @@ impl AuthenticatedUser {
     pub fn is_operator(&self) -> bool {
         matches!(self.level, UserLevel::Administrator | UserLevel::Operator)
     }
-}
-
-/// Extract authentication credentials from request.
-///
-/// This is a placeholder that will be extended to support both
-/// WS-Security (SOAP) and HTTP Digest (HTTP) authentication.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum AuthCredentials {
-    /// WS-Security UsernameToken from SOAP header.
-    WsSecurity {
-        /// Raw XML containing the UsernameToken.
-        token_xml: String,
-    },
-    /// HTTP Digest from Authorization header.
-    HttpDigest {
-        /// The Authorization header value.
-        header: String,
-    },
-    /// No credentials provided.
-    None,
 }
 
 #[cfg(test)]

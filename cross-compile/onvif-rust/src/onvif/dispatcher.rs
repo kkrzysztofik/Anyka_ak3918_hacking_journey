@@ -49,7 +49,63 @@ use super::error::OnvifError;
 use super::soap::{UsernameToken, parse_soap_request};
 use super::ws_security::{WsSecurityError, WsSecurityValidator};
 use crate::users::{PasswordManager, UserAccount, UserStorage};
+use crate::utils::validation::{SecurityError, SecurityValidator};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use serde::de::DeserializeOwned;
+
+/// Parse XML body with security validation and deserialization.
+///
+/// This helper function combines XML security validation with deserialization
+/// to ensure all request bodies are validated before parsing. This prevents
+/// XXE attacks, XML bombs, and other XML-based security issues.
+///
+/// # Arguments
+///
+/// * `body_xml` - The XML string to parse and validate
+///
+/// # Returns
+///
+/// The deserialized type `T` if valid, or `OnvifError` if validation or parsing fails.
+///
+/// # Example
+///
+/// ```ignore
+/// use onvif_rust::onvif::dispatcher::parse_body;
+/// use onvif_rust::onvif::types::device::GetDeviceInformation;
+///
+/// let request: GetDeviceInformation = parse_body(body_xml)?;
+/// ```
+pub fn parse_body<T: DeserializeOwned>(body_xml: &str) -> Result<T, OnvifError> {
+    // Validate XML security before deserialization
+    let security_validator = SecurityValidator::default();
+    security_validator
+        .check_xml_security(body_xml)
+        .map_err(|e| match e {
+            SecurityError::XxeDetected(msg) => {
+                OnvifError::WellFormed(format!("XML security validation failed: {}", msg))
+            }
+            SecurityError::XssDetected(msg) => {
+                OnvifError::WellFormed(format!("XML security validation failed: {}", msg))
+            }
+            SecurityError::XmlBombDetected => OnvifError::WellFormed(
+                "XML bomb detected: excessive entity declarations".to_string(),
+            ),
+            SecurityError::PayloadTooLarge(actual, max) => OnvifError::WellFormed(format!(
+                "Payload too large: {} bytes (max: {})",
+                actual, max
+            )),
+            SecurityError::InvalidCharacters(msg) => {
+                OnvifError::WellFormed(format!("Invalid characters in XML: {}", msg))
+            }
+            SecurityError::PathTraversal(msg) => {
+                OnvifError::WellFormed(format!("Path traversal detected: {}", msg))
+            }
+        })?;
+
+    // Deserialize XML
+    quick_xml::de::from_str(body_xml)
+        .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))
+}
 
 /// Authentication context for dispatch operations.
 ///
@@ -225,6 +281,16 @@ impl ServiceDispatcher {
             }
         };
 
+        // CRIT-002: Validate XML security before parsing to prevent XXE, XML bombs, etc.
+        let security_validator = SecurityValidator::default();
+        if let Err(e) = security_validator.check_xml_security(body_str) {
+            tracing::warn!("XML security validation failed: {}", e);
+            return error_response(OnvifError::WellFormed(format!(
+                "XML security validation failed: {}",
+                e
+            )));
+        }
+
         // Parse SOAP envelope
         let envelope = match parse_soap_request(body_str) {
             Ok(env) => env,
@@ -392,6 +458,16 @@ impl ServiceDispatcher {
             }
         };
 
+        // CRIT-002: Validate XML security before parsing to prevent XXE, XML bombs, etc.
+        let security_validator = SecurityValidator::default();
+        if let Err(e) = security_validator.check_xml_security(body_str) {
+            tracing::warn!("XML security validation failed: {}", e);
+            return Err(Box::new(error_response(OnvifError::WellFormed(format!(
+                "XML security validation failed: {}",
+                e
+            )))));
+        }
+
         // Parse SOAP envelope
         match parse_soap_request(body_str) {
             Ok(env) => Ok(env),
@@ -454,20 +530,34 @@ impl ServiceDispatcher {
         }
     }
 
-    /// Check authentication for the request.
-    async fn check_authentication(
+    /// Validate credentials for a request.
+    ///
+    /// This helper consolidates authentication logic:
+    /// - Checks if authentication is enabled
+    /// - Validates required auth level
+    /// - Tries Basic Auth first, then WS-Security
+    /// - Verifies user privileges
+    ///
+    /// # Arguments
+    ///
+    /// * `required_level` - The required authentication level for the operation
+    /// * `basic_auth_result` - Result of Basic Auth verification
+    /// * `ws_security_token` - Optional WS-Security UsernameToken
+    /// * `auth_ctx` - Authentication context
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if authentication succeeds, or `OnvifError` if it fails.
+    async fn validate_credentials(
         &self,
-        action: &str,
-        handler: &Arc<dyn ServiceHandler>,
+        required_level: AuthLevel,
         basic_auth_result: &Result<Option<UserAccount>, OnvifError>,
-        envelope: &super::soap::RawSoapEnvelope,
+        ws_security_token: Option<&UsernameToken>,
         auth_ctx: &AuthContext,
-    ) -> Result<(), Box<Response>> {
+    ) -> Result<(), OnvifError> {
         if !auth_ctx.auth_enabled {
             return Ok(());
         }
-
-        let required_level = handler.required_auth_level(action);
 
         // Skip authentication for anonymous operations
         if required_level == AuthLevel::Anonymous {
@@ -478,35 +568,62 @@ impl ServiceDispatcher {
         match basic_auth_result {
             Ok(Some(user)) => {
                 if required_level.is_satisfied_by(Some(user.level)) {
-                    tracing::debug!("Basic Auth successful for action {}", action);
+                    tracing::debug!("Basic Auth successful");
                     return Ok(());
                 }
-                return Err(Box::new(error_response(OnvifError::NotAuthorized(
+                return Err(OnvifError::NotAuthorized(
                     "Insufficient privileges".to_string(),
-                ))));
+                ));
             }
             Ok(None) => {
                 // No Basic Auth header, proceed to WS-Security
             }
             Err(e) => {
                 // Basic Auth header present but invalid
-                return Err(Box::new(error_response(e.clone())));
+                return Err(e.clone());
             }
         }
 
         // Fallback to WS-Security (UsernameToken)
-        let ws_security = envelope
+        if let Some(token) = ws_security_token {
+            self.authenticate(Some(token), auth_ctx, required_level)
+                .await
+        } else {
+            Err(OnvifError::NotAuthorized(
+                "Missing authentication credentials".to_string(),
+            ))
+        }
+    }
+
+    /// Check authentication for the request.
+    async fn check_authentication(
+        &self,
+        action: &str,
+        handler: &Arc<dyn ServiceHandler>,
+        basic_auth_result: &Result<Option<UserAccount>, OnvifError>,
+        envelope: &super::soap::RawSoapEnvelope,
+        auth_ctx: &AuthContext,
+    ) -> Result<(), Box<Response>> {
+        let required_level = handler.required_auth_level(action);
+
+        // Extract WS-Security token
+        let ws_security_token = envelope
             .header
             .as_ref()
             .and_then(|h| h.security.as_ref())
             .and_then(|s| s.username_token.as_ref());
 
         match self
-            .authenticate(ws_security, auth_ctx, required_level)
+            .validate_credentials(
+                required_level,
+                basic_auth_result,
+                ws_security_token,
+                auth_ctx,
+            )
             .await
         {
             Ok(()) => {
-                tracing::debug!("WS-Security Auth successful for action {}", action);
+                tracing::debug!("Authentication successful for action {}", action);
                 Ok(())
             }
             Err(e) => {
@@ -541,6 +658,8 @@ impl ServiceDispatcher {
     }
 
     /// Authenticate a request using WS-Security credentials.
+    ///
+    /// This is called by `validate_credentials` when Basic Auth is not available.
     async fn authenticate(
         &self,
         token: Option<&UsernameToken>,

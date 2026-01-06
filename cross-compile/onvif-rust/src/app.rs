@@ -29,6 +29,7 @@ use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
 use crate::onvif::ptz::PTZStateManager;
 use crate::onvif::server::{OnvifServer, OnvifServerConfig};
 use crate::platform::{Platform, StubPlatformBuilder};
+use crate::security::RateLimiter;
 use crate::users::password::PasswordManager;
 use crate::users::storage::UserStorage;
 
@@ -72,6 +73,8 @@ pub struct AppState {
     config: Arc<ConfigRuntime>,
     /// Memory monitor for resource enforcement.
     memory_monitor: Arc<crate::utils::MemoryMonitor>,
+    /// Rate limiter for per-IP request limiting.
+    rate_limiter: Arc<RateLimiter>,
     /// Platform abstraction (optional for testing without hardware).
     platform: Option<Arc<dyn Platform>>,
     /// Optional config persistence handle.
@@ -109,6 +112,11 @@ impl AppState {
         &self.memory_monitor
     }
 
+    /// Get a reference to the rate limiter.
+    pub fn rate_limiter(&self) -> &Arc<RateLimiter> {
+        &self.rate_limiter
+    }
+
     /// Get a reference to the platform abstraction, if available.
     pub fn platform(&self) -> Option<&Arc<dyn Platform>> {
         self.platform.as_ref()
@@ -128,6 +136,7 @@ impl std::fmt::Debug for AppState {
             .field("ptz_state", &"Arc<PTZStateManager>")
             .field("config", &"Arc<ConfigRuntime>")
             .field("memory_monitor", &"Arc<MemoryMonitor>")
+            .field("rate_limiter", &"Arc<RateLimiter>")
             .field(
                 "platform",
                 &self.platform.as_ref().map(|_| "Some(Arc<dyn Platform>)"),
@@ -158,6 +167,7 @@ pub struct AppStateBuilder {
     ptz_state: Option<Arc<PTZStateManager>>,
     config: Option<Arc<ConfigRuntime>>,
     memory_monitor: Option<Arc<crate::utils::MemoryMonitor>>,
+    rate_limiter: Option<Arc<RateLimiter>>,
     platform: Option<Arc<dyn Platform>>,
     config_persistence: Option<ConfigPersistenceHandle>,
 }
@@ -212,6 +222,12 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the rate limiter.
+    pub fn rate_limiter(mut self, limiter: Arc<RateLimiter>) -> Self {
+        self.rate_limiter = Some(limiter);
+        self
+    }
+
     /// Set the platform abstraction.
     pub fn platform(mut self, platform: Arc<dyn Platform>) -> Self {
         self.platform = Some(platform);
@@ -242,6 +258,9 @@ impl AppStateBuilder {
             memory_monitor: self
                 .memory_monitor
                 .ok_or_else(|| AppStateError::MissingComponent("memory_monitor".to_string()))?,
+            rate_limiter: self
+                .rate_limiter
+                .ok_or_else(|| AppStateError::MissingComponent("rate_limiter".to_string()))?,
             platform: self.platform,
             config_persistence: self.config_persistence,
         })
@@ -263,6 +282,7 @@ mod app_state_tests {
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
             .build();
 
         assert!(result.is_err());
@@ -280,6 +300,7 @@ mod app_state_tests {
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
             .build();
 
         assert!(result.is_err());
@@ -298,6 +319,7 @@ mod app_state_tests {
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
             .build();
 
         assert!(result.is_ok());
@@ -314,6 +336,7 @@ mod app_state_tests {
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
             .build()
             .unwrap();
 
@@ -338,6 +361,7 @@ mod app_state_tests {
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
             .build()
             .unwrap();
 
@@ -409,6 +433,12 @@ pub struct Application {
 
     /// Handle to the WS-Discovery background task.
     discovery_task: Option<JoinHandle<()>>,
+
+    /// Handle to the memory logging task.
+    memory_logging_task: Option<JoinHandle<()>>,
+
+    /// Handle to the rate limiter cleanup task.
+    rate_limiter_cleanup_task: Option<JoinHandle<()>>,
 }
 
 impl Application {
@@ -516,6 +546,16 @@ impl Application {
             }
         }
 
+        // Initialize rate limiter from config (default: 60 requests per minute)
+        let rate_limit_per_minute = config_runtime
+            .get_int("server.rate_limit_per_minute")
+            .unwrap_or(60) as u32;
+        let rate_limiter = Arc::new(RateLimiter::new(rate_limit_per_minute));
+        tracing::info!(
+            "Rate limiter initialized: {} requests/minute",
+            rate_limit_per_minute
+        );
+
         let mut app_state_builder = AppState::builder()
             .user_storage(Arc::new(user_storage))
             .password_manager(Arc::new(PasswordManager::new()))
@@ -525,7 +565,8 @@ impl Application {
                 crate::utils::MemoryMonitor::from_config(&config_runtime).map_err(|e| {
                     StartupError::Services(format!("Failed to initialize memory monitor: {}", e))
                 })?,
-            ));
+            ))
+            .rate_limiter(Arc::clone(&rate_limiter));
 
         // Wire config persistence handle
         app_state_builder = app_state_builder.config_persistence(persistence_handle.clone());
@@ -538,6 +579,21 @@ impl Application {
         let app_state = app_state_builder
             .build()
             .map_err(|e| StartupError::Services(e.to_string()))?;
+
+        // Start memory logging task (logs every 5 minutes by default)
+        let memory_logging_interval = config_runtime
+            .get_int("memory.logging_interval_secs")
+            .unwrap_or(300) as u64; // Default: 5 minutes
+        let memory_logging_task = Some(app_state.memory_monitor().clone().start_periodic_logging(
+            Duration::from_secs(memory_logging_interval),
+            shutdown_coordinator.subscribe(),
+        ));
+
+        // Start rate limiter cleanup task (runs every minute)
+        let rate_limiter_cleanup_task = Some(
+            rate_limiter
+                .start_cleanup_task(Duration::from_secs(60), shutdown_coordinator.subscribe()),
+        );
 
         progress.complete_phase();
 
@@ -572,6 +628,20 @@ impl Application {
             enable_cors: false,
             static_root,
             http_verbose,
+            tls_enabled: config_runtime
+                .get_bool("server.tls_enabled")
+                .unwrap_or(false),
+            tls_cert_path: config_runtime
+                .get_string("server.tls_cert_path")
+                .ok()
+                .map(std::path::PathBuf::from),
+            tls_key_path: config_runtime
+                .get_string("server.tls_key_path")
+                .ok()
+                .map(std::path::PathBuf::from),
+            rate_limit_per_minute: config_runtime
+                .get_int("server.rate_limit_per_minute")
+                .unwrap_or(60) as u32,
         };
 
         let server = Arc::new(
@@ -640,6 +710,8 @@ impl Application {
             discovery,
             discovery_task,
             config_persistence_task,
+            memory_logging_task,
+            rate_limiter_cleanup_task,
         })
     }
 
@@ -752,6 +824,16 @@ impl Application {
         // Phase 3a: Config persistence task
         if let Some(task) = self.config_persistence_task.take() {
             let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        }
+
+        // Phase 3b: Memory logging task
+        if let Some(task) = self.memory_logging_task.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(1), task).await;
+        }
+
+        // Phase 3c: Rate limiter cleanup task
+        if let Some(task) = self.rate_limiter_cleanup_task.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(1), task).await;
         }
 
         // Phase 3: Services shutdown (reverse order)
@@ -894,39 +976,6 @@ impl Application {
         tracing::debug!("WS-Discovery task started (full discovery mode)");
 
         Ok((handle, task))
-    }
-
-    /// Attempt to detect the local IP address.
-    ///
-    /// This is a best-effort function that tries common approaches:
-    /// 1. Check for non-loopback IPv4 addresses
-    /// 2. Fall back to 127.0.0.1 if detection fails
-    #[allow(dead_code)]
-    fn detect_local_ip() -> Option<String> {
-        // Try to get local IP using a UDP socket trick
-        // This doesn't actually send any packets, just uses the OS routing table
-        use std::net::UdpSocket;
-
-        match UdpSocket::bind("0.0.0.0:0") {
-            Ok(socket) => {
-                // Connect to a public DNS server (doesn't actually send anything)
-                if socket.connect("8.8.8.8:80").is_ok()
-                    && let Ok(addr) = socket.local_addr()
-                {
-                    let ip = addr.ip().to_string();
-                    if ip != "0.0.0.0" {
-                        tracing::debug!(detected_ip = %ip, "Auto-detected local IP");
-                        return Some(ip);
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::debug!(error = %e, "Failed to create socket for IP detection");
-            }
-        }
-
-        tracing::debug!("Could not auto-detect local IP, will use fallback");
-        None
     }
 }
 

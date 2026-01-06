@@ -309,11 +309,28 @@ mod ffi_impl {
     }
 
     /// Print a message using Anyka SDK logging.
+    ///
+    /// # Input Validation
+    ///
+    /// - `message`: Must not contain null bytes (validated by `CString::new()`)
+    /// - `level`: Must be a valid `LogLevel` enum variant (type system ensures this)
+    ///
+    /// # Safety
+    ///
+    /// - `CString::new()` ensures the string is null-terminated and contains no embedded nulls
+    /// - `c_msg.as_ptr()` is valid for the lifetime of the `CString`
+    /// - `ak_print()` is a C function that reads the string but does not modify it
+    /// - The `CString` is dropped after the call, ensuring proper cleanup
     pub fn ak_log(level: LogLevel, message: &str) -> AnykaResult<()> {
-        let c_msg = std::ffi::CString::new(message)
-            .map_err(|_| AnykaError::InvalidParameter("Invalid message string".to_string()))?;
+        // Validate: CString::new() will fail if message contains null bytes
+        let c_msg = std::ffi::CString::new(message).map_err(|_| {
+            AnykaError::InvalidParameter("Message contains null bytes or invalid UTF-8".to_string())
+        })?;
 
         // SAFETY: We're passing a valid C string to ak_print
+        // - c_msg is null-terminated (guaranteed by CString)
+        // - c_msg.as_ptr() is valid for the duration of the call
+        // - ak_print() does not take ownership or modify the string
         unsafe {
             ak_print(level as c_int, c_msg.as_ptr());
         }
@@ -325,8 +342,47 @@ mod ffi_impl {
         handle: *mut c_void,
     }
 
-    // SAFETY: The handle is thread-safe within the SDK context for these operations
+    // SAFETY: VideoInput handle is thread-safe - confirmed by Anyka SDK source code.
+    //
+    // Evidence from platform/libplat/src/vi/:
+    //
+    // 1. INTERNAL MUTEX PROTECTION (isp_vi.c:68-69):
+    //    static pthread_mutex_t isp_manipulate_mutex_lock = PTHREAD_MUTEX_INITIALIZER;
+    //    static pthread_mutex_t isp_frame_list_lock = PTHREAD_MUTEX_INITIALIZER;
+    //
+    // 2. MUTEX USAGE IN VI OPERATIONS (ak_vi.c):
+    //    - ak_vi_open() (line 1076): ak_thread_mutex_lock(&vi_ctrl.lock)
+    //    - vi_new_user() (line 707): ak_thread_mutex_lock(&pdev->vi_lock)
+    //    - ak_vi_set_channel_attr() (line 1186): ak_thread_mutex_lock(&pdev->vi_lock)
+    //    - ak_vi_change_channel_attr() (line 1248): ak_thread_mutex_lock(&pdev->vi_lock)
+    //    - vi_set_capture_on() (line 939): ak_thread_mutex_lock(&vi_ctrl.lock)
+    //    - isp_vi_capture_on() (isp_vi.c:753): ak_thread_mutex_lock(&isp_manipulate_mutex_lock)
+    //
+    // 3. DEVICE STRUCTURE WITH LOCKS (ak_vi.c:904-905):
+    //    ak_thread_mutex_init(&(pdev->vi_lock), NULL);
+    //    ak_thread_mutex_init(&(pdev->frame_lock), NULL);
+    //
+    // The SDK implements a multi-level locking strategy:
+    // - Global vi_ctrl.lock for device registration/initialization
+    // - Per-device pdev->vi_lock for device-specific operations
+    // - ISP-level isp_manipulate_mutex_lock for hardware access
+    //
+    // This confirms Send safety: the SDK's internal mutexes protect all state
+    // modifications, making it safe to transfer ownership between threads.
     unsafe impl Send for VideoInput {}
+
+    // SAFETY: VideoInput handle is Sync-safe - SDK uses internal synchronization.
+    //
+    // The SDK's mutex protection (documented above for Send) also ensures Sync safety.
+    // All operations that access or modify the vi_handle state are protected by mutexes,
+    // allowing safe concurrent access from multiple threads.
+    //
+    // Vendor reference code confirms this design:
+    // - libre_anyka_app/main.c: Global vi_handle accessed by 4+ threads without external locks
+    // - venc_demo/ak_venc_demo.c: vi_handle passed to multiple encoding threads
+    // - No pthread_mutex_lock/unlock around ak_vi_* calls in application code
+    //
+    // The SDK's internal locking makes external synchronization unnecessary.
     unsafe impl Sync for VideoInput {}
 
     impl Drop for VideoInput {
@@ -342,6 +398,11 @@ mod ffi_impl {
 
     /// Open video input device.
     ///
+    /// # Input Validation
+    ///
+    /// - `device`: Must be `VideoDevice::DEV0` (value 0) - validated by type system
+    /// - Bounds: Only device 0 is supported by hardware
+    ///
     /// # Safety
     ///
     /// The transmute is safe because:
@@ -350,9 +411,20 @@ mod ffi_impl {
     /// - The resulting i32 matches the C enum `video_dev_type` representation exactly
     /// - `video_dev_type` is a C enum with variants 0-N, and our value 0 is valid
     /// - NOSONAR: S5343 - transmute is safe for enum value mapping with known bounds
+    ///
+    /// The FFI call is safe because:
+    /// - `ak_vi_open()` is a C function that returns a handle or NULL
+    /// - We check for null handle and return error if SDK fails
+    /// - The handle is wrapped in `VideoInput` which manages cleanup
     pub fn video_input_open(device: VideoDevice) -> AnykaResult<VideoInput> {
+        // Validate: Type system ensures device.0 is only 0 (DEV0)
         let sdk_device: video_dev_type = unsafe { std::mem::transmute(device.0 as i32) };
+
+        // SAFETY: ak_vi_open() is a C function that returns handle or NULL
+        // - We validate the result (null check below)
+        // - Handle is wrapped in VideoInput for RAII cleanup
         let handle = unsafe { ak_vi_open(sdk_device) };
+
         if handle.is_null() {
             Err(AnykaError::ResourceUnavailable("Video input".to_string()))
         } else {
@@ -361,8 +433,20 @@ mod ffi_impl {
     }
 
     /// Open PTZ motor control.
+    ///
+    /// # Input Validation
+    ///
+    /// No parameters - function initializes hardware.
+    ///
+    /// # Safety
+    ///
+    /// - `ak_drv_ptz_open()` is a C function that initializes PTZ hardware
+    /// - Returns negative value on error, non-negative on success
+    /// - We validate the result and map errors appropriately
     pub fn ptz_open() -> AnykaResult<()> {
-        // SAFETY: Calling FFI function
+        // SAFETY: ak_drv_ptz_open() is a C function that initializes hardware
+        // - Returns negative value on error, non-negative on success
+        // - We validate the result below
         let result = unsafe { ak_drv_ptz_open() };
         if result < 0 {
             Err(AnykaError::SdkError(result))
@@ -372,8 +456,20 @@ mod ffi_impl {
     }
 
     /// Close PTZ motor control.
+    ///
+    /// # Input Validation
+    ///
+    /// No parameters - function cleans up hardware.
+    ///
+    /// # Safety
+    ///
+    /// - `ak_drv_ptz_close()` is a C function that cleans up PTZ hardware
+    /// - Returns negative value on error, non-negative on success
+    /// - We validate the result and map errors appropriately
     pub fn ptz_close() -> AnykaResult<()> {
-        // SAFETY: Calling FFI function
+        // SAFETY: ak_drv_ptz_close() is a C function that cleans up hardware
+        // - Returns negative value on error, non-negative on success
+        // - We validate the result below
         let result = unsafe { ak_drv_ptz_close() };
         if result < 0 {
             Err(AnykaError::SdkError(result))
@@ -384,6 +480,12 @@ mod ffi_impl {
 
     /// Turn PTZ motor in a direction.
     ///
+    /// # Input Validation
+    ///
+    /// - `direction`: Must be a valid `PtzDirection` enum variant (Left, Right, Up, Down)
+    /// - `to_direction_code()` returns only values 1, 2, 3, 4 - validated by enum
+    /// - Degree parameter is hardcoded to 0 (not configurable in current API)
+    ///
     /// # Safety
     ///
     /// The transmute is safe because:
@@ -392,9 +494,19 @@ mod ffi_impl {
     /// - The i32 bit pattern is reinterpreted as the C enum type
     /// - All possible return values are valid C enum variants
     /// - NOSONAR: S5343 - transmute is safe for enum value mapping with known bounds
+    ///
+    /// The FFI call is safe because:
+    /// - `ak_drv_ptz_turn()` is a C function that moves PTZ hardware
+    /// - Returns negative value on error, non-negative on success
+    /// - We validate the result and map errors appropriately
     pub fn ptz_turn(direction: PtzDirection) -> AnykaResult<()> {
+        // Validate: Enum ensures only valid direction values
         let sdk_direction: ptz_turn_direction =
             unsafe { std::mem::transmute(direction.to_direction_code()) };
+
+        // SAFETY: ak_drv_ptz_turn() is a C function that moves PTZ hardware
+        // - Returns negative value on error, non-negative on success
+        // - We validate the result below
         let result = unsafe { ak_drv_ptz_turn(sdk_direction, 0) };
         if result < 0 {
             Err(AnykaError::SdkError(result))
@@ -404,8 +516,20 @@ mod ffi_impl {
     }
 
     /// Stop PTZ motor movement.
+    ///
+    /// # Input Validation
+    ///
+    /// No parameters - function stops all PTZ movement.
+    ///
+    /// # Safety
+    ///
+    /// - `ak_drv_ptz_stop()` is a C function that stops PTZ hardware movement
+    /// - Returns negative value on error, non-negative on success
+    /// - We validate the result and map errors appropriately
     pub fn ptz_stop() -> AnykaResult<()> {
-        // SAFETY: Calling FFI function
+        // SAFETY: ak_drv_ptz_stop() is a C function that stops PTZ hardware
+        // - Returns negative value on error, non-negative on success
+        // - We validate the result below
         let result = unsafe { ak_drv_ptz_stop() };
         if result < 0 {
             Err(AnykaError::SdkError(result))
@@ -416,6 +540,11 @@ mod ffi_impl {
 
     /// Get PTZ motor step position.
     ///
+    /// # Input Validation
+    ///
+    /// - `motor`: Must be a valid `PtzMotor` enum variant (Horizontal or Vertical)
+    /// - `to_device_id()` returns only values 0 or 1 - validated by enum
+    ///
     /// # Safety
     ///
     /// The transmute is safe because:
@@ -424,8 +553,18 @@ mod ffi_impl {
     /// - The i32 bit pattern is reinterpreted as the C enum type
     /// - All possible return values are valid C enum variants
     /// - NOSONAR: S5343 - transmute is safe for enum value mapping with known bounds
+    ///
+    /// The FFI call is safe because:
+    /// - `ak_drv_ptz_get_step_pos()` is a C function that reads hardware position
+    /// - Returns negative value on error, position value (>=0) on success
+    /// - We validate the result and map errors appropriately
     pub fn ptz_get_position(motor: PtzMotor) -> AnykaResult<i32> {
+        // Validate: Enum ensures only valid motor values (0 or 1)
         let sdk_motor: ptz_device = unsafe { std::mem::transmute(motor.to_device_id()) };
+
+        // SAFETY: ak_drv_ptz_get_step_pos() is a C function that reads hardware position
+        // - Returns negative value on error, position value (>=0) on success
+        // - We validate the result below
         let result = unsafe { ak_drv_ptz_get_step_pos(sdk_motor) };
         if result < 0 {
             Err(AnykaError::SdkError(result))

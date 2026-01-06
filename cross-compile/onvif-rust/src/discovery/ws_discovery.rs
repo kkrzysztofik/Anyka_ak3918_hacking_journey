@@ -149,6 +149,10 @@ pub enum DiscoveryError {
     /// Discovery service already running
     #[error("discovery service already running")]
     AlreadyRunning,
+
+    /// Socket not initialized
+    #[error("socket not initialized")]
+    NotInitialized,
 }
 
 // =============================================================================
@@ -897,7 +901,12 @@ impl WsDiscovery {
         };
 
         // Clone values needed by the background task
-        let socket = self.socket.as_ref().unwrap().clone();
+        // SAFETY: socket is guaranteed to be Some after successful init_socket() call above
+        let socket = self
+            .socket
+            .as_ref()
+            .ok_or(DiscoveryError::NotInitialized)?
+            .clone();
         let config = self.config.clone();
         let running = self.running.clone();
         let metadata_version = self.metadata_version.clone();

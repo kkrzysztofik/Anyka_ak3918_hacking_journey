@@ -259,8 +259,52 @@ pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> 
         }
     }
 
-    if state.body_xml.is_empty() {
+    // Validate that Envelope exists (check this first for clearer error messages)
+    if !state.envelope_seen {
+        return Err(SoapParseError::MissingEnvelope);
+    }
+
+    // Validate that Envelope is the root element
+    if state.elements_before_envelope > 0 {
+        return Err(SoapParseError::InvalidStructure(
+            "SOAP Envelope must be the root element".to_string(),
+        ));
+    }
+
+    // Validate SOAP envelope namespace
+    if let Some(ref ns) = state.envelope_namespace {
+        if ns != SOAP_ENVELOPE_NS {
+            return Err(SoapParseError::InvalidStructure(format!(
+                "Invalid SOAP envelope namespace: expected '{}', got '{}'",
+                SOAP_ENVELOPE_NS, ns
+            )));
+        }
+    } else {
+        // Envelope was seen but no namespace was found - this is also invalid
+        return Err(SoapParseError::InvalidStructure(
+            "SOAP envelope missing namespace declaration".to_string(),
+        ));
+    }
+
+    // Validate that Body exists within Envelope
+    if !state.body_seen || state.body_xml.is_empty() {
         return Err(SoapParseError::MissingBody);
+    }
+
+    // Validate WS-Security namespace if Security header is present
+    if (state.in_security
+        || state
+            .header
+            .as_ref()
+            .and_then(|h| h.security.as_ref())
+            .is_some())
+        && let Some(ref ns) = state.security_namespace
+        && ns != WSSE_NS
+    {
+        return Err(SoapParseError::InvalidStructure(format!(
+            "Invalid WS-Security namespace: expected '{}', got '{}'",
+            WSSE_NS, ns
+        )));
     }
 
     Ok(RawSoapEnvelope {
@@ -293,6 +337,11 @@ struct SoapParseState {
     in_username_token: bool,
     current_element: Option<String>,
     security_data: WsSecurityParseData,
+    envelope_namespace: Option<String>,
+    security_namespace: Option<String>,
+    envelope_seen: bool,
+    body_seen: bool,
+    elements_before_envelope: u32,
 }
 
 impl SoapParseState {
@@ -308,14 +357,44 @@ impl SoapParseState {
             in_username_token: false,
             current_element: None,
             security_data: WsSecurityParseData::default(),
+            envelope_namespace: None,
+            security_namespace: None,
+            envelope_seen: false,
+            body_seen: false,
+            elements_before_envelope: 0,
         }
     }
 }
 
 /// Handle a Start event during SOAP parsing.
 fn handle_start_event(state: &mut SoapParseState, name: &str, e: &quick_xml::events::BytesStart) {
-    if name == "Body" && !state.in_body {
+    // Track elements before Envelope to ensure Envelope is the root
+    if !state.envelope_seen && name != "Envelope" {
+        // Ignore XML declaration and processing instructions
+        if name != "?xml" && !name.starts_with('?') {
+            state.elements_before_envelope += 1;
+        }
+    }
+
+    // Check for Envelope element and validate namespace
+    if name == "Envelope" && !state.envelope_seen {
+        state.envelope_seen = true;
+        // Extract namespace from attributes - specifically look for xmlns:s or xmlns (default NS)
+        for attr in e.attributes().flatten() {
+            let key = String::from_utf8_lossy(attr.key.as_ref());
+            // Only capture the SOAP envelope namespace, not other xmlns declarations
+            if key == "xmlns:s" || key == "xmlns" {
+                state.envelope_namespace = Some(String::from_utf8_lossy(&attr.value).to_string());
+                break;
+            }
+        }
+    } else if name == "Body" && !state.in_body {
+        if !state.envelope_seen {
+            // Body found before Envelope - invalid structure
+            return;
+        }
         state.in_body = true;
+        state.body_seen = true;
         state.in_header = false;
         state.body_depth = 0;
     } else if name == "Header" && !state.in_body {
@@ -323,6 +402,17 @@ fn handle_start_event(state: &mut SoapParseState, name: &str, e: &quick_xml::eve
         state.header = Some(SoapHeader::default());
     } else if name == "Security" && state.in_header {
         state.in_security = true;
+        // Extract WS-Security namespace
+        for attr in e.attributes().flatten() {
+            let key = String::from_utf8_lossy(attr.key.as_ref());
+            if key.starts_with("xmlns") {
+                let value = String::from_utf8_lossy(&attr.value).to_string();
+                if value.contains("wss-wssecurity-secext") {
+                    state.security_namespace = Some(value);
+                    break;
+                }
+            }
+        }
     } else if name == "UsernameToken" && state.in_security {
         state.in_username_token = true;
     } else if state.in_username_token {
@@ -739,6 +829,54 @@ mod tests {
     }
 
     #[test]
+    fn test_missing_envelope() {
+        let xml = r#"<s:Body>
+    <GetDeviceInformation/>
+</s:Body>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(matches!(result, Err(SoapParseError::MissingEnvelope)));
+    }
+
+    #[test]
+    fn test_envelope_not_root() {
+        let xml = r#"<wrapper>
+    <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+        <s:Body>
+            <GetDeviceInformation/>
+        </s:Body>
+    </s:Envelope>
+</wrapper>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(matches!(result, Err(SoapParseError::InvalidStructure(_))));
+    }
+
+    #[test]
+    fn test_invalid_soap_namespace() {
+        let xml = r#"<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope-wrong">
+    <s:Body>
+        <GetDeviceInformation/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(matches!(result, Err(SoapParseError::InvalidStructure(_))));
+    }
+
+    #[test]
+    fn test_missing_namespace_declaration() {
+        let xml = r#"<Envelope>
+    <Body>
+        <GetDeviceInformation/>
+    </Body>
+</Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(matches!(result, Err(SoapParseError::InvalidStructure(_))));
+    }
+
+    #[test]
     fn test_build_soap_response() {
         let body = r#"<GetDeviceInformationResponse>
     <Manufacturer>Anyka</Manufacturer>
@@ -905,4 +1043,58 @@ mod tests {
 
     // Note: XML error handling test omitted since quick-xml is lenient with
     // malformed XML. The MissingBody test covers the practical error case.
+
+    #[test]
+    fn test_parse_soap_request_invalid_envelope_namespace() {
+        // Test rejection of invalid SOAP envelope namespace
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2001/12/soap-envelope">
+    <s:Body>
+        <GetDeviceInformation/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(result.is_err());
+        match result {
+            Err(SoapParseError::InvalidStructure(msg)) => {
+                assert!(msg.contains("Invalid SOAP envelope namespace"));
+                assert!(msg.contains("http://www.w3.org/2003/05/soap-envelope"));
+            }
+            _ => panic!("Expected InvalidStructure error"),
+        }
+    }
+
+    #[test]
+    fn test_parse_soap_request_valid_envelope_namespace() {
+        // Test acceptance of correct SOAP 1.2 namespace
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+    <s:Body>
+        <GetDeviceInformation/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_soap_request_xml_escaping_attributes() {
+        // Test XML with special characters in attributes (&, <, >, ", ')
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+    <s:Body>
+        <SetHostname name="camera&lt;test&gt;" value="&quot;quoted&quot;"/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(result.is_ok());
+        let envelope = result.unwrap();
+        // The body should preserve the escaped characters
+        assert!(envelope.body_xml.contains("&lt;"));
+        assert!(envelope.body_xml.contains("&gt;"));
+        assert!(envelope.body_xml.contains("&quot;"));
+    }
 }
