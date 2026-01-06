@@ -35,6 +35,13 @@ $CARGO build --release --target armv5te-unknown-linux-uclibceabi
 
 > **⚠️ CRITICAL**: Always use the custom toolchain's cargo binary for target builds.
 
+## Security Warnings
+
+> [!CAUTION]
+> **TLS Required for Production**
+>
+> ONVIF 24.12 uses WS-Security with SHA-1/MD5 digest authentication (weak by modern standards). **Never use authentication without TLS in production** - credentials can be intercepted and cracked over unencrypted HTTP. See the [TLS Setup Guide](https://github.com/kkrzysztofik/Anyka_ak3918_hacking_journey/wiki/TLS-Setup) in the wiki for configuration instructions.
+
 ## Documentation
 
 **📚 For comprehensive documentation, please visit the [GitHub Wiki](https://github.com/kkrzysztofik/Anyka_ak3918_hacking_journey/wiki).**
