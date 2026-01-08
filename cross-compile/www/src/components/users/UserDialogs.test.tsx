@@ -24,11 +24,13 @@ describe('AddUserDialog', () => {
   });
 
   describe('Rendering', () => {
-    it('should render dialog when open', () => {
+    it('should render dialog when open', async () => {
       renderWithProviders(
         <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
       );
-      expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'true');
+      await waitFor(() => {
+        expect(screen.getByTestId('dialog-content')).toBeInTheDocument();
+      });
       expect(screen.getByTestId('add-user-dialog-title')).toHaveTextContent('Add User');
       expect(screen.getByTestId('add-user-dialog-description')).toHaveTextContent(
         'Create a new user account',
@@ -39,7 +41,7 @@ describe('AddUserDialog', () => {
       renderWithProviders(
         <AddUserDialog open={false} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
       );
-      expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'false');
+      expect(screen.queryByTestId('dialog-content')).not.toBeInTheDocument();
     });
   });
 
@@ -58,7 +60,7 @@ describe('AddUserDialog', () => {
       renderWithProviders(
         <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
       );
-      expect(screen.getByText('User Level')).toBeInTheDocument();
+      expect(screen.getByTestId('add-user-level-label')).toBeInTheDocument();
     });
   });
 
@@ -70,9 +72,7 @@ describe('AddUserDialog', () => {
       );
 
       const submitButton = screen.getByTestId('add-user-submit-button');
-      await act(async () => {
-        await user.click(submitButton);
-      });
+      await user.click(submitButton);
 
       await waitFor(
         () => {
@@ -91,15 +91,11 @@ describe('AddUserDialog', () => {
       const usernameInput = screen.getByTestId('add-user-username-input');
       const passwordInput = screen.getByTestId('add-user-password-input');
 
-      await act(async () => {
-        await user.type(usernameInput, 'testuser');
-        await user.type(passwordInput, '123'); // Too short
-      });
+      await user.type(usernameInput, 'testuser');
+      await user.type(passwordInput, '123'); // Too short
 
       const submitButton = screen.getByTestId('add-user-submit-button');
-      await act(async () => {
-        await user.click(submitButton);
-      });
+      await user.click(submitButton);
 
       await waitFor(
         () => {
@@ -118,15 +114,11 @@ describe('AddUserDialog', () => {
       const usernameInput = screen.getByTestId('add-user-username-input');
       const passwordInput = screen.getByTestId('add-user-password-input');
 
-      await act(async () => {
-        await user.type(usernameInput, 'testuser');
-        await user.type(passwordInput, 'a'.repeat(65)); // Too long
-      });
+      await user.type(usernameInput, 'testuser');
+      await user.type(passwordInput, 'a'.repeat(65)); // Too long
 
       const submitButton = screen.getByTestId('add-user-submit-button');
-      await act(async () => {
-        await user.click(submitButton);
-      });
+      await user.click(submitButton);
 
       await waitFor(
         () => {
@@ -146,11 +138,9 @@ describe('AddUserDialog', () => {
       const passwordInput = screen.getByTestId('add-user-password-input');
       const confirmPasswordInput = screen.getByTestId('add-user-confirm-password-input');
 
-      await act(async () => {
-        await user.type(usernameInput, 'testuser');
-        await user.type(passwordInput, 'password123');
-        await user.type(confirmPasswordInput, 'different');
-      });
+      await user.type(usernameInput, 'testuser');
+      await user.type(passwordInput, 'password123');
+      await user.type(confirmPasswordInput, 'different');
 
       const submitButton = screen.getByTestId('add-user-submit-button');
       await user.click(submitButton);
@@ -261,11 +251,9 @@ describe('AddUserDialog', () => {
       const passwordInput = screen.getByTestId('add-user-password-input');
       const confirmPasswordInput = screen.getByTestId('add-user-confirm-password-input');
 
-      await act(async () => {
-        await user.type(usernameInput, 'newuser');
-        await user.type(passwordInput, 'password123');
-        await user.type(confirmPasswordInput, 'password123');
-      });
+      await user.type(usernameInput, 'newuser');
+      await user.type(passwordInput, 'password123');
+      await user.type(confirmPasswordInput, 'password123');
 
       // Wait for form state to update - react-hook-form needs time to sync
       await waitFor(
@@ -307,9 +295,7 @@ describe('AddUserDialog', () => {
       );
 
       const cancelButton = screen.getByTestId('add-user-cancel-button');
-      await act(async () => {
-        await user.click(cancelButton);
-      });
+      await user.click(cancelButton);
 
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });

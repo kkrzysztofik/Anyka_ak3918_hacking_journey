@@ -102,7 +102,7 @@ describe('LoginPage', () => {
     await verifyPasswordVisibilityToggle(
       user,
       'login-form-password-input',
-      'login-form-password-toggle-button',
+      'login-form-password-input-toggle-button',
     );
   });
 

@@ -92,6 +92,36 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       output: {
         manualChunks: (id) => {
+          // Application code first (specific features before generic)
+          // ONVIF services and related components
+          if (id.includes('/services/') || id.includes('onvif')) {
+            return 'onvif-services';
+          }
+
+          // Device management components
+          if (id.includes('DeviceService') || id.includes('SystemInfo')) {
+            return 'device-components';
+          }
+
+          // Store slices
+          if (id.includes('/store/slices/')) {
+            return 'store-slices';
+          }
+
+          // Utilities and helpers
+          if (id.includes('/utils/') || id.includes('/config/')) {
+            return 'app-utils';
+          }
+
+          // Video and PTZ components (specific feature code, not all node_modules)
+          if (
+            id.includes('/components/') &&
+            (id.includes('LiveView') || id.includes('PTZ') || id.includes('Video'))
+          ) {
+            return 'camera-components';
+          }
+
+          // Vendor libraries (specific packages)
           // TanStack Query and related
           if (id.includes('@tanstack/react-query')) {
             return 'query-vendor';
@@ -117,32 +147,17 @@ export default defineConfig(({ mode }) => ({
             return 'utils-vendor';
           }
 
-          // ONVIF services and related components
-          if (id.includes('/services/') || id.includes('onvif')) {
-            return 'onvif-services';
+          // React and React DOM (large, separate chunk)
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
+            return 'react-vendor';
           }
 
-          // Device management components
-          if (id.includes('DeviceService') || id.includes('SystemInfo')) {
-            return 'device-components';
+          // Form libraries
+          if (id.includes('react-hook-form') || id.includes('@hookform')) {
+            return 'form-vendor';
           }
 
-          // Video and PTZ components
-          if (id.includes('node_modules')) {
-            return 'camera-components';
-          }
-
-          // Store slices
-          if (id.includes('/store/slices/')) {
-            return 'store-slices';
-          }
-
-          // Utilities and helpers
-          if (id.includes('/utils/') || id.includes('/config/')) {
-            return 'app-utils';
-          }
-
-          // Default chunk for other modules
+          // Other node_modules (catch-all, but only after specific rules)
           if (id.includes('node_modules')) {
             return 'vendor';
           }

@@ -62,6 +62,7 @@ import {
   getUsers,
   setUser,
 } from '@/services/userService';
+import { handleMutationError } from '@/utils/errorHandling';
 
 // Schema for adding/editing user
 const userSchema = z.object({
@@ -99,9 +100,7 @@ export default function UserManagementPage() {
       form.reset();
     },
     onError: (error) => {
-      toast.error('Failed to create user', {
-        description: error instanceof Error ? error.message : 'An error occurred',
-      });
+      handleMutationError(error, 'Failed to create user');
     },
   });
 
@@ -115,9 +114,7 @@ export default function UserManagementPage() {
       form.reset();
     },
     onError: (error) => {
-      toast.error('Failed to update user', {
-        description: error instanceof Error ? error.message : 'An error occurred',
-      });
+      handleMutationError(error, 'Failed to update user');
     },
   });
 
@@ -130,9 +127,7 @@ export default function UserManagementPage() {
       setDeletingUser(null);
     },
     onError: (error) => {
-      toast.error('Failed to delete user', {
-        description: error instanceof Error ? error.message : 'An error occurred',
-      });
+      handleMutationError(error, 'Failed to delete user');
     },
   });
 
@@ -164,11 +159,16 @@ export default function UserManagementPage() {
     }
   };
 
-  if (isLoading) return <div className="text-white">Loading users...</div>;
+  if (isLoading)
+    return (
+      <div className="text-white" data-testid="user-management-loading">
+        Loading users...
+      </div>
+    );
 
   if (error) {
     return (
-      <div className="text-red-500">
+      <div className="text-red-500" data-testid="user-management-error">
         Error loading users: {error instanceof Error ? error.message : String(error)}
       </div>
     );
@@ -183,7 +183,12 @@ export default function UserManagementPage() {
         {/* Header */}
         <div className="mb-[32px] flex items-center justify-between md:mb-[40px]">
           <div>
-            <h1 className="mb-[8px] text-[22px] text-white md:text-[28px]">User Management</h1>
+            <h1
+              className="mb-[8px] text-[22px] text-white md:text-[28px]"
+              data-testid="user-management-title"
+            >
+              User Management
+            </h1>
             <p className="text-[13px] text-[#a1a1a6] md:text-[14px]">
               Manage access accounts and security roles
             </p>
@@ -233,11 +238,14 @@ export default function UserManagementPage() {
                         <div className="flex size-8 items-center justify-center rounded-full bg-[#3a3a3c] text-white">
                           <User className="size-4" />
                         </div>
-                        {user.username}
+                        <span data-testid={`user-management-username-${user.username}`}>
+                          {user.username}
+                        </span>
                       </td>
                       <td className="px-6 py-4">
                         <Badge
                           className={`pointer-events-none rounded-md border px-2 py-1 text-xs font-medium ${user.userLevel === 'Administrator' ? 'border-[rgba(255,69,58,0.2)] bg-[rgba(255,69,58,0.1)] text-[#ff453a]' : ''} ${user.userLevel === 'Operator' ? 'border-[rgba(255,159,10,0.2)] bg-[rgba(255,159,10,0.1)] text-[#ff9f0a]' : ''} ${user.userLevel === 'User' ? 'border-[rgba(48,209,88,0.2)] bg-[rgba(48,209,88,0.1)] text-[#30d158]' : ''} ${user.userLevel === 'Anonymous' ? 'border-[rgba(142,142,147,0.2)] bg-[rgba(142,142,147,0.1)] text-[#8e8e93]' : ''} `}
+                          data-testid={`user-management-role-${user.username}-${user.userLevel}`}
                         >
                           {user.userLevel}
                         </Badge>

@@ -205,7 +205,12 @@ export default function MaintenancePage() {
       <div className="max-w-[1200px] p-[16px] pb-[80px] md:p-[32px] md:pb-[48px] lg:p-[48px]">
         {/* Header */}
         <div className="mb-[32px] md:mb-[40px]">
-          <h1 className="mb-[8px] text-[22px] text-white md:text-[28px]">Maintenance</h1>
+          <h1
+            className="mb-[8px] text-[22px] text-white md:text-[28px]"
+            data-testid="maintenance-title"
+          >
+            Maintenance
+          </h1>
           <p className="text-[13px] text-[#a1a1a6] md:text-[14px]">
             Manage system updates, backups, and device power state
           </p>
@@ -220,7 +225,9 @@ export default function MaintenancePage() {
                   <Archive className="size-5 text-[#0a84ff]" />
                 </div>
                 <div>
-                  <SettingsCardTitle>Configuration Backup & Restore</SettingsCardTitle>
+                  <SettingsCardTitle data-testid="maintenance-backup-restore-title">
+                    Configuration Backup & Restore
+                  </SettingsCardTitle>
                   <SettingsCardDescription>Save or load device settings</SettingsCardDescription>
                 </div>
               </div>
@@ -259,7 +266,9 @@ export default function MaintenancePage() {
                   <HardDrive className="size-5 text-[#30d158]" />
                 </div>
                 <div>
-                  <SettingsCardTitle>Firmware</SettingsCardTitle>
+                  <SettingsCardTitle data-testid="maintenance-firmware-title">
+                    Firmware
+                  </SettingsCardTitle>
                   <SettingsCardDescription>System version and updates</SettingsCardDescription>
                 </div>
               </div>
@@ -294,7 +303,9 @@ export default function MaintenancePage() {
                   <RefreshCcw className="size-5 text-[#ff9f0a]" />
                 </div>
                 <div>
-                  <SettingsCardTitle>Soft factory reset</SettingsCardTitle>
+                  <SettingsCardTitle data-testid="maintenance-soft-reset-title">
+                    Soft factory reset
+                  </SettingsCardTitle>
                   <SettingsCardDescription>
                     Reset settings but keep IP configuration
                   </SettingsCardDescription>
@@ -313,7 +324,12 @@ export default function MaintenancePage() {
                 </AlertDialogTrigger>
                 <AlertDialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white">
                   <AlertDialogHeader>
-                    <AlertDialogTitle className="text-white">Soft Reset</AlertDialogTitle>
+                    <AlertDialogTitle
+                      className="text-white"
+                      data-testid="maintenance-soft-reset-dialog-title"
+                    >
+                      Soft Reset
+                    </AlertDialogTitle>
                     <AlertDialogDescription className="text-[#a1a1a6]">
                       This will reset all images and configuration settings to their default values.
                       Network settings (IP, DNS) will be preserved. The device will reboot.
@@ -347,7 +363,9 @@ export default function MaintenancePage() {
                   <AlertTriangle className="size-5 text-[#dc2626]" />
                 </div>
                 <div>
-                  <SettingsCardTitle>Hard factory reset</SettingsCardTitle>
+                  <SettingsCardTitle data-testid="maintenance-hard-reset-title">
+                    Hard factory reset
+                  </SettingsCardTitle>
                   <SettingsCardDescription>
                     Erase all data and reset to factory defaults
                   </SettingsCardDescription>
@@ -366,7 +384,12 @@ export default function MaintenancePage() {
                 </AlertDialogTrigger>
                 <AlertDialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white">
                   <AlertDialogHeader>
-                    <AlertDialogTitle className="text-white">Factory Reset</AlertDialogTitle>
+                    <AlertDialogTitle
+                      className="text-white"
+                      data-testid="maintenance-hard-reset-dialog-title"
+                    >
+                      Factory Reset
+                    </AlertDialogTitle>
                     <AlertDialogDescription className="text-[#a1a1a6]">
                       This is a destructive action. All settings, including network configuration
                       and users, will be permanently erased. The device will revert to its original
@@ -401,7 +424,9 @@ export default function MaintenancePage() {
                   <Power className="size-5 text-white" />
                 </div>
                 <div>
-                  <SettingsCardTitle>Reboot Device</SettingsCardTitle>
+                  <SettingsCardTitle data-testid="maintenance-reboot-title">
+                    Reboot Device
+                  </SettingsCardTitle>
                   <SettingsCardDescription>Restart the system safely</SettingsCardDescription>
                 </div>
               </div>
@@ -419,7 +444,12 @@ export default function MaintenancePage() {
                 </AlertDialogTrigger>
                 <AlertDialogContent className="border-[#3a3a3c] bg-[#1c1c1e] text-white">
                   <AlertDialogHeader>
-                    <AlertDialogTitle className="text-white">Reboot Device?</AlertDialogTitle>
+                    <AlertDialogTitle
+                      className="text-white"
+                      data-testid="maintenance-reboot-dialog-title"
+                    >
+                      Reboot Device?
+                    </AlertDialogTitle>
                     <AlertDialogDescription className="text-[#a1a1a6]">
                       The device will restart immediately. All active connections will be
                       terminated. This process typically takes about 60 seconds.

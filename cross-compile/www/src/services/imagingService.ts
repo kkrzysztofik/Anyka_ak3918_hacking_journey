@@ -4,7 +4,7 @@
  * SOAP operations for imaging settings (brightness, contrast, saturation, IR cut filter, WDR, backlight compensation).
  */
 import { ENDPOINTS } from '@/services/api';
-import { soapRequest } from '@/services/soap/client';
+import { escapeXml, soapRequest } from '@/services/soap/client';
 
 export type IrCutFilterMode = 'ON' | 'OFF' | 'AUTO';
 export type WideDynamicMode = 'ON' | 'OFF';
@@ -190,7 +190,7 @@ export async function setImagingSettings(
   const settingsXml = settingsXmlParts.join('\n      ');
 
   const body = `<timg:SetImagingSettings>
-    <timg:VideoSourceToken>${videoSourceToken}</timg:VideoSourceToken>
+    <timg:VideoSourceToken>${escapeXml(videoSourceToken)}</timg:VideoSourceToken>
     <timg:ImagingSettings>
       ${settingsXml}
     </timg:ImagingSettings>

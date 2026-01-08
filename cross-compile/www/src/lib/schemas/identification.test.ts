@@ -5,18 +5,52 @@ import { identificationSchema } from './identification';
 describe('identificationSchema', () => {
   const validate = (data: unknown) => identificationSchema.safeParse(data);
 
+  const defaultDeviceInfo = {
+    manufacturer: 'Test Manufacturer',
+    model: 'Test Model',
+    firmwareVersion: '1.0.0',
+    serialNumber: 'SN123456',
+    hardwareId: 'HW123456',
+  };
+
   describe('valid identification data', () => {
     const validCases = [
-      { name: 'Camera1', location: '', description: 'minimal valid config' },
-      { name: 'Office Camera', location: 'Building A, Room 101', description: 'name and location' },
-      { name: 'A', location: 'Test', description: 'single character name' },
-      { name: 'A'.repeat(64), location: 'Test', description: 'maximum length name (64 chars)' },
       {
+        deviceInfo: defaultDeviceInfo,
+        name: 'Camera1',
+        location: '',
+        description: 'minimal valid config',
+      },
+      {
+        deviceInfo: defaultDeviceInfo,
+        name: 'Office Camera',
+        location: 'Building A, Room 101',
+        description: 'name and location',
+      },
+      {
+        deviceInfo: defaultDeviceInfo,
+        name: 'A',
+        location: 'Test',
+        description: 'single character name',
+      },
+      {
+        deviceInfo: defaultDeviceInfo,
+        name: 'A'.repeat(64),
+        location: 'Test',
+        description: 'maximum length name (64 chars)',
+      },
+      {
+        deviceInfo: defaultDeviceInfo,
         name: 'Camera',
         location: 'A'.repeat(128),
         description: 'maximum length location (128 chars)',
       },
-      { name: '123', location: '456', description: 'numeric strings' },
+      {
+        deviceInfo: defaultDeviceInfo,
+        name: '123',
+        location: '456',
+        description: 'numeric strings',
+      },
     ];
 
     it.each(validCases)('should validate $description', (config) => {
@@ -29,29 +63,48 @@ describe('identificationSchema', () => {
     });
 
     it('should handle whitespace-only strings', () => {
-      expect(validate({ name: '   ', location: 'Test' }).success).toBe(true);
-      expect(validate({ name: 'Camera', location: '   ' }).success).toBe(true);
+      expect(
+        validate({ deviceInfo: defaultDeviceInfo, name: '   ', location: 'Test' }).success,
+      ).toBe(true);
+      expect(
+        validate({ deviceInfo: defaultDeviceInfo, name: 'Camera', location: '   ' }).success,
+      ).toBe(true);
     });
 
     it('should accept location with special and unicode characters', () => {
-      expect(validate({ name: 'Camera', location: 'Building A, Room 101 - Floor 2' }).success).toBe(
-        true,
-      );
-      expect(validate({ name: 'Camera', location: '测试地点 🏢' }).success).toBe(true);
+      expect(
+        validate({
+          deviceInfo: defaultDeviceInfo,
+          name: 'Camera',
+          location: 'Building A, Room 101 - Floor 2',
+        }).success,
+      ).toBe(true);
+      expect(
+        validate({ deviceInfo: defaultDeviceInfo, name: 'Camera', location: '测试地点 🏢' })
+          .success,
+      ).toBe(true);
     });
   });
 
   describe('invalid identification data', () => {
     const invalidCases = [
-      { data: { name: '', location: 'Test' }, error: 'required', description: 'empty name' },
       {
-        data: { name: 'A'.repeat(65), location: 'Test' },
+        data: { deviceInfo: defaultDeviceInfo, name: '', location: 'Test' },
+        error: 'required',
+        description: 'empty name',
+      },
+      {
+        data: { deviceInfo: defaultDeviceInfo, name: 'A'.repeat(65), location: 'Test' },
         error: 'too long',
         description: 'name too long',
       },
-      { data: { location: 'Test' }, error: 'invalid input', description: 'missing name' },
       {
-        data: { name: 'Camera', location: 'A'.repeat(129) },
+        data: { deviceInfo: defaultDeviceInfo, location: 'Test' },
+        error: 'invalid input',
+        description: 'missing name',
+      },
+      {
+        data: { deviceInfo: defaultDeviceInfo, name: 'Camera', location: 'A'.repeat(129) },
         error: 'too long',
         description: 'location too long',
       },

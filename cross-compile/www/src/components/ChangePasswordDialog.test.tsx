@@ -52,14 +52,16 @@ describe('ChangePasswordDialog', () => {
   });
 
   describe('Dialog Open/Close', () => {
-    it('should render dialog when open is true', () => {
+    it('should render dialog when open is true', async () => {
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
-      expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'true');
+      await waitFor(() => {
+        expect(screen.getByTestId('dialog-content')).toBeInTheDocument();
+      });
     });
 
     it('should not render dialog content when open is false', () => {
       renderWithProviders(<ChangePasswordDialog open={false} onOpenChange={vi.fn()} />);
-      expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'false');
+      expect(screen.queryByTestId('dialog-content')).not.toBeInTheDocument();
     });
 
     it('should call onOpenChange when cancel button is clicked', async () => {
@@ -69,9 +71,7 @@ describe('ChangePasswordDialog', () => {
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={onOpenChange} />);
 
       const cancelButton = screen.getByTestId('change-password-dialog-cancel-button');
-      await act(async () => {
-        await user.click(cancelButton);
-      });
+      await user.click(cancelButton);
 
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
@@ -94,11 +94,9 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await act(async () => {
-        await user.type(currentPasswordInput, 'oldpass');
-        await user.type(newPasswordInput, 'newpass123');
-        await user.type(confirmPasswordInput, 'newpass123');
-      });
+      await user.type(currentPasswordInput, 'oldpass');
+      await user.type(newPasswordInput, 'newpass123');
+      await user.type(confirmPasswordInput, 'newpass123');
 
       // Wait for form state to update
       await waitFor(() => {
@@ -131,9 +129,7 @@ describe('ChangePasswordDialog', () => {
       renderWithProviders(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const submitButton = screen.getByTestId('change-password-dialog-submit-button');
-      await act(async () => {
-        await user.click(submitButton);
-      });
+      await user.click(submitButton);
 
       // Form validation should prevent submission
       await waitFor(() => {
@@ -150,15 +146,11 @@ describe('ChangePasswordDialog', () => {
       );
       const newPasswordInput = screen.getByTestId('change-password-dialog-new-password-input');
 
-      await act(async () => {
-        await user.type(currentPasswordInput, 'oldpass');
-        await user.type(newPasswordInput, '12345'); // Too short
-      });
+      await user.type(currentPasswordInput, 'oldpass');
+      await user.type(newPasswordInput, '12345'); // Too short
 
       const submitButton = screen.getByTestId('change-password-dialog-submit-button');
-      await act(async () => {
-        await user.click(submitButton);
-      });
+      await user.click(submitButton);
 
       await waitFor(() => {
         expect(verifyCredentials).not.toHaveBeenCalled();
@@ -174,15 +166,11 @@ describe('ChangePasswordDialog', () => {
       );
       const newPasswordInput = screen.getByTestId('change-password-dialog-new-password-input');
 
-      await act(async () => {
-        await user.type(currentPasswordInput, 'oldpass');
-        await user.type(newPasswordInput, 'a'.repeat(33)); // Too long
-      });
+      await user.type(currentPasswordInput, 'oldpass');
+      await user.type(newPasswordInput, 'a'.repeat(33)); // Too long
 
       const submitButton = screen.getByTestId('change-password-dialog-submit-button');
-      await act(async () => {
-        await user.click(submitButton);
-      });
+      await user.click(submitButton);
 
       await waitFor(() => {
         expect(verifyCredentials).not.toHaveBeenCalled();
@@ -201,16 +189,12 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await act(async () => {
-        await user.type(currentPasswordInput, 'oldpass');
-        await user.type(newPasswordInput, 'newpass123');
-        await user.type(confirmPasswordInput, 'different');
-      });
+      await user.type(currentPasswordInput, 'oldpass');
+      await user.type(newPasswordInput, 'newpass123');
+      await user.type(confirmPasswordInput, 'different');
 
       const submitButton = screen.getByTestId('change-password-dialog-submit-button');
-      await act(async () => {
-        await user.click(submitButton);
-      });
+      await user.click(submitButton);
 
       await waitFor(() => {
         expect(verifyCredentials).not.toHaveBeenCalled();
@@ -226,7 +210,7 @@ describe('ChangePasswordDialog', () => {
       await verifyPasswordVisibilityToggle(
         user,
         'change-password-dialog-current-password-input',
-        'change-password-dialog-current-toggle',
+        'change-password-dialog-current-password-input-toggle-button',
       );
     });
 
@@ -237,7 +221,7 @@ describe('ChangePasswordDialog', () => {
       await verifyPasswordVisibilityToggle(
         user,
         'change-password-dialog-new-password-input',
-        'change-password-dialog-new-toggle',
+        'change-password-dialog-new-password-input-toggle-button',
       );
     });
   });
@@ -258,11 +242,9 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await act(async () => {
-        await user.type(currentPasswordInput, 'oldpass');
-        await user.type(newPasswordInput, 'newpass123');
-        await user.type(confirmPasswordInput, 'newpass123');
-      });
+      await user.type(currentPasswordInput, 'oldpass');
+      await user.type(newPasswordInput, 'newpass123');
+      await user.type(confirmPasswordInput, 'newpass123');
 
       // Wait a bit for form state to update
       await waitFor(() => {
@@ -309,11 +291,9 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await act(async () => {
-        await user.type(currentPasswordInput, 'oldpass');
-        await user.type(newPasswordInput, 'newpass123');
-        await user.type(confirmPasswordInput, 'newpass123');
-      });
+      await user.type(currentPasswordInput, 'oldpass');
+      await user.type(newPasswordInput, 'newpass123');
+      await user.type(confirmPasswordInput, 'newpass123');
 
       // Wait for form state to update
       await waitFor(() => {
@@ -400,11 +380,9 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await act(async () => {
-        await user.type(currentPasswordInput, 'oldpass');
-        await user.type(newPasswordInput, 'newpass123');
-        await user.type(confirmPasswordInput, 'newpass123');
-      });
+      await user.type(currentPasswordInput, 'oldpass');
+      await user.type(newPasswordInput, 'newpass123');
+      await user.type(confirmPasswordInput, 'newpass123');
 
       // Wait for form state to update
       await waitFor(() => {
@@ -434,8 +412,6 @@ describe('ChangePasswordDialog', () => {
       const error = new Error('Network error');
       vi.mocked(verifyCredentials).mockRejectedValue(error);
 
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
       render(<ChangePasswordDialog open={true} onOpenChange={vi.fn()} />);
 
       const currentPasswordInput = screen.getByTestId(
@@ -446,11 +422,9 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await act(async () => {
-        await user.type(currentPasswordInput, 'oldpass');
-        await user.type(newPasswordInput, 'newpass123');
-        await user.type(confirmPasswordInput, 'newpass123');
-      });
+      await user.type(currentPasswordInput, 'oldpass');
+      await user.type(newPasswordInput, 'newpass123');
+      await user.type(confirmPasswordInput, 'newpass123');
 
       // Wait for form state to update
       await waitFor(() => {
@@ -471,12 +445,9 @@ describe('ChangePasswordDialog', () => {
           expect(mockToast.error).toHaveBeenCalledWith(
             'Failed to update password. Please check your connection.',
           );
-          expect(consoleSpy).toHaveBeenCalledWith('Failed to change password:', error);
         },
         { timeout: 3000 },
       );
-
-      consoleSpy.mockRestore();
     });
   });
 
@@ -498,11 +469,9 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await act(async () => {
-        await user.type(currentPasswordInput, 'oldpass');
-        await user.type(newPasswordInput, 'newpass123');
-        await user.type(confirmPasswordInput, 'newpass123');
-      });
+      await user.type(currentPasswordInput, 'oldpass');
+      await user.type(newPasswordInput, 'newpass123');
+      await user.type(confirmPasswordInput, 'newpass123');
 
       // Wait for form state to update
       await waitFor(() => {
@@ -522,8 +491,8 @@ describe('ChangePasswordDialog', () => {
 
       await waitFor(
         () => {
-          expect(screen.getByText('Updating...')).toBeInTheDocument();
           expect(submitButton).toBeDisabled();
+          expect(submitButton).toHaveTextContent('Updating...');
         },
         { timeout: 3000 },
       );
@@ -550,11 +519,9 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await act(async () => {
-        await user.type(currentPasswordInput, 'oldpass');
-        await user.type(newPasswordInput, 'newpass123');
-        await user.type(confirmPasswordInput, 'newpass123');
-      });
+      await user.type(currentPasswordInput, 'oldpass');
+      await user.type(newPasswordInput, 'newpass123');
+      await user.type(confirmPasswordInput, 'newpass123');
 
       // Wait for form state to update
       await waitFor(() => {

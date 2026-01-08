@@ -30,8 +30,7 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
         try {
           const info = await getDeviceInformation();
           setDeviceInfo(info);
-        } catch (error) {
-          console.error('Failed to fetch device info:', error);
+        } catch {
           toast.error('Failed to load device information');
         } finally {
           setIsLoading(false);
@@ -84,31 +83,50 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
                 <div className="space-y-4" data-testid="about-content">
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div className="space-y-1">
-                      <p className="text-dark-secondary-text">Manufacturer</p>
+                      <p
+                        className="text-dark-secondary-text"
+                        data-testid="about-manufacturer-label"
+                      >
+                        Manufacturer
+                      </p>
                       <p className="font-medium text-white" data-testid="about-manufacturer-value">
                         {deviceInfo.manufacturer}
                       </p>
                     </div>
                     <div className="space-y-1">
-                      <p className="text-dark-secondary-text">Model</p>
+                      <p className="text-dark-secondary-text" data-testid="about-model-label">
+                        Model
+                      </p>
                       <p className="font-medium text-white" data-testid="about-model-value">
                         {deviceInfo.model}
                       </p>
                     </div>
                     <div className="space-y-1">
-                      <p className="text-dark-secondary-text">Firmware Version</p>
+                      <p
+                        className="text-dark-secondary-text"
+                        data-testid="about-firmware-version-label"
+                      >
+                        Firmware Version
+                      </p>
                       <p className="font-medium text-white" data-testid="about-firmware-value">
                         {deviceInfo.firmwareVersion}
                       </p>
                     </div>
                     <div className="space-y-1">
-                      <p className="text-dark-secondary-text">Serial Number</p>
+                      <p
+                        className="text-dark-secondary-text"
+                        data-testid="about-serial-number-label"
+                      >
+                        Serial Number
+                      </p>
                       <p className="font-medium text-white" data-testid="about-serial-value">
                         {deviceInfo.serialNumber}
                       </p>
                     </div>
                     <div className="col-span-2 space-y-1">
-                      <p className="text-dark-secondary-text">Hardware ID</p>
+                      <p className="text-dark-secondary-text" data-testid="about-hardware-id-label">
+                        Hardware ID
+                      </p>
                       <p
                         className="bg-dark-bg border-dark-border rounded border p-2 font-mono text-xs font-medium break-all text-white"
                         data-testid="about-hardware-id-value"

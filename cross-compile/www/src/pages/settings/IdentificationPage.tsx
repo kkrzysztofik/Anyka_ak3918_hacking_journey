@@ -5,6 +5,7 @@
  */
 import React, { useEffect } from 'react';
 
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Activity, HardDrive, Image as ImageIcon, Info, RotateCcw, Save, Wifi } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -33,12 +34,14 @@ import {
   StatusCardImage,
   StatusCardItem,
 } from '@/components/ui/status-card';
+import { identificationSchema } from '@/lib/schemas/identification';
 import {
   type DeviceIdentification,
   getDeviceIdentification,
   setDeviceInformation,
 } from '@/services/deviceService';
 import { type NetworkInterface, getNetworkInterfaces } from '@/services/networkService';
+import { handleMutationError } from '@/utils/errorHandling';
 
 export default function IdentificationPage() {
   const queryClient = useQueryClient();
@@ -56,6 +59,7 @@ export default function IdentificationPage() {
   });
 
   const form = useForm<DeviceIdentification>({
+    resolver: zodResolver(identificationSchema),
     defaultValues: {
       deviceInfo: {
         manufacturer: '',
@@ -84,9 +88,7 @@ export default function IdentificationPage() {
       queryClient.invalidateQueries({ queryKey: ['deviceInformation'] });
     },
     onError: (error) => {
-      toast.error('Failed to save device information', {
-        description: error instanceof Error ? error.message : 'An error occurred',
-      });
+      handleMutationError(error, 'Failed to save device information');
     },
   });
 
@@ -102,7 +104,11 @@ export default function IdentificationPage() {
   };
 
   if (isDeviceLoading) {
-    return <div className="text-white">Loading...</div>;
+    return (
+      <div className="text-white" data-testid="identification-loading">
+        Loading...
+      </div>
+    );
   }
 
   const primaryInterface = networkInterfaces?.[0];
@@ -115,7 +121,12 @@ export default function IdentificationPage() {
       <div className="max-w-[1200px] p-[16px] pb-[80px] md:p-[32px] md:pb-[48px] lg:p-[48px]">
         {/* Header */}
         <div className="mb-[32px] md:mb-[40px]">
-          <h1 className="mb-[8px] text-[22px] text-white md:text-[28px]">Identification</h1>
+          <h1
+            className="mb-[8px] text-[22px] text-white md:text-[28px]"
+            data-testid="identification-title"
+          >
+            Identification
+          </h1>
           <p className="text-[13px] text-[#a1a1a6] md:text-[14px]">
             View and configure device identification settings
           </p>

@@ -45,7 +45,13 @@ export async function soapRequest<T>(
 
   const data = parsed.data;
   if (responseTarget && data) {
-    return data[responseTarget] as T;
+    const target = data[responseTarget];
+    if (target === undefined || target === null) {
+      throw new Error(
+        `SOAP response target "${responseTarget}" not found in response. Available keys: ${Object.keys(data).join(', ')}`,
+      );
+    }
+    return target as T;
   }
 
   return data as T;
@@ -211,16 +217,16 @@ export const soapBodies = {
   getUsers: () => '<tds:GetUsers />',
   getProfiles: () => '<trt:GetProfiles />',
   getImagingSettings: (videoSourceToken: string) =>
-    `<timg:GetImagingSettings><timg:VideoSourceToken>${videoSourceToken}</timg:VideoSourceToken></timg:GetImagingSettings>`,
+    `<timg:GetImagingSettings><timg:VideoSourceToken>${escapeXml(videoSourceToken)}</timg:VideoSourceToken></timg:GetImagingSettings>`,
   systemReboot: () => '<tds:SystemReboot />',
   setSystemFactoryDefault: (type: 'Hard' | 'Soft') =>
-    `<tds:SetSystemFactoryDefault><tds:FactoryDefault>${type}</tds:FactoryDefault></tds:SetSystemFactoryDefault>`,
+    `<tds:SetSystemFactoryDefault><tds:FactoryDefault>${escapeXml(type)}</tds:FactoryDefault></tds:SetSystemFactoryDefault>`,
   getSystemBackup: () => '<tds:GetSystemBackup />',
   restoreSystem: (backupFiles: Array<{ Name: string; Data: string }>) => {
     const filesXml = backupFiles
       .map(
         (file) =>
-          `<tds:BackupFile><tds:Name>${file.Name}</tds:Name><tds:Data>${file.Data}</tds:Data></tds:BackupFile>`,
+          `<tds:BackupFile><tds:Name>${escapeXml(file.Name)}</tds:Name><tds:Data>${escapeXml(file.Data)}</tds:Data></tds:BackupFile>`,
       )
       .join('');
     return `<tds:RestoreSystem><tds:BackupFiles>${filesXml}</tds:BackupFiles></tds:RestoreSystem>`;

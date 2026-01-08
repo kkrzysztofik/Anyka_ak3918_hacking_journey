@@ -36,14 +36,16 @@ describe('AboutDialog', () => {
   });
 
   describe('Dialog Open/Close', () => {
-    it('should render dialog when open is true', () => {
+    it('should render dialog when open is true', async () => {
       renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
-      expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'true');
+      await waitFor(() => {
+        expect(screen.getByTestId('about-dialog-content')).toBeInTheDocument();
+      });
     });
 
     it('should not render dialog content when open is false', () => {
       renderWithProviders(<AboutDialog open={false} onOpenChange={vi.fn()} />);
-      expect(screen.getByTestId('dialog')).toHaveAttribute('data-open', 'false');
+      expect(screen.queryByTestId('about-dialog-content')).not.toBeInTheDocument();
     });
 
     it('should call onOpenChange when close button is clicked', async () => {
@@ -53,9 +55,7 @@ describe('AboutDialog', () => {
       renderWithProviders(<AboutDialog open={true} onOpenChange={onOpenChange} />);
 
       const closeButton = screen.getByTestId('about-close-button');
-      await act(async () => {
-        await user.click(closeButton);
-      });
+      await user.click(closeButton);
 
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
@@ -67,9 +67,7 @@ describe('AboutDialog', () => {
       renderWithProviders(<AboutDialog open={true} onOpenChange={onOpenChange} />);
 
       const overlay = screen.getByTestId('dialog-overlay');
-      await act(async () => {
-        await user.click(overlay);
-      });
+      await user.click(overlay);
 
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
@@ -90,9 +88,11 @@ describe('AboutDialog', () => {
         expect(screen.getByTestId('about-loading')).toBeInTheDocument();
       });
 
-      // Resolve the promise
-      resolve(mockDeviceInfo);
-      await promise;
+      // Resolve the promise within act() to handle state updates
+      await act(async () => {
+        resolve(mockDeviceInfo);
+        await promise;
+      });
     });
   });
 
@@ -119,11 +119,11 @@ describe('AboutDialog', () => {
       renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
       await waitFor(() => {
-        expect(screen.getByText('Manufacturer')).toBeInTheDocument();
-        expect(screen.getByText('Model')).toBeInTheDocument();
-        expect(screen.getByText('Firmware Version')).toBeInTheDocument();
-        expect(screen.getByText('Serial Number')).toBeInTheDocument();
-        expect(screen.getByText('Hardware ID')).toBeInTheDocument();
+        expect(screen.getByTestId('about-manufacturer-label')).toBeInTheDocument();
+        expect(screen.getByTestId('about-model-label')).toBeInTheDocument();
+        expect(screen.getByTestId('about-firmware-version-label')).toBeInTheDocument();
+        expect(screen.getByTestId('about-serial-number-label')).toBeInTheDocument();
+        expect(screen.getByTestId('about-hardware-id-label')).toBeInTheDocument();
       });
     });
 
@@ -189,16 +189,12 @@ describe('AboutDialog', () => {
       const error = new Error('Network error');
       const { getDeviceInformation } = await import('@/services/deviceService');
       vi.mocked(getDeviceInformation).mockRejectedValue(error);
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
       await waitFor(() => {
         expect(mockToast.error).toHaveBeenCalledWith('Failed to load device information');
-        expect(consoleSpy).toHaveBeenCalledWith('Failed to fetch device info:', error);
       });
-
-      consoleSpy.mockRestore();
     });
 
     it('should show error message when device info is not available', async () => {

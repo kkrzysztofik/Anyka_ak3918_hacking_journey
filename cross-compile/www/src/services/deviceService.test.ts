@@ -63,7 +63,9 @@ describe('deviceService', () => {
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-      await expect(getDeviceInformation()).rejects.toThrow('Invalid response');
+      await expect(getDeviceInformation()).rejects.toThrow(
+        'SOAP response target "GetDeviceInformationResponse" not found',
+      );
     });
   });
 

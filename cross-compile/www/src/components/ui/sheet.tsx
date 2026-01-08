@@ -56,44 +56,56 @@ interface SheetContentProps
 const SheetContent = React.forwardRef<
   React.ComponentRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = 'right', className, children, ...props }, ref) => (
-  <SheetPortal>
-    <SheetOverlay data-testid="sheet-overlay" />
-    <SheetPrimitive.Content
-      ref={ref}
-      className={cn(sheetVariants({ side }), className)}
-      data-testid={props['data-testid'] || 'sheet-content'}
-      {...props}
-    >
-      <SheetPrimitive.Close
-        className="ring-offset-background focus:ring-ring data-[state=open]:bg-secondary absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:pointer-events-none"
-        data-testid="sheet-close"
+>(({ side = 'right', className, children, ...props }, ref) => {
+  const testId =
+    ((props as Record<string, unknown>)['data-testid'] as string | undefined) || 'sheet-content';
+  return (
+    <SheetPortal>
+      <SheetOverlay data-testid="sheet-overlay" />
+      <SheetPrimitive.Content
+        ref={ref}
+        className={cn(sheetVariants({ side }), className)}
+        data-testid={testId}
+        {...props}
       >
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </SheetPrimitive.Close>
-      {children}
-    </SheetPrimitive.Content>
-  </SheetPortal>
-));
+        <SheetPrimitive.Close
+          className="ring-offset-background focus:ring-ring data-[state=open]:bg-secondary absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-none disabled:pointer-events-none"
+          data-testid="sheet-close"
+        >
+          <X className="h-4 w-4" />
+          <span className="sr-only">Close</span>
+        </SheetPrimitive.Close>
+        {children}
+      </SheetPrimitive.Content>
+    </SheetPortal>
+  );
+});
 SheetContent.displayName = SheetPrimitive.Content.displayName;
 
-const SheetHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn('flex flex-col space-y-2 text-center sm:text-left', className)}
-    data-testid={props['data-testid'] || 'sheet-header'}
-    {...props}
-  />
-);
+const SheetHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => {
+  const testId =
+    ((props as Record<string, unknown>)['data-testid'] as string | undefined) || 'sheet-header';
+  return (
+    <div
+      className={cn('flex flex-col space-y-2 text-center sm:text-left', className)}
+      data-testid={testId}
+      {...props}
+    />
+  );
+};
 SheetHeader.displayName = 'SheetHeader';
 
-const SheetFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn('flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2', className)}
-    data-testid={props['data-testid'] || 'sheet-footer'}
-    {...props}
-  />
-);
+const SheetFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => {
+  const testId =
+    ((props as Record<string, unknown>)['data-testid'] as string | undefined) || 'sheet-footer';
+  return (
+    <div
+      className={cn('flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2', className)}
+      data-testid={testId}
+      {...props}
+    />
+  );
+};
 SheetFooter.displayName = 'SheetFooter';
 
 const SheetTitle = React.forwardRef<

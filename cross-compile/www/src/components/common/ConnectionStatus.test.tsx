@@ -88,8 +88,9 @@ describe('ConnectionStatusBadge', () => {
 
     it('should have correct screen reader text', () => {
       render(<ConnectionStatusBadge status="connected" />);
-      const srText = screen.getByText('Connected to device');
+      const srText = screen.getByTestId('connection-status-badge-connected-sr-text');
       expect(srText).toHaveClass('sr-only');
+      expect(srText).toHaveTextContent('Connected to device');
     });
   });
 
@@ -108,8 +109,9 @@ describe('ConnectionStatusBadge', () => {
 
     it('should have correct screen reader text', () => {
       render(<ConnectionStatusBadge status="disconnected" />);
-      const srText = screen.getByText('Disconnected from device');
+      const srText = screen.getByTestId('connection-status-badge-disconnected-sr-text');
       expect(srText).toHaveClass('sr-only');
+      expect(srText).toHaveTextContent('Disconnected from device');
     });
   });
 
@@ -128,8 +130,9 @@ describe('ConnectionStatusBadge', () => {
 
     it('should have correct screen reader text', () => {
       render(<ConnectionStatusBadge status="checking" />);
-      const srText = screen.getByText('Checking connection status');
+      const srText = screen.getByTestId('connection-status-badge-checking-sr-text');
       expect(srText).toHaveClass('sr-only');
+      expect(srText).toHaveTextContent('Checking connection status');
     });
   });
 
