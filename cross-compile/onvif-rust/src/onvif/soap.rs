@@ -222,8 +222,8 @@ pub struct RawSoapEnvelope {
 /// println!("Body: {}", envelope.body_xml);
 /// ```
 pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> {
-    use quick_xml::events::Event;
     use quick_xml::Reader;
+    use quick_xml::events::Event;
 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -299,15 +299,14 @@ pub fn parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError> 
             .and_then(|h| h.security.as_ref())
             .is_some();
 
-    if has_security {
-        if let Some(ref ns) = state.security_namespace {
-            if ns != WSSE_NS {
-                return Err(SoapParseError::InvalidStructure(format!(
-                    "Invalid WS-Security namespace: expected '{}', got '{}'",
-                    WSSE_NS, ns
-                )));
-            }
-        }
+    if has_security
+        && let Some(ref ns) = state.security_namespace
+        && ns != WSSE_NS
+    {
+        return Err(SoapParseError::InvalidStructure(format!(
+            "Invalid WS-Security namespace: expected '{}', got '{}'",
+            WSSE_NS, ns
+        )));
     }
 
     Ok(RawSoapEnvelope {
@@ -852,12 +851,14 @@ mod tests {
         assert_eq!(token.username, "admin");
         assert_eq!(token.password.value, "YkMvwPj4ZPVPLbK8QBWdYGs+3JE=");
         assert!(token.password.password_type.is_some());
-        assert!(token
-            .password
-            .password_type
-            .as_ref()
-            .unwrap()
-            .contains("PasswordDigest"));
+        assert!(
+            token
+                .password
+                .password_type
+                .as_ref()
+                .unwrap()
+                .contains("PasswordDigest")
+        );
 
         assert!(token.nonce.is_some());
         let nonce = token.nonce.unwrap();
@@ -897,12 +898,14 @@ mod tests {
 
         assert_eq!(token.username, "operator");
         assert_eq!(token.password.value, "secretpass");
-        assert!(token
-            .password
-            .password_type
-            .as_ref()
-            .unwrap()
-            .contains("PasswordText"));
+        assert!(
+            token
+                .password
+                .password_type
+                .as_ref()
+                .unwrap()
+                .contains("PasswordText")
+        );
         // No nonce or created for plaintext
         assert!(token.nonce.is_none());
         assert!(token.created.is_none());
