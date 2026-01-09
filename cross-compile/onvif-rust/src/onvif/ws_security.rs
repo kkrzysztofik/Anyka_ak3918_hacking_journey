@@ -40,7 +40,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Duration, Utc};
 use sha1::{Digest, Sha1};
 use std::collections::HashMap;
-use std::sync::Mutex;
+// CRIT-005: Use parking_lot::Mutex instead of std::sync::Mutex for better performance
+// and no panic on lock (parking_lot::Mutex doesn't return Result from lock())
+use parking_lot::Mutex;
 use thiserror::Error;
 
 /// Password type URIs from WS-Security UsernameToken Profile.
@@ -259,7 +261,7 @@ impl WsSecurityValidator {
     ///
     /// `Ok(())` if nonce is fresh, `Err(NonceReplay)` if it's a replay.
     pub fn check_nonce(&self, nonce_b64: &str, username: &str) -> Result<(), WsSecurityError> {
-        let mut cache = self.nonce_cache.lock().unwrap();
+        let mut cache = self.nonce_cache.lock();
 
         // First, purge expired entries if cache is getting large
         if cache.len() >= self.config.max_nonce_cache_size {
@@ -295,13 +297,13 @@ impl WsSecurityValidator {
     /// Manually trigger cleanup of expired nonces.
     /// This can be called periodically from a background task.
     pub fn cleanup_expired_nonces(&self) {
-        let mut cache = self.nonce_cache.lock().unwrap();
+        let mut cache = self.nonce_cache.lock();
         self.purge_expired_entries(&mut cache);
     }
 
     /// Get the current number of cached nonces.
     pub fn nonce_cache_size(&self) -> usize {
-        self.nonce_cache.lock().unwrap().len()
+        self.nonce_cache.lock().len()
     }
 
     /// Check if digest authentication is required.

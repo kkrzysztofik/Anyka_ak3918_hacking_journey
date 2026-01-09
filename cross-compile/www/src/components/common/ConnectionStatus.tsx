@@ -73,7 +73,9 @@ export function ConnectionStatusBadge({ status, className }: ConnectionStatusPro
       {status === 'connected' && <Wifi className="h-3 w-3" aria-hidden="true" />}
       {status === 'disconnected' && <WifiOff className="h-3 w-3" aria-hidden="true" />}
       {status === 'checking' && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}
-      <span className="sr-only">{statusText}</span>
+      <span className="sr-only" data-testid={`connection-status-badge-${status}-sr-text`}>
+        {statusText}
+      </span>
     </output>
   );
 }

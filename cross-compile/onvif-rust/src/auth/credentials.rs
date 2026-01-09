@@ -83,6 +83,35 @@ impl Default for AuthConfig {
     }
 }
 
+impl AuthConfig {
+    /// Validate configuration for production environment.
+    ///
+    /// CRIT-006: This method logs a warning if authentication is disabled,
+    /// which should only happen in development/testing environments.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if configuration is safe for production, or a warning message
+    /// if authentication is disabled.
+    pub fn validate_production_config(&self) -> Result<(), &'static str> {
+        if !self.enabled {
+            // Log warning for production deployments
+            tracing::warn!(
+                "SECURITY WARNING: Authentication is DISABLED. \
+                 This should ONLY be used in development/testing environments. \
+                 Set `server.auth_enabled = true` for production."
+            );
+            return Err("Authentication disabled - not suitable for production");
+        }
+        Ok(())
+    }
+
+    /// Check if running in a secure configuration.
+    pub fn is_secure(&self) -> bool {
+        self.enabled
+    }
+}
+
 /// Authentication state for axum middleware.
 ///
 /// This can be used with axum's Extension layer to provide
@@ -153,27 +182,6 @@ impl AuthenticatedUser {
     }
 }
 
-/// Extract authentication credentials from request.
-///
-/// This is a placeholder that will be extended to support both
-/// WS-Security (SOAP) and HTTP Digest (HTTP) authentication.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum AuthCredentials {
-    /// WS-Security UsernameToken from SOAP header.
-    WsSecurity {
-        /// Raw XML containing the UsernameToken.
-        token_xml: String,
-    },
-    /// HTTP Digest from Authorization header.
-    HttpDigest {
-        /// The Authorization header value.
-        header: String,
-    },
-    /// No credentials provided.
-    None,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,5 +233,75 @@ mod tests {
         let user = AuthenticatedUser::new("viewer", UserLevel::User);
         assert!(!user.is_admin());
         assert!(!user.is_operator());
+    }
+
+    #[test]
+    fn test_auth_config_from_config_enabled() {
+        use crate::config::ConfigRuntime;
+        let config = {
+            let c = ConfigRuntime::new(Default::default());
+            c.set_bool("server.auth_enabled", true).unwrap();
+            c
+        };
+        config.set_bool("server.auth_enabled", true).unwrap();
+
+        let auth_config = AuthConfig::from_config(&config);
+        assert!(auth_config.is_enabled());
+        assert!(auth_config.should_authenticate());
+    }
+
+    #[test]
+    fn test_auth_config_from_config_disabled() {
+        use crate::config::ConfigRuntime;
+        let config = {
+            let c = ConfigRuntime::new(Default::default());
+            c.set_bool("server.auth_enabled", false).unwrap();
+            c
+        };
+
+        let auth_config = AuthConfig::from_config(&config);
+        assert!(!auth_config.is_enabled());
+        assert!(!auth_config.should_authenticate());
+    }
+
+    #[test]
+    fn test_auth_config_from_config_defaults_to_enabled() {
+        use crate::config::ConfigRuntime;
+        let config = ConfigRuntime::new(Default::default());
+
+        let auth_config = AuthConfig::from_config(&config);
+        // Should default to enabled when not specified
+        assert!(auth_config.is_enabled());
+        assert!(auth_config.should_authenticate());
+    }
+
+    #[test]
+    fn test_auth_config_validate_production_config_enabled() {
+        let config = AuthConfig::new(true);
+        let result = config.validate_production_config();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_auth_config_validate_production_config_disabled() {
+        let config = AuthConfig::new(false);
+        let result = config.validate_production_config();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "Authentication disabled - not suitable for production"
+        );
+    }
+
+    #[test]
+    fn test_auth_config_is_secure_enabled() {
+        let config = AuthConfig::new(true);
+        assert!(config.is_secure());
+    }
+
+    #[test]
+    fn test_auth_config_is_secure_disabled() {
+        let config = AuthConfig::new(false);
+        assert!(!config.is_secure());
     }
 }

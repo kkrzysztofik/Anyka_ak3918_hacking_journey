@@ -1947,9 +1947,8 @@ impl Default for ProfileManager {
     }
 }
 
-// Thread-safe marker
-unsafe impl Send for ProfileManager {}
-unsafe impl Sync for ProfileManager {}
+// ProfileManager fields use thread-safe primitives (RwLock, AtomicU32, Arc)
+// so Send/Sync are automatically derived by the compiler.
 
 #[cfg(test)]
 mod tests {

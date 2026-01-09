@@ -72,7 +72,9 @@ const SystemInfo: React.FC<SystemInfoProps> = ({ cameraIP, onvifStatus, onStatus
               className="flex justify-between"
               data-testid={`system-info-endpoint-${index}`}
             >
-              <span className="text-gray-400">{endpoint.label}:</span>
+              <span className="text-gray-400" data-testid={`system-info-endpoint-${index}-label`}>
+                {endpoint.label}:
+              </span>
               <code
                 className="break-all text-blue-400"
                 data-testid={`system-info-endpoint-${index}-url`}

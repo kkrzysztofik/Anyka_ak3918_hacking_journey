@@ -8,6 +8,7 @@ import React, { type ReactNode, Suspense } from 'react';
 import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import Layout from '@/Layout';
+import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import { useAuth } from '@/hooks/useAuth';
 
 // Loading fallback for lazy-loaded routes
@@ -20,7 +21,7 @@ function LoadingFallback() {
 }
 
 // Protected route wrapper - redirects to login if not authenticated
-function ProtectedRoute({ children }: { children: ReactNode }) {
+function ProtectedRoute({ children }: Readonly<{ children: ReactNode }>) {
   const { isAuthenticated } = useAuth();
   const location = useLocation();
 
@@ -47,40 +48,42 @@ const ProfilesPage = React.lazy(() => import('@/pages/settings/ProfilesPage'));
 
 function AppRoutes() {
   return (
-    <Suspense fallback={<LoadingFallback />}>
-      <Routes>
-        {/* Public routes */}
-        <Route path="/login" element={<LoginPage />} />
+    <ErrorBoundary>
+      <Suspense fallback={<LoadingFallback />}>
+        <Routes>
+          {/* Public routes */}
+          <Route path="/login" element={<LoginPage />} />
 
-        {/* Protected routes with Layout */}
-        <Route
-          element={
-            <ProtectedRoute>
-              <Layout />
-            </ProtectedRoute>
-          }
-        >
-          <Route path="/" element={<Navigate to="/live" replace />} />
-          <Route path="/live" element={<LiveViewPage />} />
-          <Route path="/diagnostics" element={<DiagnosticsPage />} />
+          {/* Protected routes with Layout */}
+          <Route
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/" element={<Navigate to="/live" replace />} />
+            <Route path="/live" element={<LiveViewPage />} />
+            <Route path="/diagnostics" element={<DiagnosticsPage />} />
 
-          {/* Settings routes */}
-          <Route path="/settings">
-            <Route index element={<Navigate to="/settings/identification" replace />} />
-            <Route path="identification" element={<IdentificationPage />} />
-            <Route path="network" element={<NetworkPage />} />
-            <Route path="time" element={<TimePage />} />
-            <Route path="imaging" element={<ImagingPage />} />
-            <Route path="users" element={<UserManagementPage />} />
-            <Route path="maintenance" element={<MaintenancePage />} />
-            <Route path="profiles" element={<ProfilesPage />} />
+            {/* Settings routes */}
+            <Route path="/settings">
+              <Route index element={<Navigate to="/settings/identification" replace />} />
+              <Route path="identification" element={<IdentificationPage />} />
+              <Route path="network" element={<NetworkPage />} />
+              <Route path="time" element={<TimePage />} />
+              <Route path="imaging" element={<ImagingPage />} />
+              <Route path="users" element={<UserManagementPage />} />
+              <Route path="maintenance" element={<MaintenancePage />} />
+              <Route path="profiles" element={<ProfilesPage />} />
+            </Route>
           </Route>
-        </Route>
 
-        {/* Catch-all redirect */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Suspense>
+          {/* Catch-all redirect */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 

@@ -18,7 +18,13 @@ export interface EncryptedData {
  */
 async function generateKey(salt: Uint8Array): Promise<CryptoKey> {
   // Import the salt as a key material
-  const keyMaterial = await crypto.subtle.importKey('raw', salt, { name: 'PBKDF2' }, false, [
+  // Convert to ArrayBuffer to satisfy type requirements
+  // Create a new ArrayBuffer and copy the salt data
+  const saltBuffer = new ArrayBuffer(salt.byteLength);
+  const saltView = new Uint8Array(saltBuffer);
+  saltView.set(salt);
+
+  const keyMaterial = await crypto.subtle.importKey('raw', saltBuffer, { name: 'PBKDF2' }, false, [
     'deriveKey',
   ]);
 
@@ -26,7 +32,7 @@ async function generateKey(salt: Uint8Array): Promise<CryptoKey> {
   return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
-      salt: salt,
+      salt: saltBuffer,
       iterations: 100000,
       hash: 'SHA-256',
     },
@@ -69,7 +75,12 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
   const encoder = new TextEncoder();
   const data = encoder.encode(plaintext);
 
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, data);
+  // Convert IV to ArrayBuffer
+  const ivBuffer = new ArrayBuffer(iv.byteLength);
+  const ivView = new Uint8Array(ivBuffer);
+  ivView.set(iv);
+
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBuffer }, key, data);
 
   return {
     data: btoa(Array.from(new Uint8Array(ciphertext), (b) => String.fromCodePoint(b)).join('')),
@@ -86,15 +97,37 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
  * @throws Error if decryption fails
  */
 export async function decrypt(encrypted: EncryptedData): Promise<string> {
-  const salt = Uint8Array.from(atob(encrypted.salt), (c) => c.codePointAt(0)!);
-  const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.codePointAt(0)!);
-  const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.codePointAt(0)!);
-  const key = await generateKey(salt);
+  const salt = Uint8Array.from(atob(encrypted.salt), (c) => c.codePointAt(0) ?? 0);
+  const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.codePointAt(0) ?? 0);
+  const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.codePointAt(0) ?? 0);
 
-  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext);
+  try {
+    const key = await generateKey(salt);
 
-  const decoder = new TextDecoder();
-  return decoder.decode(decrypted);
+    // Convert to ArrayBuffer to satisfy type requirements
+    const ivBuffer = new ArrayBuffer(iv.byteLength);
+    const ivView = new Uint8Array(ivBuffer);
+    ivView.set(iv);
+
+    const ciphertextBuffer = new ArrayBuffer(ciphertext.byteLength);
+    const ciphertextView = new Uint8Array(ciphertextBuffer);
+    ciphertextView.set(ciphertext);
+
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: ivBuffer },
+      key,
+      ciphertextBuffer,
+    );
+
+    const decoder = new TextDecoder();
+    const password = decoder.decode(decrypted);
+    return password;
+  } finally {
+    // Clear sensitive memory
+    salt.fill(0);
+    iv.fill(0);
+    ciphertext.fill(0);
+  }
 }
 
 /**

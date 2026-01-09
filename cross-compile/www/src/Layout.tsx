@@ -123,6 +123,7 @@ function NavLinkItem({
                 'text-[15px] font-medium transition-colors',
                 isActive ? 'text-white' : 'text-dark-secondary-text group-hover:text-white',
               )}
+              data-testid={`layout-nav-${item.path.replaceAll('/', '-').replace(/^-/, '')}-label`}
             >
               {item.label}
             </span>
@@ -158,7 +159,11 @@ function NavLinkItem({
                 data-testid={`layout-nav-${child.path.replaceAll('/', '-').replace(/^-/, '')}`}
               >
                 <child.icon className="h-4 w-4" />
-                <span>{child.label}</span>
+                <span
+                  data-testid={`layout-nav-${child.path.replaceAll('/', '-').replace(/^-/, '')}-label`}
+                >
+                  {child.label}
+                </span>
               </NavLink>
             ))}
           </div>
@@ -198,6 +203,7 @@ function NavLinkItem({
                 'text-[15px] font-medium transition-colors',
                 isActive ? 'text-white' : 'text-dark-secondary-text group-hover:text-white',
               )}
+              data-testid={`layout-nav-${item.path.replaceAll('/', '-').replace(/^-/, '')}-label`}
             >
               {item.label}
             </span>
@@ -325,10 +331,18 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
                 <User className="text-accent-red h-4 w-4" />
               </div>
               <div className="flex flex-col items-start transition-opacity">
-                <span className="max-w-[100px] truncate text-[13px] font-medium text-white">
+                <span
+                  className="max-w-[100px] truncate text-[13px] font-medium text-white"
+                  data-testid="layout-username"
+                >
                   {username}
                 </span>
-                <span className="text-dark-secondary-text text-[10px]">Administrator</span>
+                <span
+                  className="text-dark-secondary-text text-[10px]"
+                  data-testid="layout-user-role"
+                >
+                  Administrator
+                </span>
               </div>
             </div>
             <ChevronUp
@@ -340,7 +354,10 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
           </button>
 
           <div className="mt-4 text-center">
-            <p className="text-dark-secondary-text/40 text-[10px] italic">
+            <p
+              className="text-dark-secondary-text/40 text-[10px] italic"
+              data-testid="layout-version"
+            >
               v1.0.0-beta • ONVIF 24.12
             </p>
           </div>

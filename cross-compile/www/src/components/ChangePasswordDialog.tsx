@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Eye, EyeOff, KeyRound, Loader2 } from 'lucide-react';
+import { KeyRound, Loader2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
+import { PasswordInput } from '@/components/common/PasswordInput';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -52,8 +53,6 @@ interface ChangePasswordDialogProps {
 export function ChangePasswordDialog({ open, onOpenChange }: Readonly<ChangePasswordDialogProps>) {
   const { username, login } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
 
   const form = useForm<ChangePasswordFormData>({
     resolver: zodResolver(changePasswordSchema),
@@ -98,8 +97,7 @@ export function ChangePasswordDialog({ open, onOpenChange }: Readonly<ChangePass
       toast.success('Password updated successfully');
       onOpenChange(false);
       form.reset();
-    } catch (error) {
-      console.error('Failed to change password:', error);
+    } catch {
       toast.error('Failed to update password. Please check your connection.');
     } finally {
       setIsLoading(false);
@@ -145,28 +143,13 @@ export function ChangePasswordDialog({ open, onOpenChange }: Readonly<ChangePass
                 <FormItem>
                   <FormLabel className="text-dark-secondary-text">Current Password</FormLabel>
                   <FormControl>
-                    <div className="relative">
-                      <Input
-                        type={showCurrentPassword ? 'text' : 'password'}
-                        placeholder="••••••••"
-                        disabled={isLoading}
-                        className="bg-dark-bg border-dark-border focus-visible:ring-accent-red pr-10"
-                        {...field}
-                        data-testid="change-password-dialog-current-password-input"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                        className="text-dark-secondary-text absolute top-1/2 right-3 -translate-y-1/2 transition-colors hover:text-white"
-                        data-testid="change-password-dialog-current-toggle"
-                      >
-                        {showCurrentPassword ? (
-                          <EyeOff className="size-4" />
-                        ) : (
-                          <Eye className="size-4" />
-                        )}
-                      </button>
-                    </div>
+                    <PasswordInput
+                      field={field}
+                      disabled={isLoading}
+                      testId="change-password-dialog-current-password-input"
+                      placeholder="••••••••"
+                      className="bg-dark-bg border-dark-border focus-visible:ring-accent-red pr-10"
+                    />
                   </FormControl>
                   <FormMessage className="text-accent-red text-xs" />
                 </FormItem>
@@ -180,28 +163,13 @@ export function ChangePasswordDialog({ open, onOpenChange }: Readonly<ChangePass
                 <FormItem>
                   <FormLabel className="text-dark-secondary-text">New Password</FormLabel>
                   <FormControl>
-                    <div className="relative">
-                      <Input
-                        type={showNewPassword ? 'text' : 'password'}
-                        placeholder="••••••••"
-                        disabled={isLoading}
-                        className="bg-dark-bg border-dark-border focus-visible:ring-accent-red pr-10"
-                        {...field}
-                        data-testid="change-password-dialog-new-password-input"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowNewPassword(!showNewPassword)}
-                        className="text-dark-secondary-text absolute top-1/2 right-3 -translate-y-1/2 transition-colors hover:text-white"
-                        data-testid="change-password-dialog-new-toggle"
-                      >
-                        {showNewPassword ? (
-                          <EyeOff className="size-4" />
-                        ) : (
-                          <Eye className="size-4" />
-                        )}
-                      </button>
-                    </div>
+                    <PasswordInput
+                      field={field}
+                      disabled={isLoading}
+                      testId="change-password-dialog-new-password-input"
+                      placeholder="••••••••"
+                      className="bg-dark-bg border-dark-border focus-visible:ring-accent-red pr-10"
+                    />
                   </FormControl>
                   <FormMessage className="text-accent-red text-xs" />
                 </FormItem>

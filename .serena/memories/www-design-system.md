@@ -2,51 +2,77 @@
 
 ## 🚨 MANDATORY DESIGN COMPLIANCE
 
-**CRITICAL**: All visual implementation MUST faithfully reproduce the design assets located in **`.ai/design`**.
+**CRITICAL**: All visual implementation MUST faithfully reproduce the design assets.
 
-- **Source of Truth**: `.ai/design/ONVIF.fig` (Figma File) and `.ai/design_proposal.md`
-- **UI Components**: Use `shadcn/ui` components (in `src/components/ui`) as the base. Customize them to match the Figma designs.
-- **Theme**: Strictly follow `.ai/design/styles/globals.css`
+| Requirement | Source |
+|-------------|--------|
+| Design Source | `.ai/design/ONVIF.fig` (Figma) |
+| Design Proposal | `.ai/design_proposal.md` |
+| Theme CSS | `.ai/design/styles/globals.css` |
+| UI Components | `src/components/ui/` (shadcn/ui) |
 
-**DO NOT** invent new designs or deviate from the specified typography, spacing, or color palette unless explicitly authorized. The user expects pixel-perfect implementation of the provided design proposal.
+**DO NOT** invent new designs or deviate from typography, spacing, or colors unless explicitly authorized.
 
-## Visual Design System
+## Theme: "Camera.UI" Dark + Red Accents
 
-### Theme: "Camera.UI" Dark + Red Accents
-
-The design follows a dark theme optimized for monitoring applications with red accent colors for active states and CTAs.
+Optimized for monitoring applications with dark theme and red accent colors.
 
 ### Color Palette
 
-| Purpose | Color | Hex |
-|---------|-------|-----|
-| Main Background | Deep black | `#0d0d0d` |
-| Navigation Areas | Dark gray | `#121212` |
-| Cards/Panels | Medium dark gray | `#1c1c1e` |
-| Borders/Dividers | Subtle gray | `#3a3a3c` |
-| Primary Text | White | `#ffffff` |
-| Secondary Text | Gray | `#a1a1a6` |
-| Disabled Text | Muted gray | `#6b6b6f` |
-| Accent (CTAs) | Red | `#ff3b30` / `#dc2626` |
-| Online Status | Green | `#34c759` |
+| Purpose | Color | Hex | CSS Variable |
+|---------|-------|-----|--------------|
+| Background (main) | Deep black | `#0d0d0d` | `--background` |
+| Background (nav) | Dark gray | `#121212` | `--nav-background` |
+| Background (cards) | Medium dark | `#1c1c1e` | `--card` |
+| Border/Dividers | Subtle gray | `#3a3a3c` | `--border` |
+| Text (primary) | White | `#ffffff` | `--foreground` |
+| Text (secondary) | Gray | `#a1a1a6` | `--muted-foreground` |
+| Text (disabled) | Muted gray | `#6b6b6f` | `--disabled` |
+| Accent (CTA) | Red | `#ff3b30` | `--primary` |
+| Accent (hover) | Dark red | `#dc2626` | `--primary-hover` |
+| Success | Green | `#34c759` | `--success` |
+| Warning | Yellow | `#ff9500` | `--warning` |
+| Error | Red | `#ff3b30` | `--destructive` |
 
 ### Typography
 
-- **Font Family**: Inter
-- **Font Weights**: Regular (400), Medium (500), Semi-Bold (600)
-- **Font Sizes**: 12px, 14px, 16px, 18px, 20px, 24px, 28px
+| Element | Font | Weight | Size |
+|---------|------|--------|------|
+| Font Family | Inter | - | - |
+| Headings (h1) | Inter | Semi-Bold (600) | 28px |
+| Headings (h2) | Inter | Semi-Bold (600) | 24px |
+| Headings (h3) | Inter | Medium (500) | 20px |
+| Body | Inter | Regular (400) | 14px |
+| Small/Caption | Inter | Regular (400) | 12px |
+| Buttons | Inter | Medium (500) | 14px |
+| Labels | Inter | Medium (500) | 12px |
 
-### Spacing & Layout
+### Spacing Scale
 
-- **Spacing Scale**: 8px, 16px, 24px, 32px, 48px
-- **Border Radius**: 8px (inputs/small elements), 12px (cards/buttons)
-- **Sidebar Widths**: 76px (icon nav), 280px (settings categories)
+| Name | Size | Usage |
+|------|------|-------|
+| xs | 4px | Tight spacing, icons |
+| sm | 8px | Default padding, gaps |
+| md | 16px | Section padding |
+| lg | 24px | Card padding |
+| xl | 32px | Section margins |
+| 2xl | 48px | Page margins |
+
+### Border Radius
+
+| Element | Radius |
+|---------|--------|
+| Buttons | 8px |
+| Inputs | 8px |
+| Cards | 12px |
+| Dialogs | 12px |
+| Tooltips | 6px |
 
 ## Layout Architecture
 
-### 1. Dashboard (Live View) - Two-Column
+### Dashboard (Live View) - Two-Column
 
-```text
+```
 ┌─────────────────────────────────────────┐
 │ [76px Icon Nav] │ [Full-width Video]   │
 │                 │ + Floating PTZ       │
@@ -54,12 +80,14 @@ The design follows a dark theme optimized for monitoring applications with red a
 └─────────────────────────────────────────┘
 ```
 
-- Left: Icon navigation sidebar (76px)
-- Right: Full-width video feed with floating/overlay controls
+| Area | Width | Purpose |
+|------|-------|---------|
+| Icon Nav | 76px fixed | Primary navigation |
+| Content | Remaining | Video feed + controls |
 
-### 2. Settings View - Three-Column
+### Settings View - Three-Column
 
-```text
+```
 ┌─────────────────────────────────────────────────────┐
 │ [76px] │ [280px Categories] │ [Main Content]        │
 │  Nav   │   + Icons          │   + Settings Forms    │
@@ -67,56 +95,195 @@ The design follows a dark theme optimized for monitoring applications with red a
 └─────────────────────────────────────────────────────┘
 ```
 
-- Left: Icon navigation sidebar (76px)
-- Middle: Settings category sidebar (280px) with icons and descriptions
-- Right: Main content area with settings forms
+| Area | Width | Purpose |
+|------|-------|---------|
+| Icon Nav | 76px fixed | Primary navigation |
+| Categories | 280px fixed | Settings category list |
+| Content | Remaining | Settings forms |
 
-## Settings Categories (7 Total)
+## Settings Categories
 
-| Category | Description |
-|----------|-------------|
-| **Identification** | Device name, model, status, editable name/location |
-| **Network** | IP address, DNS settings, network ports |
-| **Time Settings** | Timezone and NTP server configuration |
-| **Maintenance** | System updates, backups, system logs |
-| **Imaging Settings** | Camera image controls (brightness, contrast, saturation) |
-| **User Management** | Account and permission management |
-| **Profiles** | Configuration profiles and presets |
+| Category | Icon | Description |
+|----------|------|-------------|
+| Identification | Info | Device name, model, status |
+| Network | Network | IP, DNS, ports |
+| Time Settings | Clock | Timezone, NTP |
+| Maintenance | Tool | Updates, backups, logs |
+| Imaging Settings | Camera | Brightness, contrast |
+| User Management | Users | Accounts, permissions |
+| Profiles | Settings | Configuration presets |
 
-## Design Assets Location
+## Component Patterns
 
-Design assets are located in `.ai/design/`:
+### Buttons
 
-```text
-.ai/design/
-├── ONVIF.fig              # Figma source file
-├── App.tsx                # Reference component
-├── components/            # Figma-exported components
-│   ├── ui/                # 48 Radix UI components
-│   └── figma/             # Figma screen exports
-├── styles/
-│   └── globals.css        # CSS custom properties and theme
-└── guidelines/            # (Empty - for future design guidelines)
+```typescript
+// Primary action (red accent)
+<Button variant="default">Save Changes</Button>
+
+// Secondary action
+<Button variant="outline">Cancel</Button>
+
+// Destructive action
+<Button variant="destructive">Delete</Button>
+
+// Ghost/subtle action
+<Button variant="ghost">More Options</Button>
+```
+
+### Form Fields
+
+```typescript
+// Standard input
+<div className="space-y-2">
+  <Label htmlFor="name">Device Name</Label>
+  <Input 
+    id="name" 
+    data-testid="device-name-input"
+    placeholder="Enter device name" 
+  />
+</div>
+
+// With validation error
+<div className="space-y-2">
+  <Label htmlFor="ip">IP Address</Label>
+  <Input 
+    id="ip" 
+    data-testid="network-ip-input"
+    className="border-destructive" 
+  />
+  <p className="text-sm text-destructive">Invalid IP format</p>
+</div>
+```
+
+### Cards
+
+```typescript
+<Card className="bg-card border-border">
+  <CardHeader>
+    <CardTitle>Device Information</CardTitle>
+    <CardDescription>View and edit device details</CardDescription>
+  </CardHeader>
+  <CardContent>
+    {/* Content */}
+  </CardContent>
+  <CardFooter>
+    <Button data-testid="card-save-button">Save</Button>
+  </CardFooter>
+</Card>
+```
+
+### Dialogs
+
+```typescript
+<Dialog>
+  <DialogTrigger asChild>
+    <Button data-testid="open-dialog-button">Open</Button>
+  </DialogTrigger>
+  <DialogContent data-testid="user-dialog">
+    <DialogHeader>
+      <DialogTitle>Edit User</DialogTitle>
+      <DialogDescription>
+        Make changes to user settings
+      </DialogDescription>
+    </DialogHeader>
+    {/* Form content */}
+    <DialogFooter>
+      <Button variant="outline" data-testid="dialog-cancel-button">
+        Cancel
+      </Button>
+      <Button data-testid="dialog-save-button">
+        Save
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
 ```
 
 ## Responsive Design
 
-| Screen Size | Behavior |
-|-------------|----------|
-| Desktop | Fixed sidebars, multi-column layouts, full feature set |
-| Mobile | Collapsible navigation, stacked layouts, touch-optimized controls |
+| Breakpoint | Width | Behavior |
+|------------|-------|----------|
+| Mobile | < 768px | Collapsible nav, stacked layouts |
+| Tablet | 768-1024px | Condensed sidebar |
+| Desktop | > 1024px | Full multi-column layout |
 
-## Modal Dialogs
+### Mobile Adaptations
 
-- **About Modal**: Device info, firmware version, build time, license
-- **Current User Popup**: Profile menu from bottom of icon sidebar
-- **Change Password Modal**: Password change form
-- **User Modal**: Create/edit user accounts
-- **Profiles Modal**: Create/edit configuration profiles
+- Navigation collapses to hamburger menu
+- Settings categories become dropdown/accordion
+- Forms stack vertically
+- Touch-friendly hit targets (min 44px)
+
+## Loading & Error States
+
+### Loading
+
+```typescript
+// Full page loading
+<div className="flex items-center justify-center h-full">
+  <Spinner data-testid="loading-spinner" />
+</div>
+
+// Inline loading
+<Button disabled>
+  <Spinner className="mr-2 h-4 w-4" />
+  Saving...
+</Button>
+```
+
+### Error States
+
+```typescript
+// Error message
+<Alert variant="destructive" data-testid="error-alert">
+  <AlertTitle>Error</AlertTitle>
+  <AlertDescription>
+    Failed to load device information
+  </AlertDescription>
+</Alert>
+
+// Empty state
+<div className="text-center py-12" data-testid="empty-state">
+  <p className="text-muted-foreground">No devices found</p>
+</div>
+```
+
+## Accessibility Requirements
+
+| Requirement | Implementation |
+|-------------|----------------|
+| Color Contrast | WCAG AA minimum (4.5:1) |
+| Focus States | Visible focus rings |
+| Keyboard Navigation | All interactive elements focusable |
+| Screen Readers | Proper ARIA labels |
+| Motion | Respect `prefers-reduced-motion` |
+
+## Design Assets Location
+
+```
+.ai/design/
+├── ONVIF.fig              # Figma source file
+├── App.tsx                # Reference component
+├── design_proposal.md     # Design specifications
+├── components/
+│   ├── ui/                # 48 Radix UI components
+│   └── figma/             # Figma screen exports
+└── styles/
+    └── globals.css        # CSS custom properties
+```
 
 ## Implementation Priority
 
-1. **Theme & Icons**: Color palette, typography, icon system
-2. **Layout System**: Adaptive 2-column/3-column layouts
-3. **Dashboard**: Simplified video player with floating controls
-4. **Settings**: Category navigation and form components
+1. **Theme & Colors**: Apply color palette and CSS variables
+2. **Typography**: Font family, weights, sizes
+3. **Layout System**: Sidebar navigation, content areas
+4. **Components**: shadcn/ui customization
+5. **Forms**: Input styling, validation states
+6. **Responsive**: Mobile adaptations
+
+## Related Memories
+
+- `www-project-context` - Project structure and tech stack
+- `www-development-standards` - Coding standards and testing
+- `review-prompt-www` - Code review guidelines

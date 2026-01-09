@@ -26,10 +26,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
 // Mock data generator for charts
+// Using Math.random() for mock visualization data - not security-sensitive
 const generateData = (points: number, base: number, variance: number) => {
+  // NOSONAR: Math.random() is acceptable for mock visualization data
   return Array.from({ length: points }, (_, i) => ({
     time: i,
-    value: Math.max(0, Math.min(100, base + (Math.random() - 0.5) * variance)),
+    value: Math.max(0, Math.min(100, base + (Math.random() - 0.5) * variance)), // NOSONAR
   }));
 };
 
@@ -37,8 +39,9 @@ const cpuData = generateData(30, 45, 15);
 const memoryData = generateData(30, 60, 5);
 const networkData = Array.from({ length: 30 }, (_, i) => ({
   time: i,
-  upload: Math.max(0, 2 + (Math.random() - 0.5) * 1),
-  download: Math.max(0, 4 + (Math.random() - 0.5) * 2),
+  // NOSONAR: Math.random() is acceptable for mock visualization data
+  upload: Math.max(0, 2 + (Math.random() - 0.5) * 1), // NOSONAR
+  download: Math.max(0, 4 + (Math.random() - 0.5) * 2), // NOSONAR
 }));
 
 function StatCard({
@@ -48,6 +51,7 @@ function StatCard({
   subValue,
   color = 'text-muted-foreground',
   colorBg = 'bg-muted',
+  testId,
 }: Readonly<{
   icon: React.ElementType;
   label: string;
@@ -55,9 +59,14 @@ function StatCard({
   subValue?: string;
   color?: string;
   colorBg?: string;
+  testId?: string;
 }>) {
+  const baseTestId = testId || `diagnostics-stat-${label.toLowerCase().replaceAll(/\s+/g, '-')}`;
   return (
-    <div className="border-border bg-card overflow-hidden rounded-xl border">
+    <div
+      className="border-border bg-card overflow-hidden rounded-xl border"
+      data-testid={baseTestId}
+    >
       <div className="flex items-center gap-4 p-5">
         <div
           className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', colorBg)}
@@ -65,23 +74,46 @@ function StatCard({
           <Icon className={cn('h-5 w-5', color)} />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-muted-foreground text-sm font-medium">{label}</p>
-          <h3 className="text-foreground font-mono text-xl font-bold">{value}</h3>
-          {subValue && <p className="text-muted-foreground text-xs">{subValue}</p>}
+          <p
+            className="text-muted-foreground text-sm font-medium"
+            data-testid={`${baseTestId}-label`}
+          >
+            {label}
+          </p>
+          <h3
+            className="text-foreground font-mono text-xl font-bold"
+            data-testid={`${baseTestId}-value`}
+          >
+            {value}
+          </h3>
+          {subValue && (
+            <p className="text-muted-foreground text-xs" data-testid={`${baseTestId}-subvalue`}>
+              {subValue}
+            </p>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const CustomTooltip = ({ active, payload, label }: any) => {
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: Array<{
+    name: string;
+    value: number;
+    color: string;
+    unit?: string;
+  }>;
+  label?: string | number;
+}
+
+export const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
   if (active && payload?.length) {
     return (
       <div className="border-border bg-card/95 text-foreground rounded-lg border p-2 text-xs shadow-xl backdrop-blur-md">
         <p className="text-muted-foreground mb-1 font-mono">{`Time: +${label}s`}</p>
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-        {payload.map((entry: any) => (
+        {payload.map((entry) => (
           <p key={`${entry.name}-${entry.value}`} style={{ color: entry.color }}>
             {entry.name}: {Number(entry.value).toFixed(1)}
             {entry.unit}
@@ -97,8 +129,10 @@ export default function DiagnosticsPage() {
   return (
     <div className="space-y-6 pb-8">
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold text-white">Diagnostics & Statistics</h1>
-        <p className="text-muted-foreground text-sm">
+        <h1 className="text-2xl font-bold text-white" data-testid="diagnostics-title">
+          Diagnostics & Statistics
+        </h1>
+        <p className="text-muted-foreground text-sm" data-testid="diagnostics-description">
           Real-time system monitoring and performance metrics
         </p>
       </div>
@@ -112,6 +146,7 @@ export default function DiagnosticsPage() {
           subValue="● Online"
           color="text-green-500"
           colorBg="bg-green-500/10"
+          testId="diagnostics-stat-system-status"
         />
         <StatCard
           icon={Cpu}
@@ -120,6 +155,7 @@ export default function DiagnosticsPage() {
           subValue="Avg: 48%"
           color="text-red-500"
           colorBg="bg-red-500/10"
+          testId="diagnostics-stat-cpu-usage"
         />
         <StatCard
           icon={HardDrive}
@@ -128,6 +164,7 @@ export default function DiagnosticsPage() {
           subValue="1.4 GB / 2.0 GB"
           color="text-yellow-500"
           colorBg="bg-yellow-500/10"
+          testId="diagnostics-stat-memory"
         />
         <StatCard
           icon={Thermometer}
@@ -136,6 +173,7 @@ export default function DiagnosticsPage() {
           subValue="Normal range"
           color="text-blue-500"
           colorBg="bg-blue-500/10"
+          testId="diagnostics-stat-temperature"
         />
       </div>
 
@@ -149,8 +187,18 @@ export default function DiagnosticsPage() {
                   <Activity className="h-5 w-5 text-red-500" />
                 </div>
                 <div>
-                  <CardTitle className="text-foreground text-sm font-semibold">CPU Usage</CardTitle>
-                  <p className="text-muted-foreground text-xs">Processor load over time</p>
+                  <CardTitle
+                    className="text-foreground text-sm font-semibold"
+                    data-testid="diagnostics-cpu-usage-title"
+                  >
+                    CPU Usage
+                  </CardTitle>
+                  <p
+                    className="text-muted-foreground text-xs"
+                    data-testid="diagnostics-cpu-usage-description"
+                  >
+                    Processor load over time
+                  </p>
                 </div>
               </div>
               <Button
@@ -211,10 +259,18 @@ export default function DiagnosticsPage() {
                   <HardDrive className="h-5 w-5 text-yellow-500" />
                 </div>
                 <div>
-                  <CardTitle className="text-foreground text-sm font-semibold">
+                  <CardTitle
+                    className="text-foreground text-sm font-semibold"
+                    data-testid="diagnostics-memory-usage-title"
+                  >
                     Memory Usage
                   </CardTitle>
-                  <p className="text-muted-foreground text-xs">RAM utilization over time</p>
+                  <p
+                    className="text-muted-foreground text-xs"
+                    data-testid="diagnostics-memory-usage-description"
+                  >
+                    RAM utilization over time
+                  </p>
                 </div>
               </div>
               <Button
@@ -276,17 +332,31 @@ export default function DiagnosticsPage() {
                 <Wifi className="h-5 w-5 text-blue-500" />
               </div>
               <div>
-                <CardTitle className="text-foreground text-sm font-semibold">
+                <CardTitle
+                  className="text-foreground text-sm font-semibold"
+                  data-testid="diagnostics-network-throughput-title"
+                >
                   Network Throughput
                 </CardTitle>
-                <p className="text-muted-foreground text-xs">Upload and download bandwidth</p>
+                <p
+                  className="text-muted-foreground text-xs"
+                  data-testid="diagnostics-network-throughput-description"
+                >
+                  Upload and download bandwidth
+                </p>
               </div>
             </div>
             <div className="text-muted-foreground flex items-center gap-4 text-xs">
-              <span className="flex items-center gap-1.5">
+              <span
+                className="flex items-center gap-1.5"
+                data-testid="diagnostics-network-download-label"
+              >
                 <div className="h-2 w-2 rounded-full bg-blue-500"></div> Download
               </span>
-              <span className="flex items-center gap-1.5">
+              <span
+                className="flex items-center gap-1.5"
+                data-testid="diagnostics-network-upload-label"
+              >
                 <div className="h-2 w-2 rounded-full bg-green-500"></div> Upload
               </span>
             </div>
@@ -353,20 +423,28 @@ export default function DiagnosticsPage() {
                 <Info className="h-5 w-5 text-blue-500" />
               </div>
               <div>
-                <CardTitle className="text-foreground text-sm font-semibold">
+                <CardTitle
+                  className="text-foreground text-sm font-semibold"
+                  data-testid="diagnostics-device-information-title"
+                >
                   Device Information
                 </CardTitle>
-                <p className="text-muted-foreground text-xs">Hardware and firmware details</p>
+                <p
+                  className="text-muted-foreground text-xs"
+                  data-testid="diagnostics-device-information-description"
+                >
+                  Hardware and firmware details
+                </p>
               </div>
             </div>
           </CardHeader>
           <CardContent className="pt-4">
             <dl className="grid grid-cols-2 gap-4 text-sm">
-              <div className="space-y-1">
+              <div className="space-y-1" data-testid="diagnostics-device-model">
                 <dt className="text-muted-foreground">Model</dt>
                 <dd className="text-foreground font-mono">Anyka-3918-Pro</dd>
               </div>
-              <div className="space-y-1 text-right">
+              <div className="space-y-1 text-right" data-testid="diagnostics-device-firmware">
                 <dt className="text-muted-foreground">Firmware</dt>
                 <dd className="text-foreground font-mono">v2.4.1</dd>
               </div>
@@ -396,20 +474,34 @@ export default function DiagnosticsPage() {
                 <Activity className="h-5 w-5 text-red-500" />
               </div>
               <div>
-                <CardTitle className="text-foreground text-sm font-semibold">
+                <CardTitle
+                  className="text-foreground text-sm font-semibold"
+                  data-testid="diagnostics-system-metrics-title"
+                >
                   System Metrics
                 </CardTitle>
-                <p className="text-muted-foreground text-xs">Performance and storage statistics</p>
+                <p
+                  className="text-muted-foreground text-xs"
+                  data-testid="diagnostics-system-metrics-description"
+                >
+                  Performance and storage statistics
+                </p>
               </div>
             </div>
           </CardHeader>
           <CardContent className="pt-4">
             <div className="space-y-4 text-sm">
-              <div className="flex items-center justify-between">
+              <div
+                className="flex items-center justify-between"
+                data-testid="diagnostics-storage-used"
+              >
                 <span className="text-muted-foreground">Storage Used</span>
                 <span className="text-foreground font-mono">85% (42.5 GB / 50 GB)</span>
               </div>
-              <div className="flex items-center justify-between">
+              <div
+                className="flex items-center justify-between"
+                data-testid="diagnostics-active-streams"
+              >
                 <span className="text-muted-foreground">Active Streams</span>
                 <span className="text-foreground font-mono">2</span>
               </div>
@@ -435,8 +527,18 @@ export default function DiagnosticsPage() {
                 <FileText className="h-5 w-5 text-orange-500" />
               </div>
               <div>
-                <CardTitle className="text-foreground text-sm font-semibold">System Logs</CardTitle>
-                <p className="text-muted-foreground text-xs">Recent activity and events</p>
+                <CardTitle
+                  className="text-foreground text-sm font-semibold"
+                  data-testid="diagnostics-system-logs-title"
+                >
+                  System Logs
+                </CardTitle>
+                <p
+                  className="text-muted-foreground text-xs"
+                  data-testid="diagnostics-system-logs-description"
+                >
+                  Recent activity and events
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-2">

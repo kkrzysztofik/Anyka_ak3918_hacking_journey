@@ -74,11 +74,8 @@ impl AnykaPlatform {
     }
 }
 
-impl Default for AnykaPlatform {
-    fn default() -> Self {
-        Self::new().expect("Failed to create AnykaPlatform")
-    }
-}
+// Default implementation removed - use AnykaPlatform::new() for fallible initialization.
+// The Default trait should never panic per Rust best practices.
 
 #[async_trait]
 impl Platform for AnykaPlatform {

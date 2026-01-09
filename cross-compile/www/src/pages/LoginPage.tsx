@@ -6,12 +6,13 @@
 import React, { useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Camera, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Camera, Loader2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
+import { PasswordInput } from '@/components/common/PasswordInput';
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -37,7 +38,6 @@ export default function LoginPage() {
   const location = useLocation();
   const { login, isAuthenticated } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -52,12 +52,13 @@ export default function LoginPage() {
     if (isAuthenticated) {
       const rawFrom = (location.state as { from?: { pathname: string } })?.from?.pathname;
       let safeFrom = '/';
-      // Strict validation: must be a string, start with /, and NOT start with //
+      // Strict validation: must be a string, start with /, NOT start with //, and NOT contain protocol schemes
       if (
         rawFrom &&
         typeof rawFrom === 'string' &&
         rawFrom.startsWith('/') &&
-        !rawFrom.startsWith('//')
+        !rawFrom.startsWith('//') &&
+        !rawFrom.includes('://') // Prevent javascript:, data:, etc.
       ) {
         safeFrom = rawFrom;
       }
@@ -143,26 +144,14 @@ export default function LoginPage() {
                     Password
                   </FormLabel>
                   <FormControl>
-                    <div className="relative">
-                      <Input
-                        type={showPassword ? 'text' : 'password'}
-                        placeholder="Enter password"
-                        autoComplete="current-password"
-                        disabled={isLoading}
-                        className="border-dark-border placeholder:text-dark-border focus-visible:ring-accent-red focus-visible:border-accent-red h-11 bg-transparent pr-12 text-[15px] text-white transition-colors md:text-[16px]"
-                        data-testid="login-form-password-input"
-                        {...field}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="text-dark-secondary-text absolute top-1/2 right-3 -translate-y-1/2 transition-colors hover:text-white"
-                        disabled={isLoading}
-                        data-testid="login-form-password-toggle-button"
-                      >
-                        {showPassword ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
-                      </button>
-                    </div>
+                    <PasswordInput
+                      field={field}
+                      disabled={isLoading}
+                      testId="login-form-password-input"
+                      placeholder="Enter password"
+                      autoComplete="current-password"
+                      className="border-dark-border placeholder:text-dark-border focus-visible:ring-accent-red focus-visible:border-accent-red h-11 bg-transparent pr-12 text-[15px] text-white transition-colors md:text-[16px]"
+                    />
                   </FormControl>
                   <FormMessage
                     className="text-accent-red mt-1 text-xs"

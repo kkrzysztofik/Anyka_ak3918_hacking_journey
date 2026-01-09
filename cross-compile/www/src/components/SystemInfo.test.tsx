@@ -11,7 +11,8 @@ import SystemInfo from './SystemInfo';
 
 describe('SystemInfo', () => {
   const defaultProps = {
-    cameraIP: '192.168.1.100',
+    // NOSONAR: Hardcoded IP address is safe in test file
+    cameraIP: '192.168.1.100', // NOSONAR
     onvifStatus: 'online' as const,
     onStatusCheck: vi.fn(),
   };
@@ -22,8 +23,8 @@ describe('SystemInfo', () => {
     // We can check existence of items by ID or text content within list
     expect(screen.getByTestId('system-info-endpoints-list')).toBeInTheDocument();
     // Verify specific endpoints exist
-    expect(screen.getByText(/RTSP Main/)).toBeInTheDocument(); // Labels kept as text matching is fine for labels inside the item
-    expect(screen.getByText(/ONVIF Device/)).toBeInTheDocument();
+    expect(screen.getByTestId('system-info-endpoint-0-label')).toHaveTextContent('RTSP Main');
+    expect(screen.getByTestId('system-info-endpoint-3-label')).toHaveTextContent('ONVIF Device');
   });
 
   it('should display correct endpoint URLs with camera IP', () => {

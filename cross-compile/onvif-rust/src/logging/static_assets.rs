@@ -150,4 +150,36 @@ mod tests {
         assert!(config.enabled);
         assert_eq!(config.target, "static_assets");
     }
+
+    #[test]
+    fn test_format_apache_timestamp_contains_required_parts() {
+        let timestamp = format_apache_timestamp();
+        // Should contain day/month separator
+        assert!(timestamp.contains('/'));
+        // Should contain time separators
+        assert!(timestamp.matches(':').count() >= 3);
+        // Should contain year
+        assert!(timestamp.len() > 20);
+    }
+
+    #[test]
+    fn test_format_apache_timestamp_consistent_format() {
+        let timestamp1 = format_apache_timestamp();
+        // Small delay
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let timestamp2 = format_apache_timestamp();
+
+        // Both should have similar structure
+        assert_eq!(
+            timestamp1.matches('/').count(),
+            timestamp2.matches('/').count()
+        );
+        assert_eq!(
+            timestamp1.matches(':').count(),
+            timestamp2.matches(':').count()
+        );
+    }
+
+    // Note: Middleware tests are complex and require full axum router setup.
+    // Integration tests in tests/static_asset_logging.rs cover middleware functionality.
 }

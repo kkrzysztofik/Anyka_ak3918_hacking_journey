@@ -155,7 +155,12 @@ export default function TimePage() {
     toast.info('Selected computer time');
   };
 
-  if (isLoading) return <div className="text-white">Loading...</div>;
+  if (isLoading)
+    return (
+      <div className="text-white" data-testid="time-loading">
+        Loading...
+      </div>
+    );
 
   return (
     <div
@@ -165,7 +170,9 @@ export default function TimePage() {
       <div className="max-w-[1200px] p-[16px] pb-[80px] md:p-[32px] md:pb-[48px] lg:p-[48px]">
         {/* Header */}
         <div className="mb-[32px] md:mb-[40px]">
-          <h1 className="mb-[8px] text-[22px] text-white md:text-[28px]">Time</h1>
+          <h1 className="mb-[8px] text-[22px] text-white md:text-[28px]" data-testid="time-title">
+            Time
+          </h1>
           <p className="text-[13px] text-[#a1a1a6] md:text-[14px]">
             Configure system clock, NTP synchronization, and timezone
           </p>
@@ -174,7 +181,10 @@ export default function TimePage() {
         {/* Current Time Display */}
         <div className="mb-[24px] flex items-center justify-between rounded-[16px] border border-[#3a3a3c] bg-gradient-to-r from-[#1c1c1e] to-[#2c2c2e] p-[24px]">
           <div>
-            <div className="mb-[4px] text-[13px] font-medium tracking-wider text-[#a1a1a6] uppercase">
+            <div
+              className="mb-[4px] text-[13px] font-medium tracking-wider text-[#a1a1a6] uppercase"
+              data-testid="time-device-time-label"
+            >
               Device Time
             </div>
             <div className="font-mono text-[32px] font-medium tracking-tight text-white">
@@ -205,7 +215,9 @@ export default function TimePage() {
                     <RefreshCw className="size-5 text-[#ff9f0a]" />
                   </div>
                   <div>
-                    <SettingsCardTitle>Synchronization</SettingsCardTitle>
+                    <SettingsCardTitle data-testid="time-synchronization-title">
+                      Synchronization
+                    </SettingsCardTitle>
                     <SettingsCardDescription>
                       Choose how the device keeps time
                     </SettingsCardDescription>
@@ -408,8 +420,12 @@ export default function TimePage() {
                     <Globe className="size-5 text-[#bf5af2]" />
                   </div>
                   <div>
-                    <SettingsCardTitle>Time Zone</SettingsCardTitle>
-                    <SettingsCardDescription>Set the local time zone</SettingsCardDescription>
+                    <SettingsCardTitle data-testid="time-timezone-title">
+                      Time Zone
+                    </SettingsCardTitle>
+                    <SettingsCardDescription data-testid="time-timezone-description">
+                      Set the local time zone
+                    </SettingsCardDescription>
                   </div>
                 </div>
               </SettingsCardHeader>

@@ -133,7 +133,11 @@ export default function ImagingPage() {
   };
 
   if (isLoading) {
-    return <div className="text-white">Loading...</div>;
+    return (
+      <div className="text-white" data-testid="imaging-loading">
+        Loading...
+      </div>
+    );
   }
 
   return (
@@ -145,7 +149,12 @@ export default function ImagingPage() {
         {/* Header */}
         <div className="mb-[32px] flex flex-col justify-between gap-[16px] md:mb-[40px] md:flex-row md:items-center">
           <div>
-            <h1 className="mb-[8px] text-[22px] text-white md:text-[28px]">Imaging</h1>
+            <h1
+              className="mb-[8px] text-[22px] text-white md:text-[28px]"
+              data-testid="imaging-title"
+            >
+              Imaging
+            </h1>
             <p className="text-[13px] text-[#a1a1a6] md:text-[14px]">
               Configure camera image quality, exposure, and day/night settings
             </p>
@@ -181,7 +190,9 @@ export default function ImagingPage() {
                   <Sun className="size-5 text-[#ffd60a]" />
                 </div>
                 <div>
-                  <SettingsCardTitle>Color & Brightness</SettingsCardTitle>
+                  <SettingsCardTitle data-testid="imaging-color-brightness-title">
+                    Color & Brightness
+                  </SettingsCardTitle>
                   <SettingsCardDescription>Basic image adjustment</SettingsCardDescription>
                 </div>
               </div>
@@ -246,7 +257,9 @@ export default function ImagingPage() {
                   <ScanEye className="size-5 text-[#0a84ff]" />
                 </div>
                 <div>
-                  <SettingsCardTitle>Focus & Sharpness</SettingsCardTitle>
+                  <SettingsCardTitle data-testid="imaging-focus-sharpness-title">
+                    Focus & Sharpness
+                  </SettingsCardTitle>
                   <SettingsCardDescription>Lens focus and edge enhancement</SettingsCardDescription>
                 </div>
               </div>
@@ -337,14 +350,18 @@ export default function ImagingPage() {
                   <Moon className="size-5 text-[#bf5af2]" />
                 </div>
                 <div>
-                  <SettingsCardTitle>Infrared Settings</SettingsCardTitle>
+                  <SettingsCardTitle data-testid="imaging-infrared-settings-title">
+                    Infrared Settings
+                  </SettingsCardTitle>
                   <SettingsCardDescription>IR cut filter control</SettingsCardDescription>
                 </div>
               </div>
             </SettingsCardHeader>
             <SettingsCardContent className="space-y-[24px]">
               <div className="space-y-[12px]">
-                <Label className="text-[#e5e5e5]">IR Cut Filter Mode</Label>
+                <Label className="text-[#e5e5e5]" data-testid="imaging-ir-cut-filter-mode-label">
+                  IR Cut Filter Mode
+                </Label>
                 <select
                   value={localSettings.irCutFilter || 'AUTO'}
                   onChange={(e) =>
@@ -386,7 +403,9 @@ export default function ImagingPage() {
                   <Contrast className="size-5 text-[#ff9f0a]" />
                 </div>
                 <div>
-                  <SettingsCardTitle>Backlight & WDR</SettingsCardTitle>
+                  <SettingsCardTitle data-testid="imaging-backlight-wdr-title">
+                    Backlight & WDR
+                  </SettingsCardTitle>
                   <SettingsCardDescription>
                     Wide Dynamic Range and backlight compensation
                   </SettingsCardDescription>
@@ -423,7 +442,9 @@ export default function ImagingPage() {
                 {localSettings.wideDynamicRange?.mode === 'ON' && (
                   <div className="space-y-[12px]">
                     <div className="flex items-center justify-between">
-                      <Label className="text-[#e5e5e5]">WDR Level</Label>
+                      <Label className="text-[#e5e5e5]" data-testid="imaging-wdr-level-label">
+                        WDR Level
+                      </Label>
                       <span className="text-sm text-[#a1a1a6] tabular-nums">
                         {localSettings.wideDynamicRange.level}%
                       </span>
@@ -474,7 +495,9 @@ export default function ImagingPage() {
                 {localSettings.backlightCompensation?.mode === 'ON' && (
                   <div className="space-y-[12px]">
                     <div className="flex items-center justify-between">
-                      <Label className="text-[#e5e5e5]">Backlight Level</Label>
+                      <Label className="text-[#e5e5e5]" data-testid="imaging-backlight-level-label">
+                        Backlight Level
+                      </Label>
                       <span className="text-sm text-[#a1a1a6] tabular-nums">
                         {localSettings.backlightCompensation.level}%
                       </span>

@@ -26,16 +26,20 @@ describe('LiveViewPage', () => {
 
   it('should render page title and description', () => {
     renderWithProviders(<LiveViewPage />);
-    expect(screen.getByText('Live Video Preview')).toBeInTheDocument();
-    expect(
-      screen.getByText('Real-time ONVIF stream monitoring and playback controls'),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-title')).toHaveTextContent('Live Video Preview');
+    expect(screen.getByTestId('liveview-description')).toHaveTextContent(
+      'Real-time ONVIF stream monitoring and playback controls',
+    );
   });
 
   it('should render video stream placeholder', () => {
     renderWithProviders(<LiveViewPage />);
-    expect(screen.getByText('ONVIF Stream Preview')).toBeInTheDocument();
-    expect(screen.getByText('1920×1080 @ 30fps')).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-stream-preview-title')).toHaveTextContent(
+      'ONVIF Stream Preview',
+    );
+    expect(screen.getByTestId('liveview-stream-preview-info')).toHaveTextContent(
+      '1920×1080 @ 30fps',
+    );
   });
 
   it('should toggle between main and sub stream', async () => {
@@ -57,8 +61,8 @@ describe('LiveViewPage', () => {
 
   it('should render PTZ control panel', () => {
     renderWithProviders(<LiveViewPage />);
-    expect(screen.getByText('Pan & Tilt')).toBeInTheDocument();
-    expect(screen.getByText('PTZ camera controls')).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-ptz-title')).toHaveTextContent('Pan & Tilt');
+    expect(screen.getByTestId('liveview-ptz-description')).toHaveTextContent('PTZ camera controls');
   });
 
   it('should render PTZ speed slider', () => {
@@ -73,21 +77,23 @@ describe('LiveViewPage', () => {
     const speedSlider = screen.getByTestId('liveview-ptz-speed-slider');
     expect(speedSlider).toBeInTheDocument();
     expect(speedSlider).toHaveValue('50');
-    expect(screen.getByText('50%')).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-ptz-speed-value')).toHaveTextContent('50%');
   });
 
   it('should render stream information cards', () => {
     renderWithProviders(<LiveViewPage />);
-    expect(screen.getByText('Stream Info')).toBeInTheDocument();
-    expect(screen.getByText('Network Stats')).toBeInTheDocument();
-    expect(screen.getByText('Resolution')).toBeInTheDocument();
-    expect(screen.getByText('1920x1080')).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-stream-info-title')).toHaveTextContent('Stream Info');
+    expect(screen.getByTestId('liveview-network-stats-title')).toHaveTextContent('Network Stats');
+    expect(screen.getByTestId('liveview-resolution-label')).toHaveTextContent('Resolution');
+    expect(screen.getByTestId('liveview-resolution-value')).toHaveTextContent('1920x1080');
   });
 
   it('should render stream URL and copy button', () => {
     renderWithProviders(<LiveViewPage />);
-    expect(screen.getByText('Stream URL')).toBeInTheDocument();
-    expect(screen.getByText('rtsp://192.168.1.100:554/main')).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-stream-url-label')).toHaveTextContent('Stream URL');
+    expect(screen.getByTestId('liveview-stream-url-value')).toHaveTextContent(
+      'rtsp://192.168.1.100:554/main',
+    );
     expect(screen.getByTestId('liveview-copy-url-button')).toBeInTheDocument();
   });
 
@@ -97,7 +103,7 @@ describe('LiveViewPage', () => {
 
     // Wait for page to render
     await waitFor(() => {
-      expect(screen.getByText('Stream URL')).toBeInTheDocument();
+      expect(screen.getByTestId('liveview-stream-url-label')).toBeInTheDocument();
     });
 
     // Find copy button by test id
@@ -125,18 +131,18 @@ describe('LiveViewPage', () => {
 
   it('should render preset buttons', () => {
     renderWithProviders(<LiveViewPage />);
-    expect(screen.getByText('Presets')).toBeInTheDocument();
-    expect(screen.getByText('Preset 1')).toBeInTheDocument();
-    expect(screen.getByText('Preset 2')).toBeInTheDocument();
-    expect(screen.getByText('Preset 3')).toBeInTheDocument();
-    expect(screen.getByText('+ Add Preset')).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-presets-title')).toHaveTextContent('Presets');
+    expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Preset 1');
+    expect(screen.getByTestId('liveview-preset-2-label')).toHaveTextContent('Preset 2');
+    expect(screen.getByTestId('liveview-preset-3-label')).toHaveTextContent('Preset 3');
+    expect(screen.getByTestId('liveview-add-preset-label')).toHaveTextContent('+ Add Preset');
   });
 
   it('should render PTZ control buttons', () => {
     renderWithProviders(<LiveViewPage />);
     // PTZ control panel should be rendered
-    expect(screen.getByText('Pan & Tilt')).toBeInTheDocument();
-    expect(screen.getByText('PTZ camera controls')).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-ptz-title')).toHaveTextContent('Pan & Tilt');
+    expect(screen.getByTestId('liveview-ptz-description')).toHaveTextContent('PTZ camera controls');
     // PTZ buttons are rendered (home button and directional buttons)
     const buttons = screen.getAllByRole('button');
     expect(buttons.length).toBeGreaterThan(0);
@@ -144,7 +150,7 @@ describe('LiveViewPage', () => {
 
   it('should render LIVE indicator', () => {
     renderWithProviders(<LiveViewPage />);
-    expect(screen.getByText('LIVE')).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-live-indicator')).toHaveTextContent('LIVE');
   });
 
   it('should update speed slider value', async () => {

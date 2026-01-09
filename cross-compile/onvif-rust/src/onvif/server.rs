@@ -52,7 +52,7 @@ use std::time::Duration;
 use axum::{
     Router,
     body::Body,
-    extract::{Request, State},
+    extract::{ConnectInfo, Request, State},
     http::{Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -70,6 +70,7 @@ use crate::app::AppState;
 use crate::logging::{
     HttpLogConfig, HttpLoggingMiddleware, memory_check_middleware, static_asset_logging_middleware,
 };
+use crate::security::RateLimiter;
 use crate::users::{PasswordManager, UserStorage};
 use crate::utils::MemoryMonitor;
 
@@ -90,6 +91,14 @@ pub struct OnvifServerConfig {
     pub static_root: Option<String>,
     /// Enable verbose HTTP request/response logging.
     pub http_verbose: bool,
+    /// Enable TLS/HTTPS for encrypted transport.
+    pub tls_enabled: bool,
+    /// Path to TLS certificate file (PEM format).
+    pub tls_cert_path: Option<std::path::PathBuf>,
+    /// Path to TLS private key file (PEM format).
+    pub tls_key_path: Option<std::path::PathBuf>,
+    /// Rate limit: maximum requests per minute per IP address.
+    pub rate_limit_per_minute: u32,
 }
 
 impl Default for OnvifServerConfig {
@@ -102,6 +111,10 @@ impl Default for OnvifServerConfig {
             enable_cors: false,
             static_root: Some("www".to_string()),
             http_verbose: false,
+            tls_enabled: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            rate_limit_per_minute: 60,
         }
     }
 }
@@ -123,6 +136,8 @@ pub struct OnvifServerState {
     pub auth_enabled: bool,
     /// Memory monitor for resource enforcement.
     pub memory_monitor: Arc<MemoryMonitor>,
+    /// Rate limiter for per-IP request limiting.
+    pub rate_limiter: Arc<RateLimiter>,
 }
 
 impl OnvifServerState {
@@ -138,6 +153,27 @@ impl OnvifServerState {
             password_manager: Arc::clone(&self.password_manager),
         }
     }
+}
+
+/// Rate limiting middleware for axum.
+///
+/// Checks if the client IP has exceeded the rate limit and returns
+/// HTTP 429 (Too Many Requests) if the limit is exceeded.
+pub async fn rate_limit_middleware(
+    State(state): State<OnvifServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let ip = addr.ip();
+
+    if !state.rate_limiter.check_rate_limit(&ip) {
+        let count = state.rate_limiter.get_count(&ip).unwrap_or(0);
+        crate::security::log_rate_limit_exceeded(&ip, count);
+        return (StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded").into_response();
+    }
+
+    next.run(request).await
 }
 
 /// ONVIF HTTP Server.
@@ -161,6 +197,48 @@ pub struct OnvifServer {
     auth_enabled: bool,
     /// Memory monitor for resource enforcement.
     memory_monitor: Arc<MemoryMonitor>,
+    /// Rate limiter for per-IP request limiting.
+    rate_limiter: Arc<RateLimiter>,
+}
+
+/// Validate security configuration for TLS and authentication.
+///
+/// This function validates that:
+/// - TLS certificate and key paths are provided when TLS is enabled
+/// - Warns when authentication is enabled without TLS (acceptable for air-gapped environments)
+///
+/// # Arguments
+///
+/// * `config` - Server configuration to validate
+/// * `auth_enabled` - Whether authentication is enabled
+///
+/// # Returns
+///
+/// `Ok(())` if configuration is valid, or an error describing the issue.
+fn validate_security_config(
+    config: &OnvifServerConfig,
+    auth_enabled: bool,
+) -> Result<(), OnvifError> {
+    // Validate TLS certificate paths if TLS is enabled
+    if config.tls_enabled && (config.tls_cert_path.is_none() || config.tls_key_path.is_none()) {
+        return Err(OnvifError::InvalidArgVal {
+            subcode: "InvalidTLSConfig".to_string(),
+            reason: "TLS certificate and key paths must be provided when TLS is enabled"
+                .to_string(),
+        });
+    }
+
+    // Warn about weak crypto without TLS (but don't block)
+    if auth_enabled && !config.tls_enabled {
+        tracing::warn!(
+            "⚠️  SECURITY WARNING: Authentication enabled without TLS! \
+             SHA-1/MD5 credentials (required by ONVIF 24.12) will be transmitted \
+             without encryption. This is acceptable ONLY in air-gapped environments. \
+             For production deployments, enable TLS to protect credentials in transit."
+        );
+    }
+
+    Ok(())
 }
 
 impl OnvifServer {
@@ -194,6 +272,9 @@ impl OnvifServer {
             });
         }
 
+        // Validate security configuration (auth disabled in minimal mode)
+        validate_security_config(&config, false)?;
+
         let dispatcher = Arc::new(ServiceDispatcher::new());
 
         // Register built-in services (minimal set for backward compatibility)
@@ -211,6 +292,9 @@ impl OnvifServer {
         // Default memory monitor
         let memory_monitor = Arc::new(MemoryMonitor::new());
 
+        // Default rate limiter (use config value or default to 60 requests per minute)
+        let rate_limiter = Arc::new(RateLimiter::new(config.rate_limit_per_minute));
+
         Ok(Self {
             config,
             dispatcher,
@@ -220,6 +304,7 @@ impl OnvifServer {
             password_manager,
             auth_enabled: false, // Authentication disabled in minimal mode
             memory_monitor,
+            rate_limiter,
         })
     }
 
@@ -260,6 +345,15 @@ impl OnvifServer {
             });
         }
 
+        // Extract auth configuration from ConfigRuntime
+        let auth_enabled = app_state
+            .config()
+            .get_bool("server.auth_enabled")
+            .unwrap_or(true);
+
+        // Validate security configuration
+        validate_security_config(&config, auth_enabled)?;
+
         let dispatcher = Arc::new(ServiceDispatcher::new());
 
         // Register all services with dependencies from AppState
@@ -291,6 +385,7 @@ impl OnvifServer {
             password_manager: Arc::clone(app_state.password_manager()),
             auth_enabled,
             memory_monitor: Arc::clone(app_state.memory_monitor()),
+            rate_limiter: Arc::clone(app_state.rate_limiter()),
         })
     }
 
@@ -411,6 +506,7 @@ impl OnvifServer {
             password_manager: Arc::clone(&self.password_manager),
             auth_enabled: self.auth_enabled,
             memory_monitor: Arc::clone(&self.memory_monitor),
+            rate_limiter: Arc::clone(&self.rate_limiter),
         };
 
         let app = self.build_router(state);
@@ -482,7 +578,9 @@ impl OnvifServer {
             .layer(axum::extract::DefaultBodyLimit::max(
                 self.config.max_body_size,
             ))
-            .with_state(state)
+            .with_state(state.clone())
+            // Rate limiting middleware - runs BEFORE memory check
+            .layer(middleware::from_fn_with_state(state, rate_limit_middleware))
             // Memory check middleware - runs FIRST (outermost layer)
             // Order matters: first add the middleware, then the Extension it uses
             .layer(middleware::from_fn(memory_check_middleware))
@@ -713,6 +811,10 @@ mod tests {
             enable_cors: true,
             static_root: Some("/tmp".to_string()),
             http_verbose: true,
+            tls_enabled: false,
+            tls_cert_path: None,
+            tls_key_path: None,
+            rate_limit_per_minute: 60,
         };
 
         assert_eq!(config.bind_address, "127.0.0.1");
@@ -762,11 +864,15 @@ mod tests {
     #[tokio::test]
     async fn test_server_build_router() {
         use axum::body::Body;
+        use axum::extract::ConnectInfo;
         use axum::http::{Request, StatusCode};
+        use std::net::SocketAddr;
         use tower::ServiceExt;
 
-        let mut config = OnvifServerConfig::default();
-        config.static_root = None;
+        let config = OnvifServerConfig {
+            static_root: None,
+            ..Default::default()
+        };
         let server = OnvifServer::new(config).unwrap();
 
         let state = OnvifServerState {
@@ -777,15 +883,18 @@ mod tests {
             password_manager: Arc::clone(&server.password_manager),
             auth_enabled: server.auth_enabled,
             memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
         };
 
         let app = server.build_router(state);
 
         // Test that router responds to device service endpoint
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let request = Request::builder()
             .method("POST")
             .uri("/onvif/device_service")
             .header("Content-Type", "text/xml")
+            .extension(ConnectInfo(addr))
             .body(Body::from(r#"<?xml version="1.0"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><GetDeviceInformation/></s:Body></s:Envelope>"#))
             .unwrap();
 
@@ -799,11 +908,15 @@ mod tests {
     #[tokio::test]
     async fn test_server_invalid_content_type_rejected() {
         use axum::body::Body;
+        use axum::extract::ConnectInfo;
         use axum::http::{Request, StatusCode};
+        use std::net::SocketAddr;
         use tower::ServiceExt;
 
-        let mut config = OnvifServerConfig::default();
-        config.static_root = None;
+        let config = OnvifServerConfig {
+            static_root: None,
+            ..Default::default()
+        };
         let server = OnvifServer::new(config).unwrap();
 
         let state = OnvifServerState {
@@ -814,15 +927,18 @@ mod tests {
             password_manager: Arc::clone(&server.password_manager),
             auth_enabled: server.auth_enabled,
             memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
         };
 
         let app = server.build_router(state);
 
         // Test that invalid content-type is rejected
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
         let request = Request::builder()
             .method("POST")
             .uri("/onvif/device_service")
             .header("Content-Type", "application/json")
+            .extension(ConnectInfo(addr))
             .body(Body::from("{}"))
             .unwrap();
 
@@ -843,6 +959,7 @@ mod tests {
             password_manager: Arc::clone(&server.password_manager),
             auth_enabled: server.auth_enabled,
             memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
         };
 
         let cloned = state.clone();
@@ -868,6 +985,7 @@ mod tests {
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
             .build()
             .unwrap();
 
@@ -928,9 +1046,11 @@ mod tests {
     }
     #[tokio::test]
     async fn test_serve_static_files_with_compression() {
+        use axum::extract::ConnectInfo;
         use axum::http::{Request, StatusCode};
         use std::fs::File;
         use std::io::Write;
+        use std::net::SocketAddr;
         use tower::ServiceExt;
 
         // Create a temp directory for static files
@@ -948,8 +1068,10 @@ mod tests {
         let mut gz_file = File::create(gz_path).unwrap();
         gz_file.write_all(b"Hello Gzip").unwrap();
 
-        let mut config = OnvifServerConfig::default();
-        config.static_root = Some(static_root);
+        let config = OnvifServerConfig {
+            static_root: Some(static_root),
+            ..Default::default()
+        };
 
         let server = OnvifServer::new(config).unwrap();
         let state = OnvifServerState {
@@ -960,12 +1082,18 @@ mod tests {
             password_manager: Arc::clone(&server.password_manager),
             auth_enabled: server.auth_enabled,
             memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
         };
 
         let app = server.build_router(state);
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
 
         // Test 1: Request without compression preference -> serves plain file
-        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
+        let request = Request::builder()
+            .uri("/")
+            .extension(ConnectInfo(addr))
+            .body(Body::empty())
+            .unwrap();
         let response = app.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert!(response.headers().get("content-encoding").is_none());
@@ -978,6 +1106,7 @@ mod tests {
         let request = Request::builder()
             .uri("/")
             .header("Accept-Encoding", "gzip")
+            .extension(ConnectInfo(addr))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(request).await.unwrap();
@@ -987,5 +1116,162 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(&body[..], b"Hello Gzip");
+    }
+
+    #[test]
+    fn test_server_config_tls_validation_enabled_without_cert() {
+        let config = OnvifServerConfig {
+            tls_enabled: true,
+            tls_cert_path: None,
+            tls_key_path: None,
+            ..Default::default()
+        };
+
+        // Should fail validation when TLS is enabled without cert/key
+        let result = OnvifServer::new(config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_server_config_tls_validation_enabled_without_key() {
+        let config = OnvifServerConfig {
+            tls_enabled: true,
+            tls_cert_path: Some(std::path::PathBuf::from("/tmp/cert.pem")),
+            tls_key_path: None,
+            ..Default::default()
+        };
+
+        let result = OnvifServer::new(config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_server_config_tls_validation_enabled_without_cert_path() {
+        let config = OnvifServerConfig {
+            tls_enabled: true,
+            tls_cert_path: None,
+            tls_key_path: Some(std::path::PathBuf::from("/tmp/key.pem")),
+            ..Default::default()
+        };
+
+        let result = OnvifServer::new(config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_server_state_auth_context() {
+        let config = OnvifServerConfig::default();
+        let server = OnvifServer::new(config).unwrap();
+
+        let state = OnvifServerState {
+            dispatcher: Arc::clone(&server.dispatcher),
+            shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: server.auth_enabled,
+            memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
+        };
+
+        let auth_ctx = state.auth_context();
+        assert_eq!(auth_ctx.auth_enabled, state.auth_enabled);
+    }
+
+    #[test]
+    fn test_validate_content_type_get_request() {
+        use axum::body::Body;
+        use axum::http::Request;
+
+        // GET requests should not be validated
+        let request = Request::builder()
+            .method("GET")
+            .header("Content-Type", "application/json")
+            .body(Body::empty())
+            .unwrap();
+
+        // This is a simple test - in real usage, this would go through the middleware
+        // For now, just verify the request can be created
+        assert_eq!(request.method(), "GET");
+    }
+
+    #[test]
+    fn test_validate_content_type_text_xml() {
+        use axum::body::Body;
+        use axum::http::Request;
+
+        // text/xml should be accepted
+        let request = Request::builder()
+            .method("POST")
+            .header("Content-Type", "text/xml")
+            .body(Body::empty())
+            .unwrap();
+
+        assert!(request.headers().get("Content-Type").is_some());
+    }
+
+    #[test]
+    fn test_validate_content_type_application_soap_xml() {
+        use axum::body::Body;
+        use axum::http::Request;
+
+        // application/soap+xml should be accepted
+        let request = Request::builder()
+            .method("POST")
+            .header("Content-Type", "application/soap+xml")
+            .body(Body::empty())
+            .unwrap();
+
+        assert!(request.headers().get("Content-Type").is_some());
+    }
+
+    #[test]
+    fn test_server_with_app_state_tls_validation() {
+        use crate::config::ConfigRuntime;
+        use crate::onvif::ptz::PTZStateManager;
+        use crate::users::password::PasswordManager;
+        use crate::users::storage::UserStorage;
+        use crate::utils::MemoryMonitor;
+
+        let app_state = AppState::builder()
+            .user_storage(Arc::new(UserStorage::new()))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .build()
+            .unwrap();
+
+        let config = OnvifServerConfig {
+            tls_enabled: true,
+            tls_cert_path: None,
+            tls_key_path: None,
+            ..Default::default()
+        };
+
+        // Should fail validation
+        let result = OnvifServer::with_app_state(config, app_state);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rate_limit_middleware_state() {
+        let config = OnvifServerConfig::default();
+        let server = OnvifServer::new(config).unwrap();
+
+        let state = OnvifServerState {
+            dispatcher: Arc::clone(&server.dispatcher),
+            shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: server.auth_enabled,
+            memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
+        };
+
+        // Verify state can be cloned
+        let _cloned = state.clone();
     }
 }

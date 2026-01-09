@@ -65,6 +65,7 @@ fn test_user_storage_persistence_roundtrip() {
 
     let operator = storage2.get_user("operator").unwrap();
     assert_eq!(operator.level, UserLevel::Operator);
+    assert!(password_manager.verify_password("user_secret", &operator.password));
 }
 
 #[test]
@@ -74,16 +75,15 @@ fn test_user_storage_default_admin_creation() {
     // Storage is empty
     assert!(storage.is_empty());
 
-    // Ensure default admin creates a user with plaintext password
-    let result = storage.ensure_default_admin("default").unwrap();
-
-    assert!(result.is_some());
+    // Ensure default admin creates a user with random password
+    let result = storage.ensure_default_admin();
+    assert!(result.is_ok());
     assert_eq!(storage.len(), 1);
     assert_eq!(storage.admin_count(), 1);
 
-    // Calling again should not create another admin
-    let result2 = storage.ensure_default_admin("default").unwrap();
-    assert!(result2.is_none());
+    // Calling again should succeed but not create another admin
+    let result2 = storage.ensure_default_admin();
+    assert!(result2.is_ok());
     assert_eq!(storage.len(), 1);
 }
 
@@ -122,15 +122,16 @@ fn test_password_verify_integration() {
     ];
 
     for password in passwords {
+        let stored = onvif_rust::users::password::SecurePassword::from(password);
         // Verify correct password matches
         assert!(
-            manager.verify_password(password, password),
+            manager.verify_password(password, &stored),
             "Failed for password: {:?}",
             password
         );
         // Verify wrong password doesn't match
         assert!(
-            !manager.verify_password("wrong", password),
+            !manager.verify_password("wrong", &stored),
             "False positive for password: {:?}",
             password
         );
@@ -234,7 +235,7 @@ fn test_authorization_levels() {
             },
             OnvifUser {
                 username: "user".to_string(),
-                password: Some("user123".to_string()),
+                password: Some("user1234".to_string()),
                 user_level: OnvifUserLevel::User,
                 extension: None,
             },
@@ -251,7 +252,7 @@ fn test_authorization_levels() {
     let create_request = CreateUsers {
         users: vec![OnvifUser {
             username: "test".to_string(),
-            password: Some("test123".to_string()),
+            password: Some("test1234".to_string()),
             user_level: OnvifUserLevel::User,
             extension: None,
         }],
@@ -276,7 +277,7 @@ fn test_authorization_levels() {
     let set_request = SetUser {
         users: vec![OnvifUser {
             username: "user".to_string(),
-            password: Some("newpass".to_string()),
+            password: Some("newpass1".to_string()),
             user_level: OnvifUserLevel::User,
             extension: None,
         }],
@@ -360,19 +361,19 @@ fn test_bulk_user_operations() {
         users: vec![
             OnvifUser {
                 username: "user1".to_string(),
-                password: Some("pass1".to_string()),
+                password: Some("pass1234".to_string()),
                 user_level: OnvifUserLevel::User,
                 extension: None,
             },
             OnvifUser {
                 username: "user2".to_string(),
-                password: Some("pass2".to_string()),
+                password: Some("pass5678".to_string()),
                 user_level: OnvifUserLevel::Operator,
                 extension: None,
             },
             OnvifUser {
                 username: "user3".to_string(),
-                password: Some("pass3".to_string()),
+                password: Some("pass9012".to_string()),
                 user_level: OnvifUserLevel::Administrator,
                 extension: None,
             },

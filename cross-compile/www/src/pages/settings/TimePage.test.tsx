@@ -6,7 +6,16 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getDateTime, setNTP } from '@/services/timeService';
-import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import {
+  mockToast,
+  renderWithProviders,
+  selectOption,
+  waitForPageLoad,
+} from '@/test/componentTestHelpers';
+import {
+  testMutationWithErrorToast,
+  testMutationWithSuccessToast,
+} from '@/test/mutationTestHelpers';
 
 import TimePage from './TimePage';
 
@@ -20,6 +29,12 @@ vi.mock('@/services/timeService', () => ({
 // Note: Timer mocking will be handled per test
 
 describe('TimePage', () => {
+  const renderTimePage = async () => {
+    const result = renderWithProviders(<TimePage />);
+    await waitForPageLoad('time-title');
+    return result;
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
@@ -40,31 +55,24 @@ describe('TimePage', () => {
     vi.mocked(getDateTime).mockImplementation(() => new Promise(() => {}));
 
     renderWithProviders(<TimePage />);
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByTestId('time-loading')).toBeInTheDocument();
   });
 
   it('should render form with fetched time config', async () => {
-    renderWithProviders(<TimePage />);
+    await renderTimePage();
 
-    await waitFor(() => {
-      expect(screen.getByText('Time')).toBeInTheDocument();
-    });
-
-    expect(screen.getByText('Synchronization')).toBeInTheDocument();
+    expect(screen.getByTestId('time-synchronization-title')).toBeInTheDocument();
   });
 
   it('should display device time', async () => {
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Device Time')).toBeInTheDocument();
+      expect(screen.getByTestId('time-device-time-label')).toBeInTheDocument();
     });
 
-    // Device time should be displayed (format may vary, check for time-like pattern)
-    const timeDisplay = screen.getByText(/Device Time/i);
-    expect(timeDisplay).toBeInTheDocument();
-    // Time display area should exist
-    const timeContainer = screen.getByText('Device Time').closest('div');
+    // Device time display area should exist
+    const timeContainer = screen.getByTestId('time-device-time-label').closest('div');
     expect(timeContainer).toBeInTheDocument();
   });
 
@@ -72,11 +80,11 @@ describe('TimePage', () => {
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Device Time')).toBeInTheDocument();
+      expect(screen.getByTestId('time-device-time-label')).toBeInTheDocument();
     });
 
     // Verify time display area exists (actual time updates are tested in integration)
-    const timeContainer = screen.getByText('Device Time').closest('div');
+    const timeContainer = screen.getByTestId('time-device-time-label').closest('div');
     expect(timeContainer).toBeInTheDocument();
   });
 
@@ -85,7 +93,7 @@ describe('TimePage', () => {
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Time')).toBeInTheDocument();
+      expect(screen.getByTestId('time-title')).toBeInTheDocument();
     });
 
     // Find NTP radio and click it
@@ -112,7 +120,7 @@ describe('TimePage', () => {
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Time')).toBeInTheDocument();
+      expect(screen.getByTestId('time-title')).toBeInTheDocument();
     });
 
     // When NTP from DHCP is false, server fields should be visible
@@ -137,7 +145,7 @@ describe('TimePage', () => {
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Time')).toBeInTheDocument();
+      expect(screen.getByTestId('time-title')).toBeInTheDocument();
     });
 
     // Find Computer radio and click it
@@ -158,7 +166,7 @@ describe('TimePage', () => {
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Time')).toBeInTheDocument();
+      expect(screen.getByTestId('time-title')).toBeInTheDocument();
     });
 
     // Find Manual radio and click it
@@ -185,7 +193,7 @@ describe('TimePage', () => {
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Time')).toBeInTheDocument();
+      expect(screen.getByTestId('time-title')).toBeInTheDocument();
     });
 
     // Ensure NTP mode is selected (switch only appears in NTP mode)
@@ -227,19 +235,12 @@ describe('TimePage', () => {
 
   it('should select timezone', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<TimePage />);
+    await renderTimePage();
 
-    await waitFor(() => {
-      expect(screen.getByText('Time')).toBeInTheDocument();
-    });
-
-    // Find timezone select
-    const timezoneSelect = screen.getByTestId('time-page-timezone-select');
-    expect(timezoneSelect).toBeTruthy();
-
-    await user.selectOptions(timezoneSelect, 'EST');
+    await selectOption(user, 'time-page-timezone-select', 'EST');
     await waitFor(
       () => {
+        const timezoneSelect = screen.getByTestId('time-page-timezone-select');
         expect(timezoneSelect).toHaveValue('EST');
       },
       { timeout: 3000 },
@@ -248,17 +249,9 @@ describe('TimePage', () => {
 
   it('should submit form and call mutation', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<TimePage />);
+    await renderTimePage();
 
-    await waitFor(() => {
-      expect(screen.getByText('Time')).toBeInTheDocument();
-    });
-
-    // Make form dirty by changing timezone
-    const timezoneSelect = screen.getByTestId('time-page-timezone-select');
-
-    expect(timezoneSelect).toBeTruthy();
-    await user.selectOptions(timezoneSelect, 'EST');
+    await selectOption(user, 'time-page-timezone-select', 'EST');
     // Wait for form to become dirty
     await waitFor(
       () => {
@@ -269,16 +262,11 @@ describe('TimePage', () => {
       { timeout: 3000 },
     );
 
-    const saveButton = screen.getByTestId('time-page-save-button');
-    expect(saveButton).toBeTruthy();
-    await user.click(saveButton);
-
-    await waitFor(
-      () => {
-        expect(setNTP).toHaveBeenCalled();
-        expect(mockToast.success).toHaveBeenCalledWith('Time settings saved');
-      },
-      { timeout: 5000 },
+    await testMutationWithSuccessToast(
+      user,
+      'time-page-save-button',
+      setNTP,
+      'Time settings saved',
     );
   });
 
@@ -286,17 +274,9 @@ describe('TimePage', () => {
     vi.mocked(setNTP).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
-    renderWithProviders(<TimePage />);
+    await renderTimePage();
 
-    await waitFor(() => {
-      expect(screen.getByText('Time')).toBeInTheDocument();
-    });
-
-    // Make form dirty by changing timezone
-    const timezoneSelect = screen.getByTestId('time-page-timezone-select');
-
-    expect(timezoneSelect).toBeTruthy();
-    await user.selectOptions(timezoneSelect, 'EST');
+    await selectOption(user, 'time-page-timezone-select', 'EST');
     // Wait for form to become dirty
     await waitFor(
       () => {
@@ -307,17 +287,12 @@ describe('TimePage', () => {
       { timeout: 3000 },
     );
 
-    const saveButton = screen.getByTestId('time-page-save-button');
-    expect(saveButton).toBeTruthy();
-    await user.click(saveButton);
-
-    await waitFor(
-      () => {
-        expect(mockToast.error).toHaveBeenCalledWith('Failed to save time settings', {
-          description: 'Network error',
-        });
-      },
-      { timeout: 5000 },
+    await testMutationWithErrorToast(
+      user,
+      'time-page-save-button',
+      setNTP,
+      'Failed to save time settings',
+      'Network error',
     );
   });
 
@@ -325,8 +300,8 @@ describe('TimePage', () => {
     renderWithProviders(<TimePage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Time Zone')).toBeInTheDocument();
-      expect(screen.getByText('Set the local time zone')).toBeInTheDocument();
+      expect(screen.getByTestId('time-timezone-title')).toBeInTheDocument();
+      expect(screen.getByTestId('time-timezone-description')).toBeInTheDocument();
     });
   });
 });

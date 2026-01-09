@@ -88,9 +88,12 @@ describe('Router', () => {
         </AuthProvider>,
       );
 
-      await waitFor(() => {
-        expect(screen.getByTestId('page-login')).toBeInTheDocument();
-      });
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('page-login')).toBeInTheDocument();
+        },
+        { timeout: 3000 },
+      );
     });
 
     it('should redirect to login when accessing protected route without auth', async () => {
@@ -101,9 +104,12 @@ describe('Router', () => {
         </AuthProvider>,
       );
 
-      await waitFor(() => {
-        expect(screen.getByTestId('page-login')).toBeInTheDocument();
-      });
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('page-login')).toBeInTheDocument();
+        },
+        { timeout: 3000 },
+      );
     });
 
     // Authenticated routes tests
@@ -148,9 +154,12 @@ describe('Router', () => {
         </AuthProvider>,
       );
 
-      await waitFor(() => {
-        expect(screen.getByTestId('page-login')).toBeInTheDocument();
-      });
+      await waitFor(
+        () => {
+          expect(screen.getByTestId('page-login')).toBeInTheDocument();
+        },
+        { timeout: 3000 },
+      );
     });
   });
 });

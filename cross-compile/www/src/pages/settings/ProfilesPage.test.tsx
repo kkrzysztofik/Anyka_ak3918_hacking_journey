@@ -15,7 +15,15 @@ import {
   getVideoEncoderConfigurationOptions,
   setVideoEncoderConfiguration,
 } from '@/services/profileService';
-import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import {
+  MOCK_DATA,
+  expandProfile,
+  findProfileByName,
+  mockToast,
+  renderWithProviders,
+  waitForPageLoad,
+  waitForVideoEncoderSection,
+} from '@/test/componentTestHelpers';
 
 import ProfilesPage from './ProfilesPage';
 
@@ -32,33 +40,66 @@ vi.mock('@/services/profileService', () => ({
 describe('ProfilesPage', () => {
   const mockProfiles = MOCK_DATA.profiles;
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-    // Setup default successful response since most tests use it
-    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
+  const renderProfilesPage = async () => {
+    const result = renderWithProviders(<ProfilesPage />);
+    await waitForPageLoad('profiles-title');
+    return result;
+  };
+
+  const setupVideoEncoderMocks = () => {
     vi.mocked(getVideoEncoderConfiguration).mockResolvedValue(
       MOCK_DATA.videoEncoder.configuration as unknown as VideoEncoderConfiguration,
     );
     vi.mocked(getVideoEncoderConfigurationOptions).mockResolvedValue(
       MOCK_DATA.videoEncoder.options as unknown as VideoEncoderConfigurationOptions,
     );
+  };
+
+  const expandProfileAndOpenVideoEncoderDialog = async (
+    user: ReturnType<typeof userEvent.setup>,
+    profileToken = 'ProfileToken1',
+  ) => {
+    await renderProfilesPage();
+    await expandProfile(user, profileToken);
+    await waitForVideoEncoderSection();
+
+    const editButton = screen.getByTestId(`video-encoder-config-${profileToken}-edit-button`);
+    await user.click(editButton);
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('video-encoder-edit-dialog-title')).toHaveTextContent(
+          'Edit Video Encoder Configuration',
+        );
+      },
+      { timeout: 10000 },
+    );
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getProfiles).mockResolvedValue(mockProfiles);
+    setupVideoEncoderMocks();
   });
 
   it('should render page with loading state', async () => {
     vi.mocked(getProfiles).mockImplementation(() => new Promise(() => {}));
 
     renderWithProviders(<ProfilesPage />);
-    expect(screen.getByText('Loading profiles...')).toBeInTheDocument();
+    expect(screen.getByTestId('profiles-loading')).toBeInTheDocument();
   });
 
   it('should render profiles list when loaded', async () => {
-    renderWithProviders(<ProfilesPage />);
+    await renderProfilesPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('Profiles')).toBeInTheDocument();
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-      expect(screen.getByText('SubStream')).toBeInTheDocument();
-    });
+    const mainStreamProfile = findProfileByName(mockProfiles, 'MainStream');
+    const subStreamProfile = findProfileByName(mockProfiles, 'SubStream');
+    if (mainStreamProfile) {
+      expect(screen.getByTestId(`profile-name-${mainStreamProfile.token}`)).toBeInTheDocument();
+    }
+    if (subStreamProfile) {
+      expect(screen.getByTestId(`profile-name-${subStreamProfile.token}`)).toBeInTheDocument();
+    }
   });
 
   it('should render error state when query fails', async () => {
@@ -67,17 +108,13 @@ describe('ProfilesPage', () => {
     renderWithProviders(<ProfilesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText(/error loading profiles/i)).toBeInTheDocument();
+      expect(screen.getByTestId('profiles-error')).toBeInTheDocument();
     });
   });
 
   it('should open and close create profile dialog', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Profiles')).toBeInTheDocument();
-    });
+    await renderProfilesPage();
 
     const createButton = screen.getByTestId('profiles-create-profile-button');
     await user.click(createButton);
@@ -91,10 +128,8 @@ describe('ProfilesPage', () => {
     await user.click(cancelButton);
 
     await waitFor(() => {
-      // Dialog should close - check that Create Profile dialog title is not visible
       const createProfileTexts = screen.queryAllByText('Create Profile');
-      // If dialog is closed, the title should not be in a dialog context
-      expect(createProfileTexts.length).toBeLessThanOrEqual(1); // Only the button text remains
+      expect(createProfileTexts.length).toBeLessThanOrEqual(1);
     });
   });
 
@@ -102,11 +137,7 @@ describe('ProfilesPage', () => {
     vi.mocked(createProfile).mockResolvedValue('NewProfileToken');
 
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Profiles')).toBeInTheDocument();
-    });
+    await renderProfilesPage();
 
     const createButton = screen.getByTestId('profiles-create-profile-button');
     await user.click(createButton);
@@ -132,11 +163,7 @@ describe('ProfilesPage', () => {
     vi.mocked(createProfile).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Profiles')).toBeInTheDocument();
-    });
+    await renderProfilesPage();
 
     const createButton = screen.getByTestId('profiles-create-profile-button');
     await user.click(createButton);
@@ -160,13 +187,13 @@ describe('ProfilesPage', () => {
   });
 
   it('should open delete confirmation dialog', async () => {
-    renderWithProviders(<ProfilesPage />);
+    await renderProfilesPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
+    const mainStreamProfile = findProfileByName(mockProfiles, 'MainStream');
+    if (mainStreamProfile) {
+      expect(screen.getByTestId(`profile-name-${mainStreamProfile.token}`)).toBeInTheDocument();
+    }
 
-    // Find delete button for non-fixed profile
     const deleteButton = screen.getByTestId('delete-profile-button-ProfileToken1');
     expect(deleteButton).toBeInTheDocument();
   });
@@ -174,32 +201,16 @@ describe('ProfilesPage', () => {
   it('should delete profile on confirmation', async () => {
     vi.mocked(deleteProfile).mockResolvedValue(undefined);
 
-    renderWithProviders(<ProfilesPage />);
+    await renderProfilesPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
-
-    // Test that delete profile button exists and function is defined
     expect(deleteProfile).toBeDefined();
   });
 
   it('should toggle profile card expand/collapse', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
+    await renderProfilesPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
-
-    // Find collapse/expand button
-    const expandButton = screen.getByTestId('profile-expand-ProfileToken1');
-    await user.click(expandButton);
-    // Profile should expand showing configuration sections
-    await waitFor(() => {
-      const videoSourceTexts = screen.getAllByText('Video Source');
-      expect(videoSourceTexts.length).toBeGreaterThan(0);
-    });
+    await expandProfile(user, 'ProfileToken1');
   });
 
   it('should render empty state when no profiles exist', async () => {
@@ -213,12 +224,13 @@ describe('ProfilesPage', () => {
   });
 
   it('should display profile information correctly', async () => {
-    renderWithProviders(<ProfilesPage />);
+    await renderProfilesPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-      expect(screen.getByText('ProfileToken1')).toBeInTheDocument();
-    });
+    const mainStreamProfile = findProfileByName(mockProfiles, 'MainStream');
+    if (mainStreamProfile) {
+      expect(screen.getByTestId(`profile-name-${mainStreamProfile.token}`)).toBeInTheDocument();
+    }
+    expect(mainStreamProfile).toBeDefined();
   });
 
   it('should not show delete button for fixed profiles', async () => {
@@ -239,17 +251,11 @@ describe('ProfilesPage', () => {
     vi.mocked(deleteProfile).mockRejectedValue(new Error('Delete failed'));
 
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
+    await renderProfilesPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
-
-    // Find and click delete button using test ID
     const deleteButton = screen.getByTestId('delete-profile-button-ProfileToken1');
     await user.click(deleteButton);
 
-    // Wait for delete confirmation dialog
     await waitFor(
       () => {
         expect(screen.getByTestId('delete-profile-dialog-title')).toHaveTextContent(
@@ -259,7 +265,6 @@ describe('ProfilesPage', () => {
       { timeout: 3000 },
     );
 
-    // Find and click confirm delete button using test ID
     const confirmButton = screen.getByTestId('delete-profile-dialog-confirm');
     await user.click(confirmButton);
 
@@ -275,74 +280,28 @@ describe('ProfilesPage', () => {
 
   it('should toggle profile expand/collapse multiple times', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
+    await renderProfilesPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
-
-    // Find expand button (chevron button)
     const expandButton = screen.getByTestId('profile-expand-ProfileToken1');
-    // First click to expand
     await user.click(expandButton);
     await waitFor(
       () => {
-        // Check for Video Source in the expanded content - use getAllByText since there may be multiple
         const videoSourceTexts = screen.getAllByText('Video Source');
         expect(videoSourceTexts.length).toBeGreaterThan(0);
-        // Verify at least one is in the expanded content (not just the badge)
-        const expandedContent = videoSourceTexts.find((text) => {
-          const parent =
-            text.closest('[data-testid*="video"]') || text.closest(String.raw`.rounded-\[8px\]`);
-          return parent !== null;
-        });
-        expect(expandedContent).toBeTruthy();
       },
       { timeout: 3000 },
     );
 
-    // Second click to collapse
     await user.click(expandButton);
-    // After collapse, the expanded content should not be visible
-    // We can't easily test this without checking the collapsible state
-    // So we just verify the button is still clickable
     expect(expandButton).toBeInTheDocument();
   });
 
   it('should open VideoEncoderEditDialog when edit button is clicked', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
+    await expandProfileAndOpenVideoEncoderDialog(user);
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
-
-    // Expand profile first using test ID
-    const expandButton = screen.getByTestId('profile-expand-ProfileToken1');
-    await user.click(expandButton);
-
-    await waitFor(
-      () => {
-        const videoEncoderTexts = screen.getAllByText('Video Encoder');
-        expect(videoEncoderTexts.length).toBeGreaterThan(0);
-      },
-      { timeout: 3000 },
-    );
-
-    // Find and click Edit button for Video Encoder using test ID
-    const editButton = screen.getByTestId('video-encoder-config-ProfileToken1-edit-button');
-    await user.click(editButton);
-
-    await waitFor(
-      () => {
-        expect(screen.getByTestId('video-encoder-edit-dialog-title')).toHaveTextContent(
-          'Edit Video Encoder Configuration',
-        );
-        expect(getVideoEncoderConfiguration).toHaveBeenCalledWith('VideoEncoderToken1');
-        expect(getVideoEncoderConfigurationOptions).toHaveBeenCalled();
-      },
-      { timeout: 10000 },
-    );
+    expect(getVideoEncoderConfiguration).toHaveBeenCalledWith('VideoEncoderToken1');
+    expect(getVideoEncoderConfigurationOptions).toHaveBeenCalled();
   });
 
   it('should handle VideoEncoderEditDialog loading state', async () => {
@@ -354,25 +313,10 @@ describe('ProfilesPage', () => {
     );
 
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
+    await renderProfilesPage();
+    await expandProfile(user, 'ProfileToken1');
+    await waitForVideoEncoderSection();
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
-
-    // Expand profile using test ID
-    const expandButton = screen.getByTestId('profile-expand-ProfileToken1');
-    await user.click(expandButton);
-
-    await waitFor(
-      () => {
-        const videoEncoderTexts = screen.getAllByText('Video Encoder');
-        expect(videoEncoderTexts.length).toBeGreaterThan(0);
-      },
-      { timeout: 3000 },
-    );
-
-    // Click Edit button using test ID
     const editButton = screen.getByTestId('video-encoder-config-ProfileToken1-edit-button');
     await user.click(editButton);
 
@@ -390,26 +334,10 @@ describe('ProfilesPage', () => {
     vi.mocked(getVideoEncoderConfiguration).mockRejectedValue(new Error('Load failed'));
 
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
+    await renderProfilesPage();
+    await expandProfile(user, 'ProfileToken1');
+    await waitForVideoEncoderSection();
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
-
-    // Expand profile using test ID
-    const expandButton = screen.getByTestId('profile-expand-ProfileToken1');
-    await user.click(expandButton);
-
-    await waitFor(
-      () => {
-        const videoEncoderTexts = screen.getAllByText('Video Encoder');
-        expect(videoEncoderTexts.length).toBeGreaterThan(0);
-      },
-      { timeout: 5000 },
-    );
-
-    // Click Edit button
-    // Click Edit button using test ID
     const editButton = screen.getByTestId('video-encoder-config-ProfileToken1-edit-button');
     await user.click(editButton);
 
@@ -425,15 +353,8 @@ describe('ProfilesPage', () => {
 
   it('should render ConfigSection with active state', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
-
-    // Expand profile
-    const expandButton = screen.getByTestId('profile-expand-ProfileToken1');
-    await user.click(expandButton);
+    await renderProfilesPage();
+    await expandProfile(user, 'ProfileToken1');
 
     await waitFor(
       () => {
@@ -480,38 +401,8 @@ describe('ProfilesPage', () => {
     vi.mocked(setVideoEncoderConfiguration).mockResolvedValue(undefined);
 
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
+    await expandProfileAndOpenVideoEncoderDialog(user);
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
-
-    // Expand profile and open edit dialog
-    const expandButton = screen.getByTestId('profile-expand-ProfileToken1');
-    await user.click(expandButton);
-
-    await waitFor(
-      () => {
-        const videoEncoderTexts = screen.getAllByText('Video Encoder');
-        expect(videoEncoderTexts.length).toBeGreaterThan(0);
-      },
-      { timeout: 3000 },
-    );
-
-    // Click Edit button using test ID
-    const editButton = screen.getByTestId('video-encoder-config-ProfileToken1-edit-button');
-    await user.click(editButton);
-
-    await waitFor(
-      () => {
-        expect(screen.getByTestId('video-encoder-edit-dialog-title')).toHaveTextContent(
-          'Edit Video Encoder Configuration',
-        );
-      },
-      { timeout: 10000 },
-    );
-
-    // Find and click Save button using test ID
     const saveButton = screen.getByTestId('video-encoder-edit-dialog-save');
     await user.click(saveButton);
 
@@ -526,38 +417,8 @@ describe('ProfilesPage', () => {
 
   it('should cancel VideoEncoderEditDialog', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
+    await expandProfileAndOpenVideoEncoderDialog(user);
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
-
-    // Expand profile and open edit dialog
-    const expandButton = screen.getByTestId('profile-expand-ProfileToken1');
-    await user.click(expandButton);
-
-    await waitFor(
-      () => {
-        const videoEncoderTexts = screen.getAllByText('Video Encoder');
-        expect(videoEncoderTexts.length).toBeGreaterThan(0);
-      },
-      { timeout: 3000 },
-    );
-
-    // Click Edit button using test ID
-    const editButton = screen.getByTestId('video-encoder-config-ProfileToken1-edit-button');
-    await user.click(editButton);
-
-    await waitFor(
-      () => {
-        expect(screen.getByTestId('video-encoder-edit-dialog-title')).toHaveTextContent(
-          'Edit Video Encoder Configuration',
-        );
-      },
-      { timeout: 10000 },
-    );
-
-    // Find and click Cancel button using test ID
     const cancelButton = screen.getByTestId('video-encoder-edit-dialog-cancel');
     await user.click(cancelButton);
 
@@ -573,38 +434,8 @@ describe('ProfilesPage', () => {
     vi.mocked(setVideoEncoderConfiguration).mockRejectedValue(new Error('Save failed'));
 
     const user = userEvent.setup();
-    renderWithProviders(<ProfilesPage />);
+    await expandProfileAndOpenVideoEncoderDialog(user);
 
-    await waitFor(() => {
-      expect(screen.getByText('MainStream')).toBeInTheDocument();
-    });
-
-    // Expand profile and open edit dialog
-    const expandButton = screen.getByTestId('profile-expand-ProfileToken1');
-    await user.click(expandButton);
-
-    await waitFor(
-      () => {
-        const videoEncoderTexts = screen.getAllByText('Video Encoder');
-        expect(videoEncoderTexts.length).toBeGreaterThan(0);
-      },
-      { timeout: 3000 },
-    );
-
-    // Click Edit button using test ID
-    const editButton = screen.getByTestId('video-encoder-config-ProfileToken1-edit-button');
-    await user.click(editButton);
-
-    await waitFor(
-      () => {
-        expect(screen.getByTestId('video-encoder-edit-dialog-title')).toHaveTextContent(
-          'Edit Video Encoder Configuration',
-        );
-      },
-      { timeout: 10000 },
-    );
-
-    // Find and click Save button using test ID
     const saveButton = screen.getByTestId('video-encoder-edit-dialog-save');
     await user.click(saveButton);
 

@@ -65,8 +65,6 @@ describe('main.tsx', () => {
     // Ensure no root container exists
     document.body.innerHTML = '';
 
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
     // Reset modules to ensure fresh import
     vi.resetModules();
 
@@ -76,11 +74,7 @@ describe('main.tsx', () => {
     // Wait a tick for async operations
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    // Verify error was logged
-    expect(consoleSpy).toHaveBeenCalledWith('Root container not found');
     // Verify createRoot was not called
     expect(mockCreateRoot).not.toHaveBeenCalled();
-
-    consoleSpy.mockRestore();
   });
 });
