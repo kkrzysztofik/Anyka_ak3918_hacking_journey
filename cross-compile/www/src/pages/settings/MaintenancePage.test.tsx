@@ -11,7 +11,12 @@ import {
   setSystemFactoryDefault,
   systemReboot,
 } from '@/services/maintenanceService';
-import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import {
+  closeDialog,
+  mockToast,
+  openDialog,
+  renderWithProviders,
+} from '@/test/componentTestHelpers';
 
 import MaintenancePage from './MaintenancePage';
 
@@ -69,19 +74,8 @@ describe('MaintenancePage', () => {
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
-    const rebootButton = screen.getByTestId('maintenance-reboot-button');
-    await user.click(rebootButton);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('maintenance-reboot-dialog-title')).toBeInTheDocument();
-    });
-
-    const cancelButton = screen.getByTestId('maintenance-reboot-cancel-button');
-    await user.click(cancelButton);
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('maintenance-reboot-dialog-title')).not.toBeInTheDocument();
-    });
+    await openDialog(user, 'maintenance-reboot-button', 'maintenance-reboot-dialog-title');
+    await closeDialog(user, 'maintenance-reboot-cancel-button', 'maintenance-reboot-dialog-title');
   });
 
   it('should call reboot mutation on confirm', async () => {
@@ -134,19 +128,12 @@ describe('MaintenancePage', () => {
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
-    const softResetButton = screen.getByTestId('maintenance-soft-reset-button');
-    await user.click(softResetButton);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('maintenance-soft-reset-dialog-title')).toBeInTheDocument();
-    });
-
-    const cancelButton = screen.getByTestId('maintenance-soft-reset-cancel-button');
-    await user.click(cancelButton);
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('maintenance-soft-reset-dialog-title')).not.toBeInTheDocument();
-    });
+    await openDialog(user, 'maintenance-soft-reset-button', 'maintenance-soft-reset-dialog-title');
+    await closeDialog(
+      user,
+      'maintenance-soft-reset-cancel-button',
+      'maintenance-soft-reset-dialog-title',
+    );
   });
 
   it('should call soft reset mutation on confirm', async () => {
@@ -176,21 +163,12 @@ describe('MaintenancePage', () => {
     const user = userEvent.setup();
     renderWithProviders(<MaintenancePage />);
 
-    const hardResetButton = screen.getByTestId('maintenance-hard-reset-button');
-    await user.click(hardResetButton);
-
-    await waitFor(() => {
-      // Dialog title should appear
-      expect(screen.getByTestId('maintenance-hard-reset-dialog-title')).toBeInTheDocument();
-    });
-
-    const cancelButton = screen.getByTestId('maintenance-hard-reset-cancel-button');
-    await user.click(cancelButton);
-
-    await waitFor(() => {
-      // Dialog should close
-      expect(screen.queryByTestId('maintenance-hard-reset-dialog-title')).not.toBeInTheDocument();
-    });
+    await openDialog(user, 'maintenance-hard-reset-button', 'maintenance-hard-reset-dialog-title');
+    await closeDialog(
+      user,
+      'maintenance-hard-reset-cancel-button',
+      'maintenance-hard-reset-dialog-title',
+    );
   });
 
   it('should call hard reset mutation on confirm', async () => {

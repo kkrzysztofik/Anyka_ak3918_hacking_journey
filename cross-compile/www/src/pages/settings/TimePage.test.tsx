@@ -6,7 +6,12 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getDateTime, setNTP } from '@/services/timeService';
-import { mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import {
+  mockToast,
+  renderWithProviders,
+  selectOption,
+  waitForPageLoad,
+} from '@/test/componentTestHelpers';
 
 import TimePage from './TimePage';
 
@@ -20,6 +25,12 @@ vi.mock('@/services/timeService', () => ({
 // Note: Timer mocking will be handled per test
 
 describe('TimePage', () => {
+  const renderTimePage = async () => {
+    const result = renderWithProviders(<TimePage />);
+    await waitForPageLoad('time-title');
+    return result;
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getDateTime).mockResolvedValue(mockTimeConfig);
@@ -44,11 +55,7 @@ describe('TimePage', () => {
   });
 
   it('should render form with fetched time config', async () => {
-    renderWithProviders(<TimePage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('time-title')).toBeInTheDocument();
-    });
+    await renderTimePage();
 
     expect(screen.getByTestId('time-synchronization-title')).toBeInTheDocument();
   });
@@ -224,19 +231,12 @@ describe('TimePage', () => {
 
   it('should select timezone', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<TimePage />);
+    await renderTimePage();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('time-title')).toBeInTheDocument();
-    });
-
-    // Find timezone select
-    const timezoneSelect = screen.getByTestId('time-page-timezone-select');
-    expect(timezoneSelect).toBeTruthy();
-
-    await user.selectOptions(timezoneSelect, 'EST');
+    await selectOption(user, 'time-page-timezone-select', 'EST');
     await waitFor(
       () => {
+        const timezoneSelect = screen.getByTestId('time-page-timezone-select');
         expect(timezoneSelect).toHaveValue('EST');
       },
       { timeout: 3000 },
@@ -245,17 +245,9 @@ describe('TimePage', () => {
 
   it('should submit form and call mutation', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<TimePage />);
+    await renderTimePage();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('time-title')).toBeInTheDocument();
-    });
-
-    // Make form dirty by changing timezone
-    const timezoneSelect = screen.getByTestId('time-page-timezone-select');
-
-    expect(timezoneSelect).toBeTruthy();
-    await user.selectOptions(timezoneSelect, 'EST');
+    await selectOption(user, 'time-page-timezone-select', 'EST');
     // Wait for form to become dirty
     await waitFor(
       () => {
@@ -283,17 +275,9 @@ describe('TimePage', () => {
     vi.mocked(setNTP).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
-    renderWithProviders(<TimePage />);
+    await renderTimePage();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('time-title')).toBeInTheDocument();
-    });
-
-    // Make form dirty by changing timezone
-    const timezoneSelect = screen.getByTestId('time-page-timezone-select');
-
-    expect(timezoneSelect).toBeTruthy();
-    await user.selectOptions(timezoneSelect, 'EST');
+    await selectOption(user, 'time-page-timezone-select', 'EST');
     // Wait for form to become dirty
     await waitFor(
       () => {

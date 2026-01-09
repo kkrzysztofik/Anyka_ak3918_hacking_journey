@@ -63,3 +63,36 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_path_extraction() {
+        // Test default config path
+        let args: Vec<String> = vec![];
+        let config_path = args
+            .get(1)
+            .map(|s| s.clone())
+            .unwrap_or_else(|| DEFAULT_CONFIG_PATH.to_string());
+        assert_eq!(config_path, DEFAULT_CONFIG_PATH);
+
+        // Test custom config path
+        let args: Vec<String> = vec!["program".to_string(), "/custom/path.toml".to_string()];
+        let config_path = args
+            .get(1)
+            .map(|s| s.clone())
+            .unwrap_or_else(|| DEFAULT_CONFIG_PATH.to_string());
+        assert_eq!(config_path, "/custom/path.toml");
+    }
+
+    #[test]
+    fn test_config_path_default() {
+        // Simulate no command line args
+        let config_path = std::env::args()
+            .nth(1)
+            .unwrap_or_else(|| DEFAULT_CONFIG_PATH.to_string());
+        assert_eq!(config_path, DEFAULT_CONFIG_PATH);
+    }
+}

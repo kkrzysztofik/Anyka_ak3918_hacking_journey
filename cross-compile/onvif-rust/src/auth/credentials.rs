@@ -234,4 +234,74 @@ mod tests {
         assert!(!user.is_admin());
         assert!(!user.is_operator());
     }
+
+    #[test]
+    fn test_auth_config_from_config_enabled() {
+        use crate::config::ConfigRuntime;
+        let config = {
+            let c = ConfigRuntime::new(Default::default());
+            c.set_bool("server.auth_enabled", true).unwrap();
+            c
+        };
+        config.set_bool("server.auth_enabled", true).unwrap();
+
+        let auth_config = AuthConfig::from_config(&config);
+        assert!(auth_config.is_enabled());
+        assert!(auth_config.should_authenticate());
+    }
+
+    #[test]
+    fn test_auth_config_from_config_disabled() {
+        use crate::config::ConfigRuntime;
+        let config = {
+            let c = ConfigRuntime::new(Default::default());
+            c.set_bool("server.auth_enabled", false).unwrap();
+            c
+        };
+
+        let auth_config = AuthConfig::from_config(&config);
+        assert!(!auth_config.is_enabled());
+        assert!(!auth_config.should_authenticate());
+    }
+
+    #[test]
+    fn test_auth_config_from_config_defaults_to_enabled() {
+        use crate::config::ConfigRuntime;
+        let config = ConfigRuntime::new(Default::default());
+
+        let auth_config = AuthConfig::from_config(&config);
+        // Should default to enabled when not specified
+        assert!(auth_config.is_enabled());
+        assert!(auth_config.should_authenticate());
+    }
+
+    #[test]
+    fn test_auth_config_validate_production_config_enabled() {
+        let config = AuthConfig::new(true);
+        let result = config.validate_production_config();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_auth_config_validate_production_config_disabled() {
+        let config = AuthConfig::new(false);
+        let result = config.validate_production_config();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "Authentication disabled - not suitable for production"
+        );
+    }
+
+    #[test]
+    fn test_auth_config_is_secure_enabled() {
+        let config = AuthConfig::new(true);
+        assert!(config.is_secure());
+    }
+
+    #[test]
+    fn test_auth_config_is_secure_disabled() {
+        let config = AuthConfig::new(false);
+        assert!(!config.is_secure());
+    }
 }

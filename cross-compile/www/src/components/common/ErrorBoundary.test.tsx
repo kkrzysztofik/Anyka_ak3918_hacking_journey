@@ -4,6 +4,7 @@
 import React from 'react';
 
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ErrorBoundary } from './ErrorBoundary';
@@ -74,6 +75,137 @@ describe('ErrorBoundary', () => {
     expect(screen.getByTestId('error-boundary-fallback')).toBeInTheDocument();
     expect(screen.getByTestId('error-boundary-retry-button')).toBeInTheDocument();
     expect(screen.getByTestId('error-boundary-retry-button')).toHaveTextContent('Try Again');
+
+    consoleSpy.mockRestore();
+  });
+
+  it('calls componentDidCatch and logs error in development mode', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+
+    render(
+      <ErrorBoundary>
+        <ThrowError shouldThrow={true} />
+      </ErrorBoundary>,
+    );
+
+    // componentDidCatch should have been called and logged the error
+    expect(consoleSpy).toHaveBeenCalled();
+    expect(consoleSpy).toHaveBeenCalledWith(
+      'ErrorBoundary caught an error:',
+      expect.any(Error),
+      expect.any(Object),
+    );
+
+    consoleSpy.mockRestore();
+    process.env.NODE_ENV = originalEnv;
+  });
+
+  it('does not log error in production mode', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+
+    render(
+      <ErrorBoundary>
+        <ThrowError shouldThrow={true} />
+      </ErrorBoundary>,
+    );
+
+    // In production, componentDidCatch should not log our specific message
+    // (React may still log, but our ErrorBoundary message should not appear)
+    const calls = consoleSpy.mock.calls;
+    const hasErrorBoundaryMessage = calls.some((call) =>
+      call.some((arg) => typeof arg === 'string' && arg.includes('ErrorBoundary caught an error')),
+    );
+    expect(hasErrorBoundaryMessage).toBe(false);
+
+    consoleSpy.mockRestore();
+    process.env.NODE_ENV = originalEnv;
+  });
+
+  it('resets error state when retry button is clicked', async () => {
+    const user = userEvent.setup();
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // Use a component that can recover after error by using a key prop
+    function RecoverableComponent({ key: _key }: { key?: string | number }) {
+      return <div data-testid="no-error">No error</div>;
+    }
+
+    const { rerender } = render(
+      <ErrorBoundary>
+        <ThrowError shouldThrow={true} />
+      </ErrorBoundary>,
+    );
+
+    // Initially error state
+    expect(screen.getByTestId('error-boundary-fallback')).toBeInTheDocument();
+    expect(screen.queryByTestId('no-error')).not.toBeInTheDocument();
+
+    // Click retry button - this resets the error boundary state
+    const retryButton = screen.getByTestId('error-boundary-retry-button');
+    await user.click(retryButton);
+
+    // Re-render with a component that won't throw (using key to force new instance)
+    rerender(
+      <ErrorBoundary key="reset-test">
+        <RecoverableComponent />
+      </ErrorBoundary>,
+    );
+
+    // After reset, should render children again (component doesn't throw)
+    expect(screen.queryByTestId('error-boundary-fallback')).not.toBeInTheDocument();
+    expect(screen.getByTestId('no-error')).toBeInTheDocument();
+
+    consoleSpy.mockRestore();
+  });
+
+  it('displays fallback message when error.message is undefined', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // Component that throws error without message property
+    function ThrowErrorWithoutMessage() {
+      const error = Object.create(null);
+      throw error; // Error object without message property
+    }
+
+    render(
+      <ErrorBoundary>
+        <ThrowErrorWithoutMessage />
+      </ErrorBoundary>,
+    );
+
+    expect(screen.getByTestId('error-boundary-fallback')).toBeInTheDocument();
+    // When error.message is undefined, should show fallback message
+    const message = screen.getByTestId('error-boundary-message');
+    expect(message).toBeInTheDocument();
+    // The message should be the fallback since error.message is undefined
+    expect(message.textContent).toContain('An unexpected error occurred');
+
+    consoleSpy.mockRestore();
+  });
+
+  it('handles non-Error thrown objects', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // Create a component that throws a non-Error object
+    function ThrowNonError() {
+      throw 'String error';
+    }
+
+    render(
+      <ErrorBoundary>
+        <ThrowNonError />
+      </ErrorBoundary>,
+    );
+
+    // ErrorBoundary should still catch it and show fallback
+    expect(screen.getByTestId('error-boundary-fallback')).toBeInTheDocument();
+    // The message might be the string or fallback depending on how React handles it
+    const message = screen.getByTestId('error-boundary-message');
+    expect(message).toBeInTheDocument();
 
     consoleSpy.mockRestore();
   });

@@ -2198,4 +2198,558 @@ mod tests {
         });
         assert!(result.is_ok());
     }
+
+    // ========================================================================
+    // Set Configuration Tests
+    // ========================================================================
+
+    #[test]
+    fn test_set_video_source_configuration() {
+        use crate::onvif::types::common::{IntRectangle, VideoSourceConfiguration};
+
+        let service = MediaService::new();
+        let result = service.handle_set_video_source_configuration(SetVideoSourceConfiguration {
+            configuration: VideoSourceConfiguration {
+                token: "VideoSourceConfig_0".to_string(),
+                name: "TestConfig".to_string(),
+                use_count: 1,
+                view_mode: None,
+                source_token: "VideoSource_0".to_string(),
+                bounds: IntRectangle {
+                    x: 0,
+                    y: 0,
+                    width: 1920,
+                    height: 1080,
+                },
+                extension: None,
+            },
+            force_persistence: false,
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_set_video_source_configuration_invalid_token() {
+        use crate::onvif::types::common::{IntRectangle, VideoSourceConfiguration};
+
+        let service = MediaService::new();
+        // set_video_source_configuration doesn't validate - it just inserts/updates
+        // So this test should verify it succeeds (allows creating new configs)
+        let result = service.handle_set_video_source_configuration(SetVideoSourceConfiguration {
+            configuration: VideoSourceConfiguration {
+                token: "NonExistentConfig".to_string(),
+                name: "TestConfig".to_string(),
+                use_count: 1,
+                view_mode: None,
+                source_token: "VideoSource_0".to_string(),
+                bounds: IntRectangle {
+                    x: 0,
+                    y: 0,
+                    width: 1920,
+                    height: 1080,
+                },
+                extension: None,
+            },
+            force_persistence: false,
+        });
+        // Handler allows creating new configs, so this should succeed
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_set_video_encoder_configuration() {
+        use crate::onvif::types::common::{
+            H264Configuration, H264Profile, VideoEncoderConfiguration, VideoEncoding,
+            VideoRateControl, VideoResolution,
+        };
+
+        let service = MediaService::new();
+        let result = service.handle_set_video_encoder_configuration(SetVideoEncoderConfiguration {
+            configuration: VideoEncoderConfiguration {
+                token: "VideoEncoderConfig_0".to_string(),
+                name: "TestEncoder".to_string(),
+                use_count: 1,
+                encoding: VideoEncoding::H264,
+                resolution: VideoResolution {
+                    width: 1920,
+                    height: 1080,
+                },
+                quality: 0.5,
+                rate_control: Some(VideoRateControl {
+                    frame_rate_limit: 30,
+                    bitrate_limit: 2000000,
+                    encoding_interval: 1,
+                }),
+                mpeg4: None,
+                h264: Some(H264Configuration {
+                    gov_length: 30,
+                    h264_profile: H264Profile::Baseline,
+                }),
+                multicast: None,
+                session_timeout: "PT60S".to_string(),
+            },
+            force_persistence: false,
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_set_video_encoder_configuration_invalid_resolution() {
+        use crate::onvif::types::common::{
+            H264Configuration, H264Profile, VideoEncoderConfiguration, VideoEncoding,
+            VideoRateControl, VideoResolution,
+        };
+
+        let service = MediaService::new();
+        let result = service.handle_set_video_encoder_configuration(SetVideoEncoderConfiguration {
+            configuration: VideoEncoderConfiguration {
+                token: "VideoEncoderConfig_0".to_string(),
+                name: "TestEncoder".to_string(),
+                use_count: 1,
+                encoding: VideoEncoding::H264,
+                resolution: VideoResolution {
+                    width: 0, // Invalid
+                    height: 1080,
+                },
+                quality: 0.5,
+                rate_control: None,
+                mpeg4: None,
+                h264: Some(H264Configuration {
+                    gov_length: 30,
+                    h264_profile: H264Profile::Baseline,
+                }),
+                multicast: None,
+                session_timeout: "PT60S".to_string(),
+            },
+            force_persistence: false,
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_video_encoder_configuration_invalid_quality() {
+        use crate::onvif::types::common::{
+            H264Configuration, H264Profile, VideoEncoderConfiguration, VideoEncoding,
+            VideoResolution,
+        };
+
+        let service = MediaService::new();
+        let result = service.handle_set_video_encoder_configuration(SetVideoEncoderConfiguration {
+            configuration: VideoEncoderConfiguration {
+                token: "VideoEncoderConfig_0".to_string(),
+                name: "TestEncoder".to_string(),
+                use_count: 1,
+                encoding: VideoEncoding::H264,
+                resolution: VideoResolution {
+                    width: 1920,
+                    height: 1080,
+                },
+                quality: 1.5, // Invalid (> 1.0)
+                rate_control: None,
+                mpeg4: None,
+                h264: Some(H264Configuration {
+                    gov_length: 30,
+                    h264_profile: H264Profile::Baseline,
+                }),
+                multicast: None,
+                session_timeout: "PT60S".to_string(),
+            },
+            force_persistence: false,
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_video_encoder_configuration_invalid_frame_rate() {
+        use crate::onvif::types::common::{
+            H264Configuration, H264Profile, VideoEncoderConfiguration, VideoEncoding,
+            VideoRateControl, VideoResolution,
+        };
+
+        let service = MediaService::new();
+        let result = service.handle_set_video_encoder_configuration(SetVideoEncoderConfiguration {
+            configuration: VideoEncoderConfiguration {
+                token: "VideoEncoderConfig_0".to_string(),
+                name: "TestEncoder".to_string(),
+                use_count: 1,
+                encoding: VideoEncoding::H264,
+                resolution: VideoResolution {
+                    width: 1920,
+                    height: 1080,
+                },
+                quality: 0.5,
+                rate_control: Some(VideoRateControl {
+                    frame_rate_limit: 150, // Invalid (> 120)
+                    bitrate_limit: 2000000,
+                    encoding_interval: 1,
+                }),
+                mpeg4: None,
+                h264: Some(H264Configuration {
+                    gov_length: 30,
+                    h264_profile: H264Profile::Baseline,
+                }),
+                multicast: None,
+                session_timeout: "PT60S".to_string(),
+            },
+            force_persistence: false,
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_video_encoder_configuration_invalid_bitrate() {
+        use crate::onvif::types::common::{
+            H264Configuration, H264Profile, VideoEncoderConfiguration, VideoEncoding,
+            VideoRateControl, VideoResolution,
+        };
+
+        let service = MediaService::new();
+        let result = service.handle_set_video_encoder_configuration(SetVideoEncoderConfiguration {
+            configuration: VideoEncoderConfiguration {
+                token: "VideoEncoderConfig_0".to_string(),
+                name: "TestEncoder".to_string(),
+                use_count: 1,
+                encoding: VideoEncoding::H264,
+                resolution: VideoResolution {
+                    width: 1920,
+                    height: 1080,
+                },
+                quality: 0.5,
+                rate_control: Some(VideoRateControl {
+                    frame_rate_limit: 30,
+                    bitrate_limit: 100_000_000, // Invalid (> 50M)
+                    encoding_interval: 1,
+                }),
+                mpeg4: None,
+                h264: Some(H264Configuration {
+                    gov_length: 30,
+                    h264_profile: H264Profile::Baseline,
+                }),
+                multicast: None,
+                session_timeout: "PT60S".to_string(),
+            },
+            force_persistence: false,
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_audio_encoder_configuration() {
+        use crate::onvif::types::common::{AudioEncoderConfiguration, AudioEncoding};
+
+        let service = MediaService::new();
+        let result = service.handle_set_audio_encoder_configuration(SetAudioEncoderConfiguration {
+            configuration: AudioEncoderConfiguration {
+                token: "AudioEncoderConfig_0".to_string(),
+                name: "TestAudioEncoder".to_string(),
+                use_count: 1,
+                encoding: AudioEncoding::AAC,
+                bitrate: 128000,
+                sample_rate: 48000,
+                multicast: None,
+                session_timeout: "PT60S".to_string(),
+            },
+            force_persistence: false,
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_set_audio_encoder_configuration_invalid_token() {
+        use crate::onvif::types::common::{AudioEncoderConfiguration, AudioEncoding};
+
+        let service = MediaService::new();
+        // set_audio_encoder_configuration doesn't validate - it just inserts/updates
+        // So this test should verify it succeeds (allows creating new configs)
+        let result = service.handle_set_audio_encoder_configuration(SetAudioEncoderConfiguration {
+            configuration: AudioEncoderConfiguration {
+                token: "NonExistentConfig".to_string(),
+                name: "TestAudioEncoder".to_string(),
+                use_count: 1,
+                encoding: AudioEncoding::AAC,
+                bitrate: 128000,
+                sample_rate: 48000,
+                multicast: None,
+                session_timeout: "PT60S".to_string(),
+            },
+            force_persistence: false,
+        });
+        // Handler allows creating new configs, so this should succeed
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // Add/Remove Configuration Error Path Tests
+    // ========================================================================
+
+    #[test]
+    fn test_add_video_source_configuration_invalid_profile() {
+        let service = MediaService::new();
+        let result = service.handle_add_video_source_configuration(AddVideoSourceConfiguration {
+            profile_token: "NonExistentProfile".to_string(),
+            configuration_token: "VideoSourceConfig_0".to_string(),
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_video_source_configuration_invalid_config() {
+        let service = MediaService::new();
+        let profile = service
+            .handle_create_profile(CreateProfile {
+                name: "TestProfile".to_string(),
+                token: Some("TestToken".to_string()),
+            })
+            .unwrap();
+
+        let result = service.handle_add_video_source_configuration(AddVideoSourceConfiguration {
+            profile_token: profile.profile.token,
+            configuration_token: "NonExistentConfig".to_string(),
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_video_encoder_configuration_invalid_profile() {
+        let service = MediaService::new();
+        let result = service.handle_add_video_encoder_configuration(AddVideoEncoderConfiguration {
+            profile_token: "NonExistentProfile".to_string(),
+            configuration_token: "VideoEncoderConfig_0".to_string(),
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_video_encoder_configuration_invalid_config() {
+        let service = MediaService::new();
+        let profile = service
+            .handle_create_profile(CreateProfile {
+                name: "TestProfile".to_string(),
+                token: Some("TestToken".to_string()),
+            })
+            .unwrap();
+
+        let result = service.handle_add_video_encoder_configuration(AddVideoEncoderConfiguration {
+            profile_token: profile.profile.token,
+            configuration_token: "NonExistentConfig".to_string(),
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_video_source_configuration_invalid_profile() {
+        let service = MediaService::new();
+        let result =
+            service.handle_remove_video_source_configuration(RemoveVideoSourceConfiguration {
+                profile_token: "NonExistentProfile".to_string(),
+            });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_video_encoder_configuration_invalid_profile() {
+        let service = MediaService::new();
+        let result =
+            service.handle_remove_video_encoder_configuration(RemoveVideoEncoderConfiguration {
+                profile_token: "NonExistentProfile".to_string(),
+            });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_audio_source_configuration_invalid_profile() {
+        let service = MediaService::new();
+        let result = service.handle_add_audio_source_configuration(AddAudioSourceConfiguration {
+            profile_token: "NonExistentProfile".to_string(),
+            configuration_token: "AudioSourceConfig_0".to_string(),
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_audio_source_configuration_invalid_config() {
+        let service = MediaService::new();
+        let profile = service
+            .handle_create_profile(CreateProfile {
+                name: "TestProfile".to_string(),
+                token: Some("TestToken".to_string()),
+            })
+            .unwrap();
+
+        let result = service.handle_add_audio_source_configuration(AddAudioSourceConfiguration {
+            profile_token: profile.profile.token,
+            configuration_token: "NonExistentConfig".to_string(),
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_audio_encoder_configuration_invalid_profile() {
+        let service = MediaService::new();
+        let result = service.handle_add_audio_encoder_configuration(AddAudioEncoderConfiguration {
+            profile_token: "NonExistentProfile".to_string(),
+            configuration_token: "AudioEncoderConfig_0".to_string(),
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_audio_encoder_configuration_invalid_config() {
+        let service = MediaService::new();
+        let profile = service
+            .handle_create_profile(CreateProfile {
+                name: "TestProfile".to_string(),
+                token: Some("TestToken".to_string()),
+            })
+            .unwrap();
+
+        let result = service.handle_add_audio_encoder_configuration(AddAudioEncoderConfiguration {
+            profile_token: profile.profile.token,
+            configuration_token: "NonExistentConfig".to_string(),
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_audio_source_configuration_invalid_profile() {
+        let service = MediaService::new();
+        let result =
+            service.handle_remove_audio_source_configuration(RemoveAudioSourceConfiguration {
+                profile_token: "NonExistentProfile".to_string(),
+            });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_audio_encoder_configuration_invalid_profile() {
+        let service = MediaService::new();
+        let result =
+            service.handle_remove_audio_encoder_configuration(RemoveAudioEncoderConfiguration {
+                profile_token: "NonExistentProfile".to_string(),
+            });
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // Compatible Configuration Error Path Tests
+    // ========================================================================
+
+    #[test]
+    fn test_get_compatible_video_encoder_configurations_invalid_profile() {
+        let service = MediaService::new();
+        let result = service.handle_get_compatible_video_encoder_configurations(
+            GetCompatibleVideoEncoderConfigurations {
+                profile_token: "NonExistentProfile".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_compatible_audio_source_configurations_invalid_profile() {
+        let service = MediaService::new();
+        let result = service.handle_get_compatible_audio_source_configurations(
+            GetCompatibleAudioSourceConfigurations {
+                profile_token: "NonExistentProfile".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_compatible_audio_encoder_configurations_invalid_profile() {
+        let service = MediaService::new();
+        let result = service.handle_get_compatible_audio_encoder_configurations(
+            GetCompatibleAudioEncoderConfigurations {
+                profile_token: "NonExistentProfile".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // ServiceHandler Error Path Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_service_handler_unknown_action() {
+        let service = MediaService::new();
+        let result = service.handle_operation("UnknownAction", "<test/>").await;
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_invalid_xml() {
+        let service = MediaService::new();
+        let result = service
+            .handle_operation("GetProfiles", "<InvalidXml><Broken")
+            .await;
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::WellFormed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_get_profiles_xml() {
+        let service = MediaService::new();
+        let xml = r#"<GetProfiles/>"#;
+        let result = service.handle_operation("GetProfiles", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("GetProfilesResponse"));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_get_profile_xml() {
+        let service = MediaService::new();
+        let xml = r#"<GetProfile><ProfileToken>Profile_MainStream</ProfileToken></GetProfile>"#;
+        let result = service.handle_operation("GetProfile", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("GetProfileResponse"));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_create_profile_xml() {
+        let service = MediaService::new();
+        let xml = r#"<CreateProfile><Name>TestProfile</Name></CreateProfile>"#;
+        let result = service.handle_operation("CreateProfile", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("CreateProfileResponse"));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_get_stream_uri_xml() {
+        let service = MediaService::new();
+        // Use correct XML format: Stream type should be "RTP-Unicast" (with hyphen) per serde rename
+        let xml = r#"<GetStreamUri><StreamSetup><Stream>RTP-Unicast</Stream><Transport><Protocol>RTSP</Protocol></Transport></StreamSetup><ProfileToken>Profile_MainStream</ProfileToken></GetStreamUri>"#;
+        let result = service.handle_operation("GetStreamUri", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("GetStreamUriResponse"));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_get_snapshot_uri_xml() {
+        let service = MediaService::new();
+        let xml =
+            r#"<GetSnapshotUri><ProfileToken>Profile_MainStream</ProfileToken></GetSnapshotUri>"#;
+        let result = service.handle_operation("GetSnapshotUri", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("GetSnapshotUriResponse"));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_get_service_capabilities_xml() {
+        let service = MediaService::new();
+        let xml = r#"<GetServiceCapabilities/>"#;
+        let result = service
+            .handle_operation("GetServiceCapabilities", xml)
+            .await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("GetServiceCapabilitiesResponse"));
+    }
 }

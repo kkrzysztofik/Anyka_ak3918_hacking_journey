@@ -9,6 +9,7 @@ import {
   createControllablePromise,
   mockToast,
   renderWithProviders,
+  setupDeviceInfoMock,
 } from '@/test/componentTestHelpers';
 
 import { AboutDialog } from './AboutDialog';
@@ -31,8 +32,7 @@ describe('AboutDialog', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    const { getDeviceInformation } = await import('@/services/deviceService');
-    vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
+    await setupDeviceInfoMock(mockDeviceInfo);
   });
 
   describe('Dialog Open/Close', () => {
@@ -75,7 +75,6 @@ describe('AboutDialog', () => {
 
   describe('Loading State', () => {
     it('should show loading state when fetching device info', async () => {
-      // Create a promise that we can control
       const { promise, resolve } = createControllablePromise<typeof mockDeviceInfo>();
 
       const { getDeviceInformation } = await import('@/services/deviceService');
@@ -98,8 +97,7 @@ describe('AboutDialog', () => {
 
   describe('Successful Device Info Fetch', () => {
     it('should fetch and display device information', async () => {
-      const { getDeviceInformation } = await import('@/services/deviceService');
-      vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
+      await setupDeviceInfoMock(mockDeviceInfo);
 
       renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
@@ -113,8 +111,7 @@ describe('AboutDialog', () => {
     });
 
     it('should display all device info fields', async () => {
-      const { getDeviceInformation } = await import('@/services/deviceService');
-      vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
+      await setupDeviceInfoMock(mockDeviceInfo);
 
       renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
@@ -128,8 +125,7 @@ describe('AboutDialog', () => {
     });
 
     it('should display dialog title and description', async () => {
-      const { getDeviceInformation } = await import('@/services/deviceService');
-      vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
+      await setupDeviceInfoMock(mockDeviceInfo);
 
       renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
@@ -140,8 +136,7 @@ describe('AboutDialog', () => {
     });
 
     it('should display GitHub link', async () => {
-      const { getDeviceInformation } = await import('@/services/deviceService');
-      vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
+      await setupDeviceInfoMock(mockDeviceInfo);
 
       renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
@@ -157,8 +152,7 @@ describe('AboutDialog', () => {
     });
 
     it('should display license information', async () => {
-      const { getDeviceInformation } = await import('@/services/deviceService');
-      vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
+      await setupDeviceInfoMock(mockDeviceInfo);
 
       renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
@@ -173,8 +167,7 @@ describe('AboutDialog', () => {
     });
 
     it('should display copyright notice', async () => {
-      const { getDeviceInformation } = await import('@/services/deviceService');
-      vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
+      await setupDeviceInfoMock(mockDeviceInfo);
 
       renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
 
@@ -198,8 +191,7 @@ describe('AboutDialog', () => {
     });
 
     it('should show error message when device info is not available', async () => {
-      const { getDeviceInformation } = await import('@/services/deviceService');
-      vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
+      await setupDeviceInfoMock(mockDeviceInfo);
 
       const { rerender } = renderWithProviders(<AboutDialog open={false} onOpenChange={vi.fn()} />);
 
@@ -222,8 +214,7 @@ describe('AboutDialog', () => {
 
   describe('Data Fetching Logic', () => {
     it('should only fetch device info when dialog opens and deviceInfo is null', async () => {
-      const { getDeviceInformation } = await import('@/services/deviceService');
-      vi.mocked(getDeviceInformation).mockResolvedValue(mockDeviceInfo);
+      await setupDeviceInfoMock(mockDeviceInfo);
 
       const { rerender } = renderWithProviders(<AboutDialog open={false} onOpenChange={vi.fn()} />);
 

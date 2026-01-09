@@ -8,9 +8,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { type OnvifUser, createUser, deleteUser, getUsers, setUser } from '@/services/userService';
 import {
   MOCK_DATA,
+  closeDialog,
+  fillFormField,
   mockToast,
+  openDialog,
   renderWithProviders,
   verifyPasswordVisibilityToggle,
+  waitForPageLoad,
 } from '@/test/componentTestHelpers';
 
 import UserManagementPage from './UserManagementPage';
@@ -24,6 +28,12 @@ vi.mock('@/services/userService', () => ({
 }));
 
 describe('UserManagementPage', () => {
+  const renderUserManagementPage = async () => {
+    const result = renderWithProviders(<UserManagementPage />);
+    await waitForPageLoad('user-management-title');
+    return result;
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getUsers).mockResolvedValue([...MOCK_DATA.users] as OnvifUser[]);
@@ -62,48 +72,20 @@ describe('UserManagementPage', () => {
 
   it('should open and close add user dialog', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<UserManagementPage />);
+    await renderUserManagementPage();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('user-management-title')).toBeInTheDocument();
-    });
-
-    const addButton = screen.getByTestId('user-management-add-user-button');
-    expect(addButton).toBeTruthy();
-    await user.click(addButton);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('add-user-dialog-title')).toBeInTheDocument();
-    });
-
-    const cancelButton = screen.getByTestId('add-user-dialog-cancel');
-    await user.click(cancelButton);
-
-    await waitFor(() => {
-      // Dialog should close
-      expect(screen.queryByTestId('add-user-dialog-title')).not.toBeInTheDocument();
-    });
+    await openDialog(user, 'user-management-add-user-button', 'add-user-dialog-title');
+    await closeDialog(user, 'add-user-dialog-cancel', 'add-user-dialog-title');
   });
 
   it('should create user on form submission', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<UserManagementPage />);
+    await renderUserManagementPage();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('user-management-title')).toBeInTheDocument();
-    });
+    await openDialog(user, 'user-management-add-user-button', 'add-user-dialog-title');
 
-    const addButton = screen.getByTestId('user-management-add-user-button');
-    await user.click(addButton);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('add-user-dialog-title')).toBeInTheDocument();
-    });
-
-    const usernameInput = screen.getByTestId('add-user-dialog-username-input');
-    const passwordInput = screen.getByTestId('add-user-dialog-password-input');
-    await user.type(usernameInput, 'newuser');
-    await user.type(passwordInput, 'password123');
+    await fillFormField(user, 'add-user-dialog-username-input', 'newuser');
+    await fillFormField(user, 'add-user-dialog-password-input', 'password123');
 
     const roleSelect = screen.getByTestId('add-user-dialog-role-select');
     await user.click(roleSelect);

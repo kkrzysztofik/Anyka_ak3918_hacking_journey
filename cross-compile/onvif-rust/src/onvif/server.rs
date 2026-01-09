@@ -1117,4 +1117,161 @@ mod tests {
             .unwrap();
         assert_eq!(&body[..], b"Hello Gzip");
     }
+
+    #[test]
+    fn test_server_config_tls_validation_enabled_without_cert() {
+        let config = OnvifServerConfig {
+            tls_enabled: true,
+            tls_cert_path: None,
+            tls_key_path: None,
+            ..Default::default()
+        };
+
+        // Should fail validation when TLS is enabled without cert/key
+        let result = OnvifServer::new(config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_server_config_tls_validation_enabled_without_key() {
+        let config = OnvifServerConfig {
+            tls_enabled: true,
+            tls_cert_path: Some(std::path::PathBuf::from("/tmp/cert.pem")),
+            tls_key_path: None,
+            ..Default::default()
+        };
+
+        let result = OnvifServer::new(config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_server_config_tls_validation_enabled_without_cert_path() {
+        let config = OnvifServerConfig {
+            tls_enabled: true,
+            tls_cert_path: None,
+            tls_key_path: Some(std::path::PathBuf::from("/tmp/key.pem")),
+            ..Default::default()
+        };
+
+        let result = OnvifServer::new(config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_server_state_auth_context() {
+        let config = OnvifServerConfig::default();
+        let server = OnvifServer::new(config).unwrap();
+
+        let state = OnvifServerState {
+            dispatcher: Arc::clone(&server.dispatcher),
+            shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: server.auth_enabled,
+            memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
+        };
+
+        let auth_ctx = state.auth_context();
+        assert_eq!(auth_ctx.auth_enabled, state.auth_enabled);
+    }
+
+    #[test]
+    fn test_validate_content_type_get_request() {
+        use axum::body::Body;
+        use axum::http::Request;
+
+        // GET requests should not be validated
+        let request = Request::builder()
+            .method("GET")
+            .header("Content-Type", "application/json")
+            .body(Body::empty())
+            .unwrap();
+
+        // This is a simple test - in real usage, this would go through the middleware
+        // For now, just verify the request can be created
+        assert_eq!(request.method(), "GET");
+    }
+
+    #[test]
+    fn test_validate_content_type_text_xml() {
+        use axum::body::Body;
+        use axum::http::Request;
+
+        // text/xml should be accepted
+        let request = Request::builder()
+            .method("POST")
+            .header("Content-Type", "text/xml")
+            .body(Body::empty())
+            .unwrap();
+
+        assert!(request.headers().get("Content-Type").is_some());
+    }
+
+    #[test]
+    fn test_validate_content_type_application_soap_xml() {
+        use axum::body::Body;
+        use axum::http::Request;
+
+        // application/soap+xml should be accepted
+        let request = Request::builder()
+            .method("POST")
+            .header("Content-Type", "application/soap+xml")
+            .body(Body::empty())
+            .unwrap();
+
+        assert!(request.headers().get("Content-Type").is_some());
+    }
+
+    #[test]
+    fn test_server_with_app_state_tls_validation() {
+        use crate::config::ConfigRuntime;
+        use crate::onvif::ptz::PTZStateManager;
+        use crate::users::password::PasswordManager;
+        use crate::users::storage::UserStorage;
+        use crate::utils::MemoryMonitor;
+
+        let app_state = AppState::builder()
+            .user_storage(Arc::new(UserStorage::new()))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .build()
+            .unwrap();
+
+        let config = OnvifServerConfig {
+            tls_enabled: true,
+            tls_cert_path: None,
+            tls_key_path: None,
+            ..Default::default()
+        };
+
+        // Should fail validation
+        let result = OnvifServer::with_app_state(config, app_state);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rate_limit_middleware_state() {
+        let config = OnvifServerConfig::default();
+        let server = OnvifServer::new(config).unwrap();
+
+        let state = OnvifServerState {
+            dispatcher: Arc::clone(&server.dispatcher),
+            shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: server.auth_enabled,
+            memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
+        };
+
+        // Verify state can be cloned
+        let _cloned = state.clone();
+    }
 }

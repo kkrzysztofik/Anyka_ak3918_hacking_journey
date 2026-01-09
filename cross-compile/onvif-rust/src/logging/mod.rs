@@ -558,4 +558,168 @@ mod tests {
             Box::new(LoggingError::InvalidLevel("test".to_string()));
         assert!(err.to_string().contains("test"));
     }
+
+    #[test]
+    fn test_init_logging_with_config() {
+        use crate::config::ConfigRuntime;
+
+        let config = ConfigRuntime::new(Default::default());
+        config.set_string("logging.level", "debug").unwrap();
+        config.set_bool("logging.console_enabled", true).unwrap();
+
+        // Should succeed
+        let result = init_logging(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_init_logging_file_only() {
+        use crate::config::ConfigRuntime;
+        use std::fs;
+
+        let config = ConfigRuntime::new(Default::default());
+        config.set_string("logging.level", "info").unwrap();
+        config.set_bool("logging.console_enabled", false).unwrap();
+        config
+            .set_string("logging.file_path", "/tmp/test_onvif.log")
+            .unwrap();
+
+        // Create temp directory if needed
+        let _ = fs::create_dir_all("/tmp");
+
+        let result = init_logging(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_init_logging_console_and_file() {
+        use crate::config::ConfigRuntime;
+        use std::fs;
+
+        let config = ConfigRuntime::new(Default::default());
+        config.set_string("logging.level", "warn").unwrap();
+        config.set_bool("logging.console_enabled", true).unwrap();
+        config
+            .set_string("logging.file_path", "/tmp/test_both.log")
+            .unwrap();
+
+        let _ = fs::create_dir_all("/tmp");
+
+        let result = init_logging(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_init_logging_no_output() {
+        use crate::config::ConfigRuntime;
+
+        let config = ConfigRuntime::new(Default::default());
+        config.set_string("logging.level", "error").unwrap();
+        config.set_bool("logging.console_enabled", false).unwrap();
+        // No file_path set
+
+        let result = init_logging(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_init_logging_invalid_level() {
+        use crate::config::ConfigRuntime;
+
+        let config = ConfigRuntime::new(Default::default());
+        config.set_string("logging.level", "invalid_level").unwrap();
+
+        // init_logging uses INIT.call_once(), so if logging was already initialized
+        // by another test, this will return Ok(()) from the previous initialization.
+        // We need to test the parse_log_level function directly instead.
+        let result = parse_log_level("invalid_level");
+        assert!(result.is_err());
+        assert!(matches!(result, Err(LoggingError::InvalidLevel(_))));
+    }
+
+    #[test]
+    fn test_set_log_level_not_initialized() {
+        // Try to set log level without initializing
+        // Note: If logging was already initialized by another test, RELOAD_HANDLE
+        // will be set and this will succeed. We can only test the error path
+        // if logging hasn't been initialized yet, which is not guaranteed in test order.
+        // So we test the behavior: either it fails (not initialized) or succeeds (already initialized)
+        let result = set_log_level("debug");
+        // Both outcomes are valid - either logging wasn't initialized (error) or it was (success)
+        if result.is_err() {
+            assert!(matches!(result, Err(LoggingError::ReloadFailed(_))));
+        } else {
+            // Logging was already initialized by another test - this is fine
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_set_log_level_after_init() {
+        use crate::config::ConfigRuntime;
+
+        let config = ConfigRuntime::new(Default::default());
+        config.set_string("logging.level", "info").unwrap();
+
+        // Initialize first
+        let init_result = init_logging(&config);
+        assert!(init_result.is_ok());
+
+        // Now set log level should work
+        let result = set_log_level("debug");
+        assert!(result.is_ok());
+
+        // Try different levels
+        assert!(set_log_level("warn").is_ok());
+        assert!(set_log_level("error").is_ok());
+        assert!(set_log_level("trace").is_ok());
+    }
+
+    #[test]
+    fn test_set_log_level_invalid() {
+        use crate::config::ConfigRuntime;
+
+        let config = ConfigRuntime::new(Default::default());
+        init_logging(&config).unwrap();
+
+        let result = set_log_level("invalid");
+        assert!(result.is_err());
+        assert!(matches!(result, Err(LoggingError::InvalidLevel(_))));
+    }
+
+    #[test]
+    fn test_init_static_asset_logging_disabled() {
+        use crate::config::ConfigRuntime;
+
+        let config = ConfigRuntime::new(Default::default());
+        let result = init_static_asset_logging(&config, false);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_init_static_asset_logging_enabled() {
+        use crate::config::ConfigRuntime;
+
+        let config = ConfigRuntime::new(Default::default());
+        config
+            .set_string("logging.static_assets.file_path", "/tmp")
+            .unwrap();
+        config
+            .set_string("logging.static_assets.file_name", "access")
+            .unwrap();
+
+        let result = init_static_asset_logging(&config, true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_init_static_asset_logging_defaults() {
+        use crate::config::ConfigRuntime;
+
+        let config = ConfigRuntime::new(Default::default());
+        // No config set, should use defaults
+
+        let result = init_static_asset_logging(&config, true);
+        assert!(result.is_ok());
+    }
 }

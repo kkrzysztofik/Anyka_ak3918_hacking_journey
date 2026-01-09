@@ -1115,4 +1115,130 @@ mod tests {
             _ => panic!("Expected WellFormed error"),
         }
     }
+
+    // ========================================================================
+    // Platform Integration Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_set_imaging_settings_with_platform() {
+        use crate::platform::StubPlatformBuilder;
+
+        let platform = Arc::new(StubPlatformBuilder::new().imaging_supported(true).build());
+        let service = ImagingService::with_platform(platform);
+        // VideoSource_1 is the default token, so it should work
+
+        let response = service
+            .handle_set_imaging_settings(SetImagingSettings {
+                video_source_token: "VideoSource_1".to_string(),
+                imaging_settings: ImagingSettings20 {
+                    brightness: Some(75.0),
+                    contrast: Some(80.0),
+                    color_saturation: Some(70.0),
+                    sharpness: Some(65.0),
+                    ..Default::default()
+                },
+                force_persistence: None,
+            })
+            .await
+            .unwrap();
+
+        let _ = response;
+    }
+
+    #[tokio::test]
+    async fn test_set_imaging_settings_platform_failure() {
+        use crate::platform::StubPlatformBuilder;
+
+        let platform = Arc::new(StubPlatformBuilder::new().imaging_supported(false).build());
+        let service = ImagingService::with_platform(platform);
+
+        // Should still work (platform failure handled gracefully)
+        let response = service
+            .handle_set_imaging_settings(SetImagingSettings {
+                video_source_token: "VideoSource_1".to_string(),
+                imaging_settings: ImagingSettings20 {
+                    brightness: Some(75.0),
+                    contrast: Some(80.0),
+                    color_saturation: Some(70.0),
+                    sharpness: Some(65.0),
+                    ..Default::default()
+                },
+                force_persistence: None,
+            })
+            .await;
+
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_move_focus_not_supported() {
+        let service = ImagingService::new();
+
+        use crate::onvif::types::imaging::FocusMove;
+        // Use VideoSource_1 which is the default valid token
+        let result = service
+            .handle_move(Move {
+                video_source_token: "VideoSource_1".to_string(),
+                focus: FocusMove::default(),
+            })
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+    }
+
+    #[tokio::test]
+    async fn test_move_invalid_token() {
+        let service = ImagingService::new();
+
+        use crate::onvif::types::imaging::FocusMove;
+        let result = service
+            .handle_move(Move {
+                video_source_token: "InvalidToken".to_string(),
+                focus: FocusMove::default(),
+            })
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::InvalidArgVal { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_unknown_action_imaging() {
+        let service = ImagingService::new();
+        let result = service.handle_operation("UnknownAction", "<test/>").await;
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_set_imaging_settings_xml() {
+        let service = ImagingService::new();
+        let xml = r#"<SetImagingSettings><VideoSourceToken>VideoSource_1</VideoSourceToken><ImagingSettings><Brightness>75.0</Brightness></ImagingSettings></SetImagingSettings>"#;
+        let result = service.handle_operation("SetImagingSettings", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("SetImagingSettingsResponse"));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_get_options_xml() {
+        let service = ImagingService::new();
+        let xml = r#"<GetOptions><VideoSourceToken>VideoSource_1</VideoSourceToken></GetOptions>"#;
+        let result = service.handle_operation("GetOptions", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("GetOptionsResponse"));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_get_status_xml() {
+        let service = ImagingService::new();
+        let xml = r#"<GetStatus><VideoSourceToken>VideoSource_1</VideoSourceToken></GetStatus>"#;
+        let result = service.handle_operation("GetStatus", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("GetStatusResponse"));
+    }
 }

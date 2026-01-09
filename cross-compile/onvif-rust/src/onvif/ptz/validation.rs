@@ -6,6 +6,34 @@
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::PTZVector;
 
+/// Create a validation error with the given subcode and reason
+fn create_validation_error(subcode: &str, reason: String) -> OnvifError {
+    OnvifError::InvalidArgVal {
+        subcode: subcode.to_string(),
+        reason,
+    }
+}
+
+/// Validate that a value is within the specified range
+fn validate_range(
+    value: f32,
+    min: f32,
+    max: f32,
+    field_name: &str,
+    error_type: &str,
+) -> OnvifResult<()> {
+    if !(min..=max).contains(&value) {
+        return Err(create_validation_error(
+            error_type,
+            format!(
+                "{} value {} out of range ({} to {})",
+                field_name, value, min, max
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Validate PTZ position values.
 ///
 /// Ensures pan, tilt, and zoom are within valid ranges:
@@ -23,27 +51,9 @@ use crate::onvif::types::common::PTZVector;
 ///
 /// `Ok(())` if valid, or `OnvifError::InvalidArgVal` if out of range.
 pub fn validate_ptz_position(pan: f32, tilt: f32, zoom: f32) -> OnvifResult<()> {
-    if !(-1.0..=1.0).contains(&pan) {
-        return Err(OnvifError::InvalidArgVal {
-            subcode: "InvalidPanValue".to_string(),
-            reason: format!("Pan value {} out of range (-1.0 to 1.0)", pan),
-        });
-    }
-
-    if !(-1.0..=1.0).contains(&tilt) {
-        return Err(OnvifError::InvalidArgVal {
-            subcode: "InvalidTiltValue".to_string(),
-            reason: format!("Tilt value {} out of range (-1.0 to 1.0)", tilt),
-        });
-    }
-
-    if !(0.0..=1.0).contains(&zoom) {
-        return Err(OnvifError::InvalidArgVal {
-            subcode: "InvalidZoomValue".to_string(),
-            reason: format!("Zoom value {} out of range (0.0 to 1.0)", zoom),
-        });
-    }
-
+    validate_range(pan, -1.0, 1.0, "Pan", "InvalidPanValue")?;
+    validate_range(tilt, -1.0, 1.0, "Tilt", "InvalidTiltValue")?;
+    validate_range(zoom, 0.0, 1.0, "Zoom", "InvalidZoomValue")?;
     Ok(())
 }
 
@@ -65,27 +75,9 @@ pub fn validate_ptz_position(pan: f32, tilt: f32, zoom: f32) -> OnvifResult<()> 
 /// `Ok(())` if valid, or `OnvifError::InvalidArgVal` if out of range.
 #[allow(dead_code)] // Kept for potential future use, currently tested but not used in production
 pub fn validate_ptz_velocity(pan: f32, tilt: f32, zoom: f32) -> OnvifResult<()> {
-    if !(-1.0..=1.0).contains(&pan) {
-        return Err(OnvifError::InvalidArgVal {
-            subcode: "InvalidPanVelocity".to_string(),
-            reason: format!("Pan velocity {} out of range (-1.0 to 1.0)", pan),
-        });
-    }
-
-    if !(-1.0..=1.0).contains(&tilt) {
-        return Err(OnvifError::InvalidArgVal {
-            subcode: "InvalidTiltVelocity".to_string(),
-            reason: format!("Tilt velocity {} out of range (-1.0 to 1.0)", tilt),
-        });
-    }
-
-    if !(-1.0..=1.0).contains(&zoom) {
-        return Err(OnvifError::InvalidArgVal {
-            subcode: "InvalidZoomVelocity".to_string(),
-            reason: format!("Zoom velocity {} out of range (-1.0 to 1.0)", zoom),
-        });
-    }
-
+    validate_range(pan, -1.0, 1.0, "Pan velocity", "InvalidPanVelocity")?;
+    validate_range(tilt, -1.0, 1.0, "Tilt velocity", "InvalidTiltVelocity")?;
+    validate_range(zoom, -1.0, 1.0, "Zoom velocity", "InvalidZoomVelocity")?;
     Ok(())
 }
 
@@ -102,27 +94,12 @@ pub fn validate_ptz_velocity(pan: f32, tilt: f32, zoom: f32) -> OnvifResult<()> 
 /// `Ok(())` if valid, or `OnvifError::InvalidArgVal` if any component is out of range.
 pub fn validate_ptz_vector(vector: &PTZVector) -> OnvifResult<()> {
     if let Some(pan_tilt) = &vector.pan_tilt {
-        if !(-1.0..=1.0).contains(&pan_tilt.x) {
-            return Err(OnvifError::InvalidArgVal {
-                subcode: "InvalidPanValue".to_string(),
-                reason: format!("Pan value {} out of range (-1.0 to 1.0)", pan_tilt.x),
-            });
-        }
-        if !(-1.0..=1.0).contains(&pan_tilt.y) {
-            return Err(OnvifError::InvalidArgVal {
-                subcode: "InvalidTiltValue".to_string(),
-                reason: format!("Tilt value {} out of range (-1.0 to 1.0)", pan_tilt.y),
-            });
-        }
+        validate_range(pan_tilt.x, -1.0, 1.0, "Pan", "InvalidPanValue")?;
+        validate_range(pan_tilt.y, -1.0, 1.0, "Tilt", "InvalidTiltValue")?;
     }
 
-    if let Some(zoom) = &vector.zoom
-        && !(0.0..=1.0).contains(&zoom.x)
-    {
-        return Err(OnvifError::InvalidArgVal {
-            subcode: "InvalidZoomValue".to_string(),
-            reason: format!("Zoom value {} out of range (0.0 to 1.0)", zoom.x),
-        });
+    if let Some(zoom) = &vector.zoom {
+        validate_range(zoom.x, 0.0, 1.0, "Zoom", "InvalidZoomValue")?;
     }
 
     Ok(())
@@ -142,28 +119,19 @@ pub fn validate_ptz_vector(vector: &PTZVector) -> OnvifResult<()> {
 /// `Ok(())` if valid, or `OnvifError::InvalidArgVal` if any component is out of range.
 pub fn validate_ptz_velocity_vector(vector: &PTZVector) -> OnvifResult<()> {
     if let Some(pan_tilt) = &vector.pan_tilt {
-        if !(-1.0..=1.0).contains(&pan_tilt.x) {
-            return Err(OnvifError::InvalidArgVal {
-                subcode: "InvalidPanVelocity".to_string(),
-                reason: format!("Pan velocity {} out of range (-1.0 to 1.0)", pan_tilt.x),
-            });
-        }
-        if !(-1.0..=1.0).contains(&pan_tilt.y) {
-            return Err(OnvifError::InvalidArgVal {
-                subcode: "InvalidTiltVelocity".to_string(),
-                reason: format!("Tilt velocity {} out of range (-1.0 to 1.0)", pan_tilt.y),
-            });
-        }
+        validate_range(pan_tilt.x, -1.0, 1.0, "Pan velocity", "InvalidPanVelocity")?;
+        validate_range(
+            pan_tilt.y,
+            -1.0,
+            1.0,
+            "Tilt velocity",
+            "InvalidTiltVelocity",
+        )?;
     }
 
     if let Some(zoom) = &vector.zoom {
         // For velocity, zoom can be negative (unlike position)
-        if !(-1.0..=1.0).contains(&zoom.x) {
-            return Err(OnvifError::InvalidArgVal {
-                subcode: "InvalidZoomVelocity".to_string(),
-                reason: format!("Zoom velocity {} out of range (-1.0 to 1.0)", zoom.x),
-            });
-        }
+        validate_range(zoom.x, -1.0, 1.0, "Zoom velocity", "InvalidZoomVelocity")?;
     }
 
     Ok(())
@@ -280,5 +248,119 @@ mod tests {
             }),
         };
         assert!(validate_ptz_velocity_vector(&vector).is_err());
+    }
+
+    #[test]
+    fn test_validate_ptz_vector_missing_pan_tilt() {
+        let vector = PTZVector {
+            pan_tilt: None,
+            zoom: Some(Vector1D {
+                x: 0.5,
+                space: None,
+            }),
+        };
+        assert!(validate_ptz_vector(&vector).is_ok());
+    }
+
+    #[test]
+    fn test_validate_ptz_vector_missing_zoom() {
+        let vector = PTZVector {
+            pan_tilt: Some(Vector2D {
+                x: 0.5,
+                y: -0.5,
+                space: None,
+            }),
+            zoom: None,
+        };
+        assert!(validate_ptz_vector(&vector).is_ok());
+    }
+
+    #[test]
+    fn test_validate_ptz_vector_empty() {
+        let vector = PTZVector {
+            pan_tilt: None,
+            zoom: None,
+        };
+        assert!(validate_ptz_vector(&vector).is_ok());
+    }
+
+    #[test]
+    fn test_validate_ptz_velocity_vector_missing_pan_tilt() {
+        let vector = PTZVector {
+            pan_tilt: None,
+            zoom: Some(Vector1D {
+                x: -0.5,
+                space: None,
+            }),
+        };
+        assert!(validate_ptz_velocity_vector(&vector).is_ok());
+    }
+
+    #[test]
+    fn test_validate_ptz_velocity_vector_missing_zoom() {
+        let vector = PTZVector {
+            pan_tilt: Some(Vector2D {
+                x: 0.5,
+                y: -0.5,
+                space: None,
+            }),
+            zoom: None,
+        };
+        assert!(validate_ptz_velocity_vector(&vector).is_ok());
+    }
+
+    #[test]
+    fn test_validate_ptz_velocity_vector_empty() {
+        let vector = PTZVector {
+            pan_tilt: None,
+            zoom: None,
+        };
+        assert!(validate_ptz_velocity_vector(&vector).is_ok());
+    }
+
+    #[test]
+    fn test_validate_ptz_position_boundary_values() {
+        // Exact boundaries
+        assert!(validate_ptz_position(-1.0, -1.0, 0.0).is_ok());
+        assert!(validate_ptz_position(1.0, 1.0, 1.0).is_ok());
+        assert!(validate_ptz_position(0.0, 0.0, 0.0).is_ok());
+    }
+
+    #[test]
+    fn test_validate_ptz_velocity_boundary_values() {
+        // Exact boundaries
+        assert!(validate_ptz_velocity(-1.0, -1.0, -1.0).is_ok());
+        assert!(validate_ptz_velocity(1.0, 1.0, 1.0).is_ok());
+        assert!(validate_ptz_velocity(0.0, 0.0, 0.0).is_ok());
+    }
+
+    #[test]
+    fn test_validate_ptz_vector_zoom_boundary() {
+        let vector_min = PTZVector {
+            pan_tilt: None,
+            zoom: Some(Vector1D {
+                x: 0.0,
+                space: None,
+            }),
+        };
+        assert!(validate_ptz_vector(&vector_min).is_ok());
+
+        let vector_max = PTZVector {
+            pan_tilt: None,
+            zoom: Some(Vector1D {
+                x: 1.0,
+                space: None,
+            }),
+        };
+        assert!(validate_ptz_vector(&vector_max).is_ok());
+
+        let vector_invalid = PTZVector {
+            pan_tilt: None,
+            zoom: Some(Vector1D {
+                x: -0.1,
+                space: None,
+            }),
+        };
+        assert!(validate_ptz_vector(&vector_invalid).is_err());
     }
 }

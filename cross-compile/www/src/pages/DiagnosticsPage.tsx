@@ -108,7 +108,7 @@ interface CustomTooltipProps {
   label?: string | number;
 }
 
-const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
+export const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
   if (active && payload?.length) {
     return (
       <div className="border-border bg-card/95 text-foreground rounded-lg border p-2 text-xs shadow-xl backdrop-blur-md">

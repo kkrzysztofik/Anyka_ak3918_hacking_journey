@@ -31,18 +31,11 @@ describe('App', () => {
     vi.clearAllMocks();
   });
 
-  it('should render QueryClientProvider', () => {
-    render(<App />);
-    expect(screen.getByTestId('app-router')).toBeInTheDocument();
-  });
-
-  it('should render AuthProvider', () => {
-    render(<App />);
-    // AuthProvider wraps the content, so router should be visible
-    expect(screen.getByTestId('app-router')).toBeInTheDocument();
-  });
-
-  it('should render AppRouter', () => {
+  it.each([
+    { description: 'QueryClientProvider' },
+    { description: 'AuthProvider' },
+    { description: 'AppRouter' },
+  ])('should render $description', () => {
     render(<App />);
     expect(screen.getByTestId('app-router')).toBeInTheDocument();
   });

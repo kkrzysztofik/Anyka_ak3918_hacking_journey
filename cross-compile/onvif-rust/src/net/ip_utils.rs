@@ -39,3 +39,72 @@ fn detect_local_ip() -> Option<String> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_external_ip_detected_ip_precedence() {
+        let config = ConfigRuntime::new(Default::default());
+        config
+            .set_string("network.detected_ip", "192.168.1.100")
+            .unwrap();
+        config.set_string("server.address", "10.0.0.1").unwrap();
+
+        let ip = external_ip(&config);
+        assert_eq!(ip, "192.168.1.100");
+    }
+
+    #[test]
+    fn test_external_ip_server_address_fallback() {
+        let config = ConfigRuntime::new(Default::default());
+        // No detected_ip
+        config.set_string("server.address", "10.0.0.1").unwrap();
+
+        let ip = external_ip(&config);
+        assert_eq!(ip, "10.0.0.1");
+    }
+
+    #[test]
+    fn test_external_ip_server_address_zero_ignored() {
+        let config = ConfigRuntime::new(Default::default());
+        config.set_string("server.address", "0.0.0.0").unwrap();
+
+        // Should fallback to detect_local_ip or 127.0.0.1
+        let ip = external_ip(&config);
+        // Either detected IP or fallback
+        assert!(!ip.is_empty());
+    }
+
+    #[test]
+    fn test_external_ip_empty_detected_ip_fallback() {
+        let config = ConfigRuntime::new(Default::default());
+        config.set_string("network.detected_ip", "").unwrap();
+        config.set_string("server.address", "10.0.0.1").unwrap();
+
+        let ip = external_ip(&config);
+        assert_eq!(ip, "10.0.0.1");
+    }
+
+    #[test]
+    fn test_external_ip_no_config() {
+        let config = ConfigRuntime::new(Default::default());
+        // No config set
+
+        let ip = external_ip(&config);
+        // Should be detected IP or 127.0.0.1
+        assert!(!ip.is_empty());
+    }
+
+    #[test]
+    fn test_detect_local_ip() {
+        // This may or may not succeed depending on network availability
+        let result = detect_local_ip();
+        // If it succeeds, should be a valid IP
+        if let Some(ip) = result {
+            assert!(!ip.is_empty());
+            assert_ne!(ip, "0.0.0.0");
+        }
+    }
+}

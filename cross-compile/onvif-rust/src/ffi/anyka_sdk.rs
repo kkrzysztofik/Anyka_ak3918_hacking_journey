@@ -666,4 +666,97 @@ mod tests {
         assert_eq!(LogLevel::from(6), LogLevel::Debug);
         assert_eq!(LogLevel::from(99), LogLevel::Debug); // Unknown defaults to Debug
     }
+
+    #[test]
+    fn test_log_level_all_variants() {
+        assert_eq!(LogLevel::from(0), LogLevel::Reserved);
+        assert_eq!(LogLevel::from(1), LogLevel::Error);
+        assert_eq!(LogLevel::from(2), LogLevel::Warning);
+        assert_eq!(LogLevel::from(3), LogLevel::Notice);
+        assert_eq!(LogLevel::from(4), LogLevel::Normal);
+        assert_eq!(LogLevel::from(5), LogLevel::Info);
+        assert_eq!(LogLevel::from(6), LogLevel::Debug);
+    }
+
+    #[test]
+    fn test_ptz_motor_to_device_id() {
+        assert_eq!(PtzMotor::Horizontal.to_device_id(), 0);
+        assert_eq!(PtzMotor::Vertical.to_device_id(), 1);
+    }
+
+    #[test]
+    fn test_ptz_position_new() {
+        let pos = PtzPosition::new(45.0, -30.0, 2.0);
+        assert_eq!(pos.pan, 45.0);
+        assert_eq!(pos.tilt, -30.0);
+        assert_eq!(pos.zoom, 2.0);
+    }
+
+    #[test]
+    fn test_video_device_constants() {
+        assert_eq!(VideoDevice::DEV0.0, 0);
+    }
+
+    #[test]
+    fn test_video_channel_constants() {
+        assert_eq!(VideoChannel::MAIN.0, 0);
+        assert_eq!(VideoChannel::SUB.0, 1);
+    }
+
+    #[test]
+    fn test_resolution_constants() {
+        assert_eq!(Resolution::HD1080.width, 1920);
+        assert_eq!(Resolution::HD1080.height, 1080);
+        assert_eq!(Resolution::HD720.width, 1280);
+        assert_eq!(Resolution::HD720.height, 720);
+        assert_eq!(Resolution::VGA.width, 640);
+        assert_eq!(Resolution::VGA.height, 480);
+        assert_eq!(Resolution::QVGA.width, 320);
+        assert_eq!(Resolution::QVGA.height, 240);
+    }
+
+    #[test]
+    fn test_anyka_error_display() {
+        let err = AnykaError::SdkError(-1);
+        let display = format!("{}", err);
+        assert!(display.contains("Anyka SDK error"));
+
+        let err = AnykaError::InvalidParameter("test".to_string());
+        let display = format!("{}", err);
+        assert!(display.contains("Invalid parameter"));
+        assert!(display.contains("test"));
+
+        let err = AnykaError::ResourceUnavailable("video".to_string());
+        let display = format!("{}", err);
+        assert!(display.contains("Resource not available"));
+        assert!(display.contains("video"));
+
+        let err = AnykaError::Timeout;
+        let display = format!("{}", err);
+        assert!(display.contains("timed out"));
+
+        let err = AnykaError::HardwareFailure("sensor".to_string());
+        let display = format!("{}", err);
+        assert!(display.contains("Hardware failure"));
+        assert!(display.contains("sensor"));
+
+        let err = AnykaError::NotInitialized;
+        let display = format!("{}", err);
+        assert!(display.contains("not initialized"));
+    }
+
+    #[test]
+    fn test_video_encoding_default() {
+        assert_eq!(VideoEncoding::H264, VideoEncoding::default());
+    }
+
+    #[test]
+    fn test_audio_encoding_default() {
+        assert_eq!(AudioEncoding::G711U, AudioEncoding::default());
+    }
+
+    #[test]
+    fn test_bitrate_mode_default() {
+        assert_eq!(BitrateMode::Cbr, BitrateMode::default());
+    }
 }

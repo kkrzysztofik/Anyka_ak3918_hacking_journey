@@ -1376,4 +1376,192 @@ mod tests {
         // Should NOT be OK. Expecting 401 Unauthorized or 400 Bad Request (depending on error mapping)
         assert_ne!(response.status(), axum::http::StatusCode::OK);
     }
+
+    #[tokio::test]
+    async fn test_dispatch_auth_disabled() {
+        // Setup auth context with disabled auth
+        let user_storage = Arc::new(UserStorage::new());
+        let password_manager = Arc::new(PasswordManager::new());
+        let ws_security = Arc::new(WsSecurityValidator::with_defaults());
+        let auth_ctx = AuthContext::new(ws_security, user_storage, password_manager, false);
+
+        let dispatcher = ServiceDispatcher::new();
+        dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
+
+        // No auth header - should still work when auth is disabled
+        let soap_body = r#"<?xml version="1.0"?>
+            <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+                <s:Body><AdminOp xmlns="http://www.onvif.org/ver10/device/wsdl"/></s:Body>
+            </s:Envelope>"#;
+
+        let request = HttpRequest::builder()
+            .method("POST")
+            .header("Content-Type", "application/soap+xml")
+            .header("SOAPAction", "AdminOp")
+            .body(Body::from(soap_body))
+            .unwrap();
+
+        let response = dispatcher
+            .dispatch_with_auth("custom", request, &auth_ctx)
+            .await;
+
+        // Should succeed when auth is disabled
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_anonymous_operation() {
+        // Setup auth context with enabled auth
+        let user_storage = Arc::new(UserStorage::new());
+        let password_manager = Arc::new(PasswordManager::new());
+        let ws_security = Arc::new(WsSecurityValidator::with_defaults());
+        let auth_ctx = AuthContext::new(ws_security, user_storage, password_manager, true);
+
+        let dispatcher = ServiceDispatcher::new();
+        dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
+
+        // PublicOp requires Anonymous level - should work without auth
+        let soap_body = r#"<?xml version="1.0"?>
+            <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+                <s:Body><PublicOp xmlns="http://www.onvif.org/ver10/device/wsdl"/></s:Body>
+            </s:Envelope>"#;
+
+        let request = HttpRequest::builder()
+            .method("POST")
+            .header("Content-Type", "application/soap+xml")
+            .header("SOAPAction", "PublicOp")
+            .body(Body::from(soap_body))
+            .unwrap();
+
+        let response = dispatcher
+            .dispatch_with_auth("custom", request, &auth_ctx)
+            .await;
+
+        // Should succeed for anonymous operations
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_basic_auth_invalid_base64() {
+        let user_storage = Arc::new(UserStorage::new());
+        let password_manager = Arc::new(PasswordManager::new());
+        let ws_security = Arc::new(WsSecurityValidator::with_defaults());
+        let auth_ctx = AuthContext::new(ws_security, user_storage, password_manager, true);
+
+        let dispatcher = ServiceDispatcher::new();
+        dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
+
+        // Invalid base64
+        let request = HttpRequest::builder()
+            .method("POST")
+            .header("Content-Type", "application/soap+xml")
+            .header("Authorization", "Basic !!!invalid!!!")
+            .body(Body::from(r#"<?xml version="1.0"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><AdminOp/></s:Body></s:Envelope>"#))
+            .unwrap();
+
+        let response = dispatcher
+            .dispatch_with_auth("custom", request, &auth_ctx)
+            .await;
+
+        assert_ne!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_basic_auth_missing_colon() {
+        let user_storage = Arc::new(UserStorage::new());
+        let password_manager = Arc::new(PasswordManager::new());
+        let ws_security = Arc::new(WsSecurityValidator::with_defaults());
+        let auth_ctx = AuthContext::new(ws_security, user_storage, password_manager, true);
+
+        let dispatcher = ServiceDispatcher::new();
+        dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
+
+        // Missing colon separator
+        let credentials = base64::engine::general_purpose::STANDARD.encode("adminpassword123");
+        let request = HttpRequest::builder()
+            .method("POST")
+            .header("Content-Type", "application/soap+xml")
+            .header("Authorization", format!("Basic {}", credentials))
+            .body(Body::from(r#"<?xml version="1.0"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><AdminOp/></s:Body></s:Envelope>"#))
+            .unwrap();
+
+        let response = dispatcher
+            .dispatch_with_auth("custom", request, &auth_ctx)
+            .await;
+
+        assert_ne!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_basic_auth_user_not_found() {
+        let user_storage = Arc::new(UserStorage::new());
+        let password_manager = Arc::new(PasswordManager::new());
+        let ws_security = Arc::new(WsSecurityValidator::with_defaults());
+        let auth_ctx = AuthContext::new(ws_security, user_storage, password_manager, true);
+
+        let dispatcher = ServiceDispatcher::new();
+        dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
+
+        // User doesn't exist
+        let credentials = base64::engine::general_purpose::STANDARD.encode("nonexistent:password");
+        let request = HttpRequest::builder()
+            .method("POST")
+            .header("Content-Type", "application/soap+xml")
+            .header("Authorization", format!("Basic {}", credentials))
+            .body(Body::from(r#"<?xml version="1.0"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><AdminOp/></s:Body></s:Envelope>"#))
+            .unwrap();
+
+        let response = dispatcher
+            .dispatch_with_auth("custom", request, &auth_ctx)
+            .await;
+
+        assert_ne!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_insufficient_privileges() {
+        // Setup auth context
+        let user_storage = Arc::new(UserStorage::new());
+        user_storage
+            .create_user("operator", "password123", crate::users::UserLevel::Operator)
+            .unwrap();
+
+        let password_manager = Arc::new(PasswordManager::new());
+        let ws_security = Arc::new(WsSecurityValidator::with_defaults());
+        let auth_ctx = AuthContext::new(ws_security, user_storage, password_manager, true);
+
+        let dispatcher = ServiceDispatcher::new();
+        dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
+
+        // Operator trying to access AdminOp (requires Administrator)
+        let credentials = base64::engine::general_purpose::STANDARD.encode("operator:password123");
+        let request = HttpRequest::builder()
+            .method("POST")
+            .header("Content-Type", "application/soap+xml")
+            .header("Authorization", format!("Basic {}", credentials))
+            .body(Body::from(r#"<?xml version="1.0"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><AdminOp xmlns="http://www.onvif.org/ver10/device/wsdl"/></s:Body></s:Envelope>"#))
+            .unwrap();
+
+        let response = dispatcher
+            .dispatch_with_auth("custom", request, &auth_ctx)
+            .await;
+
+        // Should fail with insufficient privileges
+        assert_ne!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    #[test]
+    fn test_auth_context_disabled() {
+        let ctx = AuthContext::disabled();
+        assert!(!ctx.auth_enabled);
+    }
+
+    #[test]
+    fn test_auth_context_new() {
+        let user_storage = Arc::new(UserStorage::new());
+        let password_manager = Arc::new(PasswordManager::new());
+        let ws_security = Arc::new(WsSecurityValidator::with_defaults());
+        let ctx = AuthContext::new(ws_security, user_storage, password_manager, true);
+        assert!(ctx.auth_enabled);
+    }
 }
