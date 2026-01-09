@@ -11,6 +11,10 @@ import {
   setImagingSettings,
 } from '@/services/imagingService';
 import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import {
+  testMutationWithErrorToast,
+  testMutationWithSuccessToast,
+} from '@/test/mutationTestHelpers';
 
 import ImagingPage from './ImagingPage';
 
@@ -109,13 +113,12 @@ describe('ImagingPage', () => {
       expect(screen.getByTestId('imaging-title')).toBeInTheDocument();
     });
 
-    const saveButton = screen.getByTestId('imaging-save-button');
-    await user.click(saveButton);
-
-    await waitFor(() => {
-      expect(setImagingSettings).toHaveBeenCalled();
-      expect(mockToast.success).toHaveBeenCalledWith('Image settings saved');
-    });
+    await testMutationWithSuccessToast(
+      user,
+      'imaging-save-button',
+      setImagingSettings,
+      'Image settings saved',
+    );
   });
 
   it('should show error toast when mutation fails', async () => {
@@ -128,14 +131,13 @@ describe('ImagingPage', () => {
       expect(screen.getByTestId('imaging-title')).toBeInTheDocument();
     });
 
-    const saveButton = screen.getByTestId('imaging-save-button');
-    await user.click(saveButton);
-
-    await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith('Failed to save image settings', {
-        description: 'Network error',
-      });
-    });
+    await testMutationWithErrorToast(
+      user,
+      'imaging-save-button',
+      setImagingSettings,
+      'Failed to save image settings',
+      'Network error',
+    );
   });
 
   it('should reset form when reset button is clicked', async () => {
@@ -198,13 +200,12 @@ describe('ImagingPage', () => {
     expect(sliders.length).toBeGreaterThan(0);
 
     // Save changes
-    const saveButton = screen.getByTestId('imaging-save-button');
-    await user.click(saveButton);
-
-    await waitFor(() => {
-      expect(setImagingSettings).toHaveBeenCalled();
-      expect(mockToast.success).toHaveBeenCalled();
-    });
+    await testMutationWithSuccessToast(
+      user,
+      'imaging-save-button',
+      setImagingSettings,
+      'Image settings saved',
+    );
   });
 
   describe('Error Handling', () => {
@@ -249,14 +250,13 @@ describe('ImagingPage', () => {
         expect(screen.getByTestId('imaging-title')).toBeInTheDocument();
       });
 
-      const saveButton = screen.getByTestId('imaging-save-button');
-      await user.click(saveButton);
-
-      await waitFor(() => {
-        expect(mockToast.error).toHaveBeenCalledWith('Failed to save image settings', {
-          description: 'Network timeout',
-        });
-      });
+      await testMutationWithErrorToast(
+        user,
+        'imaging-save-button',
+        setImagingSettings,
+        'Failed to save image settings',
+        'Network timeout',
+      );
     });
 
     it('should handle mutation error with non-Error object', async () => {
@@ -269,14 +269,13 @@ describe('ImagingPage', () => {
         expect(screen.getByTestId('imaging-title')).toBeInTheDocument();
       });
 
-      const saveButton = screen.getByTestId('imaging-save-button');
-      await user.click(saveButton);
-
-      await waitFor(() => {
-        expect(mockToast.error).toHaveBeenCalledWith('Failed to save image settings', {
-          description: 'An error occurred',
-        });
-      });
+      await testMutationWithErrorToast(
+        user,
+        'imaging-save-button',
+        setImagingSettings,
+        'Failed to save image settings',
+        'An error occurred',
+      );
     });
   });
 

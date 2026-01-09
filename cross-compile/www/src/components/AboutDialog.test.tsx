@@ -11,6 +11,7 @@ import {
   renderWithProviders,
   setupDeviceInfoMock,
 } from '@/test/componentTestHelpers';
+import { testDialogClosed, testDialogOpen } from '@/test/dialogTestHelpers';
 
 import { AboutDialog } from './AboutDialog';
 
@@ -38,14 +39,12 @@ describe('AboutDialog', () => {
   describe('Dialog Open/Close', () => {
     it('should render dialog when open is true', async () => {
       renderWithProviders(<AboutDialog open={true} onOpenChange={vi.fn()} />);
-      await waitFor(() => {
-        expect(screen.getByTestId('about-dialog-content')).toBeInTheDocument();
-      });
+      await testDialogOpen('about-dialog-content');
     });
 
     it('should not render dialog content when open is false', () => {
       renderWithProviders(<AboutDialog open={false} onOpenChange={vi.fn()} />);
-      expect(screen.queryByTestId('about-dialog-content')).not.toBeInTheDocument();
+      testDialogClosed('about-dialog-content');
     });
 
     it('should call onOpenChange when close button is clicked', async () => {

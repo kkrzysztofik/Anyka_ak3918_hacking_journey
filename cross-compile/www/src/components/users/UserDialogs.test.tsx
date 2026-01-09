@@ -6,6 +6,12 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createControllablePromise, renderWithProviders } from '@/test/componentTestHelpers';
+import { testDialogTitleAndDescription } from '@/test/dialogTestHelpers';
+import {
+  submitFormByEvent,
+  testFormFieldValidation,
+  waitForFormValues,
+} from '@/test/formTestHelpers';
 
 import { AddUserDialog, ChangePasswordDialog } from './UserDialogs';
 
@@ -31,8 +37,10 @@ describe('AddUserDialog', () => {
       await waitFor(() => {
         expect(screen.getByTestId('dialog-content')).toBeInTheDocument();
       });
-      expect(screen.getByTestId('add-user-dialog-title')).toHaveTextContent('Add User');
-      expect(screen.getByTestId('add-user-dialog-description')).toHaveTextContent(
+      await testDialogTitleAndDescription(
+        'add-user-dialog-title',
+        'add-user-dialog-description',
+        'Add User',
         'Create a new user account',
       );
     });
@@ -71,15 +79,7 @@ describe('AddUserDialog', () => {
         <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
       );
 
-      const submitButton = screen.getByTestId('add-user-submit-button');
-      await user.click(submitButton);
-
-      await waitFor(
-        () => {
-          expect(mockOnSubmit).not.toHaveBeenCalled();
-        },
-        { timeout: 1000 },
-      );
+      await testFormFieldValidation(user, [], 'add-user-submit-button', mockOnSubmit);
     });
 
     it('should validate password minimum length', async () => {
@@ -88,20 +88,14 @@ describe('AddUserDialog', () => {
         <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
       );
 
-      const usernameInput = screen.getByTestId('add-user-username-input');
-      const passwordInput = screen.getByTestId('add-user-password-input');
-
-      await user.type(usernameInput, 'testuser');
-      await user.type(passwordInput, '123'); // Too short
-
-      const submitButton = screen.getByTestId('add-user-submit-button');
-      await user.click(submitButton);
-
-      await waitFor(
-        () => {
-          expect(mockOnSubmit).not.toHaveBeenCalled();
-        },
-        { timeout: 1000 },
+      await testFormFieldValidation(
+        user,
+        [
+          { testId: 'add-user-username-input', value: 'testuser' },
+          { testId: 'add-user-password-input', value: '123' }, // Too short
+        ],
+        'add-user-submit-button',
+        mockOnSubmit,
       );
     });
 
@@ -111,20 +105,14 @@ describe('AddUserDialog', () => {
         <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
       );
 
-      const usernameInput = screen.getByTestId('add-user-username-input');
-      const passwordInput = screen.getByTestId('add-user-password-input');
-
-      await user.type(usernameInput, 'testuser');
-      await user.type(passwordInput, 'a'.repeat(65)); // Too long
-
-      const submitButton = screen.getByTestId('add-user-submit-button');
-      await user.click(submitButton);
-
-      await waitFor(
-        () => {
-          expect(mockOnSubmit).not.toHaveBeenCalled();
-        },
-        { timeout: 1000 },
+      await testFormFieldValidation(
+        user,
+        [
+          { testId: 'add-user-username-input', value: 'testuser' },
+          { testId: 'add-user-password-input', value: 'a'.repeat(65) }, // Too long
+        ],
+        'add-user-submit-button',
+        mockOnSubmit,
       );
     });
 
@@ -134,22 +122,15 @@ describe('AddUserDialog', () => {
         <AddUserDialog open={true} onOpenChange={vi.fn()} onSubmit={mockOnSubmit} />,
       );
 
-      const usernameInput = screen.getByTestId('add-user-username-input');
-      const passwordInput = screen.getByTestId('add-user-password-input');
-      const confirmPasswordInput = screen.getByTestId('add-user-confirm-password-input');
-
-      await user.type(usernameInput, 'testuser');
-      await user.type(passwordInput, 'password123');
-      await user.type(confirmPasswordInput, 'different');
-
-      const submitButton = screen.getByTestId('add-user-submit-button');
-      await user.click(submitButton);
-
-      await waitFor(
-        () => {
-          expect(mockOnSubmit).not.toHaveBeenCalled();
-        },
-        { timeout: 1000 },
+      await testFormFieldValidation(
+        user,
+        [
+          { testId: 'add-user-username-input', value: 'testuser' },
+          { testId: 'add-user-password-input', value: 'password123' },
+          { testId: 'add-user-confirm-password-input', value: 'different' },
+        ],
+        'add-user-submit-button',
+        mockOnSubmit,
       );
     });
   });
@@ -174,20 +155,16 @@ describe('AddUserDialog', () => {
       await user.type(confirmPasswordInput, 'password123');
 
       // Wait for form state to update - react-hook-form needs time to sync
-      await waitFor(
-        () => {
-          expect(usernameInput).toHaveValue('newuser');
-          expect(passwordInput).toHaveValue('password123');
-        },
-        { timeout: 2000 },
+      await waitForFormValues(
+        [
+          { testId: 'add-user-username-input', value: 'newuser' },
+          { testId: 'add-user-password-input', value: 'password123' },
+        ],
+        2000,
       );
 
       // Submit form directly - wrap in act()
-      const form = usernameInput.closest('form');
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      await act(async () => {
-        form?.dispatchEvent(submitEvent);
-      });
+      await submitFormByEvent('add-user-username-input');
 
       await waitFor(
         () => {
@@ -215,20 +192,16 @@ describe('AddUserDialog', () => {
       await user.type(confirmPasswordInput, 'password123');
 
       // Wait for form state to update - react-hook-form needs time to sync
-      await waitFor(
-        () => {
-          expect(usernameInput).toHaveValue('newuser');
-          expect(passwordInput).toHaveValue('password123');
-        },
-        { timeout: 2000 },
+      await waitForFormValues(
+        [
+          { testId: 'add-user-username-input', value: 'newuser' },
+          { testId: 'add-user-password-input', value: 'password123' },
+        ],
+        2000,
       );
 
       // Submit form directly - wrap in act()
-      const form = usernameInput.closest('form');
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      await act(async () => {
-        form?.dispatchEvent(submitEvent);
-      });
+      await submitFormByEvent('add-user-username-input');
 
       await waitFor(
         () => {
@@ -324,10 +297,10 @@ describe('ChangePasswordDialog', () => {
       await waitFor(() => {
         expect(screen.getByTestId('dialog-content')).toBeInTheDocument();
       });
-      expect(screen.getByTestId('change-password-dialog-title')).toHaveTextContent(
+      await testDialogTitleAndDescription(
+        'change-password-dialog-title',
+        'change-password-dialog-description',
         'Change Password',
-      );
-      expect(screen.getByTestId('change-password-dialog-description')).toHaveTextContent(
         `Set a new password for user ${defaultUsername}`,
       );
     });
@@ -391,20 +364,14 @@ describe('ChangePasswordDialog', () => {
         />,
       );
 
-      const passwordInput = screen.getByTestId('change-password-new-input');
-      const confirmPasswordInput = screen.getByTestId('change-password-confirm-input');
-
-      await user.type(passwordInput, '123'); // Too short
-      await user.type(confirmPasswordInput, '123');
-
-      const submitButton = screen.getByTestId('change-password-submit-button');
-      await user.click(submitButton);
-
-      await waitFor(
-        () => {
-          expect(mockOnSubmit).not.toHaveBeenCalled();
-        },
-        { timeout: 1000 },
+      await testFormFieldValidation(
+        user,
+        [
+          { testId: 'change-password-new-input', value: '123' }, // Too short
+          { testId: 'change-password-confirm-input', value: '123' },
+        ],
+        'change-password-submit-button',
+        mockOnSubmit,
       );
     });
 
@@ -419,20 +386,14 @@ describe('ChangePasswordDialog', () => {
         />,
       );
 
-      const passwordInput = screen.getByTestId('change-password-new-input');
-      const confirmPasswordInput = screen.getByTestId('change-password-confirm-input');
-
-      await user.type(passwordInput, 'a'.repeat(65)); // Too long
-      await user.type(confirmPasswordInput, 'a'.repeat(65));
-
-      const submitButton = screen.getByTestId('change-password-submit-button');
-      await user.click(submitButton);
-
-      await waitFor(
-        () => {
-          expect(mockOnSubmit).not.toHaveBeenCalled();
-        },
-        { timeout: 1000 },
+      await testFormFieldValidation(
+        user,
+        [
+          { testId: 'change-password-new-input', value: 'a'.repeat(65) }, // Too long
+          { testId: 'change-password-confirm-input', value: 'a'.repeat(65) },
+        ],
+        'change-password-submit-button',
+        mockOnSubmit,
       );
     });
 
@@ -447,20 +408,14 @@ describe('ChangePasswordDialog', () => {
         />,
       );
 
-      const passwordInput = screen.getByTestId('change-password-new-input');
-      const confirmPasswordInput = screen.getByTestId('change-password-confirm-input');
-
-      await user.type(passwordInput, 'password123');
-      await user.type(confirmPasswordInput, 'different');
-
-      const submitButton = screen.getByTestId('change-password-submit-button');
-      await user.click(submitButton);
-
-      await waitFor(
-        () => {
-          expect(mockOnSubmit).not.toHaveBeenCalled();
-        },
-        { timeout: 1000 },
+      await testFormFieldValidation(
+        user,
+        [
+          { testId: 'change-password-new-input', value: 'password123' },
+          { testId: 'change-password-confirm-input', value: 'different' },
+        ],
+        'change-password-submit-button',
+        mockOnSubmit,
       );
     });
   });
@@ -486,20 +441,16 @@ describe('ChangePasswordDialog', () => {
       await user.type(confirmPasswordInput, 'newpassword123');
 
       // Wait for form state to update
-      await waitFor(
-        () => {
-          expect(passwordInput).toHaveValue('newpassword123');
-          expect(confirmPasswordInput).toHaveValue('newpassword123');
-        },
-        { timeout: 2000 },
+      await waitForFormValues(
+        [
+          { testId: 'change-password-new-input', value: 'newpassword123' },
+          { testId: 'change-password-confirm-input', value: 'newpassword123' },
+        ],
+        2000,
       );
 
       // Submit form directly
-      const form = passwordInput.closest('form');
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      await act(async () => {
-        form?.dispatchEvent(submitEvent);
-      });
+      await submitFormByEvent('change-password-new-input');
 
       await waitFor(
         () => {
@@ -529,19 +480,13 @@ describe('ChangePasswordDialog', () => {
       await user.type(passwordInput, 'newpassword123');
       await user.type(confirmPasswordInput, 'newpassword123');
 
-      await waitFor(
-        () => {
-          expect(passwordInput).toHaveValue('newpassword123');
-        },
-        { timeout: 2000 },
+      await waitForFormValues(
+        [{ testId: 'change-password-new-input', value: 'newpassword123' }],
+        2000,
       );
 
       // Submit form
-      const form = passwordInput.closest('form');
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      await act(async () => {
-        form?.dispatchEvent(submitEvent);
-      });
+      await submitFormByEvent('change-password-new-input');
 
       await waitFor(
         () => {

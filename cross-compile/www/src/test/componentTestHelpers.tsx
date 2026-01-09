@@ -14,6 +14,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import { expect } from 'vitest';
 
 import { AuthProvider } from '@/hooks/useAuth';
@@ -127,15 +128,15 @@ export const MOCK_DATA = {
         enabled: true,
         ipv4Enabled: true,
         dhcp: false,
-        address: '192.168.1.100',
+        address: '192.168.1.100', // NOSONAR - Test data: Hardcoded IP for testing network configuration
         prefixLength: 24,
-        gateway: '192.168.1.1',
+        gateway: '192.168.1.1', // NOSONAR - Test data: Hardcoded gateway IP for testing
         hwAddress: '00:11:22:33:44:55',
       },
     ],
     dns: {
       fromDHCP: false,
-      dnsServers: ['8.8.8.8', '8.8.4.4'],
+      dnsServers: ['8.8.8.8', '8.8.4.4'], // NOSONAR - Test data: Google DNS IPs for testing DNS configuration
       searchDomain: [],
     },
   },
@@ -628,3 +629,29 @@ export const MockButton = {
   ),
   buttonVariants: () => 'mock-button-variant',
 };
+
+/**
+ * Generic error toast verification helper
+ * @param message - Expected error message
+ * @param description - Optional error description
+ */
+export function testErrorToast(message: string, description?: string): void {
+  if (description) {
+    expect(toast.error).toHaveBeenCalledWith(message, { description });
+  } else {
+    expect(toast.error).toHaveBeenCalledWith(message);
+  }
+}
+
+/**
+ * Generic success toast verification helper
+ * @param message - Expected success message
+ * @param description - Optional success description
+ */
+export function testSuccessToast(message: string, description?: string): void {
+  if (description) {
+    expect(toast.success).toHaveBeenCalledWith(message, { description });
+  } else {
+    expect(toast.success).toHaveBeenCalledWith(message);
+  }
+}

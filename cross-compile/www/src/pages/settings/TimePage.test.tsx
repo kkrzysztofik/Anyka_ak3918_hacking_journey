@@ -12,6 +12,10 @@ import {
   selectOption,
   waitForPageLoad,
 } from '@/test/componentTestHelpers';
+import {
+  testMutationWithErrorToast,
+  testMutationWithSuccessToast,
+} from '@/test/mutationTestHelpers';
 
 import TimePage from './TimePage';
 
@@ -258,16 +262,11 @@ describe('TimePage', () => {
       { timeout: 3000 },
     );
 
-    const saveButton = screen.getByTestId('time-page-save-button');
-    expect(saveButton).toBeTruthy();
-    await user.click(saveButton);
-
-    await waitFor(
-      () => {
-        expect(setNTP).toHaveBeenCalled();
-        expect(mockToast.success).toHaveBeenCalledWith('Time settings saved');
-      },
-      { timeout: 5000 },
+    await testMutationWithSuccessToast(
+      user,
+      'time-page-save-button',
+      setNTP,
+      'Time settings saved',
     );
   });
 
@@ -288,17 +287,12 @@ describe('TimePage', () => {
       { timeout: 3000 },
     );
 
-    const saveButton = screen.getByTestId('time-page-save-button');
-    expect(saveButton).toBeTruthy();
-    await user.click(saveButton);
-
-    await waitFor(
-      () => {
-        expect(mockToast.error).toHaveBeenCalledWith('Failed to save time settings', {
-          description: 'Network error',
-        });
-      },
-      { timeout: 5000 },
+    await testMutationWithErrorToast(
+      user,
+      'time-page-save-button',
+      setNTP,
+      'Failed to save time settings',
+      'Network error',
     );
   });
 

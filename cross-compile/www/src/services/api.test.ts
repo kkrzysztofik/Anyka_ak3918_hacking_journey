@@ -1,6 +1,7 @@
 /**
  * API Client Tests
  */
+import type { InternalAxiosRequestConfig } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ENDPOINTS, apiClient, setAuthHeaderGetter } from './api';
@@ -104,70 +105,50 @@ describe('api', () => {
       // No getter set, so no auth header should be added
       expect(config.headers.Authorization).toBeUndefined();
     });
-  });
-
-  describe('request interceptor', () => {
-    it('should inject auth header when getter is set and returns value', async () => {
-      const mockGetter = vi.fn().mockResolvedValue('Basic YWRtaW46cGFzc3dvcmQ=');
-      setAuthHeaderGetter(mockGetter);
-
-      // The interceptor should call getAuthHeader
-      // We verify by checking the getter was set correctly
-      const authHeader = await mockGetter();
-      expect(authHeader).toBe('Basic YWRtaW46cGFzc3dvcmQ=');
-    });
-
-    it('should not inject auth header when getter returns null', async () => {
-      const mockGetter = vi.fn().mockResolvedValue(null);
-      setAuthHeaderGetter(mockGetter);
-
-      const authHeader = await mockGetter();
-      expect(authHeader).toBeNull();
-    });
 
     it('should handle request interceptor error', async () => {
       const error = new Error('Request error');
       // The interceptor error handler should reject
       await expect(Promise.reject(error)).rejects.toThrow('Request error');
     });
-  });
 
-  describe('request interceptor - actual axios calls', () => {
-    it('should inject auth header in actual request when getter is set', async () => {
-      const mockGetter = vi.fn().mockResolvedValue('Basic YWRtaW46cGFzc3dvcmQ=');
-      setAuthHeaderGetter(mockGetter);
+    describe('actual axios calls', () => {
+      it('should inject auth header in actual request when getter is set', async () => {
+        const mockGetter = vi.fn().mockResolvedValue('Basic YWRtaW46cGFzc3dvcmQ=');
+        setAuthHeaderGetter(mockGetter);
 
-      // Use axios interceptor directly to test
-      // Since we can't easily test the actual interceptor execution without making real HTTP calls,
-      // we verify the interceptor is set up correctly by checking the getter is called when we manually invoke it
-      const authHeader = await mockGetter();
-      expect(authHeader).toBe('Basic YWRtaW46cGFzc3dvcmQ=');
-      expect(mockGetter).toHaveBeenCalled();
-    });
+        // Use axios interceptor directly to test
+        // Since we can't easily test the actual interceptor execution without making real HTTP calls,
+        // we verify the interceptor is set up correctly by checking the getter is called when we manually invoke it
+        const authHeader = await mockGetter();
+        expect(authHeader).toBe('Basic YWRtaW46cGFzc3dvcmQ=');
+        expect(mockGetter).toHaveBeenCalled();
+      });
 
-    it('should not inject auth header when getter returns null in actual request', async () => {
-      const mockGetter = vi.fn().mockResolvedValue(null);
-      setAuthHeaderGetter(mockGetter);
+      it('should not inject auth header when getter returns null in actual request', async () => {
+        const mockGetter = vi.fn().mockResolvedValue(null);
+        setAuthHeaderGetter(mockGetter);
 
-      // Verify getter returns null
-      const authHeader = await mockGetter();
-      expect(authHeader).toBeNull();
-      expect(mockGetter).toHaveBeenCalled();
-    });
+        // Verify getter returns null
+        const authHeader = await mockGetter();
+        expect(authHeader).toBeNull();
+        expect(mockGetter).toHaveBeenCalled();
+      });
 
-    it('should handle request interceptor error in actual request', async () => {
-      const mockGetter = vi.fn().mockRejectedValue(new Error('Auth error'));
-      setAuthHeaderGetter(mockGetter);
+      it('should handle request interceptor error in actual request', async () => {
+        const mockGetter = vi.fn().mockRejectedValue(new Error('Auth error'));
+        setAuthHeaderGetter(mockGetter);
 
-      const originalPost = apiClient.post;
-      const mockPost = vi.fn().mockRejectedValue(new Error('Request failed'));
-      apiClient.post = mockPost;
+        const originalPost = apiClient.post;
+        const mockPost = vi.fn().mockRejectedValue(new Error('Request failed'));
+        apiClient.post = mockPost;
 
-      try {
-        await expect(apiClient.post('/test', {})).rejects.toThrow();
-      } finally {
-        apiClient.post = originalPost;
-      }
+        try {
+          await expect(apiClient.post('/test', {})).rejects.toThrow();
+        } finally {
+          apiClient.post = originalPost;
+        }
+      });
     });
   });
 
@@ -196,11 +177,6 @@ describe('api', () => {
     });
 
     it('should handle response interceptor error rejection', async () => {
-      // The interceptor should reject with the error
-      await expect(Promise.reject(new Error('Axios error'))).rejects.toThrow('Axios error');
-    });
-
-    it('should handle non-401 errors', async () => {
       // The interceptor should reject with the error
       await expect(Promise.reject(new Error('Axios error'))).rejects.toThrow('Axios error');
     });
@@ -264,17 +240,17 @@ describe('api', () => {
 
       // Use axios adapter to intercept the request
       const originalAdapter = apiClient.defaults.adapter;
-      let capturedConfig: { headers?: Record<string, string> } | null = null;
+      let capturedConfig: { headers?: Record<string, string> } | undefined = undefined;
 
-      apiClient.defaults.adapter = async (config) => {
-        capturedConfig = config;
-        return Promise.resolve({
+      apiClient.defaults.adapter = async (config: InternalAxiosRequestConfig) => {
+        capturedConfig = { headers: (config.headers || {}) as Record<string, string> };
+        return {
           data: 'success',
           status: 200,
           statusText: 'OK',
           headers: {},
           config,
-        });
+        };
       };
 
       try {
@@ -283,7 +259,8 @@ describe('api', () => {
         // Verify getter was called (interceptor executed)
         expect(mockGetter).toHaveBeenCalled();
         // Verify auth header was injected by interceptor
-        expect(capturedConfig?.headers?.Authorization).toBe('Basic YWRtaW46cGFzc3dvcmQ=');
+        expect(capturedConfig).toBeDefined();
+        expect(capturedConfig!.headers?.Authorization).toBe('Basic YWRtaW46cGFzc3dvcmQ='); // NOSONAR - Test data: Base64 encoded "admin:password" for testing authentication
       } finally {
         apiClient.defaults.adapter = originalAdapter;
       }
@@ -295,13 +272,13 @@ describe('api', () => {
 
       const originalAdapter = apiClient.defaults.adapter;
       apiClient.defaults.adapter = async () => {
-        return Promise.resolve({
+        return {
           data: 'success',
           status: 200,
           statusText: 'OK',
           headers: {},
           config: {} as unknown as import('axios').InternalAxiosRequestConfig,
-        });
+        };
       };
 
       try {
@@ -318,17 +295,17 @@ describe('api', () => {
       setAuthHeaderGetter(mockGetter);
 
       const originalAdapter = apiClient.defaults.adapter;
-      let capturedConfig: { headers?: Record<string, string> } | null = null;
+      let capturedConfig: { headers?: Record<string, string> } | undefined = undefined;
 
-      apiClient.defaults.adapter = async (config) => {
-        capturedConfig = config;
-        return Promise.resolve({
+      apiClient.defaults.adapter = async (config: InternalAxiosRequestConfig) => {
+        capturedConfig = { headers: (config.headers || {}) as Record<string, string> };
+        return {
           data: 'success',
           status: 200,
           statusText: 'OK',
           headers: {},
           config,
-        });
+        };
       };
 
       try {
@@ -336,7 +313,8 @@ describe('api', () => {
 
         expect(mockGetter).toHaveBeenCalled();
         // Auth header should not be present
-        expect(capturedConfig?.headers?.Authorization).toBeUndefined();
+        expect(capturedConfig).toBeDefined();
+        expect(capturedConfig!.headers?.Authorization).toBeUndefined();
       } finally {
         apiClient.defaults.adapter = originalAdapter;
       }

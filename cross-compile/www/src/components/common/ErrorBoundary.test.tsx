@@ -17,6 +17,18 @@ function ThrowError({ shouldThrow = false }: Readonly<{ shouldThrow?: boolean }>
   return <div data-testid="no-error">No error</div>;
 }
 
+// Component that throws error without message property
+function ThrowErrorWithoutMessage(): null {
+  const error = Object.create(null);
+  throw error; // Error object without message property
+}
+
+// Component that throws a non-Error object (string)
+// NOSONAR - Test case: intentionally throwing non-Error to test ErrorBoundary handling
+function ThrowNonError(): null {
+  throw 'String error'; // NOSONAR - Intentionally throwing string to test ErrorBoundary's handling of non-Error objects
+}
+
 describe('ErrorBoundary', () => {
   it('renders children when there is no error', () => {
     render(
@@ -130,7 +142,7 @@ describe('ErrorBoundary', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // Use a component that can recover after error by using a key prop
-    function RecoverableComponent({ key: _key }: { key?: string | number }) {
+    function RecoverableComponent({ key: _key }: Readonly<{ key?: string | number }>) {
       return <div data-testid="no-error">No error</div>;
     }
 
@@ -165,12 +177,6 @@ describe('ErrorBoundary', () => {
   it('displays fallback message when error.message is undefined', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    // Component that throws error without message property
-    function ThrowErrorWithoutMessage() {
-      const error = Object.create(null);
-      throw error; // Error object without message property
-    }
-
     render(
       <ErrorBoundary>
         <ThrowErrorWithoutMessage />
@@ -189,11 +195,6 @@ describe('ErrorBoundary', () => {
 
   it('handles non-Error thrown objects', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-    // Create a component that throws a non-Error object
-    function ThrowNonError() {
-      throw 'String error';
-    }
 
     render(
       <ErrorBoundary>

@@ -17,6 +17,10 @@ import {
   openDialog,
   renderWithProviders,
 } from '@/test/componentTestHelpers';
+import {
+  testMutationWithErrorToast,
+  testMutationWithSuccessToastAndDescription,
+} from '@/test/mutationTestHelpers';
 
 import MaintenancePage from './MaintenancePage';
 
@@ -89,16 +93,13 @@ describe('MaintenancePage', () => {
       expect(screen.getByTestId('maintenance-reboot-dialog-title')).toBeInTheDocument();
     });
 
-    const confirmButton = screen.getByTestId('maintenance-reboot-confirm-button');
-    await user.click(confirmButton);
-
-    await waitFor(() => {
-      expect(systemReboot).toHaveBeenCalled();
-      expect(mockToast.success).toHaveBeenCalledWith('Device is rebooting', {
-        description: 'Please wait for the device to restart...',
-        duration: 10000,
-      });
-    });
+    await testMutationWithSuccessToastAndDescription(
+      user,
+      'maintenance-reboot-confirm-button',
+      systemReboot,
+      'Device is rebooting',
+      'Please wait for the device to restart...',
+    );
   });
 
   it('should show error toast when reboot fails', async () => {
@@ -114,14 +115,13 @@ describe('MaintenancePage', () => {
       expect(screen.getByTestId('maintenance-reboot-dialog-title')).toBeInTheDocument();
     });
 
-    const confirmButton = screen.getByTestId('maintenance-reboot-confirm-button');
-    await user.click(confirmButton);
-
-    await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith('Failed to reboot device', {
-        description: 'Network error',
-      });
-    });
+    await testMutationWithErrorToast(
+      user,
+      'maintenance-reboot-confirm-button',
+      systemReboot,
+      'Failed to reboot device',
+      'Network error',
+    );
   });
 
   it('should open and close soft reset dialog', async () => {
@@ -147,16 +147,14 @@ describe('MaintenancePage', () => {
       expect(screen.getByTestId('maintenance-soft-reset-dialog-title')).toBeInTheDocument();
     });
 
-    const confirmButton = screen.getByTestId('maintenance-soft-reset-confirm-button');
-    await user.click(confirmButton);
-
-    await waitFor(() => {
-      expect(setSystemFactoryDefault).toHaveBeenCalledWith('Soft');
-      expect(mockToast.success).toHaveBeenCalledWith('Device is resetting', {
-        description: 'Settings returned to defaults. Device will reboot.',
-        duration: 10000,
-      });
-    });
+    await testMutationWithSuccessToastAndDescription(
+      user,
+      'maintenance-soft-reset-confirm-button',
+      setSystemFactoryDefault,
+      'Device is resetting',
+      'Settings returned to defaults. Device will reboot.',
+      ['Soft'],
+    );
   });
 
   it('should open and close hard reset dialog', async () => {
@@ -183,16 +181,14 @@ describe('MaintenancePage', () => {
       expect(screen.getByTestId('maintenance-hard-reset-dialog-title')).toBeInTheDocument();
     });
 
-    const confirmButton = screen.getByTestId('maintenance-hard-reset-confirm-button');
-    await user.click(confirmButton);
-
-    await waitFor(() => {
-      expect(setSystemFactoryDefault).toHaveBeenCalledWith('Hard');
-      expect(mockToast.success).toHaveBeenCalledWith('Factory reset initiated', {
-        description: 'All data will be erased. Device will reboot.',
-        duration: 15000,
-      });
-    });
+    await testMutationWithSuccessToastAndDescription(
+      user,
+      'maintenance-hard-reset-confirm-button',
+      setSystemFactoryDefault,
+      'Factory reset initiated',
+      'All data will be erased. Device will reboot.',
+      ['Hard'],
+    );
   });
 
   it('should trigger backup download', async () => {
@@ -268,14 +264,13 @@ describe('MaintenancePage', () => {
       expect(screen.getByTestId('maintenance-soft-reset-dialog-title')).toBeInTheDocument();
     });
 
-    const confirmButton = screen.getByTestId('maintenance-soft-reset-confirm-button');
-    await user.click(confirmButton);
-
-    await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith('Failed to reset settings', {
-        description: 'Reset failed',
-      });
-    });
+    await testMutationWithErrorToast(
+      user,
+      'maintenance-soft-reset-confirm-button',
+      setSystemFactoryDefault,
+      'Failed to reset settings',
+      'Reset failed',
+    );
   });
 
   it('should show error when hard reset fails', async () => {
@@ -291,14 +286,13 @@ describe('MaintenancePage', () => {
       expect(screen.getByTestId('maintenance-hard-reset-dialog-title')).toBeInTheDocument();
     });
 
-    const confirmButton = screen.getByTestId('maintenance-hard-reset-confirm-button');
-    await user.click(confirmButton);
-
-    await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith('Failed to factory reset', {
-        description: 'Factory reset failed',
-      });
-    });
+    await testMutationWithErrorToast(
+      user,
+      'maintenance-hard-reset-confirm-button',
+      setSystemFactoryDefault,
+      'Failed to factory reset',
+      'Factory reset failed',
+    );
   });
 
   it('should handle restore system flow', async () => {
