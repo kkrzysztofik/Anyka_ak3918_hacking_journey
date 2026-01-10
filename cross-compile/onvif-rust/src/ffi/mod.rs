@@ -5,8 +5,12 @@
 //! For native builds (testing), stub implementations are provided.
 
 mod anyka_sdk;
+mod audio;
+mod video;
 
 pub use anyka_sdk::*;
+pub use audio::{AudioEncoderHandle, AudioInputHandle};
+pub use video::{VideoEncoderHandle, VideoInputHandle};
 
 // Re-export common types
 #[cfg(not(use_stubs))]
@@ -133,7 +137,57 @@ pub mod stubs {
         Up = 3,
         Down = 4,
     }
+
+    /// Video channel attributes
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct VideoChannelAttr {
+        pub crop: CropInfo,
+        pub res: [VideoResolution; 2], // VIDEO_CHN_NUM = 2 (MAIN, SUB)
+    }
+
+    /// Crop information
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct CropInfo {
+        pub left: i32,
+        pub top: i32,
+        pub width: i32,
+        pub height: i32,
+    }
+
+    /// PCM parameters for audio input
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct PcmParam {
+        pub sample_rate: u32,
+        pub sample_bits: u32,
+        pub channel_num: u32,
+    }
+
+    /// Audio encoder attributes
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct AencAttr {
+        pub aac_head: i32, // enum aenc_aac_attr
+    }
 }
 
 #[cfg(use_stubs)]
 pub use stubs::*;
+
+// Type aliases for consistency with generated bindings (snake_case)
+#[cfg(use_stubs)]
+pub type video_channel_attr = stubs::VideoChannelAttr;
+#[cfg(use_stubs)]
+pub type pcm_param = stubs::PcmParam;
+#[cfg(use_stubs)]
+pub type aenc_attr = stubs::AencAttr;
+#[cfg(use_stubs)]
+pub type encode_param = stubs::EncodeParam;
+#[cfg(use_stubs)]
+pub type video_dev_type = stubs::VideoDevType;
+#[cfg(use_stubs)]
+pub type video_resolution = stubs::VideoResolution;
+#[cfg(use_stubs)]
+pub type audio_param = stubs::AudioParam;
