@@ -6,12 +6,23 @@
 
 mod anyka_sdk;
 pub mod audio;
+pub mod imaging;
+pub mod ptz;
 pub mod video;
 
 pub use anyka_sdk::*;
 pub use audio::{
     AudioEncoderHandle, AudioInputHandle, audio_encoder_open, audio_encoder_set_config,
     audio_input_open, audio_input_set_volume,
+};
+pub use imaging::{
+    imaging_set_brightness, imaging_set_contrast, imaging_set_ir_filter, imaging_set_saturation,
+    imaging_set_sharpness, imaging_set_wdr, onvif_to_sdk_brightness, onvif_to_sdk_contrast,
+    onvif_to_sdk_saturation, onvif_to_sdk_sharpness, validate_onvif_range,
+};
+pub use ptz::{
+    PTZHandle, degrees_to_steps, ptz_get_step_pos, ptz_open, ptz_stop, ptz_turn, steps_to_degrees,
+    validate_pan_range, validate_tilt_range,
 };
 pub use video::{
     VideoEncoderHandle, VideoInputHandle, video_encoder_open, video_encoder_request_idr,
@@ -198,3 +209,7 @@ pub type video_dev_type = stubs::VideoDevType;
 pub type video_resolution = stubs::VideoResolution;
 #[cfg(use_stubs)]
 pub type audio_param = stubs::AudioParam;
+#[cfg(use_stubs)]
+pub type ptz_device = stubs::PtzDevice;
+#[cfg(use_stubs)]
+pub type ptz_turn_direction = stubs::PtzTurnDirection;
