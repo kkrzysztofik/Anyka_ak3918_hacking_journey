@@ -1,0 +1,44 @@
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml	1970-01-01 01:00:01.000000000 +0100
++++ b/Cargo.toml	2026-01-10 19:52:55.941868966 +0100
+@@ -43,6 +43,9 @@
+ [dependencies.thiserror]
+ version = "1.0"
+ 
++[dependencies.portable-atomic]
++version = "1"
++
+ [dependencies.util]
+ version = "0.7.0"
+ features = ["marshal"]
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' a/src/sequence.rs b/src/sequence.rs
+--- a/src/sequence.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/sequence.rs	2026-01-10 19:52:55.955068966 +0100
+@@ -1,6 +1,8 @@
+ use std::fmt;
+-use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
++use std::sync::atomic::{AtomicU16, Ordering};
+ use std::sync::Arc;
++// ARMv5TEJ doesn't support AtomicU64 natively, use portable-atomic instead
++use portable_atomic::AtomicU64;
+ 
+ /// Sequencer generates sequential sequence numbers for building RTP packets
+ pub trait Sequencer: fmt::Debug {
+@@ -52,7 +54,7 @@
+     /// building RTP packets
+     fn next_sequence_number(&self) -> u16 {
+         if self.0.sequence_number.load(Ordering::SeqCst) == u16::MAX {
+-            self.0.roll_over_count.fetch_add(1, Ordering::SeqCst);
++            self.0.roll_over_count.fetch_add(1, portable_atomic::Ordering::SeqCst);
+             self.0.sequence_number.store(0, Ordering::SeqCst);
+             0
+         } else {
+@@ -63,7 +65,7 @@
+     /// RollOverCount returns the amount of times the 16bit sequence number
+     /// has wrapped
+     fn roll_over_count(&self) -> u64 {
+-        self.0.roll_over_count.load(Ordering::SeqCst)
++        self.0.roll_over_count.load(portable_atomic::Ordering::SeqCst)
+     }
+ 
+     fn clone_to(&self) -> Box<dyn Sequencer + Send + Sync> {

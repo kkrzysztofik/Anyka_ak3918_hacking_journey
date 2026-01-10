@@ -1,0 +1,179 @@
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml	1970-01-01 01:00:01.000000000 +0100
++++ b/Cargo.toml	2026-01-10 19:52:55.977068966 +0100
+@@ -64,6 +64,9 @@
+ version = "1.19"
+ features = ["full"]
+ 
++[dependencies.portable-atomic]
++version = "1"
++
+ [dependencies.turn]
+ version = "0.6.0"
+ 
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' a/src/agent/agent_internal.rs b/src/agent/agent_internal.rs
+--- a/src/agent/agent_internal.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/agent/agent_internal.rs	2026-01-10 19:52:55.977068966 +0100
+@@ -4,8 +4,10 @@
+ use crate::candidate::candidate_peer_reflexive::CandidatePeerReflexiveConfig;
+ use crate::util::*;
+ use arc_swap::ArcSwapOption;
+-use std::sync::atomic::{AtomicBool, AtomicU64};
++use std::sync::atomic::AtomicBool;
+ use util::sync::Mutex as SyncMutex;
++// ARMv5TEJ doesn't support AtomicU64 natively, use portable-atomic instead
++use portable_atomic::AtomicU64;
+ 
+ pub type ChanCandidateTx =
+     Arc<Mutex<Option<mpsc::Sender<Option<Arc<dyn Candidate + Send + Sync>>>>>>;
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' a/src/agent/agent_selector.rs b/src/agent/agent_selector.rs
+--- a/src/agent/agent_selector.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/agent/agent_selector.rs	2026-01-10 19:52:55.977068966 +0100
+@@ -8,7 +8,7 @@
+ 
+ use async_trait::async_trait;
+ use std::net::SocketAddr;
+-use std::sync::atomic::Ordering;
++use portable_atomic::Ordering;
+ use std::sync::Arc;
+ use tokio::time::{Duration, Instant};
+ 
+@@ -121,7 +121,7 @@
+                         Box::new(TransactionId::new()),
+                         Box::new(Username::new(ATTR_USERNAME, username)),
+                         Box::<UseCandidateAttr>::default(),
+-                        Box::new(AttrControlling(self.tie_breaker.load(Ordering::SeqCst))),
++                        Box::new(AttrControlling(self.tie_breaker.load(portable_atomic::Ordering::SeqCst))),
+                         Box::new(PriorityAttr(pair.local.priority())),
+                         Box::new(MessageIntegrity::new_short_term_integrity(
+                             ufrag_pwd.remote_pwd.clone(),
+@@ -433,7 +433,7 @@
+                 Box::new(BINDING_REQUEST),
+                 Box::new(TransactionId::new()),
+                 Box::new(Username::new(ATTR_USERNAME, username)),
+-                Box::new(AttrControlled(self.tie_breaker.load(Ordering::SeqCst))),
++                Box::new(AttrControlled(self.tie_breaker.load(portable_atomic::Ordering::SeqCst))),
+                 Box::new(PriorityAttr(local.priority())),
+                 Box::new(MessageIntegrity::new_short_term_integrity(
+                     ufrag_pwd.remote_pwd.clone(),
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' a/src/agent/agent_test.rs b/src/agent/agent_test.rs
+--- a/src/agent/agent_test.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/agent/agent_test.rs	2026-01-10 19:52:55.977068966 +0100
+@@ -11,6 +11,7 @@
+ 
+ use crate::agent::agent_transport_test::pipe;
+ use async_trait::async_trait;
++use portable_atomic::Ordering;
+ use std::net::Ipv4Addr;
+ use std::ops::Sub;
+ use std::str::FromStr;
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' a/src/agent/agent_vnet_test.rs b/src/agent/agent_vnet_test.rs
+--- a/src/agent/agent_vnet_test.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/agent/agent_vnet_test.rs	2026-01-10 19:52:55.977068966 +0100
+@@ -5,7 +5,8 @@
+ use std::net::{IpAddr, Ipv4Addr};
+ use std::result::Result;
+ use std::str::FromStr;
+-use std::sync::atomic::AtomicU64;
++// ARMv5TEJ doesn't support AtomicU64, use Mutex<u64> instead
++use std::sync::Mutex;
+ use util::vnet::chunk::Chunk;
+ use util::{vnet::router::Nic, vnet::*, Conn};
+ use waitgroup::WaitGroup;
+@@ -763,10 +764,10 @@
+         ..Default::default()
+     })?;
+ 
+-    let drop_all_data = Arc::new(AtomicU64::new(0));
++    let drop_all_data = Arc::new(Mutex::new(0u64));
+     let drop_all_data2 = Arc::clone(&drop_all_data);
+     wan.add_chunk_filter(Box::new(move |_c: &(dyn Chunk + Send + Sync)| -> bool {
+-        drop_all_data2.load(Ordering::SeqCst) != 1
++        *drop_all_data2.lock().unwrap() != 1
+     }))
+     .await;
+     let wan = Arc::new(Mutex::new(wan));
+@@ -845,7 +846,7 @@
+     block_until_state_seen(ConnectionState::Connected, &mut controlled_state_changes_rx).await;
+ 
+     // Drop all packets, and block until we have gone to disconnected
+-    drop_all_data.store(1, Ordering::SeqCst);
++    *drop_all_data.lock().unwrap() = 1;
+     block_until_state_seen(
+         ConnectionState::Disconnected,
+         &mut controlling_state_changes_rx,
+@@ -858,7 +859,7 @@
+     .await;
+ 
+     // Allow all packets through again, block until we have gone to connected
+-    drop_all_data.store(0, Ordering::SeqCst);
++    *drop_all_data.lock().unwrap() = 0;
+     block_until_state_seen(
+         ConnectionState::Connected,
+         &mut controlling_state_changes_rx,
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' a/src/candidate/candidate_base.rs b/src/candidate/candidate_base.rs
+--- a/src/candidate/candidate_base.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/candidate/candidate_base.rs	2026-01-10 19:52:55.981468966 +0100
+@@ -12,11 +12,13 @@
+     fmt,
+     ops::Add,
+     sync::{
+-        atomic::{AtomicU16, AtomicU64, AtomicU8, Ordering},
++        atomic::{AtomicU16, AtomicU8, Ordering},
+         Arc,
+     },
+     time::{Duration, SystemTime, UNIX_EPOCH},
+ };
++// ARMv5TEJ doesn't support AtomicU64 natively, use portable-atomic instead
++use portable_atomic::AtomicU64;
+ use tokio::sync::{broadcast, Mutex};
+ use util::sync::Mutex as SyncMutex;
+ 
+@@ -46,8 +48,9 @@
+ 
+     pub(crate) resolved_addr: SyncMutex<SocketAddr>,
+ 
+-    pub(crate) last_sent: AtomicU64,
+-    pub(crate) last_received: AtomicU64,
++    // ARMv5TEJ doesn't support AtomicU64 natively, use portable-atomic instead
++    pub(crate) last_sent: portable_atomic::AtomicU64,
++    pub(crate) last_received: portable_atomic::AtomicU64,
+ 
+     pub(crate) conn: Option<Arc<dyn util::Conn + Send + Sync>>,
+     pub(crate) closed_ch: Arc<Mutex<Option<broadcast::Sender<()>>>>,
+@@ -150,13 +153,13 @@
+     /// Returns a time indicating the last time this candidate was received.
+     fn last_received(&self) -> SystemTime {
+         UNIX_EPOCH.add(Duration::from_nanos(
+-            self.last_received.load(Ordering::SeqCst),
++            self.last_received.load(portable_atomic::Ordering::SeqCst),
+         ))
+     }
+ 
+     /// Returns a time indicating the last time this candidate was sent.
+     fn last_sent(&self) -> SystemTime {
+-        UNIX_EPOCH.add(Duration::from_nanos(self.last_sent.load(Ordering::SeqCst)))
++        UNIX_EPOCH.add(Duration::from_nanos(self.last_sent.load(portable_atomic::Ordering::SeqCst)))
+     }
+ 
+     /// Returns candidate NetworkType.
+@@ -313,15 +316,14 @@
+ }
+ 
+ impl CandidateBase {
++    #[allow(clippy::cast_possible_truncation)]
+     pub fn set_last_received(&self, d: Duration) {
+-        #[allow(clippy::cast_possible_truncation)]
+-        self.last_received
+-            .store(d.as_nanos() as u64, Ordering::SeqCst);
++        self.last_received.store(d.as_nanos() as u64, portable_atomic::Ordering::SeqCst);
+     }
+ 
++    #[allow(clippy::cast_possible_truncation)]
+     pub fn set_last_sent(&self, d: Duration) {
+-        #[allow(clippy::cast_possible_truncation)]
+-        self.last_sent.store(d.as_nanos() as u64, Ordering::SeqCst);
++        self.last_sent.store(d.as_nanos() as u64, portable_atomic::Ordering::SeqCst);
+     }
+ 
+     /// Returns the local preference for this candidate.

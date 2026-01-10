@@ -1,0 +1,322 @@
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml	1970-01-01 01:00:01.000000000 +0100
++++ b/Cargo.toml	2026-01-10 19:52:55.959468966 +0100
+@@ -60,6 +60,9 @@
+ [dependencies.pin-project-lite]
+ version = "0.2.7"
+ 
++[dependencies.portable-atomic]
++version = "1"
++
+ [dependencies.tokio]
+ version = "1.26.0"
+ features = [
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' a/src/task.rs b/src/task.rs
+--- a/src/task.rs	2006-07-24 03:21:28.000000000 +0200
++++ b/src/task.rs	2026-01-10 19:52:55.959468966 +0100
+@@ -2,7 +2,8 @@
+ use pin_project_lite::pin_project;
+ use std::future::Future;
+ use std::pin::Pin;
+-use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
++// ARMv5TEJ doesn't support AtomicU64 natively, use portable-atomic instead
++use portable_atomic::{AtomicU64, Ordering::SeqCst};
+ use std::sync::Arc;
+ use std::task::{Context, Poll};
+ use tokio_stream::Stream;
+@@ -179,16 +180,16 @@
+ /// - [*Are my tasks spending more time waiting on external events to complete?*](#are-my-tasks-spending-more-time-waiting-on-external-events-to-complete)
+ ///
+ /// ##### Are my tasks taking longer to poll?
+-/// - **Did [`mean_poll_duration`][TaskMetrics::mean_poll_duration] increase?**   
++/// - **Did [`mean_poll_duration`][TaskMetrics::mean_poll_duration] increase?**
+ ///   This metric reflects the mean poll duration. If it increased, it means that, on average,
+ ///   individual polls tended to take longer. However, this does not necessarily imply increased
+ ///   task latency: An increase in poll durations could be offset by fewer polls.
+-/// - **Did [`slow_poll_ratio`][TaskMetrics::slow_poll_ratio] increase?**   
++/// - **Did [`slow_poll_ratio`][TaskMetrics::slow_poll_ratio] increase?**
+ ///   This metric reflects the proportion of polls that were 'slow'. If it increased, it means that
+ ///   a greater proportion of polls performed excessive computation before yielding. This does not
+ ///   necessarily imply increased task latency: An increase in the proportion of slow polls could be
+ ///   offset by fewer or faster polls.
+-/// - **Did [`mean_slow_poll_duration`][TaskMetrics::mean_slow_poll_duration] increase?**   
++/// - **Did [`mean_slow_poll_duration`][TaskMetrics::mean_slow_poll_duration] increase?**
+ ///   This metric reflects the mean duration of slow polls. If it increased, it means that, on
+ ///   average, slow polls got slower. This does not necessarily imply increased task latency: An
+ ///   increase in average slow poll duration could be offset by fewer or faster polls.
+@@ -196,11 +197,11 @@
+ /// If so, [*why are my tasks taking longer to poll?*](#why-are-my-tasks-taking-longer-to-poll)
+ ///
+ /// ##### Are my tasks spending more time waiting to be polled?
+-/// - **Did [`mean_first_poll_delay`][TaskMetrics::mean_first_poll_delay] increase?**   
++/// - **Did [`mean_first_poll_delay`][TaskMetrics::mean_first_poll_delay] increase?**
+ ///   This metric reflects the mean delay between the instant a task is first instrumented and the
+ ///   instant it is first polled. If it increases, it means that, on average, tasks spent longer
+ ///   waiting to be initially run.
+-/// - **Did [`mean_scheduled_duration`][TaskMetrics::mean_scheduled_duration] increase?**   
++/// - **Did [`mean_scheduled_duration`][TaskMetrics::mean_scheduled_duration] increase?**
+ ///   This metric reflects the mean duration that tasks spent in the scheduled state. The
+ ///   'scheduled' state of a task is the duration between the instant a task is awoken and the
+ ///   instant it is subsequently polled. If this metric increases, it means that, on average, tasks
+@@ -219,7 +220,7 @@
+ /// If so, [*why are my tasks spending more time waiting to be polled?*](#why-are-my-tasks-spending-more-time-waiting-to-be-polled)
+ ///
+ /// ##### Are my tasks spending more time waiting on external events to complete?
+-/// - **Did [`mean_idle_duration`][TaskMetrics::mean_idle_duration] increase?**   
++/// - **Did [`mean_idle_duration`][TaskMetrics::mean_idle_duration] increase?**
+ ///   This metric reflects the mean duration that tasks spent in the idle state. The idle state is
+ ///   the duration spanning the instant a task completes a poll, and the instant that it is next
+ ///   awoken. Tasks inhabit this state when they are waiting for task-external events to complete
+@@ -237,11 +238,11 @@
+ /// The culprit is likely some combination of:
+ /// - **Your tasks are accidentally blocking.** Common culprits include:
+ ///     1. Using the Rust standard library's [filesystem](https://doc.rust-lang.org/std/fs/) or
+-///     [networking](https://doc.rust-lang.org/std/net/) APIs.   
++///     [networking](https://doc.rust-lang.org/std/net/) APIs.
+ ///        These APIs are synchronous; use tokio's [filesystem](https://docs.rs/tokio/latest/tokio/fs/)
+ ///        and [networking](https://docs.rs/tokio/latest/tokio/net/) APIs, instead.
+ ///     3. Calling [`block_on`](https://docs.rs/tokio/latest/tokio/runtime/struct.Handle.html#method.block_on).
+-///     4. Invoking `println!` or other synchronous logging routines.   
++///     4. Invoking `println!` or other synchronous logging routines.
+ ///     Invocations of `println!` involve acquiring an exclusive lock on stdout, followed by a
+ ///     synchronous write to stdout.
+ /// 2. **Your tasks are computationally expensive.** Common culprits include:
+@@ -269,10 +270,10 @@
+ ///
+ /// ##### Is time-to-first-poll unusually high?
+ /// Contrast these two metrics:
+-/// - **[`mean_first_poll_delay`][TaskMetrics::mean_first_poll_delay]**  
++/// - **[`mean_first_poll_delay`][TaskMetrics::mean_first_poll_delay]**
+ ///   This metric reflects the mean delay between the instant a task is first instrumented and the
+ ///   instant it is *first* polled.
+-/// - **[`mean_scheduled_duration`][TaskMetrics::mean_scheduled_duration]**  
++/// - **[`mean_scheduled_duration`][TaskMetrics::mean_scheduled_duration]**
+ ///   This metric reflects the mean delay between the instant when tasks were awoken and the
+ ///   instant they were subsequently polled.
+ ///
+@@ -322,7 +323,7 @@
+ ///         tokio::spawn(async move {
+ ///             tx.send(());
+ ///         })
+-///         
++///
+ ///         rx.await;
+ ///     }
+ /// }
+@@ -648,7 +649,7 @@
+     /// The number of tasks polled for the first time.
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_first_poll_delay`][TaskMetrics::mean_first_poll_delay]**  
++    /// - **[`mean_first_poll_delay`][TaskMetrics::mean_first_poll_delay]**
+     ///   The mean duration elapsed between the instant tasks are instrumented, and the instant they
+     ///   are first polled.
+     ///
+@@ -689,7 +690,7 @@
+     /// are first polled.
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_first_poll_delay`][TaskMetrics::mean_first_poll_delay]**   
++    /// - **[`mean_first_poll_delay`][TaskMetrics::mean_first_poll_delay]**
+     ///   The mean duration elapsed between the instant tasks are instrumented, and the instant they
+     ///   are first polled.
+     ///
+@@ -816,7 +817,7 @@
+     /// task completes a poll, and the instant that it is next awoken.
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_idle_duration`][TaskMetrics::mean_idle_duration]**   
++    /// - **[`mean_idle_duration`][TaskMetrics::mean_idle_duration]**
+     ///   The mean duration of idles.
+     ///
+     /// ##### Examples
+@@ -857,7 +858,7 @@
+     /// task completes a poll, and the instant that it is next awoken.
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_idle_duration`][TaskMetrics::mean_idle_duration]**   
++    /// - **[`mean_idle_duration`][TaskMetrics::mean_idle_duration]**
+     ///   The mean duration of idles.
+     ///
+     /// ##### Examples
+@@ -898,7 +899,7 @@
+     /// + [`total_long_delay_duration`][TaskMetrics::total_long_delay_duration].
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_scheduled_duration`][TaskMetrics::mean_scheduled_duration]**   
++    /// - **[`mean_scheduled_duration`][TaskMetrics::mean_scheduled_duration]**
+     ///   The mean duration that tasks spent waiting to be executed after awakening.
+     ///
+     /// ##### Examples
+@@ -970,7 +971,7 @@
+     /// + [`total_long_delay_count`][TaskMetrics::total_long_delay_count].
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_scheduled_duration`][TaskMetrics::mean_scheduled_duration]**   
++    /// - **[`mean_scheduled_duration`][TaskMetrics::mean_scheduled_duration]**
+     ///   The mean duration that tasks spent waiting to be executed after awakening.
+     ///
+     /// ##### Examples
+@@ -1011,7 +1012,7 @@
+     /// + [`total_slow_poll_count`][TaskMetrics::total_slow_poll_count].
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_poll_duration`][TaskMetrics::mean_poll_duration]**   
++    /// - **[`mean_poll_duration`][TaskMetrics::mean_poll_duration]**
+     ///   The mean duration of polls.
+     ///
+     /// ##### Examples
+@@ -1078,7 +1079,7 @@
+     /// + [`total_slow_poll_duration`][TaskMetrics::total_slow_poll_duration].
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_poll_duration`][TaskMetrics::mean_poll_duration]**   
++    /// - **[`mean_poll_duration`][TaskMetrics::mean_poll_duration]**
+     ///   The mean duration of polls.
+     ///
+     /// #### Examples
+@@ -1110,7 +1111,7 @@
+     /// [`slow_poll_threshold`][TaskMonitor::slow_poll_threshold].
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_fast_poll_duration`][TaskMetrics::mean_fast_poll_duration]**   
++    /// - **[`mean_fast_poll_duration`][TaskMetrics::mean_fast_poll_duration]**
+     ///   The mean duration of fast polls.
+     ///
+     /// ##### Examples
+@@ -1165,7 +1166,7 @@
+     /// [`slow_poll_threshold`][TaskMonitor::slow_poll_threshold].
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_fast_poll_duration`][TaskMetrics::mean_fast_poll_duration]**   
++    /// - **[`mean_fast_poll_duration`][TaskMetrics::mean_fast_poll_duration]**
+     ///   The mean duration of fast polls.
+     ///
+     /// ##### Examples
+@@ -1232,7 +1233,7 @@
+     /// [`slow_poll_threshold`][TaskMonitor::slow_poll_threshold].
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_slow_poll_duration`][`TaskMetrics::mean_slow_poll_duration`]**   
++    /// - **[`mean_slow_poll_duration`][`TaskMetrics::mean_slow_poll_duration`]**
+     ///   The mean duration of slow polls.
+     ///
+     /// ##### Examples
+@@ -1287,7 +1288,7 @@
+     /// [`slow_poll_threshold`][TaskMonitor::slow_poll_threshold].
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_slow_poll_duration`][`TaskMetrics::mean_slow_poll_duration`]**   
++    /// - **[`mean_slow_poll_duration`][`TaskMetrics::mean_slow_poll_duration`]**
+     ///   The mean duration of slow polls.
+     ///
+     /// ##### Examples
+@@ -1358,7 +1359,7 @@
+     /// scheduled.
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_short_delay_duration`][TaskMetrics::mean_short_delay_duration]**   
++    /// - **[`mean_short_delay_duration`][TaskMetrics::mean_short_delay_duration]**
+     ///   The mean duration of short scheduling delays.
+     pub total_short_delay_count: u64,
+ 
+@@ -1369,7 +1370,7 @@
+     /// after being scheduled.
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_long_delay_duration`][TaskMetrics::mean_long_delay_duration]**   
++    /// - **[`mean_long_delay_duration`][TaskMetrics::mean_long_delay_duration]**
+     ///   The mean duration of short scheduling delays.
+     pub total_long_delay_count: u64,
+ 
+@@ -1380,7 +1381,7 @@
+     /// scheduled.
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_short_delay_duration`][TaskMetrics::mean_short_delay_duration]**   
++    /// - **[`mean_short_delay_duration`][TaskMetrics::mean_short_delay_duration]**
+     ///   The mean duration of short scheduling delays.
+     pub total_short_delay_duration: Duration,
+ 
+@@ -1390,7 +1391,7 @@
+     /// scheduling than [`long_delay_threshold`][TaskMonitor::long_delay_threshold].
+     ///
+     /// ##### Derived metrics
+-    /// - **[`mean_long_delay_duration`][TaskMetrics::mean_long_delay_duration]**   
++    /// - **[`mean_long_delay_duration`][TaskMetrics::mean_long_delay_duration]**
+     ///   The mean duration of short scheduling delays.
+     pub total_long_delay_duration: Duration,
+ }
+@@ -1943,7 +1944,7 @@
+     /// initially polled.
+     ///
+     /// ##### See also
+-    /// - **[`mean_scheduled_duration`][TaskMetrics::mean_scheduled_duration]**   
++    /// - **[`mean_scheduled_duration`][TaskMetrics::mean_scheduled_duration]**
+     ///   The mean duration that tasks spent waiting to be executed after awakening.
+     ///
+     /// ##### Examples
+@@ -2050,7 +2051,7 @@
+     /// queues before being polled.
+     ///
+     /// ##### See also
+-    /// - **[`mean_first_poll_delay`][TaskMetrics::mean_first_poll_delay]**   
++    /// - **[`mean_first_poll_delay`][TaskMetrics::mean_first_poll_delay]**
+     ///   The mean duration elapsed between the instant tasks are instrumented, and the instant they
+     ///   are first polled.
+     ///
+@@ -2101,9 +2102,9 @@
+     /// durations could be offset by fewer polls.
+     ///
+     /// ##### See also
+-    /// - **[`slow_poll_ratio`][TaskMetrics::slow_poll_ratio]**   
++    /// - **[`slow_poll_ratio`][TaskMetrics::slow_poll_ratio]**
+     ///   The ratio between the number polls categorized as slow and fast.
+-    /// - **[`mean_slow_poll_duration`][TaskMetrics::mean_slow_poll_duration]**   
++    /// - **[`mean_slow_poll_duration`][TaskMetrics::mean_slow_poll_duration]**
+     ///   The mean duration of slow polls.
+     ///
+     /// ##### Examples
+@@ -2115,15 +2116,15 @@
+     ///     let monitor = tokio_metrics::TaskMonitor::new();
+     ///     let mut interval = monitor.intervals();
+     ///     let mut next_interval = move || interval.next().unwrap();
+-    ///  
++    ///
+     ///     assert_eq!(next_interval().mean_poll_duration(), Duration::ZERO);
+-    ///  
++    ///
+     ///     monitor.instrument(async {
+     ///         tokio::time::advance(Duration::from_secs(1)).await; // poll 1 (1s)
+     ///         tokio::time::advance(Duration::from_secs(1)).await; // poll 2 (1s)
+     ///         ()                                                  // poll 3 (0s)
+     ///     }).await;
+-    ///  
++    ///
+     ///     assert_eq!(next_interval().mean_poll_duration(), Duration::from_secs(2) / 3);
+     /// }
+     /// ```
+@@ -2144,9 +2145,9 @@
+     /// However, as a rule, *should* yield to the scheduler frequently.
+     ///
+     /// ##### See also
+-    /// - **[`mean_poll_duration`][TaskMetrics::mean_poll_duration]**   
++    /// - **[`mean_poll_duration`][TaskMetrics::mean_poll_duration]**
+     ///   The mean duration of polls.
+-    /// - **[`mean_slow_poll_duration`][TaskMetrics::mean_slow_poll_duration]**   
++    /// - **[`mean_slow_poll_duration`][TaskMetrics::mean_slow_poll_duration]**
+     ///   The mean duration of slow polls.
+     ///
+     /// ##### Examples
+@@ -2333,9 +2334,9 @@
+     /// An increase in the proportion of slow polls could be offset by fewer or faster polls.
+     ///
+     /// ##### See also
+-    /// - **[`mean_poll_duration`][TaskMetrics::mean_poll_duration]**   
++    /// - **[`mean_poll_duration`][TaskMetrics::mean_poll_duration]**
+     ///   The mean duration of polls.
+-    /// - **[`slow_poll_ratio`][TaskMetrics::slow_poll_ratio]**   
++    /// - **[`slow_poll_ratio`][TaskMetrics::slow_poll_ratio]**
+     ///   The ratio between the number polls categorized as slow and fast.
+     ///
+     /// ##### Interpretation
