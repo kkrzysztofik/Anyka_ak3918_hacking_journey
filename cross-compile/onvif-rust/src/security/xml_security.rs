@@ -55,6 +55,10 @@ pub struct XmlSecurityValidator {
     max_payload_size: usize,
     /// Maximum allowed entity expansions.
     max_entity_expansions: usize,
+    /// Reject CDATA sections entirely (for security-sensitive operations).
+    /// Note: `quick-xml` doesn't expand CDATA by default, but explicit rejection
+    /// provides defense-in-depth against potential future parser changes.
+    reject_cdata: bool,
 }
 
 impl XmlSecurityValidator {
@@ -68,6 +72,24 @@ impl XmlSecurityValidator {
         Self {
             max_payload_size,
             max_entity_expansions,
+            reject_cdata: false,
+        }
+    }
+
+    /// Create a new XML security validator with CDATA rejection enabled.
+    ///
+    /// Use this for security-sensitive operations where CDATA sections
+    /// should be rejected entirely.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_entity_expansions` - Maximum entity references allowed.
+    /// * `max_payload_size` - Maximum payload size in bytes.
+    pub fn with_cdata_rejection(max_entity_expansions: usize, max_payload_size: usize) -> Self {
+        Self {
+            max_payload_size,
+            max_entity_expansions,
+            reject_cdata: true,
         }
     }
 
@@ -78,6 +100,10 @@ impl XmlSecurityValidator {
     /// - DOCTYPE declarations (potential XXE vector)
     /// - XML bomb patterns (excessive entity declarations)
     /// - Payload size limits
+    /// - CDATA sections (if rejection is enabled)
+    ///
+    /// Note: `quick-xml` doesn't expand CDATA by default, but explicit detection
+    /// provides defense-in-depth against potential future parser changes.
     ///
     /// # Arguments
     ///
@@ -97,7 +123,7 @@ impl XmlSecurityValidator {
 
         let xml_lower = xml.to_lowercase();
 
-        // Check for XXE patterns
+        // Check for XXE patterns (includes CDATA if rejection enabled)
         self.check_xxe_patterns(&xml_lower)?;
 
         // Check for XML bomb patterns
@@ -150,6 +176,16 @@ impl XmlSecurityValidator {
                     protocol
                 )));
             }
+        }
+
+        // Check for CDATA sections if rejection is enabled
+        // Note: quick-xml doesn't expand CDATA by default, but explicit detection
+        // provides defense-in-depth. CDATA can potentially be used to bypass
+        // entity expansion checks in some XML parsers.
+        if self.reject_cdata && xml.contains("<![cdata[") {
+            return Err(XmlSecurityError::XxeDetected(
+                "CDATA section detected and rejected".to_string(),
+            ));
         }
 
         Ok(())
@@ -403,5 +439,57 @@ mod tests {
             validator.validate(xxe2),
             Err(XmlSecurityError::XxeDetected(_))
         ));
+    }
+
+    #[test]
+    fn test_cdata_allowed_by_default() {
+        let validator = XmlSecurityValidator::default();
+
+        // CDATA should be allowed by default (quick-xml doesn't expand it)
+        let cdata = r#"<Data><![CDATA[Some <raw> data & content]]></Data>"#;
+        assert!(validator.validate(cdata).is_ok());
+    }
+
+    #[test]
+    fn test_cdata_rejected_when_enabled() {
+        let validator = XmlSecurityValidator::with_cdata_rejection(10, 1024 * 1024);
+
+        // CDATA should be rejected when rejection is enabled
+        let cdata = r#"<Data><![CDATA[Some <raw> data & content]]></Data>"#;
+        let result = validator.validate(cdata);
+        assert!(matches!(result, Err(XmlSecurityError::XxeDetected(_))));
+    }
+
+    #[test]
+    fn test_cdata_case_insensitive() {
+        let validator = XmlSecurityValidator::with_cdata_rejection(10, 1024 * 1024);
+
+        // CDATA detection should be case-insensitive
+        let cdata1 = r#"<Data><![CDATA[content]]></Data>"#;
+        let cdata2 = r#"<Data><![cdata[content]]></Data>"#;
+        let cdata3 = r#"<Data><![Cdata[content]]></Data>"#;
+
+        assert!(matches!(
+            validator.validate(cdata1),
+            Err(XmlSecurityError::XxeDetected(_))
+        ));
+        assert!(matches!(
+            validator.validate(cdata2),
+            Err(XmlSecurityError::XxeDetected(_))
+        ));
+        assert!(matches!(
+            validator.validate(cdata3),
+            Err(XmlSecurityError::XxeDetected(_))
+        ));
+    }
+
+    #[test]
+    fn test_cdata_with_xxe_pattern() {
+        let validator = XmlSecurityValidator::with_cdata_rejection(10, 1024 * 1024);
+
+        // CDATA containing XXE-like patterns should be rejected
+        let malicious = r#"<Data><![CDATA[<!ENTITY xxe SYSTEM "file:///etc/passwd">]]></Data>"#;
+        let result = validator.validate(malicious);
+        assert!(matches!(result, Err(XmlSecurityError::XxeDetected(_))));
     }
 }

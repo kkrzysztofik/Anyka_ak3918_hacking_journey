@@ -42,8 +42,10 @@ export default function LiveViewPage() {
   return (
     <div className="flex h-full flex-col gap-6">
       <div className="flex shrink-0 flex-col gap-2">
-        <h1 className="text-2xl font-medium text-white">Live Video Preview</h1>
-        <p className="text-muted-foreground text-sm">
+        <h1 className="text-2xl font-medium text-white" data-testid="liveview-title">
+          Live Video Preview
+        </h1>
+        <p className="text-muted-foreground text-sm" data-testid="liveview-description">
           Real-time ONVIF stream monitoring and playback controls
         </p>
       </div>
@@ -104,20 +106,38 @@ export default function LiveViewPage() {
               <div className="mb-4 rounded-full bg-zinc-900/50 p-8">
                 <Camera className="h-12 w-12 text-zinc-600" />
               </div>
-              <h3 className="text-xl font-medium text-zinc-400">ONVIF Stream Preview</h3>
-              <p className="text-sm text-zinc-600">1920×1080 @ 30fps</p>
+              <h3
+                className="text-xl font-medium text-zinc-400"
+                data-testid="liveview-stream-preview-title"
+              >
+                ONVIF Stream Preview
+              </h3>
+              <p className="text-sm text-zinc-600" data-testid="liveview-stream-preview-info">
+                1920×1080 @ 30fps
+              </p>
             </div>
 
             {/* LIVE Indicator */}
-            <div className="live-indicator absolute top-20 left-6 backdrop-blur-sm">LIVE</div>
+            <div
+              className="live-indicator absolute top-20 left-6 backdrop-blur-sm"
+              data-testid="liveview-live-indicator"
+            >
+              LIVE
+            </div>
           </div>
 
           {/* Stream URL Bar */}
           <div className="border-border bg-card flex items-center gap-4 rounded-lg border p-3">
-            <span className="text-muted-foreground text-sm font-medium whitespace-nowrap">
+            <span
+              className="text-muted-foreground text-sm font-medium whitespace-nowrap"
+              data-testid="liveview-stream-url-label"
+            >
               Stream URL
             </span>
-            <div className="border-border bg-background text-foreground flex-1 truncate rounded border px-3 py-2 font-mono text-sm">
+            <div
+              className="border-border bg-background text-foreground flex-1 truncate rounded border px-3 py-2 font-mono text-sm"
+              data-testid="liveview-stream-url-value"
+            >
               rtsp://192.168.1.100:554/main
             </div>
             <Button
@@ -141,15 +161,24 @@ export default function LiveViewPage() {
                     <Activity className="text-accent-red h-5 w-5" />
                   </div>
                   <div>
-                    <SettingsCardTitle>Stream Info</SettingsCardTitle>
+                    <SettingsCardTitle data-testid="liveview-stream-info-title">
+                      Stream Info
+                    </SettingsCardTitle>
                     <SettingsCardDescription>Video stream parameters</SettingsCardDescription>
                   </div>
                 </div>
               </SettingsCardHeader>
               <SettingsCardContent>
                 <div className="grid grid-cols-2 gap-y-3 text-sm">
-                  <span className="text-muted-foreground">Resolution</span>
-                  <span className="text-foreground text-right font-mono">1920x1080</span>
+                  <span className="text-muted-foreground" data-testid="liveview-resolution-label">
+                    Resolution
+                  </span>
+                  <span
+                    className="text-foreground text-right font-mono"
+                    data-testid="liveview-resolution-value"
+                  >
+                    1920x1080
+                  </span>
                   <span className="text-muted-foreground">Bitrate</span>
                   <span className="text-foreground text-right font-mono">4096 Kbps</span>
                   <span className="text-muted-foreground">Frame Rate</span>
@@ -168,7 +197,9 @@ export default function LiveViewPage() {
                     <Wifi className="h-5 w-5 text-green-500" />
                   </div>
                   <div>
-                    <SettingsCardTitle>Network Stats</SettingsCardTitle>
+                    <SettingsCardTitle data-testid="liveview-network-stats-title">
+                      Network Stats
+                    </SettingsCardTitle>
                     <SettingsCardDescription>Connection metrics</SettingsCardDescription>
                   </div>
                 </div>
@@ -202,8 +233,10 @@ export default function LiveViewPage() {
                   <Camera className="text-accent-red h-5 w-5" />
                 </div>
                 <div>
-                  <SettingsCardTitle>Pan & Tilt</SettingsCardTitle>
-                  <SettingsCardDescription>PTZ camera controls</SettingsCardDescription>
+                  <SettingsCardTitle data-testid="liveview-ptz-title">Pan & Tilt</SettingsCardTitle>
+                  <SettingsCardDescription data-testid="liveview-ptz-description">
+                    PTZ camera controls
+                  </SettingsCardDescription>
                 </div>
               </div>
             </SettingsCardHeader>
@@ -299,7 +332,7 @@ export default function LiveViewPage() {
                 <div className="w-full space-y-2">
                   <div className="flex justify-between text-xs text-zinc-500">
                     <span>Speed</span>
-                    <span>{ptzSpeed}%</span>
+                    <span data-testid="liveview-ptz-speed-value">{ptzSpeed}%</span>
                   </div>
                   <input
                     type="range"
@@ -323,7 +356,9 @@ export default function LiveViewPage() {
                   <Bookmark className="h-5 w-5 text-blue-500" />
                 </div>
                 <div>
-                  <SettingsCardTitle>Presets</SettingsCardTitle>
+                  <SettingsCardTitle data-testid="liveview-presets-title">
+                    Presets
+                  </SettingsCardTitle>
                   <SettingsCardDescription>Saved camera positions</SettingsCardDescription>
                 </div>
               </div>
@@ -337,7 +372,9 @@ export default function LiveViewPage() {
                       className="border-border bg-muted text-foreground hover:border-ring hover:bg-muted/80 flex-1 justify-between"
                       data-testid={`liveview-preset-${i}-button`}
                     >
-                      <span className="text-xs">Preset {i}</span>
+                      <span className="text-xs" data-testid={`liveview-preset-${i}-label`}>
+                        Preset {i}
+                      </span>
                       <span className="bg-background text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
                         #{i}
                       </span>
@@ -357,7 +394,7 @@ export default function LiveViewPage() {
                   className="border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground mt-2 w-full border-dashed"
                   data-testid="liveview-add-preset-button"
                 >
-                  + Add Preset
+                  <span data-testid="liveview-add-preset-label">+ Add Preset</span>
                 </Button>
               </div>
             </SettingsCardContent>

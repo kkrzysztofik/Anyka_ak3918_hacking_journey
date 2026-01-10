@@ -3,6 +3,24 @@
 //! Limits the number of requests from a single IP address within a time window.
 //! Uses DashMap for concurrent access without global locking.
 //!
+//! ## Important Limitations
+//!
+//! **Per-Instance Rate Limiting**: This implementation maintains rate limit state
+//! in memory on each server instance. Without shared state (Redis/database), each
+//! server instance has its own independent rate limit counter. This means:
+//!
+//! - In a single-instance deployment: Rate limiting works as expected
+//! - In a multi-instance deployment (load balancer): Each instance tracks rate limits
+//!   independently, effectively multiplying the allowed rate by the number of instances
+//!
+//! For distributed rate limiting across multiple instances, you would need to:
+//! - Use a shared state store (Redis, database, etc.)
+//! - Implement consistent hashing to route same IP to same instance
+//! - Or accept per-instance limits as acceptable for your use case
+//!
+//! This per-instance approach is acceptable for single-instance deployments and
+//! provides protection against abuse without requiring external dependencies.
+//!
 //! # Example
 //!
 //! ```
@@ -25,6 +43,8 @@ use dashmap::DashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 
 /// Default rate limit: requests per minute.
 pub const DEFAULT_RATE_LIMIT: u32 = 60;
@@ -187,6 +207,45 @@ impl RateLimiter {
     pub fn tracked_ips(&self) -> usize {
         self.counts.len()
     }
+
+    /// Start a background task that periodically cleans up expired entries.
+    ///
+    /// The task will call `cleanup()` at the specified interval until
+    /// a shutdown signal is received. This prevents memory growth from
+    /// accumulating expired rate limit entries.
+    ///
+    /// # Arguments
+    ///
+    /// * `cleanup_interval` - How often to run cleanup (e.g., `Duration::from_secs(60)` for 1 minute)
+    /// * `shutdown_rx` - Receiver for shutdown signals. The task will exit when a signal is received.
+    ///
+    /// # Returns
+    ///
+    /// A `JoinHandle` that can be used to await the task's completion.
+    pub fn start_cleanup_task(
+        self: Arc<Self>,
+        cleanup_interval: Duration,
+        mut shutdown_rx: broadcast::Receiver<()>,
+    ) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut interval_timer = tokio::time::interval(cleanup_interval);
+            // Skip the first tick (it fires immediately)
+            interval_timer.tick().await;
+
+            loop {
+                tokio::select! {
+                    _ = interval_timer.tick() => {
+                        self.cleanup();
+                        tracing::debug!("Rate limiter cleanup: {} tracked IPs", self.tracked_ips());
+                    }
+                    _ = shutdown_rx.recv() => {
+                        tracing::debug!("Rate limiter cleanup task shutting down");
+                        break;
+                    }
+                }
+            }
+        })
+    }
 }
 
 impl std::fmt::Debug for RateLimiter {
@@ -204,6 +263,15 @@ impl Default for RateLimiter {
         Self::new(DEFAULT_RATE_LIMIT)
     }
 }
+
+// ============================================================================
+// Axum Middleware Integration
+// ============================================================================
+
+// Note: The rate limiting middleware is implemented in src/onvif/server.rs
+// as `rate_limit_middleware()` to avoid feature gate issues and because
+// it needs access to OnvifServerState. The middleware is integrated into
+// the server router during server initialization.
 
 #[cfg(test)]
 mod tests {

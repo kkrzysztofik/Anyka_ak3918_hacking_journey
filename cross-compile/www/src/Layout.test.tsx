@@ -118,9 +118,10 @@ describe('Layout', () => {
 
     it('should render navigation items', () => {
       renderLayout();
-      expect(screen.getAllByText('Live View')[0]).toBeInTheDocument();
-      expect(screen.getAllByText('Settings')[0]).toBeInTheDocument();
-      expect(screen.getAllByText('Diagnostics')[0]).toBeInTheDocument();
+      const sidebar = screen.getByTestId('layout-desktop-sidebar');
+      expect(within(sidebar).getByTestId('layout-nav-live-label')).toBeInTheDocument();
+      expect(within(sidebar).getByTestId('layout-nav-settings-label')).toBeInTheDocument();
+      expect(within(sidebar).getByTestId('layout-nav-diagnostics-label')).toBeInTheDocument();
     });
 
     it('should render connection status badge', () => {
@@ -139,17 +140,19 @@ describe('Layout', () => {
   describe('Navigation', () => {
     it('should highlight active navigation item', () => {
       renderLayout('/live');
-      const liveViewLinks = screen.getAllByText('Live View');
-      const liveViewLink = liveViewLinks[0].closest('a');
+      const sidebar = screen.getByTestId('layout-desktop-sidebar');
+      const liveViewLink = within(sidebar).getByTestId('layout-nav-live');
       expect(liveViewLink).toHaveAttribute('href', '/live');
     });
 
     it('should expand settings submenu when settings path is active', async () => {
       renderLayout('/settings/network');
+      const sidebar = screen.getByTestId('layout-desktop-sidebar');
       // Settings should be expanded to show children
       await waitFor(() => {
-        const networkElements = screen.getAllByText('Network');
-        expect(networkElements.length).toBeGreaterThan(0);
+        expect(
+          within(sidebar).getByTestId('layout-nav-settings-network-label'),
+        ).toBeInTheDocument();
       });
     });
 
@@ -166,7 +169,7 @@ describe('Layout', () => {
       await user.click(settingsButton);
       // After click, submenu should be visible
       await waitFor(() => {
-        expect(screen.getByText('Identification')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-nav-settings-identification-label')).toBeInTheDocument();
       });
     });
 
@@ -178,14 +181,13 @@ describe('Layout', () => {
       const settingsButton = settingsButtons[0]; // Use desktop version
       await user.click(settingsButton);
       await waitFor(() => {
-        expect(screen.getByText('Identification')).toBeInTheDocument();
-        const networkElements = screen.getAllByText('Network');
-        expect(networkElements.length).toBeGreaterThan(0);
-        expect(screen.getByText('Time')).toBeInTheDocument();
-        expect(screen.getByText('Imaging')).toBeInTheDocument();
-        expect(screen.getByText('Profiles')).toBeInTheDocument();
-        expect(screen.getByText('Users')).toBeInTheDocument();
-        expect(screen.getByText('Maintenance')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-nav-settings-identification-label')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-nav-settings-network-label')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-nav-settings-time-label')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-nav-settings-imaging-label')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-nav-settings-profiles-label')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-nav-settings-users-label')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-nav-settings-maintenance-label')).toBeInTheDocument();
       });
     });
   });
@@ -201,9 +203,9 @@ describe('Layout', () => {
 
       await user.click(userButton);
       await waitFor(() => {
-        expect(screen.getByText('Change Password')).toBeInTheDocument();
-        expect(screen.getByText('About')).toBeInTheDocument();
-        expect(screen.getByText('Sign Out')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-change-password-button')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-about-button')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-sign-out-button')).toBeInTheDocument();
       });
     });
 
@@ -215,7 +217,7 @@ describe('Layout', () => {
       const userButton = userButtons[0]; // Use desktop version
       await user.click(userButton);
       await waitFor(() => {
-        expect(screen.getByText('Change Password')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-change-password-button')).toBeInTheDocument();
       });
 
       // Click outside button (the backdrop)
@@ -223,7 +225,7 @@ describe('Layout', () => {
       await user.click(backdrop);
 
       await waitFor(() => {
-        expect(screen.queryByText('Change Password')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('layout-change-password-button')).not.toBeInTheDocument();
       });
     });
 
@@ -235,7 +237,7 @@ describe('Layout', () => {
       const userButton = userButtons[0]; // Use desktop version
       await user.click(userButton);
       await waitFor(() => {
-        expect(screen.getByText('Change Password')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-change-password-button')).toBeInTheDocument();
       });
 
       const changePasswordButton = screen.getByTestId('layout-change-password-button');
@@ -255,7 +257,7 @@ describe('Layout', () => {
       const userButton = userButtons[0]; // Use desktop version
       await user.click(userButton);
       await waitFor(() => {
-        expect(screen.getByText('About')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-about-button')).toBeInTheDocument();
       });
 
       const aboutButton = screen.getByTestId('layout-about-button');
@@ -275,7 +277,7 @@ describe('Layout', () => {
       const userButton = userButtons[0]; // Use desktop version
       await user.click(userButton);
       await waitFor(() => {
-        expect(screen.getByText('Sign Out')).toBeInTheDocument();
+        expect(screen.getByTestId('layout-sign-out-button')).toBeInTheDocument();
       });
 
       const signOutButton = screen.getByTestId('layout-sign-out-button');
@@ -334,22 +336,22 @@ describe('Layout', () => {
       });
 
       renderLayout();
-      const testuserElements = screen.getAllByText('testuser');
-      expect(testuserElements.length).toBeGreaterThan(0);
+      const sidebar = screen.getByTestId('layout-desktop-sidebar');
+      expect(within(sidebar).getByTestId('layout-username')).toHaveTextContent('testuser');
     });
 
     it('should display Administrator role', () => {
       renderLayout();
-      const adminElements = screen.getAllByText('Administrator');
-      expect(adminElements.length).toBeGreaterThan(0);
+      const sidebar = screen.getByTestId('layout-desktop-sidebar');
+      expect(within(sidebar).getByTestId('layout-user-role')).toHaveTextContent('Administrator');
     });
 
     it('should display version information', () => {
       renderLayout();
-      const versionElements = screen.getAllByText(/v1.0.0-beta/);
-      expect(versionElements.length).toBeGreaterThan(0);
-      const onvifTexts = screen.getAllByText(/ONVIF 24.12/);
-      expect(onvifTexts.length).toBeGreaterThan(0);
+      const sidebar = screen.getByTestId('layout-desktop-sidebar');
+      const versionElement = within(sidebar).getByTestId('layout-version');
+      expect(versionElement).toHaveTextContent(/v1.0.0-beta/);
+      expect(versionElement).toHaveTextContent(/ONVIF 24.12/);
     });
   });
 });

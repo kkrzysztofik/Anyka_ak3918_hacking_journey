@@ -144,11 +144,16 @@ export default function ProfilesPage() {
     }
   };
 
-  if (isLoading) return <div className="text-white">Loading profiles...</div>;
+  if (isLoading)
+    return (
+      <div className="text-white" data-testid="profiles-loading">
+        Loading profiles...
+      </div>
+    );
 
   if (error) {
     return (
-      <div className="text-red-500">
+      <div className="text-red-500" data-testid="profiles-error">
         Error loading profiles: {error instanceof Error ? error.message : String(error)}
       </div>
     );
@@ -163,7 +168,12 @@ export default function ProfilesPage() {
         {/* Header */}
         <div className="mb-[32px] flex items-center justify-between md:mb-[40px]">
           <div>
-            <h1 className="mb-[8px] text-[22px] text-white md:text-[28px]">Profiles</h1>
+            <h1
+              className="mb-[8px] text-[22px] text-white md:text-[28px]"
+              data-testid="profiles-title"
+            >
+              Profiles
+            </h1>
             <p className="text-[13px] text-[#a1a1a6] md:text-[14px]">
               Manage media profiles for RTSP streaming
             </p>
@@ -206,7 +216,12 @@ export default function ProfilesPage() {
                     </CollapsibleTrigger>
 
                     <div className="flex flex-col">
-                      <span className="text-[16px] font-medium text-white">{profile.name}</span>
+                      <span
+                        className="text-[16px] font-medium text-white"
+                        data-testid={`profile-name-${profile.token}`}
+                      >
+                        {profile.name}
+                      </span>
                       <span className="font-mono text-[12px] text-[#a1a1a6]">{profile.token}</span>
                     </div>
 

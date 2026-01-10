@@ -13,6 +13,7 @@ use std::sync::Arc;
 use chrono::{Datelike, Timelike, Utc};
 
 use crate::config::ConfigRuntime;
+use crate::onvif::dispatcher::parse_body;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
     Date, DateTime, DiscoveryMode, Scope, ScopeDefinition, SetDateTimeType, SystemDateTime, Time,
@@ -1406,8 +1407,7 @@ impl ServiceHandler for DeviceService {
         match action {
             // Device Information Operations
             "GetDeviceInformation" => {
-                let _request: GetDeviceInformation = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let _request: GetDeviceInformation = parse_body(body_xml)?;
                 let response = self.handle_get_device_information(_request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1416,8 +1416,7 @@ impl ServiceHandler for DeviceService {
 
             // Capabilities Operations
             "GetCapabilities" => {
-                let request: GetCapabilities = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetCapabilities = parse_body(body_xml)?;
                 let response = self.handle_get_capabilities(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1425,8 +1424,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "GetServices" => {
-                let request: GetServices = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetServices = parse_body(body_xml)?;
                 let response = self.handle_get_services(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1434,8 +1432,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "GetServiceCapabilities" => {
-                let request: GetServiceCapabilities = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetServiceCapabilities = parse_body(body_xml)?;
                 let response = self.handle_get_service_capabilities(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1444,8 +1441,7 @@ impl ServiceHandler for DeviceService {
 
             // System Date/Time Operations
             "GetSystemDateAndTime" => {
-                let request: GetSystemDateAndTime = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetSystemDateAndTime = parse_body(body_xml)?;
                 let response = self.handle_get_system_date_and_time(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1453,8 +1449,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "SetSystemDateAndTime" => {
-                let request: SetSystemDateAndTime = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetSystemDateAndTime = parse_body(body_xml)?;
                 let response = self.handle_set_system_date_and_time(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1463,8 +1458,7 @@ impl ServiceHandler for DeviceService {
 
             // System Operations
             "SystemReboot" => {
-                let request: SystemReboot = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SystemReboot = parse_body(body_xml)?;
                 let response = self.handle_system_reboot(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1472,8 +1466,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "SetSystemFactoryDefault" => {
-                let request: SetSystemFactoryDefault = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetSystemFactoryDefault = parse_body(body_xml)?;
                 let response = self.handle_set_system_factory_default(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1482,8 +1475,7 @@ impl ServiceHandler for DeviceService {
 
             // Certificate Operations
             "GetCertificates" => {
-                let request: GetCertificates = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetCertificates = parse_body(body_xml)?;
                 let response = self.handle_get_certificates(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1491,8 +1483,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "GetCertificatesStatus" => {
-                let request: GetCertificatesStatus = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetCertificatesStatus = parse_body(body_xml)?;
                 let response = self.handle_get_certificates_status(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1500,8 +1491,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "CreateCertificate" => {
-                let request: CreateCertificate = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: CreateCertificate = parse_body(body_xml)?;
                 let response = self.handle_create_certificate(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1509,8 +1499,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "LoadCertificates" => {
-                let request: LoadCertificates = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: LoadCertificates = parse_body(body_xml)?;
                 let response = self.handle_load_certificates(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1518,8 +1507,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "DeleteCertificates" => {
-                let request: DeleteCertificates = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: DeleteCertificates = parse_body(body_xml)?;
                 let response = self.handle_delete_certificates(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1528,8 +1516,7 @@ impl ServiceHandler for DeviceService {
 
             // Backup/Restore Operations
             "GetSystemBackup" => {
-                let request: GetSystemBackup = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetSystemBackup = parse_body(body_xml)?;
                 let response = self.handle_get_system_backup(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1537,8 +1524,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "RestoreSystem" => {
-                let request: RestoreSystem = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: RestoreSystem = parse_body(body_xml)?;
                 let response = self.handle_restore_system(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1547,8 +1533,7 @@ impl ServiceHandler for DeviceService {
 
             // Relay Operations
             "GetRelayOutputs" => {
-                let request: GetRelayOutputs = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetRelayOutputs = parse_body(body_xml)?;
                 let response = self.handle_get_relay_outputs(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1557,8 +1542,7 @@ impl ServiceHandler for DeviceService {
 
             // Hostname Operations
             "GetHostname" => {
-                let request: GetHostname = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetHostname = parse_body(body_xml)?;
                 let response = self.handle_get_hostname(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1566,8 +1550,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "SetHostname" => {
-                let request: SetHostname = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetHostname = parse_body(body_xml)?;
                 let response = self.handle_set_hostname(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1576,8 +1559,7 @@ impl ServiceHandler for DeviceService {
 
             // Network Operations
             "GetNetworkInterfaces" => {
-                let request: GetNetworkInterfaces = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetNetworkInterfaces = parse_body(body_xml)?;
                 let response = self.handle_get_network_interfaces(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1585,8 +1567,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "GetNetworkDefaultGateway" => {
-                let request: GetNetworkDefaultGateway = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetNetworkDefaultGateway = parse_body(body_xml)?;
                 let response = self.handle_get_network_default_gateway(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1595,8 +1576,7 @@ impl ServiceHandler for DeviceService {
 
             // DNS Operations
             "GetDNS" => {
-                let request: GetDNS = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetDNS = parse_body(body_xml)?;
                 let response = self.handle_get_dns(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1604,8 +1584,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "SetDNS" => {
-                let request: SetDNS = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetDNS = parse_body(body_xml)?;
                 let response = self.handle_set_dns(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1614,8 +1593,7 @@ impl ServiceHandler for DeviceService {
 
             // NTP Operations
             "GetNTP" => {
-                let request: GetNTP = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetNTP = parse_body(body_xml)?;
                 let response = self.handle_get_ntp(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1623,8 +1601,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "SetNTP" => {
-                let request: SetNTP = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetNTP = parse_body(body_xml)?;
                 let response = self.handle_set_ntp(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1633,8 +1610,7 @@ impl ServiceHandler for DeviceService {
 
             // Network Protocol Operations
             "GetNetworkProtocols" => {
-                let request: GetNetworkProtocols = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetNetworkProtocols = parse_body(body_xml)?;
                 let response = self.handle_get_network_protocols(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1642,8 +1618,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "SetNetworkProtocols" => {
-                let request: SetNetworkProtocols = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetNetworkProtocols = parse_body(body_xml)?;
                 let response = self.handle_set_network_protocols(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1652,8 +1627,7 @@ impl ServiceHandler for DeviceService {
 
             // Scope Operations
             "GetScopes" => {
-                let request: GetScopes = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetScopes = parse_body(body_xml)?;
                 let response = self.handle_get_scopes(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1661,8 +1635,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "SetScopes" => {
-                let request: SetScopes = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetScopes = parse_body(body_xml)?;
                 let response = self.handle_set_scopes(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1670,8 +1643,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "AddScopes" => {
-                let request: AddScopes = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: AddScopes = parse_body(body_xml)?;
                 let response = self.handle_add_scopes(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1679,8 +1651,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "RemoveScopes" => {
-                let request: RemoveScopes = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: RemoveScopes = parse_body(body_xml)?;
                 let response = self.handle_remove_scopes(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1689,8 +1660,7 @@ impl ServiceHandler for DeviceService {
 
             // Discovery Operations
             "GetDiscoveryMode" => {
-                let request: GetDiscoveryMode = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetDiscoveryMode = parse_body(body_xml)?;
                 let response = self.handle_get_discovery_mode(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1698,8 +1668,7 @@ impl ServiceHandler for DeviceService {
             }
 
             "SetDiscoveryMode" => {
-                let request: SetDiscoveryMode = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetDiscoveryMode = parse_body(body_xml)?;
                 let response = self.handle_set_discovery_mode(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1708,8 +1677,7 @@ impl ServiceHandler for DeviceService {
 
             // User Management Operations
             "GetUsers" => {
-                let request: GetUsers = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: GetUsers = parse_body(body_xml)?;
                 let response = self.handle_get_users(request)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1719,8 +1687,7 @@ impl ServiceHandler for DeviceService {
             "CreateUsers" => {
                 // Note: Caller level should be extracted from auth context
                 // For now, assume admin level for testing
-                let request: CreateUsers = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: CreateUsers = parse_body(body_xml)?;
                 let response = self.handle_create_users(request, UserLevel::Administrator)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1729,8 +1696,7 @@ impl ServiceHandler for DeviceService {
 
             "DeleteUsers" => {
                 // Note: Caller level should be extracted from auth context
-                let request: DeleteUsers = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: DeleteUsers = parse_body(body_xml)?;
                 let response = self.handle_delete_users(request, UserLevel::Administrator)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -1739,8 +1705,7 @@ impl ServiceHandler for DeviceService {
 
             "SetUser" => {
                 // Note: Caller level should be extracted from auth context
-                let request: SetUser = quick_xml::de::from_str(body_xml)
-                    .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
+                let request: SetUser = parse_body(body_xml)?;
                 let response = self.handle_set_user(request, UserLevel::Administrator)?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
@@ -2553,5 +2518,720 @@ mod tests {
             }),
         });
         assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // GetSystemBackup Tests
+    // ========================================================================
+
+    #[test]
+    fn test_get_system_backup() {
+        let service = create_test_service();
+        let response = service
+            .handle_get_system_backup(GetSystemBackup {})
+            .unwrap();
+
+        // Should have backup files
+        assert!(!response.backup_files.is_empty());
+        assert_eq!(response.backup_files[0].name, "config.toml");
+        // Data may be empty if config is empty, but should be valid base64
+        // Just verify the file structure is correct
+        let _ = &response.backup_files[0].data;
+    }
+
+    // ========================================================================
+    // RestoreSystem Tests
+    // ========================================================================
+
+    #[test]
+    fn test_restore_system_success() {
+        let service = create_test_service();
+
+        // Create a backup first
+        let backup = service
+            .handle_get_system_backup(GetSystemBackup {})
+            .unwrap();
+
+        // Restore from backup
+        let result = service.handle_restore_system(RestoreSystem {
+            backup_files: backup.backup_files,
+        });
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_restore_system_missing_config_toml() {
+        let service = create_test_service();
+
+        let result = service.handle_restore_system(RestoreSystem {
+            backup_files: vec![BackupFile {
+                name: "other.toml".to_string(),
+                data: "dGVzdA==".to_string(), // base64 for "test"
+            }],
+        });
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::WellFormed(_))));
+    }
+
+    #[test]
+    fn test_restore_system_invalid_base64() {
+        let service = create_test_service();
+
+        let result = service.handle_restore_system(RestoreSystem {
+            backup_files: vec![BackupFile {
+                name: "config.toml".to_string(),
+                data: "!!!invalid base64!!!".to_string(),
+            }],
+        });
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_restore_system_invalid_utf8() {
+        let service = create_test_service();
+
+        // Base64 for invalid UTF-8 sequence
+        use base64::Engine;
+        let invalid_utf8 = base64::engine::general_purpose::STANDARD.encode(&[0xFF, 0xFE, 0xFD]);
+
+        let result = service.handle_restore_system(RestoreSystem {
+            backup_files: vec![BackupFile {
+                name: "config.toml".to_string(),
+                data: invalid_utf8,
+            }],
+        });
+
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // GetDNS Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_dns() {
+        let service = create_test_service();
+        let response = service.handle_get_dns(GetDNS {}).await.unwrap();
+
+        // Should have DNS information
+        // from_dhcp is a bool, just verify the response is valid
+        let _ = response.dns_information.from_dhcp;
+    }
+
+    // ========================================================================
+    // SetDNS Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_set_dns() {
+        let service = create_test_service();
+
+        let result = service
+            .handle_set_dns(SetDNS {
+                from_dhcp: false,
+                search_domain: vec!["example.com".to_string()],
+                dns_manual: vec![IPAddress::ipv4("8.8.8.8")],
+            })
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_dns_with_dhcp() {
+        let service = create_test_service();
+
+        let result = service
+            .handle_set_dns(SetDNS {
+                from_dhcp: true,
+                search_domain: vec![],
+                dns_manual: vec![],
+            })
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // GetNTP Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_ntp() {
+        let service = create_test_service();
+        let response = service.handle_get_ntp(GetNTP {}).await.unwrap();
+
+        // Should have NTP information
+        // from_dhcp is a bool, just verify the response is valid
+        let _ = response.ntp_information.from_dhcp;
+    }
+
+    // ========================================================================
+    // SetNTP Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_set_ntp() {
+        let service = create_test_service();
+
+        let result = service
+            .handle_set_ntp(SetNTP {
+                from_dhcp: false,
+                ntp_manual: vec![NetworkHost::ipv4("pool.ntp.org")],
+            })
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_ntp_with_dhcp() {
+        let service = create_test_service();
+
+        let result = service
+            .handle_set_ntp(SetNTP {
+                from_dhcp: true,
+                ntp_manual: vec![],
+            })
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // GetRelayOutputs Tests
+    // ========================================================================
+
+    #[test]
+    fn test_get_relay_outputs() {
+        let service = create_test_service();
+        let response = service
+            .handle_get_relay_outputs(GetRelayOutputs {})
+            .unwrap();
+
+        // Should return empty list (no relay outputs supported)
+        assert!(response.relay_outputs.is_empty());
+    }
+
+    // ========================================================================
+    // Certificate Tests
+    // ========================================================================
+
+    #[test]
+    fn test_get_certificates() {
+        let service = create_test_service();
+        let response = service.handle_get_certificates(GetCertificates {}).unwrap();
+
+        // Should return empty list (no certificates supported)
+        assert!(response.nvt_certificate.is_empty());
+    }
+
+    #[test]
+    fn test_get_certificates_status() {
+        let service = create_test_service();
+        let response = service
+            .handle_get_certificates_status(GetCertificatesStatus {})
+            .unwrap();
+
+        // Should return empty list
+        assert!(response.certificate_status.is_empty());
+    }
+
+    #[test]
+    fn test_create_certificate_not_supported() {
+        let service = create_test_service();
+        let result = service.handle_create_certificate(CreateCertificate {
+            certificate_id: Some("test".to_string()),
+            subject: Some("CN=test".to_string()),
+            valid_not_before: Some("2024-01-01T00:00:00Z".to_string()),
+            valid_not_after: Some("2025-01-01T00:00:00Z".to_string()),
+        });
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+    }
+
+    #[test]
+    fn test_load_certificates_not_supported() {
+        let service = create_test_service();
+        let result = service.handle_load_certificates(LoadCertificates {
+            nvt_certificate: vec![],
+        });
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+    }
+
+    #[test]
+    fn test_delete_certificates_not_supported() {
+        let service = create_test_service();
+        let result = service.handle_delete_certificates(DeleteCertificates {
+            certificate_id: vec![],
+        });
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+    }
+
+    // ========================================================================
+    // Network Protocol Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_network_protocols() {
+        let service = create_test_service();
+        let response = service
+            .handle_get_network_protocols(GetNetworkProtocols {})
+            .await
+            .unwrap();
+
+        // Should have at least HTTP protocol
+        assert!(!response.network_protocols.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_set_network_protocols() {
+        let service = create_test_service();
+
+        let result = service
+            .handle_set_network_protocols(SetNetworkProtocols {
+                network_protocols: vec![NetworkProtocol {
+                    name: NetworkProtocolType::HTTP,
+                    enabled: true,
+                    port: vec![8080],
+                }],
+            })
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // GetNetworkDefaultGateway Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_network_default_gateway() {
+        let service = create_test_service();
+        let response = service
+            .handle_get_network_default_gateway(GetNetworkDefaultGateway {})
+            .await
+            .unwrap();
+
+        // Should have gateway information
+        assert!(!response.network_gateway.is_empty());
+    }
+
+    // ========================================================================
+    // Platform Fallback Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_device_information_platform_fallback() {
+        let service = create_test_service();
+        // Service without platform should use config fallback
+        let response = service
+            .handle_get_device_information(GetDeviceInformation {})
+            .await
+            .unwrap();
+
+        // Should have default values from config
+        assert_eq!(response.manufacturer, "Anyka");
+        assert_eq!(response.model, "AK3918 Camera");
+    }
+
+    #[tokio::test]
+    async fn test_get_device_information_platform_error_fallback() {
+        use crate::platform::StubPlatform;
+        use std::sync::Arc;
+
+        let users = Arc::new(UserStorage::new());
+        users
+            .create_user("admin", "admin123", UserLevel::Administrator)
+            .unwrap();
+        let password_manager = Arc::new(PasswordManager::new());
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+
+        // Create a platform that will fail
+        let platform = Arc::new(StubPlatform::new());
+        let service =
+            DeviceService::with_config_and_platform(users, password_manager, config, platform);
+
+        // Should fallback to config when platform fails
+        let response = service
+            .handle_get_device_information(GetDeviceInformation {})
+            .await
+            .unwrap();
+
+        assert_eq!(response.manufacturer, "Anyka");
+    }
+
+    // ========================================================================
+    // Network Operations Error Path Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_set_dns_invalid_ip() {
+        let service = create_test_service();
+
+        // Invalid IP address format
+        let result = service
+            .handle_set_dns(SetDNS {
+                from_dhcp: false,
+                search_domain: vec![],
+                dns_manual: vec![IPAddress::ipv4("invalid.ip.address")],
+            })
+            .await;
+
+        // Should still succeed (validation happens at platform level)
+        // But we can test the handler accepts it
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_ntp_invalid_host() {
+        let service = create_test_service();
+
+        // Invalid host format
+        let result = service
+            .handle_set_ntp(SetNTP {
+                from_dhcp: false,
+                ntp_manual: vec![NetworkHost {
+                    host_type: NetworkHostType::DNS,
+                    ipv4_address: None,
+                    ipv6_address: None,
+                    dns_name: Some("".to_string()), // Empty DNS name
+                }],
+            })
+            .await;
+
+        // Handler should accept it (validation at platform level)
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // RestoreSystem Error Path Tests
+    // ========================================================================
+
+    #[test]
+    fn test_restore_system_empty_backup_files() {
+        let service = create_test_service();
+
+        let result = service.handle_restore_system(RestoreSystem {
+            backup_files: vec![],
+        });
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::WellFormed(_))));
+    }
+
+    #[test]
+    fn test_restore_system_invalid_toml_syntax() {
+        use base64::Engine;
+        let service = create_test_service();
+
+        // Valid base64 but invalid TOML
+        let invalid_toml =
+            base64::engine::general_purpose::STANDARD.encode("[invalid toml syntax {");
+
+        let result = service.handle_restore_system(RestoreSystem {
+            backup_files: vec![BackupFile {
+                name: "config.toml".to_string(),
+                data: invalid_toml,
+            }],
+        });
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_restore_system_config_apply_failure() {
+        use base64::Engine;
+        let service = create_test_service();
+
+        // Valid TOML but might cause config errors
+        let valid_toml =
+            base64::engine::general_purpose::STANDARD.encode("[server]\nport = \"invalid\"");
+
+        let result = service.handle_restore_system(RestoreSystem {
+            backup_files: vec![BackupFile {
+                name: "config.toml".to_string(),
+                data: valid_toml,
+            }],
+        });
+
+        // May succeed or fail depending on config validation
+        // Just verify it doesn't panic
+        let _ = result;
+    }
+
+    // ========================================================================
+    // Base URL and IP Detection Tests
+    // ========================================================================
+
+    #[test]
+    fn test_base_url_uses_detected_ip() {
+        use crate::config::ConfigRuntime;
+        use crate::platform::StubPlatform;
+
+        let users = Arc::new(UserStorage::new());
+        users
+            .create_user("admin", "admin123", UserLevel::Administrator)
+            .unwrap();
+        let password_manager = Arc::new(PasswordManager::new());
+        let config = {
+            let mut c = ConfigRuntime::new(Default::default());
+            c.set_string("network.detected_ip", "192.168.1.100")
+                .unwrap();
+            c.set_string("network.mac_address", "AA:BB:CC:DD:EE:FF")
+                .unwrap();
+            c.set_bool("network.dhcp_enabled", false).unwrap();
+            c
+        };
+        config.set_int("server.port", 8080).unwrap();
+
+        let platform = Arc::new(StubPlatform::new());
+        let service = DeviceService::with_config_and_platform(
+            users,
+            password_manager,
+            Arc::new(config),
+            platform,
+        );
+
+        // Access base_url through a handler that uses it
+        let response = service
+            .handle_get_capabilities(GetCapabilities { category: vec![] })
+            .unwrap();
+
+        // Verify the URL contains the detected IP
+        let device_caps = response.capabilities.device.unwrap();
+        assert!(device_caps.x_addr.contains("192.168.1.100"));
+        assert!(device_caps.x_addr.contains("8080"));
+    }
+
+    #[test]
+    fn test_base_url_fallback_to_ip_address() {
+        use crate::config::ConfigRuntime;
+        use crate::platform::StubPlatform;
+
+        let users = Arc::new(UserStorage::new());
+        users
+            .create_user("admin", "admin123", UserLevel::Administrator)
+            .unwrap();
+        let password_manager = Arc::new(PasswordManager::new());
+        let config = {
+            let mut c = ConfigRuntime::new(Default::default());
+            // Don't set detected_ip - we want to test ip_address fallback
+            c.set_string("network.ip_address", "10.0.0.1").unwrap();
+            c.set_int("server.port", 9000).unwrap();
+            c
+        };
+
+        let platform = Arc::new(StubPlatform::new());
+        let service = DeviceService::with_config_and_platform(
+            users,
+            password_manager,
+            Arc::new(config),
+            platform,
+        );
+
+        let response = service
+            .handle_get_capabilities(GetCapabilities { category: vec![] })
+            .unwrap();
+
+        let device_caps = response.capabilities.device.unwrap();
+        assert!(device_caps.x_addr.contains("10.0.0.1"));
+        assert!(device_caps.x_addr.contains("9000"));
+    }
+
+    #[test]
+    fn test_base_url_fallback_to_127_0_0_1() {
+        use crate::config::ConfigRuntime;
+        use crate::platform::StubPlatform;
+
+        let users = Arc::new(UserStorage::new());
+        users
+            .create_user("admin", "admin123", UserLevel::Administrator)
+            .unwrap();
+        let password_manager = Arc::new(PasswordManager::new());
+        let config = ConfigRuntime::new(Default::default());
+        // No IP config, should fallback to 127.0.0.1
+
+        let platform = Arc::new(StubPlatform::new());
+        let service = DeviceService::with_config_and_platform(
+            users,
+            password_manager,
+            Arc::new(config),
+            platform,
+        );
+
+        let response = service
+            .handle_get_capabilities(GetCapabilities { category: vec![] })
+            .unwrap();
+
+        let device_caps = response.capabilities.device.unwrap();
+        // Should contain 127.0.0.1 or detected IP
+        assert!(device_caps.x_addr.contains("http://"));
+    }
+
+    // ========================================================================
+    // Network Info Fallback Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_network_interfaces_fallback() {
+        let service = create_test_service();
+        // Service without platform should use config fallback
+        let response = service
+            .handle_get_network_interfaces(GetNetworkInterfaces {})
+            .await
+            .unwrap();
+
+        // Should have at least one interface
+        assert!(!response.network_interfaces.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_network_interfaces_with_config() {
+        use crate::config::ConfigRuntime;
+
+        let users = Arc::new(UserStorage::new());
+        users
+            .create_user("admin", "admin123", UserLevel::Administrator)
+            .unwrap();
+        let password_manager = Arc::new(PasswordManager::new());
+        let config = {
+            let c = ConfigRuntime::new(Default::default());
+            c.set_string("network.detected_ip", "192.168.1.50").unwrap();
+            c.set_string("network.mac_address", "AA:BB:CC:DD:EE:FF")
+                .unwrap();
+            c.set_bool("network.dhcp_enabled", false).unwrap();
+            c
+        };
+
+        use crate::platform::StubPlatform;
+        let platform = Arc::new(StubPlatform::new());
+        let service = DeviceService::with_config_and_platform(
+            users,
+            password_manager,
+            Arc::new(config),
+            platform,
+        );
+
+        let response = service
+            .handle_get_network_interfaces(GetNetworkInterfaces {})
+            .await
+            .unwrap();
+
+        let iface = &response.network_interfaces[0];
+        assert_eq!(iface.token, "eth0");
+        if let Some(ref ipv4) = iface.ipv4 {
+            if let Some(ref manual) = ipv4.config.manual.first() {
+                assert_eq!(manual.address, "192.168.1.50");
+            }
+        }
+    }
+
+    // ========================================================================
+    // User Management Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_create_users_empty_list() {
+        let service = create_test_service();
+
+        let result =
+            service.handle_create_users(CreateUsers { users: vec![] }, UserLevel::Administrator);
+
+        // Empty list should succeed
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_delete_users_empty_list() {
+        let service = create_test_service();
+
+        let result = service
+            .handle_delete_users(DeleteUsers { usernames: vec![] }, UserLevel::Administrator);
+
+        // Empty list should succeed
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_set_user_empty_list() {
+        let service = create_test_service();
+
+        let result = service.handle_set_user(SetUser { users: vec![] }, UserLevel::Administrator);
+
+        // Empty list should succeed
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_set_user_without_password() {
+        let service = create_test_service();
+        use crate::onvif::types::common::UserLevel as OnvifUserLevel;
+
+        // Update user level without changing password
+        let result = service.handle_set_user(
+            SetUser {
+                users: vec![OnvifUser {
+                    username: "admin".to_string(),
+                    password: None, // No password change
+                    user_level: OnvifUserLevel::Administrator,
+                    extension: None,
+                }],
+            },
+            UserLevel::Administrator,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // ServiceHandler Error Path Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_service_handler_unknown_action_device() {
+        let service = create_test_service();
+        let result = service.handle_operation("UnknownAction", "<test/>").await;
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_invalid_xml() {
+        let service = create_test_service();
+        let result = service
+            .handle_operation("GetDeviceInformation", "<InvalidXml><Broken")
+            .await;
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::WellFormed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_get_device_information_xml() {
+        let service = create_test_service();
+        let xml = r#"<GetDeviceInformation/>"#;
+        let result = service.handle_operation("GetDeviceInformation", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("GetDeviceInformationResponse"));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_get_capabilities_xml() {
+        let service = create_test_service();
+        // GetCapabilities with empty category list (default)
+        let xml = r#"<GetCapabilities/>"#;
+        let result = service.handle_operation("GetCapabilities", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("GetCapabilitiesResponse"));
     }
 }

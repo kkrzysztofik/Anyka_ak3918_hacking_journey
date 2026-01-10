@@ -30,7 +30,13 @@ async function generateKey(salt: Uint8Array): Promise<CryptoKey> {
     throw new Error('Web Crypto API not available in non-secure context');
   }
   // Import the salt as a key material
-  const keyMaterial = await crypto.subtle!.importKey('raw', salt, { name: 'PBKDF2' }, false, [
+  // Convert to ArrayBuffer to satisfy type requirements
+  // Create a new ArrayBuffer and copy the salt data
+  const saltBuffer = new ArrayBuffer(salt.byteLength);
+  const saltView = new Uint8Array(saltBuffer);
+  saltView.set(salt);
+
+  const keyMaterial = await crypto.subtle.importKey('raw', saltBuffer, { name: 'PBKDF2' }, false, [
     'deriveKey',
   ]);
 
@@ -38,7 +44,7 @@ async function generateKey(salt: Uint8Array): Promise<CryptoKey> {
   return crypto.subtle!.deriveKey(
     {
       name: 'PBKDF2',
-      salt: salt,
+      salt: saltBuffer,
       iterations: 100000,
       hash: 'SHA-256',
     },
@@ -123,7 +129,12 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
     const encoder = new TextEncoder();
     const data = encoder.encode(plaintext);
 
-    const ciphertext = await crypto.subtle!.encrypt({ name: 'AES-GCM', iv: iv }, key, data);
+  // Convert IV to ArrayBuffer
+  const ivBuffer = new ArrayBuffer(iv.byteLength);
+  const ivView = new Uint8Array(ivBuffer);
+  ivView.set(iv);
+
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBuffer }, key, data);
 
     return {
       data: btoa(Array.from(new Uint8Array(ciphertext), (b) => String.fromCodePoint(b)).join('')),
@@ -145,31 +156,37 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
  * @throws Error if decryption fails
  */
 export async function decrypt(encrypted: EncryptedData): Promise<string> {
-  // Determine encryption method (default to aes-gcm for backward compatibility)
-  const method = encrypted.method ?? 'aes-gcm';
+  const salt = Uint8Array.from(atob(encrypted.salt), (c) => c.codePointAt(0) ?? 0);
+  const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.codePointAt(0) ?? 0);
+  const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.codePointAt(0) ?? 0);
 
-  // Use Web Crypto API if available and method is aes-gcm
-  if (isCryptoAvailable() && method === 'aes-gcm') {
-    const salt = Uint8Array.from(atob(encrypted.salt), (c) => c.codePointAt(0)!);
-    const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.codePointAt(0)!);
-    const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.codePointAt(0)!);
+  try {
     const key = await generateKey(salt);
 
-    const decrypted = await crypto.subtle!.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext);
+    // Convert to ArrayBuffer to satisfy type requirements
+    const ivBuffer = new ArrayBuffer(iv.byteLength);
+    const ivView = new Uint8Array(ivBuffer);
+    ivView.set(iv);
+
+    const ciphertextBuffer = new ArrayBuffer(ciphertext.byteLength);
+    const ciphertextView = new Uint8Array(ciphertextBuffer);
+    ciphertextView.set(ciphertext);
+
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: ivBuffer },
+      key,
+      ciphertextBuffer,
+    );
 
     const decoder = new TextDecoder();
-    return decoder.decode(decrypted);
+    const password = decoder.decode(decrypted);
+    return password;
+  } finally {
+    // Clear sensitive memory
+    salt.fill(0);
+    iv.fill(0);
+    ciphertext.fill(0);
   }
-
-  // If method is aes-gcm but crypto.subtle is not available, we cannot decrypt
-  if (method === 'aes-gcm' && !isCryptoAvailable()) {
-    throw new Error(
-      'Cannot decrypt AES-GCM data: Web Crypto API not available in non-secure context. Please clear sessionStorage and log in again.',
-    );
-  }
-
-  // Fallback to base64 decoding for base64-encoded data
-  return decodeBase64(encrypted);
 }
 
 /**

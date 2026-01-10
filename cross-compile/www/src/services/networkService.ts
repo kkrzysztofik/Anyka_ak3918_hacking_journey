@@ -7,6 +7,14 @@ import { ENDPOINTS } from '@/services/api';
 import { soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
+/**
+ * Safely parse boolean values from API responses.
+ * Handles both boolean and string representations.
+ */
+function parseBoolean(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
 export interface NetworkInterface {
   token: string;
   enabled: boolean;
@@ -57,11 +65,11 @@ export async function getNetworkInterfaces(): Promise<NetworkInterface[]> {
 
     return {
       token: safeString(iface['@_token'], ''),
-      enabled: iface.Enabled === true || iface.Enabled === 'true',
+      enabled: parseBoolean(iface.Enabled),
       name: safeString(info?.Name, 'eth0'),
       hwAddress: safeString(info?.HwAddress, ''),
-      ipv4Enabled: ipv4?.Enabled === true || ipv4?.Enabled === 'true',
-      dhcp: config?.DHCP === true || config?.DHCP === 'true',
+      ipv4Enabled: parseBoolean(ipv4?.Enabled),
+      dhcp: parseBoolean(config?.DHCP),
       address: safeString(manual?.Address, ''),
       prefixLength: Number(manual?.PrefixLength || 24),
       gateway: '',
@@ -99,7 +107,7 @@ export async function getDNS(): Promise<DNSConfig> {
   }
 
   return {
-    fromDHCP: dnsInfo?.FromDHCP === true || dnsInfo?.FromDHCP === 'true',
+    fromDHCP: parseBoolean(dnsInfo?.FromDHCP),
     searchDomain: searchDomainList,
     dnsServers: dnsServersList,
   };

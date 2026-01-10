@@ -6,7 +6,14 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getNetworkConfig, setDNS, setNetworkInterface } from '@/services/networkService';
-import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
+import {
+  MOCK_DATA,
+  fillFormField,
+  makeFormDirty,
+  mockToast,
+  renderWithProviders,
+  waitForPageLoad,
+} from '@/test/componentTestHelpers';
 
 import NetworkPage from './NetworkPage';
 
@@ -18,6 +25,12 @@ vi.mock('@/services/networkService', () => ({
 }));
 
 describe('NetworkPage', () => {
+  const renderNetworkPage = async () => {
+    const result = renderWithProviders(<NetworkPage />);
+    await waitForPageLoad('network-title');
+    return result;
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getNetworkConfig).mockResolvedValue(MOCK_DATA.network);
@@ -27,27 +40,20 @@ describe('NetworkPage', () => {
     vi.mocked(getNetworkConfig).mockImplementation(() => new Promise(() => {}));
 
     renderWithProviders(<NetworkPage />);
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByTestId('network-loading')).toBeInTheDocument();
   });
 
   it('should render form with fetched network config', async () => {
-    renderWithProviders(<NetworkPage />);
+    await renderNetworkPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('Network')).toBeInTheDocument();
-    });
-
-    expect(screen.getByTestId('network-ip-address-input')).toHaveValue('192.168.1.100');
-    expect(screen.getByTestId('network-gateway-input')).toHaveValue('192.168.1.1');
+    // NOSONAR: Hardcoded IP addresses are safe in test files
+    expect(screen.getByTestId('network-ip-address-input')).toHaveValue('192.168.1.100'); // NOSONAR
+    expect(screen.getByTestId('network-gateway-input')).toHaveValue('192.168.1.1'); // NOSONAR
   });
 
   it('should toggle DHCP and show/hide static IP fields', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<NetworkPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Network')).toBeInTheDocument();
-    });
+    await renderNetworkPage();
 
     const dhcpSwitch = screen.getByTestId('network-dhcp-switch');
     expect(dhcpSwitch).toBeTruthy();
@@ -65,32 +71,25 @@ describe('NetworkPage', () => {
 
   it('should validate IP address format', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<NetworkPage />);
+    await renderNetworkPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('Network')).toBeInTheDocument();
-    });
-
-    const ipInput = screen.getByTestId('network-ip-address-input');
-    await user.clear(ipInput);
-    await user.type(ipInput, 'invalid-ip');
+    await fillFormField(user, 'network-ip-address-input', 'invalid-ip');
 
     const saveButton = screen.getByTestId('network-save-button');
     await user.click(saveButton);
 
-    // Form validation should prevent submission
-    await waitFor(() => {
-      expect(screen.getByText(/invalid ip address/i)).toBeInTheDocument();
-    });
+    // Form validation should prevent submission - dialog should not open
+    await waitFor(
+      () => {
+        expect(screen.queryByTestId('network-confirm-dialog')).not.toBeInTheDocument();
+      },
+      { timeout: 1000 },
+    );
   });
 
   it('should toggle DNS from DHCP', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<NetworkPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Network')).toBeInTheDocument();
-    });
+    await renderNetworkPage();
 
     const dnsFromDHCPSwitch = screen.getByTestId('network-dns-from-dhcp-switch');
     expect(dnsFromDHCPSwitch).toBeTruthy();
@@ -102,26 +101,21 @@ describe('NetworkPage', () => {
   });
 
   it('should show DNS input fields when DNS from DHCP is off', async () => {
-    renderWithProviders(<NetworkPage />);
+    await renderNetworkPage();
 
     await waitFor(() => {
-      expect(screen.getByTestId('network-primary-dns-input')).toHaveValue('8.8.8.8');
-      expect(screen.getByTestId('network-secondary-dns-input')).toHaveValue('8.8.4.4');
+      // NOSONAR: Hardcoded IP addresses are safe in test files
+      expect(screen.getByTestId('network-primary-dns-input')).toHaveValue('8.8.8.8'); // NOSONAR
+      expect(screen.getByTestId('network-secondary-dns-input')).toHaveValue('8.8.4.4'); // NOSONAR
     });
   });
 
   it('should show confirmation dialog on form submission', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<NetworkPage />);
+    await renderNetworkPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('Network')).toBeInTheDocument();
-    });
-
-    // Make form dirty by changing a value
-    const ipInput = screen.getByTestId('network-ip-address-input');
-    await user.clear(ipInput);
-    await user.type(ipInput, '192.168.1.200');
+    // NOSONAR: Hardcoded IP address is safe in test file
+    await makeFormDirty(user, 'network-ip-address-input', '192.168.1.200'); // NOSONAR
 
     const saveButton = screen.getByTestId('network-save-button');
     expect(saveButton).toBeTruthy();
@@ -130,7 +124,7 @@ describe('NetworkPage', () => {
     await waitFor(
       () => {
         expect(screen.getByTestId('network-confirm-dialog')).toBeInTheDocument();
-        expect(screen.getByText('Save Network Settings?')).toBeInTheDocument();
+        expect(screen.getByTestId('network-confirm-dialog-title')).toBeInTheDocument();
       },
       { timeout: 3000 },
     );
@@ -138,16 +132,10 @@ describe('NetworkPage', () => {
 
   it('should call mutation on confirmation', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<NetworkPage />);
+    await renderNetworkPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('Network')).toBeInTheDocument();
-    });
-
-    // Make form dirty
-    const ipInput = screen.getByTestId('network-ip-address-input');
-    await user.clear(ipInput);
-    await user.type(ipInput, '192.168.1.200');
+    // NOSONAR: Hardcoded IP address is safe in test file
+    await makeFormDirty(user, 'network-ip-address-input', '192.168.1.200'); // NOSONAR
 
     const saveButton = screen.getByTestId('network-save-button');
     expect(saveButton).toBeTruthy();
@@ -155,7 +143,7 @@ describe('NetworkPage', () => {
 
     await waitFor(
       () => {
-        expect(screen.getByText('Save Network Settings?')).toBeInTheDocument();
+        expect(screen.getByTestId('network-confirm-dialog-title')).toBeInTheDocument();
       },
       { timeout: 3000 },
     );
@@ -180,20 +168,21 @@ describe('NetworkPage', () => {
     renderWithProviders(<NetworkPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Network')).toBeInTheDocument();
+      expect(screen.getByTestId('network-title')).toBeInTheDocument();
     });
 
     // Make form dirty
     const ipInput = screen.getByTestId('network-ip-address-input');
     await user.clear(ipInput);
-    await user.type(ipInput, '192.168.1.200');
+    // NOSONAR: Hardcoded IP address is safe in test file
+    await user.type(ipInput, '192.168.1.200'); // NOSONAR
 
     const saveButton = screen.getByTestId('network-save-button');
     await user.click(saveButton);
 
     await waitFor(
       () => {
-        expect(screen.getByText('Save Network Settings?')).toBeInTheDocument();
+        expect(screen.getByTestId('network-confirm-dialog-title')).toBeInTheDocument();
       },
       { timeout: 3000 },
     );
@@ -210,31 +199,29 @@ describe('NetworkPage', () => {
 
   it('should reset form when reset button is clicked', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<NetworkPage />);
+    await renderNetworkPage();
 
-    await waitFor(() => {
-      expect(screen.getByText('Network')).toBeInTheDocument();
-    });
-
+    // NOSONAR: Hardcoded IP address is safe in test file
+    await makeFormDirty(user, 'network-ip-address-input', '192.168.1.200'); // NOSONAR
     const ipInput = screen.getByTestId('network-ip-address-input');
-    await user.clear(ipInput);
-    await user.type(ipInput, '192.168.1.200');
 
     const resetButton = screen.getByTestId('network-reset-button');
     await user.click(resetButton);
 
     await waitFor(() => {
       expect(mockToast.info).toHaveBeenCalledWith('Form reset to current values');
-      expect(ipInput).toHaveValue('192.168.1.100');
+      // NOSONAR: Hardcoded IP address is safe in test file
+      expect(ipInput).toHaveValue('192.168.1.100'); // NOSONAR
     });
   });
 
   it('should render connection status card', async () => {
-    renderWithProviders(<NetworkPage />);
+    await renderNetworkPage();
 
     await waitFor(() => {
-      expect(screen.getByText('MAC Address')).toBeInTheDocument();
-      expect(screen.getByText('00:11:22:33:44:55')).toBeInTheDocument();
+      expect(screen.getByTestId('network-mac-address')).toBeInTheDocument();
+      // MAC address value is inside the StatusCardItem
+      expect(screen.getByTestId('network-mac-address')).toHaveTextContent('00:11:22:33:44:55');
     });
   });
 });

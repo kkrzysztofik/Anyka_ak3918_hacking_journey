@@ -32,7 +32,7 @@ describe('IdentificationPage', () => {
     renderWithProviders(<IdentificationPage />);
 
     await waitFor(() => {
-      expect(screen.getByText(/device identification/i)).toBeInTheDocument();
+      expect(screen.getByTestId('identification-title')).toBeInTheDocument();
     });
   });
 
@@ -159,7 +159,7 @@ describe('IdentificationPage', () => {
     renderWithProviders(<IdentificationPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Loading...')).toBeInTheDocument();
+      expect(screen.getByTestId('identification-loading')).toBeInTheDocument();
     });
   });
 });

@@ -92,6 +92,36 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       output: {
         manualChunks: (id) => {
+          // Application code first (specific features before generic)
+          // ONVIF services and related components
+          if (id.includes('/services/') || id.includes('onvif')) {
+            return 'onvif-services';
+          }
+
+          // Device management components
+          if (id.includes('DeviceService') || id.includes('SystemInfo')) {
+            return 'device-components';
+          }
+
+          // Store slices
+          if (id.includes('/store/slices/')) {
+            return 'store-slices';
+          }
+
+          // Utilities and helpers
+          if (id.includes('/utils/') || id.includes('/config/')) {
+            return 'app-utils';
+          }
+
+          // Video and PTZ components (specific feature code, not all node_modules)
+          if (
+            id.includes('/components/') &&
+            (id.includes('LiveView') || id.includes('PTZ') || id.includes('Video'))
+          ) {
+            return 'camera-components';
+          }
+
+          // Vendor libraries (specific packages)
           // TanStack Query and related
           if (id.includes('@tanstack/react-query')) {
             return 'query-vendor';

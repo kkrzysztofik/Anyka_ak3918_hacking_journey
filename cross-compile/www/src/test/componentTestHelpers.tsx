@@ -14,6 +14,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import { expect } from 'vitest';
 
 import { AuthProvider } from '@/hooks/useAuth';
@@ -127,15 +128,15 @@ export const MOCK_DATA = {
         enabled: true,
         ipv4Enabled: true,
         dhcp: false,
-        address: '192.168.1.100',
+        address: '192.168.1.100', // NOSONAR - Test data: Hardcoded IP for testing network configuration
         prefixLength: 24,
-        gateway: '192.168.1.1',
+        gateway: '192.168.1.1', // NOSONAR - Test data: Hardcoded gateway IP for testing
         hwAddress: '00:11:22:33:44:55',
       },
     ],
     dns: {
       fromDHCP: false,
-      dnsServers: ['8.8.8.8', '8.8.4.4'],
+      dnsServers: ['8.8.8.8', '8.8.4.4'], // NOSONAR - Test data: Google DNS IPs for testing DNS configuration
       searchDomain: [],
     },
   },
@@ -254,6 +255,235 @@ export async function verifyPasswordVisibilityToggle(
   await waitFor(() => {
     expect(passwordInput).toHaveAttribute('type', 'password');
   });
+}
+
+/**
+ * Wait for a page to load by checking for a specific test ID
+ * @param testId - Test ID of the page title or main element
+ */
+export async function waitForPageLoad(testId: string): Promise<void> {
+  await waitFor(() => {
+    expect(screen.getByTestId(testId)).toBeInTheDocument();
+  });
+}
+
+/**
+ * Render a page component and wait for it to load
+ * @param component - React component to render
+ * @param testId - Test ID to wait for
+ * @param options - Optional render options
+ */
+export async function renderPageAndWait(
+  component: ReactElement,
+  testId: string,
+  options?: RenderWithProvidersOptions,
+) {
+  const result = renderWithProviders(component, options);
+  await waitForPageLoad(testId);
+  return result;
+}
+
+/**
+ * Open a dialog by clicking the trigger and verify it opens
+ * @param user - User event instance
+ * @param triggerTestId - Test ID of the button/trigger that opens the dialog
+ * @param dialogTestId - Test ID of the dialog to verify it opened
+ */
+export async function openDialog(
+  user: ReturnType<typeof userEvent.setup>,
+  triggerTestId: string,
+  dialogTestId: string,
+): Promise<void> {
+  const trigger = screen.getByTestId(triggerTestId);
+  await user.click(trigger);
+
+  await waitFor(() => {
+    expect(screen.getByTestId(dialogTestId)).toBeInTheDocument();
+  });
+}
+
+/**
+ * Close a dialog by clicking the cancel/close button
+ * @param user - User event instance
+ * @param cancelTestId - Test ID of the cancel/close button
+ * @param dialogTestId - Test ID of the dialog to verify it closed
+ */
+export async function closeDialog(
+  user: ReturnType<typeof userEvent.setup>,
+  cancelTestId: string,
+  dialogTestId: string,
+): Promise<void> {
+  const cancelButton = screen.getByTestId(cancelTestId);
+  await user.click(cancelButton);
+
+  await waitFor(() => {
+    expect(screen.queryByTestId(dialogTestId)).not.toBeInTheDocument();
+  });
+}
+
+/**
+ * Submit a dialog form and verify the expected function was called
+ * @param user - User event instance
+ * @param submitTestId - Test ID of the submit button
+ * @param expectedCall - Mock function that should be called
+ */
+export async function submitDialog(
+  user: ReturnType<typeof userEvent.setup>,
+  submitTestId: string,
+  expectedCall?: ReturnType<typeof import('vitest').vi.fn>,
+): Promise<void> {
+  const submitButton = screen.getByTestId(submitTestId);
+  await user.click(submitButton);
+
+  if (expectedCall) {
+    await waitFor(() => {
+      expect(expectedCall).toHaveBeenCalled();
+    });
+  }
+}
+
+/**
+ * Fill a form field with a value
+ * @param user - User event instance
+ * @param testId - Test ID of the input field
+ * @param value - Value to fill
+ */
+export async function fillFormField(
+  user: ReturnType<typeof userEvent.setup>,
+  testId: string,
+  value: string,
+): Promise<void> {
+  const input = screen.getByTestId(testId);
+  await user.clear(input);
+  await user.type(input, value);
+}
+
+/**
+ * Toggle a switch or checkbox
+ * @param user - User event instance
+ * @param testId - Test ID of the switch/checkbox
+ */
+export async function toggleSwitch(
+  user: ReturnType<typeof userEvent.setup>,
+  testId: string,
+): Promise<void> {
+  const switchElement = screen.getByTestId(testId);
+  await user.click(switchElement);
+}
+
+/**
+ * Select an option from a dropdown/select
+ * @param user - User event instance
+ * @param selectTestId - Test ID of the select element
+ * @param optionValue - Value of the option to select
+ */
+export async function selectOption(
+  user: ReturnType<typeof userEvent.setup>,
+  selectTestId: string,
+  optionValue: string,
+): Promise<void> {
+  const select = screen.getByTestId(selectTestId);
+  await user.selectOptions(select, optionValue);
+}
+
+/**
+ * Find a profile by name from the mock profiles array
+ * @param profiles - Array of media profiles
+ * @param name - Name of the profile to find
+ * @returns The found profile or undefined
+ */
+export function findProfileByName(
+  profiles: MediaProfile[],
+  name: string,
+): MediaProfile | undefined {
+  return profiles.find((p) => p.name === name);
+}
+
+/**
+ * Expand a profile card by clicking the expand button
+ * @param user - User event instance
+ * @param profileToken - Token of the profile to expand
+ */
+export async function expandProfile(
+  user: ReturnType<typeof userEvent.setup>,
+  profileToken: string,
+): Promise<void> {
+  const expandButton = screen.getByTestId(`profile-expand-${profileToken}`);
+  await user.click(expandButton);
+
+  await waitFor(
+    () => {
+      const videoSourceTexts = screen.getAllByText('Video Source');
+      expect(videoSourceTexts.length).toBeGreaterThan(0);
+    },
+    { timeout: 3000 },
+  );
+}
+
+/**
+ * Wait for the video encoder section to appear in an expanded profile
+ */
+export async function waitForVideoEncoderSection(): Promise<void> {
+  await waitFor(
+    () => {
+      const videoEncoderTexts = screen.getAllByText('Video Encoder');
+      expect(videoEncoderTexts.length).toBeGreaterThan(0);
+    },
+    { timeout: 3000 },
+  );
+}
+
+/**
+ * Setup device information mock for AboutDialog tests
+ * @param mockData - Device information data to mock
+ */
+export async function setupDeviceInfoMock(mockData: {
+  manufacturer: string;
+  model: string;
+  firmwareVersion: string;
+  serialNumber: string;
+  hardwareId: string;
+}): Promise<void> {
+  const { getDeviceInformation } = await import('@/services/deviceService');
+  const { vi } = await import('vitest');
+  vi.mocked(getDeviceInformation).mockResolvedValue(mockData);
+}
+
+/**
+ * Make a form dirty by changing a field value, typically used before testing form submission
+ * @param user - User event instance
+ * @param fieldTestId - Test ID of the field to change
+ * @param newValue - New value to set
+ */
+export async function makeFormDirty(
+  user: ReturnType<typeof userEvent.setup>,
+  fieldTestId: string,
+  newValue: string,
+): Promise<void> {
+  const field = screen.getByTestId(fieldTestId);
+  await user.clear(field);
+  await user.type(field, newValue);
+}
+
+/**
+ * Helper to interact with user menu (open menu, perform action)
+ * @param user - User event instance
+ * @param actionTestId - Test ID of the menu action button
+ */
+export async function performUserMenuAction(
+  user: ReturnType<typeof userEvent.setup>,
+  actionTestId: string,
+): Promise<void> {
+  const userButtons = screen.getAllByTestId('layout-user-menu-button');
+  const userButton = userButtons[0]; // Use desktop version
+  await user.click(userButton);
+
+  await waitFor(() => {
+    expect(screen.getByTestId(actionTestId)).toBeInTheDocument();
+  });
+
+  const actionButton = screen.getByTestId(actionTestId);
+  await user.click(actionButton);
 }
 
 /**
@@ -399,3 +629,29 @@ export const MockButton = {
   ),
   buttonVariants: () => 'mock-button-variant',
 };
+
+/**
+ * Generic error toast verification helper
+ * @param message - Expected error message
+ * @param description - Optional error description
+ */
+export function testErrorToast(message: string, description?: string): void {
+  if (description) {
+    expect(toast.error).toHaveBeenCalledWith(message, { description });
+  } else {
+    expect(toast.error).toHaveBeenCalledWith(message);
+  }
+}
+
+/**
+ * Generic success toast verification helper
+ * @param message - Expected success message
+ * @param description - Optional success description
+ */
+export function testSuccessToast(message: string, description?: string): void {
+  if (description) {
+    expect(toast.success).toHaveBeenCalledWith(message, { description });
+  } else {
+    expect(toast.success).toHaveBeenCalledWith(message);
+  }
+}

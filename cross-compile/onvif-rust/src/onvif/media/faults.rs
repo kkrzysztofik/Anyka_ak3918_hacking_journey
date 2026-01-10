@@ -238,4 +238,105 @@ mod tests {
         assert!(validate_quality(-0.1).is_err());
         assert!(validate_quality(1.1).is_err());
     }
+
+    #[test]
+    fn test_validate_config_token() {
+        assert!(validate_config_token(&"Config_1".to_string()).is_ok());
+        assert!(validate_config_token(&String::new()).is_err());
+        let long_token = "x".repeat(65);
+        assert!(validate_config_token(&long_token).is_err());
+        // Exactly 64 characters should be valid
+        let max_token = "x".repeat(64);
+        assert!(validate_config_token(&max_token).is_ok());
+    }
+
+    #[test]
+    fn test_validate_source_token() {
+        assert!(validate_source_token(&"Source_1".to_string()).is_ok());
+        assert!(validate_source_token(&String::new()).is_err());
+        let long_token = "x".repeat(65);
+        assert!(validate_source_token(&long_token).is_err());
+        // Exactly 64 characters should be valid
+        let max_token = "x".repeat(64);
+        assert!(validate_source_token(&max_token).is_ok());
+    }
+
+    #[test]
+    fn test_validate_bitrate() {
+        assert!(validate_bitrate(1000000).is_ok());
+        assert!(validate_bitrate(50000000).is_ok()); // Max
+        assert!(validate_bitrate(0).is_err());
+        assert!(validate_bitrate(-1).is_err());
+        assert!(validate_bitrate(50000001).is_err()); // Over max
+    }
+
+    #[test]
+    fn test_validate_profile_name() {
+        assert!(validate_profile_name("MyProfile").is_ok());
+        assert!(validate_profile_name(&"x".repeat(64)).is_ok()); // Max length
+        assert!(validate_profile_name("").is_err());
+        assert!(validate_profile_name(&"x".repeat(65)).is_err()); // Too long
+    }
+
+    #[test]
+    fn test_no_profile_error() {
+        let err = no_profile_error("Profile_99");
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:NoProfile")
+        );
+        assert!(err.to_string().contains("Profile_99"));
+    }
+
+    #[test]
+    fn test_no_config_error() {
+        let err = no_config_error("Config_99");
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:NoConfig")
+        );
+        assert!(err.to_string().contains("Config_99"));
+    }
+
+    #[test]
+    fn test_no_source_error() {
+        let err = no_source_error("Source_99");
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:NoSource")
+        );
+        assert!(err.to_string().contains("Source_99"));
+    }
+
+    #[test]
+    fn test_config_conflict_error() {
+        let err = config_conflict_error("Configuration already in use");
+        assert!(matches!(err, OnvifError::ConfigurationConflict(_)));
+        assert!(err.to_string().contains("Configuration already in use"));
+    }
+
+    #[test]
+    fn test_config_modify_error() {
+        let err = config_modify_error();
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:ConfigModify")
+        );
+        assert!(
+            err.to_string()
+                .contains("Cannot modify fixed configuration")
+        );
+    }
+
+    #[test]
+    fn test_validate_resolution_boundaries() {
+        // Boundary values
+        assert!(validate_resolution(1, 1).is_ok());
+        assert!(validate_resolution(4096, 4096).is_ok()); // Max
+        assert!(validate_resolution(4097, 1080).is_err());
+        assert!(validate_resolution(1920, 4097).is_err());
+    }
+
+    #[test]
+    fn test_validate_frame_rate_boundaries() {
+        assert!(validate_frame_rate(1).is_ok());
+        assert!(validate_frame_rate(120).is_ok()); // Max
+        assert!(validate_frame_rate(121).is_err());
+    }
 }

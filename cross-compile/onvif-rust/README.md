@@ -17,6 +17,14 @@ This project is a complete rewrite of the ONVIF services stack for the Anyka AK3
   - **PTZ**: Pan/Tilt/Zoom control.
   - **Imaging**: Image settings (Brightness, Contrast).
 
+## 🔒 Security
+
+> **⚠️ CRITICAL**: Never use authentication without TLS in production!
+
+ONVIF 24.12 uses WS-Security with SHA-1/MD5 digest authentication. While this provides replay protection, credentials can be intercepted if transmitted over unencrypted HTTP.
+
+**See [TLS Setup Guide](wiki/TLS-Setup.md) for configuration instructions.**
+
 ## 📚 Documentation
 
 - **[Architecture Guide](doc/ARCHITECTURE.md)**: High-level design, module structure, and data flow.

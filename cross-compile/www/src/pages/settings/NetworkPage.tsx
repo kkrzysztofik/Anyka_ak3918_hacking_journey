@@ -8,7 +8,7 @@ import React, { useEffect, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Globe, Info, Network, RotateCcw, Save, Server, Wifi } from 'lucide-react';
-import { useForm, useWatch } from 'react-hook-form';
+import { Resolver, useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
@@ -91,8 +91,7 @@ export default function NetworkPage() {
 
   // Form setup
   const form = useForm<NetworkFormData>({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolver: zodResolver(networkSchema) as any,
+    resolver: zodResolver(networkSchema) as Resolver<NetworkFormData>,
     defaultValues: {
       dhcp: true,
       address: '',
@@ -196,7 +195,12 @@ export default function NetworkPage() {
     }
   };
 
-  if (isLoading) return <div className="text-white">Loading...</div>;
+  if (isLoading)
+    return (
+      <div className="text-white" data-testid="network-loading">
+        Loading...
+      </div>
+    );
 
   const primaryInterface = config?.interfaces[0];
 
@@ -208,7 +212,12 @@ export default function NetworkPage() {
       <div className="max-w-[1200px] p-[16px] pb-[80px] md:p-[32px] md:pb-[48px] lg:p-[48px]">
         {/* Header */}
         <div className="mb-[32px] md:mb-[40px]">
-          <h1 className="mb-[8px] text-[22px] text-white md:text-[28px]">Network</h1>
+          <h1
+            className="mb-[8px] text-[22px] text-white md:text-[28px]"
+            data-testid="network-title"
+          >
+            Network
+          </h1>
           <p className="text-[13px] text-[#a1a1a6] md:text-[14px]">
             Configure IP address, DNS, and service ports
           </p>
@@ -220,8 +229,12 @@ export default function NetworkPage() {
             <Network className="size-8 opacity-50" />
           </StatusCardImage>
           <StatusCardContent>
-            <StatusCardItem label="MAC Address" value={primaryInterface?.hwAddress || '--'} />
-            <StatusCardItem label="Speed" value="100 Mbps" />
+            <StatusCardItem
+              label="MAC Address"
+              value={primaryInterface?.hwAddress || '--'}
+              data-testid="network-mac-address"
+            />
+            <StatusCardItem label="Speed" value="100 Mbps" data-testid="network-speed" />
             <StatusCardItem
               label="Status"
               value={
@@ -230,8 +243,9 @@ export default function NetworkPage() {
                   <span>Connected</span>
                 </div>
               }
+              data-testid="network-status"
             />
-            <StatusCardItem label="Uptime" value="--" />
+            <StatusCardItem label="Uptime" value="--" data-testid="network-uptime" />
           </StatusCardContent>
         </StatusCard>
 
@@ -576,7 +590,9 @@ export default function NetworkPage() {
             data-testid="network-confirm-dialog"
           >
             <AlertDialogHeader>
-              <AlertDialogTitle className="text-white">Save Network Settings?</AlertDialogTitle>
+              <AlertDialogTitle className="text-white" data-testid="network-confirm-dialog-title">
+                Save Network Settings?
+              </AlertDialogTitle>
               <AlertDialogDescription className="text-[#a1a1a6]">
                 Applying these changes might disconnect the device from the network. You may need to
                 reconnect using the new IP address.

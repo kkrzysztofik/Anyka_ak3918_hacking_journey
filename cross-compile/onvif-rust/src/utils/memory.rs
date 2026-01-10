@@ -19,6 +19,9 @@ use crate::config::ConfigRuntime;
 use anyhow::{Result, anyhow};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 /// Memory limits for embedded target (ARMv5TE with ~32MB available to ONVIF services)
@@ -152,6 +155,44 @@ impl MemoryMonitor {
             self.limits.hard_limit as f64 / 1024.0 / 1024.0,
             percent
         )
+    }
+
+    /// Start a background task that periodically logs memory usage.
+    ///
+    /// The task will log memory usage at the specified interval until
+    /// a shutdown signal is received.
+    ///
+    /// # Arguments
+    ///
+    /// * `interval` - How often to log memory usage (e.g., `Duration::from_secs(300)` for 5 minutes)
+    /// * `shutdown_rx` - Receiver for shutdown signals. The task will exit when a signal is received.
+    ///
+    /// # Returns
+    ///
+    /// A `JoinHandle` that can be used to await the task's completion.
+    pub fn start_periodic_logging(
+        self: Arc<Self>,
+        interval: Duration,
+        mut shutdown_rx: broadcast::Receiver<()>,
+    ) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut interval_timer = tokio::time::interval(interval);
+            // Skip the first tick (it fires immediately)
+            interval_timer.tick().await;
+
+            loop {
+                tokio::select! {
+                    _ = interval_timer.tick() => {
+                        let usage = self.usage_string();
+                        info!("Memory usage: {}", usage);
+                    }
+                    _ = shutdown_rx.recv() => {
+                        tracing::debug!("Memory logging task shutting down");
+                        break;
+                    }
+                }
+            }
+        })
     }
 }
 

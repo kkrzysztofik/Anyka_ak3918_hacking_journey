@@ -3,6 +3,7 @@
 //! This module provides thread-safe user storage with CRUD operations
 //! and TOML file persistence for the ONVIF user management system.
 
+use crate::users::password::SecurePassword;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -20,8 +21,42 @@ pub const MAX_USERS: usize = 8;
 /// Default admin username.
 pub const DEFAULT_ADMIN_USERNAME: &str = "admin";
 
-/// Default admin password (should be changed on first use).
-pub const DEFAULT_ADMIN_PASSWORD: &str = "admin";
+/// Character set for random password generation.
+/// Includes uppercase, lowercase, digits, and safe special characters.
+const PASSWORD_CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\
+                                  abcdefghijklmnopqrstuvwxyz\
+                                  0123456789\
+                                  !@#$%^&*()_+-=[]{}";
+
+/// Length of randomly generated passwords.
+const GENERATED_PASSWORD_LENGTH: usize = 16;
+
+/// Generate a secure random password.
+///
+/// Creates a 16-character password using uppercase, lowercase, digits,
+/// and safe special characters. Uses cryptographically secure random
+/// number generation via `rand::thread_rng()`.
+///
+/// # Returns
+///
+/// A randomly generated password string.
+///
+/// # Example
+///
+/// ```ignore
+/// let password = generate_secure_password();
+/// assert_eq!(password.len(), 16);
+/// ```
+fn generate_secure_password() -> String {
+    use rand::Rng;
+    let mut rng = rand::rng();
+    (0..GENERATED_PASSWORD_LENGTH)
+        .map(|_| {
+            let idx = rng.random_range(0..PASSWORD_CHARSET.len());
+            PASSWORD_CHARSET[idx] as char
+        })
+        .collect()
+}
 
 // ============================================================================
 // UserLevel
@@ -71,12 +106,14 @@ impl std::fmt::Display for UserLevel {
 
 /// A user account in the system.
 ///
-/// Stores the username, password (plaintext), and privilege level.
-/// Plaintext storage is required for WS-Security UsernameToken digest
+/// Stores the username, password (secure), and privilege level.
+/// Passwords are stored using `SecurePassword` which zeros memory on drop.
+/// Plaintext storage is still required for WS-Security UsernameToken digest
 /// authentication which computes SHA1(Nonce + Created + Password).
 ///
 /// # Security
 ///
+/// - Passwords are automatically zeroed from memory on drop
 /// - File permissions should be restricted (`chmod 600`)
 /// - Consider encryption-at-rest for production deployments
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,10 +121,10 @@ pub struct UserAccount {
     /// The unique username.
     pub username: String,
 
-    /// The plaintext password.
+    /// The secure password (automatically zeroed on drop).
     ///
     /// Required for WS-Security digest authentication.
-    pub password: String,
+    pub password: SecurePassword,
 
     /// The user's privilege level.
     pub level: UserLevel,
@@ -95,7 +132,11 @@ pub struct UserAccount {
 
 impl UserAccount {
     /// Create a new user account.
-    pub fn new(username: impl Into<String>, password: impl Into<String>, level: UserLevel) -> Self {
+    pub fn new(
+        username: impl Into<String>,
+        password: impl Into<SecurePassword>,
+        level: UserLevel,
+    ) -> Self {
         Self {
             username: username.into(),
             password: password.into(),
@@ -203,10 +244,6 @@ struct UsersFile {
 pub struct UserStorage {
     /// In-memory user storage.
     users: RwLock<HashMap<String, UserAccount>>,
-
-    /// Optional file path for persistence.
-    #[allow(dead_code)]
-    file_path: Option<String>,
 }
 
 impl UserStorage {
@@ -214,15 +251,13 @@ impl UserStorage {
     pub fn new() -> Self {
         Self {
             users: RwLock::new(HashMap::with_capacity(MAX_USERS)),
-            file_path: None,
         }
     }
 
     /// Create user storage with file persistence.
-    pub fn with_file(file_path: impl Into<String>) -> Self {
+    pub fn with_file(_file_path: impl Into<String>) -> Self {
         Self {
             users: RwLock::new(HashMap::with_capacity(MAX_USERS)),
-            file_path: Some(file_path.into()),
         }
     }
 
@@ -359,15 +394,17 @@ impl UserStorage {
             }
         }
 
-        // Now get mutable reference and apply updates
-        let user = users.get_mut(username).unwrap();
+        // SAFETY: We just verified username exists above, so get_mut must succeed
+        let user = users
+            .get_mut(username)
+            .expect("User must exist: existence verified above");
 
         if let Some(new_level) = level {
             user.level = new_level;
         }
 
         if let Some(pwd) = password {
-            user.password = pwd.to_string();
+            user.password = SecurePassword::from(pwd);
         }
 
         Ok(())
@@ -422,6 +459,7 @@ impl UserStorage {
     /// Save users to a TOML file using atomic write.
     ///
     /// Uses a temp file + rename pattern to ensure atomic writes.
+    /// Sets file permissions to 0o600 (owner read/write only) for security.
     pub fn save_to_toml(&self, path: impl AsRef<Path>) -> Result<(), UserError> {
         let path = path.as_ref();
 
@@ -447,36 +485,112 @@ impl UserStorage {
 
         fs::rename(&temp_path, path)?;
 
+        // Set file permissions to owner read/write only (Unix only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(path)?.permissions();
+            perms.set_mode(0o600);
+            fs::set_permissions(path, perms)?;
+        }
+
         tracing::debug!("Saved {} users to {:?}", users_file.users.len(), path);
         Ok(())
     }
 
     /// Ensure at least one admin user exists.
     ///
-    /// If no admin user exists, creates a default admin account.
-    /// Returns the username if a new admin was created.
-    pub fn ensure_default_admin(
-        &self,
-        default_password: &str,
-    ) -> Result<Option<String>, UserError> {
-        let has_admin = self
-            .users
-            .read()
-            .values()
-            .any(|u| u.level == UserLevel::Administrator);
-
-        if has_admin {
-            return Ok(None);
+    /// If no admin users exist, creates a default admin with a randomly
+    /// generated password. The initial password is logged to
+    /// `/var/log/onvif-initial-password.log` for one-time retrieval.
+    ///
+    /// # Security
+    ///
+    /// - Password is randomly generated (16 characters)
+    /// - Initial password is logged once to a secure location
+    /// - Log file should have restricted permissions (0o600)
+    /// - Users should change the password on first login
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if an admin exists or was created successfully.
+    pub fn ensure_default_admin(&self) -> Result<(), UserError> {
+        if self.admin_count() > 0 {
+            return Ok(());
         }
 
-        tracing::info!("Creating default admin user '{}'", DEFAULT_ADMIN_USERNAME);
-        self.create_user(
-            DEFAULT_ADMIN_USERNAME,
-            default_password,
-            UserLevel::Administrator,
-        )?;
+        // Generate random password
+        let password = generate_secure_password();
 
-        Ok(Some(DEFAULT_ADMIN_USERNAME.to_string()))
+        // Log initial password to secure location (one-time)
+        let log_path = "/var/log/onvif-initial-password.log";
+        if let Err(e) = self.log_initial_password(DEFAULT_ADMIN_USERNAME, &password, log_path) {
+            tracing::warn!(
+                "Failed to log initial password to {}: {}. Password will be shown in console.",
+                log_path,
+                e
+            );
+            // Still show password in logs as fallback
+            tracing::warn!(
+                "⚠️  INITIAL ADMIN PASSWORD: username='{}' password='{}' - CHANGE IMMEDIATELY!",
+                DEFAULT_ADMIN_USERNAME,
+                password
+            );
+        }
+
+        self.create_user(DEFAULT_ADMIN_USERNAME, &password, UserLevel::Administrator)?;
+
+        tracing::info!(
+            "Created default admin user '{}' with random password (see {})",
+            DEFAULT_ADMIN_USERNAME,
+            log_path
+        );
+
+        Ok(())
+    }
+
+    /// Log the initial password to a secure file.
+    ///
+    /// Creates a one-time log file with the initial admin credentials.
+    /// Sets file permissions to 0o600 (owner read/write only).
+    fn log_initial_password(&self, username: &str, password: &str, path: &str) -> io::Result<()> {
+        use std::io::Write;
+
+        let content = format!(
+            "ONVIF Initial Admin Credentials\n\
+             ================================\n\
+             Generated: {}\n\
+             Username: {}\n\
+             Password: {}\n\
+             \n\
+             ⚠️  SECURITY WARNING:\n\
+             - Change this password immediately after first login\n\
+             - Delete this file after retrieving the password\n\
+             - This password will not be logged again\n",
+            chrono::Utc::now().to_rfc3339(),
+            username,
+            password
+        );
+
+        // Create parent directory if needed
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut file = fs::File::create(path)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+
+        // Set restrictive permissions (Unix only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(path)?.permissions();
+            perms.set_mode(0o600);
+            fs::set_permissions(path, perms)?;
+        }
+
+        Ok(())
     }
 
     /// Validate credentials against stored users.
@@ -529,6 +643,55 @@ mod tests {
         assert_eq!(storage.len(), 0);
     }
 
+    // Password generation tests
+    #[test]
+    fn test_generate_secure_password_length() {
+        let password = generate_secure_password();
+        assert_eq!(password.len(), GENERATED_PASSWORD_LENGTH);
+    }
+
+    #[test]
+    fn test_generate_secure_password_charset() {
+        let password = generate_secure_password();
+        let charset_str = std::str::from_utf8(PASSWORD_CHARSET).unwrap();
+
+        // All characters should be from the allowed charset
+        for ch in password.chars() {
+            assert!(
+                charset_str.contains(ch),
+                "Password contains invalid character: {}",
+                ch
+            );
+        }
+    }
+
+    #[test]
+    fn test_generate_secure_password_uniqueness() {
+        // Generate 100 passwords and verify they're all unique
+        let mut passwords = std::collections::HashSet::new();
+        for _ in 0..100 {
+            let password = generate_secure_password();
+            passwords.insert(password);
+        }
+
+        // With 16 characters from a 72-character set, collisions are astronomically unlikely
+        assert_eq!(passwords.len(), 100, "Generated passwords should be unique");
+    }
+
+    #[test]
+    fn test_generate_secure_password_contains_variety() {
+        // Generate a password and check it has variety (not all same character)
+        let password = generate_secure_password();
+        let chars: Vec<char> = password.chars().collect();
+        let unique_chars: std::collections::HashSet<_> = chars.iter().collect();
+
+        // Should have more than 1 unique character
+        assert!(
+            unique_chars.len() > 1,
+            "Password should have character variety"
+        );
+    }
+
     #[test]
     fn test_create_user() {
         let storage = UserStorage::new();
@@ -540,7 +703,7 @@ mod tests {
         assert_eq!(storage.len(), 1);
         let user = storage.get_user("admin").unwrap();
         assert_eq!(user.username, "admin");
-        assert_eq!(user.password, "secret123");
+        assert_eq!(user.password.as_str(), "secret123");
         assert_eq!(user.level, UserLevel::Administrator);
     }
 
@@ -653,7 +816,7 @@ mod tests {
             .unwrap();
 
         let user = storage.get_user("user1").unwrap();
-        assert_eq!(user.password, "new_password");
+        assert_eq!(user.password.as_str(), "new_password");
         assert_eq!(user.level, UserLevel::User);
     }
 
@@ -717,25 +880,25 @@ mod tests {
     fn test_ensure_default_admin_when_empty() {
         let storage = UserStorage::new();
 
-        let result = storage.ensure_default_admin("default_password").unwrap();
+        storage.ensure_default_admin().unwrap();
 
-        assert!(result.is_some());
         assert_eq!(storage.len(), 1);
-        let admin = storage.get_user(DEFAULT_ADMIN_USERNAME).unwrap();
-        assert_eq!(admin.level, UserLevel::Administrator);
+        let user = storage.get_user(DEFAULT_ADMIN_USERNAME).unwrap();
+        assert_eq!(user.level, UserLevel::Administrator);
+        // Password is randomly generated, so we can't check exact value
+        assert!(!user.password.is_empty());
     }
 
     #[test]
     fn test_ensure_default_admin_when_exists() {
         let storage = UserStorage::new();
-
         storage
-            .create_user("other_admin", "password", UserLevel::Administrator)
+            .create_user("existing_admin", "password", UserLevel::Administrator)
             .unwrap();
 
-        let result = storage.ensure_default_admin("default_password").unwrap();
+        storage.ensure_default_admin().unwrap();
 
-        assert!(result.is_none());
+        // Should not create another admin
         assert_eq!(storage.len(), 1);
     }
 

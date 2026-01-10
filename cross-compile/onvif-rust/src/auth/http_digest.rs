@@ -349,7 +349,7 @@ impl HttpDigestAuth {
 
         // Response depends on qop
         let response = match params.qop.as_deref() {
-            Some("auth") | Some("auth-int") => {
+            Some(qop @ "auth") | Some(qop @ "auth-int") => {
                 // response = MD5(HA1:nonce:nc:cnonce:qop:HA2)
                 let cnonce = params.cnonce.as_deref().ok_or_else(|| {
                     HttpDigestError::MissingParameter("cnonce (required with qop)".to_string())
@@ -357,7 +357,6 @@ impl HttpDigestAuth {
                 let nc = params.nc.as_deref().ok_or_else(|| {
                     HttpDigestError::MissingParameter("nc (required with qop)".to_string())
                 })?;
-                let qop = params.qop.as_deref().unwrap();
 
                 md5_hex(&format!(
                     "{}:{}:{}:{}:{}:{}",

@@ -15,7 +15,7 @@ vi.mock('@/services/api', () => ({
 
 // Mock the router
 vi.mock('@/router', () => ({
-  default: () => <div>App Router</div>,
+  default: () => <div data-testid="app-router">App Router</div>,
 }));
 
 // Mock sonner Toaster
@@ -31,20 +31,13 @@ describe('App', () => {
     vi.clearAllMocks();
   });
 
-  it('should render QueryClientProvider', () => {
+  it.each([
+    { description: 'QueryClientProvider' },
+    { description: 'AuthProvider' },
+    { description: 'AppRouter' },
+  ])('should render $description', () => {
     render(<App />);
-    expect(screen.getByText('App Router')).toBeInTheDocument();
-  });
-
-  it('should render AuthProvider', () => {
-    render(<App />);
-    // AuthProvider wraps the content, so router should be visible
-    expect(screen.getByText('App Router')).toBeInTheDocument();
-  });
-
-  it('should render AppRouter', () => {
-    render(<App />);
-    expect(screen.getByText('App Router')).toBeInTheDocument();
+    expect(screen.getByTestId('app-router')).toBeInTheDocument();
   });
 
   it('should render Toaster component', () => {
@@ -64,7 +57,7 @@ describe('App', () => {
   it('should provide all required providers', () => {
     const { container } = render(<App />);
     // Verify the component tree is rendered (router is inside providers)
-    expect(screen.getByText('App Router')).toBeInTheDocument();
+    expect(screen.getByTestId('app-router')).toBeInTheDocument();
     expect(container).toBeInTheDocument();
   });
 });

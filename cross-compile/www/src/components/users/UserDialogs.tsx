@@ -118,7 +118,7 @@ export function AddUserDialog({ open, onOpenChange, onSubmit }: Readonly<AddUser
               name="userLevel"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>User Level</FormLabel>
+                  <FormLabel data-testid="add-user-level-label">User Level</FormLabel>
                   <FormControl>
                     <select
                       {...field}

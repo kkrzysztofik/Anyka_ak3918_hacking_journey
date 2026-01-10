@@ -271,4 +271,122 @@ mod tests {
             matches!(err, OnvifError::InvalidArgVal { subcode, .. } if subcode == "ter:InvalidNetworkInterface")
         );
     }
+
+    #[test]
+    fn test_unsupported_network_config() {
+        let err = unsupported_network_config("IPv6 not supported");
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidNetworkInterface")
+        );
+        assert!(err.to_string().contains("IPv6 not supported"));
+    }
+
+    #[test]
+    fn test_network_interface_not_found() {
+        let err = network_interface_not_found("eth99");
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidNetworkInterface")
+        );
+        assert!(err.to_string().contains("eth99"));
+    }
+
+    #[test]
+    fn test_fixed_scope() {
+        let err = fixed_scope("onvif://www.onvif.org/type/video_encoder");
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:FixedScope")
+        );
+        assert!(err.to_string().contains("fixed and cannot be modified"));
+    }
+
+    #[test]
+    fn test_scope_overwrite() {
+        let err = scope_overwrite("Cannot remove required scope");
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:ScopeOverwrite")
+        );
+        assert!(err.to_string().contains("Cannot remove required scope"));
+    }
+
+    #[test]
+    fn test_invalid_discovery_mode() {
+        let err = invalid_discovery_mode("invalid");
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidDiscoveryMode")
+        );
+        assert!(err.to_string().contains("invalid"));
+        assert!(err.to_string().contains("Discoverable"));
+    }
+
+    #[test]
+    fn test_invalid_datetime() {
+        let err = invalid_datetime("year out of range");
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidDateTime")
+        );
+        assert!(err.to_string().contains("year out of range"));
+    }
+
+    #[test]
+    fn test_invalid_timezone() {
+        let err = invalid_timezone("GMT+99");
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidTimeZone")
+        );
+        assert!(err.to_string().contains("GMT+99"));
+    }
+
+    #[test]
+    fn test_operation_prohibited() {
+        let err = operation_prohibited("Device is in maintenance mode");
+        assert!(matches!(err, OnvifError::ConfigurationConflict(_)));
+        assert!(err.to_string().contains("maintenance mode"));
+    }
+
+    #[test]
+    fn test_reboot_failed() {
+        let err = reboot_failed("Hardware timeout");
+        assert!(matches!(err, OnvifError::HardwareFailure(_)));
+        assert!(err.to_string().contains("Hardware timeout"));
+    }
+
+    #[test]
+    fn test_validate_hostname_edge_cases() {
+        // Exactly 63 characters (max valid)
+        let max_valid = "a".repeat(63);
+        assert!(validate_hostname(&max_valid).is_ok());
+
+        // 64 characters (too long)
+        let too_long = "a".repeat(64);
+        assert!(validate_hostname(&too_long).is_err());
+
+        // Single character
+        assert!(validate_hostname("a").is_ok());
+
+        // All hyphens in middle
+        assert!(validate_hostname("a-b-c").is_ok());
+
+        // Numbers only
+        assert!(validate_hostname("123").is_ok());
+
+        // Mixed alphanumeric
+        assert!(validate_hostname("camera123").is_ok());
+    }
+
+    #[test]
+    fn test_validate_scope_edge_cases() {
+        // Valid with path
+        assert!(validate_scope("onvif://www.onvif.org/type/video_encoder").is_ok());
+        assert!(validate_scope("onvif://www.onvif.org/name/MyCamera").is_ok());
+
+        // Invalid: control characters
+        let scope_with_control = format!("onvif://www.onvif.org/type/video{}encoder", '\0');
+        assert!(validate_scope(&scope_with_control).is_err());
+
+        // Invalid: spaces
+        assert!(validate_scope("onvif://www.onvif.org/type/video encoder").is_err());
+
+        // Valid: special URI characters
+        assert!(validate_scope("onvif://www.onvif.org/name/Camera%20Name").is_ok());
+    }
 }

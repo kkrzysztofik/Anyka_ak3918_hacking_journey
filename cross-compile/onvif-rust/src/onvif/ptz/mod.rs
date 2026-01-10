@@ -29,10 +29,12 @@
 mod handlers;
 mod state;
 pub mod types;
+mod validation;
 
 pub use handlers::PTZService;
 pub use state::PTZStateManager;
 pub use types::*;
+pub use validation::{validate_ptz_position, validate_ptz_vector, validate_ptz_velocity_vector};
 
 // Re-export WSDL types for PTZ service
 pub use crate::onvif::types::ptz::{
