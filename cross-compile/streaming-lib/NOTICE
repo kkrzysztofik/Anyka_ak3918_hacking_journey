@@ -1,0 +1,23 @@
+This project includes code derived from xiu (https://github.com/harlanc/xiu)
+Copyright (c) 2020 HarlanC
+Licensed under MIT License
+
+Modifications:
+- Extracted minimal components (RTSP, HTTP-FLV, H.264 codec, FLV container, streamhub, bytesio, common)
+- Applied ARMv5TEJ compatibility patches (portable-atomic)
+- Applied uClibc target support patches (openssl-src)
+- Integrated with Anyka AK3918 hardware platform
+- Removed unused protocols (RTMP, WebRTC, HLS)
+- Unified all components into a single library crate (streaming-lib)
+- Updated internal imports to use crate:: paths
+
+Original xiu license: See LICENSE file
+
+Components extracted:
+- protocol/rtsp/ → src/rtsp/
+- protocol/httpflv/ → src/httpflv/
+- library/codec/h264/ → src/codec/
+- library/container/flv/ → src/container/
+- library/streamhub/ → src/streamhub/
+- library/bytesio/ → src/bytesio/
+- library/common/ → src/common/

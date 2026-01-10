@@ -1,8 +1,5 @@
 [workspace]
-members = [
-  "onvif-rust",
-  # "streaming-lib",  # TODO: Create in T4 - Media streaming library
-]
+members = ["onvif-rust", "streaming-lib"]
 resolver = "2"
 
 [patch.crates-io]
