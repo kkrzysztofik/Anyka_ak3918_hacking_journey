@@ -102,8 +102,15 @@ export default defineConfig(({ mode }) => ({
             return 'router-vendor';
           }
 
-          // UI libraries
-          if (id.includes('lucide-react')) {
+          // UI libraries (group Radix, lucide, forms, charts together)
+          if (
+            id.includes('lucide-react') ||
+            id.includes('@radix-ui') ||
+            id.includes('react-hook-form') ||
+            id.includes('@hookform') ||
+            id.includes('recharts') ||
+            id.includes('sonner')
+          ) {
             return 'ui-vendor';
           }
 
@@ -117,35 +124,33 @@ export default defineConfig(({ mode }) => ({
             return 'utils-vendor';
           }
 
-          // ONVIF services and related components
-          if (id.includes('/services/') || id.includes('onvif')) {
+          // ONVIF services and related components (from src)
+          if ((id.includes('/services/') || id.includes('onvif')) && !id.includes('node_modules')) {
             return 'onvif-services';
           }
 
-          // Device management components
-          if (id.includes('DeviceService') || id.includes('SystemInfo')) {
+          // Device management components (from src)
+          if ((id.includes('DeviceService') || id.includes('SystemInfo')) && !id.includes('node_modules')) {
             return 'device-components';
           }
 
-          // Video and PTZ components
-          if (id.includes('node_modules')) {
-            return 'camera-components';
-          }
-
-          // Store slices
-          if (id.includes('/store/slices/')) {
+          // Store slices (from src)
+          if (id.includes('/store/slices/') && !id.includes('node_modules')) {
             return 'store-slices';
           }
 
-          // Utilities and helpers
-          if (id.includes('/utils/') || id.includes('/config/')) {
+          // Utilities and helpers (from src)
+          if ((id.includes('/utils/') || id.includes('/config/')) && !id.includes('node_modules')) {
             return 'app-utils';
           }
 
-          // Default chunk for other modules
+          // Default chunk for other node_modules
           if (id.includes('node_modules')) {
             return 'vendor';
           }
+
+          // Return undefined for other files (use default chunking)
+          return undefined;
         },
         chunkFileNames: () => {
           return `js/[name]-[hash].js`;

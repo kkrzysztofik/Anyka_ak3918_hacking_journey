@@ -91,7 +91,16 @@ export default function LiveViewPage() {
             </div>
 
             {/* Video Placeholder */}
-            <div className="flex h-full w-full flex-col items-center justify-center bg-[url('/grid-pattern.png')] bg-repeat text-zinc-500">
+            <div
+              className="flex h-full w-full flex-col items-center justify-center text-zinc-500"
+              style={{
+                backgroundImage: `
+                  linear-gradient(to right, rgba(63, 63, 70, 0.1) 1px, transparent 1px),
+                  linear-gradient(to bottom, rgba(63, 63, 70, 0.1) 1px, transparent 1px)
+                `,
+                backgroundSize: '20px 20px',
+              }}
+            >
               <div className="mb-4 rounded-full bg-zinc-900/50 p-8">
                 <Camera className="h-12 w-12 text-zinc-600" />
               </div>

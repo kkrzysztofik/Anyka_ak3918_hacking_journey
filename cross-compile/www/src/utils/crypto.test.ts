@@ -179,4 +179,63 @@ describe('crypto utilities', () => {
       expect(decrypted).toBe(plaintext);
     });
   });
+
+  describe('fallback for non-secure contexts', () => {
+    it('should use base64 fallback when crypto.subtle is unavailable', async () => {
+      // Save original crypto.subtle
+      const originalSubtle = globalThis.crypto?.subtle;
+
+      // Mock crypto.subtle as undefined to simulate non-secure context
+      if (globalThis.crypto) {
+        // @ts-expect-error - Intentionally removing subtle for test
+        delete globalThis.crypto.subtle;
+      }
+
+      try {
+        const plaintext = 'test password';
+        const encrypted = await encrypt(plaintext);
+
+        // Should use base64 method
+        expect(encrypted.method).toBe('base64');
+        expect(encrypted.data).toBeTruthy();
+        expect(encrypted.iv).toBeTruthy();
+        expect(encrypted.salt).toBeTruthy();
+
+        // Should decrypt correctly
+        const decrypted = await decrypt(encrypted);
+        expect(decrypted).toBe(plaintext);
+      } finally {
+        // Restore original crypto.subtle
+        if (globalThis.crypto && originalSubtle) {
+          globalThis.crypto.subtle = originalSubtle;
+        }
+      }
+    });
+
+    it('should handle base64-encoded data from previous sessions', async () => {
+      // Create base64-encoded data manually (simulating old session data)
+      const plaintext = 'test password';
+      const obfuscated = plaintext.split('').reverse().join('');
+      const encoder = new TextEncoder();
+      const bytes = encoder.encode(obfuscated);
+      const binaryString = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+      const encoded = btoa(binaryString);
+
+      const salt = new Uint8Array(16);
+      crypto.getRandomValues(salt);
+      const iv = new Uint8Array(12);
+      crypto.getRandomValues(iv);
+
+      const encrypted: EncryptedData = {
+        data: encoded,
+        iv: btoa(Array.from(iv, (b) => String.fromCodePoint(b)).join('')),
+        salt: btoa(Array.from(salt, (b) => String.fromCodePoint(b)).join('')),
+        method: 'base64',
+      };
+
+      // Should decrypt correctly even if crypto.subtle is available
+      const decrypted = await decrypt(encrypted);
+      expect(decrypted).toBe(plaintext);
+    });
+  });
 });

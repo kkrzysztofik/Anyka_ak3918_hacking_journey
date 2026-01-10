@@ -50,6 +50,21 @@ dns_secondary = ""
 # Enable DHCP (true/false)
 dhcp_enabled = true
 
+# Obtain NTP servers from DHCP (true/false)
+ntp_from_dhcp = true
+
+# Primary NTP server (leave empty if using DHCP)
+ntp_primary = ""
+
+# Secondary NTP server (leave empty if using DHCP)
+ntp_secondary = ""
+
+# Enable HTTP protocol (true/false)
+http_enabled = true
+
+# Enable RTSP protocol (true/false)
+rtsp_enabled = true
+
 # ============================================================================
 # Device Information
 # ============================================================================
@@ -75,6 +90,9 @@ hostname = "ipcam"
 # Device UUID (leave empty to auto-generate)
 uuid = ""
 
+# Configurable ONVIF scopes (comma-separated, leave empty for defaults)
+scopes = ""
+
 # ============================================================================
 # HTTP Server Settings
 # ============================================================================
@@ -94,8 +112,11 @@ request_timeout = 30
 # Maximum request body size in bytes (1024-10485760)
 max_body_size = 1048576
 
+# Debounce delay for config saves in milliseconds (50-10000)
+config_save_delay_ms = 500
+
 # Enable authentication (true/false)
-auth_enabled = false
+auth_enabled = true
 
 # Authentication realm
 realm = "ONVIF Camera"
@@ -119,6 +140,17 @@ console_enabled = true
 
 # Log file path (leave empty to disable file logging)
 file_path = "/mnt/anyka_hack/onvif/onvif.log"
+
+# Static asset access logging
+[logging.static_assets]
+# Enable static asset access logging
+enabled = true
+
+# Directory for static asset access logs
+file_path = "logs"
+
+# Base name for static asset access log files (rotated daily)
+file_name = "access"
 
 # ============================================================================
 # Media Stream Settings
@@ -157,6 +189,21 @@ max_presets = 16
 
 # Move to home position on startup (true/false)
 home_on_start = true
+
+# Serialized PTZ presets for persistence (leave empty for none)
+presets_json = ""
+
+# Home position pan (-1.0 to 1.0, leave empty for default 0.0)
+home_pan = 0.0
+
+# Home position tilt (-1.0 to 1.0, leave empty for default 0.0)
+home_tilt = 0.0
+
+# Home position zoom (0.0 to 1.0, leave empty for default 0.0)
+home_zoom = 0.0
+
+# Next preset number for auto token generation (1-1000)
+next_preset_num = 1
 
 # ============================================================================
 # Imaging Settings
