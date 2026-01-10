@@ -1,7 +1,7 @@
 [workspace]
 members = [
-    "onvif-rust",
-    # "streaming-lib",  # TODO: Create in T4 - Media streaming library
+  "onvif-rust",
+  # "streaming-lib",  # TODO: Create in T4 - Media streaming library
 ]
 resolver = "2"
 
@@ -17,7 +17,7 @@ tokio-metrics = { path = "patches/tokio-metrics-0.2.2-full" }
 
 # uClibc target support patch for openssl-src
 # Enables cross-compilation for armv5te-unknown-linux-uclibceabi
-openssl-src = { path = "patches/openssl-src-300.2.3+3.2.1" }
+openssl-src = { path = "patches/openssl-src-300.2.3+3.2.1-full" }
 
 # Release profile for all workspace members
 # Optimized for embedded systems with minimal binary size

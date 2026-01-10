@@ -90,16 +90,20 @@ fi
 mkdir -p "$VENDOR_INCLUDE_DIR"
 
 # Copy all .h files preserving directory structure
-find "$ONVIF_INCLUDE_DIR" -type f -name "*.h" -exec sh -c '
-    for file; do
-        rel_path="${file#$1/}"
-        target_path="$2/$rel_path"
-        target_dir="$(dirname "$target_path")"
-        mkdir -p "$target_dir"
-        cp -f "$file" "$target_path"
-        chmod 644 "$target_path"
-    done
-' _ "$ONVIF_INCLUDE_DIR" "$VENDOR_INCLUDE_DIR" {} +
+# Use absolute paths to avoid path resolution issues
+ONVIF_INCLUDE_ABS="$(cd "$ONVIF_INCLUDE_DIR" && pwd)"
+VENDOR_INCLUDE_ABS="$(cd "$VENDOR_INCLUDE_DIR" && pwd)"
+
+# Use find with -print0 and read -d '' for robust handling of filenames
+while IFS= read -r -d '' file; do
+    # Calculate relative path from source directory
+    rel_path="${file#$ONVIF_INCLUDE_ABS/}"
+    target_path="$VENDOR_INCLUDE_ABS/$rel_path"
+    target_dir="$(dirname "$target_path")"
+    mkdir -p "$target_dir"
+    cp -f "$file" "$target_path"
+    chmod 644 "$target_path"
+done < <(find "$ONVIF_INCLUDE_ABS" -type f -name "*.h" -print0)
 
 # Count copied headers
 COPIED_HEADER_COUNT=$(find "$VENDOR_INCLUDE_DIR" -type f -name "*.h" | wc -l)

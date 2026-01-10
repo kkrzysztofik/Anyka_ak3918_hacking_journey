@@ -32,7 +32,7 @@ use std::ffi::c_void;
 use crate::ffi::generated::{encode_param, video_channel_attr, video_dev_type, video_resolution};
 
 #[cfg(use_stubs)]
-use crate::ffi::stubs::{encode_param, video_channel_attr, video_dev_type, video_resolution};
+use crate::ffi::{encode_param, video_channel_attr, video_dev_type, video_resolution};
 
 use crate::ffi::{AK_FAILED, AK_SUCCESS, Resolution, VideoDevice};
 

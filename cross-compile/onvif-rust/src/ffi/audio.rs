@@ -33,7 +33,7 @@ use std::ffi::c_void;
 use crate::ffi::generated::{aenc_attr, audio_param, pcm_param};
 
 #[cfg(use_stubs)]
-use crate::ffi::stubs::{aenc_attr, audio_param, pcm_param};
+use crate::ffi::{aenc_attr, audio_param, pcm_param};
 
 use crate::ffi::{AK_FAILED, AK_SUCCESS};
 

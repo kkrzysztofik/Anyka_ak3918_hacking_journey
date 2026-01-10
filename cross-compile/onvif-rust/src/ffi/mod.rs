@@ -5,12 +5,19 @@
 //! For native builds (testing), stub implementations are provided.
 
 mod anyka_sdk;
-mod audio;
-mod video;
+pub mod audio;
+pub mod video;
 
 pub use anyka_sdk::*;
-pub use audio::{AudioEncoderHandle, AudioInputHandle};
-pub use video::{VideoEncoderHandle, VideoInputHandle};
+pub use audio::{
+    AudioEncoderHandle, AudioInputHandle, audio_encoder_open, audio_encoder_set_config,
+    audio_input_open, audio_input_set_volume,
+};
+pub use video::{
+    VideoEncoderHandle, VideoInputHandle, video_encoder_open, video_encoder_request_idr,
+    video_encoder_set_rc, video_input_get_sensor_resolution, video_input_open,
+    video_input_set_channel_attr,
+};
 
 // Re-export common types
 #[cfg(not(use_stubs))]
