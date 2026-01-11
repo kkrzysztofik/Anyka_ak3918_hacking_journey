@@ -1848,7 +1848,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_absolute_move_with_platform() {
-        use crate::platform::{StubPlatform, StubPlatformBuilder};
+        use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
         let config = Arc::new(ConfigRuntime::new(Default::default()));
@@ -1879,7 +1879,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_absolute_move_platform_failure() {
-        use crate::platform::{StubPlatform, StubPlatformBuilder};
+        use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
         let config = Arc::new(ConfigRuntime::new(Default::default()));

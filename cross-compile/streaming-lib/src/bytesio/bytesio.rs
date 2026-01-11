@@ -217,8 +217,8 @@ impl TNetIO for TcpIO {
 #[cfg(test)]
 mod tests {
 
-    use super::new_udpio_pair;
     use super::UdpIO;
+    use super::new_udpio_pair;
 
     use tokio;
 

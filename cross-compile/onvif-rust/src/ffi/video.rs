@@ -235,8 +235,15 @@ pub(crate) fn video_input_open_internal(
     device: VideoDevice,
     ffi: &dyn VideoFfiTrait,
 ) -> PlatformResult<VideoInputHandle> {
-    // Validate: Type system ensures device.0 is only 0 (DEV0)
-    let sdk_device: video_dev_type = unsafe { std::mem::transmute(device.0 as i32) };
+    // Validate device ID before transmuting to prevent invalid values from reaching SDK
+    let sdk_device: video_dev_type = if device == VideoDevice::DEV0 {
+        unsafe { std::mem::transmute::<i32, video_dev_type>(0i32) }
+    } else {
+        return Err(PlatformError::InvalidParameter(format!(
+            "Invalid video device ID: {}. Only VideoDevice::DEV0 is supported",
+            device.0
+        )));
+    };
 
     let handle = ffi.vi_open(sdk_device);
 
@@ -591,11 +598,12 @@ mod tests {
         let mut mock_ffi = MockVideoFfiTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_vi_open()
             .with(eq(VideoDevType::Dev0))
             .times(1)
-            .returning(move |_| test_handle);
+            .returning(move |_| test_handle_usize as *mut c_void);
 
         let result = video_input_open_internal(VideoDevice::DEV0, &mock_ffi);
         assert!(result.is_ok());
@@ -623,6 +631,23 @@ mod tests {
     }
 
     #[test]
+    fn test_video_input_open_internal_rejects_invalid_device() {
+        let mock_ffi = MockVideoFfiTrait::new();
+
+        // Try with invalid device ID (not DEV0)
+        let invalid_device = VideoDevice(1);
+        let result = video_input_open_internal(invalid_device, &mock_ffi);
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::InvalidParameter(msg)) => {
+                assert!(msg.contains("Invalid video device ID"));
+                assert!(msg.contains("1"));
+            }
+            _ => panic!("Expected InvalidParameter error"),
+        }
+    }
+
+    #[test]
     fn test_video_input_get_sensor_resolution_internal_calls_ffi_and_returns_resolution() {
         let mut mock_ffi = MockVideoFfiTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
@@ -630,9 +655,10 @@ mod tests {
             handle: test_handle,
         };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_vi_get_sensor_resolution()
-            .withf(move |handle, _| *handle == test_handle)
+            .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_, res| {
                 unsafe {
@@ -659,9 +685,10 @@ mod tests {
             handle: test_handle,
         };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_vi_get_sensor_resolution()
-            .withf(move |handle, _| *handle == test_handle)
+            .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_, _| AK_FAILED);
 
@@ -684,9 +711,10 @@ mod tests {
         };
         let attr = video_channel_attr::default();
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_vi_set_channel_attr()
-            .withf(move |handle, _| *handle == test_handle)
+            .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_, _| AK_SUCCESS);
 
@@ -703,9 +731,10 @@ mod tests {
         };
         let attr = video_channel_attr::default();
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_vi_set_channel_attr()
-            .withf(move |handle, _| *handle == test_handle)
+            .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_, _| AK_FAILED);
 
@@ -738,10 +767,11 @@ mod tests {
             enc_out_type: 0,
         };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_venc_open()
             .times(1)
-            .returning(move |_| test_handle);
+            .returning(move |_| test_handle_usize as *mut c_void);
 
         let result = video_encoder_open_internal(&param, &mock_ffi);
         assert!(result.is_ok());
@@ -788,9 +818,10 @@ mod tests {
             handle: test_handle,
         };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_venc_set_rc()
-            .withf(move |handle, bps| *handle == test_handle && *bps == 3000000)
+            .withf(move |handle, bps| *handle as usize == test_handle_usize && *bps == 3000000)
             .times(1)
             .returning(|_, _| AK_SUCCESS);
 
@@ -806,9 +837,10 @@ mod tests {
             handle: test_handle,
         };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_venc_set_rc()
-            .withf(move |handle, _| *handle == test_handle)
+            .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_, _| AK_FAILED);
 
@@ -830,9 +862,10 @@ mod tests {
             handle: test_handle,
         };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_venc_set_iframe()
-            .withf(move |handle| *handle == test_handle)
+            .withf(move |handle| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_| AK_SUCCESS);
 
@@ -848,9 +881,10 @@ mod tests {
             handle: test_handle,
         };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_venc_set_iframe()
-            .withf(move |handle| *handle == test_handle)
+            .withf(move |handle| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_| AK_FAILED);
 

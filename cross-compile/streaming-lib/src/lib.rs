@@ -23,9 +23,9 @@ pub mod rtsp;
 pub mod streamhub;
 
 // Re-export key types from RTSP
-pub use rtsp::rtsp::{DefaultRtspServer, RtspServer};
 pub use rtsp::session::client_session::RtspClientSession;
 pub use rtsp::session::server_session::RtspServerSession;
+pub use rtsp::{DefaultRtspServer, RtspServer};
 
 /// Stream session type alias for ticket-specified API surface
 /// Represents either an RTSP client or server session
@@ -35,15 +35,15 @@ pub type StreamSession = RtspServerSession;
 pub use httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
 
 // Re-export key types from streamhub
+pub use streamhub::StreamsHub;
 pub use streamhub::define::{
     DataReceiver, DataSender, FrameData, MediaInfo, PacketData, PublishType, PublisherInfo,
-    StreamHubEvent, StreamHubEventSender, StreamIdentifier, SubscribeType, SubscriberInfo,
-    TStreamHandler, VideoCodecType,
+    StreamHubEvent, StreamHubEventSender, SubscribeType, SubscriberInfo, TStreamHandler,
+    VideoCodecType,
 };
-pub use streamhub::StreamsHub;
+pub use streamhub::stream::StreamIdentifier;
 
 // Re-export key types from codec
-pub use codec::pps::Pps;
 pub use codec::sps::Sps;
 
 // Re-export key types from container

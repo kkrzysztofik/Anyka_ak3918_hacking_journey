@@ -129,7 +129,6 @@ mod tests {
 
     use super::BitsWriter;
     use super::BytesWriter;
-    
 
     #[test]
     fn test_write_bit() {

@@ -1,13 +1,13 @@
 use {
     super::{define::h264_nal_type, errors::Mpeg4AvcHevcError},
+    crate::bytesio::{bytes_reader::BytesReader, bytes_writer::BytesWriter},
     byteorder::BigEndian,
     bytes::BytesMut,
-    bytesio::{bytes_reader::BytesReader, bytes_writer::BytesWriter},
     std::vec::Vec,
 };
 
 use super::errors::MpegErrorValue;
-use h264_decoder::sps::SpsParser;
+use crate::codec::sps::SpsParser;
 
 const H264_START_CODE: [u8; 4] = [0x00, 0x00, 0x00, 0x01];
 
@@ -261,7 +261,10 @@ impl Mpeg4AvcProcessor {
         Ok(bytes_writer.extract_current_bytes())
     }
 
-    pub fn read_nalu_size(&mut self, bytes_reader: &mut BytesReader) -> Result<u32, Mpeg4AvcHevcError> {
+    pub fn read_nalu_size(
+        &mut self,
+        bytes_reader: &mut BytesReader,
+    ) -> Result<u32, Mpeg4AvcHevcError> {
         let mut size: u32 = 0;
 
         for _ in 0..self.mpeg4_avc.nalu_length {
@@ -284,7 +287,10 @@ impl Mpeg4AvcProcessor {
         Ok(())
     }
 
-    pub fn nalus_to_mpeg4avc(&mut self, nalus: Vec<BytesMut>) -> Result<BytesMut, Mpeg4AvcHevcError> {
+    pub fn nalus_to_mpeg4avc(
+        &mut self,
+        nalus: Vec<BytesMut>,
+    ) -> Result<BytesMut, Mpeg4AvcHevcError> {
         let mut bytes_writer = BytesWriter::new();
 
         for nalu in nalus {
@@ -335,8 +341,8 @@ impl Mpeg4AvcProcessor {
 
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
     use crate::bytesio::{bytes_reader::BytesReader, bytes_writer::BytesWriter};
+    use bytes::BytesMut;
 
     #[test]
     fn test_bytes_to_bigend() {

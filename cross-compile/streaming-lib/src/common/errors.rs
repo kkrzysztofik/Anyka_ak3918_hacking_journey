@@ -14,7 +14,7 @@ pub enum AuthErrorValue {
     #[fail(display = "no token found.")]
     NoTokenFound,
     #[fail(display = "invalid token format.")]
-    InvalidTokenFormat
+    InvalidTokenFormat,
 }
 
 impl fmt::Display for AuthError {

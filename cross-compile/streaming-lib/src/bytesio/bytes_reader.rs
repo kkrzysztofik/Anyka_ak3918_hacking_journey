@@ -1,7 +1,7 @@
 use {
     super::{
+        TNetIO,
         bytes_errors::{BytesReadError, BytesReadErrorValue},
-        bytesio::TNetIO,
     },
     byteorder::{ByteOrder, ReadBytesExt},
     bytes::{BufMut, BytesMut},

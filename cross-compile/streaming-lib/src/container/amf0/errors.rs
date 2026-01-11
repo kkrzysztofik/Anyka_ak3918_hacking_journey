@@ -1,6 +1,6 @@
 #![allow(non_local_definitions)]
 use {
-    bytesio::bytes_errors::{BytesReadError, BytesWriteError},
+    crate::bytesio::bytes_errors::{BytesReadError, BytesWriteError},
     failure::{Backtrace, Fail},
     std::{
         fmt, {io, string},

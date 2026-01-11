@@ -170,6 +170,7 @@ impl Drop for PTZHandle {
 
 impl PTZHandle {
     /// Check if the handle is opened.
+    #[allow(dead_code)]
     pub(crate) fn is_opened(&self) -> bool {
         self.opened
     }
@@ -378,7 +379,6 @@ pub fn ptz_stop(handle: &PTZHandle, direction: PtzDirection) -> PlatformResult<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mockall::predicate::*;
 
     #[test]
     fn test_check_result_success() {
@@ -536,7 +536,7 @@ mod tests {
 
     #[test]
     fn test_ptz_turn_internal_validates_pan_range() {
-        let mut mock_ffi = MockPtzFfiTrait::new();
+        let mock_ffi = MockPtzFfiTrait::new();
         let handle = PTZHandle { opened: true };
 
         // Should fail validation before calling FFI
@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn test_ptz_turn_internal_validates_tilt_range() {
-        let mut mock_ffi = MockPtzFfiTrait::new();
+        let mock_ffi = MockPtzFfiTrait::new();
         let handle = PTZHandle { opened: true };
 
         // Should fail validation before calling FFI

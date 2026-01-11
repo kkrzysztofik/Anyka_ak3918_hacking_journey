@@ -2,22 +2,22 @@ use crate::streamhub::define::{StatisticData, StatisticDataSender};
 use tokio::sync::oneshot;
 use {
     super::{
-        define::{tag_type, HttpResponseDataProducer},
+        define::{HttpResponseDataProducer, tag_type},
         errors::{HttpFLvError, HttpFLvErrorValue},
     },
-    bytes::BytesMut,
-    std::net::SocketAddr,
-    streamhub::define::{
+    crate::container::amf0::amf0_writer::Amf0Writer,
+    crate::container::muxer::{FlvMuxer, HEADER_LENGTH},
+    crate::streamhub::define::{
         FrameData, FrameDataReceiver, NotifyInfo, StreamHubEvent, StreamHubEventSender,
         SubDataType, SubscribeType, SubscriberInfo,
     },
-    streamhub::{
+    crate::streamhub::{
         stream::StreamIdentifier,
         utils::{RandomDigitCount, Uuid},
     },
+    bytes::BytesMut,
+    std::net::SocketAddr,
     tokio::sync::mpsc,
-    xflv::amf0::amf0_writer::Amf0Writer,
-    xflv::muxer::{FlvMuxer, HEADER_LENGTH},
 };
 
 pub struct HttpFlv {
@@ -128,11 +128,11 @@ impl HttpFlv {
                 }
 
                 if let Err(err) = self.write_flv_tag(data) {
-                    if let HttpFLvErrorValue::MpscSendError(err_in) = &err.value {
-                        if err_in.is_disconnected() {
-                            log::info!("write_flv_tag: {}", err_in);
-                            break;
-                        }
+                    if let HttpFLvErrorValue::MpscSendError(err_in) = &err.value
+                        && err_in.is_disconnected()
+                    {
+                        log::info!("write_flv_tag: {}", err_in);
+                        break;
                     }
                     log::error!("write_flv_tag err: {}", err);
                     retry_count += 1;

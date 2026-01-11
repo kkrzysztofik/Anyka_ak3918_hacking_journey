@@ -2983,7 +2983,7 @@ mod tests {
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
         let config = {
-            let mut c = ConfigRuntime::new(Default::default());
+            let c = ConfigRuntime::new(Default::default());
             c.set_string("network.detected_ip", "192.168.1.100")
                 .unwrap();
             c.set_string("network.mac_address", "AA:BB:CC:DD:EE:FF")
@@ -3023,7 +3023,7 @@ mod tests {
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
         let config = {
-            let mut c = ConfigRuntime::new(Default::default());
+            let c = ConfigRuntime::new(Default::default());
             // Don't set detected_ip - we want to test ip_address fallback
             c.set_string("network.ip_address", "10.0.0.1").unwrap();
             c.set_int("server.port", 9000).unwrap();

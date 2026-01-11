@@ -1,8 +1,8 @@
 use crate::scanf;
 use indexmap::IndexMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fmt;
 use std::hash::BuildHasherDefault;
-use std::collections::hash_map::DefaultHasher;
 
 pub type HttpIndexMap = IndexMap<String, String, BuildHasherDefault<DefaultHasher>>;
 
@@ -79,32 +79,30 @@ impl Unmarshal for Uri {
 
         let path_with_query = match uri.schema {
             Schema::RTSP => {
-                let rtsp_path_with_query =
-                    if let Some(rtsp_url_without_prefix) = url.strip_prefix("rtsp://") {
-                        /*split host:port and path?query*/
+                if let Some(rtsp_url_without_prefix) = url.strip_prefix("rtsp://") {
+                    /*split host:port and path?query*/
 
-                        if let Some(index) = rtsp_url_without_prefix.find('/') {
-                            let path_with_query = &rtsp_url_without_prefix[index + 1..];
-                            /*parse host and port*/
-                            let host_with_port = &rtsp_url_without_prefix[..index];
-                            let (host_val, port_val) = scanf!(host_with_port, ':', String, u16);
-                            if let Some(host) = host_val {
-                                uri.host = host;
-                            }
-                            if let Some(port) = port_val {
-                                uri.port = Some(port);
-                            }
-
-                            path_with_query
-                        } else {
-                            log::error!("cannot find split '/' for host:port and path?query.");
-                            return None;
+                    if let Some(index) = rtsp_url_without_prefix.find('/') {
+                        let path_with_query = &rtsp_url_without_prefix[index + 1..];
+                        /*parse host and port*/
+                        let host_with_port = &rtsp_url_without_prefix[..index];
+                        let (host_val, port_val) = scanf!(host_with_port, ':', String, u16);
+                        if let Some(host) = host_val {
+                            uri.host = host;
                         }
+                        if let Some(port) = port_val {
+                            uri.port = Some(port);
+                        }
+
+                        path_with_query
                     } else {
-                        log::error!("cannot find RTSP prefix.");
+                        log::error!("cannot find split '/' for host:port and path?query.");
                         return None;
-                    };
-                rtsp_path_with_query
+                    }
+                } else {
+                    log::error!("cannot find RTSP prefix.");
+                    return None;
+                }
             }
             Schema::WEBRTC => url,
             Schema::UNKNOWN => url,
@@ -304,10 +302,10 @@ impl Unmarshal for HttpResponse {
                 if let Some(version) = fields.next() {
                     http_response.version = version.to_string();
                 }
-                if let Some(status) = fields.next() {
-                    if let Ok(status) = status.parse::<u16>() {
-                        http_response.status_code = status;
-                    }
+                if let Some(status) = fields.next()
+                    && let Ok(status) = status.parse::<u16>()
+                {
+                    http_response.status_code = status;
                 }
                 if let Some(reason_phrase) = fields.next() {
                     http_response.reason_phrase = reason_phrase.to_string();

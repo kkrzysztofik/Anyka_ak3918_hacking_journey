@@ -4,7 +4,7 @@ use std::fmt;
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Default)]
 pub enum StreamIdentifier {
     #[default]
-    Unkonwn,
+    Unknown,
     #[serde(rename = "rtmp")]
     Rtmp {
         app_name: String,
@@ -41,8 +41,8 @@ impl fmt::Display for StreamIdentifier {
                     "WebRTC - app_name: {app_name}, stream_name: {stream_name}"
                 )
             }
-            StreamIdentifier::Unkonwn => {
-                write!(f, "Unkonwn")
+            StreamIdentifier::Unknown => {
+                write!(f, "Unknown")
             }
         }
     }

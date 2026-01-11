@@ -95,25 +95,6 @@ function encodeBase64(plaintext: string): EncryptedData {
 }
 
 /**
- * Simple base64 decoding fallback for non-secure contexts
- */
-function decodeBase64(encrypted: EncryptedData): string {
-  try {
-    const binaryString = atob(encrypted.data);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const decoder = new TextDecoder();
-    const decoded = decoder.decode(bytes);
-    // Reverse the obfuscation
-    return decoded.split('').reverse().join('');
-  } catch {
-    throw new Error('Failed to decode base64-encoded data');
-  }
-}
-
-/**
  * Encrypt a string using AES-GCM (if available) or base64 fallback
  *
  * @param plaintext - The string to encrypt

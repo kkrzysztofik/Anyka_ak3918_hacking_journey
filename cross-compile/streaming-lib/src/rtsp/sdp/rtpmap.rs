@@ -1,4 +1,4 @@
-use crate::global_trait::{Marshal, Unmarshal};
+use crate::rtsp::global_trait::{Marshal, Unmarshal};
 
 #[derive(Debug, Clone, Default)]
 pub struct RtpMap {
@@ -17,10 +17,10 @@ impl Unmarshal for RtpMap {
 
         let parts: Vec<&str> = raw_data.split(' ').collect();
 
-        if let Some(part_0) = parts.first() {
-            if let Ok(payload_type) = part_0.parse::<u16>() {
-                rtpmap.payload_type = payload_type;
-            }
+        if let Some(part_0) = parts.first()
+            && let Ok(payload_type) = part_0.parse::<u16>()
+        {
+            rtpmap.payload_type = payload_type;
         }
 
         if let Some(part_1) = parts.get(1) {
@@ -30,10 +30,10 @@ impl Unmarshal for RtpMap {
                 rtpmap.encoding_name = para_0.to_string();
             }
 
-            if let Some(para_1) = parameters.get(1) {
-                if let Ok(clock_rate) = para_1.parse::<u32>() {
-                    rtpmap.clock_rate = clock_rate;
-                }
+            if let Some(para_1) = parameters.get(1)
+                && let Ok(clock_rate) = para_1.parse::<u32>()
+            {
+                rtpmap.clock_rate = clock_rate;
             }
             if let Some(para_2) = parameters.get(2) {
                 rtpmap.encoding_param = para_2.to_string();
@@ -61,7 +61,7 @@ impl Marshal for RtpMap {
 #[cfg(test)]
 mod tests {
 
-    use crate::global_trait::{Marshal, Unmarshal};
+    use crate::rtsp::global_trait::{Marshal, Unmarshal};
 
     use super::RtpMap;
 

@@ -1,7 +1,7 @@
 pub mod fmtp;
 pub mod rtpmap;
 
-use crate::global_trait::{Marshal, Unmarshal};
+use crate::rtsp::global_trait::{Marshal, Unmarshal};
 use rtpmap::RtpMap;
 use std::collections::HashMap;
 
@@ -23,10 +23,10 @@ impl Unmarshal for Bandwidth {
             sdp_bandwidth.b_type = t.to_string();
         }
 
-        if let Some(bandwidth) = parameters.get(1) {
-            if let Ok(bandwidth) = bandwidth.parse::<u16>() {
-                sdp_bandwidth.bandwidth = bandwidth;
-            }
+        if let Some(bandwidth) = parameters.get(1)
+            && let Ok(bandwidth) = bandwidth.parse::<u16>()
+        {
+            sdp_bandwidth.bandwidth = bandwidth;
         }
 
         Some(sdp_bandwidth)
@@ -106,10 +106,10 @@ impl Unmarshal for SdpMediaInfo {
             sdp_media.media_type = para_0.to_string();
         }
 
-        if let Some(para_1) = parameters.get(1) {
-            if let Ok(port) = para_1.parse::<usize>() {
-                sdp_media.port = port;
-            }
+        if let Some(para_1) = parameters.get(1)
+            && let Ok(port) = para_1.parse::<usize>()
+        {
+            sdp_media.port = port;
         }
 
         if let Some(para_2) = parameters.get(2) {
@@ -184,7 +184,7 @@ impl Unmarshal for Sdp {
             ..Default::default()
         };
 
-        let lines: Vec<&str> = raw_data.split(|c| c == '\r' || c == '\n').collect();
+        let lines: Vec<&str> = raw_data.split(['\r', '\n']).collect();
         for line in lines {
             if line.is_empty() {
                 continue;
@@ -322,7 +322,7 @@ impl Marshal for Sdp {
 #[cfg(test)]
 mod tests {
 
-    use crate::global_trait::{Marshal, Unmarshal};
+    use crate::rtsp::global_trait::{Marshal, Unmarshal};
 
     use super::Sdp;
 

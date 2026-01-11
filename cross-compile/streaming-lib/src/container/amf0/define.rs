@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
-use std::hash::BuildHasherDefault;
 use std::collections::hash_map::DefaultHasher;
+use std::hash::BuildHasherDefault;
 
 pub type Amf0IndexMap = IndexMap<String, Amf0ValueType, BuildHasherDefault<DefaultHasher>>;
 

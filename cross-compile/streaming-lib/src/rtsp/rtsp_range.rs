@@ -1,4 +1,4 @@
-use crate::global_trait::Marshal;
+use crate::rtsp::global_trait::Marshal;
 
 use super::global_trait::Unmarshal;
 use super::rtsp_utils;
@@ -40,7 +40,7 @@ impl Unmarshal for RtspRange {
                                 return -1;
                             }
                         };
-                    datetime.timestamp()
+                    datetime.and_utc().timestamp()
                 };
 
                 rtsp_range.begin = get_clock_time(ranges[0]);
@@ -98,7 +98,7 @@ impl Marshal for RtspRange {
 mod tests {
 
     use super::RtspRange;
-    use crate::global_trait::Unmarshal;
+    use crate::rtsp::global_trait::Unmarshal;
 
     #[test]
     fn test_parse_transport() {

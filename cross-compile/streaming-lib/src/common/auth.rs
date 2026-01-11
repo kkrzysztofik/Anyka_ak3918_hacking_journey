@@ -1,12 +1,12 @@
 use indexmap::IndexMap;
-use std::hash::BuildHasherDefault;
 use std::collections::hash_map::DefaultHasher;
+use std::hash::BuildHasherDefault;
 
 type AuthIndexMap = IndexMap<String, String, BuildHasherDefault<DefaultHasher>>;
 use md5;
 use serde_derive::Deserialize;
 
-use crate::errors::{AuthError, AuthErrorValue};
+use crate::common::errors::{AuthError, AuthErrorValue};
 use crate::scanf;
 
 #[derive(Debug, Deserialize, Clone, Default)]

@@ -1,7 +1,7 @@
 use {
     super::{
+        TNetIO,
         bytes_errors::{BytesWriteError, BytesWriteErrorValue},
-        bytesio::TNetIO,
     },
     byteorder::{ByteOrder, WriteBytesExt},
     bytes::BytesMut,
@@ -112,9 +112,9 @@ impl BytesWriter {
     }
 
     pub fn write_random_bytes(&mut self, length: u32) -> Result<(), BytesWriteError> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         for _ in 0..length {
-            self.bytes.write_u8(rng.gen())?;
+            self.bytes.write_u8(rng.random())?;
         }
         Ok(())
     }
@@ -223,7 +223,7 @@ impl AsyncBytesWriter {
             Err(_) => {
                 return Err(BytesWriteError {
                     value: BytesWriteErrorValue::Timeout,
-                })
+                });
             }
         }
 

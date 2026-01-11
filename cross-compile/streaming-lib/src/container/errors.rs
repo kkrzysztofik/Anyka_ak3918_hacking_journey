@@ -1,9 +1,9 @@
 #![allow(non_local_definitions)]
 use {
-    bytesio::bits_errors::BitError,
-    bytesio::bytes_errors::{BytesReadError, BytesWriteError},
+    crate::bytesio::bits_errors::BitError,
+    crate::bytesio::bytes_errors::{BytesReadError, BytesWriteError},
+    crate::codec::errors::H264Error,
     failure::{Backtrace, Fail},
-    h264_decoder::errors::H264Error,
     std::fmt,
 };
 

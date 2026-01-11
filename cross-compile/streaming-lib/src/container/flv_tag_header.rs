@@ -1,13 +1,13 @@
 use crate::bytesio::bytes_writer::BytesWriter;
 
 use {
+    super::{Marshal, Unmarshal},
     super::{
         define,
         errors::{FlvDemuxerError, FlvMuxerError},
     },
-    super::{Marshal, Unmarshal},
+    crate::bytesio::bytes_reader::BytesReader,
     bytes::BytesMut,
-    bytesio::bytes_reader::BytesReader,
 };
 
 #[derive(Clone, Debug)]

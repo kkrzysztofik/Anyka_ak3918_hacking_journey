@@ -1,17 +1,17 @@
 use super::errors::RtcpError;
 use super::rtcp_header::RtcpHeader;
-use crate::rtp::utils::Marshal;
-use crate::rtp::utils::Unmarshal;
-use byteorder::BigEndian;
-use bytes::BytesMut;
 use crate::bytesio::bytes_reader::BytesReader;
 use crate::bytesio::bytes_writer::BytesWriter;
+use crate::rtsp::rtp::utils::Marshal;
+use crate::rtsp::rtp::utils::Unmarshal;
+use byteorder::BigEndian;
+use bytes::BytesMut;
 
 #[derive(Debug, Clone, Default)]
 pub struct ReportBlock {
     pub ssrc: u32,
     pub fraction_lost: u8,
-    pub cumutlative_num_of_packets_lost: u32,
+    pub cumulative_num_of_packets_lost: u32,
     pub extended_highest_seq_number: u32,
     pub jitter: u32,
     pub lsr: u32,
@@ -26,7 +26,7 @@ impl Unmarshal<&mut BytesReader, Result<Self, RtcpError>> for ReportBlock {
         Ok(ReportBlock {
             ssrc: reader.read_u32::<BigEndian>()?,
             fraction_lost: reader.read_u8()?,
-            cumutlative_num_of_packets_lost: reader.read_u24::<BigEndian>()?,
+            cumulative_num_of_packets_lost: reader.read_u24::<BigEndian>()?,
             extended_highest_seq_number: reader.read_u32::<BigEndian>()?,
             jitter: reader.read_u32::<BigEndian>()?,
             lsr: reader.read_u32::<BigEndian>()?,
@@ -41,7 +41,7 @@ impl Marshal<Result<BytesMut, RtcpError>> for ReportBlock {
 
         writer.write_u32::<BigEndian>(self.ssrc)?;
         writer.write_u8(self.fraction_lost)?;
-        writer.write_u24::<BigEndian>(self.cumutlative_num_of_packets_lost)?;
+        writer.write_u24::<BigEndian>(self.cumulative_num_of_packets_lost)?;
         writer.write_u32::<BigEndian>(self.extended_highest_seq_number)?;
         writer.write_u32::<BigEndian>(self.jitter)?;
         writer.write_u32::<BigEndian>(self.lsr)?;

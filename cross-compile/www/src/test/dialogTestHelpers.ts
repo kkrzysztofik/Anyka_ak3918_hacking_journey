@@ -25,22 +25,6 @@ export function testDialogClosed(dialogTestId: string): void {
 }
 
 /**
- * Test dialog rendering (open/close states)
- * @param dialogTestId - Test ID of the dialog content
- * @param open - Whether dialog should be open
- * @deprecated Use testDialogOpen or testDialogClosed instead
- */
-export async function testDialogRendering(dialogTestId: string, open: boolean): Promise<void> {
-  // NOSONAR - Deprecated function kept for backward compatibility, will be removed in future version
-  if (open) {
-    // NOSONAR - Deprecated parameter pattern, use testDialogOpen/testDialogClosed instead
-    await testDialogOpen(dialogTestId);
-  } else {
-    testDialogClosed(dialogTestId);
-  }
-}
-
-/**
  * Test dialog cancel action
  * @param user - User event instance
  * @param cancelButtonTestId - Test ID of the cancel button

@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_brightness_internal_validates_range() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mock_ffi = MockImagingFfiTrait::new();
 
         // Should fail validation before calling FFI
         let result = imaging_set_brightness_internal(150.0, &mock_ffi);

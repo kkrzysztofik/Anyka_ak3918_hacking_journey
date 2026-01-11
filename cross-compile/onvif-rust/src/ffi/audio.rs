@@ -254,6 +254,14 @@ pub(crate) fn audio_input_set_volume_internal(
     volume: u8,
     ffi: &dyn AudioFfiTrait,
 ) -> PlatformResult<()> {
+    // Validate volume range (0-15) before computing ADC/ASLC splits
+    if volume > 15 {
+        return Err(PlatformError::InvalidParameter(format!(
+            "Volume out of range: {}. Supported range is 0-15",
+            volume
+        )));
+    }
+
     // Implement the macro logic: ak_ai_set_volume splits volume into ADC and ASLC
     let adc_vol = if volume >= 8 { 8 } else { (volume % 8) as i32 };
     let aslc_vol = if volume >= 8 { (volume - 8) as i32 } else { 0 };
@@ -404,7 +412,6 @@ pub fn audio_encoder_set_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mockall::predicate::*;
 
     #[test]
     fn test_check_result_success() {
@@ -432,7 +439,6 @@ mod tests {
             sample_rate: 8000,
             channel_num: 1,
             sample_bits: 16,
-            type_: 0,
         };
         let result = audio_input_open(&param);
         assert!(result.is_ok());
@@ -447,7 +453,6 @@ mod tests {
             sample_rate: 8000,
             channel_num: 1,
             sample_bits: 16,
-            type_: 0,
         };
         let handle = audio_input_open(&param).unwrap();
         let result = audio_input_set_volume(&handle, 10);
@@ -461,7 +466,6 @@ mod tests {
             sample_rate: 8000,
             channel_num: 1,
             sample_bits: 16,
-            type_: 0,
         };
         let handle = audio_input_open(&param).unwrap();
         // Volume < 8: ADC = volume % 8, ASLC = 0
@@ -508,13 +512,13 @@ mod tests {
             sample_rate: 8000,
             channel_num: 1,
             sample_bits: 16,
-            type_: 0,
         };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_ai_open()
             .times(1)
-            .returning(move |_| test_handle);
+            .returning(move |_| test_handle_usize as *mut c_void);
 
         let result = audio_input_open_internal(&param, &mock_ffi);
         assert!(result.is_ok());
@@ -529,7 +533,6 @@ mod tests {
             sample_rate: 8000,
             channel_num: 1,
             sample_bits: 16,
-            type_: 0,
         };
 
         mock_ffi
@@ -554,15 +557,16 @@ mod tests {
         };
 
         // Volume >= 8: ADC = 8, ASLC = volume - 8
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_ai_set_adc_volume()
-            .withf(move |handle, vol| *handle == test_handle && *vol == 8)
+            .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 8)
             .times(1)
             .returning(|_, _| AK_SUCCESS);
 
         mock_ffi
             .expect_ai_set_aslc_volume()
-            .withf(move |handle, vol| *handle == test_handle && *vol == 2)
+            .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 2)
             .times(1)
             .returning(|_, _| AK_SUCCESS);
 
@@ -579,15 +583,16 @@ mod tests {
         };
 
         // Volume < 8: ADC = volume % 8, ASLC = 0
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_ai_set_adc_volume()
-            .withf(move |handle, vol| *handle == test_handle && *vol == 5)
+            .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 5)
             .times(1)
             .returning(|_, _| AK_SUCCESS);
 
         mock_ffi
             .expect_ai_set_aslc_volume()
-            .withf(move |handle, vol| *handle == test_handle && *vol == 0)
+            .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 0)
             .times(1)
             .returning(|_, _| AK_SUCCESS);
 
@@ -603,9 +608,10 @@ mod tests {
             handle: test_handle,
         };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_ai_set_adc_volume()
-            .withf(move |handle, _| *handle == test_handle)
+            .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_, _| AK_FAILED);
 
@@ -633,15 +639,16 @@ mod tests {
             handle: test_handle,
         };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_ai_set_adc_volume()
-            .withf(move |handle, _| *handle == test_handle)
+            .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_, _| AK_SUCCESS);
 
         mock_ffi
             .expect_ai_set_aslc_volume()
-            .withf(move |handle, _| *handle == test_handle)
+            .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_, _| AK_FAILED);
 
@@ -656,6 +663,44 @@ mod tests {
     }
 
     #[test]
+    fn test_audio_input_set_volume_internal_rejects_out_of_range_volume() {
+        let mock_ffi = MockAudioFfiTrait::new();
+        let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let ai_handle = AudioInputHandle {
+            handle: test_handle,
+        };
+
+        // Volume > 15 should be rejected
+        let result = audio_input_set_volume_internal(&ai_handle, 16, &mock_ffi);
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::InvalidParameter(msg)) => {
+                assert!(msg.contains("Volume out of range"));
+                assert!(msg.contains("16"));
+                assert!(msg.contains("0-15"));
+            }
+            _ => panic!("Expected InvalidParameter error"),
+        }
+
+        // Volume at maximum valid value (15) should be accepted
+        let mut mock_ffi_valid = MockAudioFfiTrait::new();
+        let test_handle_usize = test_handle as usize;
+        mock_ffi_valid
+            .expect_ai_set_adc_volume()
+            .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 8)
+            .times(1)
+            .returning(|_, _| AK_SUCCESS);
+        mock_ffi_valid
+            .expect_ai_set_aslc_volume()
+            .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 7)
+            .times(1)
+            .returning(|_, _| AK_SUCCESS);
+
+        let result = audio_input_set_volume_internal(&ai_handle, 15, &mock_ffi_valid);
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn test_audio_encoder_open_internal_calls_ffi_and_returns_handle() {
         let mut mock_ffi = MockAudioFfiTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
@@ -666,10 +711,11 @@ mod tests {
             type_: 0,
         };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_aenc_open()
             .times(1)
-            .returning(move |_| test_handle);
+            .returning(move |_| test_handle_usize as *mut c_void);
 
         let result = audio_encoder_open_internal(&param, &mock_ffi);
         assert!(result.is_ok());
@@ -709,9 +755,10 @@ mod tests {
         };
         let attr = aenc_attr { aac_head: 0 };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_aenc_set_attr()
-            .withf(move |handle, _| *handle == test_handle)
+            .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_, _| AK_SUCCESS);
 
@@ -728,9 +775,10 @@ mod tests {
         };
         let attr = aenc_attr { aac_head: 0 };
 
+        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_aenc_set_attr()
-            .withf(move |handle, _| *handle == test_handle)
+            .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
             .returning(|_, _| AK_FAILED);
 

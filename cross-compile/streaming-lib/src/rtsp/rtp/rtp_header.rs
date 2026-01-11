@@ -1,9 +1,9 @@
-use byteorder::BigEndian;
-use bytes::BytesMut;
 use crate::bytesio::bytes_errors::BytesReadError;
 use crate::bytesio::bytes_errors::BytesWriteError;
 use crate::bytesio::bytes_reader::BytesReader;
 use crate::bytesio::bytes_writer::BytesWriter;
+use byteorder::BigEndian;
+use bytes::BytesMut;
 
 use super::utils::Marshal;
 use super::utils::Unmarshal;

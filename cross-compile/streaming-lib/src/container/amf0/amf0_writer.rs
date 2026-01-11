@@ -1,10 +1,12 @@
 use {
-    super::{amf0_markers, errors::Amf0WriteErrorValue, Amf0ValueType, Amf0WriteError},
+    super::{Amf0ValueType, Amf0WriteError, amf0_markers, errors::Amf0WriteErrorValue},
+    crate::bytesio::bytes_writer::BytesWriter,
     byteorder::BigEndian,
     bytes::BytesMut,
-    bytesio::bytes_writer::BytesWriter,
-    indexmap::IndexMap,
 };
+
+#[allow(unused_imports)]
+use indexmap::IndexMap;
 
 #[derive(Default)]
 pub struct Amf0Writer {
@@ -49,7 +51,7 @@ impl Amf0Writer {
     }
 
     pub fn write_string(&mut self, value: &String) -> Result<(), Amf0WriteError> {
-        if value.len() > (u16::max_value() as usize) {
+        if value.len() > (u16::MAX as usize) {
             return Err(Amf0WriteError {
                 value: Amf0WriteErrorValue::NormalStringTooLong,
             });
@@ -73,10 +75,7 @@ impl Amf0Writer {
         Ok(())
     }
 
-    pub fn write_object(
-        &mut self,
-        properties: &super::Amf0IndexMap,
-    ) -> Result<(), Amf0WriteError> {
+    pub fn write_object(&mut self, properties: &super::Amf0IndexMap) -> Result<(), Amf0WriteError> {
         self.writer.write_u8(amf0_markers::OBJECT)?;
 
         for (key, value) in properties {

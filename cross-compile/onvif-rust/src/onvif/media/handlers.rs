@@ -2297,7 +2297,7 @@ mod tests {
     fn test_set_video_encoder_configuration_invalid_resolution() {
         use crate::onvif::types::common::{
             H264Configuration, H264Profile, VideoEncoderConfiguration, VideoEncoding,
-            VideoRateControl, VideoResolution,
+            VideoResolution,
         };
 
         let service = MediaService::new();

@@ -10,6 +10,9 @@ pub mod imaging;
 pub mod ptz;
 pub mod video;
 
+// NOSONAR: Module-level wildcard re-export is acceptable for facade modules.
+// This module is designed as a unified FFI interface. Explicit re-exports would
+// be too verbose and harder to maintain as the SDK evolves.
 pub use anyka_sdk::*;
 pub use audio::{
     AudioEncoderHandle, AudioInputHandle, audio_encoder_open, audio_encoder_set_config,
@@ -32,6 +35,9 @@ pub use video::{
 
 // Re-export common types
 #[cfg(not(use_stubs))]
+// NOSONAR: Wildcard re-export of generated bindings is standard pattern.
+// Generated bindings are auto-created by bindgen and change frequently.
+// Explicit re-exports would require constant maintenance.
 pub use generated::*;
 
 #[cfg(not(use_stubs))]
@@ -192,24 +198,36 @@ pub mod stubs {
 }
 
 #[cfg(use_stubs)]
+// NOSONAR: Wildcard re-export of stub types is standard pattern for test builds.
+// Stub module provides type definitions that mirror generated bindings.
+// Explicit re-exports would duplicate the type list unnecessarily.
 pub use stubs::*;
 
 // Type aliases for consistency with generated bindings (snake_case)
 #[cfg(use_stubs)]
+#[allow(non_camel_case_types)]
 pub type video_channel_attr = stubs::VideoChannelAttr;
 #[cfg(use_stubs)]
+#[allow(non_camel_case_types)]
 pub type pcm_param = stubs::PcmParam;
 #[cfg(use_stubs)]
+#[allow(non_camel_case_types)]
 pub type aenc_attr = stubs::AencAttr;
 #[cfg(use_stubs)]
+#[allow(non_camel_case_types)]
 pub type encode_param = stubs::EncodeParam;
 #[cfg(use_stubs)]
+#[allow(non_camel_case_types)]
 pub type video_dev_type = stubs::VideoDevType;
 #[cfg(use_stubs)]
+#[allow(non_camel_case_types)]
 pub type video_resolution = stubs::VideoResolution;
 #[cfg(use_stubs)]
+#[allow(non_camel_case_types)]
 pub type audio_param = stubs::AudioParam;
 #[cfg(use_stubs)]
+#[allow(non_camel_case_types)]
 pub type ptz_device = stubs::PtzDevice;
 #[cfg(use_stubs)]
+#[allow(non_camel_case_types)]
 pub type ptz_turn_direction = stubs::PtzTurnDirection;

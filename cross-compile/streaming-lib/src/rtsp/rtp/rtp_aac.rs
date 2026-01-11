@@ -5,19 +5,19 @@ use super::utils::OnRtpPacketFn;
 use super::utils::OnRtpPacketFn2;
 use super::utils::TPacker;
 
+use super::RtpHeader;
+use super::RtpPacket;
 use super::utils::TRtpReceiverForRtcp;
 use super::utils::TUnPacker;
 use super::utils::Unmarshal;
-use super::RtpHeader;
-use super::RtpPacket;
 use async_trait::async_trait;
 use byteorder::BigEndian;
 use bytes::{BufMut, BytesMut};
 
+use crate::bytesio::TNetIO;
 use crate::bytesio::bytes_reader::BytesReader;
-use crate::bytesio::bytesio::TNetIO;
-use std::sync::Arc;
 use crate::streamhub::define::FrameData;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 // pub type OnPacketFn = fn(BytesMut) -> Result<(), PackerError>;
@@ -125,7 +125,7 @@ impl TUnPacker for RtpAacUnPacker {
 
         let mut reader_payload = BytesReader::new(rtp_packet.payload);
 
-        let au_headers_length = (reader_payload.read_u16::<BigEndian>()? + 7) / 8;
+        let au_headers_length = (reader_payload.read_u16::<BigEndian>()?).div_ceil(8);
         let au_header_length = 2;
         let aus_number = au_headers_length / au_header_length;
 

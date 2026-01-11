@@ -48,7 +48,7 @@ cargo build                        # Debug build for device
 ### Pre-Commit (Rust)
 
 ```bash
-cd cross-compile/onvif-rust
+cd cross-compile
 cargo fmt && \
 cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
 cargo test --target x86_64-unknown-linux-gnu

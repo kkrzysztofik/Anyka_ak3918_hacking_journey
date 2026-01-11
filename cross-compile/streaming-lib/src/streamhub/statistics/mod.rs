@@ -1,14 +1,14 @@
 use {
     super::stream::StreamIdentifier,
-    crate::{define::SubscribeType, utils::Uuid},
+    crate::container::define::{AacProfile, AvcCodecId, AvcLevel, AvcProfile, SoundFormat},
+    crate::streamhub::{define::SubscribeType, utils::Uuid},
     chrono::{DateTime, Local},
     serde::Serialize,
     std::{collections::HashMap, sync::Arc, time::Duration},
     tokio::{
-        sync::{broadcast::Receiver, Mutex},
+        sync::{Mutex, broadcast::Receiver},
         time,
     },
-    xflv::define::{AacProfile, AvcCodecId, AvcLevel, AvcProfile, SoundFormat},
 };
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -18,16 +18,16 @@ pub struct VideoInfo {
     pub level: AvcLevel,
     pub width: u32,
     pub height: u32,
-    /*used for caculate the bitrate*/
+    /*used for calculate the bitrate*/
     #[serde(skip_serializing)]
     pub recv_bytes: usize,
     #[serde(rename = "bitrate(kbits/s)")]
     pub bitrate: usize,
-    /*used for caculate the frame rate*/
+    /*used for calculate the frame rate*/
     #[serde(skip_serializing)]
     pub recv_frame_count: usize,
     pub frame_rate: usize,
-    /*used for caculate the GOP*/
+    /*used for calculate the GOP*/
     #[serde(skip_serializing)]
     pub recv_frame_count_for_gop: usize,
     pub gop: usize,
@@ -38,7 +38,7 @@ pub struct AudioInfo {
     pub profile: AacProfile,
     pub samplerate: u32,
     pub channels: u8,
-    /*used for caculate the bitrate*/
+    /*used for calculate the bitrate*/
     #[serde(skip_serializing)]
     pub recv_bytes: usize,
     #[serde(rename = "bitrate(kbits/s)")]
@@ -46,9 +46,9 @@ pub struct AudioInfo {
 }
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct StatisticsStream {
-    /*publisher infomation */
+    /*publisher information */
     pub publisher: StatisticPublisher,
-    /*subscriber infomation */
+    /*subscriber information */
     pub subscribers: HashMap<Uuid, StatisticSubscriber>,
     /*How many clients are subscribing to this stream.*/
     pub subscriber_count: usize,
@@ -65,7 +65,7 @@ pub struct StatisticPublisher {
     pub video: VideoInfo,
     pub audio: AudioInfo,
     pub remote_address: String,
-    /*used for caculate the recv_bitrate*/
+    /*used for calculate the recv_bitrate*/
     #[serde(skip_serializing)]
     pub recv_bytes: usize,
     /*the bitrate at which the server receives streaming data*/
@@ -87,7 +87,7 @@ pub struct StatisticSubscriber {
     pub start_time: DateTime<Local>,
     pub remote_address: String,
     pub sub_type: SubscribeType,
-    /*used for caculate the send_bitrate*/
+    /*used for calculate the send_bitrate*/
     #[serde(skip_serializing)]
     pub send_bytes: usize,
     /*the bitrate at which the server send streaming data to a client*/
@@ -126,17 +126,17 @@ impl StatisticsStream {
     }
 }
 
-pub struct StatisticsCaculate {
+pub struct StatisticsCalculate {
     stream: Arc<Mutex<StatisticsStream>>,
     exit: Receiver<()>,
 }
 
-impl StatisticsCaculate {
+impl StatisticsCalculate {
     pub fn new(stream: Arc<Mutex<StatisticsStream>>, exit: Receiver<()>) -> Self {
         Self { stream, exit }
     }
 
-    async fn caculate(&mut self) {
+    async fn calculate(&mut self) {
         let stream_statistics_clone = &mut self.stream.lock().await;
 
         stream_statistics_clone.publisher.video.bitrate =
@@ -166,7 +166,7 @@ impl StatisticsCaculate {
         loop {
             tokio::select! {
                _ = interval.tick() => {
-                self.caculate().await;
+                self.calculate().await;
                },
                _ = self.exit.recv() => {
                     log::info!("avstatistics shutting down");

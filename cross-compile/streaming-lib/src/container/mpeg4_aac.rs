@@ -1,10 +1,10 @@
 use {
     super::errors::{MpegAacError, MpegErrorValue},
-    bytes::BytesMut,
-    bytesio::{
+    crate::bytesio::{
         bits_reader::BitsReader, bits_writer::BitsWriter, bytes_reader::BytesReader,
         bytes_writer::BytesWriter,
     },
+    bytes::BytesMut,
 };
 
 const AAC_FREQUENCE_SIZE: usize = 13;
@@ -392,7 +392,7 @@ impl Mpeg4AacProcessor {
             self.mpeg4_bits_copy(&mut pce_bits_vec, 8)?;
         }
 
-        let rv = (pce_bits_vec.len() + 7) / 8;
+        let rv = pce_bits_vec.len().div_ceil(8);
 
         log::trace!(
             "remove warnings: {} {} {} {} {}",

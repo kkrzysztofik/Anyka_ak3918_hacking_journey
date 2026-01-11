@@ -1,14 +1,14 @@
-use crate::rtp::utils;
-use crate::rtp::RtpPacket;
+use crate::rtsp::rtp::RtpPacket;
+use crate::rtsp::rtp::utils;
 use bytes::BytesMut;
 
 use super::{
+    RTCP_RR,
     rtcp_app::RtcpApp,
     rtcp_bye::RtcpBye,
     rtcp_header::RtcpHeader,
     rtcp_rr::{ReportBlock, RtcpReceiverReport},
     rtcp_sr::RtcpSenderReport,
-    RTCP_RR,
 };
 
 //For example: sequence numbers inserted are 65533, 65534, the new coming one is 2,
@@ -186,7 +186,7 @@ impl RtcpContext {
         let dlsr = (delay as f64 / 1000000. * 65535.) as u32;
 
         ReportBlock {
-            cumutlative_num_of_packets_lost: lost,
+            cumulative_num_of_packets_lost: lost,
             fraction_lost: fraction as u8,
             extended_highest_seq_number: extend_max,
             lsr: lsr as u32,

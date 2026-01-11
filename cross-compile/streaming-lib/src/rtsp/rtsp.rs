@@ -29,6 +29,7 @@ pub struct DefaultRtspServer {
     auth: Option<Auth>,
 }
 
+#[async_trait]
 impl RtspServer for DefaultRtspServer {
     fn new(address: String, event_producer: StreamHubEventSender, auth: Option<Auth>) -> Self {
         Self {
@@ -61,24 +62,24 @@ impl RtspServer for DefaultRtspServer {
                         err
                     );
 
-                    if !session.is_normal_exit {
-                        if let Some(identifier) = session.stream_identifier.clone() {
-                            match session.exit(identifier) {
-                                Err(err) => {
-                                    log::error!(
-                                        "session exit error: session id: {} session type: {}, error info: {}",
-                                        session_id,
-                                        session.session_type,
-                                        err
-                                    );
-                                }
-                                Ok(()) => {
-                                    log::info!(
-                                        "session exit successfully: session id: {} session type: {} ",
-                                        session_id,
-                                        session.session_type,
-                                    );
-                                }
+                    if !session.is_normal_exit
+                        && let Some(identifier) = session.stream_identifier.clone()
+                    {
+                        match session.exit(identifier) {
+                            Err(err) => {
+                                log::error!(
+                                    "session exit error: session id: {} session type: {}, error info: {}",
+                                    session_id,
+                                    session.session_type,
+                                    err
+                                );
+                            }
+                            Ok(()) => {
+                                log::info!(
+                                    "session exit successfully: session id: {} session type: {} ",
+                                    session_id,
+                                    session.session_type,
+                                );
                             }
                         }
                     }

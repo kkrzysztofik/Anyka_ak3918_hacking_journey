@@ -1,11 +1,11 @@
 use super::define;
 use super::define::ClientSessionType;
 
-use crate::global_trait::Marshal;
-use crate::global_trait::Unmarshal;
-use crate::rtsp_codec;
+use crate::rtsp::global_trait::Marshal;
+use crate::rtsp::global_trait::Unmarshal;
+use crate::rtsp::rtsp_codec;
 
-use crate::rtsp_transport::CastType;
+use crate::rtsp::rtsp_transport::CastType;
 
 use super::server_session::InterleavedBinaryData;
 use crate::common::http::HttpRequest as RtspRequest;
@@ -15,35 +15,35 @@ use crate::common::http::Unmarshal as RtspUnmarshal;
 use crate::common::http::Uri;
 use crate::streamhub::define::SubscriberInfo;
 
-use crate::rtp::RtpPacket;
+use crate::rtsp::rtp::RtpPacket;
 
-use crate::rtsp_codec::RtspCodecInfo;
-use crate::rtsp_track::RtspTrack;
-use crate::rtsp_track::TrackType;
-use crate::rtsp_transport::ProtocolType;
-use crate::rtsp_transport::RtspTransport;
+use crate::rtsp::rtsp_codec::RtspCodecInfo;
+use crate::rtsp::rtsp_track::RtspTrack;
+use crate::rtsp::rtsp_track::TrackType;
+use crate::rtsp::rtsp_transport::ProtocolType;
+use crate::rtsp::rtsp_transport::RtspTransport;
 
-use bytes::BytesMut;
 use crate::bytesio::bytes_reader::BytesReader;
 use crate::bytesio::bytes_writer::AsyncBytesWriter;
+use bytes::BytesMut;
 
 use super::errors::SessionError;
 use super::errors::SessionErrorValue;
 
 use tokio::sync::oneshot;
 
-use crate::rtp::errors::UnPackerError;
-use crate::sdp::Sdp;
+use crate::rtsp::rtp::errors::UnPackerError;
+use crate::rtsp::sdp::Sdp;
 
 use super::define::rtsp_method_name;
 
-use crate::bytesio::bytesio::TNetIO;
-use crate::bytesio::bytesio::TcpIO;
+use crate::bytesio::TNetIO;
+use crate::bytesio::TcpIO;
 
 use std::collections::HashMap;
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use super::define::USER_AGENT;
 
@@ -60,7 +60,7 @@ use tokio::sync::Mutex;
 
 use super::server_session::RtspStreamHandler;
 
-use crate::bytesio::bytesio::new_udpio_pair;
+use crate::bytesio::new_udpio_pair;
 
 pub struct RtspClientSession {
     address: String,
@@ -242,10 +242,10 @@ impl RtspClientSession {
                         if let Some(track) = self.tracks.get_mut(&TrackType::Audio) {
                             track.transport.interleaved = media_transport.interleaved;
                         }
-                    } else if media.media_type == "video" {
-                        if let Some(track) = self.tracks.get_mut(&TrackType::Video) {
-                            track.transport.interleaved = media_transport.interleaved;
-                        }
+                    } else if media.media_type == "video"
+                        && let Some(track) = self.tracks.get_mut(&TrackType::Video)
+                    {
+                        track.transport.interleaved = media_transport.interleaved;
                     }
                 }
                 ProtocolType::UDP => {
@@ -274,16 +274,15 @@ impl RtspClientSession {
                                     Arc::new(Mutex::new(Box::new(socket_rtcp)));
                                 track.rtcp_receive_loop(box_rtcp_io).await;
                             }
-                        } else if media.media_type == "video" {
-                            if let Some(track) = self.tracks.get_mut(&TrackType::Video) {
-                                let box_rtp_io: Box<dyn TNetIO + Send + Sync> =
-                                    Box::new(socket_rtp);
-                                track.rtp_receive_loop(box_rtp_io).await;
+                        } else if media.media_type == "video"
+                            && let Some(track) = self.tracks.get_mut(&TrackType::Video)
+                        {
+                            let box_rtp_io: Box<dyn TNetIO + Send + Sync> = Box::new(socket_rtp);
+                            track.rtp_receive_loop(box_rtp_io).await;
 
-                                let box_rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
-                                    Arc::new(Mutex::new(Box::new(socket_rtcp)));
-                                track.rtcp_receive_loop(box_rtcp_io).await;
-                            }
+                            let box_rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
+                                Arc::new(Mutex::new(Box::new(socket_rtcp)));
+                            track.rtcp_receive_loop(box_rtcp_io).await;
                         }
                     }
                 }
@@ -364,7 +363,7 @@ impl RtspClientSession {
         SubscriberInfo {
             id,
             sub_type: SubscribeType::RtspRelay,
-            sub_data_type: streamhub::define::SubDataType::Frame,
+            sub_data_type: crate::streamhub::define::SubDataType::Frame,
             notify_info: NotifyInfo {
                 request_url: String::from(""),
                 remote_addr: String::from(""),
@@ -382,7 +381,7 @@ impl RtspClientSession {
         PublisherInfo {
             id,
             pub_type: PublishType::RtspRelay,
-            pub_data_type: streamhub::define::PubDataType::Frame,
+            pub_data_type: crate::streamhub::define::PubDataType::Frame,
             notify_info: NotifyInfo {
                 request_url: String::from(""),
                 remote_addr: String::from(""),
@@ -459,24 +458,18 @@ impl RtspClientSession {
                 // should check the body
                 if let Some(content_length) =
                     rtsp_response_data.get_header(&String::from("Content-Length"))
+                    && let Ok(uint_num) = content_length.parse::<usize>()
+                    && (rtsp_response_data.body.is_none()
+                        || uint_num > rtsp_response_data.body.clone().unwrap().len())
                 {
-                    if let Ok(uint_num) = content_length.parse::<usize>() {
-                        if rtsp_response_data.body.is_none()
-                            || uint_num > rtsp_response_data.body.clone().unwrap().len()
-                        {
-                            if retry_count >= 5 {
-                                log::error!(
-                                    "corrupted rtsp message={}",
-                                    std::str::from_utf8(&data)?
-                                );
-                                return Ok(());
-                            }
-                            retry_count += 1;
-                            let data_recv = self.io.lock().await.read().await?;
-                            self.reader.extend_from_slice(&data_recv[..]);
-                            continue;
-                        }
+                    if retry_count >= 5 {
+                        log::error!("corrupted rtsp message={}", std::str::from_utf8(&data)?);
+                        return Ok(());
                     }
+                    retry_count += 1;
+                    let data_recv = self.io.lock().await.read().await?;
+                    self.reader.extend_from_slice(&data_recv[..]);
+                    continue;
                 }
                 rtsp_response = rtsp_response_data;
                 self.reader.extract_remaining_bytes();
@@ -502,64 +495,64 @@ impl RtspClientSession {
             }
             rtsp_method_name::ANNOUNCE => {}
             rtsp_method_name::DESCRIBE => {
-                if let Some(request_body) = &rtsp_response.body {
-                    if let Some(sdp) = Sdp::unmarshal(request_body) {
-                        self.sdp = sdp.clone();
-                        self.stream_handler.set_sdp(sdp).await;
+                if let Some(request_body) = &rtsp_response.body
+                    && let Some(sdp) = Sdp::unmarshal(request_body)
+                {
+                    self.sdp = sdp.clone();
+                    self.stream_handler.set_sdp(sdp).await;
 
-                        self.new_tracks()?;
+                    self.new_tracks()?;
 
-                        let (event_result_sender, event_result_receiver) = oneshot::channel();
-                        let identifier = StreamIdentifier::Rtsp {
-                            stream_path: self.stream_name.clone(),
-                        };
+                    let (event_result_sender, event_result_receiver) = oneshot::channel();
+                    let identifier = StreamIdentifier::Rtsp {
+                        stream_path: self.stream_name.clone(),
+                    };
 
-                        let publish_event = StreamHubEvent::Publish {
-                            identifier,
-                            result_sender: event_result_sender,
-                            info: self.get_publisher_info(),
-                            stream_handler: self.stream_handler.clone(),
-                        };
+                    let publish_event = StreamHubEvent::Publish {
+                        identifier,
+                        result_sender: event_result_sender,
+                        info: self.get_publisher_info(),
+                        stream_handler: self.stream_handler.clone(),
+                    };
 
-                        if self.event_producer.send(publish_event).is_err() {
-                            return Err(SessionError {
-                                value: SessionErrorValue::StreamHubEventSendErr,
-                            });
-                        }
+                    if self.event_producer.send(publish_event).is_err() {
+                        return Err(SessionError {
+                            value: SessionErrorValue::StreamHubEventSendErr,
+                        });
+                    }
 
-                        let sender = event_result_receiver.await??.0.unwrap();
+                    let sender = event_result_receiver.await??.0.unwrap();
 
-                        for track in self.tracks.values_mut() {
-                            let sender_out = sender.clone();
+                    for track in self.tracks.values_mut() {
+                        let sender_out = sender.clone();
 
-                            let mut rtp_channel_guard = track.rtp_channel.lock().await;
-                            rtp_channel_guard.on_frame_handler(Box::new(
-                                move |msg: FrameData| -> Result<(), UnPackerError> {
-                                    if let Err(err) = sender_out.send(msg) {
-                                        log::error!("send frame error: {}", err);
-                                    }
-                                    Ok(())
-                                },
-                            ));
+                        let mut rtp_channel_guard = track.rtp_channel.lock().await;
+                        rtp_channel_guard.on_frame_handler(Box::new(
+                            move |msg: FrameData| -> Result<(), UnPackerError> {
+                                if let Err(err) = sender_out.send(msg) {
+                                    log::error!("send frame error: {}", err);
+                                }
+                                Ok(())
+                            },
+                        ));
 
-                            let rtcp_channel = Arc::clone(&track.rtcp_channel);
-                            rtp_channel_guard.on_packet_for_rtcp_handler(Box::new(
-                                move |packet: RtpPacket| {
-                                    let rtcp_channel_in = Arc::clone(&rtcp_channel);
-                                    Box::pin(async move {
-                                        rtcp_channel_in.lock().await.on_packet(packet);
-                                    })
-                                },
-                            ));
-                        }
+                        let rtcp_channel = Arc::clone(&track.rtcp_channel);
+                        rtp_channel_guard.on_packet_for_rtcp_handler(Box::new(
+                            move |packet: RtpPacket| {
+                                let rtcp_channel_in = Arc::clone(&rtcp_channel);
+                                Box::pin(async move {
+                                    rtcp_channel_in.lock().await.on_packet(packet);
+                                })
+                            },
+                        ));
                     }
                 }
             }
             rtsp_method_name::SETUP => {
-                if self.session_id.is_none() {
-                    if let Some(session_id) = rtsp_response.get_header(&"Session".to_string()) {
-                        self.session_id = Uuid::from_str2(session_id);
-                    }
+                if self.session_id.is_none()
+                    && let Some(session_id) = rtsp_response.get_header(&"Session".to_string())
+                {
+                    self.session_id = Uuid::from_str2(session_id);
                 }
 
                 if let Some(transport_str) = rtsp_response.get_header(&"Transport".to_string()) {

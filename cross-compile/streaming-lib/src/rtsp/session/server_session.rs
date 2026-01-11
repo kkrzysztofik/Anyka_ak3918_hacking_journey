@@ -1,9 +1,9 @@
-use crate::global_trait::Marshal;
-use crate::global_trait::Unmarshal;
-use crate::rtsp_codec;
+use crate::rtsp::global_trait::Marshal;
+use crate::rtsp::global_trait::Unmarshal;
+use crate::rtsp::rtsp_codec;
 
-use crate::rtp::define::ANNEXB_NALU_START_CODE;
-use crate::rtp::utils::Marshal as RtpMarshal;
+use crate::rtsp::rtp::define::ANNEXB_NALU_START_CODE;
+use crate::rtsp::rtp::utils::Marshal as RtpMarshal;
 
 use crate::common::auth::SecretCarrier;
 use crate::common::http::HttpRequest as RtspRequest;
@@ -11,44 +11,44 @@ use crate::common::http::HttpResponse as RtspResponse;
 use crate::common::http::Marshal as RtspMarshal;
 use crate::common::http::Unmarshal as RtspUnmarshal;
 
-use crate::rtp::RtpPacket;
-use crate::rtsp_range::RtspRange;
+use crate::rtsp::rtp::RtpPacket;
+use crate::rtsp::rtsp_range::RtspRange;
 
-use crate::sdp::fmtp::Fmtp;
+use crate::rtsp::sdp::fmtp::Fmtp;
 
-use crate::rtsp_codec::RtspCodecInfo;
-use crate::rtsp_track::RtspTrack;
-use crate::rtsp_track::TrackType;
-use crate::rtsp_transport::ProtocolType;
-use crate::rtsp_transport::RtspTransport;
+use crate::rtsp::rtsp_codec::RtspCodecInfo;
+use crate::rtsp::rtsp_track::RtspTrack;
+use crate::rtsp::rtsp_track::TrackType;
+use crate::rtsp::rtsp_transport::ProtocolType;
+use crate::rtsp::rtsp_transport::RtspTransport;
 
-use byteorder::BigEndian;
-use bytes::BytesMut;
 use crate::bytesio::bytes_reader::BytesReader;
 use crate::bytesio::bytes_writer::AsyncBytesWriter;
+use byteorder::BigEndian;
+use bytes::BytesMut;
 
 use super::errors::SessionError;
 use super::errors::SessionErrorValue;
+use crate::bytesio::UdpIO;
 use crate::bytesio::bytes_writer::BytesWriter;
-use crate::bytesio::bytesio::UdpIO;
-use http::StatusCode;
 use crate::streamhub::define::DataSender;
 use crate::streamhub::define::MediaInfo;
 use crate::streamhub::define::VideoCodecType;
+use http::StatusCode;
 use tokio::sync::oneshot;
 
-use crate::rtp::errors::UnPackerError;
-use crate::sdp::Sdp;
+use crate::rtsp::rtp::errors::UnPackerError;
+use crate::rtsp::sdp::Sdp;
 
 use super::define;
 use super::define::rtsp_method_name;
+use crate::bytesio::TNetIO;
+use crate::bytesio::TcpIO;
 use async_trait::async_trait;
-use crate::bytesio::bytesio::TNetIO;
-use crate::bytesio::bytesio::TcpIO;
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::common::auth::Auth;
@@ -213,24 +213,18 @@ impl RtspServerSession {
                 // should check the body
                 if let Some(content_length) =
                     rtsp_request_data.get_header(&String::from("Content-Length"))
+                    && let Ok(uint_num) = content_length.parse::<usize>()
+                    && (rtsp_request_data.body.is_none()
+                        || uint_num > rtsp_request_data.body.clone().unwrap().len())
                 {
-                    if let Ok(uint_num) = content_length.parse::<usize>() {
-                        if rtsp_request_data.body.is_none()
-                            || uint_num > rtsp_request_data.body.clone().unwrap().len()
-                        {
-                            if retry_count >= 5 {
-                                log::error!(
-                                    "corrupted rtsp message={}",
-                                    std::str::from_utf8(&data)?
-                                );
-                                return Ok(());
-                            }
-                            retry_count += 1;
-                            let data_recv = self.io.lock().await.read().await?;
-                            self.reader.extend_from_slice(&data_recv[..]);
-                            continue;
-                        }
+                    if retry_count >= 5 {
+                        log::error!("corrupted rtsp message={}", std::str::from_utf8(&data)?);
+                        return Ok(());
                     }
+                    retry_count += 1;
+                    let data_recv = self.io.lock().await.read().await?;
+                    self.reader.extend_from_slice(&data_recv[..]);
+                    continue;
                 }
                 rtsp_request = rtsp_request_data;
                 self.reader.extract_remaining_bytes();
@@ -305,12 +299,12 @@ impl RtspServerSession {
             });
         }
 
-        if let Some(Information::Sdp { data }) = receiver.recv().await {
-            if let Some(sdp) = Sdp::unmarshal(&data) {
-                self.sdp = sdp;
-                //it can new tracks when get the sdp information;
-                self.new_tracks()?;
-            }
+        if let Some(Information::Sdp { data }) = receiver.recv().await
+            && let Some(sdp) = Sdp::unmarshal(&data)
+        {
+            self.sdp = sdp;
+            //it can new tracks when get the sdp information;
+            self.new_tracks()?;
         }
 
         let mut response = Self::gen_response(status_code, rtsp_request);
@@ -338,11 +332,11 @@ impl RtspServerSession {
             )?;
         }
 
-        if let Some(request_body) = &rtsp_request.body {
-            if let Some(sdp) = Sdp::unmarshal(request_body) {
-                self.sdp = sdp.clone();
-                self.stream_handler.set_sdp(sdp).await;
-            }
+        if let Some(request_body) = &rtsp_request.body
+            && let Some(sdp) = Sdp::unmarshal(request_body)
+        {
+            self.sdp = sdp.clone();
+            self.stream_handler.set_sdp(sdp).await;
         }
 
         //new tracks for publish session
@@ -624,12 +618,12 @@ impl RtspServerSession {
 
         //A stream published by gstreamer does not support the Range header
         //https://github.com/harlanc/xiu/issues/135
-        if let Some(range_str) = rtsp_request.headers.get(&String::from("Range")) {
-            if let Some(range) = RtspRange::unmarshal(range_str) {
-                response
-                    .headers
-                    .insert(String::from("Range"), range.marshal());
-            }
+        if let Some(range_str) = rtsp_request.headers.get(&String::from("Range"))
+            && let Some(range) = RtspRange::unmarshal(range_str)
+        {
+            response
+                .headers
+                .insert(String::from("Range"), range.marshal());
         }
 
         response
@@ -760,7 +754,7 @@ impl RtspServerSession {
         SubscriberInfo {
             id,
             sub_type: SubscribeType::RtspPull,
-            sub_data_type: streamhub::define::SubDataType::Frame,
+            sub_data_type: crate::streamhub::define::SubDataType::Frame,
             notify_info: NotifyInfo {
                 request_url: String::from(""),
                 remote_addr: String::from(""),
@@ -778,7 +772,7 @@ impl RtspServerSession {
         PublisherInfo {
             id,
             pub_type: PublishType::RtspPush,
-            pub_data_type: streamhub::define::PubDataType::Frame,
+            pub_data_type: crate::streamhub::define::PubDataType::Frame,
             notify_info: NotifyInfo {
                 request_url: String::from(""),
                 remote_addr: String::from(""),

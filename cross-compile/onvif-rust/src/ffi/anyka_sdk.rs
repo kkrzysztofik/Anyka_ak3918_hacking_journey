@@ -588,6 +588,7 @@ mod stub_impl {
     }
 
     /// Open video input device (stub).
+    #[allow(dead_code)]
     pub fn video_input_open(_device: VideoDevice) -> AnykaResult<*mut std::ffi::c_void> {
         // Return a non-null pointer for stub
         Ok(std::ptr::dangling_mut::<std::ffi::c_void>())
@@ -605,6 +606,7 @@ mod stub_impl {
     }
 
     /// Open PTZ motor control (stub).
+    #[allow(dead_code)]
     pub fn ptz_open() -> AnykaResult<()> {
         Ok(())
     }
@@ -615,11 +617,13 @@ mod stub_impl {
     }
 
     /// Turn PTZ motor in a direction (stub).
+    #[allow(dead_code)]
     pub fn ptz_turn(_direction: PtzDirection) -> AnykaResult<()> {
         Ok(())
     }
 
     /// Stop PTZ motor movement (stub).
+    #[allow(dead_code)]
     pub fn ptz_stop() -> AnykaResult<()> {
         Ok(())
     }

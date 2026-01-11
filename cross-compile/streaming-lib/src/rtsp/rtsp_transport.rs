@@ -1,4 +1,4 @@
-use crate::global_trait::Marshal;
+use crate::rtsp::global_trait::Marshal;
 
 use super::global_trait::Unmarshal;
 use super::rtsp_utils::scanf;
@@ -152,8 +152,8 @@ impl Marshal for RtspTransport {
 #[cfg(test)]
 mod tests {
 
-    use crate::global_trait::Marshal;
-    use crate::global_trait::Unmarshal;
+    use crate::rtsp::global_trait::Marshal;
+    use crate::rtsp::global_trait::Unmarshal;
 
     use super::RtspTransport;
 

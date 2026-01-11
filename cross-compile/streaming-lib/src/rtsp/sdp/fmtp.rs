@@ -1,5 +1,5 @@
-use crate::global_trait::{Marshal, Unmarshal};
-use base64::{engine::general_purpose, Engine as _};
+use crate::rtsp::global_trait::{Marshal, Unmarshal};
+use base64::{Engine as _, engine::general_purpose};
 use bytes::{BufMut, BytesMut};
 
 // pub trait Fmtp: TMsgConverter {}
@@ -254,8 +254,14 @@ impl Marshal for Mpeg4Fmtp {
 
         let mpeg4_fmtp = format!(
             "{} profile-level-id={};mode={};sizelength={};indexlength={};indexdeltalength={}; config={}",
-            self.payload_type, profile_level_id_str, self.mode, self.size_length, self.index_length,
-            self.index_delta_length,asc_str);
+            self.payload_type,
+            profile_level_id_str,
+            self.mode,
+            self.size_length,
+            self.index_length,
+            self.index_delta_length,
+            asc_str
+        );
 
         format!("{mpeg4_fmtp}\r\n")
     }
@@ -269,9 +275,9 @@ mod tests {
     use super::H264Fmtp;
     use super::H265Fmtp;
     use super::Mpeg4Fmtp;
-    use crate::global_trait::Marshal;
-    use crate::global_trait::Unmarshal;
-    use crate::rtsp_utils;
+    use crate::rtsp::global_trait::Marshal;
+    use crate::rtsp::global_trait::Unmarshal;
+    use crate::rtsp::rtsp_utils;
 
     #[test]
     fn test_parse_h264fmtpsdp() {

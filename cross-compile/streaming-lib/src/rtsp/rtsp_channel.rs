@@ -1,12 +1,12 @@
-use crate::rtp::errors::PackerError;
-use crate::rtp::errors::UnPackerError;
-use crate::rtp::rtcp::rtcp_header::RtcpHeader;
-use crate::rtp::rtcp::RTCP_RR;
-use crate::rtp::rtcp::RTCP_SR;
-use crate::rtp::utils::OnFrameFn;
-use crate::rtp::utils::OnRtpPacketFn;
-use crate::rtp::utils::OnRtpPacketFn2;
-use crate::rtp::RtpPacket;
+use crate::rtsp::rtp::RtpPacket;
+use crate::rtsp::rtp::errors::PackerError;
+use crate::rtsp::rtp::errors::UnPackerError;
+use crate::rtsp::rtp::rtcp::RTCP_RR;
+use crate::rtsp::rtp::rtcp::RTCP_SR;
+use crate::rtsp::rtp::rtcp::rtcp_header::RtcpHeader;
+use crate::rtsp::rtp::utils::OnFrameFn;
+use crate::rtsp::rtp::utils::OnRtpPacketFn;
+use crate::rtsp::rtp::utils::OnRtpPacketFn2;
 
 use super::rtp::rtp_aac::RtpAacPacker;
 use super::rtp::rtp_h264::RtpH264Packer;
@@ -22,14 +22,14 @@ use super::rtp::utils::TPacker;
 use super::rtp::utils::TUnPacker;
 use super::rtsp_codec::RtspCodecId;
 use super::rtsp_codec::RtspCodecInfo;
-use crate::rtp::utils::Marshal;
-use crate::rtp::utils::Unmarshal;
-use byteorder::BigEndian;
-use bytes::BytesMut;
+use crate::bytesio::TNetIO;
 use crate::bytesio::bytes_errors::BytesWriteError;
 use crate::bytesio::bytes_reader::BytesReader;
 use crate::bytesio::bytes_writer::AsyncBytesWriter;
-use crate::bytesio::bytesio::TNetIO;
+use crate::rtsp::rtp::utils::Marshal;
+use crate::rtsp::rtp::utils::Unmarshal;
+use byteorder::BigEndian;
+use bytes::BytesMut;
 use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -56,7 +56,7 @@ pub struct RtcpChannel {
 
 impl RtpChannel {
     pub fn new(codec_info: RtspCodecInfo) -> Self {
-        let ssrc: u32 = rand::thread_rng().gen();
+        let ssrc: u32 = rand::rng().random();
         let mut rtp_channel = RtpChannel {
             codec_info,
             ssrc,
@@ -160,8 +160,8 @@ impl TRtpFunc for RtpChannel {
 }
 
 impl RtcpChannel {
-    pub fn set_channel_identifier(&mut self, channel_idendifier: u8) {
-        self.channel_identifier = channel_idendifier;
+    pub fn set_channel_identifier(&mut self, channel_identifier: u8) {
+        self.channel_identifier = channel_identifier;
     }
 
     pub async fn on_rtcp(
@@ -200,12 +200,12 @@ impl RtcpChannel {
         if let Ok(msg) = rr.marshal() {
             let mut bytes_writer = AsyncBytesWriter::new(rtcp_io);
             match net_type {
-                bytesio::bytesio::NetType::TCP => {
+                crate::bytesio::NetType::TCP => {
                     bytes_writer.write_u8(0x24)?;
                     bytes_writer.write_u8(self.channel_identifier)?;
                     bytes_writer.write_u16::<BigEndian>(msg.len() as u16)?;
                 }
-                bytesio::bytesio::NetType::UDP => {}
+                crate::bytesio::NetType::UDP => {}
             }
             bytes_writer.write(&msg)?;
             bytes_writer.flush().await?;

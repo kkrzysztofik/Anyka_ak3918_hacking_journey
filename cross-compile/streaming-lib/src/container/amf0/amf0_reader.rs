@@ -1,9 +1,8 @@
 use {
-    super::{amf0_markers, errors::Amf0ReadErrorValue, Amf0ReadError, Amf0ValueType},
-    byteorder::BigEndian,
+    super::{Amf0IndexMap, Amf0ReadError, Amf0ValueType, amf0_markers, errors::Amf0ReadErrorValue},
     // bytes::BytesMut,
-    bytesio::bytes_reader::BytesReader,
-    indexmap::IndexMap,
+    crate::bytesio::bytes_reader::BytesReader,
+    byteorder::BigEndian,
 };
 
 pub struct Amf0Reader {
@@ -108,7 +107,7 @@ impl Amf0Reader {
     }
 
     pub fn read_object(&mut self) -> Result<Amf0ValueType, Amf0ReadError> {
-        let mut properties = IndexMap::default();
+        let mut properties = Amf0IndexMap::default();
 
         loop {
             let is_eof = self.is_read_object_eof()?;
@@ -129,7 +128,7 @@ impl Amf0Reader {
     pub fn read_ecma_array(&mut self) -> Result<Amf0ValueType, Amf0ReadError> {
         let len = self.reader.read_u32::<BigEndian>()?;
 
-        let mut properties = IndexMap::default();
+        let mut properties = Amf0IndexMap::default();
 
         //here we do not use length to traverse the map, because in some
         //other media server, the length is 0 which is not correct.
@@ -174,14 +173,14 @@ mod tests {
         println!("tsetstt")
     }
 
-    use super::amf0_markers;
     use super::Amf0Reader;
     use super::Amf0ValueType;
+    use super::amf0_markers;
 
-    use bytes::BytesMut;
     use crate::bytesio::bytes_reader::BytesReader;
+    use bytes::BytesMut;
 
-    use indexmap::IndexMap;
+    use super::Amf0IndexMap;
 
     #[test]
     fn test_amf_reader() {
@@ -211,7 +210,7 @@ mod tests {
         assert_eq!(transaction_id, Amf0ValueType::Number(1.0));
 
         let command_obj_raw = amf_reader.read_with_type(amf0_markers::OBJECT).unwrap();
-        let mut properties = IndexMap::new();
+        let mut properties = Amf0IndexMap::default();
         properties.insert(
             String::from("app"),
             Amf0ValueType::UTF8String(String::from("harlan")),
@@ -344,7 +343,7 @@ mod tests {
             println!("adfa{err}");
         }
 
-        let mut properties = IndexMap::new();
+        let mut properties = Amf0IndexMap::default();
 
         properties.insert(String::from("audioCodecs"), Amf0ValueType::Number(3191.0));
         properties.insert(String::from("videoCodecs"), Amf0ValueType::Number(252.0));

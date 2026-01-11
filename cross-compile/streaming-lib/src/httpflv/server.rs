@@ -1,5 +1,5 @@
 use {
-    super::httpflv::HttpFlv,
+    super::HttpFlv,
     crate::common::auth::{Auth, SecretCarrier},
     crate::streamhub::define::StreamHubEventSender,
     async_trait::async_trait,
@@ -36,16 +36,15 @@ async fn handle_connection(
             let app_name = String::from(rv[1]);
             let stream_name = String::from(rv[2]);
 
-            if let Some(auth_val) = auth {
-                if auth_val
+            if let Some(auth_val) = auth
+                && auth_val
                     .authenticate(&stream_name, &query_string.map(SecretCarrier::Query), true)
                     .is_err()
-                {
-                    return Response::builder()
-                        .status(StatusCode::UNAUTHORIZED)
-                        .body(UNAUTHORIZED.into())
-                        .unwrap();
-                }
+            {
+                return Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .body(UNAUTHORIZED.into())
+                    .unwrap();
             }
 
             let (http_response_data_producer, http_response_data_consumer) = unbounded();
@@ -101,6 +100,7 @@ pub struct DefaultHttpFlvServer {
     auth: Option<Auth>,
 }
 
+#[async_trait]
 impl HttpFlvServer for DefaultHttpFlvServer {
     /// Create a new HTTP-FLV server instance
     fn new(address: String, event_producer: StreamHubEventSender, auth: Option<Auth>) -> Self {
