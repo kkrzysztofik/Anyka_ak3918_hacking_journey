@@ -137,6 +137,16 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
  * @throws Error if decryption fails
  */
 export async function decrypt(encrypted: EncryptedData): Promise<string> {
+  // Handle base64 fallback method
+  if (encrypted.method === 'base64') {
+    const decoded = atob(encrypted.data);
+    const bytes = Uint8Array.from(decoded, (c) => c.charCodeAt(0));
+    const decoder = new TextDecoder();
+    const obfuscated = decoder.decode(bytes);
+    // Reverse the obfuscation
+    return obfuscated.split('').reverse().join('');
+  }
+
   const salt = Uint8Array.from(atob(encrypted.salt), (c) => c.codePointAt(0) ?? 0);
   const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.codePointAt(0) ?? 0);
   const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.codePointAt(0) ?? 0);

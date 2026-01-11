@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "cross-compile/onvif-rust/**"
+      - "cross-compile/streaming-lib/**"
       - "cross-compile/www/**"
   pull_request:
     branches:
@@ -16,66 +17,15 @@ on:
       - reopened
     paths:
       - "cross-compile/onvif-rust/**"
+      - "cross-compile/streaming-lib/**"
       - "cross-compile/www/**"
-
-
 
 jobs:
   # =============================================================================
   # RUST BACKEND - Lint, Test & Coverage
   # =============================================================================
-  rust-lint:
-    name: Rust - Lint Code
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    container:
-      image: kkrzysztofik/anyka-cross-compile:rust-1.91.1
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Configure Git
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-
-      - name: Setup ARMv5TEJ Patches
-        working-directory: cross-compile/patches
-        run: |
-          bash setup.sh
-
-      - name: Setup Cargo Config
-        working-directory: cross-compile/onvif-rust
-        run: |
-          ./scripts/setup-cargo-config.sh
-
-      - name: Check Formatting
-        working-directory: cross-compile/onvif-rust
-        run: |
-          cargo fmt --check
-
-      - name: Run Clippy
-        working-directory: cross-compile/onvif-rust
-        run: |
-          cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
-
-      - name: Check Formatting (streaming-lib)
-        working-directory: cross-compile/streaming-lib
-        run: |
-          cargo fmt --check
-
-      - name: Run Clippy (streaming-lib)
-        working-directory: cross-compile/streaming-lib
-        run: |
-          cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
-
-  rust-test-and-coverage:
-    name: Rust - Test Suite & Coverage
+  rust-quality-and-coverage:
+    name: Rust - Lint, Test & Coverage
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -87,6 +37,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Configure Git
         run: |
@@ -112,9 +64,30 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin
             cross-compile/onvif-rust/target
-          key: cargo-${{ runner.os }}-rust-onvif-${{ hashFiles('cross-compile/onvif-rust/Cargo.lock') }}
+            cross-compile/streaming-lib/target
+          key: cargo-${{ runner.os }}-rust-${{ hashFiles('cross-compile/onvif-rust/Cargo.lock', 'cross-compile/streaming-lib/Cargo.lock') }}
           restore-keys: |
-            cargo-${{ runner.os }}-rust-onvif-
+            cargo-${{ runner.os }}-rust-
+
+      - name: Check Formatting
+        working-directory: cross-compile/onvif-rust
+        run: |
+          cargo fmt --check
+
+      - name: Run Clippy
+        working-directory: cross-compile/onvif-rust
+        run: |
+          cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+
+      - name: Check Formatting (streaming-lib)
+        working-directory: cross-compile/streaming-lib
+        run: |
+          cargo fmt --check
+
+      - name: Run Clippy (streaming-lib)
+        working-directory: cross-compile/streaming-lib
+        run: |
+          cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
 
       - name: Run Tests with Coverage
         working-directory: cross-compile/onvif-rust
@@ -238,8 +211,8 @@ jobs:
   # =============================================================================
   # WEBUI FRONTEND - Lint, Test & Coverage
   # =============================================================================
-  webui-test-and-coverage:
-    name: WebUI - Test Suite & Coverage
+  webui-quality-and-coverage:
+    name: WebUI - Lint, Test & Coverage
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -310,7 +283,7 @@ jobs:
   security-scans:
     name: Security Scans
     runs-on: ubuntu-latest
-    needs: [rust-test-and-coverage, webui-test-and-coverage]
+    needs: [rust-quality-and-coverage, webui-quality-and-coverage]
     continue-on-error: true
     permissions:
       contents: read
@@ -458,7 +431,7 @@ jobs:
   sonarqube:
     name: SonarQube Analysis & Quality Gate
     runs-on: ubuntu-latest
-    needs: [rust-test-and-coverage, webui-test-and-coverage]
+    needs: [rust-quality-and-coverage, webui-quality-and-coverage]
     continue-on-error: true
     permissions:
       contents: read
@@ -857,8 +830,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       [
-        rust-test-and-coverage,
-        webui-test-and-coverage,
+        rust-quality-and-coverage,
+        webui-quality-and-coverage,
         security-scans,
         sonarqube,
       ]
@@ -869,8 +842,8 @@ jobs:
     steps:
       - name: Generate Run Summary
         env:
-          RUST_COVERAGE: ${{ needs.rust-test-and-coverage.outputs.coverage || 'N/A' }}
-          WEBUI_COVERAGE: ${{ needs.webui-test-and-coverage.outputs.coverage || 'N/A' }}
+          RUST_COVERAGE: ${{ needs.rust-quality-and-coverage.outputs.coverage || 'N/A' }}
+          WEBUI_COVERAGE: ${{ needs.webui-quality-and-coverage.outputs.coverage || 'N/A' }}
           SNYK_CODE_STATUS: ${{ needs.security-scans.outputs.snyk_code_status }}
           SNYK_OSS_STATUS: ${{ needs.security-scans.outputs.snyk_oss_status }}
           SNYK_ISSUES: ${{ needs.security-scans.outputs.snyk_issues }}
@@ -928,8 +901,8 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const rustCoverage = '${{ needs.rust-test-and-coverage.outputs.coverage || 'N/A' }}';
-            const webuiCoverage = '${{ needs.webui-test-and-coverage.outputs.coverage || 'N/A' }}';
+            const rustCoverage = '${{ needs.rust-quality-and-coverage.outputs.coverage || 'N/A' }}';
+            const webuiCoverage = '${{ needs.webui-quality-and-coverage.outputs.coverage || 'N/A' }}';
             const snykCodeStatus = '${{ needs.security-scans.outputs.snyk_code_status }}';
             const snykOssStatus = '${{ needs.security-scans.outputs.snyk_oss_status }}';
             const snykIssues = '${{ needs.security-scans.outputs.snyk_issues || 0 }}';
