@@ -309,6 +309,63 @@ Rust can be bootstrapped from source using the custom LLVM toolchain. This enabl
    cargo build --target armv5te-unknown-linux-uclibceabi --release
    ```
 
+## Installing rust-src Component
+
+The `rust-src` component contains the Rust standard library source code, which is required by rust-analyzer for IDE features like "go to definition" and hover documentation.
+
+### Option 1: Quick Installation (Recommended)
+
+If you already have the custom Rust toolchain built and just need to add `rust-src`:
+
+```bash
+cd /home/kmk/anyka-dev/toolchain/build-new
+./install_rust_src.sh
+```
+
+This script will:
+
+- Install the `rust-src` component to your existing toolchain
+- Verify the installation
+- Takes only a few minutes (vs 4-8 hours for full rebuild)
+
+**Prerequisites**: The Rust source directory (`rust/`) must still exist from the original bootstrap build.
+
+### Option 2: Full Rebuild
+
+If you're building the toolchain from scratch or the Rust source directory was deleted:
+
+```bash
+cd /home/kmk/anyka-dev/toolchain/build-new
+./bootstrap_rust.sh
+```
+
+The bootstrap script now automatically includes `rust-src` component installation.
+
+### Verifying rust-src Installation
+
+After installation, verify that rust-src is available:
+
+```bash
+# Check components file
+cat /home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/lib/rustlib/components | grep rust-src
+
+# Check source directory exists
+ls -la /home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/lib/rustlib/src/rust/library/
+```
+
+Expected output:
+
+- `rust-src` appears in the components list
+- Source directory contains `std/`, `core/`, `alloc/` subdirectories
+
+### Using with rust-analyzer
+
+After installing `rust-src`, restart VS Code or reload the window. rust-analyzer should now be able to:
+
+- Show documentation on hover for standard library types
+- Navigate to standard library source code with "Go to Definition"
+- Provide accurate auto-completion for std library items
+
 ## Target Specification
 
 The `armv5te-unknown-linux-uclibceabi` target specification is available at:

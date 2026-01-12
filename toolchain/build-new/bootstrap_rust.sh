@@ -17,7 +17,7 @@ INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
 RUST_SRC_DIR="${BUILD_DIR}/rust"
 # Use latest stable Rust version (1.91.1 or newer)
 # This matches the system Rust version for bootstrap compatibility
-RUST_VERSION="1.91.1"  # Latest stable version
+RUST_VERSION="1.92.0"  # Latest stable version
 TARGET_NAME="armv5te-unknown-linux-uclibceabi"
 TARGET_SPEC="${BUILD_DIR}/${TARGET_NAME}.json"
 
@@ -254,7 +254,7 @@ rustc = "${system_rustc}"
 cargo = "${system_cargo}"
 # Build extended tools (cargo, rustfmt, clippy, etc.)
 extended = true
-tools = ["cargo", "rustfmt", "clippy", "rustdoc"]
+tools = ["cargo", "rustfmt", "clippy", "rustdoc", "src"]
 
 [install]
 prefix = "${INSTALL_DIR}"
@@ -420,6 +420,60 @@ install_rust() {
         exit 1
     }
 
+    # Install rust-src component explicitly
+    # rust-src is just source code (no compilation needed), so we copy it directly
+    # This matches the bootstrap implementation in src/bootstrap/src/core/build_steps/dist.rs
+    log_info "Installing rust-src component (copying library sources)..."
+    local rust_src_dest="${INSTALL_DIR}/lib/rustlib/src/rust"
+    
+    # Create destination directory
+    mkdir -p "${rust_src_dest}" || {
+        log_error "Failed to create rust-src destination directory: ${rust_src_dest}"
+        exit 1
+    }
+    
+    # Copy library source files (matches bootstrap dist.rs implementation)
+    if [[ -d "${RUST_SRC_DIR}/library" ]]; then
+        log_info "Copying library sources from ${RUST_SRC_DIR}/library..."
+        # Use rsync or cp with exclusions to match bootstrap behavior
+        # Exclude: library/backtrace/crates, library/stdarch/Cargo.toml, etc.
+        rsync -a --exclude='backtrace/crates' \
+              --exclude='stdarch/Cargo.toml' \
+              --exclude='stdarch/crates/stdarch-verify' \
+              --exclude='stdarch/crates/intrinsic-test' \
+              "${RUST_SRC_DIR}/library/" "${rust_src_dest}/library/" 2>/dev/null || \
+        cp -r "${RUST_SRC_DIR}/library" "${rust_src_dest}/" || {
+            log_error "Failed to copy library sources"
+            exit 1
+        }
+        log_info "Library sources copied successfully"
+    else
+        log_error "Library source directory not found: ${RUST_SRC_DIR}/library"
+        exit 1
+    fi
+    
+    # Copy libunwind source (needed for some std library dependencies)
+    if [[ -d "${RUST_SRC_DIR}/src/llvm-project/libunwind" ]]; then
+        log_info "Copying libunwind sources..."
+        mkdir -p "${rust_src_dest}/src/llvm-project"
+        cp -r "${RUST_SRC_DIR}/src/llvm-project/libunwind" "${rust_src_dest}/src/llvm-project/" || {
+            log_warn "Failed to copy libunwind sources (non-critical)"
+        }
+    fi
+    
+    # Create version file
+    local rust_version=$("${INSTALL_DIR}/bin/rustc" --version 2>/dev/null | cut -d' ' -f2 || echo "unknown")
+    echo "${rust_version}" > "${rust_src_dest}/version" 2>/dev/null || true
+    
+    # Register rust-src in components file
+    local components_file="${INSTALL_DIR}/lib/rustlib/components"
+    if [[ -f "${components_file}" ]] && ! grep -q "rust-src" "${components_file}"; then
+        echo "rust-src" >> "${components_file}"
+        log_info "Registered rust-src in components file"
+    fi
+    
+    log_info "rust-src component installed successfully at: ${rust_src_dest}"
+
     # Verify cargo was installed
     local cargo_path="${INSTALL_DIR}/bin/cargo"
     if [[ ! -f "${cargo_path}" ]]; then
@@ -468,6 +522,33 @@ verify_installation() {
         log_info "Target ${TARGET_NAME} is available!"
     else
         log_warn "Target ${TARGET_NAME} not found in target list"
+    fi
+
+    # Verify rust-src component installation
+    log_info "Verifying rust-src component..."
+    local rust_src_path="${INSTALL_DIR}/lib/rustlib/src/rust"
+    if [[ -d "${rust_src_path}" ]]; then
+        log_info "rust-src component installed at: ${rust_src_path}"
+        # Check for key library directories
+        if [[ -d "${rust_src_path}/library/std" ]] && [[ -d "${rust_src_path}/library/core" ]]; then
+            log_info "Standard library source code verified (std, core)"
+        else
+            log_warn "rust-src directory exists but library sources not found"
+        fi
+    else
+        log_error "rust-src component not found at expected location: ${rust_src_path}"
+        log_error "rust-analyzer will not be able to load standard library sources"
+        exit 1
+    fi
+
+    # Verify components file includes rust-src
+    local components_file="${INSTALL_DIR}/lib/rustlib/components"
+    if [[ -f "${components_file}" ]]; then
+        if grep -q "rust-src" "${components_file}"; then
+            log_info "rust-src component registered in components file"
+        else
+            log_warn "rust-src not found in components file, but directory exists"
+        fi
     fi
 
     log_info "Rust verification completed"
