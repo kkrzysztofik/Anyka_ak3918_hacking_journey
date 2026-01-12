@@ -63,36 +63,26 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
-            cross-compile/onvif-rust/target
-            cross-compile/streaming-lib/target
-          key: cargo-${{ runner.os }}-rust-${{ hashFiles('cross-compile/onvif-rust/Cargo.lock', 'cross-compile/streaming-lib/Cargo.lock') }}
+            cross-compile/target
+          key: cargo-${{ runner.os }}-rust-${{ hashFiles('cross-compile/Cargo.lock') }}
           restore-keys: |
             cargo-${{ runner.os }}-rust-
 
       - name: Check Formatting
-        working-directory: cross-compile/onvif-rust
+        working-directory: cross-compile
         run: |
           cargo fmt --check
 
       - name: Run Clippy
-        working-directory: cross-compile/onvif-rust
-        run: |
-          cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
-
-      - name: Check Formatting (streaming-lib)
-        working-directory: cross-compile/streaming-lib
-        run: |
-          cargo fmt --check
-
-      - name: Run Clippy (streaming-lib)
-        working-directory: cross-compile/streaming-lib
+        working-directory: cross-compile
         run: |
           cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
 
       - name: Run Tests with Coverage
-        working-directory: cross-compile/onvif-rust
+        working-directory: cross-compile
         run: |
           cargo tarpaulin \
+            --workspace \
             --target x86_64-unknown-linux-gnu \
             --all-features \
             --skip-clean \
@@ -129,84 +119,25 @@ jobs:
         with:
           name: rust-coverage
           path: |
-            cross-compile/onvif-rust/coverage/cobertura.xml
-            cross-compile/onvif-rust/coverage/lcov.info
-            cross-compile/onvif-rust/coverage/tarpaulin-report.html
-          retention-days: 7
-
-      - name: Run Tests with Coverage (streaming-lib)
-        working-directory: cross-compile/streaming-lib
-        run: |
-          cargo tarpaulin \
-            --target x86_64-unknown-linux-gnu \
-            --all-features \
-            --skip-clean \
-            --follow-exec \
-            --timeout 600 \
-            --implicit-test-threads \
-            --out Html \
-            --out Lcov \
-            --out Xml \
-            --output-dir coverage
-          echo ""
-          echo "=== Coverage Files Generated (streaming-lib) ==="
-          echo "Files in coverage directory:"
-          ls -lah coverage/ || echo "Coverage directory not found"
-          echo ""
-          if [ -f "coverage/cobertura.xml" ]; then
-            echo "✅ cobertura.xml found"
-            echo "   Size: $(wc -c < coverage/cobertura.xml) bytes"
-            echo "   Contains coverage data: $(grep -q 'coverage' coverage/cobertura.xml && echo 'Yes' || echo 'No')"
-          else
-            echo "❌ cobertura.xml NOT FOUND"
-            echo "   Searching for XML files:"
-            find coverage -name "*.xml" 2>/dev/null || echo "   No XML files found"
-          fi
-          if [ -f "coverage/lcov.info" ]; then
-            echo "✅ lcov.info found"
-            echo "   Size: $(wc -c < coverage/lcov.info) bytes"
-          else
-            echo "⚠️ lcov.info NOT FOUND"
-          fi
-
-      - name: Upload Coverage Artifacts (streaming-lib)
-        uses: actions/upload-artifact@v6
-        with:
-          name: streaming-lib-coverage
-          path: |
-            cross-compile/streaming-lib/coverage/cobertura.xml
-            cross-compile/streaming-lib/coverage/lcov.info
-            cross-compile/streaming-lib/coverage/tarpaulin-report.html
+            cross-compile/coverage/cobertura.xml
+            cross-compile/coverage/lcov.info
+            cross-compile/coverage/tarpaulin-report.html
           retention-days: 7
 
       - name: Generate Coverage Summary
         id: coverage-summary
         run: |
-          ONVIF_COVERAGE="0.00"
-          STREAMING_COVERAGE="0.00"
-          COMBINED_COVERAGE="0.00"
+          COVERAGE="0.00"
 
-          # Get onvif-rust coverage
-          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-            ONVIF_COVERAGE=$(python3 -c "import xml.etree.ElementTree as ET; tree = ET.parse('cross-compile/onvif-rust/coverage/cobertura.xml'); root = tree.getroot(); rate = float(root.get('line-rate', 0)) * 100; print(f'{rate:.2f}')" 2>/dev/null || echo "0.00")
-            echo "✅ ONVIF-Rust Coverage: ${ONVIF_COVERAGE}%"
+          # Get workspace coverage
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            COVERAGE=$(python3 -c "import xml.etree.ElementTree as ET; tree = ET.parse('cross-compile/coverage/cobertura.xml'); root = tree.getroot(); rate = float(root.get('line-rate', 0)) * 100; print(f'{rate:.2f}')" 2>/dev/null || echo "0.00")
+            echo "✅ Rust Workspace Coverage: ${COVERAGE}%"
           else
-            echo "⚠️ ONVIF-Rust coverage file not found"
+            echo "⚠️ Rust workspace coverage file not found"
           fi
 
-          # Get streaming-lib coverage
-          if [ -f "cross-compile/streaming-lib/coverage/cobertura.xml" ]; then
-            STREAMING_COVERAGE=$(python3 -c "import xml.etree.ElementTree as ET; tree = ET.parse('cross-compile/streaming-lib/coverage/cobertura.xml'); root = tree.getroot(); rate = float(root.get('line-rate', 0)) * 100; print(f'{rate:.2f}')" 2>/dev/null || echo "0.00")
-            echo "✅ Streaming-lib Coverage: ${STREAMING_COVERAGE}%"
-          else
-            echo "⚠️ Streaming-lib coverage file not found"
-          fi
-
-          # Calculate combined coverage average
-          COMBINED_COVERAGE=$(python3 -c "print(f'{(float('$ONVIF_COVERAGE') + float('$STREAMING_COVERAGE')) / 2:.2f}')" 2>/dev/null || echo "0.00")
-          echo "✅ Combined Rust Coverage: ${COMBINED_COVERAGE}%"
-
-          echo "coverage=$COMBINED_COVERAGE" >> $GITHUB_OUTPUT
+          echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
 
   # =============================================================================
   # WEBUI FRONTEND - Lint, Test & Coverage
@@ -454,22 +385,14 @@ jobs:
       - name: Merge Coverage Reports
         run: |
           # Create coverage directories
-          mkdir -p cross-compile/onvif-rust/coverage
-          mkdir -p cross-compile/streaming-lib/coverage
+          mkdir -p cross-compile/coverage
           mkdir -p cross-compile/www/coverage
 
-          # Copy Rust coverage if available
+          # Copy Rust workspace coverage if available
           if [ -f "coverage-artifacts/rust-coverage/cobertura.xml" ]; then
-            cp coverage-artifacts/rust-coverage/cobertura.xml cross-compile/onvif-rust/coverage/
-            cp coverage-artifacts/rust-coverage/lcov.info cross-compile/onvif-rust/coverage/ 2>/dev/null || true
-            echo "✅ ONVIF-Rust coverage copied"
-          fi
-
-          # Copy streaming-lib coverage if available
-          if [ -f "coverage-artifacts/streaming-lib-coverage/cobertura.xml" ]; then
-            cp coverage-artifacts/streaming-lib-coverage/cobertura.xml cross-compile/streaming-lib/coverage/
-            cp coverage-artifacts/streaming-lib-coverage/lcov.info cross-compile/streaming-lib/coverage/ 2>/dev/null || true
-            echo "✅ Streaming-lib coverage copied"
+            cp coverage-artifacts/rust-coverage/cobertura.xml cross-compile/coverage/
+            cp coverage-artifacts/rust-coverage/lcov.info cross-compile/coverage/ 2>/dev/null || true
+            echo "✅ Rust workspace coverage copied"
           fi
 
           # Copy WebUI coverage if available
@@ -497,8 +420,7 @@ jobs:
 
           # Verify coverage files exist
           echo "=== Coverage Verification ==="
-          echo "ONVIF-Rust Cobertura: $(ls -lh cross-compile/onvif-rust/coverage/cobertura.xml 2>/dev/null || echo 'Not found')"
-          echo "Streaming-lib Cobertura: $(ls -lh cross-compile/streaming-lib/coverage/cobertura.xml 2>/dev/null || echo 'Not found')"
+          echo "Rust Workspace Cobertura: $(ls -lh cross-compile/coverage/cobertura.xml 2>/dev/null || echo 'Not found')"
           echo "WebUI LCOV: $(ls -lh cross-compile/www/coverage/lcov.info 2>/dev/null || echo 'Not found')"
 
       - name: Verify Coverage Reports
@@ -527,20 +449,20 @@ jobs:
 
           echo "=== Coverage Files After Merge ==="
 
-          # Check Rust coverage with detailed info
-          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-            echo "✅ Found Rust coverage: cross-compile/onvif-rust/coverage/cobertura.xml"
-            ls -lh cross-compile/onvif-rust/coverage/
-            echo "File size: $(wc -c < cross-compile/onvif-rust/coverage/cobertura.xml) bytes"
+          # Check Rust workspace coverage with detailed info
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            echo "✅ Found Rust workspace coverage: cross-compile/coverage/cobertura.xml"
+            ls -lh cross-compile/coverage/
+            echo "File size: $(wc -c < cross-compile/coverage/cobertura.xml) bytes"
             echo "First 10 lines of cobertura.xml:"
-            head -10 cross-compile/onvif-rust/coverage/cobertura.xml || true
+            head -10 cross-compile/coverage/cobertura.xml || true
             echo "Checking for coverage data in XML:"
-            grep -c "class name" cross-compile/onvif-rust/coverage/cobertura.xml || echo "No class elements found"
-            grep -c "line number" cross-compile/onvif-rust/coverage/cobertura.xml || echo "No line number elements found"
+            grep -c "class name" cross-compile/coverage/cobertura.xml || echo "No class elements found"
+            grep -c "line number" cross-compile/coverage/cobertura.xml || echo "No line number elements found"
           else
-            echo "❌ Rust coverage NOT FOUND at: cross-compile/onvif-rust/coverage/cobertura.xml"
+            echo "❌ Rust workspace coverage NOT FOUND at: cross-compile/coverage/cobertura.xml"
             echo "Checking if directory exists:"
-            ls -la cross-compile/onvif-rust/coverage/ 2>/dev/null || echo "Directory does not exist"
+            ls -la cross-compile/coverage/ 2>/dev/null || echo "Directory does not exist"
           fi
           echo ""
 
@@ -570,11 +492,11 @@ jobs:
 
           # Check if files are readable
           echo "=== File Readability Check ==="
-          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-            if [ -r "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-              echo "✅ Rust coverage file is readable"
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            if [ -r "cross-compile/coverage/cobertura.xml" ]; then
+              echo "✅ Rust workspace coverage file is readable"
             else
-              echo "❌ Rust coverage file is NOT readable"
+              echo "❌ Rust workspace coverage file is NOT readable"
             fi
           fi
           if [ -f "cross-compile/www/coverage/lcov.info" ]; then
@@ -587,8 +509,8 @@ jobs:
           echo ""
 
           echo "=== Absolute Path Check ==="
-          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-            echo "Rust coverage absolute path: $(realpath cross-compile/onvif-rust/coverage/cobertura.xml)"
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            echo "Rust workspace coverage absolute path: $(realpath cross-compile/coverage/cobertura.xml)"
           fi
           if [ -f "cross-compile/www/coverage/lcov.info" ]; then
             echo "WebUI coverage absolute path: $(realpath cross-compile/www/coverage/lcov.info)"
@@ -601,17 +523,17 @@ jobs:
           echo ""
 
           # Check Rust coverage
-          RUST_COV_PATH="cross-compile/onvif-rust/coverage/cobertura.xml"
+          RUST_COV_PATH="cross-compile/coverage/cobertura.xml"
           if [ -f "$RUST_COV_PATH" ]; then
-            echo "✅ Rust coverage file exists: $RUST_COV_PATH"
+            echo "✅ Rust workspace coverage file exists: $RUST_COV_PATH"
             echo "   Size: $(stat -f%z "$RUST_COV_PATH" 2>/dev/null || stat -c%s "$RUST_COV_PATH" 2>/dev/null) bytes"
             echo "   Contains coverage data: $(grep -q 'line-rate' "$RUST_COV_PATH" && echo 'Yes' || echo 'No')"
             echo "   Sample of file paths in XML (first 5):"
             grep -o 'filename="[^"]*"' "$RUST_COV_PATH" | head -5 || echo "   No filename attributes found"
           else
-            echo "❌ Rust coverage file MISSING: $RUST_COV_PATH"
+            echo "❌ Rust workspace coverage file MISSING: $RUST_COV_PATH"
             echo "   Searching for any XML files in coverage directory:"
-            find cross-compile/onvif-rust/coverage -name "*.xml" 2>/dev/null || echo "   No XML files found"
+            find cross-compile/coverage -name "*.xml" 2>/dev/null || echo "   No XML files found"
           fi
           echo ""
 
@@ -714,11 +636,11 @@ jobs:
           echo "=== Post-Scan Coverage Analysis ==="
           echo "Checking if coverage files are still present after scan:"
           echo ""
-          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-            echo "✅ Rust coverage still exists after scan"
-            echo "   File size: $(wc -c < cross-compile/onvif-rust/coverage/cobertura.xml) bytes"
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            echo "✅ Rust workspace coverage still exists after scan"
+            echo "   File size: $(wc -c < cross-compile/coverage/cobertura.xml) bytes"
           else
-            echo "❌ Rust coverage missing after scan"
+            echo "❌ Rust workspace coverage missing after scan"
           fi
           if [ -f "cross-compile/www/coverage/lcov.info" ]; then
             echo "✅ WebUI coverage still exists after scan"
@@ -728,12 +650,12 @@ jobs:
           fi
           echo ""
           echo "=== Coverage File Content Sample ==="
-          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-            echo "Rust coverage XML header:"
-            head -5 cross-compile/onvif-rust/coverage/cobertura.xml || true
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            echo "Rust workspace coverage XML header:"
+            head -5 cross-compile/coverage/cobertura.xml || true
             echo ""
-            echo "Rust coverage summary (line-rate):"
-            grep -o 'line-rate="[^"]*"' cross-compile/onvif-rust/coverage/cobertura.xml | head -1 || echo "No line-rate found"
+            echo "Rust workspace coverage summary (line-rate):"
+            grep -o 'line-rate="[^"]*"' cross-compile/coverage/cobertura.xml | head -1 || echo "No line-rate found"
           fi
           if [ -f "cross-compile/www/coverage/lcov.info" ]; then
             echo "WebUI coverage LCOV header:"
