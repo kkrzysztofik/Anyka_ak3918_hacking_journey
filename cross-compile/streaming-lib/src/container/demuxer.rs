@@ -269,3 +269,290 @@ impl FlvDemuxer {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::container::muxer::FlvMuxer;
+    use bytes::BytesMut;
+
+    // ============================================
+    // FlvDemuxerAudioData Tests
+    // ============================================
+
+    #[test]
+    fn test_flv_demuxer_audio_data_new() {
+        let audio_data = FlvDemuxerAudioData::new();
+        assert!(!audio_data.has_data);
+        assert_eq!(audio_data.sound_format, 0);
+        assert_eq!(audio_data.dts, 0);
+        assert_eq!(audio_data.pts, 0);
+        assert!(audio_data.data.is_empty());
+    }
+
+    #[test]
+    fn test_flv_demuxer_audio_data_default() {
+        let audio_data = FlvDemuxerAudioData::default();
+        assert!(!audio_data.has_data);
+        assert_eq!(audio_data.sound_format, 0);
+    }
+
+    // ============================================
+    // FlvDemuxerVideoData Tests
+    // ============================================
+
+    #[test]
+    fn test_flv_demuxer_video_data_new() {
+        let video_data = FlvDemuxerVideoData::new();
+        assert_eq!(video_data.frame_type, 0);
+        assert_eq!(video_data.codec_id, 0);
+        assert_eq!(video_data.dts, 0);
+        assert_eq!(video_data.pts, 0);
+        assert!(video_data.data.is_empty());
+    }
+
+    #[test]
+    fn test_flv_demuxer_video_data_default() {
+        let video_data = FlvDemuxerVideoData::default();
+        assert_eq!(video_data.frame_type, 0);
+        assert_eq!(video_data.codec_id, 0);
+    }
+
+    // ============================================
+    // FlvDemuxer Construction Tests
+    // ============================================
+
+    #[test]
+    fn test_flv_demuxer_new() {
+        let data = BytesMut::new();
+        let demuxer = FlvDemuxer::new(data);
+        assert_eq!(demuxer.bytes_reader.len(), 0);
+    }
+
+    #[test]
+    fn test_flv_demuxer_new_with_data() {
+        let mut data = BytesMut::new();
+        data.extend_from_slice(b"FLV");
+        let demuxer = FlvDemuxer::new(data);
+        assert_eq!(demuxer.bytes_reader.len(), 3);
+    }
+
+    // ============================================
+    // FLV Header Reading Tests
+    // ============================================
+
+    #[test]
+    fn test_read_flv_header_audio_video() {
+        let mut muxer = FlvMuxer::new();
+        muxer.write_flv_header(true, true).unwrap();
+        let muxed_data = muxer.writer.get_current_bytes();
+
+        let mut demuxer = FlvDemuxer::new(muxed_data);
+        let result = demuxer.read_flv_header();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_read_flv_header_not_enough_bytes() {
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0x46, 0x4C, 0x56]); // Only "FLV", incomplete
+        let mut demuxer = FlvDemuxer::new(data);
+        let result = demuxer.read_flv_header();
+        assert!(result.is_err());
+    }
+
+    // ============================================
+    // FLV Tag Reading Tests
+    // ============================================
+
+    #[test]
+    fn test_read_flv_tag_audio() {
+        let mut muxer = FlvMuxer::new();
+        muxer.write_previous_tag_size(0).unwrap();
+
+        let mut body = BytesMut::new();
+        body.extend_from_slice(&[0xAF, 0x00, 0x10, 0x00]);
+        let body_size = body.len() as u32;
+
+        muxer.write_flv_tag_header(8, body_size, 0).unwrap();
+        muxer.write_flv_tag_body(body).unwrap();
+        muxer.write_previous_tag_size(11 + body_size).unwrap();
+
+        let muxed_data = muxer.writer.get_current_bytes();
+        let mut demuxer = FlvDemuxer::new(muxed_data);
+
+        let result = demuxer.read_flv_tag();
+        assert!(result.is_ok());
+        if let Some(FlvData::Audio { timestamp, data }) = result.unwrap() {
+            assert_eq!(timestamp, 0);
+            assert_eq!(data.len(), 4);
+        } else {
+            panic!("Expected audio tag");
+        }
+    }
+
+    #[test]
+    fn test_read_flv_tag_video() {
+        let mut muxer = FlvMuxer::new();
+        muxer.write_previous_tag_size(0).unwrap();
+
+        let mut body = BytesMut::new();
+        body.extend_from_slice(&[0x17, 0x00, 0x00, 0x00, 0x00]);
+        let body_size = body.len() as u32;
+
+        muxer.write_flv_tag_header(9, body_size, 1000).unwrap();
+        muxer.write_flv_tag_body(body).unwrap();
+        muxer.write_previous_tag_size(11 + body_size).unwrap();
+
+        let muxed_data = muxer.writer.get_current_bytes();
+        let mut demuxer = FlvDemuxer::new(muxed_data);
+
+        let result = demuxer.read_flv_tag();
+        assert!(result.is_ok());
+        if let Some(FlvData::Video { timestamp, data }) = result.unwrap() {
+            assert_eq!(timestamp, 1000);
+            assert_eq!(data.len(), 5);
+        } else {
+            panic!("Expected video tag");
+        }
+    }
+
+    #[test]
+    fn test_read_flv_tag_extended_timestamp() {
+        let mut muxer = FlvMuxer::new();
+        muxer.write_previous_tag_size(0).unwrap();
+
+        let mut body = BytesMut::new();
+        body.extend_from_slice(&[0x17, 0x00]);
+        let body_size = body.len() as u32;
+
+        // Timestamp > 24 bits
+        let timestamp = 0x01000000;
+        muxer.write_flv_tag_header(9, body_size, timestamp).unwrap();
+        muxer.write_flv_tag_body(body).unwrap();
+        muxer.write_previous_tag_size(11 + body_size).unwrap();
+
+        let muxed_data = muxer.writer.get_current_bytes();
+        let mut demuxer = FlvDemuxer::new(muxed_data);
+
+        let result = demuxer.read_flv_tag();
+        assert!(result.is_ok());
+        if let Some(FlvData::Video { timestamp: read_timestamp, .. }) = result.unwrap() {
+            assert_eq!(read_timestamp, timestamp);
+        } else {
+            panic!("Expected video tag");
+        }
+    }
+
+    #[test]
+    fn test_read_flv_tag_unknown_type() {
+        let mut muxer = FlvMuxer::new();
+        muxer.write_previous_tag_size(0).unwrap();
+
+        let mut body = BytesMut::new();
+        body.extend_from_slice(&[0x00]);
+        let body_size = body.len() as u32;
+
+        // Unknown tag type (not 8 or 9)
+        muxer.write_flv_tag_header(18, body_size, 0).unwrap();
+        muxer.write_flv_tag_body(body).unwrap();
+        muxer.write_previous_tag_size(11 + body_size).unwrap();
+
+        let muxed_data = muxer.writer.get_current_bytes();
+        let mut demuxer = FlvDemuxer::new(muxed_data);
+
+        let result = demuxer.read_flv_tag();
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none()); // Unknown tag type returns None
+    }
+
+    // ============================================
+    // Round-trip Tests (Mux -> Demux)
+    // ============================================
+
+    #[test]
+    fn test_mux_demux_roundtrip_audio() {
+        let mut muxer = FlvMuxer::new();
+        muxer.write_flv_header(true, false).unwrap();
+        muxer.write_previous_tag_size(0).unwrap();
+
+        let mut body = BytesMut::new();
+        body.extend_from_slice(&[0xAF, 0x00, 0x10, 0x00, 0x11, 0x22]);
+        let body_size = body.len() as u32;
+        let timestamp = 1000;
+
+        muxer.write_flv_tag_header(8, body_size, timestamp).unwrap();
+        muxer.write_flv_tag_body(body.clone()).unwrap();
+        muxer.write_previous_tag_size(11 + body_size).unwrap();
+
+        let muxed_data = muxer.writer.get_current_bytes();
+        let mut demuxer = FlvDemuxer::new(muxed_data);
+
+        demuxer.read_flv_header().unwrap();
+        let result = demuxer.read_flv_tag().unwrap();
+
+        if let Some(FlvData::Audio { timestamp: read_timestamp, data: read_data }) = result {
+            assert_eq!(read_timestamp, timestamp);
+            assert_eq!(&read_data[..], &body[..]);
+        } else {
+            panic!("Expected audio tag");
+        }
+    }
+
+    #[test]
+    fn test_mux_demux_roundtrip_video() {
+        let mut muxer = FlvMuxer::new();
+        muxer.write_flv_header(false, true).unwrap();
+        muxer.write_previous_tag_size(0).unwrap();
+
+        let mut body = BytesMut::new();
+        body.extend_from_slice(&[0x17, 0x00, 0x00, 0x00, 0x00, 0x11, 0x22, 0x33]);
+        let body_size = body.len() as u32;
+        let timestamp = 2000;
+
+        muxer.write_flv_tag_header(9, body_size, timestamp).unwrap();
+        muxer.write_flv_tag_body(body.clone()).unwrap();
+        muxer.write_previous_tag_size(11 + body_size).unwrap();
+
+        let muxed_data = muxer.writer.get_current_bytes();
+        let mut demuxer = FlvDemuxer::new(muxed_data);
+
+        demuxer.read_flv_header().unwrap();
+        let result = demuxer.read_flv_tag().unwrap();
+
+        if let Some(FlvData::Video { timestamp: read_timestamp, data: read_data }) = result {
+            assert_eq!(read_timestamp, timestamp);
+            assert_eq!(&read_data[..], &body[..]);
+        } else {
+            panic!("Expected video tag");
+        }
+    }
+
+    #[test]
+    fn test_timestamp_reconstruction_32_bit() {
+        let test_timestamps = vec![0x01000000, 0x7FFFFFFF, 0xFFFFFFFF];
+
+        for timestamp in test_timestamps {
+            let mut muxer = FlvMuxer::new();
+            muxer.write_previous_tag_size(0).unwrap();
+
+            let mut body = BytesMut::new();
+            body.extend_from_slice(&[0x17, 0x00]);
+            let body_size = body.len() as u32;
+
+            muxer.write_flv_tag_header(9, body_size, timestamp).unwrap();
+            muxer.write_flv_tag_body(body).unwrap();
+            muxer.write_previous_tag_size(11 + body_size).unwrap();
+
+            let muxed_data = muxer.writer.get_current_bytes();
+            let mut demuxer = FlvDemuxer::new(muxed_data);
+
+            let result = demuxer.read_flv_tag().unwrap();
+            if let Some(FlvData::Video { timestamp: read_timestamp, .. }) = result {
+                assert_eq!(read_timestamp, timestamp);
+            } else {
+                panic!("Expected video tag");
+            }
+        }
+    }
+}

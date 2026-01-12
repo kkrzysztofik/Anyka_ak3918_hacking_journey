@@ -165,3 +165,337 @@ impl TRtpReceiverForRtcp for RtpAacUnPacker {
         self.on_packet_for_rtcp_handler = Some(f);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bytesio::bytes_reader::BytesReader;
+    use crate::bytesio::bytes_writer::BytesWriter;
+    use crate::rtsp::rtp::utils::Marshal;
+    use crate::streamhub::define::FrameData;
+    use async_trait::async_trait;
+    use byteorder::BigEndian;
+    use bytes::BytesMut;
+    use mockall::mock;
+    use tokio::sync::Mutex;
+
+    use crate::bytesio::{NetType, TNetIO};
+    use crate::bytesio::bytesio_errors::BytesIOError;
+    use bytes::Bytes;
+    use std::time::Duration;
+
+    mock! {
+        NetIO {}
+
+        #[async_trait]
+        impl TNetIO for NetIO {
+            async fn write(&mut self, bytes: Bytes) -> Result<(), BytesIOError>;
+            async fn read(&mut self) -> Result<BytesMut, BytesIOError>;
+            async fn read_timeout(&mut self, duration: Duration) -> Result<BytesMut, BytesIOError>;
+            fn get_net_type(&self) -> NetType;
+        }
+    }
+
+    fn create_test_aac_data() -> BytesMut {
+        // Create simple AAC audio data
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0x12, 0x10, 0x56, 0xe5, 0x00, 0x00, 0x00, 0x00]);
+        data
+    }
+
+    #[tokio::test]
+    async fn test_rtp_aac_packer_new() {
+        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let packer = RtpAacPacker::new(97, 12345, 0, mock_io);
+        assert_eq!(packer.header.payload_type, 97);
+        assert_eq!(packer.header.ssrc, 12345);
+        assert_eq!(packer.header.seq_number, 0);
+        assert_eq!(packer.header.marker, 1);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_aac_packer_pack() {
+        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mut packer = RtpAacPacker::new(97, 12345, 0, mock_io);
+
+        let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let received_timestamp = std::sync::Arc::new(std::sync::Mutex::new(0u32));
+        let packet_count_clone = packet_count.clone();
+        let timestamp_clone = received_timestamp.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            *packet_count_clone.lock().unwrap() += 1;
+            *timestamp_clone.lock().unwrap() = packet.header.timestamp;
+            assert_eq!(packet.header.payload_type, 97);
+            assert_eq!(packet.header.marker, 1);
+            // Verify AU header structure
+            assert!(packet.payload.len() >= 4); // AU-headers-length (2) + AU header (2)
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let mut aac_data = create_test_aac_data();
+        let timestamp = 1000;
+        let result = packer.pack(&mut aac_data, timestamp).await;
+
+        assert!(result.is_ok());
+        assert_eq!(*packet_count.lock().unwrap(), 1);
+        assert_eq!(*received_timestamp.lock().unwrap(), timestamp);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_aac_packer_sequence_number_increment() {
+        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mut packer = RtpAacPacker::new(97, 12345, 100, mock_io);
+
+        let seq_numbers = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seq_numbers_clone = seq_numbers.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            seq_numbers_clone.lock().unwrap().push(packet.header.seq_number);
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let mut aac_data1 = create_test_aac_data();
+        let mut aac_data2 = create_test_aac_data();
+
+        let _ = packer.pack(&mut aac_data1, 1000).await;
+        let _ = packer.pack(&mut aac_data2, 2000).await;
+
+        let seqs = seq_numbers.lock().unwrap();
+        assert_eq!(seqs.len(), 2);
+        assert_eq!(seqs[0], 100);
+        assert_eq!(seqs[1], 101);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_aac_packer_au_header_encoding() {
+        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mut packer = RtpAacPacker::new(97, 12345, 0, mock_io);
+
+        let received_payload = std::sync::Arc::new(std::sync::Mutex::new(None::<BytesMut>));
+        let received_payload_clone = received_payload.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            *received_payload_clone.lock().unwrap() = Some(packet.payload.clone());
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let mut aac_data = create_test_aac_data();
+        let data_len = aac_data.len();
+        let _ = packer.pack(&mut aac_data, 1000).await;
+
+        let payload_opt = received_payload.lock().unwrap();
+        assert!(payload_opt.is_some());
+        let payload = payload_opt.as_ref().unwrap();
+
+        // Verify AU-headers-length (should be 16 bits = 2 bytes for one AU)
+        let au_headers_length = ((payload[0] as u16) << 8) | (payload[1] as u16);
+        assert_eq!(au_headers_length, 16); // 2 bytes * 8 bits = 16 bits
+
+        // Verify AU header encoding
+        let au_size_high = payload[2];
+        let au_size_low = payload[3];
+        let decoded_size = (((au_size_high as u16) << 8) | ((au_size_low as u16) & 0xF8)) / 8;
+        assert_eq!(decoded_size as usize, data_len);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_aac_unpacker_new() {
+        let unpacker = RtpAacUnPacker::new();
+        assert!(unpacker.on_frame_handler.is_none());
+        assert!(unpacker.on_packet_for_rtcp_handler.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_rtp_aac_unpacker_unpack_single_au() {
+        let mut unpacker = RtpAacUnPacker::new();
+        let frame_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let received_timestamp = std::sync::Arc::new(std::sync::Mutex::new(0u32));
+        let frame_count_clone = frame_count.clone();
+        let timestamp_clone = received_timestamp.clone();
+
+        unpacker.on_frame_handler(Box::new(move |frame| {
+            *frame_count_clone.lock().unwrap() += 1;
+            if let FrameData::Audio { timestamp, .. } = frame {
+                *timestamp_clone.lock().unwrap() = timestamp;
+            }
+            Ok(())
+        }));
+
+        // Create RTP packet with single AU
+        let mut packet = RtpPacket {
+            header: RtpHeader {
+            payload_type: 97,
+            seq_number: 1,
+            timestamp: 1000,
+            ssrc: 12345,
+                version: 2,
+                marker: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // AU-headers-length: 16 bits (2 bytes for one AU)
+        packet.payload.put_u16(16);
+
+        // AU header: size = 8 bytes
+        let au_size = 8;
+        packet.payload.put_u8((au_size >> 5) as u8);
+        packet.payload.put_u8(((au_size & 0x1F) << 3) as u8);
+
+        // AU data
+        packet.payload.extend_from_slice(&[0x12, 0x10, 0x56, 0xe5, 0x00, 0x00, 0x00, 0x00]);
+
+        let packet_bytes = packet.marshal().unwrap();
+        let mut reader = BytesReader::new(packet_bytes);
+
+        let result = unpacker.unpack(&mut reader).await;
+        assert!(result.is_ok());
+        assert_eq!(*frame_count.lock().unwrap(), 1);
+        assert_eq!(*received_timestamp.lock().unwrap(), 1000);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_aac_unpacker_unpack_multiple_aus() {
+        let mut unpacker = RtpAacUnPacker::new();
+        let frame_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let frame_count_clone = frame_count.clone();
+
+        unpacker.on_frame_handler(Box::new(move |_frame| {
+            *frame_count_clone.lock().unwrap() += 1;
+            Ok(())
+        }));
+
+        // Create RTP packet with multiple AUs
+        let mut packet = RtpPacket {
+            header: RtpHeader {
+            payload_type: 97,
+            seq_number: 1,
+            timestamp: 1000,
+            ssrc: 12345,
+                version: 2,
+                marker: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // AU-headers-length: 32 bits (2 bytes * 2 AUs = 4 bytes = 32 bits)
+        packet.payload.put_u16(32);
+
+        // First AU header: size = 4 bytes
+        let au1_size = 4;
+        packet.payload.put_u8((au1_size >> 5) as u8);
+        packet.payload.put_u8(((au1_size & 0x1F) << 3) as u8);
+
+        // Second AU header: size = 4 bytes
+        let au2_size = 4;
+        packet.payload.put_u8((au2_size >> 5) as u8);
+        packet.payload.put_u8(((au2_size & 0x1F) << 3) as u8);
+
+        // First AU data
+        packet.payload.extend_from_slice(&[0x12, 0x10, 0x56, 0xe5]);
+
+        // Second AU data
+        packet.payload.extend_from_slice(&[0x12, 0x10, 0x56, 0xe5]);
+
+        let packet_bytes = packet.marshal().unwrap();
+        let mut reader = BytesReader::new(packet_bytes);
+
+        let result = unpacker.unpack(&mut reader).await;
+        assert!(result.is_ok());
+        assert_eq!(*frame_count.lock().unwrap(), 2); // Should receive two frames
+    }
+
+    #[tokio::test]
+    async fn test_rtp_aac_unpacker_timestamp_calculation() {
+        let mut unpacker = RtpAacUnPacker::new();
+        let timestamps = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let timestamps_clone = timestamps.clone();
+
+        unpacker.on_frame_handler(Box::new(move |frame| {
+            if let FrameData::Audio { timestamp, .. } = frame {
+                timestamps_clone.lock().unwrap().push(timestamp);
+            }
+            Ok(())
+        }));
+
+        // Create RTP packet with multiple AUs
+        let mut packet = RtpPacket {
+            header: RtpHeader {
+            payload_type: 97,
+            seq_number: 1,
+            timestamp: 1000,
+            ssrc: 12345,
+                version: 2,
+                marker: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // AU-headers-length: 32 bits
+        packet.payload.put_u16(32);
+
+        // First AU
+        packet.payload.put_u8(0);
+        packet.payload.put_u8(0x18); // 3 bytes
+        packet.payload.extend_from_slice(&[0x12, 0x10, 0x56]);
+
+        // Second AU
+        packet.payload.put_u8(0);
+        packet.payload.put_u8(0x18); // 3 bytes
+        packet.payload.extend_from_slice(&[0x12, 0x10, 0x56]);
+
+        let packet_bytes = packet.marshal().unwrap();
+        let mut reader = BytesReader::new(packet_bytes);
+
+        let _ = unpacker.unpack(&mut reader).await;
+
+        // Verify timestamps: base + (index * 1024)
+        let ts = timestamps.lock().unwrap();
+        assert_eq!(ts.len(), 2);
+        assert_eq!(ts[0], 1000); // base timestamp
+        assert_eq!(ts[1], 2024); // base + 1 * 1024
+    }
+
+    #[tokio::test]
+    async fn test_rtp_aac_unpacker_au_headers_length_calculation() {
+        let mut unpacker = RtpAacUnPacker::new();
+        let frame_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let frame_count_clone = frame_count.clone();
+
+        unpacker.on_frame_handler(Box::new(move |_frame| {
+            *frame_count_clone.lock().unwrap() += 1;
+            Ok(())
+        }));
+
+        // Create RTP packet with AU-headers-length that requires ceiling division
+        let mut packet = RtpPacket {
+            header: RtpHeader {
+            payload_type: 97,
+            seq_number: 1,
+            timestamp: 1000,
+            ssrc: 12345,
+                version: 2,
+                marker: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // AU-headers-length: 17 bits (should round up to 24 bits = 3 bytes)
+        // This tests the div_ceil(8) calculation
+        packet.payload.put_u16(17);
+
+        // One AU header (2 bytes)
+        packet.payload.put_u8(0);
+        packet.payload.put_u8(0x18); // 3 bytes
+        packet.payload.extend_from_slice(&[0x12, 0x10, 0x56]);
+
+        let packet_bytes = packet.marshal().unwrap();
+        let mut reader = BytesReader::new(packet_bytes);
+
+        let result = unpacker.unpack(&mut reader).await;
+        assert!(result.is_ok());
+        assert_eq!(*frame_count.lock().unwrap(), 1);
+    }
+}

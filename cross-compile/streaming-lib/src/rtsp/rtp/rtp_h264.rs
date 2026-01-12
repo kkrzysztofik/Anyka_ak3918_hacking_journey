@@ -475,3 +475,359 @@ impl TRtpReceiverForRtcp for RtpH264UnPacker {
         self.on_packet_for_rtcp_handler = Some(f);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bytesio::bytes_reader::BytesReader;
+    use crate::bytesio::bytes_writer::BytesWriter;
+    use crate::rtsp::rtp::utils::Marshal;
+    use crate::streamhub::define::FrameData;
+    use async_trait::async_trait;
+    use byteorder::BigEndian;
+    use bytes::BytesMut;
+    use mockall::mock;
+    use tokio::sync::Mutex;
+
+    use crate::bytesio::{NetType, TNetIO};
+    use crate::bytesio::bytesio_errors::BytesIOError;
+    use bytes::Bytes;
+    use std::time::Duration;
+
+    mock! {
+        NetIO {}
+
+        #[async_trait]
+        impl TNetIO for NetIO {
+            async fn write(&mut self, bytes: Bytes) -> Result<(), BytesIOError>;
+            async fn read(&mut self) -> Result<BytesMut, BytesIOError>;
+            async fn read_timeout(&mut self, duration: Duration) -> Result<BytesMut, BytesIOError>;
+            fn get_net_type(&self) -> NetType;
+        }
+    }
+
+    fn create_test_nalu() -> BytesMut {
+        // Create a simple H.264 NAL unit (SPS type 7)
+        let mut nalu = BytesMut::new();
+        nalu.put_u8(0x67); // NAL header: type 7 (SPS), NRI 3
+        nalu.extend_from_slice(&[0x42, 0x00, 0x1e, 0x9a, 0x74, 0x90, 0x24, 0x00]);
+        nalu
+    }
+
+    fn create_large_nalu(size: usize) -> BytesMut {
+        let mut nalu = BytesMut::new();
+        nalu.put_u8(0x65); // NAL header: type 5 (IDR), NRI 3
+        nalu.extend_from_slice(&vec![0x00; size]);
+        nalu
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_packer_new() {
+        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
+        assert_eq!(packer.header.payload_type, 96);
+        assert_eq!(packer.header.ssrc, 12345);
+        assert_eq!(packer.header.seq_number, 0);
+        assert_eq!(packer.mtu, 1500);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_packer_pack_single_small_nalu() {
+        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
+
+        let mut packet_count = 0;
+        let packet_count_clone = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let packet_count_clone2 = packet_count_clone.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            let mut count = packet_count_clone2.lock().unwrap();
+            *count += 1;
+            assert_eq!(packet.header.marker, 1);
+            assert_eq!(packet.header.payload_type, 96);
+            assert!(!packet.payload.is_empty());
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let nalu = create_test_nalu();
+        let result = packer.pack_single(nalu).await;
+        assert!(result.is_ok());
+        assert_eq!(*packet_count_clone.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_packer_pack_fu_a_large_nalu() {
+        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
+
+        let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let first_packet_marker = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let last_packet_marker = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let packet_count_clone = packet_count.clone();
+        let first_marker_clone = first_packet_marker.clone();
+        let last_marker_clone = last_packet_marker.clone();
+
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            let mut count = packet_count_clone.lock().unwrap();
+            *count += 1;
+            if *count == 1 {
+                *first_marker_clone.lock().unwrap() = packet.header.marker;
+            }
+            *last_marker_clone.lock().unwrap() = packet.header.marker;
+            assert_eq!(packet.header.payload_type, 96);
+            // Verify FU-A structure
+            if packet.payload.len() > 0 {
+                let fu_indicator = packet.payload[0];
+                assert_eq!(fu_indicator & 0x1F, define::FU_A);
+            }
+            Box::pin(async move { Ok(()) })
+        }));
+
+        // Create a NAL unit larger than MTU
+        let nalu = create_large_nalu(2000);
+        let result = packer.pack_fu_a(nalu).await;
+        assert!(result.is_ok());
+        assert!(*packet_count.lock().unwrap() > 1); // Should be fragmented
+        assert_eq!(*first_packet_marker.lock().unwrap(), 0); // First packet should not have marker
+        assert_eq!(*last_packet_marker.lock().unwrap(), 1); // Last packet should have marker
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_packer_pack_nalu_small() {
+        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
+
+        let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let packet_count_clone = packet_count.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            *packet_count_clone.lock().unwrap() += 1;
+            assert_eq!(packet.header.marker, 1);
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let nalu = create_test_nalu();
+        let result = packer.pack_nalu(nalu).await;
+        assert!(result.is_ok());
+        assert_eq!(*packet_count.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_packer_pack_nalu_large() {
+        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
+
+        let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let packet_count_clone = packet_count.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            *packet_count_clone.lock().unwrap() += 1;
+            Box::pin(async move { Ok(()) })
+        }));
+
+        // Create a NAL unit larger than MTU
+        let nalu = create_large_nalu(2000);
+        let result = packer.pack_nalu(nalu).await;
+        assert!(result.is_ok());
+        assert!(*packet_count.lock().unwrap() > 1); // Should be fragmented
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_packer_sequence_number_increment() {
+        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mut packer = RtpH264Packer::new(96, 12345, 100, 1500, mock_io);
+
+        let seq_numbers = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seq_numbers_clone = seq_numbers.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            seq_numbers_clone.lock().unwrap().push(packet.header.seq_number);
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let nalu = create_large_nalu(2000);
+        let _ = packer.pack_fu_a(nalu).await;
+
+        // Verify sequence numbers increment
+        let seqs = seq_numbers.lock().unwrap();
+        assert!(seqs.len() > 1);
+        for i in 1..seqs.len() {
+            assert_eq!(seqs[i], seqs[i-1].wrapping_add(1));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_unpacker_new() {
+        let unpacker = RtpH264UnPacker::new();
+        assert_eq!(unpacker.sequence_number, 0);
+        assert_eq!(unpacker.timestamp, 0);
+        assert!(unpacker.fu_buffer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_unpacker_unpack_single() {
+        let mut unpacker = RtpH264UnPacker::new();
+        let frame_data = std::sync::Arc::new(std::sync::Mutex::new(None::<FrameData>));
+        let frame_data_clone = frame_data.clone();
+
+        unpacker.on_frame_handler(Box::new(move |frame| {
+            *frame_data_clone.lock().unwrap() = Some(frame);
+            Ok(())
+        }));
+
+        // Create a single NAL unit RTP packet
+        let mut packet = RtpPacket::new(RtpHeader {
+            payload_type: 96,
+            seq_number: 1,
+            timestamp: 1000,
+            ssrc: 12345,
+            version: 2,
+            ..Default::default()
+        });
+        let nalu = create_test_nalu();
+        packet.payload.put(nalu);
+
+        let packet_bytes = packet.marshal().unwrap();
+        let mut reader = BytesReader::new(packet_bytes);
+
+        let result = unpacker.unpack(&mut reader).await;
+        assert!(result.is_ok());
+        let frame_opt = frame_data.lock().unwrap();
+        assert!(frame_opt.is_some());
+        if let Some(FrameData::Video { timestamp, data }) = frame_opt.as_ref() {
+            assert_eq!(*timestamp, 1000);
+            // Verify Annex-B start code
+            assert_eq!(data[0..4], define::ANNEXB_NALU_START_CODE);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_unpacker_unpack_fu_a() {
+        let mut unpacker = RtpH264UnPacker::new();
+        let frame_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let frame_count_clone = frame_count.clone();
+
+        unpacker.on_frame_handler(Box::new(move |_frame| {
+            *frame_count_clone.lock().unwrap() += 1;
+            Ok(())
+        }));
+
+        // Create FU-A start packet
+        let mut start_packet = RtpPacket {
+            header: RtpHeader {
+            payload_type: 96,
+            seq_number: 1,
+            timestamp: 1000,
+            ssrc: 12345,
+                version: 2,
+                marker: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let nalu_header = 0x65; // IDR frame
+        start_packet.payload.put_u8((nalu_header & 0xE0) | define::FU_A);
+        start_packet.payload.put_u8((nalu_header & 0x1F) | define::FU_START);
+        start_packet.payload.extend_from_slice(&[0x01, 0x02, 0x03]);
+
+        let start_bytes = start_packet.marshal().unwrap();
+        let mut reader = BytesReader::new(start_bytes);
+        let _ = unpacker.unpack(&mut reader).await;
+
+        // Create FU-A end packet
+        let mut end_packet = RtpPacket {
+            header: RtpHeader {
+            payload_type: 96,
+            seq_number: 2,
+            timestamp: 1000,
+            ssrc: 12345,
+                version: 2,
+                marker: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        end_packet.payload.put_u8((nalu_header & 0xE0) | define::FU_A);
+        end_packet.payload.put_u8((nalu_header & 0x1F) | define::FU_END);
+        end_packet.payload.extend_from_slice(&[0x04, 0x05, 0x06]);
+
+        let end_bytes = end_packet.marshal().unwrap();
+        let mut reader = BytesReader::new(end_bytes);
+        let result = unpacker.unpack(&mut reader).await;
+
+        assert!(result.is_ok());
+        assert_eq!(*frame_count.lock().unwrap(), 1); // Should receive complete frame
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_unpacker_unpack_stap_a() {
+        let mut unpacker = RtpH264UnPacker::new();
+        let frame_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let frame_count_clone = frame_count.clone();
+
+        unpacker.on_frame_handler(Box::new(move |_frame| {
+            *frame_count_clone.lock().unwrap() += 1;
+            Ok(())
+        }));
+
+        // Create STAP-A packet with two NAL units
+        let mut packet = RtpPacket {
+            header: RtpHeader {
+                payload_type: 96,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
+                version: 2,
+                marker: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // STAP-A header
+        packet.payload.put_u8((0x67 & 0xE0) | define::STAP_A);
+
+        // First NAL unit
+        packet.payload.put_u16(4); // Size
+        packet.payload.extend_from_slice(&[0x67, 0x42, 0x00, 0x1e]);
+
+        // Second NAL unit
+        packet.payload.put_u16(2); // Size
+        packet.payload.extend_from_slice(&[0x68, 0xce]);
+
+        let packet_bytes = packet.marshal().unwrap();
+        let mut reader = BytesReader::new(packet_bytes);
+
+        let result = unpacker.unpack(&mut reader).await;
+        assert!(result.is_ok());
+        assert_eq!(*frame_count.lock().unwrap(), 2); // Should receive two frames
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_unpacker_timestamp_preservation() {
+        let mut unpacker = RtpH264UnPacker::new();
+        let received_timestamp = std::sync::Arc::new(std::sync::Mutex::new(0u32));
+        let received_timestamp_clone = received_timestamp.clone();
+
+        unpacker.on_frame_handler(Box::new(move |frame| {
+            if let FrameData::Video { timestamp, .. } = frame {
+                *received_timestamp_clone.lock().unwrap() = timestamp;
+            }
+            Ok(())
+        }));
+
+        let mut packet = RtpPacket::new(RtpHeader {
+            payload_type: 96,
+            seq_number: 1,
+            timestamp: 5000,
+            ssrc: 12345,
+            version: 2,
+            marker: 1,
+            ..Default::default()
+        });
+        let nalu = create_test_nalu();
+        packet.payload.put(nalu);
+
+        let packet_bytes = packet.marshal().unwrap();
+        let mut reader = BytesReader::new(packet_bytes);
+
+        let _ = unpacker.unpack(&mut reader).await;
+        assert_eq!(*received_timestamp.lock().unwrap(), 5000);
+    }
+}

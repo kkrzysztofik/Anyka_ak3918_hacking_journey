@@ -1100,3 +1100,372 @@ impl StreamsHub {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::streamhub::define::{
+        DataReceiver, DataSender, FrameData, FrameDataSender, Information, NotifyInfo,
+        PacketData, PacketDataSender, PublisherInfo, PublishType, PubDataType,
+        StatisticData, SubscriberInfo, SubscribeType, SubDataType,
+    };
+    use async_trait::async_trait;
+    use bytes::BytesMut;
+    use mockall::mock;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+
+    // Mock TStreamHandler for testing
+    mock! {
+        StreamHandler {}
+
+        #[async_trait]
+        impl TStreamHandler for StreamHandler {
+            async fn send_prior_data(
+                &self,
+                sender: DataSender,
+                sub_type: SubscribeType,
+            ) -> Result<(), StreamHubError>;
+            async fn get_statistic_data(&self) -> Option<StatisticsStream>;
+            async fn send_information(&self, sender: super::define::InformationSender);
+        }
+    }
+
+    fn create_test_stream_identifier() -> StreamIdentifier {
+        StreamIdentifier::Rtmp {
+            app_name: "live".to_string(),
+            stream_name: "test".to_string(),
+        }
+    }
+
+    fn create_test_publisher_info() -> PublisherInfo {
+        PublisherInfo {
+            id: Uuid::new(crate::streamhub::utils::RandomDigitCount::Four),
+            pub_type: PublishType::RtmpPush,
+            pub_data_type: PubDataType::Frame,
+            notify_info: NotifyInfo {
+                request_url: "rtmp://localhost/live/test".to_string(),
+                remote_addr: "127.0.0.1:1935".to_string(),
+            },
+        }
+    }
+
+    fn create_test_subscriber_info() -> SubscriberInfo {
+        SubscriberInfo {
+            id: Uuid::new(crate::streamhub::utils::RandomDigitCount::Four),
+            sub_type: SubscribeType::RtmpPull,
+            notify_info: NotifyInfo {
+                request_url: "rtmp://localhost/live/test".to_string(),
+                remote_addr: "127.0.0.1:1935".to_string(),
+            },
+            sub_data_type: SubDataType::Frame,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_new() {
+        let hub = StreamsHub::new(None);
+        assert_eq!(hub.streams.len(), 0);
+        assert_eq!(hub.un_pub_sub_events.len(), 0);
+        assert!(!hub.rtmp_push_enabled);
+        assert!(!hub.rtmp_pull_enabled);
+        assert!(!hub.rtmp_remuxer_enabled);
+        assert!(!hub.hls_enabled);
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_set_flags() {
+        let mut hub = StreamsHub::new(None);
+        hub.set_rtmp_push_enabled(true);
+        hub.set_rtmp_pull_enabled(true);
+        hub.set_rtmp_remuxer_enabled(true);
+        hub.set_hls_enabled(true);
+
+        assert!(hub.rtmp_push_enabled);
+        assert!(hub.rtmp_pull_enabled);
+        assert!(hub.rtmp_remuxer_enabled);
+        assert!(hub.hls_enabled);
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_publish_success() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+        let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+        let receiver = DataReceiver {
+            frame_receiver: Some(frame_receiver),
+            packet_receiver: None,
+        };
+
+        let mut mock_handler = MockStreamHandler::new();
+        mock_handler
+            .expect_send_prior_data()
+            .times(0)
+            .returning(|_, _| Ok(()));
+        let mock_handler = Arc::new(mock_handler);
+
+        let result = hub
+            .publish(identifier.clone(), receiver, mock_handler)
+            .await;
+
+        assert!(result.is_ok());
+        assert!(hub.streams.contains_key(&identifier));
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_publish_duplicate() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+        let (_frame_sender1, frame_receiver1) = mpsc::unbounded_channel();
+        let (_frame_sender2, frame_receiver2) = mpsc::unbounded_channel();
+
+        let receiver1 = DataReceiver {
+            frame_receiver: Some(frame_receiver1),
+            packet_receiver: None,
+        };
+        let receiver2 = DataReceiver {
+            frame_receiver: Some(frame_receiver2),
+            packet_receiver: None,
+        };
+
+        let mut mock_handler1 = MockStreamHandler::new();
+        mock_handler1
+            .expect_send_prior_data()
+            .times(0)
+            .returning(|_, _| Ok(()));
+        let mock_handler1 = Arc::new(mock_handler1);
+
+        let mut mock_handler2 = MockStreamHandler::new();
+        mock_handler2
+            .expect_send_prior_data()
+            .times(0)
+            .returning(|_, _| Ok(()));
+        let mock_handler2 = Arc::new(mock_handler2);
+
+        let result1 = hub
+            .publish(identifier.clone(), receiver1, mock_handler1)
+            .await;
+        assert!(result1.is_ok());
+
+        let result2 = hub
+            .publish(identifier.clone(), receiver2, mock_handler2)
+            .await;
+        assert!(result2.is_err());
+        match result2.unwrap_err().value {
+            StreamHubErrorValue::Exists => {}
+            _ => panic!("Expected Exists error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_subscribe_success() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+        let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+        let receiver = DataReceiver {
+            frame_receiver: Some(frame_receiver),
+            packet_receiver: None,
+        };
+
+        let mut mock_handler = MockStreamHandler::new();
+        mock_handler
+            .expect_send_prior_data()
+            .times(0)
+            .returning(|_, _| Ok(()));
+        let mock_handler = Arc::new(mock_handler);
+
+        // First publish
+        let _ = hub
+            .publish(identifier.clone(), receiver, mock_handler.clone())
+            .await;
+
+        // Then subscribe
+        let sub_info = create_test_subscriber_info();
+        let (sender, _) = mpsc::unbounded_channel();
+        let data_sender = DataSender::Frame { sender };
+
+        let result = hub
+            .subscribe(&identifier, sub_info.clone(), data_sender)
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_subscribe_no_stream() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+        let sub_info = create_test_subscriber_info();
+        let (sender, _) = mpsc::unbounded_channel();
+        let data_sender = DataSender::Frame { sender };
+
+        let result = hub.subscribe(&identifier, sub_info, data_sender).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err().value {
+            StreamHubErrorValue::NoAppOrStreamName => {}
+            _ => panic!("Expected NoAppOrStreamName error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_unsubscribe_success() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+        let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+        let receiver = DataReceiver {
+            frame_receiver: Some(frame_receiver),
+            packet_receiver: None,
+        };
+
+        let mut mock_handler = MockStreamHandler::new();
+        mock_handler
+            .expect_send_prior_data()
+            .times(0)
+            .returning(|_, _| Ok(()));
+        let mock_handler = Arc::new(mock_handler);
+
+        // Publish
+        let _ = hub
+            .publish(identifier.clone(), receiver, mock_handler.clone())
+            .await;
+
+        // Subscribe
+        let sub_info = create_test_subscriber_info();
+        let (sender, _) = mpsc::unbounded_channel();
+        let data_sender = DataSender::Frame { sender };
+        let _ = hub
+            .subscribe(&identifier, sub_info.clone(), data_sender)
+            .await;
+
+        // Unsubscribe
+        let result = hub.unsubscribe(&identifier, sub_info);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_unsubscribe_no_stream() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+        let sub_info = create_test_subscriber_info();
+
+        let result = hub.unsubscribe(&identifier, sub_info);
+        assert!(result.is_err());
+        match result.unwrap_err().value {
+            StreamHubErrorValue::NoAppName => {}
+            _ => panic!("Expected NoAppName error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_unpublish_success() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+        let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+        let receiver = DataReceiver {
+            frame_receiver: Some(frame_receiver),
+            packet_receiver: None,
+        };
+
+        let mut mock_handler = MockStreamHandler::new();
+        mock_handler
+            .expect_send_prior_data()
+            .times(0)
+            .returning(|_, _| Ok(()));
+        let mock_handler = Arc::new(mock_handler);
+
+        // Publish
+        let _ = hub
+            .publish(identifier.clone(), receiver, mock_handler.clone())
+            .await;
+        assert!(hub.streams.contains_key(&identifier));
+
+        // Unpublish
+        let result = hub.unpublish(&identifier);
+        assert!(result.is_ok());
+        assert!(!hub.streams.contains_key(&identifier));
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_unpublish_no_stream() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+
+        let result = hub.unpublish(&identifier);
+        assert!(result.is_err());
+        match result.unwrap_err().value {
+            StreamHubErrorValue::NoAppName => {}
+            _ => panic!("Expected NoAppName error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_request_success() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+        let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+        let receiver = DataReceiver {
+            frame_receiver: Some(frame_receiver),
+            packet_receiver: None,
+        };
+
+        let mut mock_handler = MockStreamHandler::new();
+        mock_handler
+            .expect_send_prior_data()
+            .times(0)
+            .returning(|_, _| Ok(()));
+        mock_handler
+            .expect_send_information()
+            .times(1)
+            .returning(|_| {});
+        let mock_handler = Arc::new(mock_handler);
+
+        // Publish
+        let _ = hub
+            .publish(identifier.clone(), receiver, mock_handler.clone())
+            .await;
+
+        // Request
+        let (info_sender, _) = mpsc::unbounded_channel();
+        let result = hub.request(&identifier, info_sender);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_streams_hub_request_no_stream() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+        let (info_sender, _) = mpsc::unbounded_channel();
+
+        let result = hub.request(&identifier, info_sender);
+        // Request doesn't fail if stream doesn't exist, it just does nothing
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_stream_data_transceiver_new() {
+        let (_data_sender, data_receiver) = mpsc::unbounded_channel();
+        let (_event_sender, event_receiver) = mpsc::unbounded_channel();
+        let identifier = create_test_stream_identifier();
+        let mock_handler = Arc::new(MockStreamHandler::new());
+
+        let receiver = DataReceiver {
+            frame_receiver: Some(data_receiver),
+            packet_receiver: None,
+        };
+
+        let transceiver = StreamDataTransceiver::new(
+            receiver,
+            event_receiver,
+            identifier.clone(),
+            mock_handler,
+        );
+
+        let statistic_sender = transceiver.get_statistics_data_sender();
+        assert!(statistic_sender.send(StatisticData::Publisher {
+            id: Uuid::new(crate::streamhub::utils::RandomDigitCount::Four),
+            remote_addr: "127.0.0.1:1935".to_string(),
+            start_time: chrono::Local::now(),
+        }).is_ok());
+    }
+}

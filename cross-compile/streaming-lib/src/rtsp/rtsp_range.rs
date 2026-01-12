@@ -97,7 +97,7 @@ impl Marshal for RtspRange {
 #[cfg(test)]
 mod tests {
 
-    use super::RtspRange;
+    use super::{RtspRange, RtspRangeType};
     use crate::rtsp::global_trait::Unmarshal;
 
     #[test]
@@ -107,13 +107,177 @@ mod tests {
         //a=range:npt=0-
         let parser = RtspRange::unmarshal("clock=20220520T064812Z-20230520T064816Z").unwrap();
 
-        println!(" parser: {parser:?}");
+        assert_eq!(parser.range_type, RtspRangeType::CLOCK);
+        assert!(parser.begin > 0);
+        assert!(parser.end.is_some());
 
         let parser1 = RtspRange::unmarshal("npt=now-").unwrap();
-
-        println!(" parser1: {:?}, {}", parser1, parser1.end.is_none());
+        assert_eq!(parser1.range_type, RtspRangeType::NPT);
+        assert_eq!(parser1.begin, 0);
+        assert!(parser1.end.is_none());
 
         let parser2 = RtspRange::unmarshal("npt=0-").unwrap();
-        println!(" parser2: {:?}, {}", parser2, parser2.end.is_none());
+        assert_eq!(parser2.range_type, RtspRangeType::NPT);
+        assert_eq!(parser2.begin, 0);
+        assert!(parser2.end.is_none());
+    }
+
+    // ============================================
+    // NPT Range Tests
+    // ============================================
+
+    #[test]
+    fn test_unmarshal_npt_now() {
+        let range = RtspRange::unmarshal("npt=now-").unwrap();
+        assert_eq!(range.range_type, RtspRangeType::NPT);
+        assert_eq!(range.begin, 0);
+        assert!(range.end.is_none());
+    }
+
+    #[test]
+    fn test_unmarshal_npt_zero() {
+        let range = RtspRange::unmarshal("npt=0-").unwrap();
+        assert_eq!(range.range_type, RtspRangeType::NPT);
+        assert_eq!(range.begin, 0);
+        assert!(range.end.is_none());
+    }
+
+    #[test]
+    fn test_unmarshal_npt_with_end() {
+        let range = RtspRange::unmarshal("npt=10.5-20.5").unwrap();
+        assert_eq!(range.range_type, RtspRangeType::NPT);
+        // begin = 10 seconds + 500ms = 10500ms
+        assert_eq!(range.begin, 10500);
+        assert_eq!(range.end, Some(20500));
+    }
+
+    #[test]
+    fn test_unmarshal_npt_hours_minutes_seconds() {
+        let range = RtspRange::unmarshal("npt=1:2:3.500-2:3:4.600").unwrap();
+        assert_eq!(range.range_type, RtspRangeType::NPT);
+        // 1:2:3.500 = 1*3600 + 2*60 + 3 = 3723 seconds + 500ms = 3723500ms
+        assert_eq!(range.begin, 3723500);
+        // 2:3:4.600 = 2*3600 + 3*60 + 4 = 7384 seconds + 600ms = 7384600ms
+        assert_eq!(range.end, Some(7384600));
+    }
+
+    #[test]
+    fn test_unmarshal_npt_seconds_only() {
+        let range = RtspRange::unmarshal("npt=123.456-456.789").unwrap();
+        assert_eq!(range.range_type, RtspRangeType::NPT);
+        // 123 seconds + 456ms = 123456ms
+        assert_eq!(range.begin, 123456);
+        // 456 seconds + 789ms = 456789ms
+        assert_eq!(range.end, Some(456789));
+    }
+
+    #[test]
+    fn test_unmarshal_npt_no_milliseconds() {
+        let range = RtspRange::unmarshal("npt=10-20").unwrap();
+        assert_eq!(range.range_type, RtspRangeType::NPT);
+        // 10 seconds = 10000ms
+        assert_eq!(range.begin, 10000);
+        assert_eq!(range.end, Some(20000));
+    }
+
+    // ============================================
+    // Clock Range Tests
+    // ============================================
+
+    #[test]
+    fn test_unmarshal_clock_with_end() {
+        let range = RtspRange::unmarshal("clock=20220520T064812Z-20230520T064816Z").unwrap();
+        assert_eq!(range.range_type, RtspRangeType::CLOCK);
+        assert!(range.begin > 0);
+        assert!(range.end.is_some());
+        assert!(range.end.unwrap() > range.begin);
+    }
+
+    #[test]
+    fn test_unmarshal_clock_no_end() {
+        let range = RtspRange::unmarshal("clock=20220520T064812Z-").unwrap();
+        assert_eq!(range.range_type, RtspRangeType::CLOCK);
+        assert!(range.begin > 0);
+        assert!(range.end.is_none());
+    }
+
+    #[test]
+    fn test_unmarshal_clock_single_timestamp() {
+        let range = RtspRange::unmarshal("clock=20220520T064812Z").unwrap();
+        assert_eq!(range.range_type, RtspRangeType::CLOCK);
+        assert!(range.begin > 0);
+        assert!(range.end.is_none());
+    }
+
+    // ============================================
+    // Error Handling Tests
+    // ============================================
+
+    #[test]
+    fn test_unmarshal_invalid_format() {
+        let range = RtspRange::unmarshal("invalid");
+        assert!(range.is_none());
+    }
+
+    #[test]
+    fn test_unmarshal_empty_string() {
+        let range = RtspRange::unmarshal("");
+        assert!(range.is_none());
+    }
+
+    #[test]
+    fn test_unmarshal_unknown_type() {
+        let range = RtspRange::unmarshal("unknown=value");
+        // Should return default range
+        assert!(range.is_some());
+    }
+
+    #[test]
+    fn test_unmarshal_malformed_clock() {
+        let range = RtspRange::unmarshal("clock=invalid-format");
+        // Should handle gracefully
+        assert!(range.is_some());
+    }
+
+    // ============================================
+    // Round-trip Tests
+    // ============================================
+
+    #[test]
+    fn test_rtsp_range_npt_roundtrip() {
+        let original_str = "npt=10.5-20.5";
+        let range = RtspRange::unmarshal(original_str).unwrap();
+        assert_eq!(range.range_type, RtspRangeType::NPT);
+        assert_eq!(range.begin, 10500);
+        assert_eq!(range.end, Some(20500));
+    }
+
+    #[test]
+    fn test_rtsp_range_clock_roundtrip() {
+        let original_str = "clock=20220520T064812Z-20230520T064816Z";
+        let range = RtspRange::unmarshal(original_str).unwrap();
+        assert_eq!(range.range_type, RtspRangeType::CLOCK);
+        assert!(range.begin > 0);
+        assert!(range.end.is_some());
+    }
+
+    // ============================================
+    // Edge Cases
+    // ============================================
+
+    #[test]
+    fn test_unmarshal_npt_very_large() {
+        let range = RtspRange::unmarshal("npt=999999:59:59.999-").unwrap();
+        assert_eq!(range.range_type, RtspRangeType::NPT);
+        // Should handle large values
+        assert!(range.begin >= 0);
+    }
+
+    #[test]
+    fn test_unmarshal_npt_zero_milliseconds() {
+        let range = RtspRange::unmarshal("npt=10.0-20.0").unwrap();
+        assert_eq!(range.range_type, RtspRangeType::NPT);
+        assert_eq!(range.begin, 10000);
+        assert_eq!(range.end, Some(20000));
     }
 }

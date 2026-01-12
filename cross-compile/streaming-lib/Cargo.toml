@@ -68,3 +68,8 @@ reqwest = { version = "0.13.1", features = ["native-tls-vendored"] }
 # - rtp (portable-atomic)
 # - tokio-metrics (portable-atomic)
 # - openssl-src (uClibc support)
+
+[dev-dependencies]
+mockall = "0.13"
+tokio-test = "0.4"
+proptest = "1.0"

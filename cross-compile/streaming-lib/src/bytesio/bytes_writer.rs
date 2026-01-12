@@ -233,7 +233,867 @@ impl AsyncBytesWriter {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use byteorder::{BigEndian, LittleEndian};
     use std::io::Write;
+
+    // ============================================
+    // BytesWriter Construction and Basic Operations
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_new() {
+        let writer = BytesWriter::new();
+        assert_eq!(writer.len(), 0);
+        assert!(writer.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_default() {
+        let writer = BytesWriter::default();
+        assert_eq!(writer.len(), 0);
+        assert!(writer.is_empty());
+    }
+
+    // ============================================
+    // write_u8 Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_write_u8_success() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0x42).unwrap();
+        assert_eq!(writer.len(), 1);
+        assert_eq!(writer.bytes[0], 0x42);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u8_boundary_values() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0x00).unwrap();
+        writer.write_u8(0x7F).unwrap();
+        writer.write_u8(0x80).unwrap();
+        writer.write_u8(0xFF).unwrap();
+
+        assert_eq!(writer.len(), 4);
+        assert_eq!(writer.bytes, vec![0x00, 0x7F, 0x80, 0xFF]);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u8_sequential() {
+        let mut writer = BytesWriter::new();
+        for i in 0..10u8 {
+            writer.write_u8(i).unwrap();
+        }
+        assert_eq!(writer.len(), 10);
+        assert_eq!(writer.bytes, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    }
+
+    // ============================================
+    // write_u8_at, or_u8_at, add_u8_at Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_write_u8_at_success() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0x00).unwrap();
+        writer.write_u8(0x00).unwrap();
+        writer.write_u8(0x00).unwrap();
+
+        writer.write_u8_at(1, 0x42).unwrap();
+        assert_eq!(writer.bytes, vec![0x00, 0x42, 0x00]);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u8_at_out_of_index() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0x00).unwrap();
+
+        let result = writer.write_u8_at(5, 0x42);
+        assert!(result.is_err());
+        match result.unwrap_err().value {
+            BytesWriteErrorValue::OutofIndex => {}
+            _ => panic!("Expected OutofIndex error"),
+        }
+    }
+
+    #[test]
+    fn test_bytes_writer_or_u8_at_success() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0b00001111).unwrap();
+
+        writer.or_u8_at(0, 0b11110000).unwrap();
+        assert_eq!(writer.bytes[0], 0b11111111);
+    }
+
+    #[test]
+    fn test_bytes_writer_or_u8_at_out_of_index() {
+        let mut writer = BytesWriter::new();
+        let result = writer.or_u8_at(0, 0x42);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bytes_writer_add_u8_at_success() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(10).unwrap();
+
+        writer.add_u8_at(0, 5).unwrap();
+        assert_eq!(writer.bytes[0], 15);
+    }
+
+    #[test]
+    fn test_bytes_writer_add_u8_at_out_of_index() {
+        let mut writer = BytesWriter::new();
+        let result = writer.add_u8_at(0, 5);
+        assert!(result.is_err());
+    }
+
+    // ============================================
+    // get Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_get_success() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0x42).unwrap();
+        writer.write_u8(0x43).unwrap();
+
+        assert_eq!(writer.get(0), Some(&0x42));
+        assert_eq!(writer.get(1), Some(&0x43));
+    }
+
+    #[test]
+    fn test_bytes_writer_get_out_of_range() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0x42).unwrap();
+
+        assert_eq!(writer.get(1), None);
+        assert_eq!(writer.get(100), None);
+    }
+
+    // ============================================
+    // write_u16 Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_write_u16_big_endian() {
+        let mut writer = BytesWriter::new();
+        writer.write_u16::<BigEndian>(0x0102).unwrap();
+
+        assert_eq!(writer.len(), 2);
+        assert_eq!(writer.bytes, vec![0x01, 0x02]);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u16_little_endian() {
+        let mut writer = BytesWriter::new();
+        writer.write_u16::<LittleEndian>(0x0102).unwrap();
+
+        assert_eq!(writer.len(), 2);
+        assert_eq!(writer.bytes, vec![0x02, 0x01]);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u16_boundary_values() {
+        // Min value
+        let mut writer = BytesWriter::new();
+        writer.write_u16::<BigEndian>(0).unwrap();
+        assert_eq!(writer.bytes, vec![0x00, 0x00]);
+
+        // Max value
+        let mut writer = BytesWriter::new();
+        writer.write_u16::<BigEndian>(0xFFFF).unwrap();
+        assert_eq!(writer.bytes, vec![0xFF, 0xFF]);
+    }
+
+    // ============================================
+    // write_u24 Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_write_u24_big_endian() {
+        let mut writer = BytesWriter::new();
+        writer.write_u24::<BigEndian>(0x010203).unwrap();
+
+        assert_eq!(writer.len(), 3);
+        assert_eq!(writer.bytes, vec![0x01, 0x02, 0x03]);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u24_little_endian() {
+        let mut writer = BytesWriter::new();
+        writer.write_u24::<LittleEndian>(0x010203).unwrap();
+
+        assert_eq!(writer.len(), 3);
+        assert_eq!(writer.bytes, vec![0x03, 0x02, 0x01]);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u24_max_value() {
+        let mut writer = BytesWriter::new();
+        writer.write_u24::<BigEndian>(0xFFFFFF).unwrap();
+        assert_eq!(writer.bytes, vec![0xFF, 0xFF, 0xFF]);
+    }
+
+    // ============================================
+    // write_u32 Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_write_u32_big_endian() {
+        let mut writer = BytesWriter::new();
+        writer.write_u32::<BigEndian>(0x01020304).unwrap();
+
+        assert_eq!(writer.len(), 4);
+        assert_eq!(writer.bytes, vec![0x01, 0x02, 0x03, 0x04]);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u32_little_endian() {
+        let mut writer = BytesWriter::new();
+        writer.write_u32::<LittleEndian>(0x01020304).unwrap();
+
+        assert_eq!(writer.len(), 4);
+        assert_eq!(writer.bytes, vec![0x04, 0x03, 0x02, 0x01]);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u32_boundary_values() {
+        // Min
+        let mut writer = BytesWriter::new();
+        writer.write_u32::<BigEndian>(0).unwrap();
+        assert_eq!(writer.bytes, vec![0x00, 0x00, 0x00, 0x00]);
+
+        // Max
+        let mut writer = BytesWriter::new();
+        writer.write_u32::<BigEndian>(u32::MAX).unwrap();
+        assert_eq!(writer.bytes, vec![0xFF, 0xFF, 0xFF, 0xFF]);
+    }
+
+    // ============================================
+    // write_u64 Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_write_u64_big_endian() {
+        let mut writer = BytesWriter::new();
+        writer.write_u64::<BigEndian>(0x0102030405060708).unwrap();
+
+        assert_eq!(writer.len(), 8);
+        assert_eq!(
+            writer.bytes,
+            vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+        );
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u64_little_endian() {
+        let mut writer = BytesWriter::new();
+        writer.write_u64::<LittleEndian>(0x0102030405060708).unwrap();
+
+        assert_eq!(writer.len(), 8);
+        assert_eq!(
+            writer.bytes,
+            vec![0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+        );
+    }
+
+    // ============================================
+    // write_f64 Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_write_f64_big_endian() {
+        let mut writer = BytesWriter::new();
+        writer.write_f64::<BigEndian>(1.0).unwrap();
+
+        assert_eq!(writer.len(), 8);
+        // IEEE 754 representation of 1.0
+        assert_eq!(
+            writer.bytes,
+            vec![0x3F, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        );
+    }
+
+    #[test]
+    fn test_bytes_writer_write_f64_pi() {
+        let mut writer = BytesWriter::new();
+        let pi: f64 = std::f64::consts::PI;
+        writer.write_f64::<BigEndian>(pi).unwrap();
+
+        assert_eq!(writer.len(), 8);
+        // Verify by reading back
+        let mut expected = [0u8; 8];
+        byteorder::BigEndian::write_f64(&mut expected, pi);
+        assert_eq!(writer.bytes, expected.to_vec());
+    }
+
+    // ============================================
+    // write (byte slice) Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_write_slice() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2, 3, 4, 5]).unwrap();
+
+        assert_eq!(writer.len(), 5);
+        assert_eq!(writer.bytes, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_empty_slice() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[]).unwrap();
+
+        assert_eq!(writer.len(), 0);
+        assert!(writer.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_write_multiple_slices() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2]).unwrap();
+        writer.write(&[3, 4]).unwrap();
+        writer.write(&[5]).unwrap();
+
+        assert_eq!(writer.len(), 5);
+        assert_eq!(writer.bytes, vec![1, 2, 3, 4, 5]);
+    }
+
+    // ============================================
+    // prepend Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_prepend() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[3, 4, 5]).unwrap();
+        writer.prepend(&[1, 2]).unwrap();
+
+        assert_eq!(writer.len(), 5);
+        assert_eq!(writer.bytes, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_bytes_writer_prepend_to_empty() {
+        let mut writer = BytesWriter::new();
+        writer.prepend(&[1, 2, 3]).unwrap();
+
+        assert_eq!(writer.len(), 3);
+        assert_eq!(writer.bytes, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_bytes_writer_prepend_empty() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2, 3]).unwrap();
+        writer.prepend(&[]).unwrap();
+
+        assert_eq!(writer.len(), 3);
+        assert_eq!(writer.bytes, vec![1, 2, 3]);
+    }
+
+    // ============================================
+    // append Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_append() {
+        let mut writer1 = BytesWriter::new();
+        writer1.write(&[1, 2, 3]).unwrap();
+
+        let mut writer2 = BytesWriter::new();
+        writer2.write(&[4, 5, 6]).unwrap();
+
+        writer1.append(&mut writer2);
+
+        assert_eq!(writer1.len(), 6);
+        assert_eq!(writer1.bytes, vec![1, 2, 3, 4, 5, 6]);
+        assert!(writer2.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_append_empty() {
+        let mut writer1 = BytesWriter::new();
+        writer1.write(&[1, 2, 3]).unwrap();
+
+        let mut writer2 = BytesWriter::new();
+
+        writer1.append(&mut writer2);
+
+        assert_eq!(writer1.len(), 3);
+        assert_eq!(writer1.bytes, vec![1, 2, 3]);
+    }
+
+    // ============================================
+    // write_random_bytes Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_write_random_bytes_length() {
+        let mut writer = BytesWriter::new();
+        writer.write_random_bytes(10).unwrap();
+
+        assert_eq!(writer.len(), 10);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_random_bytes_zero() {
+        let mut writer = BytesWriter::new();
+        writer.write_random_bytes(0).unwrap();
+
+        assert_eq!(writer.len(), 0);
+    }
+
+    // ============================================
+    // extract_current_bytes and get_current_bytes Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_extract_current_bytes() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2, 3, 4, 5]).unwrap();
+
+        let bytes = writer.extract_current_bytes();
+
+        assert_eq!(&bytes[..], &[1, 2, 3, 4, 5]);
+        assert!(writer.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_get_current_bytes() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2, 3, 4, 5]).unwrap();
+
+        let bytes = writer.get_current_bytes();
+
+        assert_eq!(&bytes[..], &[1, 2, 3, 4, 5]);
+        // Original data should still be there
+        assert_eq!(writer.len(), 5);
+    }
+
+    // ============================================
+    // clear Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_clear() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2, 3, 4, 5]).unwrap();
+        assert_eq!(writer.len(), 5);
+
+        writer.clear();
+
+        assert!(writer.is_empty());
+        assert_eq!(writer.len(), 0);
+    }
+
+    // ============================================
+    // pop_bytes Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_pop_bytes() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2, 3, 4, 5]).unwrap();
+
+        writer.pop_bytes(2);
+
+        assert_eq!(writer.len(), 3);
+        assert_eq!(writer.bytes, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_bytes_writer_pop_bytes_all() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2, 3]).unwrap();
+
+        writer.pop_bytes(3);
+
+        assert!(writer.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_pop_bytes_zero() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2, 3]).unwrap();
+
+        writer.pop_bytes(0);
+
+        assert_eq!(writer.len(), 3);
+    }
+
+    // ============================================
+    // Sequential Write Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_sequential_writes() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0x01).unwrap();
+        writer.write_u16::<BigEndian>(0x0203).unwrap();
+        writer.write_u32::<BigEndian>(0x04050607).unwrap();
+        writer.write_u8(0x08).unwrap();
+
+        assert_eq!(writer.len(), 8);
+        assert_eq!(
+            writer.bytes,
+            vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+        );
+    }
+
+    // ============================================
+    // Roundtrip Tests (Writer -> Reader)
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_reader_u16_roundtrip() {
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        let test_values: [u16; 5] = [0, 1, 32767, 65534, 65535];
+
+        for &val in &test_values {
+            let mut writer = BytesWriter::new();
+            writer.write_u16::<BigEndian>(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+
+            assert_eq!(reader.read_u16::<BigEndian>().unwrap(), val);
+        }
+    }
+
+    #[test]
+    fn test_bytes_writer_reader_u32_roundtrip() {
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        let test_values: [u32; 5] = [0, 1, 65535, 2147483647, u32::MAX];
+
+        for &val in &test_values {
+            let mut writer = BytesWriter::new();
+            writer.write_u32::<BigEndian>(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+
+            assert_eq!(reader.read_u32::<BigEndian>().unwrap(), val);
+        }
+    }
+
+    #[test]
+    fn test_bytes_writer_reader_u64_roundtrip() {
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        let test_values: [u64; 4] = [0, 1, u32::MAX as u64 + 1, u64::MAX];
+
+        for &val in &test_values {
+            let mut writer = BytesWriter::new();
+            writer.write_u64::<BigEndian>(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+
+            assert_eq!(reader.read_u64::<BigEndian>().unwrap(), val);
+        }
+    }
+
+    #[test]
+    fn test_bytes_writer_reader_f64_roundtrip() {
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        let test_values: [f64; 5] = [0.0, 1.0, -1.0, std::f64::consts::PI, f64::MAX];
+
+        for &val in &test_values {
+            let mut writer = BytesWriter::new();
+            writer.write_f64::<BigEndian>(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+
+            let read_val = reader.read_f64::<BigEndian>().unwrap();
+            assert!((read_val - val).abs() < f64::EPSILON || (val.is_nan() && read_val.is_nan()));
+        }
+    }
+
+    // ============================================
+    // Property-based Tests (proptest)
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_u8_property_roundtrip() {
+        use proptest::prelude::*;
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        proptest!(|(val in 0u8..=255u8)| {
+            let mut writer = BytesWriter::new();
+            writer.write_u8(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+            assert_eq!(reader.read_u8().unwrap(), val);
+        });
+    }
+
+    #[test]
+    fn test_bytes_writer_u16_property_roundtrip_big_endian() {
+        use proptest::prelude::*;
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        proptest!(|(val in 0u16..=65535u16)| {
+            let mut writer = BytesWriter::new();
+            writer.write_u16::<BigEndian>(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+            assert_eq!(reader.read_u16::<BigEndian>().unwrap(), val);
+        });
+    }
+
+    #[test]
+    fn test_bytes_writer_u16_property_roundtrip_little_endian() {
+        use proptest::prelude::*;
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        proptest!(|(val in 0u16..=65535u16)| {
+            let mut writer = BytesWriter::new();
+            writer.write_u16::<LittleEndian>(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+            assert_eq!(reader.read_u16::<LittleEndian>().unwrap(), val);
+        });
+    }
+
+    #[test]
+    fn test_bytes_writer_u24_property_roundtrip_big_endian() {
+        use proptest::prelude::*;
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        proptest!(|(val in 0u32..=16777215u32)| {
+            let mut writer = BytesWriter::new();
+            writer.write_u24::<BigEndian>(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+            assert_eq!(reader.read_u24::<BigEndian>().unwrap(), val);
+        });
+    }
+
+    #[test]
+    fn test_bytes_writer_u32_property_roundtrip_big_endian() {
+        use proptest::prelude::*;
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        proptest!(|(val in 0u32..=u32::MAX)| {
+            let mut writer = BytesWriter::new();
+            writer.write_u32::<BigEndian>(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+            assert_eq!(reader.read_u32::<BigEndian>().unwrap(), val);
+        });
+    }
+
+    #[test]
+    fn test_bytes_writer_u32_property_roundtrip_little_endian() {
+        use proptest::prelude::*;
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        proptest!(|(val in 0u32..=u32::MAX)| {
+            let mut writer = BytesWriter::new();
+            writer.write_u32::<LittleEndian>(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+            assert_eq!(reader.read_u32::<LittleEndian>().unwrap(), val);
+        });
+    }
+
+    #[test]
+    fn test_bytes_writer_u64_property_roundtrip_big_endian() {
+        use proptest::prelude::*;
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        proptest!(|(val in 0u64..=u64::MAX)| {
+            let mut writer = BytesWriter::new();
+            writer.write_u64::<BigEndian>(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+            assert_eq!(reader.read_u64::<BigEndian>().unwrap(), val);
+        });
+    }
+
+    #[test]
+    fn test_bytes_writer_f64_property_roundtrip_big_endian() {
+        use proptest::prelude::*;
+        use super::super::bytes_reader::BytesReader;
+        use bytes::BytesMut;
+
+        proptest!(|(val in proptest::num::f64::NORMAL)| {
+            let mut writer = BytesWriter::new();
+            writer.write_f64::<BigEndian>(val).unwrap();
+
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&writer.bytes);
+            let mut reader = BytesReader::new(buf);
+            let read_val = reader.read_f64::<BigEndian>().unwrap();
+            if val.is_nan() {
+                assert!(read_val.is_nan());
+            } else {
+                assert!((read_val - val).abs() < f64::EPSILON * 100.0);
+            }
+        });
+    }
+
+    // ============================================
+    // Additional Error Condition Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_write_u8_at_exact_boundary() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0x00).unwrap();
+        writer.write_u8(0x00).unwrap();
+
+        // Valid: at index 1
+        writer.write_u8_at(1, 0x42).unwrap();
+        assert_eq!(writer.bytes[1], 0x42);
+
+        // Invalid: at index 2 (beyond length)
+        let result = writer.write_u8_at(2, 0x42);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bytes_writer_or_u8_at_bit_operations() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0b00001111).unwrap();
+
+        // OR with 0b11110000 should result in 0b11111111
+        writer.or_u8_at(0, 0b11110000).unwrap();
+        assert_eq!(writer.bytes[0], 0b11111111);
+
+        // OR with 0b00000001 should keep it as 0b11111111
+        writer.or_u8_at(0, 0b00000001).unwrap();
+        assert_eq!(writer.bytes[0], 0b11111111);
+    }
+
+    #[test]
+    fn test_bytes_writer_add_u8_at_overflow() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(250).unwrap();
+
+        // Add 10 should wrap around (250 + 10 = 260 -> 4)
+        writer.add_u8_at(0, 10).unwrap();
+        assert_eq!(writer.bytes[0], 4);
+    }
+
+    #[test]
+    fn test_bytes_writer_prepend_large_data() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[3, 4, 5, 6, 7, 8, 9, 10]).unwrap();
+        writer.prepend(&[1, 2]).unwrap();
+
+        assert_eq!(writer.bytes, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    }
+
+    #[test]
+    fn test_bytes_writer_append_multiple_times() {
+        let mut writer1 = BytesWriter::new();
+        writer1.write(&[1, 2]).unwrap();
+
+        let mut writer2 = BytesWriter::new();
+        writer2.write(&[3, 4]).unwrap();
+
+        let mut writer3 = BytesWriter::new();
+        writer3.write(&[5, 6]).unwrap();
+
+        writer1.append(&mut writer2);
+        writer1.append(&mut writer3);
+
+        assert_eq!(writer1.bytes, vec![1, 2, 3, 4, 5, 6]);
+        assert!(writer2.is_empty());
+        assert!(writer3.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_pop_bytes_edge_cases() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2, 3]).unwrap();
+
+        // Pop more than available (should panic or handle gracefully)
+        // In current implementation, it just pops what's available
+        writer.pop_bytes(5);
+        assert!(writer.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_extract_vs_get_current_bytes() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2, 3, 4, 5]).unwrap();
+
+        // get_current_bytes should not consume
+        let bytes1 = writer.get_current_bytes();
+        assert_eq!(&bytes1[..], &[1, 2, 3, 4, 5]);
+        assert_eq!(writer.len(), 5);
+
+        // extract_current_bytes should consume
+        let bytes2 = writer.extract_current_bytes();
+        assert_eq!(&bytes2[..], &[1, 2, 3, 4, 5]);
+        assert!(writer.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_sequential_mixed_writes() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0x01).unwrap();
+        writer.write_u16::<BigEndian>(0x0203).unwrap();
+        writer.write_u24::<BigEndian>(0x040506).unwrap();
+        writer.write_u32::<BigEndian>(0x0708090A).unwrap();
+        writer.write_u64::<BigEndian>(0x0B0C0D0E0F101112).unwrap();
+        writer.write_u8(0x19).unwrap();
+
+        assert_eq!(
+            writer.bytes,
+            vec![
+                0x01,                    // u8
+                0x02, 0x03,              // u16
+                0x04, 0x05, 0x06,       // u24
+                0x07, 0x08, 0x09, 0x0A, // u32
+                0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, // u64
+                0x19,                    // u8
+            ]
+        );
+    }
+
+    // ============================================
+    // Original Tests (Preserved)
+    // ============================================
 
     #[test]
     fn test_write_vec() {
@@ -297,7 +1157,6 @@ mod tests {
 
     #[test]
     fn test_bit_opertion3() {
-        //let flags = 0xC0;
         let pts: i64 = 1627702096;
 
         let b12 = ((pts & 0x7fff) << 1) | 1; /* PTS 7-14 */

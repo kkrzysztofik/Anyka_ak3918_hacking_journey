@@ -7,7 +7,7 @@ use bytes::{BufMut, BytesMut};
 #[derive(Debug, Clone, Default)]
 pub struct H264Fmtp {
     pub payload_type: u16,
-    packetization_mode: u8,
+    pub packetization_mode: u8,
     profile_level_id: BytesMut,
     pub sps: BytesMut,
     pub pps: BytesMut,
@@ -344,5 +344,358 @@ mod tests {
         let b = BytesMut::from(&ss[..]);
 
         rtsp_utils::print("test", b);
+    }
+
+    // H.264 FMTP comprehensive tests
+    #[test]
+    fn test_h264_fmtp_packetization_mode() {
+        let fmtp = H264Fmtp::unmarshal("96 packetization-mode=0").unwrap();
+        assert_eq!(fmtp.payload_type, 96);
+        assert_eq!(fmtp.packetization_mode, 0);
+
+        let fmtp = H264Fmtp::unmarshal("96 packetization-mode=1").unwrap();
+        assert_eq!(fmtp.packetization_mode, 1);
+
+        let fmtp = H264Fmtp::unmarshal("96 packetization-mode=2").unwrap();
+        assert_eq!(fmtp.packetization_mode, 2);
+    }
+
+    #[test]
+    fn test_h264_fmtp_profile_level_id() {
+        let fmtp = H264Fmtp::unmarshal("96 profile-level-id=42001e").unwrap();
+        assert_eq!(fmtp.profile_level_id, "42001e");
+
+        let fmtp = H264Fmtp::unmarshal("96 profile-level-id=640016").unwrap();
+        assert_eq!(fmtp.profile_level_id, "640016");
+    }
+
+    #[test]
+    fn test_h264_fmtp_sprop_parameter_sets() {
+        let fmtp = H264Fmtp::unmarshal(
+            "96 sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA",
+        )
+        .unwrap();
+        assert_eq!(fmtp.payload_type, 96);
+        // Verify SPS and PPS are decoded correctly
+        assert!(!fmtp.sps.is_empty());
+        assert!(!fmtp.pps.is_empty());
+    }
+
+    #[test]
+    fn test_h264_fmtp_all_parameters() {
+        let fmtp = H264Fmtp::unmarshal("96 packetization-mode=1; sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA; profile-level-id=640016").unwrap();
+        assert_eq!(fmtp.payload_type, 96);
+        assert_eq!(fmtp.packetization_mode, 1);
+        assert_eq!(fmtp.profile_level_id, "640016");
+        assert!(!fmtp.sps.is_empty());
+        assert!(!fmtp.pps.is_empty());
+    }
+
+    #[test]
+    fn test_h264_fmtp_round_trip() {
+        let original = "96 packetization-mode=1; sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA; profile-level-id=640016";
+        let fmtp = H264Fmtp::unmarshal(original).unwrap();
+        let marshaled = fmtp.marshal();
+
+        // Parse the marshaled output (remove \r\n)
+        let marshaled_trimmed = marshaled.trim();
+        let fmtp2 = H264Fmtp::unmarshal(marshaled_trimmed).unwrap();
+
+        assert_eq!(fmtp.payload_type, fmtp2.payload_type);
+        assert_eq!(fmtp.packetization_mode, fmtp2.packetization_mode);
+        assert_eq!(fmtp.profile_level_id, fmtp2.profile_level_id);
+        assert_eq!(fmtp.sps, fmtp2.sps);
+        assert_eq!(fmtp.pps, fmtp2.pps);
+    }
+
+    #[test]
+    fn test_h264_fmtp_invalid_payload_type() {
+        let fmtp = H264Fmtp::unmarshal("invalid packetization-mode=1");
+        assert!(fmtp.is_some()); // Still parses, but payload_type will be 0 (default)
+    }
+
+    #[test]
+    fn test_h264_fmtp_missing_parameters() {
+        let fmtp = H264Fmtp::unmarshal("96").unwrap();
+        assert_eq!(fmtp.payload_type, 96);
+        assert_eq!(fmtp.packetization_mode, 0); // default
+    }
+
+    // H.265 FMTP comprehensive tests
+    #[test]
+    fn test_h265_fmtp_sprop_vps() {
+        let fmtp = H265Fmtp::unmarshal("96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA").unwrap();
+        assert_eq!(fmtp.payload_type, 96);
+        assert_eq!(fmtp.vps, "QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA");
+    }
+
+    #[test]
+    fn test_h265_fmtp_sprop_sps() {
+        let fmtp = H265Fmtp::unmarshal(
+            "96 sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I",
+        )
+        .unwrap();
+        assert_eq!(fmtp.payload_type, 96);
+        assert_eq!(
+            fmtp.sps,
+            "QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I"
+        );
+    }
+
+    #[test]
+    fn test_h265_fmtp_sprop_pps() {
+        let fmtp = H265Fmtp::unmarshal("96 sprop-pps=RAHAc8GJ").unwrap();
+        assert_eq!(fmtp.payload_type, 96);
+        assert_eq!(fmtp.pps, "RAHAc8GJ");
+    }
+
+    #[test]
+    fn test_h265_fmtp_all_parameters() {
+        let fmtp = H265Fmtp::unmarshal("96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA; sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I; sprop-pps=RAHAc8GJ").unwrap();
+        assert_eq!(fmtp.payload_type, 96);
+        assert_eq!(fmtp.vps, "QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA");
+        assert_eq!(
+            fmtp.sps,
+            "QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I"
+        );
+        assert_eq!(fmtp.pps, "RAHAc8GJ");
+    }
+
+    #[test]
+    fn test_h265_fmtp_round_trip() {
+        let original = "96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA; sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I; sprop-pps=RAHAc8GJ";
+        let fmtp = H265Fmtp::unmarshal(original).unwrap();
+        let marshaled = fmtp.marshal();
+
+        // Parse the marshaled output (remove \r\n)
+        let marshaled_trimmed = marshaled.trim();
+        let fmtp2 = H265Fmtp::unmarshal(marshaled_trimmed).unwrap();
+
+        assert_eq!(fmtp.payload_type, fmtp2.payload_type);
+        assert_eq!(fmtp.vps, fmtp2.vps);
+        assert_eq!(fmtp.sps, fmtp2.sps);
+        assert_eq!(fmtp.pps, fmtp2.pps);
+    }
+
+    #[test]
+    fn test_h265_fmtp_partial_parameters() {
+        let fmtp = H265Fmtp::unmarshal("96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA; sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I").unwrap();
+        assert_eq!(fmtp.payload_type, 96);
+        assert_eq!(fmtp.vps, "QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA");
+        assert_eq!(
+            fmtp.sps,
+            "QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I"
+        );
+        assert!(fmtp.pps.is_empty()); // PPS not provided
+    }
+
+    // MPEG4 FMTP comprehensive tests
+    #[test]
+    fn test_mpeg4_fmtp_profile_level_id() {
+        let fmtp = Mpeg4Fmtp::unmarshal("97 profile-level-id=1").unwrap();
+        assert_eq!(fmtp.payload_type, 97);
+        assert_eq!(fmtp.profile_level_id, "1");
+
+        let fmtp = Mpeg4Fmtp::unmarshal("97 profile-level-id=15").unwrap();
+        assert_eq!(fmtp.profile_level_id, "15");
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_mode() {
+        let fmtp = Mpeg4Fmtp::unmarshal("97 mode=AAC-hbr").unwrap();
+        assert_eq!(fmtp.payload_type, 97);
+        assert_eq!(fmtp.mode, "AAC-hbr");
+
+        let fmtp = Mpeg4Fmtp::unmarshal("97 mode=AAC-lbr").unwrap();
+        assert_eq!(fmtp.mode, "AAC-lbr");
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_sizelength() {
+        let fmtp = Mpeg4Fmtp::unmarshal("97 sizelength=13").unwrap();
+        assert_eq!(fmtp.payload_type, 97);
+        assert_eq!(fmtp.size_length, 13);
+
+        let fmtp = Mpeg4Fmtp::unmarshal("97 sizelength=16").unwrap();
+        assert_eq!(fmtp.size_length, 16);
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_indexlength() {
+        let fmtp = Mpeg4Fmtp::unmarshal("97 indexlength=3").unwrap();
+        assert_eq!(fmtp.payload_type, 97);
+        assert_eq!(fmtp.index_length, 3);
+
+        let fmtp = Mpeg4Fmtp::unmarshal("97 indexlength=5").unwrap();
+        assert_eq!(fmtp.index_length, 5);
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_indexdeltalength() {
+        let fmtp = Mpeg4Fmtp::unmarshal("97 indexdeltalength=3").unwrap();
+        assert_eq!(fmtp.payload_type, 97);
+        assert_eq!(fmtp.index_delta_length, 3);
+
+        let fmtp = Mpeg4Fmtp::unmarshal("97 indexdeltalength=23").unwrap();
+        assert_eq!(fmtp.index_delta_length, 23);
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_config() {
+        let fmtp = Mpeg4Fmtp::unmarshal("97 config=121056e500").unwrap();
+        assert_eq!(fmtp.payload_type, 97);
+        let en_asc = hex::encode(fmtp.asc.clone());
+        assert_eq!(en_asc, "121056e500");
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_all_parameters() {
+        let fmtp = Mpeg4Fmtp::unmarshal("97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=23; config=121056e500").unwrap();
+        assert_eq!(fmtp.payload_type, 97);
+        assert_eq!(fmtp.profile_level_id, "1");
+        assert_eq!(fmtp.mode, "AAC-hbr");
+        assert_eq!(fmtp.size_length, 13);
+        assert_eq!(fmtp.index_length, 3);
+        assert_eq!(fmtp.index_delta_length, 23);
+        let en_asc = hex::encode(fmtp.asc.clone());
+        assert_eq!(en_asc, "121056e500");
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_round_trip() {
+        let original = "97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=23; config=121056e500";
+        let fmtp = Mpeg4Fmtp::unmarshal(original).unwrap();
+        let marshaled = fmtp.marshal();
+
+        // Parse the marshaled output (remove \r\n)
+        let marshaled_trimmed = marshaled.trim();
+        let fmtp2 = Mpeg4Fmtp::unmarshal(marshaled_trimmed).unwrap();
+
+        assert_eq!(fmtp.payload_type, fmtp2.payload_type);
+        assert_eq!(fmtp.profile_level_id, fmtp2.profile_level_id);
+        assert_eq!(fmtp.mode, fmtp2.mode);
+        assert_eq!(fmtp.size_length, fmtp2.size_length);
+        assert_eq!(fmtp.index_length, fmtp2.index_length);
+        assert_eq!(fmtp.index_delta_length, fmtp2.index_delta_length);
+        assert_eq!(fmtp.asc, fmtp2.asc);
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_case_insensitive() {
+        // Test that mode parameter is case-insensitive (based on to_lowercase in code)
+        let fmtp = Mpeg4Fmtp::unmarshal("97 MODE=AAC-hbr").unwrap();
+        assert_eq!(fmtp.mode, "AAC-hbr");
+
+        let fmtp = Mpeg4Fmtp::unmarshal("97 Mode=AAC-lbr").unwrap();
+        assert_eq!(fmtp.mode, "AAC-lbr");
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_partial_parameters() {
+        let fmtp = Mpeg4Fmtp::unmarshal("97 mode=AAC-hbr; config=121056e500").unwrap();
+        assert_eq!(fmtp.payload_type, 97);
+        assert_eq!(fmtp.mode, "AAC-hbr");
+        let en_asc = hex::encode(fmtp.asc.clone());
+        assert_eq!(en_asc, "121056e500");
+        // Default values for missing parameters
+        assert_eq!(fmtp.size_length, 0);
+        assert_eq!(fmtp.index_length, 0);
+        assert_eq!(fmtp.index_delta_length, 0);
+    }
+
+    // Fmtp enum tests
+    #[test]
+    fn test_fmtp_new_h264() {
+        use super::Fmtp;
+        let raw_data = "96 packetization-mode=1; sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA; profile-level-id=640016";
+        let fmtp = Fmtp::new("h264", raw_data).unwrap();
+
+        match fmtp {
+            Fmtp::H264(h264_fmtp) => {
+                assert_eq!(h264_fmtp.payload_type, 96);
+                assert_eq!(h264_fmtp.packetization_mode, 1);
+            }
+            _ => panic!("Expected H264 variant"),
+        }
+    }
+
+    #[test]
+    fn test_fmtp_new_h265() {
+        use super::Fmtp;
+        let raw_data = "96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA; sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I; sprop-pps=RAHAc8GJ";
+        let fmtp = Fmtp::new("h265", raw_data).unwrap();
+
+        match fmtp {
+            Fmtp::H265(h265_fmtp) => {
+                assert_eq!(h265_fmtp.payload_type, 96);
+                assert_eq!(h265_fmtp.vps, "QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA");
+            }
+            _ => panic!("Expected H265 variant"),
+        }
+    }
+
+    #[test]
+    fn test_fmtp_new_mpeg4() {
+        use super::Fmtp;
+        let raw_data = "97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=23; config=121056e500";
+        let fmtp = Fmtp::new("mpeg4-generic", raw_data).unwrap();
+
+        match fmtp {
+            Fmtp::Mpeg4(mpeg4_fmtp) => {
+                assert_eq!(mpeg4_fmtp.payload_type, 97);
+                assert_eq!(mpeg4_fmtp.mode, "AAC-hbr");
+            }
+            _ => panic!("Expected Mpeg4 variant"),
+        }
+    }
+
+    #[test]
+    fn test_fmtp_new_case_insensitive() {
+        use super::Fmtp;
+        let raw_data = "96 packetization-mode=1";
+        let fmtp = Fmtp::new("H264", raw_data).unwrap();
+
+        match fmtp {
+            Fmtp::H264(_) => {}
+            _ => panic!("Expected H264 variant"),
+        }
+    }
+
+    #[test]
+    fn test_fmtp_new_invalid_codec() {
+        use super::Fmtp;
+        let raw_data = "96 packetization-mode=1";
+        let fmtp = Fmtp::new("invalid", raw_data);
+        assert!(fmtp.is_none());
+    }
+
+    #[test]
+    fn test_fmtp_marshal_h264() {
+        use super::Fmtp;
+        let raw_data = "96 packetization-mode=1; sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA; profile-level-id=640016";
+        let fmtp = Fmtp::new("h264", raw_data).unwrap();
+        let marshaled = fmtp.marshal();
+        assert!(marshaled.contains("96"));
+        assert!(marshaled.contains("packetization-mode=1"));
+    }
+
+    #[test]
+    fn test_fmtp_marshal_h265() {
+        use super::Fmtp;
+        let raw_data = "96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA; sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I; sprop-pps=RAHAc8GJ";
+        let fmtp = Fmtp::new("h265", raw_data).unwrap();
+        let marshaled = fmtp.marshal();
+        assert!(marshaled.contains("96"));
+        assert!(marshaled.contains("sprop-vps"));
+    }
+
+    #[test]
+    fn test_fmtp_marshal_mpeg4() {
+        use super::Fmtp;
+        let raw_data = "97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=23; config=121056e500";
+        let fmtp = Fmtp::new("mpeg4-generic", raw_data).unwrap();
+        let marshaled = fmtp.marshal();
+        assert!(marshaled.contains("97"));
+        assert!(marshaled.contains("mode=AAC-hbr"));
     }
 }
