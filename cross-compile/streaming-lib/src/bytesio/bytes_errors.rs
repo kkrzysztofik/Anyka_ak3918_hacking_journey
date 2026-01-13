@@ -121,3 +121,160 @@ impl Fail for BytesWriteError {
         self.value.backtrace()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error as IoError, ErrorKind};
+
+    // ========== BytesReadErrorValue Display Tests ==========
+
+    #[test]
+    fn test_bytes_read_error_value_not_enough_bytes_display() {
+        let err = BytesReadErrorValue::NotEnoughBytes;
+        assert_eq!(format!("{}", err), "not enough bytes to read");
+    }
+
+    #[test]
+    fn test_bytes_read_error_value_empty_stream_display() {
+        let err = BytesReadErrorValue::EmptyStream;
+        assert_eq!(format!("{}", err), "empty stream");
+    }
+
+    #[test]
+    fn test_bytes_read_error_value_index_out_of_range_display() {
+        let err = BytesReadErrorValue::IndexOutofRange;
+        assert_eq!(format!("{}", err), "index out of range");
+    }
+
+    #[test]
+    fn test_bytes_read_error_value_io_display() {
+        let io_err = IoError::new(ErrorKind::NotFound, "file not found");
+        let err = BytesReadErrorValue::IO(io_err);
+        assert!(format!("{}", err).contains("io error"));
+    }
+
+    // ========== BytesReadError From Trait Tests ==========
+
+    #[test]
+    fn test_bytes_read_error_from_value() {
+        let value = BytesReadErrorValue::NotEnoughBytes;
+        let err: BytesReadError = value.into();
+        assert!(matches!(err.value, BytesReadErrorValue::NotEnoughBytes));
+    }
+
+    #[test]
+    fn test_bytes_read_error_from_io_error() {
+        let io_err = IoError::new(ErrorKind::PermissionDenied, "access denied");
+        let err: BytesReadError = io_err.into();
+        assert!(matches!(err.value, BytesReadErrorValue::IO(_)));
+    }
+
+    #[test]
+    fn test_bytes_read_error_from_bytesio_error() {
+        use super::super::bytesio_errors::{BytesIOError, BytesIOErrorValue};
+        let bytesio_err = BytesIOError {
+            value: BytesIOErrorValue::NotEnoughBytes,
+        };
+        let err: BytesReadError = bytesio_err.into();
+        assert!(matches!(err.value, BytesReadErrorValue::BytesIOError(_)));
+    }
+
+    // ========== BytesReadError Display Tests ==========
+
+    #[test]
+    fn test_bytes_read_error_display_not_enough_bytes() {
+        let err = BytesReadError {
+            value: BytesReadErrorValue::NotEnoughBytes,
+        };
+        assert_eq!(format!("{}", err), "not enough bytes to read");
+    }
+
+    #[test]
+    fn test_bytes_read_error_display_empty_stream() {
+        let err = BytesReadError {
+            value: BytesReadErrorValue::EmptyStream,
+        };
+        assert_eq!(format!("{}", err), "empty stream");
+    }
+
+    // ========== BytesWriteErrorValue Display Tests ==========
+
+    #[test]
+    fn test_bytes_write_error_value_io_display() {
+        let io_err = IoError::new(ErrorKind::WriteZero, "write zero");
+        let err = BytesWriteErrorValue::IO(io_err);
+        assert_eq!(format!("{}", err), "io error");
+    }
+
+    #[test]
+    fn test_bytes_write_error_value_timeout_display() {
+        let err = BytesWriteErrorValue::Timeout;
+        assert_eq!(format!("{}", err), "write time out");
+    }
+
+    #[test]
+    fn test_bytes_write_error_value_outof_index_display() {
+        let err = BytesWriteErrorValue::OutofIndex;
+        assert_eq!(format!("{}", err), "outof index");
+    }
+
+    // ========== BytesWriteError From Trait Tests ==========
+
+    #[test]
+    fn test_bytes_write_error_from_io_error() {
+        let io_err = IoError::new(ErrorKind::BrokenPipe, "broken pipe");
+        let err: BytesWriteError = io_err.into();
+        assert!(matches!(err.value, BytesWriteErrorValue::IO(_)));
+    }
+
+    #[test]
+    fn test_bytes_write_error_from_bytesio_error() {
+        use super::super::bytesio_errors::{BytesIOError, BytesIOErrorValue};
+        let bytesio_err = BytesIOError {
+            value: BytesIOErrorValue::EmptyStream,
+        };
+        let err: BytesWriteError = bytesio_err.into();
+        assert!(matches!(err.value, BytesWriteErrorValue::BytesIOError(_)));
+    }
+
+    // ========== BytesWriteError Display Tests ==========
+
+    #[test]
+    fn test_bytes_write_error_display_timeout() {
+        let err = BytesWriteError {
+            value: BytesWriteErrorValue::Timeout,
+        };
+        assert_eq!(format!("{}", err), "write time out");
+    }
+
+    #[test]
+    fn test_bytes_write_error_display_outof_index() {
+        let err = BytesWriteError {
+            value: BytesWriteErrorValue::OutofIndex,
+        };
+        assert_eq!(format!("{}", err), "outof index");
+    }
+
+    // ========== Debug Trait Tests ==========
+
+    #[test]
+    fn test_bytes_read_error_debug() {
+        let err = BytesReadError {
+            value: BytesReadErrorValue::NotEnoughBytes,
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("BytesReadError"));
+        assert!(debug_str.contains("NotEnoughBytes"));
+    }
+
+    #[test]
+    fn test_bytes_write_error_debug() {
+        let err = BytesWriteError {
+            value: BytesWriteErrorValue::Timeout,
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("BytesWriteError"));
+        assert!(debug_str.contains("Timeout"));
+    }
+}

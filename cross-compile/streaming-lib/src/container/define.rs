@@ -163,3 +163,222 @@ pub enum FlvData {
     Audio { timestamp: u32, data: BytesMut },
     MetaData { timestamp: u32, data: BytesMut },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========== u8_2_avc_codec_id Tests ==========
+
+    #[test]
+    fn test_u8_2_avc_codec_id_h264() {
+        let codec = u8_2_avc_codec_id(7);
+        assert!(matches!(codec, AvcCodecId::H264));
+    }
+
+    #[test]
+    fn test_u8_2_avc_codec_id_hevc() {
+        let codec = u8_2_avc_codec_id(12);
+        assert!(matches!(codec, AvcCodecId::HEVC));
+    }
+
+    #[test]
+    fn test_u8_2_avc_codec_id_unknown() {
+        let codec = u8_2_avc_codec_id(0);
+        assert!(matches!(codec, AvcCodecId::UNKNOWN));
+    }
+
+    #[test]
+    fn test_u8_2_avc_codec_id_invalid_value() {
+        let codec = u8_2_avc_codec_id(255);
+        assert!(matches!(codec, AvcCodecId::UNKNOWN));
+    }
+
+    // ========== u8_2_aac_profile Tests ==========
+
+    #[test]
+    fn test_u8_2_aac_profile_lc() {
+        let profile = u8_2_aac_profile(2);
+        assert!(matches!(profile, AacProfile::LC));
+    }
+
+    #[test]
+    fn test_u8_2_aac_profile_ssr() {
+        let profile = u8_2_aac_profile(3);
+        assert!(matches!(profile, AacProfile::SSR));
+    }
+
+    #[test]
+    fn test_u8_2_aac_profile_he() {
+        let profile = u8_2_aac_profile(5);
+        assert!(matches!(profile, AacProfile::HE));
+    }
+
+    #[test]
+    fn test_u8_2_aac_profile_hev2() {
+        let profile = u8_2_aac_profile(29);
+        assert!(matches!(profile, AacProfile::HEV2));
+    }
+
+    #[test]
+    fn test_u8_2_aac_profile_unknown() {
+        let profile = u8_2_aac_profile(0);
+        assert!(matches!(profile, AacProfile::UNKNOWN));
+    }
+
+    #[test]
+    fn test_u8_2_aac_profile_invalid_value() {
+        let profile = u8_2_aac_profile(100);
+        assert!(matches!(profile, AacProfile::UNKNOWN));
+    }
+
+    // ========== u8_2_avc_profile Tests ==========
+
+    #[test]
+    fn test_u8_2_avc_profile_baseline() {
+        let profile = u8_2_avc_profile(66);
+        assert!(matches!(profile, AvcProfile::Baseline));
+    }
+
+    #[test]
+    fn test_u8_2_avc_profile_main() {
+        let profile = u8_2_avc_profile(77);
+        assert!(matches!(profile, AvcProfile::Main));
+    }
+
+    #[test]
+    fn test_u8_2_avc_profile_extended() {
+        let profile = u8_2_avc_profile(88);
+        assert!(matches!(profile, AvcProfile::Extended));
+    }
+
+    #[test]
+    fn test_u8_2_avc_profile_high() {
+        let profile = u8_2_avc_profile(100);
+        assert!(matches!(profile, AvcProfile::High));
+    }
+
+    #[test]
+    fn test_u8_2_avc_profile_unknown() {
+        let profile = u8_2_avc_profile(0);
+        assert!(matches!(profile, AvcProfile::UNKNOWN));
+    }
+
+    // ========== u8_2_avc_level Tests ==========
+
+    #[test]
+    fn test_u8_2_avc_level_1() {
+        let level = u8_2_avc_level(10);
+        assert!(matches!(level, AvcLevel::Level1));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_11() {
+        let level = u8_2_avc_level(11);
+        assert!(matches!(level, AvcLevel::Level11));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_21() {
+        let level = u8_2_avc_level(21);
+        assert!(matches!(level, AvcLevel::Level21));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_31() {
+        let level = u8_2_avc_level(31);
+        assert!(matches!(level, AvcLevel::Level31));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_41() {
+        let level = u8_2_avc_level(41);
+        assert!(matches!(level, AvcLevel::Level41));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_51() {
+        let level = u8_2_avc_level(51);
+        assert!(matches!(level, AvcLevel::Level51));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_unknown() {
+        let level = u8_2_avc_level(0);
+        assert!(matches!(level, AvcLevel::UNKNOWN));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_invalid_value() {
+        let level = u8_2_avc_level(255);
+        assert!(matches!(level, AvcLevel::UNKNOWN));
+    }
+
+    // ========== Default Tests ==========
+
+    #[test]
+    fn test_sound_format_default() {
+        let format: SoundFormat = Default::default();
+        assert!(matches!(format, SoundFormat::AAC));
+    }
+
+    #[test]
+    fn test_avc_codec_id_default() {
+        let codec: AvcCodecId = Default::default();
+        assert!(matches!(codec, AvcCodecId::UNKNOWN));
+    }
+
+    #[test]
+    fn test_aac_profile_default() {
+        let profile: AacProfile = Default::default();
+        assert!(matches!(profile, AacProfile::UNKNOWN));
+    }
+
+    #[test]
+    fn test_avc_profile_default() {
+        let profile: AvcProfile = Default::default();
+        assert!(matches!(profile, AvcProfile::UNKNOWN));
+    }
+
+    #[test]
+    fn test_avc_level_default() {
+        let level: AvcLevel = Default::default();
+        assert!(matches!(level, AvcLevel::UNKNOWN));
+    }
+
+    // ========== Constants Tests ==========
+
+    #[test]
+    fn test_aac_packet_type_constants() {
+        assert_eq!(aac_packet_type::AAC_SEQHDR, 0);
+        assert_eq!(aac_packet_type::AAC_RAW, 1);
+    }
+
+    #[test]
+    fn test_avc_packet_type_constants() {
+        assert_eq!(avc_packet_type::AVC_SEQHDR, 0);
+        assert_eq!(avc_packet_type::AVC_NALU, 1);
+        assert_eq!(avc_packet_type::AVC_EOS, 2);
+    }
+
+    #[test]
+    fn test_frame_type_constants() {
+        assert_eq!(frame_type::KEY_FRAME, 1);
+        assert_eq!(frame_type::INTER_FRAME, 2);
+    }
+
+    #[test]
+    fn test_tag_type_constants() {
+        assert_eq!(tag_type::AUDIO, 8);
+        assert_eq!(tag_type::VIDEO, 9);
+        assert_eq!(tag_type::SCRIPT_DATA_AMF, 18);
+    }
+
+    #[test]
+    fn test_h264_nal_type_constants() {
+        assert_eq!(h264_nal_type::H264_NAL_IDR, 5);
+        assert_eq!(h264_nal_type::H264_NAL_SPS, 7);
+        assert_eq!(h264_nal_type::H264_NAL_PPS, 8);
+        assert_eq!(h264_nal_type::H264_NAL_AUD, 9);
+    }
+}

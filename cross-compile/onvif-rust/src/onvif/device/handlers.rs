@@ -3234,4 +3234,21 @@ mod tests {
         let response_xml = result.unwrap();
         assert!(response_xml.contains("GetCapabilitiesResponse"));
     }
+
+    // ========================================================================
+    // SetSystemFactoryDefault Tests
+    // ========================================================================
+
+    #[test]
+    fn test_set_system_factory_default() {
+        let service = create_test_service();
+        let response = service
+            .handle_set_system_factory_default(SetSystemFactoryDefault {
+                factory_default: crate::onvif::types::common::FactoryDefaultType::Soft,
+            })
+            .unwrap();
+
+        // Stub returns empty struct, verify success
+        let _ = response;
+    }
 }

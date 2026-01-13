@@ -1113,7 +1113,7 @@ mod tests {
     use bytes::BytesMut;
     use mockall::mock;
     use std::sync::Arc;
-    use tokio::sync::mpsc;
+    use tokio::sync::{mpsc, oneshot};
 
     // Mock TStreamHandler for testing
     mock! {
@@ -1465,5 +1465,142 @@ mod tests {
                 })
                 .is_ok()
         );
+    }
+    #[tokio::test]
+    async fn test_stream_data_transceiver_frame_forwarding() {
+        let (frame_sender, frame_receiver) = mpsc::unbounded_channel();
+        let (event_sender, event_receiver) = mpsc::unbounded_channel();
+        let identifier = create_test_stream_identifier();
+        let mut mock_handler = MockStreamHandler::new();
+        mock_handler
+            .expect_send_prior_data()
+            .returning(|_, _| Ok(()));
+        let mock_handler = Arc::new(mock_handler);
+
+        let receiver = DataReceiver {
+            frame_receiver: Some(frame_receiver),
+            packet_receiver: None,
+        };
+
+        let mut transceiver =
+            StreamDataTransceiver::new(receiver, event_receiver, identifier.clone(), mock_handler);
+
+        // Run transceiver in background
+        tokio::spawn(async move {
+            let _ = transceiver.run().await;
+        });
+
+        // 1. Subscribe
+        let (sub_frame_sender, mut sub_frame_receiver) = mpsc::unbounded_channel();
+        let sub_info = create_test_subscriber_info();
+        let data_sender = DataSender::Frame {
+            sender: sub_frame_sender,
+        };
+
+        let (sub_result_sender, _) = oneshot::channel();
+        event_sender
+            .send(TransceiverEvent::Subscribe {
+                sender: data_sender,
+                info: sub_info,
+                result_sender: sub_result_sender,
+            })
+            .unwrap();
+
+        // Allow some time for subscription processing
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // 2. Send Frame Data
+        let frame_data = FrameData::Audio {
+            timestamp: 100,
+            data: BytesMut::from(&[0x01, 0x02, 0x03][..]),
+        };
+
+        frame_sender.send(frame_data).unwrap();
+
+        // 3. Verify Subscriber Received Data
+        let received = tokio::time::timeout(
+            tokio::time::Duration::from_millis(100),
+            sub_frame_receiver.recv(),
+        )
+        .await
+        .expect("Timeout waiting for frame data");
+
+        assert!(received.is_some());
+        match received.unwrap() {
+            FrameData::Audio { timestamp, data } => {
+                assert_eq!(timestamp, 100);
+                assert_eq!(data, BytesMut::from(&[0x01, 0x02, 0x03][..]));
+            }
+            _ => panic!("Expected Audio frame"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stream_data_transceiver_packet_forwarding() {
+        let (packet_sender, packet_receiver) = mpsc::unbounded_channel();
+        let (event_sender, event_receiver) = mpsc::unbounded_channel();
+        let identifier = create_test_stream_identifier();
+        let mut mock_handler = MockStreamHandler::new();
+        mock_handler
+            .expect_send_prior_data()
+            .returning(|_, _| Ok(()));
+        let mock_handler = Arc::new(mock_handler);
+
+        let receiver = DataReceiver {
+            frame_receiver: None,
+            packet_receiver: Some(packet_receiver),
+        };
+
+        let mut transceiver =
+            StreamDataTransceiver::new(receiver, event_receiver, identifier.clone(), mock_handler);
+
+        tokio::spawn(async move {
+            let _ = transceiver.run().await;
+        });
+
+        // 1. Subscribe
+        let (sub_packet_sender, mut sub_packet_receiver) = mpsc::unbounded_channel();
+        let mut sub_info = create_test_subscriber_info();
+        sub_info.sub_data_type = SubDataType::Packet;
+
+        let data_sender = DataSender::Packet {
+            sender: sub_packet_sender,
+        };
+
+        let (sub_result_sender, _) = oneshot::channel();
+        event_sender
+            .send(TransceiverEvent::Subscribe {
+                sender: data_sender,
+                info: sub_info,
+                result_sender: sub_result_sender,
+            })
+            .unwrap();
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // 2. Send Packet Data
+        let packet_data = PacketData::Audio {
+            timestamp: 200,
+            data: BytesMut::from(&[0x0A, 0x0B][..]),
+        };
+
+        packet_sender.send(packet_data).unwrap();
+
+        // 3. Verify Subscriber Received Data
+        let received = tokio::time::timeout(
+            tokio::time::Duration::from_millis(100),
+            sub_packet_receiver.recv(),
+        )
+        .await
+        .expect("Timeout waiting for packet data");
+
+        assert!(received.is_some());
+        match received.unwrap() {
+            PacketData::Audio { timestamp, data } => {
+                assert_eq!(timestamp, 200);
+                assert_eq!(data, BytesMut::from(&[0x0A, 0x0B][..]));
+            }
+            _ => panic!("Expected Audio packet"),
+        }
     }
 }

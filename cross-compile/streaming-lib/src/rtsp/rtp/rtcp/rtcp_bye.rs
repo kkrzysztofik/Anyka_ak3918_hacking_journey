@@ -67,3 +67,200 @@ impl Marshal<Result<BytesMut, RtcpError>> for RtcpBye {
         Ok(writer.extract_current_bytes())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========== Default Tests ==========
+
+    #[test]
+    fn test_rtcp_bye_default() {
+        let bye = RtcpBye::default();
+        assert!(bye.ssrss.is_empty());
+        assert_eq!(bye.length, 0);
+        assert!(bye.reason.is_empty());
+    }
+
+    // ========== Clone and Debug Tests ==========
+
+    #[test]
+    fn test_rtcp_bye_clone() {
+        let mut bye = RtcpBye::default();
+        bye.ssrss = vec![0x12345678, 0xAABBCCDD];
+        bye.length = 5;
+        bye.reason = BytesMut::from(&b"leave"[..]);
+
+        let cloned = bye.clone();
+        assert_eq!(cloned.ssrss, bye.ssrss);
+        assert_eq!(cloned.length, bye.length);
+        assert_eq!(cloned.reason, bye.reason);
+    }
+
+    #[test]
+    fn test_rtcp_bye_debug() {
+        let bye = RtcpBye::default();
+        let debug_str = format!("{:?}", bye);
+        assert!(debug_str.contains("RtcpBye"));
+        assert!(debug_str.contains("ssrss"));
+    }
+
+    // ========== Marshal Tests ==========
+
+    #[test]
+    fn test_rtcp_bye_marshal_no_ssrc() {
+        let bye = RtcpBye {
+            header: RtcpHeader {
+                version: 2,
+                padding_flag: 0,
+                report_count: 0,
+                payload_type: 203, // BYE
+                length: 0,
+            },
+            ssrss: vec![],
+            length: 0,
+            reason: BytesMut::new(),
+        };
+
+        let result = bye.marshal().unwrap();
+        // 4 (header) + 0 (no SSRCs) + 1 (length) + 0 (no reason) = 5 bytes
+        assert_eq!(result.len(), 5);
+    }
+
+    #[test]
+    fn test_rtcp_bye_marshal_single_ssrc() {
+        let bye = RtcpBye {
+            header: RtcpHeader {
+                version: 2,
+                padding_flag: 0,
+                report_count: 1,
+                payload_type: 203,
+                length: 1,
+            },
+            ssrss: vec![0x12345678],
+            length: 0,
+            reason: BytesMut::new(),
+        };
+
+        let result = bye.marshal().unwrap();
+        // 4 (header) + 4 (1 SSRC) + 1 (length) + 0 (no reason) = 9 bytes
+        assert_eq!(result.len(), 9);
+    }
+
+    #[test]
+    fn test_rtcp_bye_marshal_with_reason() {
+        let bye = RtcpBye {
+            header: RtcpHeader {
+                version: 2,
+                padding_flag: 0,
+                report_count: 1,
+                payload_type: 203,
+                length: 2,
+            },
+            ssrss: vec![0xAABBCCDD],
+            length: 7,
+            reason: BytesMut::from(&b"leaving"[..]),
+        };
+
+        let result = bye.marshal().unwrap();
+        // 4 (header) + 4 (1 SSRC) + 1 (length) + 7 (reason) = 16 bytes
+        assert_eq!(result.len(), 16);
+    }
+
+    #[test]
+    fn test_rtcp_bye_marshal_multiple_ssrcs() {
+        let bye = RtcpBye {
+            header: RtcpHeader {
+                version: 2,
+                padding_flag: 0,
+                report_count: 3,
+                payload_type: 203,
+                length: 3,
+            },
+            ssrss: vec![0x11111111, 0x22222222, 0x33333333],
+            length: 0,
+            reason: BytesMut::new(),
+        };
+
+        let result = bye.marshal().unwrap();
+        // 4 (header) + 12 (3 SSRCs) + 1 (length) + 0 (no reason) = 17 bytes
+        assert_eq!(result.len(), 17);
+    }
+
+    // ========== Unmarshal Tests ==========
+
+    #[test]
+    fn test_rtcp_bye_unmarshal_single_ssrc() {
+        let mut data = BytesMut::new();
+        // Header: version 2, report_count 1, pt 203
+        data.extend_from_slice(&[0x81, 203, 0x00, 0x01]); // Header
+        data.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]); // SSRC
+        data.extend_from_slice(&[0x00]); // length 0 (no reason)
+
+        let bye = RtcpBye::unmarshal(data).unwrap();
+        assert_eq!(bye.ssrss.len(), 1);
+        assert_eq!(bye.ssrss[0], 0x12345678);
+        assert_eq!(bye.length, 0);
+    }
+
+    #[test]
+    fn test_rtcp_bye_unmarshal_with_reason() {
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0x81, 203, 0x00, 0x02]); // Header
+        data.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD]); // SSRC
+        data.extend_from_slice(&[0x03]); // length 3
+        data.extend_from_slice(b"bye"); // reason
+
+        let bye = RtcpBye::unmarshal(data).unwrap();
+        assert_eq!(bye.ssrss[0], 0xAABBCCDD);
+        assert_eq!(bye.length, 3);
+        assert_eq!(&bye.reason[..], b"bye");
+    }
+
+    // ========== Round-Trip Tests ==========
+
+    #[test]
+    fn test_rtcp_bye_roundtrip_no_reason() {
+        let original = RtcpBye {
+            header: RtcpHeader {
+                version: 2,
+                padding_flag: 0,
+                report_count: 1,
+                payload_type: 203,
+                length: 1,
+            },
+            ssrss: vec![0xDEADBEEF],
+            length: 0,
+            reason: BytesMut::new(),
+        };
+
+        let marshaled = original.marshal().unwrap();
+        let unmarshaled = RtcpBye::unmarshal(marshaled).unwrap();
+
+        assert_eq!(unmarshaled.ssrss, original.ssrss);
+        assert_eq!(unmarshaled.length, original.length);
+    }
+
+    #[test]
+    fn test_rtcp_bye_roundtrip_with_reason() {
+        let original = RtcpBye {
+            header: RtcpHeader {
+                version: 2,
+                padding_flag: 0,
+                report_count: 2,
+                payload_type: 203,
+                length: 3,
+            },
+            ssrss: vec![0x11111111, 0x22222222],
+            length: 4,
+            reason: BytesMut::from(&b"quit"[..]),
+        };
+
+        let marshaled = original.marshal().unwrap();
+        let unmarshaled = RtcpBye::unmarshal(marshaled).unwrap();
+
+        assert_eq!(unmarshaled.ssrss, original.ssrss);
+        assert_eq!(unmarshaled.length, original.length);
+        assert_eq!(unmarshaled.reason, original.reason);
+    }
+}

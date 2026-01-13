@@ -127,3 +127,140 @@ impl RtspTrack {
         self.rtp_channel.lock().await.create_packer(io);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rtsp::rtsp_codec::RtspCodecId;
+
+    // ========================================================================
+    // TrackType Tests
+    // ========================================================================
+
+    #[test]
+    fn test_track_type_default() {
+        let tt = TrackType::default();
+        assert!(matches!(tt, TrackType::Audio));
+    }
+
+    #[test]
+    fn test_track_type_audio() {
+        let tt = TrackType::Audio;
+        assert!(matches!(tt, TrackType::Audio));
+    }
+
+    #[test]
+    fn test_track_type_video() {
+        let tt = TrackType::Video;
+        assert!(matches!(tt, TrackType::Video));
+    }
+
+    #[test]
+    fn test_track_type_application() {
+        let tt = TrackType::Application;
+        assert!(matches!(tt, TrackType::Application));
+    }
+
+    #[test]
+    fn test_track_type_clone() {
+        let tt1 = TrackType::Video;
+        let tt2 = tt1.clone();
+        assert_eq!(tt1, tt2);
+    }
+
+    #[test]
+    fn test_track_type_debug() {
+        let tt = TrackType::Audio;
+        let debug_str = format!("{:?}", tt);
+        assert!(debug_str.contains("Audio"));
+    }
+
+    #[test]
+    fn test_track_type_equality() {
+        assert_eq!(TrackType::Audio, TrackType::Audio);
+        assert_eq!(TrackType::Video, TrackType::Video);
+        assert_ne!(TrackType::Audio, TrackType::Video);
+    }
+
+    #[test]
+    fn test_track_type_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(TrackType::Audio);
+        set.insert(TrackType::Video);
+        set.insert(TrackType::Application);
+        assert_eq!(set.len(), 3);
+    }
+
+    // ========================================================================
+    // RtspTrack Tests
+    // ========================================================================
+
+    #[test]
+    fn test_rtsp_track_new_video() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let track = RtspTrack::new(TrackType::Video, codec_info, "trackID=0".to_string());
+        assert!(matches!(track.track_type, TrackType::Video));
+        assert_eq!(track.media_control, "trackID=0");
+    }
+
+    #[test]
+    fn test_rtsp_track_new_audio() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::AAC,
+            payload_type: 97,
+            sample_rate: 44100,
+            channel_count: 2,
+        };
+        let track = RtspTrack::new(TrackType::Audio, codec_info, "trackID=1".to_string());
+        assert!(matches!(track.track_type, TrackType::Audio));
+        assert_eq!(track.media_control, "trackID=1");
+    }
+
+    #[test]
+    fn test_rtsp_track_default_transport() {
+        let codec_info = RtspCodecInfo::default();
+        let track = RtspTrack::new(TrackType::Video, codec_info, "track0".to_string());
+        // Transport should be default
+        assert!(track.transport.interleaved.is_none());
+    }
+
+    #[test]
+    fn test_rtsp_track_default_uri() {
+        let codec_info = RtspCodecInfo::default();
+        let track = RtspTrack::new(TrackType::Audio, codec_info, "control".to_string());
+        assert!(track.uri.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_track_set_transport_tcp() {
+        let codec_info = RtspCodecInfo::default();
+        let mut track = RtspTrack::new(TrackType::Video, codec_info, "track0".to_string());
+
+        let transport = RtspTransport {
+            interleaved: Some([0, 1]),
+            ..Default::default()
+        };
+        track.set_transport(transport.clone()).await;
+        assert_eq!(track.transport.interleaved, Some([0, 1]));
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_track_set_transport_udp() {
+        let codec_info = RtspCodecInfo::default();
+        let mut track = RtspTrack::new(TrackType::Video, codec_info, "track0".to_string());
+
+        let transport = RtspTransport {
+            client_port: Some([5000, 5001]),
+            ..Default::default()
+        };
+        track.set_transport(transport.clone()).await;
+        assert!(track.transport.interleaved.is_none());
+        assert_eq!(track.transport.client_port, Some([5000, 5001]));
+    }
+}

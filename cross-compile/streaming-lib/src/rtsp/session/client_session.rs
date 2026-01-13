@@ -115,6 +115,36 @@ impl RtspClientSession {
         })
     }
 
+    pub fn new_with_io(
+        address: String,
+        stream_name: String,
+        protocol_type: ProtocolType,
+        event_producer: StreamHubEventSender,
+        client_type: ClientSessionType,
+        net_io: Box<dyn TNetIO + Send + Sync>,
+    ) -> Self {
+        let io = Arc::new(Mutex::new(net_io));
+
+        Self {
+            address,
+            stream_name,
+            io: io.clone(),
+            reader: BytesReader::new(BytesMut::default()),
+            writer: AsyncBytesWriter::new(io),
+            protocol_type,
+            tracks: HashMap::new(),
+            sdp: Sdp::default(),
+            session_id: None,
+            client_type,
+            event_producer,
+
+            cseq: 1,
+
+            stream_handler: Arc::new(RtspStreamHandler::new()),
+            is_running: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
     //publish stream: OPTIONS->ANNOUNCE->SETUP->RECORD->TEARDOWN
     //subscribe stream: OPTIONS->DESCRIBE->SETUP->PLAY->TEARDOWN
     pub async fn run(&mut self) -> Result<(), SessionError> {
@@ -596,5 +626,329 @@ impl RtspClientSession {
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========================================================================
+    // ClientSessionType Tests
+    // ========================================================================
+
+    #[test]
+    fn test_client_session_type_push() {
+        let session_type = ClientSessionType::Push;
+        assert!(matches!(session_type, ClientSessionType::Push));
+    }
+
+    #[test]
+    fn test_client_session_type_pull() {
+        let session_type = ClientSessionType::Pull;
+        assert!(matches!(session_type, ClientSessionType::Pull));
+    }
+
+    // ========================================================================
+    // Constants Tests
+    // ========================================================================
+
+    #[test]
+    fn test_user_agent_not_empty() {
+        assert!(!USER_AGENT.is_empty());
+        assert!(USER_AGENT.len() > 0);
+    }
+
+    #[test]
+    fn test_rtsp_method_names() {
+        assert_eq!(rtsp_method_name::OPTIONS, "OPTIONS");
+        assert_eq!(rtsp_method_name::DESCRIBE, "DESCRIBE");
+        assert_eq!(rtsp_method_name::ANNOUNCE, "ANNOUNCE");
+        assert_eq!(rtsp_method_name::SETUP, "SETUP");
+        assert_eq!(rtsp_method_name::PLAY, "PLAY");
+        assert_eq!(rtsp_method_name::RECORD, "RECORD");
+        assert_eq!(rtsp_method_name::TEARDOWN, "TEARDOWN");
+    }
+
+    // ========================================================================
+    // SubscriberInfo and PublisherInfo Tests
+    // ========================================================================
+
+    #[test]
+    fn test_subscriber_info_default_values() {
+        let info = SubscriberInfo {
+            id: Uuid::new(RandomDigitCount::Zero),
+            sub_type: SubscribeType::RtspRelay,
+            sub_data_type: crate::streamhub::define::SubDataType::Frame,
+            notify_info: NotifyInfo {
+                request_url: String::from(""),
+                remote_addr: String::from(""),
+            },
+        };
+        assert!(matches!(info.sub_type, SubscribeType::RtspRelay));
+        assert!(info.notify_info.request_url.is_empty());
+        assert!(info.notify_info.remote_addr.is_empty());
+    }
+
+    #[test]
+    fn test_publisher_info_default_values() {
+        let info = PublisherInfo {
+            id: Uuid::new(RandomDigitCount::Zero),
+            pub_type: PublishType::RtspRelay,
+            pub_data_type: crate::streamhub::define::PubDataType::Frame,
+            notify_info: NotifyInfo {
+                request_url: String::from(""),
+                remote_addr: String::from(""),
+            },
+        };
+        assert!(matches!(info.pub_type, PublishType::RtspRelay));
+        assert!(info.notify_info.request_url.is_empty());
+        assert!(info.notify_info.remote_addr.is_empty());
+    }
+
+    // ========================================================================
+    // Uri Tests
+    // ========================================================================
+
+    #[test]
+    fn test_uri_unmarshal_valid() {
+        let uri_str = "rtsp://192.168.1.1:554/stream";
+        let uri = Uri::unmarshal(uri_str);
+        assert!(uri.is_some());
+        let uri = uri.unwrap();
+        assert!(matches!(uri.schema, crate::common::http::Schema::RTSP));
+        assert_eq!(uri.host, "192.168.1.1");
+    }
+
+    #[test]
+    fn test_uri_unmarshal_with_path() {
+        let uri_str = "rtsp://example.com/live/stream1";
+        let uri = Uri::unmarshal(uri_str);
+        assert!(uri.is_some());
+        let uri = uri.unwrap();
+        assert!(uri.path.contains("live"));
+    }
+
+    // ========================================================================
+    // RtspTransport Tests
+    // ========================================================================
+
+    #[test]
+    fn test_rtsp_transport_default() {
+        let transport = RtspTransport::default();
+        assert!(transport.client_port.is_none());
+        assert!(transport.server_port.is_none());
+        assert!(transport.interleaved.is_none());
+    }
+
+    #[test]
+    fn test_rtsp_transport_tcp() {
+        let transport = RtspTransport {
+            protocol_type: ProtocolType::TCP,
+            cast_type: CastType::Unicast,
+            interleaved: Some([0, 1]),
+            ..Default::default()
+        };
+        assert!(matches!(transport.protocol_type, ProtocolType::TCP));
+        assert!(matches!(transport.cast_type, CastType::Unicast));
+        assert_eq!(transport.interleaved, Some([0, 1]));
+    }
+
+    #[test]
+    fn test_rtsp_transport_udp() {
+        let transport = RtspTransport {
+            protocol_type: ProtocolType::UDP,
+            cast_type: CastType::Unicast,
+            client_port: Some([5000, 5001]),
+            ..Default::default()
+        };
+        assert!(matches!(transport.protocol_type, ProtocolType::UDP));
+        assert_eq!(transport.client_port, Some([5000, 5001]));
+    }
+
+    #[test]
+    fn test_rtsp_transport_marshal() {
+        let transport = RtspTransport {
+            protocol_type: ProtocolType::TCP,
+            cast_type: CastType::Unicast,
+            interleaved: Some([0, 1]),
+            ..Default::default()
+        };
+        let marshaled = transport.marshal();
+        assert!(!marshaled.is_empty());
+        assert!(marshaled.contains("RTP/AVP"));
+    }
+
+    // ========================================================================
+    // Protocol Type Tests
+    // ========================================================================
+
+    #[test]
+    fn test_protocol_type_tcp() {
+        let pt = ProtocolType::TCP;
+        assert!(matches!(pt, ProtocolType::TCP));
+    }
+
+    #[test]
+    fn test_protocol_type_udp() {
+        let pt = ProtocolType::UDP;
+        assert!(matches!(pt, ProtocolType::UDP));
+    }
+
+    // ========================================================================
+    // CastType Tests
+    // ========================================================================
+
+    #[test]
+    fn test_cast_type_unicast() {
+        let ct = CastType::Unicast;
+        assert!(matches!(ct, CastType::Unicast));
+    }
+
+    #[test]
+    fn test_cast_type_multicast() {
+        let ct = CastType::Multicast;
+        assert!(matches!(ct, CastType::Multicast));
+    }
+
+    // ========================================================================
+    // SessionError Tests
+    // ========================================================================
+
+    #[test]
+    fn test_session_error_rtsp_response_status_error() {
+        let err = SessionError {
+            value: SessionErrorValue::RtspResponseStatusError,
+        };
+        assert!(matches!(
+            err.value,
+            SessionErrorValue::RtspResponseStatusError
+        ));
+    }
+
+    #[test]
+    fn test_session_error_stream_hub_event_send_err() {
+        let err = SessionError {
+            value: SessionErrorValue::StreamHubEventSendErr,
+        };
+        assert!(matches!(
+            err.value,
+            SessionErrorValue::StreamHubEventSendErr
+        ));
+    }
+
+    // ========================================================================
+    // StreamIdentifier Tests
+    // ========================================================================
+
+    #[test]
+    fn test_stream_identifier_rtsp() {
+        let identifier = StreamIdentifier::Rtsp {
+            stream_path: "live/stream1".to_string(),
+        };
+        if let StreamIdentifier::Rtsp { stream_path } = identifier {
+            assert_eq!(stream_path, "live/stream1");
+        } else {
+            panic!("Expected Rtsp variant");
+        }
+    }
+
+    // ========================================================================
+    // Uuid Tests
+    // ========================================================================
+
+    #[test]
+    fn test_uuid_new_zero_digits() {
+        let uuid = Uuid::new(RandomDigitCount::Zero);
+        // Should be created without panic
+        let _ = uuid.to_string();
+    }
+
+    #[test]
+    fn test_uuid_to_string_not_empty() {
+        let uuid = Uuid::new(RandomDigitCount::Zero);
+        let s = uuid.to_string();
+        assert!(!s.is_empty());
+    }
+
+    use crate::bytesio::bytesio_errors::BytesIOError;
+    use crate::bytesio::{NetType, TNetIO};
+    use async_trait::async_trait;
+    use bytes::Bytes;
+    use mockall::mock;
+
+    mock! {
+        pub NetIO {}
+
+        #[async_trait]
+        impl TNetIO for NetIO {
+            async fn write(&mut self, bytes: Bytes) -> Result<(), BytesIOError>;
+            async fn read(&mut self) -> Result<BytesMut, BytesIOError>;
+            async fn read_timeout(&mut self, duration: std::time::Duration) -> Result<BytesMut, BytesIOError>;
+            fn get_net_type(&self) -> NetType;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_client_session_send_options() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut mock_io = MockNetIO::new();
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("OPTIONS rtsp://localhost:554/live/test RTSP/1.0")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        // Mock get_net_type called by AsyncBytesWriter
+        mock_io.expect_read()
+            .returning(|| {
+                let response = "RTSP/1.0 200 OK\r\nCSeq: 1\r\nPublic: OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN\r\n\r\n";
+                Ok(BytesMut::from(response))
+            });
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+
+        let mut session = RtspClientSession::new_with_io(
+            "localhost:554".to_string(),
+            "live/test".to_string(),
+            ProtocolType::TCP,
+            event_sender,
+            ClientSessionType::Pull,
+            Box::new(mock_io),
+        );
+
+        let result = session.send_options().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_client_session_receive_response() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut mock_io = MockNetIO::new();
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+
+        // Respond to receive_response
+        mock_io.expect_read()
+            .times(1)
+            .returning(|| {
+                let response = "RTSP/1.0 200 OK\r\nCSeq: 1\r\nPublic: OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN\r\n\r\n";
+                Ok(BytesMut::from(response))
+            });
+
+        let mut session = RtspClientSession::new_with_io(
+            "localhost:554".to_string(),
+            "live/test".to_string(),
+            ProtocolType::TCP,
+            event_sender,
+            ClientSessionType::Pull,
+            Box::new(mock_io),
+        );
+
+        let result = session.receive_response("OPTIONS").await;
+        assert!(result.is_ok());
     }
 }

@@ -1,0 +1,106 @@
+warning: patch `rtp v0.8.0 (/home/kmk/anyka-dev/cross-compile/patches/rtp-0.8.0-full)` was not used in the crate graph
+warning: patch `tokio-metrics v0.2.2 (/home/kmk/anyka-dev/cross-compile/patches/tokio-metrics-0.2.2-full)` was not used in the crate graph
+warning: patch `webrtc-ice v0.9.1 (/home/kmk/anyka-dev/cross-compile/patches/webrtc-ice-0.9.1-full)` was not used in the crate graph
+warning: patch `webrtc-sctp v0.8.0 (/home/kmk/anyka-dev/cross-compile/patches/webrtc-sctp-0.8.0-full)` was not used in the crate graph
+warning: patch `webrtc-util v0.7.0 (/home/kmk/anyka-dev/cross-compile/patches/webrtc-util-0.7.0-full)` was not used in the crate graph
+help: Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
+warning: variable `depend_skipped` is assigned to, but never used
+   --> patches/openssl-src-300.2.3+3.2.1-full/src/lib.rs:568:17
+    |
+568 |             let mut depend_skipped = false;
+    |                 ^^^^^^^^^^^^^^^^^^
+    |
+    = note: consider using `_depend_skipped` instead
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `depend_skipped` is never read
+   --> patches/openssl-src-300.2.3+3.2.1-full/src/lib.rs:584:29
+    |
+584 | ...                   depend_skipped = true;
+    |                       ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `depend_skipped` is never read
+   --> patches/openssl-src-300.2.3+3.2.1-full/src/lib.rs:600:29
+    |
+600 | ...                   depend_skipped = true;
+    |                       ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: field `bin_dir` is never read
+  --> patches/openssl-src-300.2.3+3.2.1-full/src/lib.rs:28:5
+   |
+25 | pub struct Artifacts {
+   |            --------- field in this struct
+...
+28 |     bin_dir: PathBuf,
+   |     ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `openssl-src` (lib) generated 4 warnings
+   Compiling streaming-lib v0.1.0 (/home/kmk/anyka-dev/cross-compile/streaming-lib)
+warning: unused import: `bytes::BytesMut`
+   --> streaming-lib/src/container/amf0/amf0_writer.rs:133:9
+    |
+133 |     use bytes::BytesMut;
+    |         ^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `crate::bytesio::bytes_writer::BytesWriter`
+   --> streaming-lib/src/rtsp/rtp/rtp_aac.rs:173:9
+    |
+173 |     use crate::bytesio::bytes_writer::BytesWriter;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `byteorder::BigEndian`
+   --> streaming-lib/src/rtsp/rtp/rtp_aac.rs:177:9
+    |
+177 |     use byteorder::BigEndian;
+    |         ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::bytesio::bytes_writer::BytesWriter`
+   --> streaming-lib/src/rtsp/rtp/rtp_h264.rs:483:9
+    |
+483 |     use crate::bytesio::bytes_writer::BytesWriter;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `byteorder::BigEndian`
+   --> streaming-lib/src/rtsp/rtp/rtp_h264.rs:487:9
+    |
+487 |     use byteorder::BigEndian;
+    |         ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::bytesio::bytes_writer::BytesWriter`
+   --> streaming-lib/src/rtsp/rtp/rtp_h265.rs:370:9
+    |
+370 |     use crate::bytesio::bytes_writer::BytesWriter;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `byteorder::BigEndian`
+   --> streaming-lib/src/rtsp/rtp/rtp_h265.rs:374:9
+    |
+374 |     use byteorder::BigEndian;
+    |         ^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `FrameDataSender`, `FrameData`, `Information`, `PacketDataSender`, and `PacketData`
+    --> streaming-lib/src/streamhub/mod.rs:1108:35
+     |
+1108 |         DataReceiver, DataSender, FrameData, FrameDataSender, Information, NotifyInfo, PacketData,
+     |                                   ^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^^^^^^              ^^^^^^^^^^
+1109 |         PacketDataSender, PubDataType, PublishType, PublisherInfo, StatisticData, SubDataType,
+     |         ^^^^^^^^^^^^^^^^
+
+warning: unused import: `bytes::BytesMut`
+    --> streaming-lib/src/streamhub/mod.rs:1113:9
+     |
+1113 |     use bytes::BytesMut;
+     |         ^^^^^^^^^^^^^^^
+

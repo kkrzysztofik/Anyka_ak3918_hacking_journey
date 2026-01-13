@@ -96,3 +96,142 @@ impl Fail for UnPackerError {
         self.value.backtrace()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bytesio::bytes_errors::{BytesReadError, BytesReadErrorValue};
+    use crate::bytesio::bytes_errors::{BytesWriteError, BytesWriteErrorValue};
+
+    // ========== PackerErrorValue Display Tests ==========
+
+    #[test]
+    fn test_packer_error_value_bytes_read_display() {
+        let read_err = BytesReadError {
+            value: BytesReadErrorValue::NotEnoughBytes,
+        };
+        let err = PackerErrorValue::BytesReadError(read_err);
+        assert!(format!("{}", err).contains("bytes read error"));
+    }
+
+    #[test]
+    fn test_packer_error_value_bytes_write_display() {
+        let write_err = BytesWriteError {
+            value: BytesWriteErrorValue::Timeout,
+        };
+        let err = PackerErrorValue::BytesWriteError(write_err);
+        assert!(format!("{}", err).contains("bytes write error"));
+    }
+
+    // ========== PackerError From Trait Tests ==========
+
+    #[test]
+    fn test_packer_error_from_bytes_read_error() {
+        let read_err = BytesReadError {
+            value: BytesReadErrorValue::EmptyStream,
+        };
+        let err: PackerError = read_err.into();
+        assert!(matches!(err.value, PackerErrorValue::BytesReadError(_)));
+    }
+
+    #[test]
+    fn test_packer_error_from_bytes_write_error() {
+        let write_err = BytesWriteError {
+            value: BytesWriteErrorValue::OutofIndex,
+        };
+        let err: PackerError = write_err.into();
+        assert!(matches!(err.value, PackerErrorValue::BytesWriteError(_)));
+    }
+
+    // ========== PackerError Display Tests ==========
+
+    #[test]
+    fn test_packer_error_display() {
+        let read_err = BytesReadError {
+            value: BytesReadErrorValue::NotEnoughBytes,
+        };
+        let err = PackerError {
+            value: PackerErrorValue::BytesReadError(read_err),
+        };
+        assert!(format!("{}", err).contains("bytes read error"));
+    }
+
+    // ========== UnPackerErrorValue Display Tests ==========
+
+    #[test]
+    fn test_unpacker_error_value_bytes_read_display() {
+        let read_err = BytesReadError {
+            value: BytesReadErrorValue::IndexOutofRange,
+        };
+        let err = UnPackerErrorValue::BytesReadError(read_err);
+        assert!(format!("{}", err).contains("bytes read error"));
+    }
+
+    #[test]
+    fn test_unpacker_error_value_bytes_write_display() {
+        let write_err = BytesWriteError {
+            value: BytesWriteErrorValue::Timeout,
+        };
+        let err = UnPackerErrorValue::BytesWriteError(write_err);
+        assert!(format!("{}", err).contains("bytes write error"));
+    }
+
+    // ========== UnPackerError From Trait Tests ==========
+
+    #[test]
+    fn test_unpacker_error_from_bytes_read_error() {
+        let read_err = BytesReadError {
+            value: BytesReadErrorValue::NotEnoughBytes,
+        };
+        let err: UnPackerError = read_err.into();
+        assert!(matches!(err.value, UnPackerErrorValue::BytesReadError(_)));
+    }
+
+    #[test]
+    fn test_unpacker_error_from_bytes_write_error() {
+        let write_err = BytesWriteError {
+            value: BytesWriteErrorValue::Timeout,
+        };
+        let err: UnPackerError = write_err.into();
+        assert!(matches!(err.value, UnPackerErrorValue::BytesWriteError(_)));
+    }
+
+    // ========== UnPackerError Display Tests ==========
+
+    #[test]
+    fn test_unpacker_error_display() {
+        let read_err = BytesReadError {
+            value: BytesReadErrorValue::EmptyStream,
+        };
+        let err = UnPackerError {
+            value: UnPackerErrorValue::BytesReadError(read_err),
+        };
+        assert!(format!("{}", err).contains("bytes read error"));
+    }
+
+    // ========== Debug Trait Tests ==========
+
+    #[test]
+    fn test_packer_error_debug() {
+        let read_err = BytesReadError {
+            value: BytesReadErrorValue::NotEnoughBytes,
+        };
+        let err = PackerError {
+            value: PackerErrorValue::BytesReadError(read_err),
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("PackerError"));
+    }
+
+    #[test]
+    fn test_unpacker_error_debug() {
+        let write_err = BytesWriteError {
+            value: BytesWriteErrorValue::Timeout,
+        };
+        let err = UnPackerError {
+            value: UnPackerErrorValue::BytesWriteError(write_err),
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("UnPackerError"));
+    }
+}

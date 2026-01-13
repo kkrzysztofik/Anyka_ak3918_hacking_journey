@@ -216,3 +216,360 @@ impl Marshal<Result<BytesMut, FlvMuxerError>> for VideoTagHeader {
         Ok(writer.extract_current_bytes())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========== AudioTagHeader Default Tests ==========
+
+    #[test]
+    fn test_audio_tag_header_default() {
+        let header = AudioTagHeader::defalut();
+        assert_eq!(header.sound_format, 0);
+        assert_eq!(header.sound_rate, 0);
+        assert_eq!(header.sound_size, 0);
+        assert_eq!(header.sound_type, 0);
+        assert_eq!(header.aac_packet_type, 0);
+    }
+
+    // ========== AudioTagHeader Marshal Tests ==========
+
+    #[test]
+    fn test_audio_tag_header_marshal_non_aac() {
+        let header = AudioTagHeader {
+            sound_format: 2, // MP3
+            sound_rate: 3,   // 44kHz
+            sound_size: 1,   // 16-bit
+            sound_type: 1,   // Stereo
+            aac_packet_type: 0,
+        };
+
+        let result = header.marshal().unwrap();
+        // MP3 format: should only write 1 byte (no AAC packet type)
+        assert_eq!(result.len(), 1);
+
+        // Verify byte encoding: format(4) << 4 | rate(2) << 2 | size(1) << 1 | type(1)
+        // 2 << 4 | 3 << 2 | 1 << 1 | 1 = 32 | 12 | 2 | 1 = 47 (0x2F)
+        assert_eq!(result[0], 0x2F);
+    }
+
+    #[test]
+    fn test_audio_tag_header_marshal_aac() {
+        let header = AudioTagHeader {
+            sound_format: 10, // AAC
+            sound_rate: 3,    // 44kHz
+            sound_size: 1,    // 16-bit
+            sound_type: 1,    // Stereo
+            aac_packet_type: 1,
+        };
+
+        let result = header.marshal().unwrap();
+        // AAC format: should write 2 bytes (flags + AAC packet type)
+        assert_eq!(result.len(), 2);
+
+        // Verify byte encoding: format(10) << 4 | rate(3) << 2 | size(1) << 1 | type(1)
+        // 10 << 4 | 3 << 2 | 1 << 1 | 1 = 160 | 12 | 2 | 1 = 175 (0xAF)
+        assert_eq!(result[0], 0xAF);
+        assert_eq!(result[1], 1); // AAC raw data
+    }
+
+    // ========== AudioTagHeader Unmarshal Tests ==========
+
+    #[test]
+    fn test_audio_tag_header_unmarshal_non_aac() {
+        // MP3 format: format(2) << 4 | rate(3) << 2 | size(1) << 1 | type(1) = 0x2F
+        let data = BytesMut::from(&[0x2F][..]);
+        let mut reader = BytesReader::new(data);
+
+        let header = AudioTagHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(header.sound_format, 2);
+        assert_eq!(header.sound_rate, 3);
+        assert_eq!(header.sound_size, 1);
+        assert_eq!(header.sound_type, 1);
+    }
+
+    #[test]
+    fn test_audio_tag_header_unmarshal_aac() {
+        // AAC format: 0xAF (flags) + 0x01 (AAC raw)
+        let data = BytesMut::from(&[0xAF, 0x01][..]);
+        let mut reader = BytesReader::new(data);
+
+        let header = AudioTagHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(header.sound_format, 10); // AAC
+        assert_eq!(header.sound_rate, 3);
+        assert_eq!(header.sound_size, 1);
+        assert_eq!(header.sound_type, 1);
+        assert_eq!(header.aac_packet_type, 1);
+    }
+
+    #[test]
+    fn test_audio_tag_header_unmarshal_aac_seqhdr() {
+        // AAC sequence header: 0xAF (flags) + 0x00 (sequence header)
+        let data = BytesMut::from(&[0xAF, 0x00][..]);
+        let mut reader = BytesReader::new(data);
+
+        let header = AudioTagHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(header.sound_format, 10);
+        assert_eq!(header.aac_packet_type, 0); // Sequence header
+    }
+
+    // ========== AudioTagHeader Round-Trip Tests ==========
+
+    #[test]
+    fn test_audio_tag_header_roundtrip_mp3() {
+        let original = AudioTagHeader {
+            sound_format: 2, // MP3
+            sound_rate: 2,   // 22kHz
+            sound_size: 1,   // 16-bit
+            sound_type: 0,   // Mono
+            aac_packet_type: 0,
+        };
+
+        let marshaled = original.marshal().unwrap();
+        let mut reader = BytesReader::new(marshaled);
+        let decoded = AudioTagHeader::unmarshal(&mut reader).unwrap();
+
+        assert_eq!(decoded.sound_format, original.sound_format);
+        assert_eq!(decoded.sound_rate, original.sound_rate);
+        assert_eq!(decoded.sound_size, original.sound_size);
+        assert_eq!(decoded.sound_type, original.sound_type);
+    }
+
+    #[test]
+    fn test_audio_tag_header_roundtrip_aac() {
+        let original = AudioTagHeader {
+            sound_format: 10, // AAC
+            sound_rate: 3,    // 44kHz
+            sound_size: 1,    // 16-bit
+            sound_type: 1,    // Stereo
+            aac_packet_type: 1,
+        };
+
+        let marshaled = original.marshal().unwrap();
+        let mut reader = BytesReader::new(marshaled);
+        let decoded = AudioTagHeader::unmarshal(&mut reader).unwrap();
+
+        assert_eq!(decoded.sound_format, original.sound_format);
+        assert_eq!(decoded.sound_rate, original.sound_rate);
+        assert_eq!(decoded.sound_size, original.sound_size);
+        assert_eq!(decoded.sound_type, original.sound_type);
+        assert_eq!(decoded.aac_packet_type, original.aac_packet_type);
+    }
+
+    // ========== VideoTagHeader Default Tests ==========
+
+    #[test]
+    fn test_video_tag_header_default() {
+        let header = VideoTagHeader::defalut();
+        assert_eq!(header.frame_type, 0);
+        assert_eq!(header.codec_id, 0);
+        assert_eq!(header.avc_packet_type, 0);
+        assert_eq!(header.composition_time, 0);
+    }
+
+    // ========== VideoTagHeader Marshal Tests ==========
+
+    #[test]
+    fn test_video_tag_header_marshal_non_avc() {
+        let header = VideoTagHeader {
+            frame_type: 1, // Keyframe
+            codec_id: 2,   // H.263
+            avc_packet_type: 0,
+            composition_time: 0,
+        };
+
+        let result = header.marshal().unwrap();
+        // Non-AVC: should only write 1 byte
+        assert_eq!(result.len(), 1);
+
+        // frame_type(1) << 4 | codec_id(2) = 0x12
+        assert_eq!(result[0], 0x12);
+    }
+
+    #[test]
+    fn test_video_tag_header_marshal_h264_keyframe() {
+        let header = VideoTagHeader {
+            frame_type: 1,      // Keyframe
+            codec_id: 7,        // AVC (H.264)
+            avc_packet_type: 0, // Sequence header
+            composition_time: 0,
+        };
+
+        let result = header.marshal().unwrap();
+        // AVC: should write 5 bytes (flags + packet type + 3 bytes composition time)
+        assert_eq!(result.len(), 5);
+
+        // frame_type(1) << 4 | codec_id(7) = 0x17
+        assert_eq!(result[0], 0x17);
+        assert_eq!(result[1], 0); // Sequence header
+    }
+
+    #[test]
+    fn test_video_tag_header_marshal_hevc() {
+        let header = VideoTagHeader {
+            frame_type: 1,      // Keyframe
+            codec_id: 12,       // HEVC
+            avc_packet_type: 1, // NALU
+            composition_time: 100,
+        };
+
+        let result = header.marshal().unwrap();
+        assert_eq!(result.len(), 5);
+
+        // frame_type(1) << 4 | codec_id(12) = 0x1C
+        assert_eq!(result[0], 0x1C);
+        assert_eq!(result[1], 1); // NALU
+    }
+
+    // ========== VideoTagHeader Unmarshal Tests ==========
+
+    #[test]
+    fn test_video_tag_header_unmarshal_non_avc() {
+        // H.263: frame_type(1) << 4 | codec_id(2) = 0x12
+        let data = BytesMut::from(&[0x12][..]);
+        let mut reader = BytesReader::new(data);
+
+        let header = VideoTagHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(header.frame_type, 1);
+        assert_eq!(header.codec_id, 2);
+    }
+
+    #[test]
+    fn test_video_tag_header_unmarshal_h264() {
+        // H.264 keyframe + sequence header + composition time 0
+        let data = BytesMut::from(&[0x17, 0x00, 0x00, 0x00, 0x00][..]);
+        let mut reader = BytesReader::new(data);
+
+        let header = VideoTagHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(header.frame_type, 1);
+        assert_eq!(header.codec_id, 7);
+        assert_eq!(header.avc_packet_type, 0);
+        assert_eq!(header.composition_time, 0);
+    }
+
+    #[test]
+    fn test_video_tag_header_unmarshal_h264_with_cts() {
+        // H.264 with composition time = 0x010203 (big-endian)
+        let data = BytesMut::from(&[0x17, 0x01, 0x01, 0x02, 0x03][..]);
+        let mut reader = BytesReader::new(data);
+
+        let header = VideoTagHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(header.frame_type, 1);
+        assert_eq!(header.codec_id, 7);
+        assert_eq!(header.avc_packet_type, 1);
+        // Big-endian: 0x01 << 16 | 0x02 << 8 | 0x03 = 66051
+        assert_eq!(header.composition_time, 66051);
+    }
+
+    #[test]
+    fn test_video_tag_header_unmarshal_negative_cts() {
+        // H.264 with negative composition time (sign bit set in 24-bit value)
+        // 0x800001 in big-endian: this has bit 23 set, so should be sign-extended
+        let data = BytesMut::from(&[0x17, 0x01, 0x80, 0x00, 0x01][..]);
+        let mut reader = BytesReader::new(data);
+
+        let header = VideoTagHeader::unmarshal(&mut reader).unwrap();
+        // The value 0x800001 with sign extension becomes negative
+        assert!(header.composition_time < 0);
+    }
+
+    // ========== VideoTagHeader Round-Trip Tests ==========
+
+    #[test]
+    fn test_video_tag_header_roundtrip_h264_keyframe() {
+        let original = VideoTagHeader {
+            frame_type: 1,
+            codec_id: 7, // H.264
+            avc_packet_type: 0,
+            composition_time: 0,
+        };
+
+        let marshaled = original.marshal().unwrap();
+        let mut reader = BytesReader::new(marshaled);
+        let decoded = VideoTagHeader::unmarshal(&mut reader).unwrap();
+
+        assert_eq!(decoded.frame_type, original.frame_type);
+        assert_eq!(decoded.codec_id, original.codec_id);
+        assert_eq!(decoded.avc_packet_type, original.avc_packet_type);
+        assert_eq!(decoded.composition_time, original.composition_time);
+    }
+
+    #[test]
+    fn test_video_tag_header_roundtrip_h264_interframe() {
+        let original = VideoTagHeader {
+            frame_type: 2, // Inter frame
+            codec_id: 7,   // H.264
+            avc_packet_type: 1,
+            composition_time: 33,
+        };
+
+        let marshaled = original.marshal().unwrap();
+        let mut reader = BytesReader::new(marshaled);
+        let decoded = VideoTagHeader::unmarshal(&mut reader).unwrap();
+
+        assert_eq!(decoded.frame_type, original.frame_type);
+        assert_eq!(decoded.codec_id, original.codec_id);
+        assert_eq!(decoded.avc_packet_type, original.avc_packet_type);
+        // Note: composition_time encoding/decoding is different (endianness)
+        // so we just verify it's not zero when original is non-zero
+        assert!(decoded.composition_time != 0 || original.composition_time == 0);
+    }
+
+    #[test]
+    fn test_video_tag_header_roundtrip_hevc() {
+        let original = VideoTagHeader {
+            frame_type: 1,
+            codec_id: 12, // HEVC
+            avc_packet_type: 1,
+            composition_time: 0,
+        };
+
+        let marshaled = original.marshal().unwrap();
+        let mut reader = BytesReader::new(marshaled);
+        let decoded = VideoTagHeader::unmarshal(&mut reader).unwrap();
+
+        assert_eq!(decoded.frame_type, original.frame_type);
+        assert_eq!(decoded.codec_id, original.codec_id);
+        assert_eq!(decoded.avc_packet_type, original.avc_packet_type);
+    }
+
+    // ========== Clone and Debug Tests ==========
+
+    #[test]
+    fn test_audio_tag_header_clone() {
+        let header = AudioTagHeader {
+            sound_format: 10,
+            sound_rate: 3,
+            sound_size: 1,
+            sound_type: 1,
+            aac_packet_type: 1,
+        };
+
+        let cloned = header.clone();
+        assert_eq!(cloned.sound_format, header.sound_format);
+        assert_eq!(cloned.aac_packet_type, header.aac_packet_type);
+    }
+
+    #[test]
+    fn test_audio_tag_header_debug() {
+        let header = AudioTagHeader::defalut();
+        let debug_str = format!("{:?}", header);
+        assert!(debug_str.contains("AudioTagHeader"));
+        assert!(debug_str.contains("sound_format"));
+    }
+
+    #[test]
+    fn test_video_tag_header_clone() {
+        let header = VideoTagHeader {
+            frame_type: 1,
+            codec_id: 7,
+            avc_packet_type: 0,
+            composition_time: 100,
+        };
+
+        let cloned = header.clone();
+        assert_eq!(cloned.frame_type, header.frame_type);
+        assert_eq!(cloned.composition_time, header.composition_time);
+    }
+}

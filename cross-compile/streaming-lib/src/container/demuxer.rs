@@ -571,4 +571,100 @@ mod tests {
             }
         }
     }
+
+    // ============================================
+    // FlvVideoTagDemuxer Tests
+    // ============================================
+
+    #[test]
+    fn test_flv_video_tag_demuxer_seq_header() {
+        let mut demuxer = FlvVideoTagDemuxer::new();
+        // FrameType: 1 (Keyframe), CodecID: 7 (AVC) -> 0x17
+        // AVCPacketType: 0 (SeqHdr)
+        // CompositionTime: 0
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0x17, 0x00, 0x00, 0x00, 0x00]);
+        // Add AVCDecoderConfigurationRecord with 0 SPS and 0 PPS to avoid SpsParser errors with dummy data
+        data.extend_from_slice(&[
+            0x01, // Version
+            0x42, // Profile
+            0xC0, // Compatibility
+            0x1E, // Level
+            0xFF, // NALU Length Size - 1 (3 -> 4 bytes)
+            0xE0, // Number of SPS = 0 (0xE0 | 0)
+            0x00, // Number of PPS = 0
+        ]);
+
+        let result = demuxer.demux(0, data).unwrap();
+        assert!(result.is_none()); // SeqHdr returns None but loads config
+
+        // Verify config loaded
+        assert_eq!(demuxer.avc_processor.mpeg4_avc.profile, 0x42);
+        assert_eq!(demuxer.avc_processor.mpeg4_avc.nalu_length, 4);
+    }
+
+    #[test]
+    fn test_flv_video_tag_demuxer_nalu() {
+        let mut demuxer = FlvVideoTagDemuxer::new();
+        // Set nalu_length explicitly as defaults might be 0
+        demuxer.avc_processor.mpeg4_avc.nalu_length = 4;
+
+        // FrameType: 2 (Interframe), CodecID: 7 (AVC) -> 0x27
+        // AVCPacketType: 1 (NALU)
+        // CompositionTime: 100
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0x27, 0x01, 0x00, 0x00, 0x64]);
+
+        // Add NALU: Size 4 bytes (e.g., 2), Data 2 bytes
+        data.extend_from_slice(&[0x00, 0x00, 0x00, 0x02, 0x06, 0x05]);
+
+        let result = demuxer.demux(1000, data).unwrap();
+        assert!(result.is_some());
+        let video_data = result.unwrap();
+        assert_eq!(video_data.pts, 1100); // 1000 + 100
+        assert_eq!(video_data.frame_type, 2);
+        // Data should be Annex-B (0x00 0x00 0x00 0x01 ...)
+        assert_eq!(video_data.data[0..4], [0x00, 0x00, 0x00, 0x01]);
+        assert_eq!(video_data.data[4..6], [0x06, 0x05]);
+    }
+
+    // ============================================
+    // FlvAudioTagDemuxer Tests
+    // ============================================
+
+    #[test]
+    fn test_flv_audio_tag_demuxer_seq_header() {
+        let mut demuxer = FlvAudioTagDemuxer::new();
+        // AAC (10, 0xA), 44k(3), 16bit(1), Stereo(1) -> 0xAF
+        // AACPacketType: 0 (SeqHdr)
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0xAF, 0x00]);
+        // AudioSpecificConfig (2 bytes usually, e.g. 0x12 0x10)
+        data.extend_from_slice(&[0x12, 0x10]);
+
+        let result = demuxer.demux(0, data).unwrap();
+        assert!(!result.has_data); // SeqHdr returns empty data but loads config
+    }
+
+    #[test]
+    fn test_flv_audio_tag_demuxer_raw() {
+        let mut demuxer = FlvAudioTagDemuxer::new();
+        // Pre-configure AAC processor to avoid overflow in adts_save due to default profile=0
+        demuxer.aac_processor.mpeg4_aac.object_type = 2; // AAC LC
+        demuxer.aac_processor.mpeg4_aac.sampling_frequency_index = 4; // 44100Hz
+        demuxer.aac_processor.mpeg4_aac.channel_configuration = 2; // Stereo
+
+        // AAC (10, 0xA) ... -> 0xAF
+        // AACPacketType: 1 (Raw)
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0xAF, 0x01]);
+        // Raw data
+        data.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
+
+        let result = demuxer.demux(1000, data).unwrap();
+        assert!(result.has_data);
+        assert_eq!(result.pts, 1000);
+        // Check that data contains raw data
+        assert!(result.data.len() > 3);
+    }
 }

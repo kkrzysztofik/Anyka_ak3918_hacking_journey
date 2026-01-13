@@ -248,3 +248,225 @@ impl RtcpContext {
         self.last_rtp_timestamp = pkt.header.timestamp;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rtsp::rtp::rtp_header::RtpHeader;
+
+    // ========== Constant Tests ==========
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(MIN_SEQUENTIAL, 2);
+        assert_eq!(RTP_SEQ_MOD, 65536);
+        assert_eq!(MAX_DROPOUT, 3000);
+        assert_eq!(MAX_MISORDER, 100);
+    }
+
+    // ========== distance() Tests ==========
+
+    #[test]
+    fn test_distance_simple() {
+        assert_eq!(distance(10, 5), 5);
+    }
+
+    #[test]
+    fn test_distance_wrapping() {
+        // When sequence wraps around (65534 -> 2)
+        assert_eq!(distance(2, 65534), 4); // 65534, 65535, 0, 1, 2
+    }
+
+    #[test]
+    fn test_distance_same() {
+        assert_eq!(distance(100, 100), 0);
+    }
+
+    #[test]
+    fn test_distance_one() {
+        assert_eq!(distance(1, 0), 1);
+    }
+
+    #[test]
+    fn test_distance_max_to_zero() {
+        assert_eq!(distance(0, 65535), 1);
+    }
+
+    // ========== RtcpSource Tests ==========
+
+    #[test]
+    fn test_rtcp_source_default() {
+        let source = RtcpSource::default();
+        assert_eq!(source.max_seq, 0);
+        assert_eq!(source.cycles, 0);
+        assert_eq!(source.received, 0);
+    }
+
+    #[test]
+    fn test_rtcp_source_init_seq() {
+        let mut source = RtcpSource::default();
+        source.init_seq(1000);
+        assert_eq!(source.base_seq, 1000);
+        assert_eq!(source.max_seq, 1000);
+        assert_eq!(source.cycles, 0);
+        assert_eq!(source.received, 0);
+    }
+
+    // ========== RtcpContext Construction Tests ==========
+
+    #[test]
+    fn test_rtcp_context_new() {
+        let ctx = RtcpContext::new(12345, 100, 48000);
+        assert_eq!(ctx.ssrc, 12345);
+        assert_eq!(ctx.sample_rate, 48000);
+        assert_eq!(ctx.source.max_seq, 99); // seq - 1
+        assert_eq!(ctx.source.probation, MIN_SEQUENTIAL);
+    }
+
+    #[test]
+    fn test_rtcp_context_default() {
+        let ctx = RtcpContext::default();
+        assert_eq!(ctx.ssrc, 0);
+        assert_eq!(ctx.sample_rate, 0);
+    }
+
+    // ========== generate_bye Tests ==========
+
+    #[test]
+    fn test_generate_bye() {
+        let ctx = RtcpContext::new(12345, 100, 48000);
+        let bye = ctx.generate_bye();
+        assert_eq!(bye.ssrss.len(), 1);
+        assert_eq!(bye.ssrss[0], 12345);
+        assert_eq!(bye.header.report_count, 1);
+    }
+
+    // ========== generate_app Tests ==========
+
+    #[test]
+    fn test_generate_app() {
+        let ctx = RtcpContext::new(12345, 100, 48000);
+        let data = BytesMut::from(&[0x01, 0x02, 0x03][..]);
+        let app = ctx.generate_app("TEST".to_string(), data.clone());
+
+        assert_eq!(app.ssrc, 12345);
+        assert_eq!(app.name.as_ref(), b"TEST");
+        assert_eq!(app.app_data.as_ref(), data.as_ref());
+    }
+
+    #[test]
+    fn test_generate_app_empty_data() {
+        let ctx = RtcpContext::new(12345, 100, 48000);
+        let app = ctx.generate_app("TEST".to_string(), BytesMut::new());
+
+        assert_eq!(app.ssrc, 12345);
+        assert!(app.app_data.is_empty());
+    }
+
+    // ========== generate_rr Tests ==========
+
+    #[test]
+    fn test_generate_rr() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+        let rr = ctx.generate_rr();
+
+        assert_eq!(rr.ssrc, 12345);
+        assert_eq!(rr.header.payload_type, RTCP_RR);
+        assert_eq!(rr.header.report_count, 1);
+        assert_eq!(rr.header.version, 2);
+        assert_eq!(rr.report_blocks.len(), 1);
+    }
+
+    // ========== send_rtp Tests ==========
+
+    #[test]
+    fn test_send_rtp() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+
+        let pkt = RtpPacket {
+            header: RtpHeader {
+                timestamp: 1000,
+                ..Default::default()
+            },
+            payload: BytesMut::from(&[0x00; 100][..]),
+            ..Default::default()
+        };
+
+        ctx.send_rtp(pkt);
+
+        assert_eq!(ctx.send_packets, 1);
+        assert_eq!(ctx.send_bytes, 100);
+        assert_eq!(ctx.last_rtp_timestamp, 1000);
+    }
+
+    #[test]
+    fn test_send_rtp_multiple() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+
+        for i in 0..5 {
+            let pkt = RtpPacket {
+                header: RtpHeader {
+                    timestamp: 1000 + i * 160,
+                    ..Default::default()
+                },
+                payload: BytesMut::from(&[0x00; 50][..]),
+                ..Default::default()
+            };
+            ctx.send_rtp(pkt);
+        }
+
+        assert_eq!(ctx.send_packets, 5);
+        assert_eq!(ctx.send_bytes, 250);
+    }
+
+    // ========== received_sr Tests ==========
+
+    #[test]
+    fn test_received_sr() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+
+        // Create default SR and set public fields
+        let mut sr = RtcpSenderReport::default();
+        sr.ssrc = 54321;
+        sr.ntp = 0x0011223344556677;
+
+        ctx.received_sr(&sr);
+
+        assert_eq!(ctx.sender_ssrc, 54321);
+        assert_eq!(ctx.sr_ntp_lsr, 0x0011223344556677);
+        assert!(ctx.sr_clock_time > 0);
+    }
+
+    // ========== Clone and Debug Tests ==========
+
+    #[test]
+    fn test_rtcp_context_clone() {
+        let ctx = RtcpContext::new(12345, 100, 48000);
+        let cloned = ctx.clone();
+        assert_eq!(cloned.ssrc, ctx.ssrc);
+        assert_eq!(cloned.sample_rate, ctx.sample_rate);
+    }
+
+    #[test]
+    fn test_rtcp_context_debug() {
+        let ctx = RtcpContext::new(12345, 100, 48000);
+        let debug_str = format!("{:?}", ctx);
+        assert!(debug_str.contains("RtcpContext"));
+        assert!(debug_str.contains("ssrc"));
+    }
+
+    #[test]
+    fn test_rtcp_source_clone() {
+        let mut source = RtcpSource::default();
+        source.max_seq = 1000;
+        let cloned = source.clone();
+        assert_eq!(cloned.max_seq, source.max_seq);
+    }
+
+    #[test]
+    fn test_rtcp_source_debug() {
+        let source = RtcpSource::default();
+        let debug_str = format!("{:?}", source);
+        assert!(debug_str.contains("RtcpSource"));
+    }
+}

@@ -49,3 +49,107 @@ impl fmt::Display for ServerSessionType {
 }
 
 pub const USER_AGENT: &str = "xiu 0.12.8";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========== RTSP Method Name Constants Tests ==========
+
+    #[test]
+    fn test_rtsp_method_options() {
+        assert_eq!(rtsp_method_name::OPTIONS, "OPTIONS");
+    }
+
+    #[test]
+    fn test_rtsp_method_describe() {
+        assert_eq!(rtsp_method_name::DESCRIBE, "DESCRIBE");
+    }
+
+    #[test]
+    fn test_rtsp_method_announce() {
+        assert_eq!(rtsp_method_name::ANNOUNCE, "ANNOUNCE");
+    }
+
+    #[test]
+    fn test_rtsp_method_setup() {
+        assert_eq!(rtsp_method_name::SETUP, "SETUP");
+    }
+
+    #[test]
+    fn test_rtsp_method_play() {
+        assert_eq!(rtsp_method_name::PLAY, "PLAY");
+    }
+
+    #[test]
+    fn test_rtsp_method_pause() {
+        assert_eq!(rtsp_method_name::PAUSE, "PAUSE");
+    }
+
+    #[test]
+    fn test_rtsp_method_teardown() {
+        assert_eq!(rtsp_method_name::TEARDOWN, "TEARDOWN");
+    }
+
+    #[test]
+    fn test_rtsp_method_get_parameter() {
+        assert_eq!(rtsp_method_name::GET_PARAMETER, "GET_PARAMETER");
+    }
+
+    #[test]
+    fn test_rtsp_method_set_parameter() {
+        assert_eq!(rtsp_method_name::SET_PARAMETER, "SET_PARAMETER");
+    }
+
+    #[test]
+    fn test_rtsp_method_redirect() {
+        assert_eq!(rtsp_method_name::REDIRECT, "REDIRECT");
+    }
+
+    #[test]
+    fn test_rtsp_method_record() {
+        assert_eq!(rtsp_method_name::RECORD, "RECORD");
+    }
+
+    #[test]
+    fn test_rtsp_method_array_length() {
+        assert_eq!(rtsp_method_name::ARRAY.len(), 11);
+    }
+
+    #[test]
+    fn test_rtsp_method_array_contains_all_methods() {
+        assert!(rtsp_method_name::ARRAY.contains(&rtsp_method_name::OPTIONS));
+        assert!(rtsp_method_name::ARRAY.contains(&rtsp_method_name::DESCRIBE));
+        assert!(rtsp_method_name::ARRAY.contains(&rtsp_method_name::ANNOUNCE));
+        assert!(rtsp_method_name::ARRAY.contains(&rtsp_method_name::SETUP));
+        assert!(rtsp_method_name::ARRAY.contains(&rtsp_method_name::PLAY));
+        assert!(rtsp_method_name::ARRAY.contains(&rtsp_method_name::PAUSE));
+        assert!(rtsp_method_name::ARRAY.contains(&rtsp_method_name::TEARDOWN));
+        assert!(rtsp_method_name::ARRAY.contains(&rtsp_method_name::GET_PARAMETER));
+        assert!(rtsp_method_name::ARRAY.contains(&rtsp_method_name::SET_PARAMETER));
+        assert!(rtsp_method_name::ARRAY.contains(&rtsp_method_name::REDIRECT));
+        assert!(rtsp_method_name::ARRAY.contains(&rtsp_method_name::RECORD));
+    }
+
+    // ========== ServerSessionType Display Tests ==========
+
+    #[test]
+    fn test_server_session_type_pull_display() {
+        let session_type = ServerSessionType::Pull;
+        assert_eq!(format!("{}", session_type), "pull");
+    }
+
+    #[test]
+    fn test_server_session_type_push_display() {
+        let session_type = ServerSessionType::Push;
+        assert_eq!(format!("{}", session_type), "push");
+    }
+
+    // ========== USER_AGENT Constant Test ==========
+
+    #[test]
+    fn test_user_agent_constant() {
+        assert!(USER_AGENT.starts_with("xiu"));
+        assert!(USER_AGENT.contains("0.12"));
+    }
+}

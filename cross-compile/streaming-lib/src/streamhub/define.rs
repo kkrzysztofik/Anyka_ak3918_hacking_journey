@@ -478,3 +478,358 @@ impl Segment {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========== SubscribeType Tests ==========
+
+    #[test]
+    fn test_subscribe_type_variants() {
+        let types = [
+            SubscribeType::RtmpPull,
+            SubscribeType::RtmpRemux2HttpFlv,
+            SubscribeType::RtmpRemux2Hls,
+            SubscribeType::RtmpRelay,
+            SubscribeType::RtspPull,
+            SubscribeType::RtspRemux2Rtmp,
+            SubscribeType::RtspRelay,
+            SubscribeType::WhepPull,
+            SubscribeType::WebRTCRemux2Rtmp,
+            SubscribeType::WhipRelay,
+            SubscribeType::RtpPull,
+        ];
+        assert_eq!(types.len(), 11);
+    }
+
+    #[test]
+    fn test_subscribe_type_clone_eq() {
+        let t1 = SubscribeType::RtmpPull;
+        let t2 = t1.clone();
+        assert_eq!(t1, t2);
+    }
+
+    #[test]
+    fn test_subscribe_type_debug() {
+        let t = SubscribeType::RtspPull;
+        let debug_str = format!("{:?}", t);
+        assert!(debug_str.contains("RtspPull"));
+    }
+
+    #[test]
+    fn test_subscribe_type_serialize() {
+        let t = SubscribeType::RtmpPull;
+        let json = serde_json::to_string(&t).unwrap();
+        assert!(json.contains("RtmpPull"));
+    }
+
+    // ========== PublishType Tests ==========
+
+    #[test]
+    fn test_publish_type_variants() {
+        let types = [
+            PublishType::RtmpPush,
+            PublishType::RtmpRelay,
+            PublishType::RtspPush,
+            PublishType::RtspRelay,
+            PublishType::WhipPush,
+            PublishType::WhepRelay,
+            PublishType::RtpPush,
+        ];
+        assert_eq!(types.len(), 7);
+    }
+
+    #[test]
+    fn test_publish_type_clone_eq() {
+        let t1 = PublishType::RtmpPush;
+        let t2 = t1.clone();
+        assert_eq!(t1, t2);
+    }
+
+    #[test]
+    fn test_publish_type_debug() {
+        let t = PublishType::RtspPush;
+        let debug_str = format!("{:?}", t);
+        assert!(debug_str.contains("RtspPush"));
+    }
+
+    #[test]
+    fn test_publish_type_serialize() {
+        let t = PublishType::RtmpPush;
+        let json = serde_json::to_string(&t).unwrap();
+        assert!(json.contains("RtmpPush"));
+    }
+
+    // ========== NotifyInfo Tests ==========
+
+    #[test]
+    fn test_notify_info_construction() {
+        let info = NotifyInfo {
+            request_url: "http://example.com/live/stream".to_string(),
+            remote_addr: "192.168.1.100:5000".to_string(),
+        };
+        assert_eq!(info.request_url, "http://example.com/live/stream");
+        assert_eq!(info.remote_addr, "192.168.1.100:5000");
+    }
+
+    #[test]
+    fn test_notify_info_clone() {
+        let info = NotifyInfo {
+            request_url: "http://test".to_string(),
+            remote_addr: "127.0.0.1:1234".to_string(),
+        };
+        let cloned = info.clone();
+        assert_eq!(info.request_url, cloned.request_url);
+        assert_eq!(info.remote_addr, cloned.remote_addr);
+    }
+
+    #[test]
+    fn test_notify_info_serialize() {
+        let info = NotifyInfo {
+            request_url: "http://test".to_string(),
+            remote_addr: "127.0.0.1:1234".to_string(),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("request_url"));
+        assert!(json.contains("remote_addr"));
+        assert!(json.contains("http://test"));
+    }
+
+    #[test]
+    fn test_notify_info_debug() {
+        let info = NotifyInfo {
+            request_url: "http://test".to_string(),
+            remote_addr: "127.0.0.1:1234".to_string(),
+        };
+        let debug_str = format!("{:?}", info);
+        assert!(debug_str.contains("NotifyInfo"));
+    }
+
+    // ========== VideoCodecType Tests ==========
+
+    #[test]
+    fn test_video_codec_type_variants() {
+        let h264 = VideoCodecType::H264;
+        let h265 = VideoCodecType::H265;
+        assert!(h264 == VideoCodecType::H264);
+        assert!(h265 == VideoCodecType::H265);
+    }
+
+    #[test]
+    fn test_video_codec_type_clone() {
+        let codec = VideoCodecType::H264;
+        let cloned = codec.clone();
+        assert!(codec == cloned);
+    }
+
+    #[test]
+    fn test_video_codec_type_ne() {
+        assert!(VideoCodecType::H264 != VideoCodecType::H265);
+    }
+
+    // ========== MediaInfo Tests ==========
+
+    #[test]
+    fn test_media_info_construction() {
+        let info = MediaInfo {
+            audio_clock_rate: 48000,
+            video_clock_rate: 90000,
+            vcodec: VideoCodecType::H264,
+        };
+        assert_eq!(info.audio_clock_rate, 48000);
+        assert_eq!(info.video_clock_rate, 90000);
+        assert!(info.vcodec == VideoCodecType::H264);
+    }
+
+    #[test]
+    fn test_media_info_clone() {
+        let info = MediaInfo {
+            audio_clock_rate: 48000,
+            video_clock_rate: 90000,
+            vcodec: VideoCodecType::H265,
+        };
+        let cloned = info.clone();
+        assert_eq!(cloned.audio_clock_rate, 48000);
+        assert_eq!(cloned.video_clock_rate, 90000);
+    }
+
+    // ========== FrameData Tests ==========
+
+    #[test]
+    fn test_frame_data_video_variant() {
+        let frame = FrameData::Video {
+            timestamp: 1000,
+            data: BytesMut::from(&[0x00, 0x01, 0x02][..]),
+        };
+        if let FrameData::Video { timestamp, data } = frame {
+            assert_eq!(timestamp, 1000);
+            assert_eq!(data.len(), 3);
+        } else {
+            panic!("Expected Video variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_audio_variant() {
+        let frame = FrameData::Audio {
+            timestamp: 2000,
+            data: BytesMut::from(&[0xAA, 0xBB][..]),
+        };
+        if let FrameData::Audio { timestamp, data } = frame {
+            assert_eq!(timestamp, 2000);
+            assert_eq!(data.len(), 2);
+        } else {
+            panic!("Expected Audio variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_metadata_variant() {
+        let frame = FrameData::MetaData {
+            timestamp: 0,
+            data: BytesMut::from(&[0x01][..]),
+        };
+        if let FrameData::MetaData { timestamp, .. } = frame {
+            assert_eq!(timestamp, 0);
+        } else {
+            panic!("Expected MetaData variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_media_info_variant() {
+        let info = MediaInfo {
+            audio_clock_rate: 48000,
+            video_clock_rate: 90000,
+            vcodec: VideoCodecType::H264,
+        };
+        let frame = FrameData::MediaInfo { media_info: info };
+        if let FrameData::MediaInfo { media_info } = frame {
+            assert_eq!(media_info.audio_clock_rate, 48000);
+        } else {
+            panic!("Expected MediaInfo variant");
+        }
+    }
+
+    // ========== PacketData Tests ==========
+
+    #[test]
+    fn test_packet_data_video_variant() {
+        let packet = PacketData::Video {
+            timestamp: 3000,
+            data: BytesMut::from(&[0x67, 0x42][..]),
+        };
+        if let PacketData::Video { timestamp, data } = packet {
+            assert_eq!(timestamp, 3000);
+            assert_eq!(data.len(), 2);
+        } else {
+            panic!("Expected Video variant");
+        }
+    }
+
+    #[test]
+    fn test_packet_data_audio_variant() {
+        let packet = PacketData::Audio {
+            timestamp: 4000,
+            data: BytesMut::from(&[0xFF, 0xF1][..]),
+        };
+        if let PacketData::Audio { timestamp, data } = packet {
+            assert_eq!(timestamp, 4000);
+            assert_eq!(data.len(), 2);
+        } else {
+            panic!("Expected Audio variant");
+        }
+    }
+
+    // ========== Information Tests ==========
+
+    #[test]
+    fn test_information_sdp_variant() {
+        let info = Information::Sdp {
+            data: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n".to_string(),
+        };
+        if let Information::Sdp { data } = info {
+            assert!(data.contains("v=0"));
+        } else {
+            panic!("Expected Sdp variant");
+        }
+    }
+
+    // ========== RelayType Tests ==========
+
+    #[test]
+    fn test_relay_type_variants() {
+        let pull = RelayType::Pull;
+        let push = RelayType::Push;
+        let pull_json = serde_json::to_string(&pull).unwrap();
+        let push_json = serde_json::to_string(&push).unwrap();
+        assert!(pull_json.contains("Pull"));
+        assert!(push_json.contains("Push"));
+    }
+
+    // ========== Segment Tests ==========
+
+    #[test]
+    fn test_segment_new() {
+        let segment = Segment::new(
+            10,
+            false,
+            "segment1.ts".to_string(),
+            "/path/to/segment1.ts".to_string(),
+            false,
+        );
+        assert_eq!(segment.duration, 10);
+        assert!(!segment.discontinuity);
+        assert_eq!(segment.name, "segment1.ts");
+        assert_eq!(segment.path, "/path/to/segment1.ts");
+        assert!(!segment.is_eof);
+    }
+
+    #[test]
+    fn test_segment_clone() {
+        let segment = Segment::new(5, true, "seg.ts".to_string(), "/seg.ts".to_string(), true);
+        let cloned = segment.clone();
+        assert_eq!(cloned.duration, 5);
+        assert!(cloned.discontinuity);
+        assert!(cloned.is_eof);
+    }
+
+    #[test]
+    fn test_segment_debug() {
+        let segment = Segment::new(
+            10,
+            false,
+            "seg.ts".to_string(),
+            "/seg.ts".to_string(),
+            false,
+        );
+        let debug_str = format!("{:?}", segment);
+        assert!(debug_str.contains("Segment"));
+        assert!(debug_str.contains("seg.ts"));
+    }
+
+    #[test]
+    fn test_segment_serialize() {
+        let segment = Segment::new(
+            10,
+            false,
+            "seg.ts".to_string(),
+            "/seg.ts".to_string(),
+            false,
+        );
+        let json = serde_json::to_string(&segment).unwrap();
+        assert!(json.contains("duration"));
+        assert!(json.contains("10"));
+        assert!(json.contains("seg.ts"));
+    }
+
+    #[test]
+    fn test_segment_deserialize() {
+        let json = r#"{"duration":15,"discontinuity":true,"name":"test.ts","path":"/test.ts","is_eof":false}"#;
+        let segment: Segment = serde_json::from_str(json).unwrap();
+        assert_eq!(segment.duration, 15);
+        assert!(segment.discontinuity);
+        assert_eq!(segment.name, "test.ts");
+    }
+}

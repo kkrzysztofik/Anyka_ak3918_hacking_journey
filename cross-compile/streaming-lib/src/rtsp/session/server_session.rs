@@ -909,3 +909,271 @@ impl TStreamHandler for RtspStreamHandler {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bytesio::bytes_reader::BytesReader;
+    use crate::common::http::HttpRequest as RtspRequest;
+    use bytes::BytesMut;
+    use http::StatusCode;
+
+    // ========================================================================
+    // InterleavedBinaryData Tests
+    // ========================================================================
+
+    #[test]
+    fn test_interleaved_binary_data_parse_valid() {
+        // Dollar sign (0x24) + channel (0x00) + length (0x0004)
+        let data: &[u8] = &[0x24, 0x00, 0x00, 0x04, 0xDE, 0xAD, 0xBE, 0xEF];
+        let mut reader = BytesReader::new(BytesMut::from(data));
+
+        let result = InterleavedBinaryData::new(&mut reader).unwrap();
+        assert!(result.is_some());
+        let interleaved = result.unwrap();
+        assert_eq!(interleaved.channel_identifier, 0x00);
+        assert_eq!(interleaved.length, 4);
+    }
+
+    #[test]
+    fn test_interleaved_binary_data_parse_channel_1() {
+        // Dollar sign + channel 1 + length 10
+        let data: &[u8] = &[0x24, 0x01, 0x00, 0x0A];
+        let mut reader = BytesReader::new(BytesMut::from(data));
+
+        let result = InterleavedBinaryData::new(&mut reader).unwrap();
+        assert!(result.is_some());
+        let interleaved = result.unwrap();
+        assert_eq!(interleaved.channel_identifier, 0x01);
+        assert_eq!(interleaved.length, 10);
+    }
+
+    #[test]
+    fn test_interleaved_binary_data_parse_large_length() {
+        // Dollar sign + channel 2 + length 0xFFFF (65535)
+        let data: &[u8] = &[0x24, 0x02, 0xFF, 0xFF];
+        let mut reader = BytesReader::new(BytesMut::from(data));
+
+        let result = InterleavedBinaryData::new(&mut reader).unwrap();
+        assert!(result.is_some());
+        let interleaved = result.unwrap();
+        assert_eq!(interleaved.channel_identifier, 0x02);
+        assert_eq!(interleaved.length, 65535);
+    }
+
+    #[test]
+    fn test_interleaved_binary_data_no_dollar_sign() {
+        // Not starting with dollar sign - should return None
+        let data: &[u8] = &[0x52, 0x54, 0x53, 0x50]; // "RTSP"
+        let mut reader = BytesReader::new(BytesMut::from(data));
+
+        let result = InterleavedBinaryData::new(&mut reader).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_interleaved_binary_data_insufficient_data() {
+        // Only dollar sign, not enough for full header
+        let data: &[u8] = &[0x24];
+        let mut reader = BytesReader::new(BytesMut::from(data));
+
+        let result = InterleavedBinaryData::new(&mut reader);
+        // Should return an error due to insufficient bytes
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_interleaved_binary_data_empty() {
+        let data: &[u8] = &[];
+        let mut reader = BytesReader::new(BytesMut::from(data));
+
+        let result = InterleavedBinaryData::new(&mut reader);
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // gen_response Tests
+    // ========================================================================
+
+    /// Create a test RtspRequest with the given method and CSeq
+    fn create_test_request(method: &str, cseq: Option<&str>) -> RtspRequest {
+        let mut request = RtspRequest {
+            method: method.to_string(),
+            version: "RTSP/1.0".to_string(),
+            ..Default::default()
+        };
+        if let Some(seq) = cseq {
+            request.headers.insert("CSeq".to_string(), seq.to_string());
+        }
+        request
+    }
+
+    #[test]
+    fn test_gen_response_ok_status() {
+        let request = create_test_request("OPTIONS", Some("1"));
+
+        let response = RtspServerSession::gen_response(StatusCode::OK, &request);
+        assert_eq!(response.version, "RTSP/1.0");
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.reason_phrase, "OK");
+        assert_eq!(response.headers.get("CSeq"), Some(&"1".to_string()));
+    }
+
+    #[test]
+    fn test_gen_response_not_found_status() {
+        let request = create_test_request("DESCRIBE", None);
+
+        let response = RtspServerSession::gen_response(StatusCode::NOT_FOUND, &request);
+        assert_eq!(response.status_code, 404);
+        assert_eq!(response.reason_phrase, "Not Found");
+    }
+
+    #[test]
+    fn test_gen_response_unauthorized_status() {
+        let request = create_test_request("PLAY", None);
+
+        let response = RtspServerSession::gen_response(StatusCode::UNAUTHORIZED, &request);
+        assert_eq!(response.status_code, 401);
+        assert_eq!(response.reason_phrase, "Unauthorized");
+    }
+
+    #[test]
+    fn test_gen_response_with_cseq() {
+        let request = create_test_request("SETUP", Some("42"));
+
+        let response = RtspServerSession::gen_response(StatusCode::OK, &request);
+        assert_eq!(response.headers.get("CSeq"), Some(&"42".to_string()));
+    }
+
+    #[test]
+    fn test_gen_response_without_cseq() {
+        let request = create_test_request("OPTIONS", None);
+
+        let response = RtspServerSession::gen_response(StatusCode::OK, &request);
+        assert!(response.headers.get("CSeq").is_none());
+    }
+
+    #[test]
+    fn test_gen_response_bad_request() {
+        let request = create_test_request("INVALID", None);
+
+        let response = RtspServerSession::gen_response(StatusCode::BAD_REQUEST, &request);
+        assert_eq!(response.status_code, 400);
+        assert_eq!(response.reason_phrase, "Bad Request");
+    }
+
+    #[test]
+    fn test_gen_response_internal_error() {
+        let request = create_test_request("PLAY", None);
+
+        let response = RtspServerSession::gen_response(StatusCode::INTERNAL_SERVER_ERROR, &request);
+        assert_eq!(response.status_code, 500);
+        assert_eq!(response.reason_phrase, "Internal Server Error");
+    }
+
+    // ========================================================================
+    // RtspStreamHandler Tests
+    // ========================================================================
+
+    #[test]
+    fn test_rtsp_stream_handler_new() {
+        let handler = RtspStreamHandler::new();
+        // Handler should be created successfully
+        assert!(std::mem::size_of_val(&handler) > 0);
+    }
+
+    #[test]
+    fn test_rtsp_stream_handler_default() {
+        let handler = RtspStreamHandler::default();
+        assert!(std::mem::size_of_val(&handler) > 0);
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_stream_handler_set_sdp() {
+        let handler = RtspStreamHandler::new();
+        let sdp = Sdp::default();
+        handler.set_sdp(sdp).await;
+        // Should not panic
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_stream_handler_send_information() {
+        let handler = RtspStreamHandler::new();
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(sender).await;
+
+        // Should receive SDP information
+        if let Some(info) = receiver.recv().await {
+            match info {
+                Information::Sdp { data: _ } => {
+                    // Correct type received
+                }
+                _ => panic!("Expected Sdp information"),
+            }
+        } else {
+            panic!("Expected to receive information");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_stream_handler_get_statistic_data() {
+        let handler = RtspStreamHandler::new();
+        let stats = handler.get_statistic_data().await;
+        assert!(stats.is_none());
+    }
+
+    // ========================================================================
+    // ServerSessionType Tests
+    // ========================================================================
+
+    #[test]
+    fn test_server_session_type_push() {
+        let session_type = define::ServerSessionType::Push;
+        // Should be able to compare
+        assert!(matches!(session_type, define::ServerSessionType::Push));
+    }
+
+    #[test]
+    fn test_server_session_type_pull() {
+        let session_type = define::ServerSessionType::Pull;
+        assert!(matches!(session_type, define::ServerSessionType::Pull));
+    }
+
+    // ========================================================================
+    // Integration-style tests for parsing
+    // ========================================================================
+
+    #[test]
+    fn test_interleaved_binary_data_all_channels() {
+        // Test all common channel identifiers (0-3 for RTP/RTCP audio/video)
+        for channel in 0..4u8 {
+            let data: &[u8] = &[0x24, channel, 0x00, 0x10];
+            let mut reader = BytesReader::new(BytesMut::from(data));
+
+            let result = InterleavedBinaryData::new(&mut reader).unwrap();
+            assert!(result.is_some());
+            let interleaved = result.unwrap();
+            assert_eq!(interleaved.channel_identifier, channel);
+            assert_eq!(interleaved.length, 16);
+        }
+    }
+
+    #[test]
+    fn test_gen_response_service_unavailable() {
+        let request = create_test_request("DESCRIBE", None);
+
+        let response = RtspServerSession::gen_response(StatusCode::SERVICE_UNAVAILABLE, &request);
+        assert_eq!(response.status_code, 503);
+        assert_eq!(response.reason_phrase, "Service Unavailable");
+    }
+
+    #[test]
+    fn test_gen_response_method_not_allowed() {
+        let request = create_test_request("UNKNOWN", None);
+
+        let response = RtspServerSession::gen_response(StatusCode::METHOD_NOT_ALLOWED, &request);
+        assert_eq!(response.status_code, 405);
+        assert_eq!(response.reason_phrase, "Method Not Allowed");
+    }
+}

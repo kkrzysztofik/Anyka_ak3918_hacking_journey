@@ -213,3 +213,168 @@ impl RtcpChannel {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rtsp::rtsp_codec::RtspCodecId;
+
+    // ========================================================================
+    // RtpChannel Tests
+    // ========================================================================
+
+    #[test]
+    fn test_rtp_channel_new_h264() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let channel = RtpChannel::new(codec_info);
+        assert!(channel.rtp_unpacker.is_some());
+        assert!(channel.rtp_packer.is_none());
+    }
+
+    #[test]
+    fn test_rtp_channel_new_h265() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H265,
+            payload_type: 98,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let channel = RtpChannel::new(codec_info);
+        assert!(channel.rtp_unpacker.is_some());
+        assert!(channel.rtp_packer.is_none());
+    }
+
+    #[test]
+    fn test_rtp_channel_new_aac() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::AAC,
+            payload_type: 97,
+            sample_rate: 44100,
+            channel_count: 2,
+        };
+        let channel = RtpChannel::new(codec_info);
+        assert!(channel.rtp_unpacker.is_some());
+        assert!(channel.rtp_packer.is_none());
+    }
+
+    #[test]
+    fn test_rtp_channel_new_g711a() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::G711A,
+            payload_type: 8,
+            sample_rate: 8000,
+            ..Default::default()
+        };
+        let channel = RtpChannel::new(codec_info);
+        // G711A doesn't have an unpacker implemented
+        assert!(channel.rtp_unpacker.is_none());
+        assert!(channel.rtp_packer.is_none());
+    }
+
+    #[test]
+    fn test_rtp_channel_ssrc_is_random() {
+        let codec_info = RtspCodecInfo::default();
+        let channel1 = RtpChannel::new(codec_info.clone());
+        let channel2 = RtpChannel::new(codec_info);
+        // SSRCs should be different (random)
+        assert_ne!(channel1.ssrc, channel2.ssrc);
+    }
+
+    // ========================================================================
+    // RtcpChannel Tests
+    // ========================================================================
+
+    #[test]
+    fn test_rtcp_channel_default() {
+        let channel = RtcpChannel::default();
+        assert_eq!(channel.channel_identifier, 0);
+    }
+
+    #[test]
+    fn test_rtcp_channel_set_channel_identifier() {
+        let mut channel = RtcpChannel::default();
+        channel.set_channel_identifier(3);
+        assert_eq!(channel.channel_identifier, 3);
+    }
+
+    #[test]
+    fn test_rtcp_channel_set_channel_identifier_max() {
+        let mut channel = RtcpChannel::default();
+        channel.set_channel_identifier(255);
+        assert_eq!(channel.channel_identifier, 255);
+    }
+
+    #[test]
+    fn test_rtcp_channel_on_packet() {
+        let mut channel = RtcpChannel::default();
+        let packet = RtpPacket::default();
+        // Should not panic
+        channel.on_packet(packet);
+    }
+
+    // ========================================================================
+    // TRtpFunc Trait Tests
+    // ========================================================================
+
+    #[test]
+    fn test_create_unpacker_h264() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let mut channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0,
+            init_sequence: 0,
+        };
+        channel.create_unpacker();
+        assert!(channel.rtp_unpacker.is_some());
+    }
+
+    #[test]
+    fn test_create_unpacker_h265() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H265,
+            payload_type: 98,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let mut channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0,
+            init_sequence: 0,
+        };
+        channel.create_unpacker();
+        assert!(channel.rtp_unpacker.is_some());
+    }
+
+    #[test]
+    fn test_create_unpacker_aac() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::AAC,
+            payload_type: 97,
+            sample_rate: 44100,
+            channel_count: 2,
+        };
+        let mut channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0,
+            init_sequence: 0,
+        };
+        channel.create_unpacker();
+        assert!(channel.rtp_unpacker.is_some());
+    }
+}

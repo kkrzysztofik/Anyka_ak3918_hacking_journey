@@ -119,23 +119,200 @@ impl fmt::Display for Uuid {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
-    use super::Uuid;
+    // ========== RandomDigitCount Tests ==========
+
+    #[test]
+    fn test_random_digit_count_default() {
+        let count = RandomDigitCount::default();
+        assert_eq!(count, RandomDigitCount::Zero);
+    }
+
+    #[test]
+    fn test_random_digit_count_values() {
+        assert_eq!(RandomDigitCount::Zero as usize, 0);
+        assert_eq!(RandomDigitCount::One as usize, 1);
+        assert_eq!(RandomDigitCount::Two as usize, 2);
+        assert_eq!(RandomDigitCount::Three as usize, 3);
+        assert_eq!(RandomDigitCount::Four as usize, 4);
+        assert_eq!(RandomDigitCount::Five as usize, 5);
+        assert_eq!(RandomDigitCount::Six as usize, 6);
+    }
+
+    #[test]
+    fn test_u8_to_enum() {
+        assert_eq!(u8_to_enum(0), RandomDigitCount::Zero);
+        assert_eq!(u8_to_enum(1), RandomDigitCount::One);
+        assert_eq!(u8_to_enum(2), RandomDigitCount::Two);
+        assert_eq!(u8_to_enum(3), RandomDigitCount::Three);
+        assert_eq!(u8_to_enum(4), RandomDigitCount::Four);
+        assert_eq!(u8_to_enum(5), RandomDigitCount::Five);
+        assert_eq!(u8_to_enum(6), RandomDigitCount::Six);
+    }
+
+    #[test]
+    fn test_u8_to_enum_out_of_range() {
+        assert_eq!(u8_to_enum(7), RandomDigitCount::Zero);
+        assert_eq!(u8_to_enum(100), RandomDigitCount::Zero);
+        assert_eq!(u8_to_enum(255), RandomDigitCount::Zero);
+    }
+
+    // ========== Uuid Construction Tests ==========
+
+    #[test]
+    fn test_uuid_new_zero_random() {
+        let uuid = Uuid::new(RandomDigitCount::Zero);
+        let s = uuid.to_string();
+        assert_eq!(s.len(), 10);
+    }
+
+    #[test]
+    fn test_uuid_new_four_random() {
+        let uuid = Uuid::new(RandomDigitCount::Four);
+        let s = uuid.to_string();
+        assert_eq!(s.len(), 14);
+    }
+
+    #[test]
+    fn test_uuid_new_six_random() {
+        let uuid = Uuid::new(RandomDigitCount::Six);
+        let s = uuid.to_string();
+        assert_eq!(s.len(), 16);
+    }
+
+    #[test]
+    fn test_uuid_contains_only_digits() {
+        let uuid = Uuid::new(RandomDigitCount::Four);
+        let s = uuid.to_string();
+        assert!(s.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    // ========== Uuid Parsing Tests ==========
+
+    #[test]
+    fn test_uuid_from_str2_valid() {
+        let uuid = Uuid::from_str2("1234567890");
+        assert!(uuid.is_some());
+        let uuid = uuid.unwrap();
+        assert_eq!(uuid.to_string(), "1234567890");
+    }
+
+    #[test]
+    fn test_uuid_from_str2_with_random_digits() {
+        let uuid = Uuid::from_str2("12345678901234");
+        assert!(uuid.is_some());
+        let uuid = uuid.unwrap();
+        assert_eq!(uuid.to_string(), "12345678901234");
+    }
+
+    #[test]
+    fn test_uuid_from_str2_too_short() {
+        let uuid = Uuid::from_str2("123456789");
+        assert!(uuid.is_none());
+    }
+
+    #[test]
+    fn test_uuid_from_str2_too_long() {
+        let uuid = Uuid::from_str2("12345678901234567");
+        assert!(uuid.is_none());
+    }
+
+    #[test]
+    fn test_uuid_from_str2_empty() {
+        let uuid = Uuid::from_str2("");
+        assert!(uuid.is_none());
+    }
+
+    #[test]
+    fn test_uuid_from_str2_min_length() {
+        let uuid = Uuid::from_str2("1234567890");
+        assert!(uuid.is_some());
+    }
+
+    #[test]
+    fn test_uuid_from_str2_max_length() {
+        let uuid = Uuid::from_str2("1234567890123456");
+        assert!(uuid.is_some());
+    }
+
+    // ========== Uuid Serialization Tests ==========
+
+    #[test]
+    fn test_uuid_serialize() {
+        let uuid = Uuid::new(RandomDigitCount::Four);
+        let serialized = serde_json::to_string(&uuid).unwrap();
+        assert!(serialized.starts_with('"'));
+        assert!(serialized.ends_with('"'));
+    }
+
+    // ========== Uuid Round-Trip Tests ==========
+
+    #[test]
+    fn test_uuid_roundtrip() {
+        let uuid = Uuid::new(RandomDigitCount::Four);
+        let s = uuid.to_string();
+        let parsed = Uuid::from_str2(&s);
+        assert!(parsed.is_some());
+        assert_eq!(parsed.unwrap().to_string(), s);
+    }
+
+    // ========== Uuid Equality Tests ==========
+
+    #[test]
+    fn test_uuid_equality() {
+        let uuid1 = Uuid::from_str2("1234567890").unwrap();
+        let uuid2 = Uuid::from_str2("1234567890").unwrap();
+        assert_eq!(uuid1, uuid2);
+    }
+
+    #[test]
+    fn test_uuid_inequality() {
+        let uuid1 = Uuid::from_str2("1234567890").unwrap();
+        let uuid2 = Uuid::from_str2("0987654321").unwrap();
+        assert_ne!(uuid1, uuid2);
+    }
+
+    // ========== Uuid Clone and Debug Tests ==========
+
+    #[test]
+    fn test_uuid_clone() {
+        let uuid = Uuid::new(RandomDigitCount::Four);
+        let cloned = uuid.clone();
+        assert_eq!(uuid, cloned);
+    }
+
+    #[test]
+    fn test_uuid_debug() {
+        let uuid = Uuid::new(RandomDigitCount::Zero);
+        let debug_str = format!("{:?}", uuid);
+        assert!(debug_str.contains("Uuid"));
+        assert!(debug_str.contains("value"));
+    }
+
+    // ========== Uuid Hash Tests ==========
+
+    #[test]
+    fn test_uuid_hash_consistency() {
+        use std::collections::HashSet;
+        let uuid = Uuid::from_str2("1234567890").unwrap();
+        let mut set = HashSet::new();
+        set.insert(uuid);
+        assert!(set.contains(&uuid));
+    }
+
+    // ========== Original Test ==========
 
     #[test]
     fn test_uuid() {
-        let id = Uuid::new(super::RandomDigitCount::Four);
-
+        let id = Uuid::new(RandomDigitCount::Four);
         let s = id.to_string();
-
         let serialized = serde_json::to_string(&id).unwrap();
-
-        println!("serialized:{serialized}");
-
-        println!("{s}");
+        assert!(!serialized.is_empty());
+        assert!(!s.is_empty());
 
         if let Some(u) = Uuid::from_str2(&s) {
-            println!("{:?}", u.to_string());
+            assert_eq!(u.to_string(), s);
         }
     }
 }
