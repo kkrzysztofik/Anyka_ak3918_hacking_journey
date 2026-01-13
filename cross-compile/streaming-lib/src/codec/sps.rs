@@ -144,11 +144,8 @@ impl SpsParser {
         self.sps.max_num_ref_frames = utils::read_uev(&mut self.bits_reader)?;
         self.sps.gaps_in_frame_num_value_allowed_flag = self.bits_reader.read_bit()?;
 
-        // Align to byte boundary before reading pic_width_in_mbs_minus1
-        self.bits_reader.bits_aligment_8();
+        // H.264 spec: these fields are continuous bit-packed, no byte alignment
         self.sps.pic_width_in_mbs_minus1 = utils::read_uev(&mut self.bits_reader)?;
-        // Align to byte boundary before reading pic_height_in_map_units_minus1
-        self.bits_reader.bits_aligment_8();
         self.sps.pic_height_in_map_units_minus1 = utils::read_uev(&mut self.bits_reader)?;
 
         self.sps.frame_mbs_only_flag = self.bits_reader.read_bit()?;
@@ -189,9 +186,9 @@ impl SpsParser {
         }
 
         // Calculate height: only apply crop offsets if frame_cropping_flag is set
-        let mut height = ((2 - self.sps.frame_mbs_only_flag as u32)
+        let mut height = (2 - self.sps.frame_mbs_only_flag as u32)
             * (self.sps.pic_height_in_map_units_minus1 + 1)
-            * 16);
+            * 16;
         if self.sps.frame_cropping_flag > 0 {
             // crop_unit_y = 2 for chroma_format_idc = 1 (4:2:0, default for Baseline)
             // For other chroma formats, this would need to be adjusted
@@ -215,95 +212,257 @@ mod tests {
     use bytes::BytesMut;
 
     // ============================================
-    // Test Fixtures - Real-world SPS NAL units
+    // SPS Encoder for Tests - Proper Bit-Packed Encoding
     // ============================================
-
-    // SPS for Baseline profile, 640x480, no cropping
-    // Profile: 66 (Baseline), Level: 30, Resolution: 640x480
-    fn create_baseline_sps_640x480() -> BytesMut {
-        let mut data = BytesMut::new();
-        // profile_idc = 66 (Baseline)
-        data.extend_from_slice(&[0x42]);
-        // constraint flags = 0xE0, level_idc = 30
-        data.extend_from_slice(&[0xE0, 0x1E]);
-        // seq_parameter_set_id = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // log2_max_frame_num_minus4 = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // pic_order_cnt_type = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // log2_max_pic_order_cnt_lsb_minus4 = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // max_num_ref_frames = 1 (ue(v): 010)
-        // gaps_in_frame_num_value_allowed_flag = 0 (1 bit, 4th bit of 0x40)
-        // After reading 3 bits (010) from 0x40, we have 5 bits left: 00000
-        // Read 1 bit for flag: 0 (4th bit), remaining: 0000
-        // Align: discard 4 bits, next byte is 0x05
-        data.extend_from_slice(&[0x40]);
-        // pic_width_in_mbs_minus1 = 39 (640/16 - 1 = 39, ue(v): 00000101000)
-        // Byte-aligned encoding: 0x05, 0x00 (uses 11 bits total)
-        data.extend_from_slice(&[0x05, 0x00]);
-        // pic_height_in_map_units_minus1 = 29 (480/16 - 1 = 29, ue(v): 000011110)
-        // Uses 9 bits: first 8 bits from 0x0F (00001111), 9th bit (0) from next byte
-        // frame_mbs_only_flag = 1 (2nd bit of next byte)
-        // So we need: 0x0F (8 bits) + 0x40 (01000000: bit 0 = 9th bit of ue(v), bit 1 = frame_mbs_only_flag)
-        data.extend_from_slice(&[0x0F, 0x40]);
-        // direct_8x8_inference_flag = 1
-        data.extend_from_slice(&[0x80]);
-        // frame_cropping_flag = 0
-        data.extend_from_slice(&[0x00]);
-        // vui_parameters_present_flag = 0
-        data.extend_from_slice(&[0x00]);
-        data
+    
+    /// Helper to build proper bit-packed SPS NAL units for testing.
+    /// Uses the BitsWriter to ensure continuous bit-packing per H.264 spec.
+    struct SpsBuilder {
+        writer: crate::bytesio::bits_writer::BitsWriter,
     }
-
-    // SPS for High profile, 1920x1080, with cropping
-    // Profile: 100 (High), Level: 40, Resolution: 1920x1080
-    fn create_high_sps_1920x1080() -> BytesMut {
-        let mut data = BytesMut::new();
-        // profile_idc = 100 (High)
-        data.extend_from_slice(&[0x64]);
-        // constraint flags = 0x00, level_idc = 40
-        data.extend_from_slice(&[0x00, 0x28]);
-        // seq_parameter_set_id = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // chroma_format_idc = 1 (ue(v): 010)
-        data.extend_from_slice(&[0x40]);
-        // bit_depth_luma_minus8 = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // bit_depth_chroma_minus8 = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // qpprime_y_zero_transform_bypass_flag = 0
-        data.extend_from_slice(&[0x00]);
-        // seq_scaling_matrix_present_flag = 0
-        data.extend_from_slice(&[0x00]);
-        // log2_max_frame_num_minus4 = 4 (ue(v): 00101)
-        data.extend_from_slice(&[0x28]);
-        // pic_order_cnt_type = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // log2_max_pic_order_cnt_lsb_minus4 = 4 (ue(v): 00101)
-        data.extend_from_slice(&[0x28]);
-        // max_num_ref_frames = 4 (ue(v): 00101)
-        // gaps_in_frame_num_value_allowed_flag = 0 (1 bit, read from same byte after 00101)
-        data.extend_from_slice(&[0x28]);
-        // pic_width_in_mbs_minus1 = 119 (ue(v): 0000001111000, 13 bits)
-        // Bytes: 0x03 (8 bits) + 0xC0 (5 bits used)
-        data.extend_from_slice(&[0x03, 0xC0]);
-        // pic_height_in_map_units_minus1 = 67 (ue(v): 0000001000100, 13 bits)
-        // Bytes: 0x02 (8 bits) + 0x27 (bits 0-4: 00100 for pic_height, bits 5-7: 111 for flags)
-        // Flags: frame_mbs_only_flag=1 (bit 5), direct_8x8_inference_flag=1 (bit 6), frame_cropping_flag=1 (bit 7)
-        data.extend_from_slice(&[0x02, 0x27]);
-        // frame_crop_left_offset = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // frame_crop_right_offset = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // frame_crop_top_offset = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // frame_crop_bottom_offset = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // vui_parameters_present_flag = 0
-        data.extend_from_slice(&[0x00]);
-        data
+    
+    impl SpsBuilder {
+        fn new() -> Self {
+            Self {
+                writer: crate::bytesio::bits_writer::BitsWriter::new(
+                    crate::bytesio::bytes_writer::BytesWriter::default()
+                ),
+            }
+        }
+        
+        /// Write a u8 value (8 bits)
+        fn write_u8(&mut self, val: u8) {
+            for i in (0..8).rev() {
+                self.writer.write_bit((val >> i) & 1).unwrap();
+            }
+        }
+        
+        /// Write n bits from a u32 value (most significant bit first)
+        fn write_bits(&mut self, val: u32, n: usize) {
+            for i in (0..n).rev() {
+                self.writer.write_bit(((val >> i) & 1) as u8).unwrap();
+            }
+        }
+        
+        /// Write a single bit
+        fn write_bit(&mut self, val: u8) {
+            self.writer.write_bit(val).unwrap();
+        }
+        
+        /// Write unsigned Exp-Golomb coded value (ue(v))
+        /// Encoding: value N = 2^leadingZeroBits - 1 + INFO
+        /// Written as: leadingZeroBits zeros, 1 bit, leadingZeroBits INFO bits
+        fn write_uev(&mut self, val: u32) {
+            if val == 0 {
+                // Special case: 0 is encoded as just "1"
+                self.write_bit(1);
+                return;
+            }
+            
+            // Find leadingZeroBits such that 2^leadingZeroBits - 1 <= val < 2^(leadingZeroBits+1) - 1
+            // leadingZeroBits = floor(log2(val + 1))
+            let code_num = val + 1;
+            let leading_zero_bits = 31 - code_num.leading_zeros() as usize; // This is floor(log2(code_num))
+            let info = val - ((1 << leading_zero_bits) - 1);
+            
+            // Write leading zeros
+            for _ in 0..leading_zero_bits {
+                self.write_bit(0);
+            }
+            // Write 1
+            self.write_bit(1);
+            // Write info bits
+            self.write_bits(info, leading_zero_bits);
+        }
+        
+        /// Get the encoded bytes, flushing any remaining bits
+        fn build(mut self) -> BytesMut {
+            // Flush any partial byte
+            self.writer.bits_aligment_8().unwrap();
+            self.writer.get_current_bytes()
+        }
+    }
+    
+    /// Create a properly bit-packed Baseline SPS for given resolution
+    fn create_baseline_sps(width: u32, height: u32) -> BytesMut {
+        let mut builder = SpsBuilder::new();
+        
+        // First 3 bytes are byte-aligned
+        builder.write_u8(0x42);  // profile_idc = 66 (Baseline)
+        builder.write_u8(0xE0);  // constraint flags
+        builder.write_u8(0x1E);  // level_idc = 30
+        
+        // Now continuous bit-packed fields
+        builder.write_uev(0);    // seq_parameter_set_id = 0
+        builder.write_uev(0);    // log2_max_frame_num_minus4 = 0
+        builder.write_uev(2);    // pic_order_cnt_type = 2 (no extra fields needed)
+        builder.write_uev(1);    // max_num_ref_frames = 1
+        builder.write_bit(0);    // gaps_in_frame_num_value_allowed_flag = 0
+        builder.write_uev(width / 16 - 1);   // pic_width_in_mbs_minus1
+        builder.write_uev(height / 16 - 1);  // pic_height_in_map_units_minus1
+        builder.write_bit(1);    // frame_mbs_only_flag = 1
+        builder.write_bit(1);    // direct_8x8_inference_flag = 1
+        builder.write_bit(0);    // frame_cropping_flag = 0
+        builder.write_bit(0);    // vui_parameters_present_flag = 0
+        
+        builder.build()
+    }
+    
+    /// Create a properly bit-packed Baseline SPS with pic_order_cnt_type = 0
+    fn create_baseline_sps_poc0(width: u32, height: u32) -> BytesMut {
+        let mut builder = SpsBuilder::new();
+        
+        builder.write_u8(0x42);  // profile_idc = 66 (Baseline)
+        builder.write_u8(0xE0);  // constraint flags
+        builder.write_u8(0x1E);  // level_idc = 30
+        
+        builder.write_uev(0);    // seq_parameter_set_id = 0
+        builder.write_uev(0);    // log2_max_frame_num_minus4 = 0
+        builder.write_uev(0);    // pic_order_cnt_type = 0
+        builder.write_uev(0);    // log2_max_pic_order_cnt_lsb_minus4 = 0
+        builder.write_uev(1);    // max_num_ref_frames = 1
+        builder.write_bit(0);    // gaps_in_frame_num_value_allowed_flag = 0
+        builder.write_uev(width / 16 - 1);   // pic_width_in_mbs_minus1
+        builder.write_uev(height / 16 - 1);  // pic_height_in_map_units_minus1
+        builder.write_bit(1);    // frame_mbs_only_flag = 1
+        builder.write_bit(1);    // direct_8x8_inference_flag = 1
+        builder.write_bit(0);    // frame_cropping_flag = 0
+        builder.write_bit(0);    // vui_parameters_present_flag = 0
+        
+        builder.build()
+    }
+    
+    /// Create a properly bit-packed Baseline SPS with pic_order_cnt_type = 1
+    fn create_baseline_sps_poc1(width: u32, height: u32) -> BytesMut {
+        let mut builder = SpsBuilder::new();
+        
+        builder.write_u8(0x42);  // profile_idc = 66 (Baseline)
+        builder.write_u8(0xE0);  // constraint flags
+        builder.write_u8(0x1E);  // level_idc = 30
+        
+        builder.write_uev(0);    // seq_parameter_set_id = 0
+        builder.write_uev(0);    // log2_max_frame_num_minus4 = 0
+        builder.write_uev(1);    // pic_order_cnt_type = 1
+        builder.write_bit(0);    // delta_pic_order_always_zero_flag = 0
+        builder.write_uev(0);    // offset_for_non_ref_pic = 0 (se(v) where 0 = ue(0) = 1)
+        builder.write_uev(0);    // offset_for_top_to_bottom_field = 0
+        builder.write_uev(0);    // num_ref_frames_in_pic_order_cnt_cycle = 0
+        builder.write_uev(1);    // max_num_ref_frames = 1
+        builder.write_bit(0);    // gaps_in_frame_num_value_allowed_flag = 0
+        builder.write_uev(width / 16 - 1);   // pic_width_in_mbs_minus1
+        builder.write_uev(height / 16 - 1);  // pic_height_in_map_units_minus1
+        builder.write_bit(1);    // frame_mbs_only_flag = 1
+        builder.write_bit(1);    // direct_8x8_inference_flag = 1
+        builder.write_bit(0);    // frame_cropping_flag = 0
+        builder.write_bit(0);    // vui_parameters_present_flag = 0
+        
+        builder.build()
+    }
+    
+    /// Create a properly bit-packed Baseline SPS with frame_mbs_only_flag = 0 (interlaced)
+    fn create_baseline_sps_interlaced(width: u32, height: u32) -> BytesMut {
+        let mut builder = SpsBuilder::new();
+        
+        builder.write_u8(0x42);  // profile_idc = 66 (Baseline)
+        builder.write_u8(0xE0);  // constraint flags
+        builder.write_u8(0x1E);  // level_idc = 30
+        
+        builder.write_uev(0);    // seq_parameter_set_id = 0
+        builder.write_uev(0);    // log2_max_frame_num_minus4 = 0
+        builder.write_uev(2);    // pic_order_cnt_type = 2
+        builder.write_uev(1);    // max_num_ref_frames = 1
+        builder.write_bit(0);    // gaps_in_frame_num_value_allowed_flag = 0
+        builder.write_uev(width / 16 - 1);   // pic_width_in_mbs_minus1
+        // For interlaced, height is halved in map units
+        builder.write_uev(height / 16 / 2 - 1);  // pic_height_in_map_units_minus1
+        builder.write_bit(0);    // frame_mbs_only_flag = 0 (interlaced)
+        builder.write_bit(0);    // mb_adaptive_frame_field_flag = 0
+        builder.write_bit(1);    // direct_8x8_inference_flag = 1
+        builder.write_bit(0);    // frame_cropping_flag = 0
+        builder.write_bit(0);    // vui_parameters_present_flag = 0
+        
+        builder.build()
+    }
+    
+    /// Create a properly bit-packed Baseline SPS with frame cropping
+    fn create_baseline_sps_with_cropping(
+        width: u32, height: u32,
+        crop_left: u32, crop_right: u32, crop_top: u32, crop_bottom: u32
+    ) -> BytesMut {
+        let mut builder = SpsBuilder::new();
+        
+        builder.write_u8(0x42);  // profile_idc = 66 (Baseline)
+        builder.write_u8(0xE0);  // constraint flags
+        builder.write_u8(0x1E);  // level_idc = 30
+        
+        builder.write_uev(0);    // seq_parameter_set_id = 0
+        builder.write_uev(0);    // log2_max_frame_num_minus4 = 0
+        builder.write_uev(2);    // pic_order_cnt_type = 2
+        builder.write_uev(1);    // max_num_ref_frames = 1
+        builder.write_bit(0);    // gaps_in_frame_num_value_allowed_flag = 0
+        builder.write_uev(width / 16 - 1);   // pic_width_in_mbs_minus1
+        builder.write_uev(height / 16 - 1);  // pic_height_in_map_units_minus1
+        builder.write_bit(1);    // frame_mbs_only_flag = 1
+        builder.write_bit(1);    // direct_8x8_inference_flag = 1
+        builder.write_bit(1);    // frame_cropping_flag = 1
+        builder.write_uev(crop_left);   // frame_crop_left_offset
+        builder.write_uev(crop_right);  // frame_crop_right_offset
+        builder.write_uev(crop_top);    // frame_crop_top_offset
+        builder.write_uev(crop_bottom); // frame_crop_bottom_offset
+        builder.write_bit(0);    // vui_parameters_present_flag = 0
+        
+        builder.build()
+    }
+    
+    /// Create a properly bit-packed High profile SPS
+    fn create_high_sps(width: u32, height: u32) -> BytesMut {
+        let mut builder = SpsBuilder::new();
+        
+        builder.write_u8(0x64);  // profile_idc = 100 (High)
+        builder.write_u8(0x00);  // constraint flags
+        builder.write_u8(0x28);  // level_idc = 40
+        
+        builder.write_uev(0);    // seq_parameter_set_id = 0
+        builder.write_uev(1);    // chroma_format_idc = 1 (4:2:0)
+        builder.write_uev(0);    // bit_depth_luma_minus8 = 0
+        builder.write_uev(0);    // bit_depth_chroma_minus8 = 0
+        builder.write_bit(0);    // qpprime_y_zero_transform_bypass_flag = 0
+        builder.write_bit(0);    // seq_scaling_matrix_present_flag = 0
+        builder.write_uev(0);    // log2_max_frame_num_minus4 = 0
+        builder.write_uev(2);    // pic_order_cnt_type = 2 (simpler, no extra fields)
+        builder.write_uev(2);    // max_num_ref_frames = 2
+        builder.write_bit(0);    // gaps_in_frame_num_value_allowed_flag = 0
+        builder.write_uev(width / 16 - 1);   // pic_width_in_mbs_minus1
+        builder.write_uev(height / 16 - 1);  // pic_height_in_map_units_minus1
+        builder.write_bit(1);    // frame_mbs_only_flag = 1
+        builder.write_bit(1);    // direct_8x8_inference_flag = 1
+        builder.write_bit(0);    // frame_cropping_flag = 0
+        builder.write_bit(0);    // vui_parameters_present_flag = 0
+        
+        builder.build()
+    }
+    
+    /// Create a properly bit-packed Main profile SPS
+    fn create_main_sps(width: u32, height: u32) -> BytesMut {
+        let mut builder = SpsBuilder::new();
+        
+        builder.write_u8(0x4D);  // profile_idc = 77 (Main)
+        builder.write_u8(0x00);  // constraint flags
+        builder.write_u8(0x1E);  // level_idc = 30
+        
+        builder.write_uev(0);    // seq_parameter_set_id = 0
+        builder.write_uev(0);    // log2_max_frame_num_minus4 = 0
+        builder.write_uev(2);    // pic_order_cnt_type = 2
+        builder.write_uev(1);    // max_num_ref_frames = 1
+        builder.write_bit(0);    // gaps_in_frame_num_value_allowed_flag = 0
+        builder.write_uev(width / 16 - 1);   // pic_width_in_mbs_minus1
+        builder.write_uev(height / 16 - 1);  // pic_height_in_map_units_minus1
+        builder.write_bit(1);    // frame_mbs_only_flag = 1
+        builder.write_bit(1);    // direct_8x8_inference_flag = 1
+        builder.write_bit(0);    // frame_cropping_flag = 0
+        builder.write_bit(0);    // vui_parameters_present_flag = 0
+        
+        builder.build()
     }
 
     // ============================================
@@ -337,23 +496,7 @@ mod tests {
 
     #[test]
     fn test_sps_parse_baseline_profile() {
-        let mut data = BytesMut::new();
-        // Minimal SPS for Baseline profile (66)
-        data.extend_from_slice(&[0x42]); // profile_idc = 66
-        data.extend_from_slice(&[0xE0, 0x1E]); // flags, level_idc = 30
-        data.extend_from_slice(&[0x80]); // seq_parameter_set_id = 0
-        data.extend_from_slice(&[0x80]); // log2_max_frame_num_minus4 = 0
-        data.extend_from_slice(&[0x80]); // pic_order_cnt_type = 0
-        data.extend_from_slice(&[0x80]); // log2_max_pic_order_cnt_lsb_minus4 = 0
-        data.extend_from_slice(&[0x40]); // max_num_ref_frames = 1, gaps_in_frame_num_value_allowed_flag = 0 (4th bit)
-        data.extend_from_slice(&[0x05, 0x00]); // pic_width_in_mbs_minus1 = 39 (640x480)
-        // pic_height_in_map_units_minus1 = 29 (9 bits: 0x0F + 1 bit from next byte)
-        // frame_mbs_only_flag = 1 (2nd bit of next byte)
-        data.extend_from_slice(&[0x0F, 0x40]); // Combined: 0x0F (8 bits) + 0x40 (bit 0 = 9th bit of ue(v), bit 1 = frame_mbs_only_flag)
-        data.extend_from_slice(&[0x80]); // direct_8x8_inference_flag = 1
-        data.extend_from_slice(&[0x00]); // frame_cropping_flag = 0
-        data.extend_from_slice(&[0x00]); // vui_parameters_present_flag = 0
-
+        let data = create_baseline_sps(640, 480);
         let bytes_reader = BytesReader::new(data);
         let mut parser = SpsParser::new(bytes_reader);
         let result = parser.parse();
@@ -362,33 +505,13 @@ mod tests {
         let (width, height) = result.unwrap();
         assert_eq!(parser.sps.profile_idc, 66);
         assert_eq!(parser.sps.level_idc, 30);
-        // 640x480 resolution
         assert_eq!(width, 640);
         assert_eq!(height, 480);
     }
 
     #[test]
     fn test_sps_parse_main_profile() {
-        let mut data = BytesMut::new();
-        // Minimal SPS for Main profile (77)
-        data.extend_from_slice(&[0x4D]); // profile_idc = 77
-        data.extend_from_slice(&[0x00, 0x1E]); // flags, level_idc = 30
-        data.extend_from_slice(&[0x80]); // seq_parameter_set_id = 0
-        data.extend_from_slice(&[0x80]); // log2_max_frame_num_minus4 = 0
-        data.extend_from_slice(&[0x80]); // pic_order_cnt_type = 0
-        data.extend_from_slice(&[0x80]); // log2_max_pic_order_cnt_lsb_minus4 = 0
-        // max_num_ref_frames = 1 (ue(v): 010, 3 bits) + gaps_in_frame_num_value_allowed_flag = 0 (1 bit)
-        // 0x40 = 01000000: bits 0-2 = 010 (max_num_ref_frames), bit 3 = 0 (gaps flag)
-        data.extend_from_slice(&[0x40]); // Combined: max_num_ref_frames + gaps flag
-        data.extend_from_slice(&[0x05, 0x00]); // pic_width_in_mbs_minus1 = 39
-        // pic_height_in_map_units_minus1 = 29 (9 bits: 0x0F + 1 bit from next byte)
-        // frame_mbs_only_flag = 1 (2nd bit of next byte)
-        // direct_8x8_inference_flag = 1 (3rd bit of next byte)
-        // So: 0x0F (8 bits) + 0x60 (bits: 0=9th bit of ue(v), 1=frame_mbs_only_flag, 1=direct_8x8_inference_flag)
-        data.extend_from_slice(&[0x0F, 0x60]);
-        data.extend_from_slice(&[0x00]); // frame_cropping_flag = 0
-        data.extend_from_slice(&[0x00]); // vui_parameters_present_flag = 0
-
+        let data = create_main_sps(640, 480);
         let bytes_reader = BytesReader::new(data);
         let mut parser = SpsParser::new(bytes_reader);
         let result = parser.parse();
@@ -399,28 +522,7 @@ mod tests {
 
     #[test]
     fn test_sps_parse_high_profile() {
-        let mut data = BytesMut::new();
-        // Minimal SPS for High profile (100)
-        data.extend_from_slice(&[0x64]); // profile_idc = 100
-        data.extend_from_slice(&[0x00, 0x28]); // flags, level_idc = 40
-        data.extend_from_slice(&[0x80]); // seq_parameter_set_id = 0
-        data.extend_from_slice(&[0x40]); // chroma_format_idc = 1
-        data.extend_from_slice(&[0x80]); // bit_depth_luma_minus8 = 0
-        data.extend_from_slice(&[0x80]); // bit_depth_chroma_minus8 = 0
-        data.extend_from_slice(&[0x00]); // qpprime_y_zero_transform_bypass_flag = 0
-        data.extend_from_slice(&[0x00]); // seq_scaling_matrix_present_flag = 0
-        data.extend_from_slice(&[0x28]); // log2_max_frame_num_minus4 = 4
-        data.extend_from_slice(&[0x80]); // pic_order_cnt_type = 0
-        data.extend_from_slice(&[0x28]); // log2_max_pic_order_cnt_lsb_minus4 = 4
-        data.extend_from_slice(&[0x28]); // max_num_ref_frames = 4, gaps_in_frame_num_value_allowed_flag = 0 (6th bit)
-        // pic_width_in_mbs_minus1 = 119 (ue(v): 0000001111000, 13 bits)
-        data.extend_from_slice(&[0x03, 0xC0]);
-        // pic_height_in_map_units_minus1 = 67 (ue(v): 0000001000100, 13 bits)
-        // Bytes: 0x02 (8 bits) + 0x26 (bits 0-4: 00100 for pic_height, bits 5-7: 110 for flags)
-        // Flags: frame_mbs_only_flag=1 (bit 5), direct_8x8_inference_flag=1 (bit 6), frame_cropping_flag=0 (bit 7)
-        data.extend_from_slice(&[0x02, 0x26]);
-        data.extend_from_slice(&[0x00]); // vui_parameters_present_flag = 0
-
+        let data = create_high_sps(1920, 1088);  // Use 1088 (divisible by 16)
         let bytes_reader = BytesReader::new(data);
         let mut parser = SpsParser::new(bytes_reader);
         let result = parser.parse();
@@ -428,9 +530,8 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(parser.sps.profile_idc, 100);
         let (width, height) = result.unwrap();
-        // 1920x1080 resolution
         assert_eq!(width, 1920);
-        assert_eq!(height, 1080);
+        assert_eq!(height, 1088);
     }
 
     // ============================================
@@ -439,7 +540,7 @@ mod tests {
 
     #[test]
     fn test_sps_resolution_640x480() {
-        let data = create_baseline_sps_640x480();
+        let data = create_baseline_sps(640, 480);
         let bytes_reader = BytesReader::new(data);
         let mut parser = SpsParser::new(bytes_reader);
         let result = parser.parse().unwrap();
@@ -450,45 +551,26 @@ mod tests {
 
     #[test]
     fn test_sps_resolution_1920x1080() {
-        let data = create_high_sps_1920x1080();
+        // For 1920x1080, we need cropping since 1080 is not divisible by 16
+        // Use 1920x1088 raw, then crop 8 pixels (4 units) from bottom
+        // crop_unit_y = 2 for 4:2:0, so crop_bottom = 4 units removes 8 pixels
+        let data = create_baseline_sps_with_cropping(1920, 1088, 0, 0, 0, 4);
         let bytes_reader = BytesReader::new(data);
         let mut parser = SpsParser::new(bytes_reader);
         let result = parser.parse().unwrap();
 
-        assert_eq!(result.0, 1920); // width
-        assert_eq!(result.1, 1080); // height
+        assert_eq!(result.0, 1920);
+        assert_eq!(result.1, 1080);  // 1088 - 4*2 = 1080
     }
 
     #[test]
     fn test_sps_resolution_with_cropping() {
-        let mut data = BytesMut::new();
-        // SPS with frame cropping
-        data.extend_from_slice(&[0x42, 0xE0, 0x1E]); // profile, flags, level
-        data.extend_from_slice(&[0x80]); // seq_parameter_set_id = 0
-        data.extend_from_slice(&[0x80]); // log2_max_frame_num_minus4 = 0
-        data.extend_from_slice(&[0x80]); // pic_order_cnt_type = 0
-        data.extend_from_slice(&[0x80]); // log2_max_pic_order_cnt_lsb_minus4 = 0
-        // max_num_ref_frames = 1 (ue(v): 010, 3 bits) + gaps_in_frame_num_value_allowed_flag = 0 (1 bit)
-        // 0x40 = 01000000: bits 0-2 = 010 (max_num_ref_frames), bit 3 = 0 (gaps flag)
-        data.extend_from_slice(&[0x40]); // Combined: max_num_ref_frames + gaps flag
-        data.extend_from_slice(&[0x05, 0x00]); // pic_width_in_mbs_minus1 = 39
-        // pic_height_in_map_units_minus1 = 29 (9 bits: 0x0F + 1 bit from next byte)
-        // frame_mbs_only_flag = 1 (2nd bit of next byte)
-        // direct_8x8_inference_flag = 1 (3rd bit of next byte)
-        // frame_cropping_flag = 1 (4th bit of next byte)
-        // So: 0x0F (8 bits) + 0x70 (bits: 0=9th bit of ue(v), 1=frame_mbs_only_flag, 1=direct_8x8_inference_flag, 1=frame_cropping_flag)
-        data.extend_from_slice(&[0x0F, 0x70]);
-        data.extend_from_slice(&[0x80]); // frame_crop_left_offset = 0
-        data.extend_from_slice(&[0x80]); // frame_crop_right_offset = 0
-        data.extend_from_slice(&[0x80]); // frame_crop_top_offset = 0
-        data.extend_from_slice(&[0x80]); // frame_crop_bottom_offset = 0
-        data.extend_from_slice(&[0x00]); // vui_parameters_present_flag = 0
-
+        // Zero cropping
+        let data = create_baseline_sps_with_cropping(640, 480, 0, 0, 0, 0);
         let bytes_reader = BytesReader::new(data);
         let mut parser = SpsParser::new(bytes_reader);
         let result = parser.parse().unwrap();
 
-        // With cropping offsets of 0, resolution should still be 640x480
         assert_eq!(result.0, 640);
         assert_eq!(result.1, 480);
         assert_eq!(parser.sps.frame_cropping_flag, 1);
@@ -524,32 +606,16 @@ mod tests {
 
     #[test]
     fn test_sps_frame_mbs_only_flag() {
-        let mut data = BytesMut::new();
-        // SPS with frame_mbs_only_flag = 0 (interlaced)
-        data.extend_from_slice(&[0x42, 0xE0, 0x1E]); // profile, flags, level
-        data.extend_from_slice(&[0x80]); // seq_parameter_set_id = 0
-        data.extend_from_slice(&[0x80]); // log2_max_frame_num_minus4 = 0
-        data.extend_from_slice(&[0x80]); // pic_order_cnt_type = 0
-        data.extend_from_slice(&[0x80]); // log2_max_pic_order_cnt_lsb_minus4 = 0
-        // max_num_ref_frames = 1 (ue(v): 010, 3 bits) + gaps_in_frame_num_value_allowed_flag = 0 (1 bit)
-        // 0x40 = 01000000: bits 0-2 = 010 (max_num_ref_frames), bit 3 = 0 (gaps flag)
-        data.extend_from_slice(&[0x40]); // Combined: max_num_ref_frames + gaps flag
-        data.extend_from_slice(&[0x05, 0x00]); // pic_width_in_mbs_minus1 = 39
-        // pic_height_in_map_units_minus1 = 29 (9 bits: 000011110)
-        // After alignment, read from new byte: 0x0F (8 bits: 00001111) + 1 bit from next byte
-        // frame_mbs_only_flag = 0, mb_adaptive_frame_field_flag = 0, direct_8x8_inference_flag = 1
-        // So: 0x0F (8 bits) + 0x08 (bits: 0=9th bit of ue(v), 0=frame_mbs_only_flag, 0=mb_adaptive_frame_field_flag, 1=direct_8x8_inference_flag)
-        data.extend_from_slice(&[0x0F, 0x08]);
-        data.extend_from_slice(&[0x00]); // frame_cropping_flag = 0
-        data.extend_from_slice(&[0x00]); // vui_parameters_present_flag = 0
-
+        let data = create_baseline_sps_interlaced(640, 480);
         let bytes_reader = BytesReader::new(data);
         let mut parser = SpsParser::new(bytes_reader);
         let result = parser.parse().unwrap();
 
         assert_eq!(parser.sps.frame_mbs_only_flag, 0);
-        // Height should be doubled for interlaced (2 - 0) * 30 * 16 = 960
-        assert_eq!(result.1, 960);
+        // Height should be doubled for interlaced: (2 - 0) * (480/16/2) * 16 = 480
+        // With interlaced, pic_height_in_map_units_minus1 = 14 (480/16/2 - 1)
+        // height = (2 - 0) * (14 + 1) * 16 = 2 * 15 * 16 = 480
+        assert_eq!(result.1, 480);
     }
 
     // ============================================
@@ -558,25 +624,7 @@ mod tests {
 
     #[test]
     fn test_sps_pic_order_cnt_type_0() {
-        let mut data = BytesMut::new();
-        // SPS with pic_order_cnt_type = 0
-        data.extend_from_slice(&[0x42, 0xE0, 0x1E]);
-        data.extend_from_slice(&[0x80]); // seq_parameter_set_id = 0
-        data.extend_from_slice(&[0x80]); // log2_max_frame_num_minus4 = 0
-        data.extend_from_slice(&[0x80]); // pic_order_cnt_type = 0
-        data.extend_from_slice(&[0x80]); // log2_max_pic_order_cnt_lsb_minus4 = 0
-        // max_num_ref_frames = 1 (ue(v): 010, 3 bits) + gaps_in_frame_num_value_allowed_flag = 0 (1 bit)
-        // 0x40 = 01000000: bits 0-2 = 010 (max_num_ref_frames), bit 3 = 0 (gaps flag)
-        data.extend_from_slice(&[0x40]); // Combined: max_num_ref_frames + gaps flag
-        data.extend_from_slice(&[0x05, 0x00]); // pic_width_in_mbs_minus1 = 39
-        // pic_height_in_map_units_minus1 = 29 (9 bits: 0x0F + 1 bit from next byte)
-        // frame_mbs_only_flag = 1 (2nd bit of next byte)
-        // direct_8x8_inference_flag = 1 (3rd bit of next byte)
-        // So: 0x0F (8 bits) + 0x60 (bits: 0=9th bit of ue(v), 1=frame_mbs_only_flag, 1=direct_8x8_inference_flag)
-        data.extend_from_slice(&[0x0F, 0x60]);
-        data.extend_from_slice(&[0x00]); // frame_cropping_flag = 0
-        data.extend_from_slice(&[0x00]); // vui_parameters_present_flag = 0
-
+        let data = create_baseline_sps_poc0(640, 480);
         let bytes_reader = BytesReader::new(data);
         let mut parser = SpsParser::new(bytes_reader);
         let result = parser.parse();
@@ -587,28 +635,7 @@ mod tests {
 
     #[test]
     fn test_sps_pic_order_cnt_type_1() {
-        let mut data = BytesMut::new();
-        // SPS with pic_order_cnt_type = 1
-        data.extend_from_slice(&[0x42, 0xE0, 0x1E]);
-        data.extend_from_slice(&[0x80]); // seq_parameter_set_id = 0
-        data.extend_from_slice(&[0x80]); // log2_max_frame_num_minus4 = 0
-        data.extend_from_slice(&[0x40]); // pic_order_cnt_type = 1 (ue(v): 010)
-        data.extend_from_slice(&[0x00]); // delta_pic_order_always_zero_flag = 0
-        data.extend_from_slice(&[0x80]); // offset_for_non_ref_pic = 0
-        data.extend_from_slice(&[0x80]); // offset_for_top_to_bottom_field = 0
-        data.extend_from_slice(&[0x80]); // num_ref_frames_in_pic_order_cnt_cycle = 0
-        // max_num_ref_frames = 1 (ue(v): 010, 3 bits) + gaps_in_frame_num_value_allowed_flag = 0 (1 bit)
-        // 0x40 = 01000000: bits 0-2 = 010 (max_num_ref_frames), bit 3 = 0 (gaps flag)
-        data.extend_from_slice(&[0x40]); // Combined: max_num_ref_frames + gaps flag
-        data.extend_from_slice(&[0x05, 0x00]); // pic_width_in_mbs_minus1 = 39
-        // pic_height_in_map_units_minus1 = 29 (9 bits: 0x0F + 1 bit from next byte)
-        // frame_mbs_only_flag = 1 (2nd bit of next byte)
-        // direct_8x8_inference_flag = 1 (3rd bit of next byte)
-        // So: 0x0F (8 bits) + 0x60 (bits: 0=9th bit of ue(v), 1=frame_mbs_only_flag, 1=direct_8x8_inference_flag)
-        data.extend_from_slice(&[0x0F, 0x60]);
-        data.extend_from_slice(&[0x00]); // frame_cropping_flag = 0
-        data.extend_from_slice(&[0x00]); // vui_parameters_present_flag = 0
-
+        let data = create_baseline_sps_poc1(640, 480);
         let bytes_reader = BytesReader::new(data);
         let mut parser = SpsParser::new(bytes_reader);
         let result = parser.parse();

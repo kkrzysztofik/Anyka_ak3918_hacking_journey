@@ -418,7 +418,7 @@ mod tests {
             Ok(())
         }));
 
-        // Create RTP packet with multiple AUs
+        // Create RTP packet with multiple AUs per RFC 3640
         let mut packet = RtpPacket {
             header: RtpHeader {
             payload_type: 97,
@@ -432,18 +432,26 @@ mod tests {
             ..Default::default()
         };
 
-        // AU-headers-length: 32 bits
+        // RFC 3640 layout:
+        // 1. AU-headers-length (2 bytes): number of BITS in AU header section
+        // 2. AU headers (each 2 bytes: 13-bit size + 3-bit index)
+        // 3. AU data section (all AU payloads concatenated)
+
+        // AU-headers-length: 32 bits = 4 bytes = 2 AU headers × 16 bits each
         packet.payload.put_u16(32);
 
-        // First AU
+        // First AU header: size=3 bytes (0x18 >> 3 = 3), index=0
+        // Encoding: (size << 3) | index = (3 << 3) | 0 = 0x18, high byte = 0
         packet.payload.put_u8(0);
-        packet.payload.put_u8(0x18); // 3 bytes
-        packet.payload.extend_from_slice(&[0x12, 0x10, 0x56]);
+        packet.payload.put_u8(0x18);
 
-        // Second AU
+        // Second AU header: size=3 bytes, index-delta=1
         packet.payload.put_u8(0);
-        packet.payload.put_u8(0x18); // 3 bytes
-        packet.payload.extend_from_slice(&[0x12, 0x10, 0x56]);
+        packet.payload.put_u8(0x18);
+
+        // Now AU data section: 3 bytes for first AU + 3 bytes for second AU
+        packet.payload.extend_from_slice(&[0x12, 0x10, 0x56]); // First AU data
+        packet.payload.extend_from_slice(&[0x34, 0x56, 0x78]); // Second AU data
 
         let packet_bytes = packet.marshal().unwrap();
         let mut reader = BytesReader::new(packet_bytes);

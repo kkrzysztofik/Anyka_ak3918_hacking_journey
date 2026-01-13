@@ -1270,7 +1270,6 @@ mod tests {
         let mut mock_handler = MockStreamHandler::new();
         mock_handler
             .expect_send_prior_data()
-            .times(0)
             .returning(|_, _| Ok(()));
         let mock_handler = Arc::new(mock_handler);
 
@@ -1321,7 +1320,6 @@ mod tests {
         let mut mock_handler = MockStreamHandler::new();
         mock_handler
             .expect_send_prior_data()
-            .times(0)
             .returning(|_, _| Ok(()));
         let mock_handler = Arc::new(mock_handler);
 

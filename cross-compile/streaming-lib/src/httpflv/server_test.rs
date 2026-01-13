@@ -2,20 +2,19 @@ use super::server::{DefaultHttpFlvServer, HttpFlvServer};
 use crate::common::auth::Auth;
 use crate::streamhub::define::{StreamHubEvent, StreamHubEventSender};
 use crate::streamhub::stream::StreamIdentifier;
-use crate::streamhub::utils::Uuid;
 use axum::{
     body::Body,
-    http::{Request, StatusCode, Uri},
+    http::{Request, Uri},
 };
-use futures::channel::mpsc;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use tokio::sync::mpsc as tokio_mpsc;
 
+#[allow(dead_code)]
 fn create_test_event_sender() -> StreamHubEventSender {
     let (sender, _receiver) = tokio_mpsc::unbounded_channel();
     sender
 }
-
 #[tokio::test]
 async fn test_default_httpflv_server_new() {
     let _event_sender = create_test_event_sender();
@@ -250,16 +249,21 @@ async fn test_stream_identifier_creation() {
 
 #[tokio::test]
 async fn test_event_producer_clone() {
-    let event_sender = create_test_event_sender();
+    // Create event channel and keep receiver alive for the test duration
+    let (event_sender, _event_receiver) = tokio_mpsc::unbounded_channel();
     let cloned = event_sender.clone();
 
-    // Verify both can be used
+    // Create inner channels for the Request events - keep receivers alive
+    let (sender1, _receiver1) = tokio_mpsc::unbounded_channel();
+    let (sender2, _receiver2) = tokio_mpsc::unbounded_channel();
+
+    // Verify both event senders can be used
     assert!(event_sender.send(StreamHubEvent::Request {
         identifier: StreamIdentifier::Rtmp {
             app_name: "test".to_string(),
             stream_name: "stream".to_string(),
         },
-        sender: tokio_mpsc::unbounded_channel().0,
+        sender: sender1,
     }).is_ok());
 
     assert!(cloned.send(StreamHubEvent::Request {
@@ -267,8 +271,7 @@ async fn test_event_producer_clone() {
             app_name: "test2".to_string(),
             stream_name: "stream2".to_string(),
         },
-        sender: tokio_mpsc::unbounded_channel().0,
+        sender: sender2,
     }).is_ok());
 }
 
-use std::str::FromStr;

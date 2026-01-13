@@ -106,15 +106,13 @@ clone_rust() {
     cd "${BUILD_DIR}"
 
     log_info "Cloning Rust repository (version ${RUST_VERSION})..."
-    # Try to clone specific version first, fallback to stable branch
+    # Clone the specific version tag - do NOT fallback to stable
+    # Use annotated tag format with v prefix
     git clone --depth 1 --branch "${RUST_VERSION}" \
-        https://github.com/rust-lang/rust.git "${RUST_SRC_DIR}" 2>/dev/null || {
-        log_warn "Version ${RUST_VERSION} not found, trying stable branch..."
-        git clone --depth 1 --branch stable \
-            https://github.com/rust-lang/rust.git "${RUST_SRC_DIR}" || {
-            log_error "Failed to clone Rust source"
-            exit 1
-        }
+        https://github.com/rust-lang/rust.git "${RUST_SRC_DIR}" || {
+        log_error "Failed to clone Rust source for version ${RUST_VERSION}"
+        log_error "Available versions can be checked at: https://github.com/rust-lang/rust/tags"
+        exit 1
     }
 
     log_info "Rust source cloned. Using system Rust ${RUST_VERSION} for bootstrap."

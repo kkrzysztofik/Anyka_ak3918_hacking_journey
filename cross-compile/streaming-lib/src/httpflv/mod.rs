@@ -4,4 +4,5 @@ pub mod errors;
 mod httpflv_impl;
 pub use httpflv_impl::*;
 pub mod server;
-pub mod server_test;
+#[cfg(test)]
+mod server_test;

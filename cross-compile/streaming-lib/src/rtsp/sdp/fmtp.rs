@@ -73,13 +73,22 @@ impl Unmarshal for H264Fmtp {
     fn unmarshal(raw_data: &str) -> Option<Self> {
         let mut h264_fmtp = H264Fmtp::default();
         let eles: Vec<&str> = raw_data.splitn(2, ' ').collect();
-        if eles.len() < 2 {
-            log::warn!("H264FmtpSdp parse err: {}", raw_data);
+        
+        if eles.is_empty() {
+            log::warn!("H264FmtpSdp parse err: empty input");
             return None;
         }
 
         if let Ok(payload_type) = eles[0].parse::<u16>() {
             h264_fmtp.payload_type = payload_type;
+        } else {
+            log::warn!("H264FmtpSdp parse err: invalid payload type in {}", raw_data);
+            return None;
+        }
+
+        // If no parameters provided, return with defaults
+        if eles.len() < 2 {
+            return Some(h264_fmtp);
         }
 
         let parameters: Vec<&str> = eles[1].split(';').collect();
@@ -410,8 +419,9 @@ mod tests {
 
     #[test]
     fn test_h264_fmtp_invalid_payload_type() {
+        // Invalid payload type should return None
         let fmtp = H264Fmtp::unmarshal("invalid packetization-mode=1");
-        assert!(fmtp.is_some()); // Still parses, but payload_type will be 0 (default)
+        assert!(fmtp.is_none());
     }
 
     #[test]

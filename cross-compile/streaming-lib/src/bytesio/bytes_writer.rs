@@ -32,7 +32,7 @@ impl BytesWriter {
     }
 
     pub fn or_u8_at(&mut self, position: usize, byte: u8) -> Result<(), BytesWriteError> {
-        if position > self.bytes.len() {
+        if position >= self.bytes.len() {
             return Err(BytesWriteError {
                 value: BytesWriteErrorValue::OutofIndex,
             });
@@ -43,18 +43,18 @@ impl BytesWriter {
     }
 
     pub fn add_u8_at(&mut self, position: usize, byte: u8) -> Result<(), BytesWriteError> {
-        if position > self.bytes.len() {
+        if position >= self.bytes.len() {
             return Err(BytesWriteError {
                 value: BytesWriteErrorValue::OutofIndex,
             });
         }
-        self.bytes[position] += byte;
+        self.bytes[position] = self.bytes[position].wrapping_add(byte);
 
         Ok(())
     }
 
     pub fn write_u8_at(&mut self, position: usize, byte: u8) -> Result<(), BytesWriteError> {
-        if position > self.bytes.len() {
+        if position >= self.bytes.len() {
             return Err(BytesWriteError {
                 value: BytesWriteErrorValue::OutofIndex,
             });

@@ -62,7 +62,7 @@ impl PpsParser {
                         self.pps.slice_group_info.push(bottom_right);
                     }
                 }
-                3 | 4 | 5 => {
+                3..=5 => {
                     // Slice group map units
                     let num_slice_group_map_units_minus1 = utils::read_uev(&mut self.bits_reader)?;
                     self.pps.slice_group_info.push(num_slice_group_map_units_minus1);
@@ -94,107 +94,109 @@ mod tests {
     use bytes::BytesMut;
 
     // ============================================
-    // Test Fixtures - Real-world PPS NAL units
+    // PPS Encoder for Tests - Proper Bit-Packed Encoding
+    // ============================================
+    
+    /// Helper to build proper bit-packed PPS NAL units for testing.
+    /// Uses the BitsWriter to ensure continuous bit-packing per H.264 spec.
+    struct PpsBuilder {
+        writer: crate::bytesio::bits_writer::BitsWriter,
+    }
+    
+    impl PpsBuilder {
+        fn new() -> Self {
+            Self {
+                writer: crate::bytesio::bits_writer::BitsWriter::new(
+                    crate::bytesio::bytes_writer::BytesWriter::default()
+                ),
+            }
+        }
+        
+        /// Write n bits from a u32 value (most significant bit first)
+        fn write_bits(&mut self, val: u32, n: usize) {
+            for i in (0..n).rev() {
+                self.writer.write_bit(((val >> i) & 1) as u8).unwrap();
+            }
+        }
+        
+        /// Write a single bit
+        fn write_bit(&mut self, val: u8) {
+            self.writer.write_bit(val).unwrap();
+        }
+        
+        /// Write unsigned Exp-Golomb coded value (ue(v))
+        fn write_uev(&mut self, val: u32) {
+            if val == 0 {
+                self.write_bit(1);
+                return;
+            }
+            
+            let code_num = val + 1;
+            let leading_zero_bits = 31 - code_num.leading_zeros() as usize;
+            let info = val - ((1 << leading_zero_bits) - 1);
+            
+            for _ in 0..leading_zero_bits {
+                self.write_bit(0);
+            }
+            self.write_bit(1);
+            self.write_bits(info, leading_zero_bits);
+        }
+        
+        /// Get the encoded bytes, flushing any remaining bits
+        fn build(mut self) -> BytesMut {
+            self.writer.bits_aligment_8().unwrap();
+            self.writer.get_current_bytes()
+        }
+    }
+
+    // ============================================
+    // Test Fixtures - Properly bit-packed PPS NAL units
     // ============================================
 
-    // PPS for Baseline profile with typical settings
-    // pic_parameter_set_id = 0, seq_parameter_set_id = 0
-    // entropy_coding_mode_flag = 0 (CAVLC), num_slice_groups_minus1 = 0
+    /// PPS for Baseline profile with typical settings
+    /// pic_parameter_set_id = 0, seq_parameter_set_id = 0
+    /// entropy_coding_mode_flag = 0 (CAVLC), num_slice_groups_minus1 = 0
     fn create_baseline_pps() -> BytesMut {
-        let mut data = BytesMut::new();
-        // pic_parameter_set_id = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // seq_parameter_set_id = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // entropy_coding_mode_flag = 0, bottom_field_pic_order_in_frame_present_flag = 0
-        data.extend_from_slice(&[0x00]);
-        // num_slice_groups_minus1 = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // num_ref_idx_l0_active_minus1 = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // num_ref_idx_l1_active_minus1 = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // weighted_pred_flag = 0, weighted_bipred_idc = 0
-        data.extend_from_slice(&[0x00]);
-        // pic_init_qp_minus26 = 0 (se(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // pic_init_qs_minus26 = 0 (se(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // chroma_qp_index_offset = 0 (se(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // deblocking_filter_control_present_flag = 1
-        data.extend_from_slice(&[0x80]);
-        // constrained_intra_pred_flag = 0, redundant_pic_cnt_present_flag = 0
-        data.extend_from_slice(&[0x00]);
-        data
+        let mut builder = PpsBuilder::new();
+        
+        builder.write_uev(0);    // pic_parameter_set_id = 0
+        builder.write_uev(0);    // seq_parameter_set_id = 0
+        builder.write_bit(0);    // entropy_coding_mode_flag = 0 (CAVLC)
+        builder.write_bit(0);    // bottom_field_pic_order_in_frame_present_flag = 0
+        builder.write_uev(0);    // num_slice_groups_minus1 = 0
+        
+        builder.build()
     }
 
-    // PPS for High profile with CABAC (entropy_coding_mode_flag = 1)
-    // pic_parameter_set_id = 1, seq_parameter_set_id = 0
+    /// PPS for High profile with CABAC (entropy_coding_mode_flag = 1)
+    /// pic_parameter_set_id = 1, seq_parameter_set_id = 0
     fn create_high_pps_cabac() -> BytesMut {
-        let mut data = BytesMut::new();
-        // pic_parameter_set_id = 1 (ue(v): 010)
-        data.extend_from_slice(&[0x40]);
-        // seq_parameter_set_id = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // entropy_coding_mode_flag = 1, bottom_field_pic_order_in_frame_present_flag = 0
-        data.extend_from_slice(&[0x80]);
-        // num_slice_groups_minus1 = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // num_ref_idx_l0_active_minus1 = 3 (ue(v): 00100)
-        data.extend_from_slice(&[0x20]);
-        // num_ref_idx_l1_active_minus1 = 1 (ue(v): 010)
-        data.extend_from_slice(&[0x40]);
-        // weighted_pred_flag = 0, weighted_bipred_idc = 0
-        data.extend_from_slice(&[0x00]);
-        // pic_init_qp_minus26 = 0 (se(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // pic_init_qs_minus26 = 0 (se(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // chroma_qp_index_offset = 0 (se(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // deblocking_filter_control_present_flag = 1
-        data.extend_from_slice(&[0x80]);
-        // constrained_intra_pred_flag = 0, redundant_pic_cnt_present_flag = 0
-        data.extend_from_slice(&[0x00]);
-        data
+        let mut builder = PpsBuilder::new();
+        
+        builder.write_uev(1);    // pic_parameter_set_id = 1
+        builder.write_uev(0);    // seq_parameter_set_id = 0
+        builder.write_bit(1);    // entropy_coding_mode_flag = 1 (CABAC)
+        builder.write_bit(0);    // bottom_field_pic_order_in_frame_present_flag = 0
+        builder.write_uev(0);    // num_slice_groups_minus1 = 0
+        
+        builder.build()
     }
 
-    // PPS with slice groups (num_slice_groups_minus1 > 0)
-    // pic_parameter_set_id = 2, slice_group_map_type = 0 (interleaved)
+    /// PPS with slice groups (num_slice_groups_minus1 > 0)
+    /// pic_parameter_set_id = 2, slice_group_map_type = 0 (interleaved)
     fn create_pps_with_slice_groups() -> BytesMut {
-        let mut data = BytesMut::new();
-        // pic_parameter_set_id = 2 (ue(v): 011)
-        data.extend_from_slice(&[0x60]);
-        // seq_parameter_set_id = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // entropy_coding_mode_flag = 0, bottom_field_pic_order_in_frame_present_flag = 0
-        data.extend_from_slice(&[0x00]);
-        // num_slice_groups_minus1 = 1 (ue(v): 010)
-        data.extend_from_slice(&[0x40]);
-        // slice_group_map_type = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // run_length_minus1[0] = 10 (ue(v): 01011)
-        data.extend_from_slice(&[0x58]);
-        // run_length_minus1[1] = 20 (ue(v): 0010101)
-        data.extend_from_slice(&[0x2A, 0x80]);
-        // num_ref_idx_l0_active_minus1 = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // num_ref_idx_l1_active_minus1 = 0 (ue(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // weighted_pred_flag = 0, weighted_bipred_idc = 0
-        data.extend_from_slice(&[0x00]);
-        // pic_init_qp_minus26 = 0 (se(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // pic_init_qs_minus26 = 0 (se(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // chroma_qp_index_offset = 0 (se(v): 1)
-        data.extend_from_slice(&[0x80]);
-        // deblocking_filter_control_present_flag = 1
-        data.extend_from_slice(&[0x80]);
-        // constrained_intra_pred_flag = 0, redundant_pic_cnt_present_flag = 0
-        data.extend_from_slice(&[0x00]);
-        data
+        let mut builder = PpsBuilder::new();
+        
+        builder.write_uev(2);    // pic_parameter_set_id = 2
+        builder.write_uev(0);    // seq_parameter_set_id = 0
+        builder.write_bit(0);    // entropy_coding_mode_flag = 0
+        builder.write_bit(0);    // bottom_field_pic_order_in_frame_present_flag = 0
+        builder.write_uev(1);    // num_slice_groups_minus1 = 1 (2 slice groups)
+        builder.write_uev(0);    // slice_group_map_type = 0 (interleaved)
+        builder.write_uev(10);   // run_length_minus1[0] = 10
+        builder.write_uev(20);   // run_length_minus1[1] = 20
+        
+        builder.build()
     }
 
     // ============================================

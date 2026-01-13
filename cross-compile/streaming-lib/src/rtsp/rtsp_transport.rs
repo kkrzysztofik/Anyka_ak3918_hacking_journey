@@ -90,9 +90,13 @@ impl Unmarshal for RtspTransport {
                     rtsp_transport.interleaved = Some(interleaveds);
                 }
                 "ssrc" => {
-                    if let Ok(ssrc) = kv[1].parse::<u32>() {
-                        rtsp_transport.ssrc = Some(ssrc);
-                    }
+                    let ssrc_str = kv[1].trim();
+                    let ssrc = if ssrc_str.starts_with("0x") || ssrc_str.starts_with("0X") {
+                        u32::from_str_radix(&ssrc_str[2..], 16).ok()
+                    } else {
+                        ssrc_str.parse::<u32>().ok()
+                    };
+                    rtsp_transport.ssrc = ssrc;
                 }
 
                 _ => {}

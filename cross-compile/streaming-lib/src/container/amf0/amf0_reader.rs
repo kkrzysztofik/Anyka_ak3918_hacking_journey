@@ -2,7 +2,6 @@ use {
     super::{Amf0IndexMap, Amf0ReadError, Amf0ValueType, amf0_markers, errors::Amf0ReadErrorValue},
     // bytes::BytesMut,
     crate::bytesio::bytes_reader::BytesReader,
-    crate::bytesio::bytes_writer::BytesWriter,
     byteorder::BigEndian,
 };
 
@@ -143,7 +142,7 @@ impl Amf0Reader {
             log::warn!("the ecma array length is not correct!");
         }
 
-        Ok(Amf0ValueType::Object(properties))
+        Ok(Amf0ValueType::EcmaArray(properties))
     }
 
     pub fn read_long_string(&mut self) -> Result<Amf0ValueType, Amf0ReadError> {

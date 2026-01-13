@@ -44,7 +44,7 @@ impl Unmarshal for RtspRange {
                 };
 
                 rtsp_range.begin = get_clock_time(ranges[0]);
-                if ranges.len() > 1 {
+                if ranges.len() > 1 && !ranges[1].is_empty() {
                     rtsp_range.end = Some(get_clock_time(ranges[1]));
                 }
             }
@@ -53,6 +53,7 @@ impl Unmarshal for RtspRange {
                 let ranges: Vec<&str> = kv[1].split('-').collect();
 
                 let get_npt_time = |range_time: &str| -> i64 {
+                    // Try HH:MM:SS.mmm format first
                     if let (Some(hour), Some(minute), Some(second), mill) =
                         rtsp_utils::scanf!(range_time, |c| c == ':' || c == '.', i64, i64, i64, i64)
                     {
@@ -60,10 +61,26 @@ impl Unmarshal for RtspRange {
                         if let Some(m) = mill {
                             result += m;
                         }
-                        result
-                    } else {
-                        0
+                        return result;
                     }
+                    
+                    // Try SS.mmm format (seconds with milliseconds)
+                    if let Some(idx) = range_time.find('.') {
+                        let (sec_str, ms_str) = range_time.split_at(idx);
+                        if let (Ok(sec), Ok(ms)) = (sec_str.parse::<i64>(), ms_str[1..].parse::<i64>()) {
+                            // Handle variable millisecond precision (e.g., .5 = 500ms, .500 = 500ms)
+                            let ms_len = ms_str.len() - 1; // exclude the dot
+                            let multiplier = match ms_len {
+                                1 => 100, // .5 -> 500
+                                2 => 10,  // .50 -> 500
+                                _ => 1,   // .500 -> 500
+                            };
+                            return sec * 1000 + ms * multiplier;
+                        }
+                    }
+                    
+                    // Try just seconds
+                    range_time.parse::<i64>().map(|s| s * 1000).unwrap_or(0)
                 };
 
                 match ranges[0] {
