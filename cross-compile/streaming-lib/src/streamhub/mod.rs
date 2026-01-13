@@ -1105,9 +1105,9 @@ impl StreamsHub {
 mod tests {
     use super::*;
     use crate::streamhub::define::{
-        DataReceiver, DataSender, FrameData, FrameDataSender, Information, NotifyInfo,
-        PacketData, PacketDataSender, PublisherInfo, PublishType, PubDataType,
-        StatisticData, SubscriberInfo, SubscribeType, SubDataType,
+        DataReceiver, DataSender, FrameData, FrameDataSender, Information, NotifyInfo, PacketData,
+        PacketDataSender, PubDataType, PublishType, PublisherInfo, StatisticData, SubDataType,
+        SubscribeType, SubscriberInfo,
     };
     use async_trait::async_trait;
     use bytes::BytesMut;
@@ -1452,18 +1452,18 @@ mod tests {
             packet_receiver: None,
         };
 
-        let transceiver = StreamDataTransceiver::new(
-            receiver,
-            event_receiver,
-            identifier.clone(),
-            mock_handler,
-        );
+        let transceiver =
+            StreamDataTransceiver::new(receiver, event_receiver, identifier.clone(), mock_handler);
 
         let statistic_sender = transceiver.get_statistics_data_sender();
-        assert!(statistic_sender.send(StatisticData::Publisher {
-            id: Uuid::new(crate::streamhub::utils::RandomDigitCount::Four),
-            remote_addr: "127.0.0.1:1935".to_string(),
-            start_time: chrono::Local::now(),
-        }).is_ok());
+        assert!(
+            statistic_sender
+                .send(StatisticData::Publisher {
+                    id: Uuid::new(crate::streamhub::utils::RandomDigitCount::Four),
+                    remote_addr: "127.0.0.1:1935".to_string(),
+                    start_time: chrono::Local::now(),
+                })
+                .is_ok()
+        );
     }
 }

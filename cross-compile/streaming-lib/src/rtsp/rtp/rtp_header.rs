@@ -434,13 +434,15 @@ mod tests {
 
     #[test]
     fn test_unmarshal_minimal_header() {
-        let data = BytesMut::from(&[
-            0x80, // V=2, P=0, X=0, CC=0
-            0x00, // M=0, PT=0
-            0x00, 0x00, // seq=0
-            0x00, 0x00, 0x00, 0x00, // timestamp=0
-            0x00, 0x00, 0x00, 0x00, // ssrc=0
-        ][..]);
+        let data = BytesMut::from(
+            &[
+                0x80, // V=2, P=0, X=0, CC=0
+                0x00, // M=0, PT=0
+                0x00, 0x00, // seq=0
+                0x00, 0x00, 0x00, 0x00, // timestamp=0
+                0x00, 0x00, 0x00, 0x00, // ssrc=0
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.version, 2);
@@ -458,19 +460,31 @@ mod tests {
     #[test]
     fn test_unmarshal_version_field() {
         // Version 0
-        let data = BytesMut::from(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let data = BytesMut::from(
+            &[
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.version, 0);
 
         // Version 2
-        let data = BytesMut::from(&[0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let data = BytesMut::from(
+            &[
+                0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.version, 2);
 
         // Version 3
-        let data = BytesMut::from(&[0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let data = BytesMut::from(
+            &[
+                0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.version, 3);
@@ -479,7 +493,11 @@ mod tests {
     #[test]
     fn test_unmarshal_padding_flag() {
         // P=1
-        let data = BytesMut::from(&[0xA0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let data = BytesMut::from(
+            &[
+                0xA0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.version, 2);
@@ -489,7 +507,11 @@ mod tests {
     #[test]
     fn test_unmarshal_extension_flag() {
         // X=1
-        let data = BytesMut::from(&[0x90, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let data = BytesMut::from(
+            &[
+                0x90, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.version, 2);
@@ -499,18 +521,17 @@ mod tests {
     #[test]
     fn test_unmarshal_cc_field() {
         // CC=5 with 5 CSRCs
-        let data = BytesMut::from(&[
-            0x85, // V=2, CC=5
-            0x00,
-            0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x01, // CSRC 1
-            0x00, 0x00, 0x00, 0x02, // CSRC 2
-            0x00, 0x00, 0x00, 0x03, // CSRC 3
-            0x00, 0x00, 0x00, 0x04, // CSRC 4
-            0x00, 0x00, 0x00, 0x05, // CSRC 5
-        ][..]);
+        let data = BytesMut::from(
+            &[
+                0x85, // V=2, CC=5
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x01, // CSRC 1
+                0x00, 0x00, 0x00, 0x02, // CSRC 2
+                0x00, 0x00, 0x00, 0x03, // CSRC 3
+                0x00, 0x00, 0x00, 0x04, // CSRC 4
+                0x00, 0x00, 0x00, 0x05, // CSRC 5
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.cc, 5);
@@ -521,7 +542,11 @@ mod tests {
     #[test]
     fn test_unmarshal_marker_bit() {
         // M=1
-        let data = BytesMut::from(&[0x80, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let data = BytesMut::from(
+            &[
+                0x80, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.marker, 1);
@@ -530,13 +555,21 @@ mod tests {
     #[test]
     fn test_unmarshal_payload_type() {
         // PT=96
-        let data = BytesMut::from(&[0x80, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let data = BytesMut::from(
+            &[
+                0x80, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.payload_type, 96);
 
         // PT=127
-        let data = BytesMut::from(&[0x80, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let data = BytesMut::from(
+            &[
+                0x80, 0x7F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.payload_type, 127);
@@ -544,7 +577,11 @@ mod tests {
 
     #[test]
     fn test_unmarshal_sequence_number() {
-        let data = BytesMut::from(&[0x80, 0x00, 0x12, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let data = BytesMut::from(
+            &[
+                0x80, 0x00, 0x12, 0x34, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.seq_number, 0x1234);
@@ -552,7 +589,11 @@ mod tests {
 
     #[test]
     fn test_unmarshal_timestamp() {
-        let data = BytesMut::from(&[0x80, 0x00, 0x00, 0x00, 0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x00][..]);
+        let data = BytesMut::from(
+            &[
+                0x80, 0x00, 0x00, 0x00, 0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.timestamp, 0x12345678);
@@ -560,7 +601,11 @@ mod tests {
 
     #[test]
     fn test_unmarshal_ssrc() {
-        let data = BytesMut::from(&[0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xDE, 0xAD, 0xBE, 0xEF][..]);
+        let data = BytesMut::from(
+            &[
+                0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xDE, 0xAD, 0xBE, 0xEF,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.ssrc, 0xDEADBEEF);
@@ -569,16 +614,18 @@ mod tests {
     #[test]
     fn test_unmarshal_combined_first_byte() {
         // V=2, P=1, X=1, CC=7 = 0xB7
-        let data = BytesMut::from(&[
-            0xB7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x01, 0x01, 0x01, 0x01, // CSRC 1
-            0x02, 0x02, 0x02, 0x02, // CSRC 2
-            0x03, 0x03, 0x03, 0x03, // CSRC 3
-            0x04, 0x04, 0x04, 0x04, // CSRC 4
-            0x05, 0x05, 0x05, 0x05, // CSRC 5
-            0x06, 0x06, 0x06, 0x06, // CSRC 6
-            0x07, 0x07, 0x07, 0x07, // CSRC 7
-        ][..]);
+        let data = BytesMut::from(
+            &[
+                0xB7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
+                0x01, 0x01, // CSRC 1
+                0x02, 0x02, 0x02, 0x02, // CSRC 2
+                0x03, 0x03, 0x03, 0x03, // CSRC 3
+                0x04, 0x04, 0x04, 0x04, // CSRC 4
+                0x05, 0x05, 0x05, 0x05, // CSRC 5
+                0x06, 0x06, 0x06, 0x06, // CSRC 6
+                0x07, 0x07, 0x07, 0x07, // CSRC 7
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.version, 2);
@@ -591,7 +638,11 @@ mod tests {
     #[test]
     fn test_unmarshal_combined_second_byte() {
         // M=1, PT=96 = 0xE0
-        let data = BytesMut::from(&[0x80, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        let data = BytesMut::from(
+            &[
+                0x80, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
         assert_eq!(header.marker, 1);
@@ -723,7 +774,7 @@ mod tests {
             padding_flag: 0,
             extension_flag: 0,
             cc: 0,
-            marker: 1, // End of frame
+            marker: 1,        // End of frame
             payload_type: 96, // Dynamic PT for H.264
             seq_number: 12345,
             timestamp: 90000, // 90kHz clock
@@ -941,14 +992,14 @@ mod tests {
     #[test]
     fn test_unmarshal_missing_csrc_data() {
         // Header says CC=5 but no CSRC data
-        let data = BytesMut::from(&[
-            0x85, // V=2, CC=5
-            0x00,
-            0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            // Missing 5 CSRCs
-        ][..]);
+        let data = BytesMut::from(
+            &[
+                0x85, // V=2, CC=5
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00,
+                // Missing 5 CSRCs
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let result = RtpHeader::unmarshal(&mut reader);
         assert!(result.is_err());
@@ -957,16 +1008,15 @@ mod tests {
     #[test]
     fn test_unmarshal_partial_csrc_data() {
         // Header says CC=3 but only has 2 CSRCs
-        let data = BytesMut::from(&[
-            0x83, // V=2, CC=3
-            0x00,
-            0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x01, // CSRC 1
-            0x00, 0x00, 0x00, 0x02, // CSRC 2
-            // Missing CSRC 3
-        ][..]);
+        let data = BytesMut::from(
+            &[
+                0x83, // V=2, CC=3
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x01, // CSRC 1
+                0x00, 0x00, 0x00, 0x02, // CSRC 2
+                      // Missing CSRC 3
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let result = RtpHeader::unmarshal(&mut reader);
         assert!(result.is_err());
@@ -1018,13 +1068,15 @@ mod tests {
     #[test]
     fn test_real_world_h264_packet() {
         // Real H.264 RTP packet header (captured)
-        let data = BytesMut::from(&[
-            0x80, // V=2, P=0, X=0, CC=0
-            0xE0, // M=1, PT=96
-            0x00, 0x01, // seq=1
-            0x00, 0x00, 0x00, 0x00, // timestamp=0
-            0x12, 0x34, 0x56, 0x78, // ssrc
-        ][..]);
+        let data = BytesMut::from(
+            &[
+                0x80, // V=2, P=0, X=0, CC=0
+                0xE0, // M=1, PT=96
+                0x00, 0x01, // seq=1
+                0x00, 0x00, 0x00, 0x00, // timestamp=0
+                0x12, 0x34, 0x56, 0x78, // ssrc
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
 
@@ -1042,13 +1094,15 @@ mod tests {
     #[test]
     fn test_real_world_audio_packet() {
         // Real audio RTP packet header (PCMU)
-        let data = BytesMut::from(&[
-            0x80, // V=2, P=0, X=0, CC=0
-            0x00, // M=0, PT=0 (PCMU)
-            0x03, 0xE8, // seq=1000
-            0x00, 0x01, 0xF4, 0x00, // timestamp=128000
-            0x87, 0x65, 0x43, 0x21, // ssrc
-        ][..]);
+        let data = BytesMut::from(
+            &[
+                0x80, // V=2, P=0, X=0, CC=0
+                0x00, // M=0, PT=0 (PCMU)
+                0x03, 0xE8, // seq=1000
+                0x00, 0x01, 0xF4, 0x00, // timestamp=128000
+                0x87, 0x65, 0x43, 0x21, // ssrc
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
 
@@ -1063,17 +1117,19 @@ mod tests {
     #[test]
     fn test_mixer_packet_with_csrcs() {
         // RTP packet from a mixer with contributing sources
-        let data = BytesMut::from(&[
-            0x84, // V=2, P=0, X=0, CC=4
-            0x60, // M=0, PT=96
-            0x00, 0x64, // seq=100
-            0x00, 0x01, 0x51, 0x80, // timestamp=86400
-            0xAB, 0xCD, 0xEF, 0x01, // ssrc
-            0x11, 0x11, 0x11, 0x11, // CSRC 1
-            0x22, 0x22, 0x22, 0x22, // CSRC 2
-            0x33, 0x33, 0x33, 0x33, // CSRC 3
-            0x44, 0x44, 0x44, 0x44, // CSRC 4
-        ][..]);
+        let data = BytesMut::from(
+            &[
+                0x84, // V=2, P=0, X=0, CC=4
+                0x60, // M=0, PT=96
+                0x00, 0x64, // seq=100
+                0x00, 0x01, 0x51, 0x80, // timestamp=86400
+                0xAB, 0xCD, 0xEF, 0x01, // ssrc
+                0x11, 0x11, 0x11, 0x11, // CSRC 1
+                0x22, 0x22, 0x22, 0x22, // CSRC 2
+                0x33, 0x33, 0x33, 0x33, // CSRC 3
+                0x44, 0x44, 0x44, 0x44, // CSRC 4
+            ][..],
+        );
         let mut reader = BytesReader::new(data);
         let header = RtpHeader::unmarshal(&mut reader).unwrap();
 

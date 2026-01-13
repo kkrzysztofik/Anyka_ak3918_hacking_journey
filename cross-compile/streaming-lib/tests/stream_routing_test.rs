@@ -1,9 +1,9 @@
 // Integration tests for stream routing
 // Tests end-to-end stream hub operations, publisher/subscriber routing, and data flow
 
-use streaming_lib::streamhub::stream::StreamIdentifier;
-use streaming_lib::streamhub::define::{SubscribeType, PublishType};
 use std::collections::HashMap;
+use streaming_lib::streamhub::define::{PublishType, SubscribeType};
+use streaming_lib::streamhub::stream::StreamIdentifier;
 
 #[tokio::test]
 async fn test_stream_identifier_creation() {
@@ -23,7 +23,10 @@ async fn test_stream_identifier_creation() {
     };
 
     match rtmp_id {
-        StreamIdentifier::Rtmp { app_name, stream_name } => {
+        StreamIdentifier::Rtmp {
+            app_name,
+            stream_name,
+        } => {
             assert_eq!(app_name, "live");
             assert_eq!(stream_name, "test");
         }
@@ -38,7 +41,10 @@ async fn test_stream_identifier_creation() {
     }
 
     match webrtc_id {
-        StreamIdentifier::WebRTC { app_name, stream_name } => {
+        StreamIdentifier::WebRTC {
+            app_name,
+            stream_name,
+        } => {
             assert_eq!(app_name, "live");
             assert_eq!(stream_name, "test");
         }

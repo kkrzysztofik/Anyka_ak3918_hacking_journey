@@ -181,7 +181,9 @@ mod tests {
 
         // Write 10101010
         for i in 0..8 {
-            bits_writer.write_bit(if i % 2 == 0 { 1 } else { 0 }).unwrap();
+            bits_writer
+                .write_bit(if i % 2 == 0 { 1 } else { 0 })
+                .unwrap();
         }
 
         let bytes = bits_writer.get_current_bytes();
@@ -576,11 +578,11 @@ mod tests {
         let bytes_writer = BytesWriter::new();
         let mut bits_writer = BitsWriter::new(bytes_writer);
 
-        bits_writer.write_n_bits(0b101, 3).unwrap();      // 3 bits
-        bits_writer.write_n_bits(0b11, 2).unwrap();       // 2 bits
-        bits_writer.write_n_bits(0b010, 3).unwrap();      // 3 bits
-        bits_writer.write_n_bits(0xABCD, 16).unwrap();    // 16 bits
-        bits_writer.bits_aligment_8().unwrap();           // Align remaining
+        bits_writer.write_n_bits(0b101, 3).unwrap(); // 3 bits
+        bits_writer.write_n_bits(0b11, 2).unwrap(); // 2 bits
+        bits_writer.write_n_bits(0b010, 3).unwrap(); // 3 bits
+        bits_writer.write_n_bits(0xABCD, 16).unwrap(); // 16 bits
+        bits_writer.bits_aligment_8().unwrap(); // Align remaining
 
         // Read back
         let written_bytes = bits_writer.get_current_bytes();
@@ -607,9 +609,9 @@ mod tests {
 
         // forbidden_zero_bit(1) | nal_ref_idc(2) | nal_unit_type(5)
         // 0 | 11 | 00101 = 0x65 (IDR slice)
-        bits_writer.write_bit(0).unwrap();           // forbidden_zero_bit
-        bits_writer.write_n_bits(3, 2).unwrap();     // nal_ref_idc = 3
-        bits_writer.write_n_bits(5, 5).unwrap();     // nal_unit_type = 5
+        bits_writer.write_bit(0).unwrap(); // forbidden_zero_bit
+        bits_writer.write_n_bits(3, 2).unwrap(); // nal_ref_idc = 3
+        bits_writer.write_n_bits(5, 5).unwrap(); // nal_unit_type = 5
 
         let bytes = bits_writer.get_current_bytes();
         assert_eq!(bytes.to_vec(), vec![0x65]);
@@ -623,10 +625,10 @@ mod tests {
 
         // version(2) | padding(1) | extension(1) | cc(4)
         // 10 | 0 | 0 | 0000 = 0x80
-        bits_writer.write_n_bits(2, 2).unwrap();     // version = 2
-        bits_writer.write_bit(0).unwrap();           // padding = 0
-        bits_writer.write_bit(0).unwrap();           // extension = 0
-        bits_writer.write_n_bits(0, 4).unwrap();     // cc = 0
+        bits_writer.write_n_bits(2, 2).unwrap(); // version = 2
+        bits_writer.write_bit(0).unwrap(); // padding = 0
+        bits_writer.write_bit(0).unwrap(); // extension = 0
+        bits_writer.write_n_bits(0, 4).unwrap(); // cc = 0
 
         let bytes = bits_writer.get_current_bytes();
         assert_eq!(bytes.to_vec(), vec![0x80]);
@@ -661,7 +663,9 @@ mod tests {
 
         // Write 16 single bits to form 0xAAAA
         for i in 0..16 {
-            bits_writer.write_bit(if i % 2 == 0 { 1 } else { 0 }).unwrap();
+            bits_writer
+                .write_bit(if i % 2 == 0 { 1 } else { 0 })
+                .unwrap();
         }
 
         let bytes = bits_writer.get_current_bytes();
@@ -689,9 +693,9 @@ mod tests {
 
     #[test]
     fn test_bits_writer_read_bit_property() {
-        use proptest::prelude::*;
         use super::super::bits_reader::BitsReader;
         use super::super::bytes_reader::BytesReader;
+        use proptest::prelude::*;
 
         proptest!(|(byte in 0u8..=255u8)| {
             // Write byte as individual bits
@@ -722,9 +726,9 @@ mod tests {
 
     #[test]
     fn test_bits_writer_read_n_bits_property() {
-        use proptest::prelude::*;
         use super::super::bits_reader::BitsReader;
         use super::super::bytes_reader::BytesReader;
+        use proptest::prelude::*;
 
         proptest!(|(value in 0u64..=0xFFFFFFFFu64, bit_count in 1usize..=32usize)| {
             // Mask value to fit in bit_count bits
@@ -750,9 +754,9 @@ mod tests {
 
     #[test]
     fn test_bits_writer_read_8bit_property() {
-        use proptest::prelude::*;
         use super::super::bits_reader::BitsReader;
         use super::super::bytes_reader::BytesReader;
+        use proptest::prelude::*;
 
         proptest!(|(byte in 0u8..=255u8)| {
             // Write byte

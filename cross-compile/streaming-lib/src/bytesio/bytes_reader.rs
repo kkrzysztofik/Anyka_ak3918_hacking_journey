@@ -484,10 +484,7 @@ mod tests {
         buf.extend_from_slice(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
         let mut reader = BytesReader::new(buf);
 
-        assert_eq!(
-            reader.read_u64::<BigEndian>().unwrap(),
-            0x0102030405060708
-        );
+        assert_eq!(reader.read_u64::<BigEndian>().unwrap(), 0x0102030405060708);
     }
 
     #[test]
@@ -1037,11 +1034,11 @@ mod tests {
         let mut buf = BytesMut::new();
         // u8, u16 (BE), u24 (BE), u32 (BE), u8
         buf.extend_from_slice(&[
-            0x01,                    // u8
-            0x02, 0x03,             // u16
-            0x04, 0x05, 0x06,       // u24
+            0x01, // u8
+            0x02, 0x03, // u16
+            0x04, 0x05, 0x06, // u24
             0x07, 0x08, 0x09, 0x0A, // u32
-            0x0B,                   // u8
+            0x0B, // u8
         ]);
         let mut reader = BytesReader::new(buf);
 

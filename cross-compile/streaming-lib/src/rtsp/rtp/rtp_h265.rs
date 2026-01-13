@@ -376,8 +376,8 @@ mod tests {
     use mockall::mock;
     use tokio::sync::Mutex;
 
-    use crate::bytesio::{NetType, TNetIO};
     use crate::bytesio::bytesio_errors::BytesIOError;
+    use crate::bytesio::{NetType, TNetIO};
     use bytes::Bytes;
     use std::time::Duration;
 
@@ -412,7 +412,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_rtp_h265_packer_new() {
-        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
         let packer = RtpH265Packer::new(96, 12345, 0, 1500, mock_io);
         assert_eq!(packer.header.payload_type, 96);
         assert_eq!(packer.header.ssrc, 12345);
@@ -422,7 +424,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_rtp_h265_packer_pack_single_small_nalu() {
-        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
         let mut packer = RtpH265Packer::new(96, 12345, 0, 1500, mock_io);
 
         let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
@@ -443,7 +447,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_rtp_h265_packer_pack_fu_large_nalu() {
-        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
         let mut packer = RtpH265Packer::new(96, 12345, 0, 1500, mock_io);
 
         let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
@@ -469,7 +475,11 @@ mod tests {
                 // Check that PayloadHdr has FU type (49)
                 assert_eq!((payload_hdr_1st >> 1) & 0x3F, define::FU);
                 // Check FU header has S or E bit set
-                assert!(fu_header & define::FU_START > 0 || fu_header & define::FU_END > 0 || *count > 1);
+                assert!(
+                    fu_header & define::FU_START > 0
+                        || fu_header & define::FU_END > 0
+                        || *count > 1
+                );
             }
             Box::pin(async move { Ok(()) })
         }));
@@ -485,7 +495,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_rtp_h265_packer_pack_nalu_small() {
-        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
         let mut packer = RtpH265Packer::new(96, 12345, 0, 1500, mock_io);
 
         let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
@@ -504,7 +516,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_rtp_h265_packer_pack_nalu_large() {
-        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
         let mut packer = RtpH265Packer::new(96, 12345, 0, 1500, mock_io);
 
         let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
@@ -523,13 +537,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_rtp_h265_packer_sequence_number_increment() {
-        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
         let mut packer = RtpH265Packer::new(96, 12345, 100, 1500, mock_io);
 
         let seq_numbers = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let seq_numbers_clone = seq_numbers.clone();
         packer.on_packet_handler(Box::new(move |_io, packet| {
-            seq_numbers_clone.lock().unwrap().push(packet.header.seq_number);
+            seq_numbers_clone
+                .lock()
+                .unwrap()
+                .push(packet.header.seq_number);
             Box::pin(async move { Ok(()) })
         }));
 
@@ -540,7 +559,7 @@ mod tests {
         let seqs = seq_numbers.lock().unwrap();
         assert!(seqs.len() > 1);
         for i in 1..seqs.len() {
-            assert_eq!(seqs[i], seqs[i-1] + 1);
+            assert_eq!(seqs[i], seqs[i - 1] + 1);
         }
     }
 
@@ -567,10 +586,10 @@ mod tests {
         // Create a single NAL unit RTP packet
         let mut packet = RtpPacket {
             header: RtpHeader {
-            payload_type: 96,
-            seq_number: 1,
-            timestamp: 1000,
-            ssrc: 12345,
+                payload_type: 96,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
                 version: 2,
                 marker: 1,
                 ..Default::default()
@@ -608,10 +627,10 @@ mod tests {
         // Create FU start packet
         let mut start_packet = RtpPacket {
             header: RtpHeader {
-            payload_type: 96,
-            seq_number: 1,
-            timestamp: 1000,
-            ssrc: 12345,
+                payload_type: 96,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
                 version: 2,
                 marker: 0,
                 ..Default::default()
@@ -632,10 +651,10 @@ mod tests {
         // Create FU end packet
         let mut end_packet = RtpPacket {
             header: RtpHeader {
-            payload_type: 96,
-            seq_number: 2,
-            timestamp: 1000,
-            ssrc: 12345,
+                payload_type: 96,
+                seq_number: 2,
+                timestamp: 1000,
+                ssrc: 12345,
                 version: 2,
                 marker: 1,
                 ..Default::default()
@@ -669,10 +688,10 @@ mod tests {
         // Create AP (Aggregation Packet) with two NAL units
         let mut packet = RtpPacket {
             header: RtpHeader {
-            payload_type: 96,
-            seq_number: 1,
-            timestamp: 1000,
-            ssrc: 12345,
+                payload_type: 96,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
                 version: 2,
                 marker: 1,
                 ..Default::default()

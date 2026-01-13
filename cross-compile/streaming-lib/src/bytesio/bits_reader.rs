@@ -360,7 +360,7 @@ mod tests {
         let mut bits_reader = BitsReader::new(bytes_reader);
 
         assert_eq!(bits_reader.read_n_bits(3).unwrap(), 0b111); // 7
-        assert_eq!(bits_reader.read_n_bits(2).unwrap(), 0b00);  // 0
+        assert_eq!(bits_reader.read_n_bits(2).unwrap(), 0b00); // 0
         assert_eq!(bits_reader.read_n_bits(3).unwrap(), 0b101); // 5
     }
 

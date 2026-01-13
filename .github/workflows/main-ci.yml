@@ -89,6 +89,7 @@ jobs:
             --follow-exec \
             --timeout 600 \
             --implicit-test-threads \
+            --exclude-files "xiu/**" "patches/**" "anyka_reference/**" "onvif/**" \
             --out Html \
             --out Lcov \
             --out Xml \

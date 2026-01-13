@@ -1,5 +1,7 @@
 use {
-    super::{Amf0IndexMap, Amf0ValueType, Amf0WriteError, amf0_markers, errors::Amf0WriteErrorValue},
+    super::{
+        Amf0IndexMap, Amf0ValueType, Amf0WriteError, amf0_markers, errors::Amf0WriteErrorValue,
+    },
     crate::bytesio::bytes_writer::BytesWriter,
     byteorder::BigEndian,
     bytes::BytesMut,
@@ -88,10 +90,7 @@ impl Amf0Writer {
         Ok(())
     }
 
-    pub fn write_eacm_array(
-        &mut self,
-        properties: &Amf0IndexMap,
-    ) -> Result<(), Amf0WriteError> {
+    pub fn write_eacm_array(&mut self, properties: &Amf0IndexMap) -> Result<(), Amf0WriteError> {
         self.writer.write_u8(amf0_markers::ECMA_ARRAY)?;
         self.writer
             .write_u32::<BigEndian>(properties.len() as u32)?;
@@ -129,8 +128,8 @@ impl Amf0Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::container::amf0::amf0_reader::Amf0Reader;
     use crate::bytesio::bytes_reader::BytesReader;
+    use crate::container::amf0::amf0_reader::Amf0Reader;
     use bytes::BytesMut;
 
     // ============================================
@@ -301,7 +300,10 @@ mod tests {
     fn test_write_object_with_properties() {
         let mut writer = Amf0Writer::new();
         let mut props = Amf0IndexMap::default();
-        props.insert("key1".to_string(), Amf0ValueType::UTF8String("value1".to_string()));
+        props.insert(
+            "key1".to_string(),
+            Amf0ValueType::UTF8String("value1".to_string()),
+        );
         props.insert("key2".to_string(), Amf0ValueType::Number(42.0));
         writer.write_object(&props).unwrap();
 
@@ -316,7 +318,10 @@ mod tests {
         let mut writer = Amf0Writer::new();
         let mut outer_props = Amf0IndexMap::default();
         let mut inner_props = Amf0IndexMap::default();
-        inner_props.insert("inner_key".to_string(), Amf0ValueType::UTF8String("inner_value".to_string()));
+        inner_props.insert(
+            "inner_key".to_string(),
+            Amf0ValueType::UTF8String("inner_value".to_string()),
+        );
         outer_props.insert("nested".to_string(), Amf0ValueType::Object(inner_props));
         writer.write_object(&outer_props).unwrap();
 
@@ -344,8 +349,14 @@ mod tests {
     fn test_write_ecma_array_with_elements() {
         let mut writer = Amf0Writer::new();
         let mut props = Amf0IndexMap::default();
-        props.insert("0".to_string(), Amf0ValueType::UTF8String("first".to_string()));
-        props.insert("1".to_string(), Amf0ValueType::UTF8String("second".to_string()));
+        props.insert(
+            "0".to_string(),
+            Amf0ValueType::UTF8String("first".to_string()),
+        );
+        props.insert(
+            "1".to_string(),
+            Amf0ValueType::UTF8String("second".to_string()),
+        );
         writer.write_eacm_array(&props).unwrap();
 
         let bytes = writer.get_current_bytes();
@@ -378,7 +389,9 @@ mod tests {
     #[test]
     fn test_write_any_string() {
         let mut writer = Amf0Writer::new();
-        writer.write_any(&Amf0ValueType::UTF8String("test".to_string())).unwrap();
+        writer
+            .write_any(&Amf0ValueType::UTF8String("test".to_string()))
+            .unwrap();
 
         let bytes = writer.get_current_bytes();
         assert_eq!(bytes[0], amf0_markers::STRING);
@@ -397,7 +410,10 @@ mod tests {
     fn test_write_any_object() {
         let mut writer = Amf0Writer::new();
         let mut props = Amf0IndexMap::default();
-        props.insert("key".to_string(), Amf0ValueType::UTF8String("value".to_string()));
+        props.insert(
+            "key".to_string(),
+            Amf0ValueType::UTF8String("value".to_string()),
+        );
         writer.write_any(&Amf0ValueType::Object(props)).unwrap();
 
         let bytes = writer.get_current_bytes();
@@ -479,7 +495,10 @@ mod tests {
     #[test]
     fn test_amf0_writer_reader_roundtrip_object() {
         let mut props = Amf0IndexMap::default();
-        props.insert("key1".to_string(), Amf0ValueType::UTF8String("value1".to_string()));
+        props.insert(
+            "key1".to_string(),
+            Amf0ValueType::UTF8String("value1".to_string()),
+        );
         props.insert("key2".to_string(), Amf0ValueType::Number(42.0));
         props.insert("key3".to_string(), Amf0ValueType::Boolean(true));
 
@@ -493,7 +512,10 @@ mod tests {
 
         if let Amf0ValueType::Object(read_props) = read_value {
             assert_eq!(read_props.len(), 3);
-            assert_eq!(read_props.get("key1"), Some(&Amf0ValueType::UTF8String("value1".to_string())));
+            assert_eq!(
+                read_props.get("key1"),
+                Some(&Amf0ValueType::UTF8String("value1".to_string()))
+            );
             assert_eq!(read_props.get("key2"), Some(&Amf0ValueType::Number(42.0)));
             assert_eq!(read_props.get("key3"), Some(&Amf0ValueType::Boolean(true)));
         } else {
@@ -504,8 +526,14 @@ mod tests {
     #[test]
     fn test_amf0_writer_reader_roundtrip_ecma_array() {
         let mut props = Amf0IndexMap::default();
-        props.insert("0".to_string(), Amf0ValueType::UTF8String("first".to_string()));
-        props.insert("1".to_string(), Amf0ValueType::UTF8String("second".to_string()));
+        props.insert(
+            "0".to_string(),
+            Amf0ValueType::UTF8String("first".to_string()),
+        );
+        props.insert(
+            "1".to_string(),
+            Amf0ValueType::UTF8String("second".to_string()),
+        );
 
         let mut writer = Amf0Writer::new();
         writer.write_eacm_array(&props).unwrap();
@@ -517,8 +545,14 @@ mod tests {
 
         if let Amf0ValueType::EcmaArray(read_props) = read_value {
             assert_eq!(read_props.len(), 2);
-            assert_eq!(read_props.get("0"), Some(&Amf0ValueType::UTF8String("first".to_string())));
-            assert_eq!(read_props.get("1"), Some(&Amf0ValueType::UTF8String("second".to_string())));
+            assert_eq!(
+                read_props.get("0"),
+                Some(&Amf0ValueType::UTF8String("first".to_string()))
+            );
+            assert_eq!(
+                read_props.get("1"),
+                Some(&Amf0ValueType::UTF8String("second".to_string()))
+            );
         } else {
             panic!("Expected EcmaArray");
         }
@@ -527,10 +561,16 @@ mod tests {
     #[test]
     fn test_amf0_writer_reader_roundtrip_nested_object() {
         let mut inner_props = Amf0IndexMap::default();
-        inner_props.insert("inner_key".to_string(), Amf0ValueType::UTF8String("inner_value".to_string()));
+        inner_props.insert(
+            "inner_key".to_string(),
+            Amf0ValueType::UTF8String("inner_value".to_string()),
+        );
 
         let mut outer_props = Amf0IndexMap::default();
-        outer_props.insert("nested".to_string(), Amf0ValueType::Object(inner_props.clone()));
+        outer_props.insert(
+            "nested".to_string(),
+            Amf0ValueType::Object(inner_props.clone()),
+        );
 
         let mut writer = Amf0Writer::new();
         writer.write_object(&outer_props).unwrap();
@@ -542,7 +582,10 @@ mod tests {
 
         if let Amf0ValueType::Object(read_outer) = read_value {
             if let Some(Amf0ValueType::Object(read_inner)) = read_outer.get("nested") {
-                assert_eq!(read_inner.get("inner_key"), Some(&Amf0ValueType::UTF8String("inner_value".to_string())));
+                assert_eq!(
+                    read_inner.get("inner_key"),
+                    Some(&Amf0ValueType::UTF8String("inner_value".to_string()))
+                );
             } else {
                 panic!("Expected nested Object");
             }

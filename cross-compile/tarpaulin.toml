@@ -1,0 +1,29 @@
+# Tarpaulin configuration for cross-compile workspace
+# Excludes patched dependencies and external workspaces from coverage
+# This file is automatically detected when running tarpaulin from the cross-compile/ directory
+
+# Exclude patched crates (these are external dependencies we've patched for ARMv5TEJ)
+# These are included in the dependency graph via [patch.crates-io] but shouldn't be in coverage
+exclude = [
+    "webrtc-util",
+    "webrtc-ice", 
+    "webrtc-sctp",
+    "rtp",
+    "tokio-metrics",
+    "openssl-src",
+]
+
+# Exclude files and directories (paths are relative to workspace root)
+# Note: Patterns use glob syntax - * matches any sequence except /
+exclude-files = [
+    # Exclude the entire patches directory (patched dependencies)
+    "patches/**",
+    # Exclude the xiu workspace (separate project, not part of our workspace)
+    "xiu/**",
+    # Exclude anyka_reference (vendor reference code, not our code)
+    "anyka_reference/**",
+    # Exclude onvif C code (not Rust, separate project)
+    "onvif/**",
+    # Exclude build artifacts in xiu/target
+    "xiu/target/**",
+]

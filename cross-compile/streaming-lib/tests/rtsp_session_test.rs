@@ -44,10 +44,10 @@ async fn test_rtsp_codec_mapping() {
     let codec_name = streaming_lib::rtsp::rtsp_codec::RTSP_CODEC_ID_2_NAME
         .get(&codec_id)
         .unwrap();
-    assert_eq!(*codec_name, "H264");
+    assert_eq!(*codec_name, "h264");
 
     let mapped_id = streaming_lib::rtsp::rtsp_codec::RTSP_CODEC_NAME_2_ID
-        .get("H264")
+        .get("h264")
         .unwrap();
     assert_eq!(*mapped_id, codec_id);
 }

@@ -426,7 +426,9 @@ mod tests {
         let test_string = "Hello, World!";
         let mut writer = BytesWriter::new();
         writer.write_u8(amf0_markers::STRING).unwrap();
-        writer.write_u16::<BigEndian>(test_string.len() as u16).unwrap();
+        writer
+            .write_u16::<BigEndian>(test_string.len() as u16)
+            .unwrap();
         writer.write(test_string.as_bytes()).unwrap();
 
         let mut bytes_reader = BytesReader::new(writer.extract_current_bytes());
@@ -451,7 +453,9 @@ mod tests {
     fn test_read_object_empty() {
         let mut writer = BytesWriter::new();
         writer.write_u8(amf0_markers::OBJECT).unwrap();
-        writer.write_u24::<BigEndian>(amf0_markers::OBJECT_END as u32).unwrap();
+        writer
+            .write_u24::<BigEndian>(amf0_markers::OBJECT_END as u32)
+            .unwrap();
 
         let mut bytes_reader = BytesReader::new(writer.extract_current_bytes());
         let mut amf_reader = Amf0Reader::new(bytes_reader);
@@ -478,7 +482,9 @@ mod tests {
         writer.write_u8(amf0_markers::NUMBER).unwrap();
         writer.write_f64::<BigEndian>(42.0).unwrap();
 
-        writer.write_u24::<BigEndian>(amf0_markers::OBJECT_END as u32).unwrap();
+        writer
+            .write_u24::<BigEndian>(amf0_markers::OBJECT_END as u32)
+            .unwrap();
 
         let mut bytes_reader = BytesReader::new(writer.extract_current_bytes());
         let mut amf_reader = Amf0Reader::new(bytes_reader);
@@ -486,7 +492,10 @@ mod tests {
 
         if let Amf0ValueType::Object(props) = result {
             assert_eq!(props.len(), 2);
-            assert_eq!(props.get("key1"), Some(&Amf0ValueType::UTF8String("value1".to_string())));
+            assert_eq!(
+                props.get("key1"),
+                Some(&Amf0ValueType::UTF8String("value1".to_string()))
+            );
             assert_eq!(props.get("key2"), Some(&Amf0ValueType::Number(42.0)));
         } else {
             panic!("Expected Object");
@@ -506,7 +515,9 @@ mod tests {
         writer.write_u16::<BigEndian>(5).unwrap();
         writer.write(b"first").unwrap();
 
-        writer.write_u24::<BigEndian>(amf0_markers::OBJECT_END as u32).unwrap();
+        writer
+            .write_u24::<BigEndian>(amf0_markers::OBJECT_END as u32)
+            .unwrap();
 
         let mut bytes_reader = BytesReader::new(writer.extract_current_bytes());
         let mut amf_reader = Amf0Reader::new(bytes_reader);
@@ -514,7 +525,10 @@ mod tests {
 
         if let Amf0ValueType::EcmaArray(props) = result {
             assert_eq!(props.len(), 1);
-            assert_eq!(props.get("0"), Some(&Amf0ValueType::UTF8String("first".to_string())));
+            assert_eq!(
+                props.get("0"),
+                Some(&Amf0ValueType::UTF8String("first".to_string()))
+            );
         } else {
             panic!("Expected EcmaArray");
         }
@@ -534,9 +548,13 @@ mod tests {
         writer.write_u8(amf0_markers::STRING).unwrap();
         writer.write_u16::<BigEndian>(5).unwrap();
         writer.write(b"value").unwrap();
-        writer.write_u24::<BigEndian>(amf0_markers::OBJECT_END as u32).unwrap();
+        writer
+            .write_u24::<BigEndian>(amf0_markers::OBJECT_END as u32)
+            .unwrap();
 
-        writer.write_u24::<BigEndian>(amf0_markers::OBJECT_END as u32).unwrap();
+        writer
+            .write_u24::<BigEndian>(amf0_markers::OBJECT_END as u32)
+            .unwrap();
 
         let mut bytes_reader = BytesReader::new(writer.extract_current_bytes());
         let mut amf_reader = Amf0Reader::new(bytes_reader);
@@ -545,7 +563,10 @@ mod tests {
         if let Amf0ValueType::Object(props) = result {
             assert_eq!(props.len(), 1);
             if let Some(Amf0ValueType::Object(nested)) = props.get("nested") {
-                assert_eq!(nested.get("inner"), Some(&Amf0ValueType::UTF8String("value".to_string())));
+                assert_eq!(
+                    nested.get("inner"),
+                    Some(&Amf0ValueType::UTF8String("value".to_string()))
+                );
             } else {
                 panic!("Expected nested Object");
             }
@@ -656,7 +677,10 @@ mod tests {
         use super::super::amf0_writer::Amf0Writer;
 
         let mut props = Amf0IndexMap::default();
-        props.insert("key1".to_string(), Amf0ValueType::UTF8String("value1".to_string()));
+        props.insert(
+            "key1".to_string(),
+            Amf0ValueType::UTF8String("value1".to_string()),
+        );
         props.insert("key2".to_string(), Amf0ValueType::Number(42.0));
         let value = Amf0ValueType::Object(props.clone());
 

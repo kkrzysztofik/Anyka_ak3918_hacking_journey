@@ -350,11 +350,20 @@ mod tests {
         assert_eq!(original.ssrc, unmarshaled.ssrc);
         assert_eq!(original.ntp, unmarshaled.ntp);
         assert_eq!(original.rtp_timestamp, unmarshaled.rtp_timestamp);
-        assert_eq!(original.sender_packet_count, unmarshaled.sender_packet_count);
+        assert_eq!(
+            original.sender_packet_count,
+            unmarshaled.sender_packet_count
+        );
         assert_eq!(original.sender_octet_count, unmarshaled.sender_octet_count);
-        assert_eq!(original.report_blocks.len(), unmarshaled.report_blocks.len());
+        assert_eq!(
+            original.report_blocks.len(),
+            unmarshaled.report_blocks.len()
+        );
         if !original.report_blocks.is_empty() {
-            assert_eq!(original.report_blocks[0].ssrc, unmarshaled.report_blocks[0].ssrc);
+            assert_eq!(
+                original.report_blocks[0].ssrc,
+                unmarshaled.report_blocks[0].ssrc
+            );
         }
     }
 

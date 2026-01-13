@@ -67,7 +67,10 @@ mod tests {
             stream_name: "test".to_string(),
         };
         match &id {
-            StreamIdentifier::Rtmp { app_name, stream_name } => {
+            StreamIdentifier::Rtmp {
+                app_name,
+                stream_name,
+            } => {
                 assert_eq!(app_name, "live");
                 assert_eq!(stream_name, "test");
             }
@@ -100,7 +103,10 @@ mod tests {
             stream_name: "test".to_string(),
         };
         match &id {
-            StreamIdentifier::WebRTC { app_name, stream_name } => {
+            StreamIdentifier::WebRTC {
+                app_name,
+                stream_name,
+            } => {
                 assert_eq!(app_name, "live");
                 assert_eq!(stream_name, "test");
             }

@@ -136,8 +136,14 @@ mod tests {
 
         assert_eq!(original.ssrc, unmarshaled.ssrc);
         assert_eq!(original.fraction_lost, unmarshaled.fraction_lost);
-        assert_eq!(original.cumulative_num_of_packets_lost, unmarshaled.cumulative_num_of_packets_lost);
-        assert_eq!(original.extended_highest_seq_number, unmarshaled.extended_highest_seq_number);
+        assert_eq!(
+            original.cumulative_num_of_packets_lost,
+            unmarshaled.cumulative_num_of_packets_lost
+        );
+        assert_eq!(
+            original.extended_highest_seq_number,
+            unmarshaled.extended_highest_seq_number
+        );
         assert_eq!(original.jitter, unmarshaled.jitter);
         assert_eq!(original.lsr, unmarshaled.lsr);
         assert_eq!(original.dlsr, unmarshaled.dlsr);
@@ -344,10 +350,19 @@ mod tests {
         let unmarshaled = RtcpReceiverReport::unmarshal(marshaled).unwrap();
 
         assert_eq!(original.ssrc, unmarshaled.ssrc);
-        assert_eq!(original.report_blocks.len(), unmarshaled.report_blocks.len());
+        assert_eq!(
+            original.report_blocks.len(),
+            unmarshaled.report_blocks.len()
+        );
         if !original.report_blocks.is_empty() {
-            assert_eq!(original.report_blocks[0].ssrc, unmarshaled.report_blocks[0].ssrc);
-            assert_eq!(original.report_blocks[0].fraction_lost, unmarshaled.report_blocks[0].fraction_lost);
+            assert_eq!(
+                original.report_blocks[0].ssrc,
+                unmarshaled.report_blocks[0].ssrc
+            );
+            assert_eq!(
+                original.report_blocks[0].fraction_lost,
+                unmarshaled.report_blocks[0].fraction_lost
+            );
         }
     }
 

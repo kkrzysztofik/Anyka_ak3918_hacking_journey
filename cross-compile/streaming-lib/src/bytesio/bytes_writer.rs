@@ -490,7 +490,9 @@ mod tests {
     #[test]
     fn test_bytes_writer_write_u64_little_endian() {
         let mut writer = BytesWriter::new();
-        writer.write_u64::<LittleEndian>(0x0102030405060708).unwrap();
+        writer
+            .write_u64::<LittleEndian>(0x0102030405060708)
+            .unwrap();
 
         assert_eq!(writer.len(), 8);
         assert_eq!(
@@ -831,9 +833,9 @@ mod tests {
 
     #[test]
     fn test_bytes_writer_u8_property_roundtrip() {
-        use proptest::prelude::*;
         use super::super::bytes_reader::BytesReader;
         use bytes::BytesMut;
+        use proptest::prelude::*;
 
         proptest!(|(val in 0u8..=255u8)| {
             let mut writer = BytesWriter::new();
@@ -848,9 +850,9 @@ mod tests {
 
     #[test]
     fn test_bytes_writer_u16_property_roundtrip_big_endian() {
-        use proptest::prelude::*;
         use super::super::bytes_reader::BytesReader;
         use bytes::BytesMut;
+        use proptest::prelude::*;
 
         proptest!(|(val in 0u16..=65535u16)| {
             let mut writer = BytesWriter::new();
@@ -865,9 +867,9 @@ mod tests {
 
     #[test]
     fn test_bytes_writer_u16_property_roundtrip_little_endian() {
-        use proptest::prelude::*;
         use super::super::bytes_reader::BytesReader;
         use bytes::BytesMut;
+        use proptest::prelude::*;
 
         proptest!(|(val in 0u16..=65535u16)| {
             let mut writer = BytesWriter::new();
@@ -882,9 +884,9 @@ mod tests {
 
     #[test]
     fn test_bytes_writer_u24_property_roundtrip_big_endian() {
-        use proptest::prelude::*;
         use super::super::bytes_reader::BytesReader;
         use bytes::BytesMut;
+        use proptest::prelude::*;
 
         proptest!(|(val in 0u32..=16777215u32)| {
             let mut writer = BytesWriter::new();
@@ -899,9 +901,9 @@ mod tests {
 
     #[test]
     fn test_bytes_writer_u32_property_roundtrip_big_endian() {
-        use proptest::prelude::*;
         use super::super::bytes_reader::BytesReader;
         use bytes::BytesMut;
+        use proptest::prelude::*;
 
         proptest!(|(val in 0u32..=u32::MAX)| {
             let mut writer = BytesWriter::new();
@@ -916,9 +918,9 @@ mod tests {
 
     #[test]
     fn test_bytes_writer_u32_property_roundtrip_little_endian() {
-        use proptest::prelude::*;
         use super::super::bytes_reader::BytesReader;
         use bytes::BytesMut;
+        use proptest::prelude::*;
 
         proptest!(|(val in 0u32..=u32::MAX)| {
             let mut writer = BytesWriter::new();
@@ -933,9 +935,9 @@ mod tests {
 
     #[test]
     fn test_bytes_writer_u64_property_roundtrip_big_endian() {
-        use proptest::prelude::*;
         use super::super::bytes_reader::BytesReader;
         use bytes::BytesMut;
+        use proptest::prelude::*;
 
         proptest!(|(val in 0u64..=u64::MAX)| {
             let mut writer = BytesWriter::new();
@@ -950,9 +952,9 @@ mod tests {
 
     #[test]
     fn test_bytes_writer_f64_property_roundtrip_big_endian() {
-        use proptest::prelude::*;
         use super::super::bytes_reader::BytesReader;
         use bytes::BytesMut;
+        use proptest::prelude::*;
 
         proptest!(|(val in proptest::num::f64::NORMAL)| {
             let mut writer = BytesWriter::new();
@@ -1081,12 +1083,12 @@ mod tests {
         assert_eq!(
             writer.bytes,
             vec![
-                0x01,                    // u8
-                0x02, 0x03,              // u16
-                0x04, 0x05, 0x06,       // u24
+                0x01, // u8
+                0x02, 0x03, // u16
+                0x04, 0x05, 0x06, // u24
                 0x07, 0x08, 0x09, 0x0A, // u32
                 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, // u64
-                0x19,                    // u8
+                0x19, // u8
             ]
         );
     }

@@ -159,7 +159,7 @@ mod tests {
     use crate::rtsp::global_trait::Marshal;
     use crate::rtsp::global_trait::Unmarshal;
 
-    use super::{RtspTransport, CastType, ProtocolType};
+    use super::{CastType, ProtocolType, RtspTransport};
 
     #[test]
     fn test_parse_transport() {
@@ -232,7 +232,9 @@ mod tests {
 
     #[test]
     fn test_unmarshal_both_ports() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000-5001;server_port=6000-6001").unwrap();
+        let transport =
+            RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000-5001;server_port=6000-6001")
+                .unwrap();
         assert_eq!(transport.client_port, Some([5000, 5001]));
         assert_eq!(transport.server_port, Some([6000, 6001]));
     }

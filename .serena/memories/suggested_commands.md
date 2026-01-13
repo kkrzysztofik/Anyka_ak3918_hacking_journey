@@ -36,7 +36,13 @@ cargo doc --no-deps                # Generate docs
 cargo doc --no-deps --open         # Generate and open in browser
 
 # Coverage (host target, requires tarpaulin)
-cargo tarpaulin --target x86_64-unknown-linux-gnu --out Html
+# Exclude xiu/ and patches/ directories (not part of our workspace)
+cargo tarpaulin \
+  --workspace \
+  --target x86_64-unknown-linux-gnu \
+  --exclude-files "xiu/**" "patches/**" "anyka_reference/**" "onvif/**" \
+  --out Html
+# Note: tarpaulin.toml config file also exists but command-line flags are more reliable
 
 # === DEVICE-SIDE COMMANDS (cross-compile for ARM) ===
 

@@ -80,7 +80,10 @@ mod tests {
 
     #[test]
     fn test_codec_id_to_name_aac() {
-        assert_eq!(RTSP_CODEC_ID_2_NAME.get(&RtspCodecId::AAC), Some(&"mpeg4-generic"));
+        assert_eq!(
+            RTSP_CODEC_ID_2_NAME.get(&RtspCodecId::AAC),
+            Some(&"mpeg4-generic")
+        );
     }
 
     #[test]
@@ -104,7 +107,10 @@ mod tests {
 
     #[test]
     fn test_codec_name_to_id_aac() {
-        assert_eq!(RTSP_CODEC_NAME_2_ID.get("mpeg4-generic"), Some(&RtspCodecId::AAC));
+        assert_eq!(
+            RTSP_CODEC_NAME_2_ID.get("mpeg4-generic"),
+            Some(&RtspCodecId::AAC)
+        );
     }
 
     #[test]
@@ -165,7 +171,11 @@ mod tests {
         for codec_id in codecs {
             let name = RTSP_CODEC_ID_2_NAME.get(&codec_id).unwrap();
             let back_to_id = RTSP_CODEC_NAME_2_ID.get(name).unwrap();
-            assert_eq!(&codec_id, back_to_id, "Round-trip failed for {:?}", codec_id);
+            assert_eq!(
+                &codec_id, back_to_id,
+                "Round-trip failed for {:?}",
+                codec_id
+            );
         }
     }
 

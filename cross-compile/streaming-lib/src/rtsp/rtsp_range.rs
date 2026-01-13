@@ -63,11 +63,13 @@ impl Unmarshal for RtspRange {
                         }
                         return result;
                     }
-                    
+
                     // Try SS.mmm format (seconds with milliseconds)
                     if let Some(idx) = range_time.find('.') {
                         let (sec_str, ms_str) = range_time.split_at(idx);
-                        if let (Ok(sec), Ok(ms)) = (sec_str.parse::<i64>(), ms_str[1..].parse::<i64>()) {
+                        if let (Ok(sec), Ok(ms)) =
+                            (sec_str.parse::<i64>(), ms_str[1..].parse::<i64>())
+                        {
                             // Handle variable millisecond precision (e.g., .5 = 500ms, .500 = 500ms)
                             let ms_len = ms_str.len() - 1; // exclude the dot
                             let multiplier = match ms_len {
@@ -78,7 +80,7 @@ impl Unmarshal for RtspRange {
                             return sec * 1000 + ms * multiplier;
                         }
                     }
-                    
+
                     // Try just seconds
                     range_time.parse::<i64>().map(|s| s * 1000).unwrap_or(0)
                 };

@@ -179,8 +179,8 @@ mod tests {
     use mockall::mock;
     use tokio::sync::Mutex;
 
-    use crate::bytesio::{NetType, TNetIO};
     use crate::bytesio::bytesio_errors::BytesIOError;
+    use crate::bytesio::{NetType, TNetIO};
     use bytes::Bytes;
     use std::time::Duration;
 
@@ -205,7 +205,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_rtp_aac_packer_new() {
-        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
         let packer = RtpAacPacker::new(97, 12345, 0, mock_io);
         assert_eq!(packer.header.payload_type, 97);
         assert_eq!(packer.header.ssrc, 12345);
@@ -215,7 +217,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_rtp_aac_packer_pack() {
-        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
         let mut packer = RtpAacPacker::new(97, 12345, 0, mock_io);
 
         let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
@@ -243,13 +247,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_rtp_aac_packer_sequence_number_increment() {
-        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
         let mut packer = RtpAacPacker::new(97, 12345, 100, mock_io);
 
         let seq_numbers = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let seq_numbers_clone = seq_numbers.clone();
         packer.on_packet_handler(Box::new(move |_io, packet| {
-            seq_numbers_clone.lock().unwrap().push(packet.header.seq_number);
+            seq_numbers_clone
+                .lock()
+                .unwrap()
+                .push(packet.header.seq_number);
             Box::pin(async move { Ok(()) })
         }));
 
@@ -267,7 +276,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_rtp_aac_packer_au_header_encoding() {
-        let mock_io = Arc::new(Mutex::new(Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>));
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
         let mut packer = RtpAacPacker::new(97, 12345, 0, mock_io);
 
         let received_payload = std::sync::Arc::new(std::sync::Mutex::new(None::<BytesMut>));
@@ -322,10 +333,10 @@ mod tests {
         // Create RTP packet with single AU
         let mut packet = RtpPacket {
             header: RtpHeader {
-            payload_type: 97,
-            seq_number: 1,
-            timestamp: 1000,
-            ssrc: 12345,
+                payload_type: 97,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
                 version: 2,
                 marker: 1,
                 ..Default::default()
@@ -342,7 +353,9 @@ mod tests {
         packet.payload.put_u8(((au_size & 0x1F) << 3) as u8);
 
         // AU data
-        packet.payload.extend_from_slice(&[0x12, 0x10, 0x56, 0xe5, 0x00, 0x00, 0x00, 0x00]);
+        packet
+            .payload
+            .extend_from_slice(&[0x12, 0x10, 0x56, 0xe5, 0x00, 0x00, 0x00, 0x00]);
 
         let packet_bytes = packet.marshal().unwrap();
         let mut reader = BytesReader::new(packet_bytes);
@@ -367,10 +380,10 @@ mod tests {
         // Create RTP packet with multiple AUs
         let mut packet = RtpPacket {
             header: RtpHeader {
-            payload_type: 97,
-            seq_number: 1,
-            timestamp: 1000,
-            ssrc: 12345,
+                payload_type: 97,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
                 version: 2,
                 marker: 1,
                 ..Default::default()
@@ -421,10 +434,10 @@ mod tests {
         // Create RTP packet with multiple AUs per RFC 3640
         let mut packet = RtpPacket {
             header: RtpHeader {
-            payload_type: 97,
-            seq_number: 1,
-            timestamp: 1000,
-            ssrc: 12345,
+                payload_type: 97,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
                 version: 2,
                 marker: 1,
                 ..Default::default()
@@ -479,10 +492,10 @@ mod tests {
         // Create RTP packet with AU-headers-length that requires ceiling division
         let mut packet = RtpPacket {
             header: RtpHeader {
-            payload_type: 97,
-            seq_number: 1,
-            timestamp: 1000,
-            ssrc: 12345,
+                payload_type: 97,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
                 version: 2,
                 marker: 1,
                 ..Default::default()

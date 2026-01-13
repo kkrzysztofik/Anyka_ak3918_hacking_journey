@@ -437,7 +437,11 @@ mod tests {
 
         let result = demuxer.read_flv_tag();
         assert!(result.is_ok());
-        if let Some(FlvData::Video { timestamp: read_timestamp, .. }) = result.unwrap() {
+        if let Some(FlvData::Video {
+            timestamp: read_timestamp,
+            ..
+        }) = result.unwrap()
+        {
             assert_eq!(read_timestamp, timestamp);
         } else {
             panic!("Expected video tag");
@@ -491,7 +495,11 @@ mod tests {
         demuxer.read_flv_header().unwrap();
         let result = demuxer.read_flv_tag().unwrap();
 
-        if let Some(FlvData::Audio { timestamp: read_timestamp, data: read_data }) = result {
+        if let Some(FlvData::Audio {
+            timestamp: read_timestamp,
+            data: read_data,
+        }) = result
+        {
             assert_eq!(read_timestamp, timestamp);
             assert_eq!(&read_data[..], &body[..]);
         } else {
@@ -520,7 +528,11 @@ mod tests {
         demuxer.read_flv_header().unwrap();
         let result = demuxer.read_flv_tag().unwrap();
 
-        if let Some(FlvData::Video { timestamp: read_timestamp, data: read_data }) = result {
+        if let Some(FlvData::Video {
+            timestamp: read_timestamp,
+            data: read_data,
+        }) = result
+        {
             assert_eq!(read_timestamp, timestamp);
             assert_eq!(&read_data[..], &body[..]);
         } else {
@@ -548,7 +560,11 @@ mod tests {
             let mut demuxer = FlvDemuxer::new(muxed_data);
 
             let result = demuxer.read_flv_tag().unwrap();
-            if let Some(FlvData::Video { timestamp: read_timestamp, .. }) = result {
+            if let Some(FlvData::Video {
+                timestamp: read_timestamp,
+                ..
+            }) = result
+            {
                 assert_eq!(read_timestamp, timestamp);
             } else {
                 panic!("Expected video tag");

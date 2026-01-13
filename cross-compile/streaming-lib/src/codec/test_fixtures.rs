@@ -62,9 +62,9 @@ pub const SPS_BASELINE_720P: &[u8] = &[
     0xC0, // constraint_set0_flag=1, constraint_set1_flag=1, others=0
     0x1F, // level_idc = 31 (Level 3.1)
     0xE1, // seq_parameter_set_id=0 (1), log2_max_frame_num_minus4=0 (1),
-          // pic_order_cnt_type=2 (011), max_num_ref_frames... (continued)
+    // pic_order_cnt_type=2 (011), max_num_ref_frames... (continued)
     0x10, // ...=1 (010), gaps_in_frame_num_value_allowed_flag=0 (0),
-          // pic_width_in_mbs_minus1=79... (continued: 0001010...)
+    // pic_width_in_mbs_minus1=79... (continued: 0001010...)
     0xA0, // ...79 (0001010000), pic_height_in_map_units_minus1=44... (continued)
     0x16, // ...44 (000101101), frame_mbs_only_flag=1
     0xC4, // direct_8x8_inference_flag=1, frame_cropping_flag=0,
@@ -95,7 +95,7 @@ pub const SPS_HIGH_720P: &[u8] = &[
     0x1F, // level_idc = 31 (Level 3.1)
     0xAC, // seq_parameter_set_id=0, chroma_format_idc=1, bit_depth_luma_minus8=0
     0xD9, // bit_depth_chroma_minus8=0, qpprime_y_zero_transform_bypass_flag=0,
-          // seq_scaling_matrix_present_flag=0, log2_max_frame_num_minus4=0
+    // seq_scaling_matrix_present_flag=0, log2_max_frame_num_minus4=0
     0x40, // pic_order_cnt_type=0, log2_max_pic_order_cnt_lsb_minus4=4
     0x50, // max_num_ref_frames=1, gaps_in_frame_num_value_allowed_flag=0
     0x05, // pic_width_in_mbs_minus1=79
@@ -167,13 +167,13 @@ pub const SPS_MAIN_480P: &[u8] = &[
 pub const PPS_BASELINE: &[u8] = &[
     0x68, // NAL header: nal_ref_idc=3, nal_unit_type=8 (PPS)
     0xCE, // pic_parameter_set_id=0 (1), seq_parameter_set_id=0 (1),
-          // entropy_coding_mode_flag=0, bottom_field_pic_order...=0,
-          // num_slice_groups_minus1=0 (1), num_ref_idx_l0_default...=0 (1),
-          // num_ref_idx_l1_default...=0 (1), weighted_pred_flag=0
+    // entropy_coding_mode_flag=0, bottom_field_pic_order...=0,
+    // num_slice_groups_minus1=0 (1), num_ref_idx_l0_default...=0 (1),
+    // num_ref_idx_l1_default...=0 (1), weighted_pred_flag=0
     0x38, // weighted_bipred_idc=00, pic_init_qp_minus26=0 (1),
-          // pic_init_qs_minus26=0 (1), chroma_qp_index_offset=0 (1),
-          // deblocking_filter_control_present_flag=1, constrained_intra_pred=0,
-          // redundant_pic_cnt_present_flag=0, rbsp_trailing_bits
+    // pic_init_qs_minus26=0 (1), chroma_qp_index_offset=0 (1),
+    // deblocking_filter_control_present_flag=1, constrained_intra_pred=0,
+    // redundant_pic_cnt_present_flag=0, rbsp_trailing_bits
     0x80, // trailing bits padding
 ];
 
@@ -183,7 +183,7 @@ pub const PPS_BASELINE: &[u8] = &[
 pub const PPS_HIGH_CABAC: &[u8] = &[
     0x68, // NAL header
     0xEE, // pic_parameter_set_id=0, seq_parameter_set_id=0,
-          // entropy_coding_mode_flag=1 (CABAC), other flags
+    // entropy_coding_mode_flag=1 (CABAC), other flags
     0x3C, // weighted prediction, QP offsets
     0xB0, // deblocking, transform_8x8_mode_flag=1
     0x80, // trailing bits

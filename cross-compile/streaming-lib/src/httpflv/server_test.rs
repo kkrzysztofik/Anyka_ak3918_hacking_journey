@@ -40,11 +40,7 @@ async fn test_default_httpflv_server_new_with_auth() {
         AuthAlgorithm::Simple,
         AuthType::Pull,
     );
-    let server = DefaultHttpFlvServer::new(
-        "127.0.0.1:8080".to_string(),
-        event_sender,
-        Some(auth),
-    );
+    let server = DefaultHttpFlvServer::new("127.0.0.1:8080".to_string(), event_sender, Some(auth));
 
     // address and auth are private, so we can't test them directly
     let _server = server;
@@ -54,10 +50,7 @@ async fn test_default_httpflv_server_new_with_auth() {
 async fn test_handle_connection_valid_flv_path() {
     let event_sender = create_test_event_sender();
     let uri = Uri::from_static("http://localhost/live/test.flv");
-    let req = Request::builder()
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap();
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
 
     // Note: This test would require setting up the full axum state
     // For now, we test the path parsing logic
@@ -77,10 +70,7 @@ async fn test_handle_connection_valid_flv_path() {
 #[tokio::test]
 async fn test_handle_connection_invalid_path() {
     let uri = Uri::from_static("http://localhost/invalid/path");
-    let req = Request::builder()
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap();
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
 
     let path = req.uri().path();
     match path.find(".flv") {
@@ -102,10 +92,7 @@ async fn test_handle_connection_path_parsing() {
 
     for (path_str, expected) in test_cases {
         let uri = Uri::from_str(&format!("http://localhost{}", path_str)).unwrap();
-        let req = Request::builder()
-            .uri(uri)
-            .body(Body::empty())
-            .unwrap();
+        let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
 
         let path = req.uri().path();
         match path.find(".flv") {
@@ -134,11 +121,7 @@ async fn test_handle_connection_auth_success() {
     let stream_name = "test_stream".to_string();
     let secret = Some(SecretCarrier::Query("token=test_secret".to_string()));
 
-    let result = auth.authenticate(
-        &stream_name,
-        &secret,
-        true,
-    );
+    let result = auth.authenticate(&stream_name, &secret, true);
 
     // Note: This depends on the actual auth implementation
     // Adjust based on how Auth::authenticate works
@@ -159,11 +142,7 @@ async fn test_handle_connection_auth_failure() {
     let stream_name = "test_stream".to_string();
     let secret = Some(SecretCarrier::Query("token=wrong_secret".to_string()));
 
-    let result = auth.authenticate(
-        &stream_name,
-        &secret,
-        true,
-    );
+    let result = auth.authenticate(&stream_name, &secret, true);
 
     // Should fail with wrong token
     // Adjust based on actual auth implementation
@@ -173,11 +152,7 @@ async fn test_handle_connection_auth_failure() {
 #[tokio::test]
 async fn test_httpflv_server_address_parsing() {
     let event_sender = create_test_event_sender();
-    let server = DefaultHttpFlvServer::new(
-        "127.0.0.1:8080".to_string(),
-        event_sender,
-        None,
-    );
+    let server = DefaultHttpFlvServer::new("127.0.0.1:8080".to_string(), event_sender, None);
 
     // address is private, test by trying to run (would fail if address invalid)
     // For now, just verify server creation
@@ -194,11 +169,7 @@ async fn test_httpflv_server_address_parsing() {
 #[tokio::test]
 async fn test_httpflv_server_address_parsing_ipv6() {
     let event_sender = create_test_event_sender();
-    let server = DefaultHttpFlvServer::new(
-        "[::1]:8080".to_string(),
-        event_sender,
-        None,
-    );
+    let server = DefaultHttpFlvServer::new("[::1]:8080".to_string(), event_sender, None);
 
     // address is private, test parsing directly
     let sock_addr: SocketAddr = "[::1]:8080".parse().unwrap();
@@ -208,11 +179,7 @@ async fn test_httpflv_server_address_parsing_ipv6() {
 #[tokio::test]
 async fn test_httpflv_server_address_parsing_invalid() {
     let event_sender = create_test_event_sender();
-    let server = DefaultHttpFlvServer::new(
-        "invalid_address".to_string(),
-        event_sender,
-        None,
-    );
+    let server = DefaultHttpFlvServer::new("invalid_address".to_string(), event_sender, None);
 
     // address is private, test invalid address parsing directly
     let result: Result<SocketAddr, _> = "invalid_address".parse();
@@ -239,7 +206,10 @@ async fn test_stream_identifier_creation() {
     };
 
     match identifier {
-        StreamIdentifier::Rtmp { app_name: a, stream_name: s } => {
+        StreamIdentifier::Rtmp {
+            app_name: a,
+            stream_name: s,
+        } => {
             assert_eq!(a, "live");
             assert_eq!(s, "test");
         }
@@ -258,20 +228,27 @@ async fn test_event_producer_clone() {
     let (sender2, _receiver2) = tokio_mpsc::unbounded_channel();
 
     // Verify both event senders can be used
-    assert!(event_sender.send(StreamHubEvent::Request {
-        identifier: StreamIdentifier::Rtmp {
-            app_name: "test".to_string(),
-            stream_name: "stream".to_string(),
-        },
-        sender: sender1,
-    }).is_ok());
+    assert!(
+        event_sender
+            .send(StreamHubEvent::Request {
+                identifier: StreamIdentifier::Rtmp {
+                    app_name: "test".to_string(),
+                    stream_name: "stream".to_string(),
+                },
+                sender: sender1,
+            })
+            .is_ok()
+    );
 
-    assert!(cloned.send(StreamHubEvent::Request {
-        identifier: StreamIdentifier::Rtmp {
-            app_name: "test2".to_string(),
-            stream_name: "stream2".to_string(),
-        },
-        sender: sender2,
-    }).is_ok());
+    assert!(
+        cloned
+            .send(StreamHubEvent::Request {
+                identifier: StreamIdentifier::Rtmp {
+                    app_name: "test2".to_string(),
+                    stream_name: "stream2".to_string(),
+                },
+                sender: sender2,
+            })
+            .is_ok()
+    );
 }
-

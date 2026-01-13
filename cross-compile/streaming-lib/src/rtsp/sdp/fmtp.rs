@@ -73,7 +73,7 @@ impl Unmarshal for H264Fmtp {
     fn unmarshal(raw_data: &str) -> Option<Self> {
         let mut h264_fmtp = H264Fmtp::default();
         let eles: Vec<&str> = raw_data.splitn(2, ' ').collect();
-        
+
         if eles.is_empty() {
             log::warn!("H264FmtpSdp parse err: empty input");
             return None;
@@ -82,7 +82,10 @@ impl Unmarshal for H264Fmtp {
         if let Ok(payload_type) = eles[0].parse::<u16>() {
             h264_fmtp.payload_type = payload_type;
         } else {
-            log::warn!("H264FmtpSdp parse err: invalid payload type in {}", raw_data);
+            log::warn!(
+                "H264FmtpSdp parse err: invalid payload type in {}",
+                raw_data
+            );
             return None;
         }
 

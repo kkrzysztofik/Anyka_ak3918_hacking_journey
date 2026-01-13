@@ -5,14 +5,14 @@ use {
 
 #[derive(Default, Debug)]
 pub struct Pps {
-    pub pic_parameter_set_id: u32,        // ue(v)
-    pub seq_parameter_set_id: u32,        // ue(v)
-    pub entropy_coding_mode_flag: u8,     // u(1)
+    pub pic_parameter_set_id: u32,                        // ue(v)
+    pub seq_parameter_set_id: u32,                        // ue(v)
+    pub entropy_coding_mode_flag: u8,                     // u(1)
     pub bottom_field_pic_order_in_frame_present_flag: u8, // u(1)
-    pub num_slice_groups_minus1: u32,     // ue(v)
+    pub num_slice_groups_minus1: u32,                     // ue(v)
     // slice_group_info fields
-    pub slice_group_map_type: u32,        // ue(v) - when num_slice_groups_minus1 > 0
-    pub slice_group_info: Vec<u32>,       // Additional slice group information
+    pub slice_group_map_type: u32, // ue(v) - when num_slice_groups_minus1 > 0
+    pub slice_group_info: Vec<u32>, // Additional slice group information
 }
 
 pub struct PpsParser {
@@ -65,13 +65,17 @@ impl PpsParser {
                 3..=5 => {
                     // Slice group map units
                     let num_slice_group_map_units_minus1 = utils::read_uev(&mut self.bits_reader)?;
-                    self.pps.slice_group_info.push(num_slice_group_map_units_minus1);
+                    self.pps
+                        .slice_group_info
+                        .push(num_slice_group_map_units_minus1);
                     // Additional parsing would be needed for full implementation
                 }
                 6 => {
                     // Explicit slice group map
                     let num_slice_group_map_units_minus1 = utils::read_uev(&mut self.bits_reader)?;
-                    self.pps.slice_group_info.push(num_slice_group_map_units_minus1);
+                    self.pps
+                        .slice_group_info
+                        .push(num_slice_group_map_units_minus1);
                     for _ in 0..=num_slice_group_map_units_minus1 {
                         let slice_group_id = utils::read_uev(&mut self.bits_reader)?;
                         self.pps.slice_group_info.push(slice_group_id);
@@ -96,52 +100,52 @@ mod tests {
     // ============================================
     // PPS Encoder for Tests - Proper Bit-Packed Encoding
     // ============================================
-    
+
     /// Helper to build proper bit-packed PPS NAL units for testing.
     /// Uses the BitsWriter to ensure continuous bit-packing per H.264 spec.
     struct PpsBuilder {
         writer: crate::bytesio::bits_writer::BitsWriter,
     }
-    
+
     impl PpsBuilder {
         fn new() -> Self {
             Self {
                 writer: crate::bytesio::bits_writer::BitsWriter::new(
-                    crate::bytesio::bytes_writer::BytesWriter::default()
+                    crate::bytesio::bytes_writer::BytesWriter::default(),
                 ),
             }
         }
-        
+
         /// Write n bits from a u32 value (most significant bit first)
         fn write_bits(&mut self, val: u32, n: usize) {
             for i in (0..n).rev() {
                 self.writer.write_bit(((val >> i) & 1) as u8).unwrap();
             }
         }
-        
+
         /// Write a single bit
         fn write_bit(&mut self, val: u8) {
             self.writer.write_bit(val).unwrap();
         }
-        
+
         /// Write unsigned Exp-Golomb coded value (ue(v))
         fn write_uev(&mut self, val: u32) {
             if val == 0 {
                 self.write_bit(1);
                 return;
             }
-            
+
             let code_num = val + 1;
             let leading_zero_bits = 31 - code_num.leading_zeros() as usize;
             let info = val - ((1 << leading_zero_bits) - 1);
-            
+
             for _ in 0..leading_zero_bits {
                 self.write_bit(0);
             }
             self.write_bit(1);
             self.write_bits(info, leading_zero_bits);
         }
-        
+
         /// Get the encoded bytes, flushing any remaining bits
         fn build(mut self) -> BytesMut {
             self.writer.bits_aligment_8().unwrap();
@@ -158,13 +162,13 @@ mod tests {
     /// entropy_coding_mode_flag = 0 (CAVLC), num_slice_groups_minus1 = 0
     fn create_baseline_pps() -> BytesMut {
         let mut builder = PpsBuilder::new();
-        
-        builder.write_uev(0);    // pic_parameter_set_id = 0
-        builder.write_uev(0);    // seq_parameter_set_id = 0
-        builder.write_bit(0);    // entropy_coding_mode_flag = 0 (CAVLC)
-        builder.write_bit(0);    // bottom_field_pic_order_in_frame_present_flag = 0
-        builder.write_uev(0);    // num_slice_groups_minus1 = 0
-        
+
+        builder.write_uev(0); // pic_parameter_set_id = 0
+        builder.write_uev(0); // seq_parameter_set_id = 0
+        builder.write_bit(0); // entropy_coding_mode_flag = 0 (CAVLC)
+        builder.write_bit(0); // bottom_field_pic_order_in_frame_present_flag = 0
+        builder.write_uev(0); // num_slice_groups_minus1 = 0
+
         builder.build()
     }
 
@@ -172,13 +176,13 @@ mod tests {
     /// pic_parameter_set_id = 1, seq_parameter_set_id = 0
     fn create_high_pps_cabac() -> BytesMut {
         let mut builder = PpsBuilder::new();
-        
-        builder.write_uev(1);    // pic_parameter_set_id = 1
-        builder.write_uev(0);    // seq_parameter_set_id = 0
-        builder.write_bit(1);    // entropy_coding_mode_flag = 1 (CABAC)
-        builder.write_bit(0);    // bottom_field_pic_order_in_frame_present_flag = 0
-        builder.write_uev(0);    // num_slice_groups_minus1 = 0
-        
+
+        builder.write_uev(1); // pic_parameter_set_id = 1
+        builder.write_uev(0); // seq_parameter_set_id = 0
+        builder.write_bit(1); // entropy_coding_mode_flag = 1 (CABAC)
+        builder.write_bit(0); // bottom_field_pic_order_in_frame_present_flag = 0
+        builder.write_uev(0); // num_slice_groups_minus1 = 0
+
         builder.build()
     }
 
@@ -186,16 +190,16 @@ mod tests {
     /// pic_parameter_set_id = 2, slice_group_map_type = 0 (interleaved)
     fn create_pps_with_slice_groups() -> BytesMut {
         let mut builder = PpsBuilder::new();
-        
-        builder.write_uev(2);    // pic_parameter_set_id = 2
-        builder.write_uev(0);    // seq_parameter_set_id = 0
-        builder.write_bit(0);    // entropy_coding_mode_flag = 0
-        builder.write_bit(0);    // bottom_field_pic_order_in_frame_present_flag = 0
-        builder.write_uev(1);    // num_slice_groups_minus1 = 1 (2 slice groups)
-        builder.write_uev(0);    // slice_group_map_type = 0 (interleaved)
-        builder.write_uev(10);   // run_length_minus1[0] = 10
-        builder.write_uev(20);   // run_length_minus1[1] = 20
-        
+
+        builder.write_uev(2); // pic_parameter_set_id = 2
+        builder.write_uev(0); // seq_parameter_set_id = 0
+        builder.write_bit(0); // entropy_coding_mode_flag = 0
+        builder.write_bit(0); // bottom_field_pic_order_in_frame_present_flag = 0
+        builder.write_uev(1); // num_slice_groups_minus1 = 1 (2 slice groups)
+        builder.write_uev(0); // slice_group_map_type = 0 (interleaved)
+        builder.write_uev(10); // run_length_minus1[0] = 10
+        builder.write_uev(20); // run_length_minus1[1] = 20
+
         builder.build()
     }
 

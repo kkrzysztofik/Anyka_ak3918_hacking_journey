@@ -333,7 +333,11 @@ mod tests {
 
         for (expected_rate, input) in test_cases {
             let rtpmap = RtpMap::unmarshal(input).unwrap();
-            assert_eq!(rtpmap.clock_rate, expected_rate, "Failed for input: {}", input);
+            assert_eq!(
+                rtpmap.clock_rate, expected_rate,
+                "Failed for input: {}",
+                input
+            );
         }
     }
 

@@ -552,13 +552,19 @@ mod tests {
         let pull_secret = Some(SecretCarrier::Query("token=pull_password".to_string()));
         assert!(auth.authenticate(&stream_name, &pull_secret, true).is_ok());
         let pull_secret_wrong = Some(SecretCarrier::Query("token=push_password".to_string()));
-        assert!(auth.authenticate(&stream_name, &pull_secret_wrong, true).is_err());
+        assert!(
+            auth.authenticate(&stream_name, &pull_secret_wrong, true)
+                .is_err()
+        );
 
         // Push should use push_password
         let push_secret = Some(SecretCarrier::Query("token=push_password".to_string()));
         assert!(auth.authenticate(&stream_name, &push_secret, false).is_ok());
         let push_secret_wrong = Some(SecretCarrier::Query("token=pull_password".to_string()));
-        assert!(auth.authenticate(&stream_name, &push_secret_wrong, false).is_err());
+        assert!(
+            auth.authenticate(&stream_name, &push_secret_wrong, false)
+                .is_err()
+        );
     }
 
     #[test]
