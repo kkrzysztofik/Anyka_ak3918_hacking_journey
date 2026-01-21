@@ -8,7 +8,7 @@ const FLV_HEADER_AV: [u8; 9] = [
     0x4c, //'L'
     0x56, //'V'
     0x01, //version
-    0x05, //00000101  audio tag  and video tag
+    0x05, // flags: 0x04 audio + 0x01 video
     0x00, 0x00, 0x00, 0x09, //flv header size
 ]; // 9
 const FLV_HEADER_JUST_AUDIO: [u8; 9] = [
@@ -16,7 +16,7 @@ const FLV_HEADER_JUST_AUDIO: [u8; 9] = [
     0x4c, //'L'
     0x56, //'V'
     0x01, //version
-    0x04, //00000101  audio tag  and video tag
+    0x04, // flags: 0x04 audio only
     0x00, 0x00, 0x00, 0x09, //flv header size
 ]; // 9
 const FLV_HEADER_JUST_VIDEO: [u8; 9] = [
@@ -24,7 +24,7 @@ const FLV_HEADER_JUST_VIDEO: [u8; 9] = [
     0x4c, //'L'
     0x56, //'V'
     0x01, //version
-    0x01, //00000101  audio tag  and video tag
+    0x01, // flags: 0x01 video only
     0x00, 0x00, 0x00, 0x09, //flv header size
 ]; // 9
 const FLV_HEADER_EMPTY_AV: [u8; 9] = [
@@ -32,7 +32,7 @@ const FLV_HEADER_EMPTY_AV: [u8; 9] = [
     0x4c, //'L'
     0x56, //'V'
     0x01, //version
-    0x00, //00000101  audio tag  and video tag
+    0x00, // flags: no audio/video
     0x00, 0x00, 0x00, 0x09, //flv header size
 ]; // 9
 pub const HEADER_LENGTH: u32 = 11;

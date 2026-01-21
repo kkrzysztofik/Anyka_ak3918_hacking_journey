@@ -66,10 +66,11 @@ impl Marshal<Result<BytesMut, BytesWriteError>> for RtpHeader {
     fn marshal(&self) -> Result<BytesMut, BytesWriteError> {
         let mut writer = BytesWriter::default();
 
+        let csrc_count = (self.csrcs.len() as u8) & 0x0F;
         let byte_1st: u8 = (self.version << 6)
             | (self.padding_flag << 5)
             | (self.extension_flag << 4)
-            | (self.cc & 0x0F);
+            | csrc_count;
         writer.write_u8(byte_1st)?;
 
         let byte_2nd: u8 = (self.marker << 7) | self.payload_type;

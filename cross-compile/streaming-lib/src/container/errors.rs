@@ -1,60 +1,44 @@
-#![allow(non_local_definitions)]
 use {
     crate::bytesio::bits_errors::BitError,
     crate::bytesio::bytes_errors::{BytesReadError, BytesWriteError},
     crate::codec::errors::H264Error,
-    failure::{Backtrace, Fail},
-    std::fmt,
+    thiserror::Error,
 };
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum TagParseErrorValue {
-    #[fail(display = "bytes read error")]
-    BytesReadError(BytesReadError),
-    #[fail(display = "tag data length error")]
+    #[error(transparent)]
+    BytesReadError(#[from] BytesReadError),
+    #[error("tag data length error")]
     TagDataLength,
-    #[fail(display = "unknow tag type error")]
+    #[error("unknown tag type error")]
     UnknownTagType,
 }
-#[derive(Debug)]
-pub struct TagParseError {
-    pub value: TagParseErrorValue,
-}
+#[derive(Debug, Error)]
+#[error(transparent)]
+pub struct TagParseError(#[from] pub TagParseErrorValue);
 
 impl From<BytesReadError> for TagParseError {
     fn from(error: BytesReadError) -> Self {
-        TagParseError {
-            value: TagParseErrorValue::BytesReadError(error),
-        }
+        TagParseError(TagParseErrorValue::BytesReadError(error))
     }
 }
-
-impl fmt::Display for TagParseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
+#[derive(Debug, Error)]
+pub enum MuxerErrorValue {
+    #[error(transparent)]
+    BytesWriteError(#[from] BytesWriteError),
 }
 
-impl Fail for TagParseError {
-    fn cause(&self) -> Option<&dyn Fail> {
-        self.value.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.value.backtrace()
-    }
-}
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct FlvMuxerError {
     pub value: MuxerErrorValue,
 }
 
-#[derive(Debug, Fail)]
-pub enum MuxerErrorValue {
-    // #[fail(display = "server error")]
-    // Error,
-    #[fail(display = "bytes write error")]
-    BytesWriteError(BytesWriteError),
+impl From<MuxerErrorValue> for FlvMuxerError {
+    fn from(value: MuxerErrorValue) -> Self {
+        FlvMuxerError { value }
+    }
 }
 
 impl From<BytesWriteError> for FlvMuxerError {
@@ -65,39 +49,16 @@ impl From<BytesWriteError> for FlvMuxerError {
     }
 }
 
-impl fmt::Display for FlvMuxerError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-impl Fail for FlvMuxerError {
-    fn cause(&self) -> Option<&dyn Fail> {
-        self.value.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.value.backtrace()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct FlvDemuxerError {
     pub value: DemuxerErrorValue,
 }
 
-#[derive(Debug, Fail)]
-pub enum DemuxerErrorValue {
-    // #[fail(display = "server error")]
-    // Error,
-    #[fail(display = "bytes write error:{}", _0)]
-    BytesWriteError(#[cause] BytesWriteError),
-    #[fail(display = "bytes read error:{}", _0)]
-    BytesReadError(#[cause] BytesReadError),
-    #[fail(display = "mpeg avc error:{}", _0)]
-    MpegAvcError(#[cause] Mpeg4AvcHevcError),
-    #[fail(display = "mpeg aac error:{}", _0)]
-    MpegAacError(#[cause] MpegAacError),
+impl From<DemuxerErrorValue> for FlvDemuxerError {
+    fn from(value: DemuxerErrorValue) -> Self {
+        FlvDemuxerError { value }
+    }
 }
 
 impl From<BytesWriteError> for FlvDemuxerError {
@@ -132,44 +93,49 @@ impl From<MpegAacError> for FlvDemuxerError {
     }
 }
 
-impl fmt::Display for FlvDemuxerError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
+#[derive(Debug, Error)]
+pub enum DemuxerErrorValue {
+    #[error(transparent)]
+    BytesWriteError(#[from] BytesWriteError),
+    #[error(transparent)]
+    BytesReadError(#[from] BytesReadError),
+    #[error(transparent)]
+    MpegAvcError(#[from] Mpeg4AvcHevcError),
+    #[error(transparent)]
+    MpegAacError(#[from] MpegAacError),
+    #[error("invalid flv header: {reason}")]
+    InvalidFlvHeader { reason: String },
 }
 
-impl Fail for FlvDemuxerError {
-    fn cause(&self) -> Option<&dyn Fail> {
-        self.value.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.value.backtrace()
-    }
-}
-
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum MpegErrorValue {
-    #[fail(display = "bytes read error:{}", _0)]
-    BytesReadError(#[cause] BytesReadError),
-    #[fail(display = "bytes write error:{}", _0)]
-    BytesWriteError(#[cause] BytesWriteError),
-    #[fail(display = "bits error:{}", _0)]
-    BitError(#[cause] BitError),
-    #[fail(display = "h264 error:{}", _0)]
-    H264Error(#[cause] H264Error),
-    #[fail(display = "there is not enough bits to read")]
+    #[error(transparent)]
+    BytesReadError(#[from] BytesReadError),
+    #[error(transparent)]
+    BytesWriteError(#[from] BytesWriteError),
+    #[error(transparent)]
+    BitError(#[from] BitError),
+    #[error(transparent)]
+    H264Error(#[from] H264Error),
+    #[error("there is not enough bits to read")]
     NotEnoughBitsToRead,
-    #[fail(display = "should not come here")]
+    #[error("should not come here")]
     ShouldNotComeHere,
-    #[fail(display = "the sps nal unit type is not correct")]
+    #[error("the sps nal unit type is not correct")]
     SPSNalunitTypeNotCorrect,
-    #[fail(display = "not supported sampling frequency")]
+    #[error("not supported sampling frequency")]
     NotSupportedSamplingFrequency,
 }
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct Mpeg4AvcHevcError {
     pub value: MpegErrorValue,
+}
+
+impl From<MpegErrorValue> for Mpeg4AvcHevcError {
+    fn from(value: MpegErrorValue) -> Self {
+        Mpeg4AvcHevcError { value }
+    }
 }
 
 impl From<BytesReadError> for Mpeg4AvcHevcError {
@@ -188,6 +154,14 @@ impl From<BytesWriteError> for Mpeg4AvcHevcError {
     }
 }
 
+impl From<BitError> for Mpeg4AvcHevcError {
+    fn from(error: BitError) -> Self {
+        Mpeg4AvcHevcError {
+            value: MpegErrorValue::BitError(error),
+        }
+    }
+}
+
 impl From<H264Error> for Mpeg4AvcHevcError {
     fn from(error: H264Error) -> Self {
         Mpeg4AvcHevcError {
@@ -196,25 +170,16 @@ impl From<H264Error> for Mpeg4AvcHevcError {
     }
 }
 
-impl fmt::Display for Mpeg4AvcHevcError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-impl Fail for Mpeg4AvcHevcError {
-    fn cause(&self) -> Option<&dyn Fail> {
-        self.value.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.value.backtrace()
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct MpegAacError {
     pub value: MpegErrorValue,
+}
+
+impl From<MpegErrorValue> for MpegAacError {
+    fn from(value: MpegErrorValue) -> Self {
+        MpegAacError { value }
+    }
 }
 
 impl From<BytesReadError> for MpegAacError {
@@ -241,30 +206,22 @@ impl From<BitError> for MpegAacError {
     }
 }
 
-impl fmt::Display for MpegAacError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-impl Fail for MpegAacError {
-    fn cause(&self) -> Option<&dyn Fail> {
-        self.value.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.value.backtrace()
-    }
-}
-
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum BitVecErrorValue {
-    #[fail(display = "not enough bits left")]
+    #[error("not enough bits left")]
     NotEnoughBits,
 }
-#[derive(Debug)]
+
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct BitVecError {
     pub value: BitVecErrorValue,
+}
+
+impl From<BitVecErrorValue> for BitVecError {
+    fn from(value: BitVecErrorValue) -> Self {
+        BitVecError { value }
+    }
 }
 
 #[cfg(test)]
@@ -284,7 +241,7 @@ mod tests {
     #[test]
     fn test_tag_parse_error_value_unknown_tag_type_display() {
         let err = TagParseErrorValue::UnknownTagType;
-        assert_eq!(format!("{}", err), "unknow tag type error");
+        assert_eq!(format!("{}", err), "unknown tag type error");
     }
 
     // ========== TagParseError From Trait Tests ==========
@@ -295,16 +252,14 @@ mod tests {
             value: BytesReadErrorValue::NotEnoughBytes,
         };
         let err: TagParseError = read_err.into();
-        assert!(matches!(err.value, TagParseErrorValue::BytesReadError(_)));
+        assert!(matches!(err.0, TagParseErrorValue::BytesReadError(_)));
     }
 
     // ========== TagParseError Display Tests ==========
 
     #[test]
     fn test_tag_parse_error_display() {
-        let err = TagParseError {
-            value: TagParseErrorValue::TagDataLength,
-        };
+        let err = TagParseError(TagParseErrorValue::TagDataLength);
         assert_eq!(format!("{}", err), "tag data length error");
     }
 
@@ -461,9 +416,7 @@ mod tests {
 
     #[test]
     fn test_tag_parse_error_debug() {
-        let err = TagParseError {
-            value: TagParseErrorValue::UnknownTagType,
-        };
+        let err = TagParseError(TagParseErrorValue::UnknownTagType);
         let debug_str = format!("{:?}", err);
         assert!(debug_str.contains("TagParseError"));
         assert!(debug_str.contains("UnknownTagType"));

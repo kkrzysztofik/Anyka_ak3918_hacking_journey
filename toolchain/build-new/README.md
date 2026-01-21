@@ -68,7 +68,8 @@ sudo apt-get install -y \
 ### Step 1: Navigate to Build Directory
 
 ```bash
-cd /home/kmk/anyka-dev/toolchain/build-new
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}/toolchain/build-new"
 ```
 
 ### Step 2: Run the Build Script
@@ -116,7 +117,8 @@ The toolchain is configured via `crosstool-ng.config` file. Key settings:
 After the initial configuration is created, you can customize it:
 
 ```bash
-cd /home/kmk/anyka-dev/toolchain/build-new
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}/toolchain/build-new"
 ./crosstool-ng-1.28.0/ct-ng menuconfig
 ```
 
@@ -318,7 +320,8 @@ The `rust-src` component contains the Rust standard library source code, which i
 If you already have the custom Rust toolchain built and just need to add `rust-src`:
 
 ```bash
-cd /home/kmk/anyka-dev/toolchain/build-new
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}/toolchain/build-new"
 ./install_rust_src.sh
 ```
 
@@ -335,7 +338,8 @@ This script will:
 If you're building the toolchain from scratch or the Rust source directory was deleted:
 
 ```bash
-cd /home/kmk/anyka-dev/toolchain/build-new
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}/toolchain/build-new"
 ./bootstrap_rust.sh
 ```
 
@@ -346,11 +350,14 @@ The bootstrap script now automatically includes `rust-src` component installatio
 After installation, verify that rust-src is available:
 
 ```bash
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+TOOLCHAIN_DIR="${REPO_ROOT}/toolchain/arm-anykav200-crosstool-ng"
+
 # Check components file
-cat /home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/lib/rustlib/components | grep rust-src
+grep rust-src "${TOOLCHAIN_DIR}/lib/rustlib/components"
 
 # Check source directory exists
-ls -la /home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/lib/rustlib/src/rust/library/
+ls -la "${TOOLCHAIN_DIR}/lib/rustlib/src/rust/library/"
 ```
 
 Expected output:
@@ -406,7 +413,8 @@ See the main project documentation for integration details.
 To start fresh:
 
 ```bash
-cd /home/kmk/anyka-dev/toolchain/build-new
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}/toolchain/build-new"
 rm -rf crosstool-ng-1.28.0 .config .build
 ./build_toolchain.sh
 ```

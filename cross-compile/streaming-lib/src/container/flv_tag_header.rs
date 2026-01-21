@@ -10,7 +10,7 @@ use {
     bytes::BytesMut,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct AudioTagHeader {
     //1010 11 1 1
     /*
@@ -68,24 +68,12 @@ pub struct AudioTagHeader {
     pub aac_packet_type: u8,
 }
 
-impl AudioTagHeader {
-    pub fn defalut() -> Self {
-        AudioTagHeader {
-            sound_format: 0,
-            sound_rate: 0,
-            sound_size: 0,
-            sound_type: 0,
-            aac_packet_type: 0,
-        }
-    }
-}
-
 impl Unmarshal<&mut BytesReader, Result<Self, FlvDemuxerError>> for AudioTagHeader {
     fn unmarshal(reader: &mut BytesReader) -> Result<Self, FlvDemuxerError>
     where
         Self: Sized,
     {
-        let mut tag_header = AudioTagHeader::defalut();
+        let mut tag_header = AudioTagHeader::default();
 
         let flags = reader.read_u8()?;
         tag_header.sound_format = flags >> 4;
@@ -117,7 +105,7 @@ impl Marshal<Result<BytesMut, FlvMuxerError>> for AudioTagHeader {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Default)]
 pub struct VideoTagHeader {
     /*
         1: keyframe (for AVC, a seekable frame)
@@ -147,23 +135,12 @@ pub struct VideoTagHeader {
     pub composition_time: i32,
 }
 
-impl VideoTagHeader {
-    pub fn defalut() -> Self {
-        VideoTagHeader {
-            frame_type: 0,
-            codec_id: 0,
-            avc_packet_type: 0,
-            composition_time: 0,
-        }
-    }
-}
-
 impl Unmarshal<&mut BytesReader, Result<Self, FlvDemuxerError>> for VideoTagHeader {
     fn unmarshal(reader: &mut BytesReader) -> Result<Self, FlvDemuxerError>
     where
         Self: Sized,
     {
-        let mut tag_header = VideoTagHeader::defalut();
+        let mut tag_header = VideoTagHeader::default();
 
         let flags = reader.read_u8()?;
         tag_header.frame_type = flags >> 4;
@@ -206,11 +183,10 @@ impl Marshal<Result<BytesMut, FlvMuxerError>> for VideoTagHeader {
         {
             writer.write_u8(self.avc_packet_type)?;
 
-            let mut cts = self.composition_time;
-            for _ in 0..3 {
-                writer.write_u8((cts & 0xFF) as u8)?;
-                cts >>= 8;
-            }
+            let cts = self.composition_time as u32;
+            writer.write_u8(((cts >> 16) & 0xFF) as u8)?;
+            writer.write_u8(((cts >> 8) & 0xFF) as u8)?;
+            writer.write_u8((cts & 0xFF) as u8)?;
         }
 
         Ok(writer.extract_current_bytes())
@@ -225,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_audio_tag_header_default() {
-        let header = AudioTagHeader::defalut();
+        let header = AudioTagHeader::default();
         assert_eq!(header.sound_format, 0);
         assert_eq!(header.sound_rate, 0);
         assert_eq!(header.sound_size, 0);
@@ -361,7 +337,7 @@ mod tests {
 
     #[test]
     fn test_video_tag_header_default() {
-        let header = VideoTagHeader::defalut();
+        let header = VideoTagHeader::default();
         assert_eq!(header.frame_type, 0);
         assert_eq!(header.codec_id, 0);
         assert_eq!(header.avc_packet_type, 0);
@@ -511,9 +487,7 @@ mod tests {
         assert_eq!(decoded.frame_type, original.frame_type);
         assert_eq!(decoded.codec_id, original.codec_id);
         assert_eq!(decoded.avc_packet_type, original.avc_packet_type);
-        // Note: composition_time encoding/decoding is different (endianness)
-        // so we just verify it's not zero when original is non-zero
-        assert!(decoded.composition_time != 0 || original.composition_time == 0);
+        assert_eq!(decoded.composition_time, original.composition_time);
     }
 
     #[test]
@@ -553,7 +527,7 @@ mod tests {
 
     #[test]
     fn test_audio_tag_header_debug() {
-        let header = AudioTagHeader::defalut();
+        let header = AudioTagHeader::default();
         let debug_str = format!("{:?}", header);
         assert!(debug_str.contains("AudioTagHeader"));
         assert!(debug_str.contains("sound_format"));

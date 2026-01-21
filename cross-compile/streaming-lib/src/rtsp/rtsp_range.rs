@@ -1,4 +1,5 @@
 use crate::rtsp::global_trait::Marshal;
+use log::error;
 
 use super::global_trait::Unmarshal;
 use super::rtsp_utils;
@@ -18,12 +19,12 @@ pub struct RtspRange {
 }
 
 impl Unmarshal for RtspRange {
-    fn unmarshal(raw_data: &str) -> Option<Self> {
+    fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut rtsp_range = RtspRange::default();
 
         let kv: Vec<&str> = raw_data.splitn(2, '=').collect();
         if kv.len() < 2 {
-            return None;
+            return Err("invalid rtsp range format".to_string());
         }
 
         match kv[0] {
@@ -31,28 +32,26 @@ impl Unmarshal for RtspRange {
                 rtsp_range.range_type = RtspRangeType::CLOCK;
                 let ranges: Vec<&str> = kv[1].split('-').collect();
 
-                let get_clock_time = |range_time: &str| -> i64 {
+                let get_clock_time = |range_time: &str| -> Result<i64, String> {
                     let datetime =
-                        match chrono::NaiveDateTime::parse_from_str(range_time, "%Y%m%dT%H%M%SZ") {
-                            Ok(dt) => dt,
-                            Err(err) => {
-                                println!("get_clock_time error: {err}");
-                                return -1;
-                            }
-                        };
-                    datetime.and_utc().timestamp()
+                        chrono::NaiveDateTime::parse_from_str(range_time, "%Y%m%dT%H%M%SZ")
+                            .map_err(|err| {
+                                error!("get_clock_time error: {err}");
+                                format!("invalid clock range: {range_time}")
+                            })?;
+                    Ok(datetime.and_utc().timestamp())
                 };
 
-                rtsp_range.begin = get_clock_time(ranges[0]);
+                rtsp_range.begin = get_clock_time(ranges[0])?;
                 if ranges.len() > 1 && !ranges[1].is_empty() {
-                    rtsp_range.end = Some(get_clock_time(ranges[1]));
+                    rtsp_range.end = Some(get_clock_time(ranges[1])?);
                 }
             }
             "npt" => {
                 rtsp_range.range_type = RtspRangeType::NPT;
                 let ranges: Vec<&str> = kv[1].split('-').collect();
 
-                let get_npt_time = |range_time: &str| -> i64 {
+                let get_npt_time = |range_time: &str| -> Result<i64, String> {
                     // Try HH:MM:SS.mmm format first
                     if let (Some(hour), Some(minute), Some(second), mill) =
                         rtsp_utils::scanf!(range_time, |c| c == ':' || c == '.', i64, i64, i64, i64)
@@ -61,7 +60,7 @@ impl Unmarshal for RtspRange {
                         if let Some(m) = mill {
                             result += m;
                         }
-                        return result;
+                        return Ok(result);
                     }
 
                     // Try SS.mmm format (seconds with milliseconds)
@@ -77,12 +76,15 @@ impl Unmarshal for RtspRange {
                                 2 => 10,  // .50 -> 500
                                 _ => 1,   // .500 -> 500
                             };
-                            return sec * 1000 + ms * multiplier;
+                            return Ok(sec * 1000 + ms * multiplier);
                         }
                     }
 
                     // Try just seconds
-                    range_time.parse::<i64>().map(|s| s * 1000).unwrap_or(0)
+                    range_time
+                        .parse::<i64>()
+                        .map(|s| s * 1000)
+                        .map_err(|err| format!("invalid npt seconds '{range_time}': {err}"))
                 };
 
                 match ranges[0] {
@@ -90,26 +92,76 @@ impl Unmarshal for RtspRange {
                         rtsp_range.begin = 0;
                     }
                     _ => {
-                        rtsp_range.begin = get_npt_time(ranges[0]);
+                        rtsp_range.begin = get_npt_time(ranges[0])?;
                     }
                 }
 
                 if ranges.len() == 2 && !ranges[1].is_empty() {
-                    rtsp_range.end = Some(get_npt_time(ranges[1]));
+                    rtsp_range.end = Some(get_npt_time(ranges[1])?);
                 }
             }
             _ => {
-                log::info!("{} not parsed..", kv[0]);
+                return Err(format!("unsupported range type: {}", kv[0]));
             }
         }
 
-        Some(rtsp_range)
+        Ok(rtsp_range)
     }
 }
 
 impl Marshal for RtspRange {
     fn marshal(&self) -> String {
-        String::default()
+        match self.range_type {
+            RtspRangeType::NPT => {
+                let format_npt = |ms: i64| {
+                    let clamped = ms.max(0);
+                    let seconds = clamped / 1000;
+                    let millis = (clamped % 1000).abs();
+                    if millis == 0 {
+                        format!("{}", seconds)
+                    } else {
+                        format!("{}.{:03}", seconds, millis)
+                    }
+                };
+
+                let begin = format_npt(self.begin);
+                let end = self.end.map(format_npt).unwrap_or_default();
+                if end.is_empty() {
+                    format!("npt={begin}-")
+                } else {
+                    format!("npt={begin}-{end}")
+                }
+            }
+            RtspRangeType::CLOCK => {
+                let format_clock = |timestamp: i64| {
+                    chrono::DateTime::from_timestamp(timestamp, 0)
+                        .map(|dt| dt.format("%Y%m%dT%H%M%SZ").to_string())
+                        .unwrap_or("19700101T000000Z".to_string())
+                };
+
+                let begin = format_clock(self.begin);
+                if let Some(end) = self.end {
+                    let end_str = format_clock(end);
+                    format!("clock={begin}-{end_str}")
+                } else {
+                    format!("clock={begin}-")
+                }
+            }
+        }
+    }
+}
+
+impl RtspRange {
+    pub fn range_type(&self) -> RtspRangeType {
+        self.range_type.clone()
+    }
+
+    pub fn begin(&self) -> i64 {
+        self.begin
+    }
+
+    pub fn end(&self) -> Option<i64> {
+        self.end
     }
 }
 
@@ -117,6 +169,7 @@ impl Marshal for RtspRange {
 mod tests {
 
     use super::{RtspRange, RtspRangeType};
+    use crate::rtsp::global_trait::Marshal;
     use crate::rtsp::global_trait::Unmarshal;
 
     #[test]
@@ -126,19 +179,19 @@ mod tests {
         //a=range:npt=0-
         let parser = RtspRange::unmarshal("clock=20220520T064812Z-20230520T064816Z").unwrap();
 
-        assert_eq!(parser.range_type, RtspRangeType::CLOCK);
-        assert!(parser.begin > 0);
-        assert!(parser.end.is_some());
+        assert_eq!(parser.range_type(), RtspRangeType::CLOCK);
+        assert!(parser.begin() > 0);
+        assert!(parser.end().is_some());
 
         let parser1 = RtspRange::unmarshal("npt=now-").unwrap();
-        assert_eq!(parser1.range_type, RtspRangeType::NPT);
-        assert_eq!(parser1.begin, 0);
-        assert!(parser1.end.is_none());
+        assert_eq!(parser1.range_type(), RtspRangeType::NPT);
+        assert_eq!(parser1.begin(), 0);
+        assert!(parser1.end().is_none());
 
         let parser2 = RtspRange::unmarshal("npt=0-").unwrap();
-        assert_eq!(parser2.range_type, RtspRangeType::NPT);
-        assert_eq!(parser2.begin, 0);
-        assert!(parser2.end.is_none());
+        assert_eq!(parser2.range_type(), RtspRangeType::NPT);
+        assert_eq!(parser2.begin(), 0);
+        assert!(parser2.end().is_none());
     }
 
     // ============================================
@@ -148,55 +201,71 @@ mod tests {
     #[test]
     fn test_unmarshal_npt_now() {
         let range = RtspRange::unmarshal("npt=now-").unwrap();
-        assert_eq!(range.range_type, RtspRangeType::NPT);
-        assert_eq!(range.begin, 0);
-        assert!(range.end.is_none());
+        assert_eq!(range.range_type(), RtspRangeType::NPT);
+        assert_eq!(range.begin(), 0);
+        assert!(range.end().is_none());
     }
 
     #[test]
     fn test_unmarshal_npt_zero() {
         let range = RtspRange::unmarshal("npt=0-").unwrap();
-        assert_eq!(range.range_type, RtspRangeType::NPT);
-        assert_eq!(range.begin, 0);
-        assert!(range.end.is_none());
+        assert_eq!(range.range_type(), RtspRangeType::NPT);
+        assert_eq!(range.begin(), 0);
+        assert!(range.end().is_none());
     }
 
     #[test]
     fn test_unmarshal_npt_with_end() {
         let range = RtspRange::unmarshal("npt=10.5-20.5").unwrap();
-        assert_eq!(range.range_type, RtspRangeType::NPT);
+        assert_eq!(range.range_type(), RtspRangeType::NPT);
         // begin = 10 seconds + 500ms = 10500ms
-        assert_eq!(range.begin, 10500);
-        assert_eq!(range.end, Some(20500));
+        assert_eq!(range.begin(), 10500);
+        assert_eq!(range.end(), Some(20500));
     }
 
     #[test]
     fn test_unmarshal_npt_hours_minutes_seconds() {
         let range = RtspRange::unmarshal("npt=1:2:3.500-2:3:4.600").unwrap();
-        assert_eq!(range.range_type, RtspRangeType::NPT);
+        assert_eq!(range.range_type(), RtspRangeType::NPT);
         // 1:2:3.500 = 1*3600 + 2*60 + 3 = 3723 seconds + 500ms = 3723500ms
-        assert_eq!(range.begin, 3723500);
+        assert_eq!(range.begin(), 3723500);
         // 2:3:4.600 = 2*3600 + 3*60 + 4 = 7384 seconds + 600ms = 7384600ms
-        assert_eq!(range.end, Some(7384600));
+        assert_eq!(range.end(), Some(7384600));
     }
 
     #[test]
     fn test_unmarshal_npt_seconds_only() {
         let range = RtspRange::unmarshal("npt=123.456-456.789").unwrap();
-        assert_eq!(range.range_type, RtspRangeType::NPT);
+        assert_eq!(range.range_type(), RtspRangeType::NPT);
         // 123 seconds + 456ms = 123456ms
-        assert_eq!(range.begin, 123456);
+        assert_eq!(range.begin(), 123456);
         // 456 seconds + 789ms = 456789ms
-        assert_eq!(range.end, Some(456789));
+        assert_eq!(range.end(), Some(456789));
     }
 
     #[test]
     fn test_unmarshal_npt_no_milliseconds() {
         let range = RtspRange::unmarshal("npt=10-20").unwrap();
-        assert_eq!(range.range_type, RtspRangeType::NPT);
+        assert_eq!(range.range_type(), RtspRangeType::NPT);
         // 10 seconds = 10000ms
-        assert_eq!(range.begin, 10000);
-        assert_eq!(range.end, Some(20000));
+        assert_eq!(range.begin(), 10000);
+        assert_eq!(range.end(), Some(20000));
+    }
+
+    // ============================================
+    // Marshal Tests
+    // ============================================
+
+    #[test]
+    fn test_marshal_npt_range() {
+        let range = RtspRange::unmarshal("npt=10.5-20.25").unwrap();
+        assert_eq!(range.marshal(), "npt=10.500-20.250");
+    }
+
+    #[test]
+    fn test_marshal_clock_range() {
+        let range = RtspRange::unmarshal("clock=20220520T064812Z-20230520T064816Z").unwrap();
+        assert_eq!(range.marshal(), "clock=20220520T064812Z-20230520T064816Z");
     }
 
     // ============================================
@@ -206,26 +275,26 @@ mod tests {
     #[test]
     fn test_unmarshal_clock_with_end() {
         let range = RtspRange::unmarshal("clock=20220520T064812Z-20230520T064816Z").unwrap();
-        assert_eq!(range.range_type, RtspRangeType::CLOCK);
-        assert!(range.begin > 0);
-        assert!(range.end.is_some());
-        assert!(range.end.unwrap() > range.begin);
+        assert_eq!(range.range_type(), RtspRangeType::CLOCK);
+        assert!(range.begin() > 0);
+        assert!(range.end().is_some());
+        assert!(range.end().unwrap() > range.begin());
     }
 
     #[test]
     fn test_unmarshal_clock_no_end() {
         let range = RtspRange::unmarshal("clock=20220520T064812Z-").unwrap();
-        assert_eq!(range.range_type, RtspRangeType::CLOCK);
-        assert!(range.begin > 0);
-        assert!(range.end.is_none());
+        assert_eq!(range.range_type(), RtspRangeType::CLOCK);
+        assert!(range.begin() > 0);
+        assert!(range.end().is_none());
     }
 
     #[test]
     fn test_unmarshal_clock_single_timestamp() {
         let range = RtspRange::unmarshal("clock=20220520T064812Z").unwrap();
-        assert_eq!(range.range_type, RtspRangeType::CLOCK);
-        assert!(range.begin > 0);
-        assert!(range.end.is_none());
+        assert_eq!(range.range_type(), RtspRangeType::CLOCK);
+        assert!(range.begin() > 0);
+        assert!(range.end().is_none());
     }
 
     // ============================================
@@ -235,27 +304,25 @@ mod tests {
     #[test]
     fn test_unmarshal_invalid_format() {
         let range = RtspRange::unmarshal("invalid");
-        assert!(range.is_none());
+        assert!(range.is_err());
     }
 
     #[test]
     fn test_unmarshal_empty_string() {
         let range = RtspRange::unmarshal("");
-        assert!(range.is_none());
+        assert!(range.is_err());
     }
 
     #[test]
     fn test_unmarshal_unknown_type() {
         let range = RtspRange::unmarshal("unknown=value");
-        // Should return default range
-        assert!(range.is_some());
+        assert!(range.is_err());
     }
 
     #[test]
     fn test_unmarshal_malformed_clock() {
         let range = RtspRange::unmarshal("clock=invalid-format");
-        // Should handle gracefully
-        assert!(range.is_some());
+        assert!(range.is_err());
     }
 
     // ============================================
@@ -266,18 +333,18 @@ mod tests {
     fn test_rtsp_range_npt_roundtrip() {
         let original_str = "npt=10.5-20.5";
         let range = RtspRange::unmarshal(original_str).unwrap();
-        assert_eq!(range.range_type, RtspRangeType::NPT);
-        assert_eq!(range.begin, 10500);
-        assert_eq!(range.end, Some(20500));
+        assert_eq!(range.range_type(), RtspRangeType::NPT);
+        assert_eq!(range.begin(), 10500);
+        assert_eq!(range.end(), Some(20500));
     }
 
     #[test]
     fn test_rtsp_range_clock_roundtrip() {
         let original_str = "clock=20220520T064812Z-20230520T064816Z";
         let range = RtspRange::unmarshal(original_str).unwrap();
-        assert_eq!(range.range_type, RtspRangeType::CLOCK);
-        assert!(range.begin > 0);
-        assert!(range.end.is_some());
+        assert_eq!(range.range_type(), RtspRangeType::CLOCK);
+        assert!(range.begin() > 0);
+        assert!(range.end().is_some());
     }
 
     // ============================================
@@ -287,16 +354,16 @@ mod tests {
     #[test]
     fn test_unmarshal_npt_very_large() {
         let range = RtspRange::unmarshal("npt=999999:59:59.999-").unwrap();
-        assert_eq!(range.range_type, RtspRangeType::NPT);
+        assert_eq!(range.range_type(), RtspRangeType::NPT);
         // Should handle large values
-        assert!(range.begin >= 0);
+        assert!(range.begin() >= 0);
     }
 
     #[test]
     fn test_unmarshal_npt_zero_milliseconds() {
         let range = RtspRange::unmarshal("npt=10.0-20.0").unwrap();
-        assert_eq!(range.range_type, RtspRangeType::NPT);
-        assert_eq!(range.begin, 10000);
-        assert_eq!(range.end, Some(20000));
+        assert_eq!(range.range_type(), RtspRangeType::NPT);
+        assert_eq!(range.begin(), 10000);
+        assert_eq!(range.end(), Some(20000));
     }
 }

@@ -1,35 +1,24 @@
-#![allow(non_local_definitions)]
-use failure::{Backtrace, Fail};
-use std::fmt;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+pub enum AuthErrorValue {
+    #[error("token is not correct")]
+    TokenIsNotCorrect,
+    #[error("no token found")]
+    NoTokenFound,
+    #[error("invalid token format")]
+    InvalidTokenFormat,
+}
+
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct AuthError {
     pub value: AuthErrorValue,
 }
 
-#[derive(Debug, Fail)]
-pub enum AuthErrorValue {
-    #[fail(display = "token is not correct.")]
-    TokenIsNotCorrect,
-    #[fail(display = "no token found.")]
-    NoTokenFound,
-    #[fail(display = "invalid token format.")]
-    InvalidTokenFormat,
-}
-
-impl fmt::Display for AuthError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-impl Fail for AuthError {
-    fn cause(&self) -> Option<&dyn Fail> {
-        self.value.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.value.backtrace()
+impl From<AuthErrorValue> for AuthError {
+    fn from(val: AuthErrorValue) -> Self {
+        AuthError { value: val }
     }
 }
 
@@ -42,19 +31,19 @@ mod tests {
     #[test]
     fn test_auth_error_value_token_not_correct_display() {
         let err = AuthErrorValue::TokenIsNotCorrect;
-        assert_eq!(format!("{}", err), "token is not correct.");
+        assert_eq!(format!("{}", err), "token is not correct");
     }
 
     #[test]
     fn test_auth_error_value_no_token_found_display() {
         let err = AuthErrorValue::NoTokenFound;
-        assert_eq!(format!("{}", err), "no token found.");
+        assert_eq!(format!("{}", err), "no token found");
     }
 
     #[test]
     fn test_auth_error_value_invalid_token_format_display() {
         let err = AuthErrorValue::InvalidTokenFormat;
-        assert_eq!(format!("{}", err), "invalid token format.");
+        assert_eq!(format!("{}", err), "invalid token format");
     }
 
     // ========== AuthError Display Tests ==========
@@ -64,7 +53,7 @@ mod tests {
         let err = AuthError {
             value: AuthErrorValue::TokenIsNotCorrect,
         };
-        assert_eq!(format!("{}", err), "token is not correct.");
+        assert_eq!(format!("{}", err), "token is not correct");
     }
 
     #[test]
@@ -72,7 +61,7 @@ mod tests {
         let err = AuthError {
             value: AuthErrorValue::NoTokenFound,
         };
-        assert_eq!(format!("{}", err), "no token found.");
+        assert_eq!(format!("{}", err), "no token found");
     }
 
     #[test]
@@ -80,7 +69,7 @@ mod tests {
         let err = AuthError {
             value: AuthErrorValue::InvalidTokenFormat,
         };
-        assert_eq!(format!("{}", err), "invalid token format.");
+        assert_eq!(format!("{}", err), "invalid token format");
     }
 
     // ========== Debug Trait Tests ==========

@@ -1,0 +1,16 @@
+# Cargo configuration for workspace
+
+[build]
+# Enable incremental compilation to reduce memory usage and speed up rebuild cycles
+incremental = true
+
+# Set target directory for build artifacts
+# This can be overridden by CARGO_TARGET_DIR environment variable if needed
+# target-dir = "target"
+
+[net]
+# Reduce retry attempts for network requests
+retry = 3
+
+# Optional: Enable offline mode for faster builds when all dependencies are cached
+# offline = true

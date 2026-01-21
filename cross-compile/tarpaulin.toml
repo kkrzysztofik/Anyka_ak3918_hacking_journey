@@ -24,6 +24,4 @@ exclude-files = [
     "anyka_reference/**",
     # Exclude onvif C code (not Rust, separate project)
     "onvif/**",
-    # Exclude build artifacts in xiu/target
-    "xiu/target/**",
 ]

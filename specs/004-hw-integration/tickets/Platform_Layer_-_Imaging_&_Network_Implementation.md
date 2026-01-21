@@ -30,8 +30,9 @@ Implement ImagingControl and NetworkInfo traits for Anyka AK3918 hardware, provi
 ## Technical Details
 
 **Imaging Parameter Mapping:**
-- ONVIF range (0-100) → SDK register values
-- Settings persist to configuration file
+- ONVIF range (0-100) → SDK register values (0-255)
+- Mapping formula: `sdk_value = (onvif_value * 255) / 100`
+- Settings persist to configuration file (persist the mapped SDK register values)
 
 **Network Info Sources:**
 - `/proc/net/dev` - Network interfaces

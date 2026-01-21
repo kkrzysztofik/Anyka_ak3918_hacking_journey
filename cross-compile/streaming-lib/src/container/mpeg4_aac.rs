@@ -112,8 +112,10 @@ impl Mpeg4AacProcessor {
         self.mpeg4_aac.sampling_frequency_index = ((byte_0 & 0x07) << 1) | ((byte_1 >> 7) & 0x01);
         self.mpeg4_aac.channel_configuration = (byte_1 >> 3) & 0x0F;
         self.mpeg4_aac.channels = self.mpeg4_aac.channel_configuration;
-        self.mpeg4_aac.sampling_frequency =
-            AAC_FREQUENCE[self.mpeg4_aac.sampling_frequency_index as usize];
+        let freq_index = self.mpeg4_aac.sampling_frequency_index as usize;
+        self.mpeg4_aac.sampling_frequency = *AAC_FREQUENCE.get(freq_index).ok_or(MpegAacError {
+            value: MpegErrorValue::NotSupportedSamplingFrequency,
+        })?;
 
         // log::info!("aac info: {:?}", self.mpeg4_aac);
 
@@ -135,11 +137,22 @@ impl Mpeg4AacProcessor {
         self.bits_reader.extend_data(remain_bytes);
 
         self.mpeg4_aac.object_type = self.get_audio_object_type()?;
-        self.mpeg4_aac.sampling_frequency_index = self.get_sampling_frequency()?;
+        let sampling_frequency = self.get_sampling_frequency()?;
+        if sampling_frequency <= 0x0F {
+            self.mpeg4_aac.sampling_frequency_index = sampling_frequency as u8;
+            let freq_index = self.mpeg4_aac.sampling_frequency_index as usize;
+            self.mpeg4_aac.sampling_frequency =
+                *AAC_FREQUENCE.get(freq_index).ok_or(MpegAacError {
+                    value: MpegErrorValue::NotSupportedSamplingFrequency,
+                })?;
+        } else {
+            self.mpeg4_aac.sampling_frequency_index = 0x0F;
+            self.mpeg4_aac.sampling_frequency = sampling_frequency;
+        }
         self.mpeg4_aac.channel_configuration = self.bits_reader.read_n_bits(4)? as u8;
 
         let mut extension_audio_object_type: u8;
-        let mut extension_sampling_frequency_index: u8 = 0;
+        let mut extension_sampling_frequency_index: u32 = 0;
         let mut extension_channel_configuration: u8 = 0;
 
         if self.mpeg4_aac.object_type == 5 || self.mpeg4_aac.object_type == 29 {
@@ -225,14 +238,11 @@ impl Mpeg4AacProcessor {
             }
         }
 
-        self.bits_reader.bits_aligment_8();
+        self.bits_reader.bits_alignment_8();
 
-        log::trace!(
-            "remove warnings: {} {} {}",
-            extension_audio_object_type,
-            extension_sampling_frequency_index,
-            extension_channel_configuration
-        );
+        let _ = extension_audio_object_type;
+        let _ = extension_sampling_frequency_index;
+        let _ = extension_channel_configuration;
 
         Ok(())
     }
@@ -383,8 +393,8 @@ impl Mpeg4AacProcessor {
             tag = self.mpeg4_bits_copy(&mut pce_bits_vec, 4)?;
         }
 
-        pce_bits_vec.bits_aligment_8()?;
-        self.bits_reader.bits_aligment_8();
+        pce_bits_vec.bits_alignment_8()?;
+        self.bits_reader.bits_alignment_8();
 
         let comment_field_bytes: u64 = self.mpeg4_bits_copy(&mut pce_bits_vec, 8)?;
 
@@ -394,14 +404,11 @@ impl Mpeg4AacProcessor {
 
         let rv = pce_bits_vec.len().div_ceil(8);
 
-        log::trace!(
-            "remove warnings: {} {} {} {} {}",
-            tag,
-            element_instance_tag,
-            object_type,
-            sampling_frequency_index,
-            cpe
-        );
+        let _ = tag;
+        let _ = element_instance_tag;
+        let _ = object_type;
+        let _ = sampling_frequency_index;
+        let _ = cpe;
 
         Ok(rv as u8)
     }
@@ -417,7 +424,7 @@ impl Mpeg4AacProcessor {
         Ok(audio_object_type as u8)
     }
 
-    pub fn get_sampling_frequency(&mut self) -> Result<u8, MpegAacError> {
+    pub fn get_sampling_frequency(&mut self) -> Result<u32, MpegAacError> {
         let mut sampling_frequency_index: u64;
 
         sampling_frequency_index = self.bits_reader.read_n_bits(4)?;
@@ -425,7 +432,7 @@ impl Mpeg4AacProcessor {
             sampling_frequency_index = self.bits_reader.read_n_bits(24)?;
         }
 
-        Ok(sampling_frequency_index as u8)
+        Ok(sampling_frequency_index as u32)
     }
 
     pub fn adts_save(&mut self) -> Result<(), MpegAacError> {

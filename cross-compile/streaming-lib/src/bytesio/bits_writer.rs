@@ -22,11 +22,24 @@ impl BitsWriter {
     }
 
     pub fn write_bytes(&mut self, data: BytesMut) -> Result<(), BitError> {
+        // Enforce byte alignment: cannot write raw bytes if we have pending bits
+        if self.cur_bit_num != 0 {
+            return Err(BitError {
+                value: BitErrorValue::CannotWrite8Bit,
+            });
+        }
         self.writer.write(&data[..])?;
         Ok(())
     }
 
     pub fn write_bit(&mut self, b: u8) -> Result<(), BitError> {
+        // Validate that b is a single bit (0 or 1)
+        if b & !0x01 != 0 {
+            return Err(BitError {
+                value: BitErrorValue::InvalidBitValue,
+            });
+        }
+
         self.cur_byte |= b << (7 - self.cur_bit_num);
         self.cur_bit_num += 1;
 
@@ -107,12 +120,18 @@ impl BitsWriter {
         Ok(())
     }
 
-    pub fn bits_aligment_8(&mut self) -> Result<(), BitError> {
+    pub fn bits_alignment_8(&mut self) -> Result<(), BitError> {
         // If we have partial bits, flush them (already zero-padded implicitly)
         if self.cur_bit_num > 0 {
             self.flush()?;
         }
         Ok(())
+    }
+
+    /// Deprecated: use bits_alignment_8 instead (corrected spelling)
+    #[deprecated(since = "0.2.0", note = "use bits_alignment_8 instead")]
+    pub fn bits_aligment_8(&mut self) -> Result<(), BitError> {
+        self.bits_alignment_8()
     }
 
     pub fn get_current_bytes(&self) -> BytesMut {

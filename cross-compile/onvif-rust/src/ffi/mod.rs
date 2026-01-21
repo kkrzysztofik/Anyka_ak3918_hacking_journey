@@ -206,28 +206,18 @@ pub use stubs::*;
 // Type aliases for consistency with generated bindings (snake_case)
 #[cfg(use_stubs)]
 #[allow(non_camel_case_types)]
-pub type video_channel_attr = stubs::VideoChannelAttr;
+mod stub_type_aliases {
+    use super::stubs;
+    pub type video_channel_attr = stubs::VideoChannelAttr;
+    pub type pcm_param = stubs::PcmParam;
+    pub type aenc_attr = stubs::AencAttr;
+    pub type encode_param = stubs::EncodeParam;
+    pub type video_dev_type = stubs::VideoDevType;
+    pub type video_resolution = stubs::VideoResolution;
+    pub type audio_param = stubs::AudioParam;
+    pub type ptz_device = stubs::PtzDevice;
+    pub type ptz_turn_direction = stubs::PtzTurnDirection;
+}
+
 #[cfg(use_stubs)]
-#[allow(non_camel_case_types)]
-pub type pcm_param = stubs::PcmParam;
-#[cfg(use_stubs)]
-#[allow(non_camel_case_types)]
-pub type aenc_attr = stubs::AencAttr;
-#[cfg(use_stubs)]
-#[allow(non_camel_case_types)]
-pub type encode_param = stubs::EncodeParam;
-#[cfg(use_stubs)]
-#[allow(non_camel_case_types)]
-pub type video_dev_type = stubs::VideoDevType;
-#[cfg(use_stubs)]
-#[allow(non_camel_case_types)]
-pub type video_resolution = stubs::VideoResolution;
-#[cfg(use_stubs)]
-#[allow(non_camel_case_types)]
-pub type audio_param = stubs::AudioParam;
-#[cfg(use_stubs)]
-#[allow(non_camel_case_types)]
-pub type ptz_device = stubs::PtzDevice;
-#[cfg(use_stubs)]
-#[allow(non_camel_case_types)]
-pub type ptz_turn_direction = stubs::PtzTurnDirection;
+pub use stub_type_aliases::*;

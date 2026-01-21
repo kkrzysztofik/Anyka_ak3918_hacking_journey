@@ -1,46 +1,36 @@
-#![allow(non_local_definitions)]
-use {
-    failure::Fail,
-    std::{fmt, io::Error},
-    tokio::sync::broadcast::error::RecvError,
-};
+use {std::io::Error, thiserror::Error, tokio::sync::broadcast::error::RecvError};
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct RelayError {
     pub value: PushClientErrorValue,
 }
 
-impl fmt::Display for RelayError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-#[derive(Debug, Fail)]
-pub enum PushClientErrorValue {
-    #[fail(display = "receive error")]
-    ReceiveError(RecvError),
-
-    #[fail(display = "send error")]
-    SendError,
-    #[fail(display = "io error")]
-    IOError(Error),
-}
-
 impl From<Error> for RelayError {
-    fn from(error: Error) -> Self {
-        RelayError {
-            value: PushClientErrorValue::IOError(error),
+    fn from(err: Error) -> Self {
+        Self {
+            value: PushClientErrorValue::IOError(err),
         }
     }
 }
 
 impl From<RecvError> for RelayError {
-    fn from(error: RecvError) -> Self {
-        RelayError {
-            value: PushClientErrorValue::ReceiveError(error),
+    fn from(err: RecvError) -> Self {
+        Self {
+            value: PushClientErrorValue::ReceiveError(err),
         }
     }
+}
+
+#[derive(Debug, Error)]
+pub enum PushClientErrorValue {
+    #[error("receive error: {0}")]
+    ReceiveError(#[from] RecvError),
+
+    #[error("send error")]
+    SendError,
+    #[error("io error: {0}")]
+    IOError(#[from] Error),
 }
 
 #[cfg(test)]

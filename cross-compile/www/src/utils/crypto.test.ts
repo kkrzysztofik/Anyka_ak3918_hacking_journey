@@ -187,7 +187,8 @@ describe('crypto utilities', () => {
 
       // Create a mock crypto without subtle to simulate non-secure context
       const mockCrypto = {
-        getRandomValues: originalCrypto?.getRandomValues.bind(originalCrypto) || crypto.getRandomValues,
+        getRandomValues: (arr: Uint8Array) =>
+          originalCrypto.getRandomValues.call(originalCrypto, arr),
       };
 
       // Use vi.stubGlobal to properly mock the read-only crypto property

@@ -80,20 +80,6 @@ pub struct Mpeg4Avc {
     // off: i32,
 }
 
-pub fn print(data: BytesMut) {
-    println!("==========={}", data.len());
-    let mut idx = 0;
-    for i in data {
-        print!("{i:02X} ");
-        idx += 1;
-        if idx % 16 == 0 {
-            println!()
-        }
-    }
-
-    println!("===========")
-}
-
 impl Mpeg4Avc {
     pub fn new() -> Self {
         Self {
@@ -312,17 +298,19 @@ impl Mpeg4AvcProcessor {
         bytes_writer.write_u8((self.mpeg4_avc.nalu_length - 1) | 0xFC)?;
 
         //sps
-        bytes_writer.write_u8(self.mpeg4_avc.nb_sps | 0xE0)?;
-        for i in 0..self.mpeg4_avc.nb_sps as usize {
-            bytes_writer.write_u16::<BigEndian>(self.mpeg4_avc.sps[i].len() as u16)?;
-            bytes_writer.write(&self.mpeg4_avc.sps[i].data[..])?;
+        let sps_count = self.mpeg4_avc.sps.len() as u8;
+        bytes_writer.write_u8((sps_count & 0x1F) | 0xE0)?;
+        for sps in &self.mpeg4_avc.sps {
+            bytes_writer.write_u16::<BigEndian>(sps.len() as u16)?;
+            bytes_writer.write(&sps.data[..])?;
         }
 
         //pps
-        bytes_writer.write_u8(self.mpeg4_avc.nb_pps)?;
-        for i in 0..self.mpeg4_avc.nb_pps as usize {
-            bytes_writer.write_u16::<BigEndian>(self.mpeg4_avc.pps[i].len() as u16)?;
-            bytes_writer.write(&self.mpeg4_avc.pps[i].data[..])?
+        let pps_count = self.mpeg4_avc.pps.len() as u8;
+        bytes_writer.write_u8(pps_count)?;
+        for pps in &self.mpeg4_avc.pps {
+            bytes_writer.write_u16::<BigEndian>(pps.len() as u16)?;
+            bytes_writer.write(&pps.data[..])?
         }
 
         match self.mpeg4_avc.profile {

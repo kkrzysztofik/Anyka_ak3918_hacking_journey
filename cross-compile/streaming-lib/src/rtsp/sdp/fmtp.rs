@@ -37,26 +37,23 @@ pub enum Fmtp {
 }
 
 impl Fmtp {
-    pub fn new(codec: &str, raw_data: &str) -> Option<Fmtp> {
+    pub fn new(codec: &str, raw_data: &str) -> Result<Fmtp, String> {
         match codec.to_lowercase().as_str() {
-            "h264" => {
-                if let Some(h264_fmtp) = H264Fmtp::unmarshal(raw_data) {
-                    return Some(Fmtp::H264(h264_fmtp));
-                }
-            }
-            "h265" => {
-                if let Some(h265_fmtp) = H265Fmtp::unmarshal(raw_data) {
-                    return Some(Fmtp::H265(h265_fmtp));
-                }
-            }
-            "mpeg4-generic" => {
-                if let Some(mpeg4_fmtp) = Mpeg4Fmtp::unmarshal(raw_data) {
-                    return Some(Fmtp::Mpeg4(mpeg4_fmtp));
-                }
-            }
+            "h264" => match H264Fmtp::unmarshal(raw_data) {
+                Ok(h264_fmtp) => return Ok(Fmtp::H264(h264_fmtp)),
+                Err(e) => return Err(e),
+            },
+            "h265" => match H265Fmtp::unmarshal(raw_data) {
+                Ok(h265_fmtp) => return Ok(Fmtp::H265(h265_fmtp)),
+                Err(e) => return Err(e),
+            },
+            "mpeg4-generic" => match Mpeg4Fmtp::unmarshal(raw_data) {
+                Ok(mpeg4_fmtp) => return Ok(Fmtp::Mpeg4(mpeg4_fmtp)),
+                Err(e) => return Err(e),
+            },
             _ => {}
         }
-        None
+        Err("Unsupported codec".to_string())
     }
 
     pub fn marshal(&self) -> String {
@@ -70,13 +67,13 @@ impl Fmtp {
 
 // a=fmtp:96 packetization-mode=1; sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA; profile-level-id=640016
 impl Unmarshal for H264Fmtp {
-    fn unmarshal(raw_data: &str) -> Option<Self> {
+    fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut h264_fmtp = H264Fmtp::default();
         let eles: Vec<&str> = raw_data.splitn(2, ' ').collect();
 
         if eles.is_empty() {
             log::warn!("H264FmtpSdp parse err: empty input");
-            return None;
+            return Err("Empty input".to_string());
         }
 
         if let Ok(payload_type) = eles[0].parse::<u16>() {
@@ -86,12 +83,12 @@ impl Unmarshal for H264Fmtp {
                 "H264FmtpSdp parse err: invalid payload type in {}",
                 raw_data
             );
-            return None;
+            return Err("Invalid payload type".to_string());
         }
 
         // If no parameters provided, return with defaults
         if eles.len() < 2 {
-            return Some(h264_fmtp);
+            return Ok(h264_fmtp);
         }
 
         let parameters: Vec<&str> = eles[1].split(';').collect();
@@ -101,6 +98,32 @@ impl Unmarshal for H264Fmtp {
                 log::warn!("H264FmtpSdp parse key=value err: {}", parameter);
                 continue;
             }
+            #[test]
+            fn test_parse_h264fmtp_invalid_base64() {
+                let parser = H264Fmtp::unmarshal(
+                        "96 packetization-mode=1; sprop-parameter-sets=!!invalid!!,??bad??; profile-level-id=640016",
+                    )
+                    .unwrap();
+
+                assert_eq!(parser.payload_type, 96);
+                assert_eq!(parser.packetization_mode, 1);
+                assert_eq!(parser.profile_level_id, "640016");
+                assert!(parser.sps.is_empty());
+                assert!(parser.pps.is_empty());
+            }
+
+            #[test]
+            fn test_parse_mpeg4fmtp_invalid_hex() {
+                let parser = Mpeg4Fmtp::unmarshal(
+                        "97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=23; config=zzzz",
+                    )
+                    .unwrap();
+
+                assert_eq!(parser.payload_type, 97);
+                assert_eq!(parser.profile_level_id, "1");
+                assert!(parser.asc.is_empty());
+            }
+
             match kv[0] {
                 "packetization-mode" => {
                     if let Ok(packetization_mode) = kv[1].parse::<u8>() {
@@ -109,10 +132,18 @@ impl Unmarshal for H264Fmtp {
                 }
                 "sprop-parameter-sets" => {
                     let spspps: Vec<&str> = kv[1].split(',').collect();
-                    let sps = general_purpose::STANDARD.decode(spspps[0]).unwrap();
-                    h264_fmtp.sps.put(&sps[..]);
-                    let pps = general_purpose::STANDARD.decode(spspps[1]).unwrap();
-                    h264_fmtp.pps.put(&pps[..]);
+                    if spspps.len() < 2 {
+                        log::warn!("H264FmtpSdp parse err: missing sps/pps");
+                        continue;
+                    }
+                    match general_purpose::STANDARD.decode(spspps[0]) {
+                        Ok(sps) => h264_fmtp.sps.put(&sps[..]),
+                        Err(err) => log::warn!("H264FmtpSdp sps decode err: {err}"),
+                    }
+                    match general_purpose::STANDARD.decode(spspps[1]) {
+                        Ok(pps) => h264_fmtp.pps.put(&pps[..]),
+                        Err(err) => log::warn!("H264FmtpSdp pps decode err: {err}"),
+                    }
                 }
                 "profile-level-id" => {
                     h264_fmtp.profile_level_id = kv[1].into();
@@ -123,7 +154,7 @@ impl Unmarshal for H264Fmtp {
             }
         }
 
-        Some(h264_fmtp)
+        Ok(h264_fmtp)
     }
 }
 
@@ -132,7 +163,7 @@ impl Marshal for H264Fmtp {
     fn marshal(&self) -> String {
         let sps_str = general_purpose::STANDARD.encode(&self.sps);
         let pps_str = general_purpose::STANDARD.encode(&self.pps);
-        let profile_level_id_str = String::from_utf8(self.profile_level_id.to_vec()).unwrap();
+        let profile_level_id_str = String::from_utf8_lossy(&self.profile_level_id).to_string();
 
         let h264_fmtp = format!(
             "{} packetization-mode={}; sprop-parameter-sets={},{}; profile-level-id={}",
@@ -144,13 +175,13 @@ impl Marshal for H264Fmtp {
 }
 
 impl Unmarshal for H265Fmtp {
-    //"a=fmtp:96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA; sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I; sprop-pps=RAHAc8GJ"
-    fn unmarshal(raw_data: &str) -> Option<Self> {
+    //\"a=fmtp:96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA; sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I; sprop-pps=RAHAc8GJ\"
+    fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut h265_fmtp = H265Fmtp::default();
         let eles: Vec<&str> = raw_data.splitn(2, ' ').collect();
         if eles.len() < 2 {
             log::warn!("H265FmtpSdp parse err: {}", raw_data);
-            return None;
+            return Err("Invalid H265 FMTP format".to_string());
         }
 
         if let Ok(payload_type) = eles[0].parse::<u16>() {
@@ -181,16 +212,16 @@ impl Unmarshal for H265Fmtp {
             }
         }
 
-        Some(h265_fmtp)
+        Ok(h265_fmtp)
     }
 }
 
 impl Marshal for H265Fmtp {
     //"a=fmtp:96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA; sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I; sprop-pps=RAHAc8GJ"
     fn marshal(&self) -> String {
-        let sps_str = String::from_utf8(self.sps.to_vec()).unwrap();
-        let pps_str = String::from_utf8(self.pps.to_vec()).unwrap();
-        let vps_str = String::from_utf8(self.vps.to_vec()).unwrap();
+        let sps_str = String::from_utf8_lossy(&self.sps).to_string();
+        let pps_str = String::from_utf8_lossy(&self.pps).to_string();
+        let vps_str = String::from_utf8_lossy(&self.vps).to_string();
 
         let h265_fmtp = format!(
             "{} sprop-vps={}; sprop-sps={}; sprop-pps={}",
@@ -203,12 +234,12 @@ impl Marshal for H265Fmtp {
 
 impl Unmarshal for Mpeg4Fmtp {
     //a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=121056e500
-    fn unmarshal(raw_data: &str) -> Option<Self> {
+    fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut mpeg4_fmtp = Mpeg4Fmtp::default();
         let eles: Vec<&str> = raw_data.splitn(2, ' ').collect();
         if eles.len() < 2 {
             log::warn!("Mpeg4FmtpSdp parse err: {}", raw_data);
-            return None;
+            return Err("Invalid MPEG4 FMTP format".to_string());
         }
 
         if let Ok(payload_type) = eles[0].parse::<u16>() {
@@ -226,10 +257,12 @@ impl Unmarshal for Mpeg4Fmtp {
                 "mode" => {
                     mpeg4_fmtp.mode = kv[1].to_string();
                 }
-                "config" => {
-                    let asc = hex::decode(kv[1]).unwrap();
-                    mpeg4_fmtp.asc.put(&asc[..]);
-                }
+                "config" => match hex::decode(kv[1]) {
+                    Ok(asc) => mpeg4_fmtp.asc.put(&asc[..]),
+                    Err(err) => {
+                        log::warn!("Mpeg4FmtpSdp hex decode err: {err}");
+                    }
+                },
                 "profile-level-id" => {
                     mpeg4_fmtp.profile_level_id = kv[1].into();
                 }
@@ -254,14 +287,14 @@ impl Unmarshal for Mpeg4Fmtp {
             }
         }
 
-        Some(mpeg4_fmtp)
+        Ok(mpeg4_fmtp)
     }
 }
 
 impl Marshal for Mpeg4Fmtp {
     //a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=121056e500
     fn marshal(&self) -> String {
-        let profile_level_id_str = String::from_utf8(self.profile_level_id.to_vec()).unwrap();
+        let profile_level_id_str = String::from_utf8_lossy(&self.profile_level_id).to_string();
         let asc_str = hex::encode(&self.asc); //String::from_utf8(self.asc.to_vec()).unwrap();
 
         let mpeg4_fmtp = format!(
@@ -293,7 +326,7 @@ mod tests {
 
     #[test]
     fn test_parse_h264fmtpsdp() {
-        let parser =  H264Fmtp::unmarshal("96 packetization-mode=1; sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA; profile-level-id=640016").unwrap();
+        let parser = H264Fmtp::unmarshal("96 packetization-mode=1; sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA; profile-level-id=640016").expect("Failed to unmarshal H264");
 
         println!(" parser: {parser:?}");
 
@@ -305,7 +338,7 @@ mod tests {
 
         print!("264 parser: {}", parser.marshal());
 
-        let parser2 = H264Fmtp::unmarshal("96 packetization-mode=1;\nsprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA;\nprofile-level-id=640016").unwrap();
+        let parser2 = H264Fmtp::unmarshal("96 packetization-mode=1;\nsprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA;\nprofile-level-id=640016").expect("Failed to unmarshal H264 (variant 2)");
 
         println!(" parser: {parser2:?}");
 
@@ -318,7 +351,7 @@ mod tests {
     }
     #[test]
     fn test_parse_h265fmtpsdp() {
-        let parser = H265Fmtp::unmarshal("96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA; sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I; sprop-pps=RAHAc8GJ").unwrap();
+        let parser = H265Fmtp::unmarshal("96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA; sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I; sprop-pps=RAHAc8GJ").expect("Failed to unmarshal H265");
 
         println!(" parser: {parser:?}");
 
@@ -334,7 +367,7 @@ mod tests {
 
     #[test]
     fn test_parse_mpeg4fmtpsdp() {
-        let parser = Mpeg4Fmtp::unmarshal("97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=23; config=121056e500").unwrap();
+        let parser = Mpeg4Fmtp::unmarshal("97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=23; config=121056e500").expect("Failed to unmarshal MPEG4");
 
         println!(" parser: {parser:?}");
         let en_asc = hex::encode(parser.asc.clone());
@@ -422,9 +455,9 @@ mod tests {
 
     #[test]
     fn test_h264_fmtp_invalid_payload_type() {
-        // Invalid payload type should return None
+        // Invalid payload type should return Err
         let fmtp = H264Fmtp::unmarshal("invalid packetization-mode=1");
-        assert!(fmtp.is_none());
+        assert!(fmtp.is_err());
     }
 
     #[test]
@@ -679,7 +712,7 @@ mod tests {
         use super::Fmtp;
         let raw_data = "96 packetization-mode=1";
         let fmtp = Fmtp::new("invalid", raw_data);
-        assert!(fmtp.is_none());
+        assert!(fmtp.is_err());
     }
 
     #[test]

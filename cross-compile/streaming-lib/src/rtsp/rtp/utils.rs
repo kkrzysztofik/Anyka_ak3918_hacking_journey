@@ -7,6 +7,7 @@ use crate::bytesio::bytes_reader::BytesReader;
 use crate::streamhub::define::FrameData;
 use async_trait::async_trait;
 use bytes::BytesMut;
+use log::error;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -114,7 +115,10 @@ pub fn current_time() -> u64 {
 
     match duration {
         Ok(result) => (result.as_nanos() / 1000) as u64,
-        _ => 0,
+        Err(err) => {
+            error!("current_time error: {err}");
+            0
+        }
     }
 }
 
@@ -271,7 +275,7 @@ mod tests {
     // ========== Annexb Split Test ==========
 
     #[test]
-    pub fn test_annexb_split() {
+    fn test_annexb_split() {
         let mut nalus = BytesMut::new();
         nalus.extend_from_slice(&[
             0x00, 0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04,

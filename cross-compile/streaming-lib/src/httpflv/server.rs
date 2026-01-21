@@ -7,7 +7,7 @@ use {
         body::Body,
         extract::{ConnectInfo, Request, State},
         handler::Handler,
-        http::StatusCode,
+        http::{HeaderValue, StatusCode},
         response::Response,
     },
     futures::channel::mpsc::unbounded,
@@ -19,8 +19,9 @@ type GenericError = Box<dyn std::error::Error + Send + Sync>;
 type Result<T> = std::result::Result<T, GenericError>;
 static NOTFOUND: &[u8] = b"Not Found";
 static UNAUTHORIZED: &[u8] = b"Unauthorized";
+static BADREQUEST: &[u8] = b"Bad Request";
 
-async fn handle_connection(
+pub(crate) async fn handle_connection(
     State((event_producer, auth)): State<(StreamHubEventSender, Option<Auth>)>, // event_producer: ChannelEventProducer
     ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
     req: Request<Body>,
@@ -33,6 +34,13 @@ async fn handle_connection(
             let (left, _) = path.split_at(index);
             let rv: Vec<_> = left.split('/').collect();
 
+            if rv.len() < 3 {
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(BADREQUEST.into())
+                    .unwrap_or_else(|_| Response::new(Body::from(BADREQUEST)));
+            }
+
             let app_name = String::from(rv[1]);
             let stream_name = String::from(rv[2]);
 
@@ -44,12 +52,12 @@ async fn handle_connection(
                 return Response::builder()
                     .status(StatusCode::UNAUTHORIZED)
                     .body(UNAUTHORIZED.into())
-                    .unwrap();
+                    .unwrap_or_else(|_| Response::new(Body::from(UNAUTHORIZED)));
             }
 
             let (http_response_data_producer, http_response_data_consumer) = unbounded();
 
-            let mut flv_hanlder = HttpFlv::new(
+            let mut flv_handler = HttpFlv::new(
                 app_name,
                 stream_name,
                 event_producer,
@@ -59,14 +67,14 @@ async fn handle_connection(
             );
 
             tokio::spawn(async move {
-                if let Err(err) = flv_hanlder.run().await {
+                if let Err(err) = flv_handler.run().await {
                     log::error!("flv handler run error {}", err);
                 }
             });
 
             let mut resp = Response::new(Body::from_stream(http_response_data_consumer));
             resp.headers_mut()
-                .insert("Access-Control-Allow-Origin", "*".parse().unwrap());
+                .insert("Access-Control-Allow-Origin", HeaderValue::from_static("*"));
 
             resp
         }
@@ -74,7 +82,7 @@ async fn handle_connection(
         _ => Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(NOTFOUND.into())
-            .unwrap(),
+            .unwrap_or_else(|_| Response::new(Body::from(NOTFOUND))),
     }
 }
 
@@ -113,7 +121,7 @@ impl HttpFlvServer for DefaultHttpFlvServer {
 
     /// Run the HTTP-FLV server
     async fn run(&mut self) -> Result<()> {
-        let sock_addr: SocketAddr = self.address.parse().unwrap();
+        let sock_addr: SocketAddr = self.address.parse()?;
 
         let listener = TcpListener::bind(sock_addr).await?;
 

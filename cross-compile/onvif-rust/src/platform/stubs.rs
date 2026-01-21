@@ -1298,4 +1298,418 @@ mod tests {
         assert!(platform.ptz_control().is_some());
         assert!(platform.imaging_control().is_some());
     }
+
+    #[test]
+    fn test_stub_platform_builder_network_info_supported_disabled() {
+        let platform = StubPlatformBuilder::new()
+            .network_info_supported(false)
+            .build();
+
+        assert!(platform.network_info().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_stub_platform_builder_network_info_supported_enabled() {
+        let platform = StubPlatformBuilder::new()
+            .network_info_supported(true)
+            .build();
+
+        let network = platform.network_info().unwrap();
+        let interfaces = network.get_network_interfaces().await.unwrap();
+        assert_eq!(interfaces.len(), 1);
+        assert_eq!(interfaces[0].name, "eth0");
+    }
+
+    #[tokio::test]
+    async fn test_stub_platform_builder_mac_address() {
+        let platform = StubPlatformBuilder::new()
+            .network_info_supported(true)
+            .mac_address("11:22:33:44:55:66")
+            .build();
+
+        let network = platform.network_info().unwrap();
+        let interfaces = network.get_network_interfaces().await.unwrap();
+        assert_eq!(
+            interfaces[0].mac_address,
+            Some("11:22:33:44:55:66".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stub_platform_builder_ip_address() {
+        let platform = StubPlatformBuilder::new()
+            .network_info_supported(true)
+            .ip_address(Some("192.168.1.100".to_string()))
+            .build();
+
+        let network = platform.network_info().unwrap();
+        let interfaces = network.get_network_interfaces().await.unwrap();
+        assert_eq!(
+            interfaces[0].ipv4_address,
+            Some("192.168.1.100".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stub_platform_builder_mac_and_ip_address() {
+        let platform = StubPlatformBuilder::new()
+            .network_info_supported(true)
+            .mac_address("AA:BB:CC:DD:EE:01")
+            .ip_address(Some("10.0.0.50".to_string()))
+            .build();
+
+        let network = platform.network_info().unwrap();
+        let interfaces = network.get_network_interfaces().await.unwrap();
+        assert_eq!(
+            interfaces[0].mac_address,
+            Some("AA:BB:CC:DD:EE:01".to_string())
+        );
+        assert_eq!(interfaces[0].ipv4_address, Some("10.0.0.50".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_stub_network_info_dns_operations() {
+        let platform = StubPlatformBuilder::new()
+            .network_info_supported(true)
+            .build();
+
+        let network = platform.network_info().unwrap();
+
+        // Get initial DNS info (DHCP defaults)
+        let dns = network.get_dns_info().await.unwrap();
+        assert!(dns.from_dhcp);
+        assert!(dns.dns_manual.is_empty());
+
+        // Set manual DNS
+        network
+            .set_dns(
+                &["1.1.1.1".to_string(), "1.0.0.1".to_string()],
+                &["example.com".to_string()],
+            )
+            .await
+            .unwrap();
+
+        let dns = network.get_dns_info().await.unwrap();
+        assert!(!dns.from_dhcp);
+        assert_eq!(dns.dns_manual.len(), 2);
+        assert!(dns.dns_manual.contains(&"1.1.1.1".to_string()));
+        assert_eq!(dns.search_domains, vec!["example.com".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_stub_network_info_gateway_operations() {
+        let platform = StubPlatformBuilder::new()
+            .network_info_supported(true)
+            .build();
+
+        let network = platform.network_info().unwrap();
+
+        // Set gateway
+        network.set_gateway("192.168.1.1").await.unwrap();
+
+        // Gateway is stored but not returned in a specific getter (only internal storage)
+        // This test verifies the operation succeeds without error
+    }
+
+    #[tokio::test]
+    async fn test_stub_network_info_ntp() {
+        let platform = StubPlatformBuilder::new()
+            .network_info_supported(true)
+            .build();
+
+        let network = platform.network_info().unwrap();
+        let ntp = network.get_ntp_info().await.unwrap();
+        assert!(ntp.from_dhcp);
+        assert!(!ntp.ntp_from_dhcp.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_stub_network_info_protocols() {
+        let platform = StubPlatformBuilder::new()
+            .network_info_supported(true)
+            .build();
+
+        let network = platform.network_info().unwrap();
+        let protocols = network.get_network_protocols().await.unwrap();
+        assert_eq!(protocols.len(), 2);
+        let names: Vec<&str> = protocols.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"HTTP"));
+        assert!(names.contains(&"RTSP"));
+    }
+
+    #[tokio::test]
+    async fn test_stub_network_info_set_interface() {
+        let platform = StubPlatformBuilder::new()
+            .network_info_supported(true)
+            .build();
+
+        let network = platform.network_info().unwrap();
+
+        // Set network interface - stub accepts but doesn't persist
+        let result = network
+            .set_network_interface("eth0", Some("192.168.1.50".to_string()), Some(24), false)
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_stub_imaging_control_contrast_out_of_range() {
+        let platform = StubPlatform::new();
+        let imaging = platform.imaging_control().unwrap();
+
+        let result = imaging.set_contrast(150.0).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_stub_imaging_control_saturation_out_of_range() {
+        let platform = StubPlatform::new();
+        let imaging = platform.imaging_control().unwrap();
+
+        let result = imaging.set_saturation(-10.0).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_stub_imaging_control_sharpness_out_of_range() {
+        let platform = StubPlatform::new();
+        let imaging = platform.imaging_control().unwrap();
+
+        let result = imaging.set_sharpness(200.0).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_stub_imaging_control_set_all_settings() {
+        let platform = StubPlatform::new();
+        let imaging = platform.imaging_control().unwrap();
+
+        let new_settings = ImagingSettings {
+            brightness: 80.0,
+            contrast: 70.0,
+            saturation: 60.0,
+            sharpness: 50.0,
+            ir_cut_filter: false,
+            ir_led: true,
+            wdr: true,
+            backlight_compensation: true,
+        };
+
+        imaging.set_settings(&new_settings).await.unwrap();
+        let settings = imaging.get_settings().await.unwrap();
+        assert_eq!(settings.brightness, 80.0);
+        assert_eq!(settings.contrast, 70.0);
+        assert!(!settings.ir_cut_filter);
+        assert!(settings.ir_led);
+        assert!(settings.wdr);
+    }
+
+    #[tokio::test]
+    async fn test_stub_imaging_control_get_options() {
+        let platform = StubPlatform::new();
+        let imaging = platform.imaging_control().unwrap();
+
+        let options = imaging.get_options().await.unwrap();
+        let (min, max) = options.brightness_range;
+        assert!(min <= 50.0 && 50.0 <= max);
+    }
+
+    #[tokio::test]
+    async fn test_stub_ptz_continuous_move_and_stop() {
+        let platform = StubPlatform::new();
+        let ptz = platform.ptz_control().unwrap();
+
+        let velocity = PtzVelocity::new(0.5, -0.3, 0.1);
+        ptz.continuous_move(velocity).await.unwrap();
+
+        ptz.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_stub_ptz_position_clamping() {
+        let custom_limits = PtzLimits {
+            min_pan: -90.0,
+            max_pan: 90.0,
+            min_tilt: -45.0,
+            max_tilt: 45.0,
+            min_zoom: 1.0,
+            max_zoom: 5.0,
+        };
+
+        let platform = StubPlatformBuilder::new()
+            .ptz_supported(true)
+            .ptz_limits(custom_limits)
+            .build();
+
+        let ptz = platform.ptz_control().unwrap();
+
+        // Move to position exceeding limits
+        ptz.move_to_position(PtzPosition::new(180.0, 90.0, 10.0))
+            .await
+            .unwrap();
+
+        let pos = ptz.get_position().await.unwrap();
+        // Position should be clamped to limits
+        assert_eq!(pos.pan, 90.0);
+        assert_eq!(pos.tilt, 45.0);
+        assert_eq!(pos.zoom, 5.0);
+    }
+
+    #[tokio::test]
+    async fn test_stub_ptz_goto_invalid_preset() {
+        let platform = StubPlatform::new();
+        let ptz = platform.ptz_control().unwrap();
+
+        let result = ptz.goto_preset("nonexistent_preset").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_stub_ptz_remove_invalid_preset() {
+        let platform = StubPlatform::new();
+        let ptz = platform.ptz_control().unwrap();
+
+        let result = ptz.remove_preset("nonexistent_preset").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_stub_video_encoder_set_unknown_configuration() {
+        let platform = StubPlatform::new();
+        let encoder = platform.video_encoder();
+
+        let unknown_config = VideoEncoderConfig {
+            token: "UnknownEncoder".to_string(),
+            name: "Unknown".to_string(),
+            resolution: Resolution::new(640, 480),
+            framerate: 30,
+            bitrate: 1000,
+            encoding: VideoEncoding::H264,
+            bitrate_mode: BitrateMode::Vbr,
+            gop_length: 30,
+            quality: 70,
+        };
+
+        let result = encoder.set_configuration(&unknown_config).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_stub_video_encoder_init_new_config() {
+        let platform = StubPlatform::new();
+        let encoder = platform.video_encoder();
+
+        let new_config = VideoEncoderConfig {
+            token: "NewEncoder".to_string(),
+            name: "New Stream".to_string(),
+            resolution: Resolution::new(1280, 720),
+            framerate: 25,
+            bitrate: 2000,
+            encoding: VideoEncoding::H265,
+            bitrate_mode: BitrateMode::Cbr,
+            gop_length: 50,
+            quality: 85,
+        };
+
+        encoder.init(&new_config).await.unwrap();
+        let configs = encoder.get_configurations().await.unwrap();
+        assert_eq!(configs.len(), 3); // 2 defaults + 1 new
+    }
+
+    #[tokio::test]
+    async fn test_stub_audio_encoder_set_unknown_configuration() {
+        let platform = StubPlatform::new();
+        let encoder = platform.audio_encoder();
+
+        let unknown_config = AudioEncoderConfig {
+            token: "UnknownAudioEncoder".to_string(),
+            name: "Unknown".to_string(),
+            sample_rate: 8000,
+            channels: 1,
+            encoding: AudioEncoding::G711U,
+            bitrate: 64,
+        };
+
+        let result = encoder.set_configuration(&unknown_config).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_stub_audio_encoder_init_new_config() {
+        let platform = StubPlatform::new();
+        let encoder = platform.audio_encoder();
+
+        let new_config = AudioEncoderConfig {
+            token: "NewAudioEncoder".to_string(),
+            name: "New Audio".to_string(),
+            sample_rate: 16000,
+            channels: 2,
+            encoding: AudioEncoding::Aac,
+            bitrate: 128,
+        };
+
+        encoder.init(&new_config).await.unwrap();
+        let configs = encoder.get_configurations().await.unwrap();
+        assert_eq!(configs.len(), 2); // 1 default + 1 new
+    }
+
+    #[tokio::test]
+    async fn test_stub_video_input_no_sources() {
+        // Build platform with no video sources by using custom empty-like setup
+        // This is tricky because the platform auto-populates defaults. We test the fallthrough.
+        let platform = StubPlatform::new();
+        let video = platform.video_input();
+
+        // Close doesn't fail
+        video.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_stub_audio_input_close() {
+        let platform = StubPlatform::new();
+        let audio = platform.audio_input();
+
+        audio.open().await.unwrap();
+        audio.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_stub_platform_shutdown() {
+        let platform = StubPlatform::new();
+
+        platform.initialize().await.unwrap();
+        assert!(platform.is_initialized());
+
+        platform.shutdown().await.unwrap();
+        assert!(!platform.is_initialized());
+    }
+
+    #[test]
+    fn test_stub_network_info_constructors() {
+        let info1 = StubNetworkInfo::new();
+        assert_eq!(info1.mac_address, "AA:BB:CC:DD:EE:FF");
+
+        let info2 = StubNetworkInfo::with_mac("00:11:22:33:44:55".to_string());
+        assert_eq!(info2.mac_address, "00:11:22:33:44:55");
+
+        let info3 = StubNetworkInfo::with_mac_and_ip(
+            "66:77:88:99:AA:BB".to_string(),
+            Some("172.16.0.1".to_string()),
+        );
+        assert_eq!(info3.mac_address, "66:77:88:99:AA:BB");
+        assert_eq!(info3.ip_address, Some("172.16.0.1".to_string()));
+    }
+
+    #[test]
+    fn test_stub_network_info_default() {
+        let info = StubNetworkInfo::default();
+        assert_eq!(info.mac_address, "AA:BB:CC:DD:EE:FF");
+    }
+
+    #[test]
+    fn test_stub_platform_default_trait() {
+        let platform = StubPlatform::default();
+        // Just verify it compiles and returns a valid instance
+        assert!(!platform.is_initialized());
+    }
 }

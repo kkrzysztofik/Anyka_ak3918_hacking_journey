@@ -59,13 +59,6 @@ export CXX="g++"
 export AR="ar"
 export RANLIB="ranlib"
 
-# Set LLVM_CONFIG for custom LLVM
-export LLVM_CONFIG="${INSTALL_DIR}/bin/llvm-config"
-if [[ ! -f "${LLVM_CONFIG}" ]]; then
-    log_error "LLVM_CONFIG not found: ${LLVM_CONFIG}"
-    exit 1
-fi
-
 log_info "Installing rust-src component (copying library sources)..."
 log_info "Note: rust-src is just source code - no compilation needed, so memchr errors are not a problem"
 RUST_SRC_PATH="${INSTALL_DIR}/lib/rustlib/src/rust"
@@ -80,16 +73,34 @@ mkdir -p "${RUST_SRC_PATH}" || {
 if [[ -d "${RUST_SRC_DIR}/library" ]]; then
     log_info "Copying library sources from ${RUST_SRC_DIR}/library..."
     # Try rsync with exclusions first (matches bootstrap behavior), fallback to cp
-    rsync -a --exclude='backtrace/crates' \
-          --exclude='stdarch/Cargo.toml' \
-          --exclude='stdarch/crates/stdarch-verify' \
-          --exclude='stdarch/crates/intrinsic-test' \
-          "${RUST_SRC_DIR}/library/" "${RUST_SRC_PATH}/library/" 2>&1 | tee -a "${SCRIPT_DIR}/rust_src_install.log" || \
-    cp -r "${RUST_SRC_DIR}/library" "${RUST_SRC_PATH}/" 2>&1 | tee -a "${SCRIPT_DIR}/rust_src_install.log" || {
-        log_error "Failed to copy library sources"
-        exit 1
-    }
-    log_info "Library sources copied successfully"
+    if command -v rsync >/dev/null 2>&1; then
+        if rsync -a --exclude='backtrace/crates' \
+              --exclude='stdarch/Cargo.toml' \
+              --exclude='stdarch/crates/stdarch-verify' \
+              --exclude='stdarch/crates/intrinsic-test' \
+              "${RUST_SRC_DIR}/library/" "${RUST_SRC_PATH}/library/" \
+              > >(tee -a "${SCRIPT_DIR}/rust_src_install.log") 2>&1; then
+            log_info "Library sources copied successfully"
+        else
+            log_warn "rsync failed, falling back to cp"
+            if cp -r "${RUST_SRC_DIR}/library" "${RUST_SRC_PATH}/" \
+                > >(tee -a "${SCRIPT_DIR}/rust_src_install.log") 2>&1; then
+                log_info "Library sources copied successfully"
+            else
+                log_error "Failed to copy library sources"
+                exit 1
+            fi
+        fi
+    else
+        log_warn "rsync not found, falling back to cp"
+        if cp -r "${RUST_SRC_DIR}/library" "${RUST_SRC_PATH}/" \
+            > >(tee -a "${SCRIPT_DIR}/rust_src_install.log") 2>&1; then
+            log_info "Library sources copied successfully"
+        else
+            log_error "Failed to copy library sources"
+            exit 1
+        fi
+    fi
 else
     log_error "Library source directory not found: ${RUST_SRC_DIR}/library"
     exit 1
@@ -119,7 +130,6 @@ log_info "rust-src component installed successfully"
 
 # Verify installation
 log_info "Verifying rust-src installation..."
-RUST_SRC_PATH="${INSTALL_DIR}/lib/rustlib/src/rust"
 
 if [[ -d "${RUST_SRC_PATH}" ]]; then
     log_info "✓ rust-src component installed at: ${RUST_SRC_PATH}"

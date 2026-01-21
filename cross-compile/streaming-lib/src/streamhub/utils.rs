@@ -1,7 +1,9 @@
-use rand::Rng;
+use portable_atomic::{AtomicU64, Ordering};
 use serde::{Serialize, Serializer};
 use std::fmt;
 use std::time::SystemTime;
+
+static UUID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Default, Copy)]
 pub struct Uuid {
@@ -44,7 +46,7 @@ impl Serialize for Uuid {
 }
 
 impl Uuid {
-    pub fn from_str2(uuid: &str) -> Option<Uuid> {
+    fn parse_uuid(uuid: &str) -> Option<Uuid> {
         let length = uuid.len();
         if !(10..=16).contains(&length) {
             return None;
@@ -61,6 +63,16 @@ impl Uuid {
             random_count,
         })
     }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(uuid: &str) -> Option<Uuid> {
+        Self::parse_uuid(uuid)
+    }
+
+    pub fn from_str2(uuid: &str) -> Option<Uuid> {
+        Self::from_str(uuid)
+    }
+
     pub fn new(random_digit_count: RandomDigitCount) -> Self {
         let duration = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH);
         let seconds = match duration {
@@ -77,11 +89,12 @@ impl Uuid {
             value[i] = c;
         }
 
-        let mut rng = rand::rng();
         let random_size = random_digit_count as usize;
-        for i in 0..random_size {
-            let number = rng.random_range(0..=9);
-            if let Some(c) = std::char::from_digit(number, 10) {
+        if random_size > 0 {
+            let max = 10_u64.saturating_pow(random_size as u32);
+            let counter = UUID_COUNTER.fetch_add(1, Ordering::Relaxed) % max.max(1);
+            let counter_str = format!("{:0width$}", counter, width = random_size);
+            for (i, c) in counter_str.chars().enumerate() {
                 value[10 + i] = c;
             }
         }
@@ -114,6 +127,14 @@ impl fmt::Display for Uuid {
             .take(10 + self.random_count as usize)
             .collect();
         write!(f, "{}", &val)
+    }
+}
+
+impl std::str::FromStr for Uuid {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Uuid::parse_uuid(s).ok_or(())
     }
 }
 
@@ -192,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_uuid_from_str2_valid() {
-        let uuid = Uuid::from_str2("1234567890");
+        let uuid = Uuid::from_str("1234567890");
         assert!(uuid.is_some());
         let uuid = uuid.unwrap();
         assert_eq!(uuid.to_string(), "1234567890");
@@ -200,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_uuid_from_str2_with_random_digits() {
-        let uuid = Uuid::from_str2("12345678901234");
+        let uuid = Uuid::from_str("12345678901234");
         assert!(uuid.is_some());
         let uuid = uuid.unwrap();
         assert_eq!(uuid.to_string(), "12345678901234");
@@ -208,31 +229,31 @@ mod tests {
 
     #[test]
     fn test_uuid_from_str2_too_short() {
-        let uuid = Uuid::from_str2("123456789");
+        let uuid = Uuid::from_str("123456789");
         assert!(uuid.is_none());
     }
 
     #[test]
     fn test_uuid_from_str2_too_long() {
-        let uuid = Uuid::from_str2("12345678901234567");
+        let uuid = Uuid::from_str("12345678901234567");
         assert!(uuid.is_none());
     }
 
     #[test]
     fn test_uuid_from_str2_empty() {
-        let uuid = Uuid::from_str2("");
+        let uuid = Uuid::from_str("");
         assert!(uuid.is_none());
     }
 
     #[test]
     fn test_uuid_from_str2_min_length() {
-        let uuid = Uuid::from_str2("1234567890");
+        let uuid = Uuid::from_str("1234567890");
         assert!(uuid.is_some());
     }
 
     #[test]
     fn test_uuid_from_str2_max_length() {
-        let uuid = Uuid::from_str2("1234567890123456");
+        let uuid = Uuid::from_str("1234567890123456");
         assert!(uuid.is_some());
     }
 
@@ -252,7 +273,7 @@ mod tests {
     fn test_uuid_roundtrip() {
         let uuid = Uuid::new(RandomDigitCount::Four);
         let s = uuid.to_string();
-        let parsed = Uuid::from_str2(&s);
+        let parsed = Uuid::from_str(&s);
         assert!(parsed.is_some());
         assert_eq!(parsed.unwrap().to_string(), s);
     }
@@ -261,15 +282,15 @@ mod tests {
 
     #[test]
     fn test_uuid_equality() {
-        let uuid1 = Uuid::from_str2("1234567890").unwrap();
-        let uuid2 = Uuid::from_str2("1234567890").unwrap();
+        let uuid1 = Uuid::from_str("1234567890").unwrap();
+        let uuid2 = Uuid::from_str("1234567890").unwrap();
         assert_eq!(uuid1, uuid2);
     }
 
     #[test]
     fn test_uuid_inequality() {
-        let uuid1 = Uuid::from_str2("1234567890").unwrap();
-        let uuid2 = Uuid::from_str2("0987654321").unwrap();
+        let uuid1 = Uuid::from_str("1234567890").unwrap();
+        let uuid2 = Uuid::from_str("0987654321").unwrap();
         assert_ne!(uuid1, uuid2);
     }
 
@@ -295,7 +316,7 @@ mod tests {
     #[test]
     fn test_uuid_hash_consistency() {
         use std::collections::HashSet;
-        let uuid = Uuid::from_str2("1234567890").unwrap();
+        let uuid = Uuid::from_str("1234567890").unwrap();
         let mut set = HashSet::new();
         set.insert(uuid);
         assert!(set.contains(&uuid));
@@ -311,7 +332,7 @@ mod tests {
         assert!(!serialized.is_empty());
         assert!(!s.is_empty());
 
-        if let Some(u) = Uuid::from_str2(&s) {
+        if let Some(u) = Uuid::from_str(&s) {
             assert_eq!(u.to_string(), s);
         }
     }

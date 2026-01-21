@@ -155,7 +155,7 @@ pub struct HttpRequest {
 }
 
 impl HttpRequest {
-    pub fn get_header(&self, header_name: &String) -> Option<&String> {
+    pub fn get_header(&self, header_name: &str) -> Option<&String> {
         self.headers.get(header_name)
     }
 }
@@ -174,65 +174,62 @@ pub fn parse_content_length(request_data: &str) -> Option<u32> {
 impl Unmarshal for HttpRequest {
     fn unmarshal(request_data: &str) -> Option<Self> {
         let mut http_request = HttpRequest::default();
-        let header_end_idx = if let Some(idx) = request_data.find("\r\n\r\n") {
-            let data_except_body = &request_data[..idx];
-            let mut lines = data_except_body.lines();
-            /*parse the first line
-            POST /whip?app=live&stream=test HTTP/1.1*/
-            if let Some(request_first_line) = lines.next() {
-                let mut fields = request_first_line.split_ascii_whitespace();
-                /* method */
-                if let Some(method) = fields.next() {
-                    http_request.method = method.to_string();
-                }
-                /* url */
-                if let Some(url) = fields.next() {
-                    if let Some(uri) = Uri::unmarshal(url) {
-                        http_request.uri = uri;
+        let idx = request_data.find("\r\n\r\n")?;
+        let data_except_body = &request_data[..idx];
+        let mut lines = data_except_body.lines();
+        /*parse the first line
+        POST /whip?app=live&stream=test HTTP/1.1*/
+        if let Some(request_first_line) = lines.next() {
+            let mut fields = request_first_line.split_ascii_whitespace();
+            /* method */
+            if let Some(method) = fields.next() {
+                http_request.method = method.to_string();
+            }
+            /* url */
+            if let Some(url) = fields.next() {
+                if let Some(uri) = Uri::unmarshal(url) {
+                    http_request.uri = uri;
 
-                        if let Some(query) = &http_request.uri.query {
-                            let pars_array: Vec<&str> = query.split('&').collect();
+                    if let Some(query) = &http_request.uri.query {
+                        let pars_array: Vec<&str> = query.split('&').collect();
 
-                            for ele in pars_array {
-                                let (k, v) = scanf!(ele, '=', String, String);
-                                if k.is_none() || v.is_none() {
-                                    continue;
-                                }
-                                http_request.query_pairs.insert(k.unwrap(), v.unwrap());
+                        for ele in pars_array {
+                            let (k, v) = scanf!(ele, '=', String, String);
+                            if k.is_none() || v.is_none() {
+                                continue;
                             }
-                        }
-                    } else {
-                        log::error!("cannot get a Uri.");
-                        return None;
-                    }
-                }
-                /* version */
-                if let Some(version) = fields.next() {
-                    http_request.version = version.to_string();
-                }
-            }
-            /*parse headers*/
-            for line in lines {
-                if let Some(index) = line.find(": ") {
-                    let name = line[..index].to_string();
-                    let value = line[index + 2..].to_string();
-                    /*for schema: webrtc*/
-                    if name == "Host" {
-                        let (address_val, port_val) = scanf!(value, ':', String, u16);
-                        if let Some(address) = address_val {
-                            http_request.uri.host = address;
-                        }
-                        if let Some(port) = port_val {
-                            http_request.uri.port = Some(port);
+                            http_request.query_pairs.insert(k.unwrap(), v.unwrap());
                         }
                     }
-                    http_request.headers.insert(name, value);
+                } else {
+                    log::error!("cannot get a Uri.");
+                    return None;
                 }
             }
-            idx + 4
-        } else {
-            return None;
-        };
+            /* version */
+            if let Some(version) = fields.next() {
+                http_request.version = version.to_string();
+            }
+        }
+        /*parse headers*/
+        for line in lines {
+            if let Some(index) = line.find(": ") {
+                let name = line[..index].to_string();
+                let value = line[index + 2..].to_string();
+                /*for schema: webrtc*/
+                if name == "Host" {
+                    let (address_val, port_val) = scanf!(value, ':', String, u16);
+                    if let Some(address) = address_val {
+                        http_request.uri.host = address;
+                    }
+                    if let Some(port) = port_val {
+                        http_request.uri.port = Some(port);
+                    }
+                }
+                http_request.headers.insert(name, value);
+            }
+        }
+        let header_end_idx = idx + 4;
         log::trace!(
             "header_end_idx is: {} {}",
             header_end_idx,
@@ -257,7 +254,7 @@ impl Marshal for HttpRequest {
             self.version
         );
         for (header_name, header_value) in &self.headers {
-            if header_name == &"Content-Length".to_string() {
+            if header_name == "Content-Length" {
                 if let Some(body) = &self.body {
                     request_str += &format!("Content-Length: {}\r\n", body.len());
                 }
@@ -284,7 +281,7 @@ pub struct HttpResponse {
 }
 
 impl HttpResponse {
-    pub fn get_header(&self, header_name: &String) -> Option<&String> {
+    pub fn get_header(&self, header_name: &str) -> Option<&String> {
         self.headers.get(header_name)
     }
 }
@@ -292,37 +289,34 @@ impl HttpResponse {
 impl Unmarshal for HttpResponse {
     fn unmarshal(request_data: &str) -> Option<Self> {
         let mut http_response = HttpResponse::default();
-        let header_end_idx = if let Some(idx) = request_data.find("\r\n\r\n") {
-            let data_except_body = &request_data[..idx];
-            let mut lines = data_except_body.lines();
-            //parse the first line
-            if let Some(request_first_line) = lines.next() {
-                let mut fields = request_first_line.split_ascii_whitespace();
+        let idx = request_data.find("\r\n\r\n")?;
+        let data_except_body = &request_data[..idx];
+        let mut lines = data_except_body.lines();
+        //parse the first line
+        if let Some(request_first_line) = lines.next() {
+            let mut fields = request_first_line.split_ascii_whitespace();
 
-                if let Some(version) = fields.next() {
-                    http_response.version = version.to_string();
-                }
-                if let Some(status) = fields.next()
-                    && let Ok(status) = status.parse::<u16>()
-                {
-                    http_response.status_code = status;
-                }
-                if let Some(reason_phrase) = fields.next() {
-                    http_response.reason_phrase = reason_phrase.to_string();
-                }
+            if let Some(version) = fields.next() {
+                http_response.version = version.to_string();
             }
-            //parse headers
-            for line in lines {
-                if let Some(index) = line.find(": ") {
-                    let name = line[..index].to_string();
-                    let value = line[index + 2..].to_string();
-                    http_response.headers.insert(name, value);
-                }
+            if let Some(status) = fields.next()
+                && let Ok(status_code) = status.parse::<u16>()
+            {
+                http_response.status_code = status_code;
             }
-            idx + 4
-        } else {
-            return None;
-        };
+            if let Some(reason_phrase) = fields.next() {
+                http_response.reason_phrase = reason_phrase.to_string();
+            }
+        }
+        //parse headers
+        for line in lines {
+            if let Some(index) = line.find(": ") {
+                let name = line[..index].to_string();
+                let value = line[index + 2..].to_string();
+                http_response.headers.insert(name, value);
+            }
+        }
+        let header_end_idx = idx + 4;
 
         if request_data.len() > header_end_idx {
             //parse body
@@ -341,7 +335,7 @@ impl Marshal for HttpResponse {
         );
 
         for (header_name, header_value) in &self.headers {
-            if header_name != &"Content-Length".to_string() {
+            if header_name != "Content-Length" {
                 response_str += &format!("{header_name}: {header_value}\r\n");
             }
         }

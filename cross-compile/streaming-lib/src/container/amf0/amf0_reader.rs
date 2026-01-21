@@ -47,18 +47,16 @@ impl Amf0Reader {
             amf0_markers::NULL => self.read_null(),
             amf0_markers::ECMA_ARRAY => self.read_ecma_array(),
             amf0_markers::LONG_STRING => self.read_long_string(),
-            _ => Err(Amf0ReadError {
-                value: Amf0ReadErrorValue::UnknownMarker { marker: markers },
-            }),
+            _ => Err(Amf0ReadError(Amf0ReadErrorValue::UnknownMarker {
+                marker: markers,
+            })),
         }
     }
     pub fn read_with_type(&mut self, specified_marker: u8) -> Result<Amf0ValueType, Amf0ReadError> {
         let marker = self.reader.advance_u8()?;
 
         if marker != specified_marker {
-            return Err(Amf0ReadError {
-                value: Amf0ReadErrorValue::WrongType,
-            });
+            return Err(Amf0ReadError(Amf0ReadErrorValue::WrongType));
         }
 
         self.read_any()
@@ -74,8 +72,9 @@ impl Amf0Reader {
         let value = self.reader.read_u8()?;
 
         match value {
-            1 => Ok(Amf0ValueType::Boolean(true)),
-            _ => Ok(Amf0ValueType::Boolean(false)),
+            0x01 => Ok(Amf0ValueType::Boolean(true)),
+            0x00 => Ok(Amf0ValueType::Boolean(false)),
+            _ => Err(Amf0ReadError(Amf0ReadErrorValue::InvalidBoolean { value })),
         }
     }
 
@@ -257,6 +256,7 @@ mod tests {
     //     result2
     // }
 
+    #[cfg(test)]
     fn bytes_to_i24(bytes: [u8; 3]) -> i32 {
         let sign_extend_mask = 0xff_ff << 23;
         let value = ((bytes[0] as i32) << 16) | ((bytes[1] as i32) << 8) | (bytes[2] as i32);

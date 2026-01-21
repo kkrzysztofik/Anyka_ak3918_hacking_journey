@@ -41,14 +41,24 @@ pub enum ClientSessionType {
 impl fmt::Display for ServerSessionType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let client_type = match self {
-            ServerSessionType::Pull => String::from("pull"),
-            ServerSessionType::Push => String::from("push"),
+            ServerSessionType::Pull => "pull",
+            ServerSessionType::Push => "push",
         };
         write!(f, "{client_type}")
     }
 }
 
-pub const USER_AGENT: &str = "xiu 0.12.8";
+impl fmt::Display for ClientSessionType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let client_type = match self {
+            ClientSessionType::Pull => "pull",
+            ClientSessionType::Push => "push",
+        };
+        write!(f, "{client_type}")
+    }
+}
+
+pub const USER_AGENT: &str = concat!("xiu ", env!("CARGO_PKG_VERSION"));
 
 #[cfg(test)]
 mod tests {
@@ -150,6 +160,6 @@ mod tests {
     #[test]
     fn test_user_agent_constant() {
         assert!(USER_AGENT.starts_with("xiu"));
-        assert!(USER_AGENT.contains("0.12"));
+        assert!(USER_AGENT.contains(env!("CARGO_PKG_VERSION")));
     }
 }

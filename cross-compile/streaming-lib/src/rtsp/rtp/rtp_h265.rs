@@ -29,6 +29,8 @@ pub struct RtpH265Packer {
     on_packet_for_rtcp_handler: Option<OnRtpPacketFn2>,
 }
 
+const MAX_FU_BUFFER_SIZE: usize = 1024 * 1024;
+
 impl RtpH265Packer {
     pub fn new(
         payload_type: u8,
@@ -89,7 +91,7 @@ impl RtpH265Packer {
         while left_nalu_bytes > 0 {
             /* 3 = PayloadHdr(2 bytes) + FU header(1 byte) */
             if left_nalu_bytes + define::RTP_FIXED_HEADER_LEN <= self.mtu - 3 {
-                fu_header = (nalu_header_1st_byte & 0x1F) | define::FU_END;
+                fu_header = ((nalu_header_1st_byte >> 1) & 0x3F) | define::FU_END;
                 fu_payload_len = left_nalu_bytes;
             } else {
                 fu_payload_len = self.mtu - define::RTP_FIXED_HEADER_LEN - 3;
@@ -171,6 +173,7 @@ impl TVideoPacker for RtpH265Packer {
 #[derive(Default)]
 pub struct RtpH265UnPacker {
     sequence_number: u16,
+    expected_seq: Option<u16>,
     timestamp: u32,
     fu_buffer: BytesMut,
     using_donl_field: bool,
@@ -335,6 +338,25 @@ impl RtpH265UnPacker {
             let nal_1st_byte = (payload_header_1st_byte & 0x81) | ((fu_header & 0x3F) << 1);
             self.fu_buffer.put_u8(nal_1st_byte);
             self.fu_buffer.put_u8(payload_header_2nd_byte);
+            self.expected_seq = Some(self.sequence_number.wrapping_add(1));
+        } else if let Some(expected) = self.expected_seq
+            && self.sequence_number != expected
+        {
+            log::warn!(
+                "rtp h265 fu sequence discontinuity: expected {}, got {}",
+                expected,
+                self.sequence_number
+            );
+            self.fu_buffer.clear();
+            self.expected_seq = None;
+            return Ok(());
+        }
+
+        if self.fu_buffer.len() + payload_reader.len() > MAX_FU_BUFFER_SIZE {
+            log::warn!("rtp h265 fu buffer overflow; dropping fragment");
+            self.fu_buffer.clear();
+            self.expected_seq = None;
+            return Ok(());
         }
 
         self.fu_buffer.put(payload_reader.extract_remaining_bytes());
@@ -342,8 +364,9 @@ impl RtpH265UnPacker {
         if utils::is_fu_end(fu_header) {
             let mut payload = BytesMut::new();
             payload.extend_from_slice(&define::ANNEXB_NALU_START_CODE);
-            payload.put(self.fu_buffer.clone());
-            self.fu_buffer.clear();
+            let fu_payload = std::mem::take(&mut self.fu_buffer);
+            payload.put(fu_payload);
+            self.expected_seq = None;
 
             if let Some(f) = &self.on_frame_handler {
                 f(FrameData::Video {
@@ -351,6 +374,8 @@ impl RtpH265UnPacker {
                     data: payload,
                 })?;
             }
+        } else {
+            self.expected_seq = Some(self.sequence_number.wrapping_add(1));
         }
 
         Ok(())

@@ -53,16 +53,43 @@ impl BitsReader {
 
     pub fn read_n_bits(&mut self, n: usize) -> Result<u64, BitError> {
         let mut result: u64 = 0;
-        for _ in 0..n {
-            result <<= 1;
-            let cur_bit = self.read_bit()?;
-            result |= cur_bit as u64;
+
+        // Optimize for byte-aligned reads: if we're byte-aligned and need >=8 bits,
+        // bulk-read whole bytes to improve performance
+        if self.cur_bit_left == 0 && n >= 8 {
+            let full_bytes = n / 8;
+            for _ in 0..full_bytes {
+                result <<= 8;
+                let byte = self.read_byte()?;
+                result |= byte as u64;
+            }
+
+            // Handle any remaining partial bits
+            let remaining = n % 8;
+            for _ in 0..remaining {
+                result <<= 1;
+                let cur_bit = self.read_bit()?;
+                result |= cur_bit as u64;
+            }
+        } else {
+            // Fall back to bit-by-bit reading for unaligned data
+            for _ in 0..n {
+                result <<= 1;
+                let cur_bit = self.read_bit()?;
+                result |= cur_bit as u64;
+            }
         }
         Ok(result)
     }
 
-    pub fn bits_aligment_8(&mut self) {
+    pub fn bits_alignment_8(&mut self) {
         self.cur_bit_left = 0;
+    }
+
+    /// Deprecated: use bits_alignment_8 instead (corrected spelling)
+    #[deprecated(since = "0.2.0", note = "use bits_alignment_8 instead")]
+    pub fn bits_aligment_8(&mut self) {
+        self.bits_alignment_8();
     }
 }
 

@@ -170,7 +170,7 @@ impl RtspClientSession {
             }
 
             if let Ok(Some(a)) = InterleavedBinaryData::new(&mut self.reader) {
-                if self.reader.len() < a.length as usize {
+                while self.reader.len() < a.length as usize {
                     let data = self.io.lock().await.read().await?;
                     self.reader.extend_from_slice(&data[..]);
                 }
@@ -208,7 +208,7 @@ impl RtspClientSession {
     async fn send_options(&mut self) -> Result<(), SessionError> {
         log::info!("rtsp client: send_options");
         let uri_path = format!("rtsp://{}/{}", self.address, self.stream_name);
-        let request = self.gen_request(rtsp_method_name::OPTIONS, uri_path);
+        let request = self.gen_request(rtsp_method_name::OPTIONS, uri_path)?;
         self.send_resquest(&request).await?;
         self.receive_response(rtsp_method_name::OPTIONS).await
     }
@@ -216,14 +216,15 @@ impl RtspClientSession {
     async fn send_announce(&mut self) -> Result<(), SessionError> {
         log::info!("rtsp client: send_announce");
         let uri_path = format!("rtsp://{}/{}", self.address, self.stream_name);
-        let request = self.gen_request(rtsp_method_name::ANNOUNCE, uri_path);
-        self.send_resquest(&request).await
+        let request = self.gen_request(rtsp_method_name::ANNOUNCE, uri_path)?;
+        self.send_resquest(&request).await?;
+        self.receive_response(rtsp_method_name::ANNOUNCE).await
     }
 
     async fn send_describe(&mut self) -> Result<(), SessionError> {
         log::info!("rtsp client: send_describe");
         let uri_path = format!("rtsp://{}/{}", self.address, self.stream_name);
-        let mut request = self.gen_request(rtsp_method_name::DESCRIBE, uri_path);
+        let mut request = self.gen_request(rtsp_method_name::DESCRIBE, uri_path)?;
         request
             .headers
             .insert("Accept".to_string(), "application/sdp".to_string());
@@ -248,12 +249,15 @@ impl RtspClientSession {
                 self.address, self.stream_name, media_control
             );
 
-            let mut request = self.gen_request(rtsp_method_name::SETUP, uri_path);
+            let mut request = self.gen_request(rtsp_method_name::SETUP, uri_path)?;
 
             match self.protocol_type {
                 ProtocolType::TCP => {
                     let kv: Vec<&str> = media_control.trim().splitn(2, '=').collect();
-
+                    if kv.len() < 2 || kv[1].trim().is_empty() {
+                        log::error!("cannot parse control attribute: {}", media_control);
+                        continue;
+                    }
                     let mut media_transport = RtspTransport::default();
                     if let Ok(interleaved_idx) = kv[1].parse::<u8>() {
                         media_transport.interleaved =
@@ -280,13 +284,16 @@ impl RtspClientSession {
                 }
                 ProtocolType::UDP => {
                     if let Some((socket_rtp, socket_rtcp)) = new_udpio_pair().await {
+                        let rtp_port = socket_rtp.get_local_port().ok_or(SessionError {
+                            value: SessionErrorValue::MissingClientPort,
+                        })?;
+                        let rtcp_port = socket_rtcp.get_local_port().ok_or(SessionError {
+                            value: SessionErrorValue::MissingClientPort,
+                        })?;
                         let media_transport = RtspTransport {
                             protocol_type: ProtocolType::UDP,
                             cast_type: CastType::Unicast,
-                            client_port: Some([
-                                socket_rtp.get_local_port().unwrap(),
-                                socket_rtcp.get_local_port().unwrap(),
-                            ]),
+                            client_port: Some([rtp_port, rtcp_port]),
                             ..Default::default()
                         };
 
@@ -327,7 +334,7 @@ impl RtspClientSession {
     async fn send_play(&mut self) -> Result<(), SessionError> {
         log::info!("rtsp client: send_play");
         let uri_path = format!("rtsp://{}/{}", self.address, self.stream_name);
-        let mut request = self.gen_request(rtsp_method_name::PLAY, uri_path);
+        let mut request = self.gen_request(rtsp_method_name::PLAY, uri_path)?;
         request
             .headers
             .insert("Range".to_string(), "npt=0.000".to_string());
@@ -341,23 +348,30 @@ impl RtspClientSession {
     async fn send_record(&mut self) -> Result<(), SessionError> {
         log::info!("rtsp client: send_record");
         let uri_path = format!("rtsp://{}/{}", self.address, self.stream_name);
-        let mut request = self.gen_request(rtsp_method_name::RECORD, uri_path);
+        let mut request = self.gen_request(rtsp_method_name::RECORD, uri_path)?;
         request
             .headers
             .insert("Transport".to_string(), "application/sdp".to_string());
-        self.send_resquest(&request).await
+        self.send_resquest(&request).await?;
+        self.receive_response(rtsp_method_name::RECORD).await
     }
 
     async fn send_teardown(&mut self) -> Result<(), SessionError> {
         log::info!("rtsp client: send_teardown");
         let uri_path = format!("rtsp://{}/{}", self.address, self.stream_name);
-        let request = self.gen_request(rtsp_method_name::TEARDOWN, uri_path);
+        let request = self.gen_request(rtsp_method_name::TEARDOWN, uri_path)?;
         self.send_resquest(&request).await?;
         self.exit()
     }
 
-    fn gen_request(&mut self, method_name: &str, uri_path: String) -> RtspRequest {
-        let uri = Uri::unmarshal(&uri_path).unwrap();
+    fn gen_request(
+        &mut self,
+        method_name: &str,
+        uri_path: String,
+    ) -> Result<RtspRequest, SessionError> {
+        let uri = Uri::unmarshal(&uri_path).ok_or(SessionError {
+            value: SessionErrorValue::RtspMessageCorrupted("invalid rtsp uri".to_string()),
+        })?;
 
         let mut request = RtspRequest {
             method: method_name.to_string(),
@@ -380,7 +394,7 @@ impl RtspClientSession {
                 .insert("Session".to_string(), session_id.to_string());
         }
 
-        request
+        Ok(request)
     }
 
     fn get_subscriber_info(&mut self) -> SubscriberInfo {
@@ -430,15 +444,30 @@ impl RtspClientSession {
             let media_name = &media.media_type;
             match media_name.as_str() {
                 "audio" => {
-                    let codec_id = rtsp_codec::RTSP_CODEC_NAME_2_ID
+                    let codec_id = match rtsp_codec::RTSP_CODEC_NAME_2_ID
                         .get(&media.rtpmap.encoding_name.to_lowercase().as_str())
-                        .unwrap()
-                        .clone();
+                    {
+                        Some(codec_id) => codec_id.clone(),
+                        None => {
+                            log::error!("unsupported audio codec: {}", media.rtpmap.encoding_name);
+                            continue;
+                        }
+                    };
+                    let channel_count = match media.rtpmap.encoding_param.parse::<u8>() {
+                        Ok(val) => val,
+                        Err(err) => {
+                            log::error!(
+                                "invalid audio channel count '{}': {err}",
+                                media.rtpmap.encoding_param
+                            );
+                            continue;
+                        }
+                    };
                     let codec_info = RtspCodecInfo {
                         codec_id,
                         payload_type: media.rtpmap.payload_type as u8,
                         sample_rate: media.rtpmap.clock_rate,
-                        channel_count: media.rtpmap.encoding_param.parse().unwrap(),
+                        channel_count,
                     };
 
                     log::info!("audio codec info: {:?}", codec_info);
@@ -447,10 +476,15 @@ impl RtspClientSession {
                     self.tracks.insert(TrackType::Audio, track);
                 }
                 "video" => {
-                    let codec_id = rtsp_codec::RTSP_CODEC_NAME_2_ID
+                    let codec_id = match rtsp_codec::RTSP_CODEC_NAME_2_ID
                         .get(&media.rtpmap.encoding_name.to_lowercase().as_str())
-                        .unwrap()
-                        .clone();
+                    {
+                        Some(codec_id) => codec_id.clone(),
+                        None => {
+                            log::error!("unsupported video codec: {}", media.rtpmap.encoding_name);
+                            continue;
+                        }
+                    };
                     let codec_info = RtspCodecInfo {
                         codec_id,
                         payload_type: media.rtpmap.payload_type as u8,
@@ -486,11 +520,12 @@ impl RtspClientSession {
             if let Some(rtsp_response_data) = RtspResponse::unmarshal(std::str::from_utf8(&data)?) {
                 // TCP packet sticking issue, if have content_length in header.
                 // should check the body
-                if let Some(content_length) =
-                    rtsp_response_data.get_header(&String::from("Content-Length"))
+                if let Some(content_length) = rtsp_response_data.get_header("Content-Length")
                     && let Ok(uint_num) = content_length.parse::<usize>()
-                    && (rtsp_response_data.body.is_none()
-                        || uint_num > rtsp_response_data.body.clone().unwrap().len())
+                    && rtsp_response_data
+                        .body
+                        .as_ref()
+                        .is_none_or(|body| uint_num > body.len())
                 {
                     if retry_count >= 5 {
                         log::error!("corrupted rtsp message={}", std::str::from_utf8(&data)?);
@@ -519,14 +554,14 @@ impl RtspClientSession {
 
         match method_name {
             rtsp_method_name::OPTIONS => {
-                if let Some(public) = rtsp_response.get_header(&"Public".to_string()) {
+                if let Some(public) = rtsp_response.get_header("Public") {
                     log::info!("support methods: {}", public);
                 }
             }
             rtsp_method_name::ANNOUNCE => {}
             rtsp_method_name::DESCRIBE => {
                 if let Some(request_body) = &rtsp_response.body
-                    && let Some(sdp) = Sdp::unmarshal(request_body)
+                    && let Ok(sdp) = Sdp::unmarshal(request_body)
                 {
                     self.sdp = sdp.clone();
                     self.stream_handler.set_sdp(sdp).await;
@@ -551,7 +586,9 @@ impl RtspClientSession {
                         });
                     }
 
-                    let sender = event_result_receiver.await??.0.unwrap();
+                    let sender = event_result_receiver.await??.0.ok_or(SessionError {
+                        value: SessionErrorValue::MissingFrameSender,
+                    })?;
 
                     for track in self.tracks.values_mut() {
                         let sender_out = sender.clone();
@@ -580,12 +617,12 @@ impl RtspClientSession {
             }
             rtsp_method_name::SETUP => {
                 if self.session_id.is_none()
-                    && let Some(session_id) = rtsp_response.get_header(&"Session".to_string())
+                    && let Some(session_id) = rtsp_response.get_header("Session")
                 {
                     self.session_id = Uuid::from_str2(session_id);
                 }
 
-                if let Some(transport_str) = rtsp_response.get_header(&"Transport".to_string()) {
+                if let Some(transport_str) = rtsp_response.get_header("Transport") {
                     log::info!("setup response: transport {}", transport_str);
                 }
             }
@@ -611,7 +648,8 @@ impl RtspClientSession {
             },
         };
 
-        let event_json_str = serde_json::to_string(&event).unwrap();
+        let event_json_str =
+            serde_json::to_string(&event).unwrap_or_else(|_| "<serialize failed>".to_string());
 
         let rv = self.event_producer.send(event);
         match rv {

@@ -33,14 +33,25 @@ impl Unmarshal<BytesMut, Result<Self, RtcpError>> for RtcpApp {
     {
         let mut reader = BytesReader::new(data);
 
-        let mut rtcp_app = RtcpApp::default();
-        rtcp_app.header = RtcpHeader::unmarshal(&mut reader)?;
+        let header = RtcpHeader::unmarshal(&mut reader)?;
+        let ssrc = reader.read_u32::<BigEndian>()?;
+        let name = reader.read_bytes(4)?;
+        let app_data_words = (header.length as usize)
+            .checked_sub(2)
+            .ok_or(RtcpError::from(
+                super::errors::RtcpErrorValue::InvalidAppLength {
+                    length: header.length,
+                },
+            ))?;
+        let app_data_bytes = app_data_words * 4;
+        let app_data = reader.read_bytes(app_data_bytes)?;
 
-        rtcp_app.ssrc = reader.read_u32::<BigEndian>()?;
-        rtcp_app.name = reader.read_bytes(4)?;
-        rtcp_app.app_data = reader.read_bytes(rtcp_app.header.length as usize * 4)?;
-
-        Ok(rtcp_app)
+        Ok(RtcpApp {
+            header,
+            ssrc,
+            name,
+            app_data,
+        })
     }
 }
 
@@ -48,7 +59,11 @@ impl Marshal<Result<BytesMut, RtcpError>> for RtcpApp {
     fn marshal(&self) -> Result<BytesMut, RtcpError> {
         let mut writer = BytesWriter::default();
 
-        let header_bytesmut = self.header.marshal()?;
+        let app_data_words = self.app_data.len().div_ceil(4);
+        let mut header = self.header.clone();
+        header.length = (2 + app_data_words) as u16;
+
+        let header_bytesmut = header.marshal()?;
         writer.write(&header_bytesmut[..])?;
 
         writer.write_u32::<BigEndian>(self.ssrc)?;
@@ -140,14 +155,14 @@ mod tests {
 
     #[test]
     fn test_rtcp_app_unmarshal_minimal() {
-        // Header: version 2, pt 204, length 2
+        // Header: version 2, pt 204, length 4
         // SSRC: 0x12345678
         // Name: "TEST"
         let mut data = BytesMut::new();
-        data.extend_from_slice(&[0x80, 204, 0x00, 0x02]); // Header
+        data.extend_from_slice(&[0x80, 204, 0x00, 0x04]); // Header
         data.extend_from_slice(&[0x12, 0x34, 0x56, 0x78]); // SSRC
         data.extend_from_slice(b"TEST"); // Name
-        // app_data: length=2 means 2*4=8 bytes of app data expected
+        // app_data: length=4 means 8 bytes of app data expected
         data.extend_from_slice(&[0; 8]); // Empty app data
 
         let app = RtcpApp::unmarshal(data).unwrap();
@@ -165,7 +180,7 @@ mod tests {
                 padding_flag: 0,
                 report_count: 0,
                 payload_type: 204,
-                length: 0, // Will recalculate
+                length: 2, // Will recalculate
             },
             ssrc: 0xDEADBEEF,
             name: BytesMut::from(&b"XYZ0"[..]),

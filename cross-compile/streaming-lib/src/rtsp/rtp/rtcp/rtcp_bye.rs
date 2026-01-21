@@ -21,7 +21,7 @@ use bytes::BytesMut;
 #[derive(Debug, Clone, Default)]
 pub struct RtcpBye {
     pub header: RtcpHeader,
-    pub ssrss: Vec<u32>,
+    pub ssrcs: Vec<u32>,
     pub length: u8,
     pub reason: BytesMut,
 }
@@ -40,11 +40,15 @@ impl Unmarshal<BytesMut, Result<Self, RtcpError>> for RtcpBye {
 
         for _ in 0..rtcp_bye.header.report_count {
             let ssrc = reader.read_u32::<BigEndian>()?;
-            rtcp_bye.ssrss.push(ssrc);
+            rtcp_bye.ssrcs.push(ssrc);
         }
 
-        rtcp_bye.length = reader.read_u8()?;
-        rtcp_bye.reason = reader.read_bytes(rtcp_bye.length as usize)?;
+        if rtcp_bye.header.length > 0 && !reader.is_empty() {
+            rtcp_bye.length = reader.read_u8()?;
+            if rtcp_bye.length > 0 && reader.len() >= rtcp_bye.length as usize {
+                rtcp_bye.reason = reader.read_bytes(rtcp_bye.length as usize)?;
+            }
+        }
 
         Ok(rtcp_bye)
     }
@@ -57,7 +61,7 @@ impl Marshal<Result<BytesMut, RtcpError>> for RtcpBye {
         let header_bytesmut = self.header.marshal()?;
         writer.write(&header_bytesmut[..])?;
 
-        for ssrc in &self.ssrss {
+        for ssrc in &self.ssrcs {
             writer.write_u32::<BigEndian>(*ssrc)?;
         }
 
@@ -77,7 +81,7 @@ mod tests {
     #[test]
     fn test_rtcp_bye_default() {
         let bye = RtcpBye::default();
-        assert!(bye.ssrss.is_empty());
+        assert!(bye.ssrcs.is_empty());
         assert_eq!(bye.length, 0);
         assert!(bye.reason.is_empty());
     }
@@ -87,12 +91,12 @@ mod tests {
     #[test]
     fn test_rtcp_bye_clone() {
         let mut bye = RtcpBye::default();
-        bye.ssrss = vec![0x12345678, 0xAABBCCDD];
+        bye.ssrcs = vec![0x12345678, 0xAABBCCDD];
         bye.length = 5;
         bye.reason = BytesMut::from(&b"leave"[..]);
 
         let cloned = bye.clone();
-        assert_eq!(cloned.ssrss, bye.ssrss);
+        assert_eq!(cloned.ssrcs, bye.ssrcs);
         assert_eq!(cloned.length, bye.length);
         assert_eq!(cloned.reason, bye.reason);
     }
@@ -102,7 +106,7 @@ mod tests {
         let bye = RtcpBye::default();
         let debug_str = format!("{:?}", bye);
         assert!(debug_str.contains("RtcpBye"));
-        assert!(debug_str.contains("ssrss"));
+        assert!(debug_str.contains("ssrcs"));
     }
 
     // ========== Marshal Tests ==========
@@ -117,7 +121,7 @@ mod tests {
                 payload_type: 203, // BYE
                 length: 0,
             },
-            ssrss: vec![],
+            ssrcs: vec![],
             length: 0,
             reason: BytesMut::new(),
         };
@@ -137,7 +141,7 @@ mod tests {
                 payload_type: 203,
                 length: 1,
             },
-            ssrss: vec![0x12345678],
+            ssrcs: vec![0x12345678],
             length: 0,
             reason: BytesMut::new(),
         };
@@ -157,7 +161,7 @@ mod tests {
                 payload_type: 203,
                 length: 2,
             },
-            ssrss: vec![0xAABBCCDD],
+            ssrcs: vec![0xAABBCCDD],
             length: 7,
             reason: BytesMut::from(&b"leaving"[..]),
         };
@@ -177,7 +181,7 @@ mod tests {
                 payload_type: 203,
                 length: 3,
             },
-            ssrss: vec![0x11111111, 0x22222222, 0x33333333],
+            ssrcs: vec![0x11111111, 0x22222222, 0x33333333],
             length: 0,
             reason: BytesMut::new(),
         };
@@ -198,8 +202,8 @@ mod tests {
         data.extend_from_slice(&[0x00]); // length 0 (no reason)
 
         let bye = RtcpBye::unmarshal(data).unwrap();
-        assert_eq!(bye.ssrss.len(), 1);
-        assert_eq!(bye.ssrss[0], 0x12345678);
+        assert_eq!(bye.ssrcs.len(), 1);
+        assert_eq!(bye.ssrcs[0], 0x12345678);
         assert_eq!(bye.length, 0);
     }
 
@@ -212,7 +216,7 @@ mod tests {
         data.extend_from_slice(b"bye"); // reason
 
         let bye = RtcpBye::unmarshal(data).unwrap();
-        assert_eq!(bye.ssrss[0], 0xAABBCCDD);
+        assert_eq!(bye.ssrcs[0], 0xAABBCCDD);
         assert_eq!(bye.length, 3);
         assert_eq!(&bye.reason[..], b"bye");
     }
@@ -229,7 +233,7 @@ mod tests {
                 payload_type: 203,
                 length: 1,
             },
-            ssrss: vec![0xDEADBEEF],
+            ssrcs: vec![0xDEADBEEF],
             length: 0,
             reason: BytesMut::new(),
         };
@@ -237,7 +241,7 @@ mod tests {
         let marshaled = original.marshal().unwrap();
         let unmarshaled = RtcpBye::unmarshal(marshaled).unwrap();
 
-        assert_eq!(unmarshaled.ssrss, original.ssrss);
+        assert_eq!(unmarshaled.ssrcs, original.ssrcs);
         assert_eq!(unmarshaled.length, original.length);
     }
 
@@ -251,7 +255,7 @@ mod tests {
                 payload_type: 203,
                 length: 3,
             },
-            ssrss: vec![0x11111111, 0x22222222],
+            ssrcs: vec![0x11111111, 0x22222222],
             length: 4,
             reason: BytesMut::from(&b"quit"[..]),
         };
@@ -259,7 +263,7 @@ mod tests {
         let marshaled = original.marshal().unwrap();
         let unmarshaled = RtcpBye::unmarshal(marshaled).unwrap();
 
-        assert_eq!(unmarshaled.ssrss, original.ssrss);
+        assert_eq!(unmarshaled.ssrcs, original.ssrcs);
         assert_eq!(unmarshaled.length, original.length);
         assert_eq!(unmarshaled.reason, original.reason);
     }

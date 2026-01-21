@@ -90,9 +90,14 @@ fn generate_anyka_bindings() {
     // Verify required library files
     let required_libs = [
         "libplat_common.a",
+        "libplat_thread.a",
         "libplat_vi.a",
-        "libmpi_venc.a",
+        "libplat_vpss.a",
+        "libplat_ai.a",
         "libplat_drv.a",
+        "libmpi_venc.a",
+        "libmpi_aenc.a",
+        "libakuio.a",
     ];
 
     let mut missing_libs = Vec::new();

@@ -5,9 +5,9 @@
 //! encoding and continuous bit-packed fields.
 //!
 //! # Usage
-//! ```rust
-//! use crate::codec::test_fixtures::{SPS_BASELINE_720P, PPS_BASELINE};
-//! use crate::codec::sps::SpsParser;
+//! ```rust,ignore
+//! use streaming_lib::codec::test_fixtures::{SPS_BASELINE_720P, PPS_BASELINE};
+//! use streaming_lib::codec::sps::SpsParser;
 //!
 //! let sps = SpsParser::parse(SPS_BASELINE_720P).unwrap();
 //! assert_eq!(sps.profile_idc, 66); // Baseline profile

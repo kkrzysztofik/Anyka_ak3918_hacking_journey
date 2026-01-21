@@ -70,6 +70,15 @@ use {
  reference: https://www.cnblogs.com/chyingp/p/flv-getting-started.html
 */
 
+/// Information extracted from the FLV file header
+#[derive(Debug, Clone)]
+pub struct FlvHeaderInfo {
+    /// Whether the FLV file contains audio streams
+    pub has_audio: bool,
+    /// Whether the FLV file contains video streams
+    pub has_video: bool,
+}
+
 #[derive(Default)]
 pub struct FlvDemuxerAudioData {
     pub has_data: bool,
@@ -151,7 +160,15 @@ impl FlvVideoTagDemuxer {
                     //print!("flv demux video payload length {}\n", video_data.data.len());
                     return Ok(Some(video_data));
                 }
-                _ => {}
+                _ => {
+                    log::warn!(
+                        "unknown avc_packet_type: {} (timestamp={}, frame_type={}, composition_time={})",
+                        tag_header.avc_packet_type,
+                        timestamp,
+                        tag_header.frame_type,
+                        tag_header.composition_time
+                    );
+                }
             }
         }
 
@@ -223,10 +240,49 @@ impl FlvDemuxer {
         }
     }
 
-    pub fn read_flv_header(&mut self) -> Result<(), FlvDemuxerError> {
-        /*flv header*/
-        self.bytes_reader.read_bytes(9)?;
-        Ok(())
+    pub fn read_flv_header(&mut self) -> Result<FlvHeaderInfo, FlvDemuxerError> {
+        let signature = self.bytes_reader.read_bytes(3)?;
+        if signature.as_ref() != b"FLV" {
+            return Err(FlvDemuxerError {
+                value: super::errors::DemuxerErrorValue::InvalidFlvHeader {
+                    reason: "invalid signature".to_string(),
+                },
+            });
+        }
+
+        let version = self.bytes_reader.read_u8()?;
+        if version != 1 {
+            return Err(FlvDemuxerError {
+                value: super::errors::DemuxerErrorValue::InvalidFlvHeader {
+                    reason: format!("unsupported version: {version}"),
+                },
+            });
+        }
+
+        let flags = self.bytes_reader.read_u8()?;
+        if flags & 0xFA != 0 {
+            return Err(FlvDemuxerError {
+                value: super::errors::DemuxerErrorValue::InvalidFlvHeader {
+                    reason: format!("invalid flags: {flags:#04x}"),
+                },
+            });
+        }
+
+        let has_audio = (flags & 0x04) != 0;
+        let has_video = (flags & 0x01) != 0;
+
+        let data_offset = self.bytes_reader.read_u32::<BigEndian>()?;
+        if data_offset != 9 {
+            return Err(FlvDemuxerError {
+                value: super::errors::DemuxerErrorValue::InvalidFlvHeader {
+                    reason: format!("unexpected data offset: {data_offset}"),
+                },
+            });
+        }
+        Ok(FlvHeaderInfo {
+            has_audio,
+            has_video,
+        })
     }
 
     pub fn read_flv_tag(&mut self) -> Result<Option<FlvData>, FlvDemuxerError> {

@@ -7,9 +7,6 @@ use {
     bytes::BytesMut,
 };
 
-#[allow(unused_imports)]
-use indexmap::IndexMap;
-
 #[derive(Default)]
 pub struct Amf0Writer {
     writer: BytesWriter,
@@ -34,9 +31,10 @@ impl Amf0Writer {
             Amf0ValueType::Null => self.write_null(),
             Amf0ValueType::Number(ref val) => self.write_number(val),
             Amf0ValueType::UTF8String(ref val) => self.write_string(val),
+            Amf0ValueType::LongUTF8String(ref val) => self.write_long_string(val),
             Amf0ValueType::Object(ref val) => self.write_object(val),
-            Amf0ValueType::EcmaArray(ref val) => self.write_eacm_array(val),
-            _ => Ok(()),
+            Amf0ValueType::EcmaArray(ref val) => self.write_ecma_array(val),
+            Amf0ValueType::END => self.write_object_eof(),
         }
     }
 
@@ -54,13 +52,23 @@ impl Amf0Writer {
 
     pub fn write_string(&mut self, value: &String) -> Result<(), Amf0WriteError> {
         if value.len() > (u16::MAX as usize) {
-            return Err(Amf0WriteError {
-                value: Amf0WriteErrorValue::NormalStringTooLong,
-            });
+            return Err(Amf0WriteError(Amf0WriteErrorValue::NormalStringTooLong));
         }
 
         self.writer.write_u8(amf0_markers::STRING)?;
         self.writer.write_u16::<BigEndian>(value.len() as u16)?;
+        self.writer.write(value.as_bytes())?;
+
+        Ok(())
+    }
+
+    pub fn write_long_string(&mut self, value: &String) -> Result<(), Amf0WriteError> {
+        if value.len() > (u32::MAX as usize) {
+            return Err(Amf0WriteError(Amf0WriteErrorValue::LongStringTooLong));
+        }
+
+        self.writer.write_u8(amf0_markers::LONG_STRING)?;
+        self.writer.write_u32::<BigEndian>(value.len() as u32)?;
         self.writer.write(value.as_bytes())?;
 
         Ok(())
@@ -90,7 +98,7 @@ impl Amf0Writer {
         Ok(())
     }
 
-    pub fn write_eacm_array(&mut self, properties: &Amf0IndexMap) -> Result<(), Amf0WriteError> {
+    pub fn write_ecma_array(&mut self, properties: &Amf0IndexMap) -> Result<(), Amf0WriteError> {
         self.writer.write_u8(amf0_markers::ECMA_ARRAY)?;
         self.writer
             .write_u32::<BigEndian>(properties.len() as u32)?;
@@ -261,7 +269,7 @@ mod tests {
         let test_string = "a".repeat((u16::MAX as usize) + 1);
         let result = writer.write_string(&test_string);
         assert!(result.is_err());
-        match result.unwrap_err().value {
+        match &result.unwrap_err().0 {
             Amf0WriteErrorValue::NormalStringTooLong => {}
             _ => panic!("Expected NormalStringTooLong error"),
         }
@@ -337,7 +345,7 @@ mod tests {
     fn test_write_ecma_array_empty() {
         let mut writer = Amf0Writer::new();
         let props = Amf0IndexMap::default();
-        writer.write_eacm_array(&props).unwrap();
+        writer.write_ecma_array(&props).unwrap();
 
         let bytes = writer.get_current_bytes();
         assert_eq!(bytes[0], amf0_markers::ECMA_ARRAY);
@@ -357,7 +365,7 @@ mod tests {
             "1".to_string(),
             Amf0ValueType::UTF8String("second".to_string()),
         );
-        writer.write_eacm_array(&props).unwrap();
+        writer.write_ecma_array(&props).unwrap();
 
         let bytes = writer.get_current_bytes();
         assert_eq!(bytes[0], amf0_markers::ECMA_ARRAY);
@@ -536,7 +544,7 @@ mod tests {
         );
 
         let mut writer = Amf0Writer::new();
-        writer.write_eacm_array(&props).unwrap();
+        writer.write_ecma_array(&props).unwrap();
 
         let written_bytes = writer.extract_current_bytes();
         let mut bytes_reader = BytesReader::new(written_bytes);

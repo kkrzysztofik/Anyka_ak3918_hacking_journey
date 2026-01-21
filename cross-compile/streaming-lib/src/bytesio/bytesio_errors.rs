@@ -1,23 +1,23 @@
 #![allow(non_local_definitions)]
-use failure::{Backtrace, Fail};
-use std::fmt;
 use std::io;
-// use tokio::time::Elapsed;
+use thiserror::Error;
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum BytesIOErrorValue {
-    #[fail(display = "not enough bytes")]
+    #[error("not enough bytes")]
     NotEnoughBytes,
-    #[fail(display = "empty stream")]
+    #[error("empty stream")]
     EmptyStream,
-    #[fail(display = "io error")]
+    #[error("io error: {}", _0)]
     IOError(io::Error),
-    #[fail(display = "time out error")]
+    #[error("time out error: {}", _0)]
     TimeoutError(tokio::time::error::Elapsed),
-    #[fail(display = "none return")]
+    #[error("none return")]
     NoneReturn,
 }
-#[derive(Debug)]
+
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct BytesIOError {
     pub value: BytesIOErrorValue,
 }
@@ -33,30 +33,6 @@ impl From<io::Error> for BytesIOError {
         BytesIOError {
             value: BytesIOErrorValue::IOError(error),
         }
-    }
-}
-
-// impl From<Elapsed> for NetIOError {
-//     fn from(error: Elapsed) -> Self {
-//         NetIOError {
-//             value: NetIOErrorValue::TimeoutError(error),
-//         }
-//     }
-// }
-
-impl fmt::Display for BytesIOError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-impl Fail for BytesIOError {
-    fn cause(&self) -> Option<&dyn Fail> {
-        self.value.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.value.backtrace()
     }
 }
 

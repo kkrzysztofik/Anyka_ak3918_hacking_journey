@@ -109,13 +109,13 @@ impl Auth {
 
     pub fn authenticate(
         &self,
-        stream_name: &String,
+        stream_name: &str,
         secret: &Option<SecretCarrier>,
         is_pull: bool,
     ) -> Result<(), AuthError> {
-        if self.auth_type == AuthType::Both
-            || is_pull && (self.auth_type == AuthType::Pull)
-            || !is_pull && (self.auth_type == AuthType::Push)
+        if (self.auth_type == AuthType::Both)
+            || (is_pull && (self.auth_type == AuthType::Pull))
+            || (!is_pull && (self.auth_type == AuthType::Push))
         {
             let mut auth_err_reason: String = String::from("there is no token str found.");
             let mut err: AuthErrorValue = AuthErrorValue::NoTokenFound;
@@ -142,7 +142,7 @@ impl Auth {
         Ok(())
     }
 
-    fn check(&self, stream_name: &String, auth_str: &str, is_pull: bool) -> bool {
+    fn check(&self, stream_name: &str, auth_str: &str, is_pull: bool) -> bool {
         let password = if is_pull {
             &self.password
         } else {

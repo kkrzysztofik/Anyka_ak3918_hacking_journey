@@ -75,9 +75,8 @@ echo ""
 
 # Create vendor directory structure
 echo "Creating vendor directory structure..."
-mkdir -p "$VENDOR_INCLUDE_DIR"
 mkdir -p "$VENDOR_LIB_DIR"
-chmod 755 "$VENDOR_INCLUDE_DIR" "$VENDOR_LIB_DIR"
+chmod 755 "$VENDOR_LIB_DIR"
 echo "✓ Vendor directories created"
 echo ""
 
@@ -131,7 +130,6 @@ echo ""
 
 # Copy static libraries
 echo "Copying static libraries..."
-LIB_COUNT=0
 COPIED_COUNT=0
 MISSING_LIBS=()
 
@@ -148,7 +146,6 @@ for lib in "${REQUIRED_LIBS[@]}"; do
     # Copy library (overwrite if exists)
     cp -f "$source_lib" "$dest_lib"
     chmod 644 "$dest_lib"
-    ((LIB_COUNT++))
     ((COPIED_COUNT++))
 done
 

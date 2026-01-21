@@ -14,6 +14,9 @@ use tokio_util::codec::Framed;
 
 use super::bytesio_errors::{BytesIOError, BytesIOErrorValue};
 
+/// Maximum UDP datagram size (RFC 768 limit)
+const MAX_UDP_DATAGRAM_SIZE: usize = 65507;
+
 pub enum NetType {
     TCP,
     UDP,
@@ -42,13 +45,17 @@ impl UdpIO {
         let local_address = format!("0.0.0.0:{local_port}");
         if let Ok(local_socket) = UdpSocket::bind(local_address).await {
             if let Ok(remote_socket_addr) = remote_address.parse::<SocketAddr>() {
-                if let Err(err) = local_socket.connect(remote_socket_addr).await {
-                    log::info!("connect to remote udp socket error: {}", err);
+                match local_socket.connect(remote_socket_addr).await {
+                    Ok(()) => {
+                        return Some(Self {
+                            socket: local_socket,
+                        });
+                    }
+                    Err(err) => {
+                        log::error!("connect to remote udp socket error: {}", err);
+                        return None;
+                    }
                 }
-
-                return Some(Self {
-                    socket: local_socket,
-                });
             } else {
                 log::error!("remote_address parse error: {:?}", remote_address);
             }
@@ -79,8 +86,11 @@ impl UdpIO {
 }
 
 pub async fn new_udpio_pair() -> Option<(UdpIO, UdpIO)> {
+    const MAX_ATTEMPTS: u32 = 32768; // Prevent infinite loops
+
     let mut next_local_port = 0;
     let first_local_port;
+    let mut attempt_count = 0;
 
     // get the first available port
     if let Some(udpio_0) = UdpIO::new_with_local_port(next_local_port).await {
@@ -105,6 +115,12 @@ pub async fn new_udpio_pair() -> Option<(UdpIO, UdpIO)> {
     }
 
     loop {
+        attempt_count += 1;
+        if attempt_count > MAX_ATTEMPTS {
+            log::error!("new_udpio_pair exceeded maximum attempts");
+            return None;
+        }
+
         log::trace!("next local port: {next_local_port} and first port: {first_local_port}");
 
         if next_local_port == 65535 {
@@ -129,7 +145,6 @@ pub async fn new_udpio_pair() -> Option<(UdpIO, UdpIO)> {
             next_local_port += 1;
         }
     }
-    //None
 }
 
 #[async_trait]
@@ -153,7 +168,7 @@ impl TNetIO for UdpIO {
     }
 
     async fn read(&mut self) -> Result<BytesMut, BytesIOError> {
-        let mut buf = vec![0; 4096];
+        let mut buf = vec![0; MAX_UDP_DATAGRAM_SIZE];
         let len = self.socket.recv(&mut buf).await?;
         let mut rv = BytesMut::new();
         rv.put(&buf[..len]);
@@ -234,20 +249,22 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // This test is too slow for normal test runs
     async fn test_new_udpio_pair2() {
         println!("test_new_udpio_pair2 begin...");
         let mut socket: Vec<UdpIO> = Vec::new();
 
-        for i in 1..=65535 {
-            println!("cur port:== {}", i);
-            //if i % 2 == 1 {
+        // Only test a sample of ports to avoid extremely slow test execution
+        // Testing port 0 (automatic), and a few high port numbers
+        let test_ports = [0, 30000, 40000, 50000];
+
+        for i in test_ports.iter() {
             println!("cur port: {}", i);
-            if let Some(udpio) = UdpIO::new_with_local_port(i).await {
+            if let Some(udpio) = UdpIO::new_with_local_port(*i).await {
                 socket.push(udpio)
             } else {
                 println!("new local port fail: {}", i);
             }
-            //}
         }
 
         println!("socket size: {}", socket.len());

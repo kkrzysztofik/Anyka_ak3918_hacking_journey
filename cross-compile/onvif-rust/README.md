@@ -76,7 +76,7 @@ If needed, you can manually set up the vendor directory:
 
    ```bash
    mkdir -p cross-compile/onvif-rust/vendor/lib
-   cp cross-compile/anyka_reference/IOT-ANYKA-PTZdaemon/libs/lib*.a vendor/lib/
+   cp cross-compile/anyka_reference/IOT-ANYKA-PTZdaemon/libs/lib*.a cross-compile/onvif-rust/vendor/lib/
    ```
 
 #### Verification

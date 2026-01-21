@@ -327,7 +327,7 @@ sequenceDiagram
         Platform->>RTSP: Forward frame
         RTSP->>Client: RTP packets (video)
         
-        SDK->>Platform: Audio frame (G.711)
+        SDK->>Platform: Audio frame (AAC)
         Platform->>RTSP: Forward frame
         RTSP->>Client: RTP packets (audio)
     end
@@ -346,7 +346,7 @@ sequenceDiagram
 2. **Media Description**
   - Client sends DESCRIBE request
   - Server queries platform for encoder parameters
-  - Server generates SDP with H.264 and G.711 tracks
+  - Server generates SDP with H.264 and AAC tracks
   - Client parses SDP and prepares decoders
 3. **Transport Setup**
   - Client sends SETUP for video track (RTP/UDP or RTP/TCP)

@@ -74,7 +74,7 @@ impl Drop for FrameHandle {
 
 // Platform maintains active frames
 struct ActiveFrames {
-    frames: HashMap<*const u8,="" Arc<AtomicUsize="">>,
+    frames: HashMap<*const u8, Arc<AtomicUsize>>,
 }
 ```
 
@@ -128,4 +128,4 @@ if duration > Duration::from_millis(2) {
 - ✅ Callbacks invoked within timing constraint (< 2ms average)
 - ✅ Integration with T8a and T9 validated
 - ✅ Unit tests pass (100% with mocks, including panic scenarios)
-- ✅ `cargo clippy` passes with zero warnings</*const></AtomicUsize>
+- ✅ `cargo clippy` passes with zero warnings

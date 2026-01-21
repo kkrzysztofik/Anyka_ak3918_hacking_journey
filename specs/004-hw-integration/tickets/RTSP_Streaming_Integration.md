@@ -32,10 +32,12 @@ Integrate RTSP server from streaming-lib with the platform layer using bounded s
 ```rust
 if let Err(packet) = self.send_queue.try_send(packet_buffer) {
     // Evict oldest frame
-    if let Ok(old_packet) = rx.try_recv() {
+  if let Ok(old_packet) = self.send_queue_rx.try_recv() {
         drop(old_packet);  // Return to pool
     }
-    self.send_queue.try_send(packet).ok();
+  if let Err(err) = self.send_queue.try_send(packet) {
+    log::warn!("RTSP send queue still full after eviction: {}", err);
+  }
 }
 ```
 

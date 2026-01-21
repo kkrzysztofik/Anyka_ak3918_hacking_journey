@@ -38,7 +38,7 @@ let audio_config = AudioEncoderConfig {
     codec: AudioCodec::AAC,
     sample_rate: 16000,
     channels: 1,
-    bitrate: 64,
+  bitrate: 64_000, // bps
 };
 ```
 

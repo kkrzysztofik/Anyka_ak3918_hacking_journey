@@ -41,6 +41,13 @@ impl Marshal<Result<BytesMut, RtcpError>> for ReportBlock {
 
         writer.write_u32::<BigEndian>(self.ssrc)?;
         writer.write_u8(self.fraction_lost)?;
+        if self.cumulative_num_of_packets_lost > 0x00FF_FFFF {
+            return Err(RtcpError::from(
+                super::errors::RtcpErrorValue::InvalidPacketLoss {
+                    value: self.cumulative_num_of_packets_lost,
+                },
+            ));
+        }
         writer.write_u24::<BigEndian>(self.cumulative_num_of_packets_lost)?;
         writer.write_u32::<BigEndian>(self.extended_highest_seq_number)?;
         writer.write_u32::<BigEndian>(self.jitter)?;
@@ -84,7 +91,11 @@ impl Marshal<Result<BytesMut, RtcpError>> for RtcpReceiverReport {
     fn marshal(&self) -> Result<BytesMut, RtcpError> {
         let mut writer = BytesWriter::default();
 
-        let header_bytesmut = self.header.marshal()?;
+        let mut header = self.header.clone();
+        header.report_count = self.report_blocks.len() as u8;
+        debug_assert_eq!(header.report_count as usize, self.report_blocks.len());
+
+        let header_bytesmut = header.marshal()?;
         writer.write(&header_bytesmut[..])?;
 
         writer.write_u32::<BigEndian>(self.ssrc)?;

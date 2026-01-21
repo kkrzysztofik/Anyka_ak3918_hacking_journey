@@ -1,58 +1,50 @@
-#![allow(non_local_definitions)]
 use crate::bytesio::bytes_errors::BytesReadError;
 use crate::bytesio::bytes_errors::BytesWriteError;
-use failure::Backtrace;
 use serde_json::error::Error;
+use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 
-use {failure::Fail, std::fmt};
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum StreamHubErrorValue {
-    #[fail(display = "no app name")]
+    #[error("no app name")]
     NoAppName,
-    #[fail(display = "no stream name")]
+    #[error("no stream name")]
     NoStreamName,
-    #[fail(display = "no app or stream name")]
+    #[error("no app or stream name")]
     NoAppOrStreamName,
-    #[fail(display = "exists")]
+    #[error("exists")]
     Exists,
-    #[fail(display = "send error")]
+    #[error("send error")]
     SendError,
-    #[fail(display = "send video error")]
+    #[error("send video error")]
     SendVideoError,
-    #[fail(display = "send audio error")]
+    #[error("send audio error")]
     SendAudioError,
-    #[fail(display = "bytes read error")]
-    BytesReadError(BytesReadError),
-    #[fail(display = "bytes write error")]
-    BytesWriteError(BytesWriteError),
-    #[fail(display = "not correct data sender type")]
+    #[error("bytes read error: {}", _0)]
+    BytesReadError(#[from] BytesReadError),
+    #[error("bytes write error: {}", _0)]
+    BytesWriteError(#[from] BytesWriteError),
+    #[error("not correct data sender type")]
     NotCorrectDataSenderType,
-    #[fail(display = "Tokio oneshot recv error")]
-    RecvError(RecvError),
-    #[fail(display = "Serde json error")]
-    SerdeError(Error),
-    #[fail(display = "the client session error: {}", _0)]
+    #[error("Tokio oneshot recv error: {}", _0)]
+    RecvError(#[from] RecvError),
+    #[error("Serde json error: {}", _0)]
+    SerdeError(#[from] Error),
+    #[error("the client session error: {}", _0)]
     RtspClientSessionError(String),
+    #[error("other error: {0}")]
+    Other(String),
 }
-#[derive(Debug)]
+
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct StreamHubError {
     pub value: StreamHubErrorValue,
 }
 
-impl fmt::Display for StreamHubError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-impl Fail for StreamHubError {
-    fn cause(&self) -> Option<&dyn Fail> {
-        self.value.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.value.backtrace()
+impl From<StreamHubErrorValue> for StreamHubError {
+    fn from(val: StreamHubErrorValue) -> Self {
+        StreamHubError { value: val }
     }
 }
 
@@ -91,7 +83,7 @@ impl From<Error> for StreamHubError {
 impl From<String> for StreamHubError {
     fn from(error: String) -> Self {
         StreamHubError {
-            value: StreamHubErrorValue::RtspClientSessionError(error),
+            value: StreamHubErrorValue::Other(error),
         }
     }
 }
@@ -166,6 +158,12 @@ mod tests {
         assert!(format!("{}", err).contains("test error"));
     }
 
+    #[test]
+    fn test_streamhub_error_value_other_display() {
+        let err = StreamHubErrorValue::Other("other".to_string());
+        assert_eq!(format!("{}", err), "other error: other");
+    }
+
     // ========== StreamHubError From Trait Tests ==========
 
     #[test]
@@ -189,10 +187,7 @@ mod tests {
     #[test]
     fn test_streamhub_error_from_string() {
         let err: StreamHubError = "test session error".to_string().into();
-        assert!(matches!(
-            err.value,
-            StreamHubErrorValue::RtspClientSessionError(_)
-        ));
+        assert!(matches!(err.value, StreamHubErrorValue::Other(_)));
         assert!(format!("{}", err).contains("test session error"));
     }
 

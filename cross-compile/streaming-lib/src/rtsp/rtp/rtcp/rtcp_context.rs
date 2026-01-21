@@ -101,10 +101,6 @@ impl RtcpSource {
         self.received_prior = 0;
         self.expected_prior = 0;
         /* other initialization */
-
-        self.base_seq = seq as u32;
-        self.max_seq = seq;
-        self.bad_seq = RTP_SEQ_MOD + 1;
     }
 }
 
@@ -129,7 +125,7 @@ impl RtcpContext {
         RtcpContext {
             ssrc,
             source: RtcpSource {
-                max_seq: seq - 1,
+                max_seq: seq.wrapping_sub(1),
                 probation: MIN_SEQUENTIAL,
                 ..Default::default()
             },
@@ -152,13 +148,13 @@ impl RtcpContext {
     }
 
     pub fn generate_bye(&self) -> RtcpBye {
-        let ssrss = vec![self.ssrc];
+        let ssrcs = vec![self.ssrc];
         RtcpBye {
             header: RtcpHeader {
                 report_count: 1,
                 ..Default::default()
             },
-            ssrss,
+            ssrcs,
             ..Default::default()
         }
     }
@@ -182,8 +178,10 @@ impl RtcpContext {
         };
 
         let delay = utils::current_time() - self.sr_clock_time;
-        let lsr = self.sr_ntp_lsr >> 8 & 0xFFFFFFFF;
-        let dlsr = (delay as f64 / 1000000. * 65535.) as u32;
+        // Extract the middle 32 bits of the 64-bit NTP timestamp (RFC3550).
+        let lsr = (self.sr_ntp_lsr >> 8) & 0xFFFFFFFF;
+        // DLSR is in units of 1/65536 seconds per RFC3550.
+        let dlsr = (delay as f64 / 1_000_000.0 * 65_535.0) as u32;
 
         ReportBlock {
             cumulative_num_of_packets_lost: lost,
@@ -234,14 +232,15 @@ impl RtcpContext {
         if self.last_rtp_clock == 0 {
             self.source.jitter = 0.;
         } else {
-            let mut d = ((rtp_clock - self.last_rtp_clock) * self.sample_rate as u64 / 1000000)
-                as i64
-                - (pkt.header.timestamp - self.last_rtp_timestamp) as i64;
+            let rtp_delta =
+                (rtp_clock - self.last_rtp_clock) as f64 * (self.sample_rate as f64) / 1_000_000.0;
+            let ts_delta = (pkt.header.timestamp - self.last_rtp_timestamp) as f64;
+            let mut d = rtp_delta - ts_delta;
 
-            if d < 0 {
+            if d < 0.0 {
                 d = -d;
             }
-            self.source.jitter += (d as f64 - self.source.jitter) / 16.;
+            self.source.jitter += (d - self.source.jitter) / 16.0;
         }
 
         self.last_rtp_clock = rtp_clock;
@@ -336,8 +335,8 @@ mod tests {
     fn test_generate_bye() {
         let ctx = RtcpContext::new(12345, 100, 48000);
         let bye = ctx.generate_bye();
-        assert_eq!(bye.ssrss.len(), 1);
-        assert_eq!(bye.ssrss[0], 12345);
+        assert_eq!(bye.ssrcs.len(), 1);
+        assert_eq!(bye.ssrcs[0], 12345);
         assert_eq!(bye.header.report_count, 1);
     }
 
@@ -468,5 +467,249 @@ mod tests {
         let source = RtcpSource::default();
         let debug_str = format!("{:?}", source);
         assert!(debug_str.contains("RtcpSource"));
+    }
+
+    // ========== update_sequence Tests ==========
+
+    #[test]
+    fn test_update_sequence_probation_success() {
+        let mut source = RtcpSource {
+            max_seq: 100,
+            probation: 2, // MIN_SEQUENTIAL
+            ..Default::default()
+        };
+
+        // First sequential packet
+        let result = source.update_sequence(101);
+        assert_eq!(result, 0); // still in probation
+        assert_eq!(source.probation, 1);
+        assert_eq!(source.max_seq, 101);
+
+        // Second sequential packet - should exit probation
+        let result = source.update_sequence(102);
+        assert_eq!(result, 1);
+        assert_eq!(source.probation, 0);
+    }
+
+    #[test]
+    fn test_update_sequence_probation_reset() {
+        let mut source = RtcpSource {
+            max_seq: 100,
+            probation: 2,
+            ..Default::default()
+        };
+
+        // Non-sequential packet resets probation
+        let result = source.update_sequence(150);
+        assert_eq!(result, 0);
+        assert_eq!(source.probation, 1); // MIN_SEQUENTIAL - 1
+        assert_eq!(source.max_seq, 150);
+    }
+
+    #[test]
+    fn test_update_sequence_in_order_within_dropout() {
+        let mut source = RtcpSource {
+            max_seq: 100,
+            probation: 0,
+            received: 10,
+            ..Default::default()
+        };
+
+        // In order packet
+        let result = source.update_sequence(101);
+        assert_eq!(result, 1);
+        assert_eq!(source.max_seq, 101);
+        assert_eq!(source.received, 11);
+    }
+
+    #[test]
+    fn test_update_sequence_wrap_around() {
+        let mut source = RtcpSource {
+            max_seq: 65534,
+            probation: 0,
+            cycles: 0,
+            received: 10,
+            ..Default::default()
+        };
+
+        // Packet after max (causes wrap)
+        source.update_sequence(65535);
+        assert_eq!(source.max_seq, 65535);
+
+        // Next packet wraps around
+        let result = source.update_sequence(0);
+        assert_eq!(result, 1);
+        assert_eq!(source.cycles, RTP_SEQ_MOD); // 65536
+    }
+
+    #[test]
+    fn test_update_sequence_bad_seq_resync() {
+        let mut source = RtcpSource {
+            max_seq: 100,
+            probation: 0,
+            bad_seq: RTP_SEQ_MOD + 1, // Initial value from init_seq
+            received: 10,
+            ..Default::default()
+        };
+
+        // First out-of-order packet sets bad_seq to seq+1
+        let result = source.update_sequence(5000);
+        assert_eq!(result, 0);
+        assert_eq!(source.bad_seq, 5001);
+
+        // Send the same packet matching bad_seq - this will trigger resync
+        // because seq == bad_seq as u16 is checked
+        source.bad_seq = 5001;
+        let result = source.update_sequence(5001);
+        // After resync via init_seq, received gets incremented and returns 1
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn test_update_sequence_large_delta() {
+        let mut source = RtcpSource {
+            max_seq: 100,
+            probation: 0,
+            received: 5,
+            ..Default::default()
+        };
+
+        // Large delta (greater than MAX_DROPOUT but within misorder range)
+        let result = source.update_sequence(5000);
+        assert_eq!(result, 0); // Sets bad_seq, returns 0
+    }
+
+    // ========== received_rtp Tests ==========
+
+    #[test]
+    fn test_received_rtp_first_packet() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+
+        let pkt = RtpPacket {
+            header: RtpHeader {
+                seq_number: 100,
+                timestamp: 1000,
+                ..Default::default()
+            },
+            payload: BytesMut::from(&[0x00; 50][..]),
+            ..Default::default()
+        };
+
+        ctx.received_rtp(pkt);
+        assert_eq!(ctx.source.jitter, 0.0);
+    }
+
+    #[test]
+    fn test_received_rtp_jitter_calculation() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+
+        // First packet (exits probation)
+        let pkt1 = RtpPacket {
+            header: RtpHeader {
+                seq_number: 100,
+                timestamp: 1000,
+                ..Default::default()
+            },
+            payload: BytesMut::from(&[0x00; 50][..]),
+            ..Default::default()
+        };
+        ctx.received_rtp(pkt1);
+
+        // Second packet (now we exit probation and jitter can be calculated)
+        let pkt2 = RtpPacket {
+            header: RtpHeader {
+                seq_number: 101,
+                timestamp: 1160, // +160 samples (at 48kHz = 3.33ms)
+                ..Default::default()
+            },
+            payload: BytesMut::from(&[0x00; 50][..]),
+            ..Default::default()
+        };
+        ctx.received_rtp(pkt2);
+        // Jitter should be calculated now
+    }
+
+    #[test]
+    fn test_received_rtp_sequence_rejected() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+
+        // Out of sequence packet during probation should be rejected
+        let pkt = RtpPacket {
+            header: RtpHeader {
+                seq_number: 200, // Way out of sequence
+                timestamp: 1000,
+                ..Default::default()
+            },
+            payload: BytesMut::from(&[0x00; 50][..]),
+            ..Default::default()
+        };
+
+        let initial_jitter = ctx.source.jitter;
+        ctx.received_rtp(pkt);
+        // Packet rejected, jitter unchanged
+        assert_eq!(ctx.source.jitter, initial_jitter);
+    }
+
+    // ========== gen_report_block Tests ==========
+
+    #[test]
+    fn test_gen_report_block_with_received_packets() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+        ctx.source.probation = 0;
+        ctx.source.base_seq = 100;
+        ctx.source.max_seq = 105;
+        ctx.source.received = 5;
+        ctx.source.cycles = 0;
+
+        let block = ctx.gen_report_block();
+        assert_eq!(block.ssrc, ctx.sender_ssrc);
+        // expected = 105 - 100 + 1 = 6, lost = 6 - 5 = 1
+        assert_eq!(block.cumulative_num_of_packets_lost, 1);
+    }
+
+    #[test]
+    fn test_gen_report_block_no_loss() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+        ctx.source.probation = 0;
+        ctx.source.base_seq = 100;
+        ctx.source.max_seq = 104;
+        ctx.source.received = 5;
+        ctx.source.cycles = 0;
+
+        let block = ctx.gen_report_block();
+        assert_eq!(block.cumulative_num_of_packets_lost, 0);
+    }
+
+    #[test]
+    fn test_gen_report_block_fraction_lost_calculation() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+        ctx.source.probation = 0;
+        ctx.source.base_seq = 0;
+        ctx.source.max_seq = 100;
+        ctx.source.received = 90;
+        ctx.source.cycles = 0;
+        ctx.source.expected_prior = 50;
+        ctx.source.received_prior = 45;
+
+        let _block = ctx.gen_report_block();
+        // Just verify it doesn't panic
+    }
+
+    // ========== generate_rr with sender info Tests ==========
+
+    #[test]
+    fn test_generate_rr_after_sr() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+
+        // Receive an SR first
+        let mut sr = RtcpSenderReport::default();
+        sr.ssrc = 54321;
+        sr.ntp = 0x0011223344556677;
+        ctx.received_sr(&sr);
+
+        // Now generate RR
+        let rr = ctx.generate_rr();
+        assert_eq!(rr.ssrc, 12345);
+        assert_eq!(rr.report_blocks[0].ssrc, 54321);
     }
 }

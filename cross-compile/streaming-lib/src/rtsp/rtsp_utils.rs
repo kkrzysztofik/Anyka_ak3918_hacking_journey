@@ -7,19 +7,19 @@ macro_rules! scanf {
 
 pub(crate) use scanf;
 
-use bytes::BytesMut;
-pub fn print(title: &str, data: BytesMut) {
-    println!("==========={}:{}", title, data.len());
-    let mut idx = 0;
-    for i in data {
-        print!("{i:02X} ");
-        idx += 1;
-        if idx % 16 == 0 {
-            println!()
+pub fn debug_print_hex(title: &str, data: &[u8]) {
+    let mut line = String::new();
+    line.push_str(&format!("==========={}:{}\n", title, data.len()));
+
+    for (idx, byte) in data.iter().enumerate() {
+        line.push_str(&format!("{byte:02X} "));
+        if (idx + 1) % 16 == 0 {
+            line.push('\n');
         }
     }
 
-    println!("===========")
+    line.push_str("\n===========");
+    log::debug!("{line}");
 }
 
 #[cfg(test)]
@@ -29,10 +29,15 @@ mod tests {
     fn test_scanf() {
         let str_a = "18:23:08";
 
-        if let (Some(a), Some(b), Some(c), _) =
+        if let (Some(a), Some(b), Some(c), d) =
             scanf!(str_a, |c| c == ':' || c == '.', i64, i64, i64, i64)
         {
-            println!("a:{a} b:{b} c:{c} ");
+            assert_eq!(a, 18);
+            assert_eq!(b, 23);
+            assert_eq!(c, 8);
+            assert!(d.is_none());
+        } else {
+            panic!("scanf did not parse expected values");
         }
     }
 }

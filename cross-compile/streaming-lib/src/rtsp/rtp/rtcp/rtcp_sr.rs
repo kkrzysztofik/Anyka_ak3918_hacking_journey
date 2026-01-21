@@ -49,9 +49,9 @@ pub struct RtcpSenderReport {
     pub header: RtcpHeader,
     pub ssrc: u32,
     pub ntp: u64,
-    rtp_timestamp: u32,
-    sender_packet_count: u32,
-    sender_octet_count: u32,
+    pub rtp_timestamp: u32,
+    pub sender_packet_count: u32,
+    pub sender_octet_count: u32,
     pub report_blocks: Vec<ReportBlock>,
 }
 

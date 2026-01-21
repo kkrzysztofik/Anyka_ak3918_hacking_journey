@@ -107,7 +107,7 @@ clone_rust() {
 
     log_info "Cloning Rust repository (version ${RUST_VERSION})..."
     # Clone the specific version tag - do NOT fallback to stable
-    # Use annotated tag format with v prefix
+    # Rust tags use plain semantic versions (e.g., 1.92.0) without a v prefix
     git clone --depth 1 --branch "${RUST_VERSION}" \
         https://github.com/rust-lang/rust.git "${RUST_SRC_DIR}" || {
         log_error "Failed to clone Rust source for version ${RUST_VERSION}"
@@ -435,16 +435,29 @@ install_rust() {
         log_info "Copying library sources from ${RUST_SRC_DIR}/library..."
         # Use rsync or cp with exclusions to match bootstrap behavior
         # Exclude: library/backtrace/crates, library/stdarch/Cargo.toml, etc.
-        rsync -a --exclude='backtrace/crates' \
-              --exclude='stdarch/Cargo.toml' \
-              --exclude='stdarch/crates/stdarch-verify' \
-              --exclude='stdarch/crates/intrinsic-test' \
-              "${RUST_SRC_DIR}/library/" "${rust_src_dest}/library/" 2>/dev/null || \
-        cp -r "${RUST_SRC_DIR}/library" "${rust_src_dest}/" || {
-            log_error "Failed to copy library sources"
-            exit 1
-        }
-        log_info "Library sources copied successfully"
+        if command -v rsync >/dev/null 2>&1; then
+            if rsync -a --exclude='backtrace/crates' \
+                  --exclude='stdarch/Cargo.toml' \
+                  --exclude='stdarch/crates/stdarch-verify' \
+                  --exclude='stdarch/crates/intrinsic-test' \
+                  "${RUST_SRC_DIR}/library/" "${rust_src_dest}/library/"; then
+                log_info "Library sources copied successfully"
+            else
+                log_warn "rsync failed, falling back to cp"
+                cp -r "${RUST_SRC_DIR}/library" "${rust_src_dest}/" || {
+                    log_error "Failed to copy library sources"
+                    exit 1
+                }
+                log_info "Library sources copied successfully"
+            fi
+        else
+            log_warn "rsync not found, falling back to cp"
+            cp -r "${RUST_SRC_DIR}/library" "${rust_src_dest}/" || {
+                log_error "Failed to copy library sources"
+                exit 1
+            }
+            log_info "Library sources copied successfully"
+        fi
     else
         log_error "Library source directory not found: ${RUST_SRC_DIR}/library"
         exit 1

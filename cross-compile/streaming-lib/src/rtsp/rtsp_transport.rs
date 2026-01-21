@@ -28,7 +28,7 @@ pub struct RtspTransport {
 }
 
 impl Unmarshal for RtspTransport {
-    fn unmarshal(raw_data: &str) -> Option<Self> {
+    fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut rtsp_transport = RtspTransport::default();
 
         let param_parts: Vec<&str> = raw_data.split(';').collect();
@@ -48,9 +48,15 @@ impl Unmarshal for RtspTransport {
                     rtsp_transport.cast_type = CastType::Multicast;
                 }
                 "mode" => {
+                    if kv.len() < 2 {
+                        continue;
+                    }
                     rtsp_transport.transport_mod = Some(kv[1].to_string());
                 }
                 "client_port" => {
+                    if kv.len() < 2 {
+                        continue;
+                    }
                     let ports = scanf!(kv[1], '-', u16, u16);
 
                     let mut client_ports: [u16; 2] = [0, 0];
@@ -64,6 +70,9 @@ impl Unmarshal for RtspTransport {
                     rtsp_transport.client_port = Some(client_ports);
                 }
                 "server_port" => {
+                    if kv.len() < 2 {
+                        continue;
+                    }
                     let ports = scanf!(kv[1], '-', u16, u16);
 
                     let mut server_ports: [u16; 2] = [0, 0];
@@ -77,6 +86,9 @@ impl Unmarshal for RtspTransport {
                     rtsp_transport.server_port = Some(server_ports);
                 }
                 "interleaved" => {
+                    if kv.len() < 2 {
+                        continue;
+                    }
                     let vals = scanf!(kv[1], '-', u8, u8);
 
                     let mut interleaveds: [u8; 2] = [0, 0];
@@ -90,6 +102,9 @@ impl Unmarshal for RtspTransport {
                     rtsp_transport.interleaved = Some(interleaveds);
                 }
                 "ssrc" => {
+                    if kv.len() < 2 {
+                        continue;
+                    }
                     let ssrc_str = kv[1].trim();
                     let ssrc = if ssrc_str.starts_with("0x") || ssrc_str.starts_with("0X") {
                         u32::from_str_radix(&ssrc_str[2..], 16).ok()
@@ -103,7 +118,7 @@ impl Unmarshal for RtspTransport {
             }
         }
 
-        Some(rtsp_transport)
+        Ok(rtsp_transport)
     }
 }
 
@@ -165,7 +180,8 @@ mod tests {
     fn test_parse_transport() {
         let parser = RtspTransport::unmarshal(
             "RTP/AVP;unicast;client_port=8000-8001;server_port=9000-9001;ssrc=1234;interleaved=0-1;mode=record",
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(parser.cast_type, CastType::Unicast);
         assert_eq!(parser.protocol_type, ProtocolType::UDP);
@@ -445,7 +461,7 @@ mod tests {
     fn test_unmarshal_empty_string() {
         let transport = RtspTransport::unmarshal("");
         // Should return default transport
-        assert!(transport.is_some());
+        assert!(transport.is_ok());
     }
 
     #[test]
@@ -458,9 +474,7 @@ mod tests {
 
     #[test]
     fn test_unmarshal_malformed_port() {
-        let _transport = RtspTransport::unmarshal("RTP/AVP;unicast;client_port=invalid").unwrap();
-        // Malformed port should be ignored or set to default
-        // Implementation may vary, but should not panic
-        assert!(true);
+        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;client_port=invalid").unwrap();
+        assert!(transport.client_port.is_none());
     }
 }

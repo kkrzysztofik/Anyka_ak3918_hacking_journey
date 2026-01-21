@@ -11,6 +11,7 @@ use define::PacketData;
 
 pub mod define;
 pub mod errors;
+pub mod mock_publisher;
 pub mod notify;
 pub mod statistics;
 pub mod stream;
@@ -137,6 +138,9 @@ impl StreamDataTransceiver {
             loop {
                 tokio::select! {
                     data = receiver.recv() => {
+                       if data.is_none() {
+                           break;
+                       }
                        Self::receive_frame_data(data, &frame_senders).await;
                     }
                     _ = exit.recv()=>{
@@ -193,6 +197,9 @@ impl StreamDataTransceiver {
             loop {
                 tokio::select! {
                     data = receiver.recv() => {
+                       if data.is_none() {
+                           break;
+                       }
                        Self::receive_packet_data(data, &packet_senders).await;
                     }
                     _ = exit.recv()=>{
@@ -347,6 +354,9 @@ impl StreamDataTransceiver {
                 tokio::select! {
                     data = receiver.recv()  =>
                     {
+                        if data.is_none() {
+                            break;
+                        }
                         Self::receive_statistics_data(data, &statistics_data).await;
                     }
                     _ = exit_receive.recv()=>{
@@ -367,81 +377,76 @@ impl StreamDataTransceiver {
         statistics_data: Arc<Mutex<StatisticsStream>>,
     ) {
         tokio::spawn(async move {
-            loop {
-                if let Some(val) = receiver.recv().await {
-                    match val {
-                        TransceiverEvent::Subscribe {
-                            sender,
-                            info,
-                            result_sender,
-                        } => {
-                            if let Err(err) = stream_handler
-                                .send_prior_data(sender.clone(), info.sub_type)
-                                .await
-                            {
-                                log::error!("receive_event_loop send_prior_data err: {}", err);
-                                break;
-                            }
-                            match sender {
-                                DataSender::Frame {
-                                    sender: frame_sender,
-                                } => {
-                                    frame_senders.lock().await.insert(info.id, frame_sender);
-                                }
-                                DataSender::Packet {
-                                    sender: packet_sender,
-                                } => {
-                                    packet_senders.lock().await.insert(info.id, packet_sender);
-                                }
-                            }
-
-                            if let Err(err) = result_sender.send(statistic_sender.clone()) {
-                                log::error!(
-                                    "receive_event_loop:send statistic send err :{:?} ",
-                                    err
-                                )
-                            }
-
-                            let mut statistics_data = statistics_data.lock().await;
-                            statistics_data.subscriber_count += 1;
-                        }
-                        TransceiverEvent::UnSubscribe { info } => {
-                            match info.sub_type {
-                                SubscribeType::RtpPull | SubscribeType::WhepPull => {
-                                    packet_senders.lock().await.remove(&info.id);
-                                }
-                                _ => {
-                                    frame_senders.lock().await.remove(&info.id);
-                                }
-                            }
-                            let mut statistics_data = statistics_data.lock().await;
-                            let subscribers = &mut statistics_data.subscribers;
-                            subscribers.remove(&info.id);
-
-                            statistics_data.subscriber_count -= 1;
-                        }
-                        TransceiverEvent::UnPublish {} => {
-                            if let Err(err) = exit.send(()) {
-                                log::error!("TransmitterEvent::UnPublish send error: {}", err);
-                            }
+            while let Some(val) = receiver.recv().await {
+                match val {
+                    TransceiverEvent::Subscribe {
+                        sender,
+                        info,
+                        result_sender,
+                    } => {
+                        if let Err(err) = stream_handler
+                            .send_prior_data(sender.clone(), info.sub_type)
+                            .await
+                        {
+                            log::error!("receive_event_loop send_prior_data err: {}", err);
                             break;
                         }
-                        TransceiverEvent::Api { sender, uuid } => {
-                            log::info!("api:  stream identifier: {:?}", uuid);
-                            let statistic_data = if let Some(uid) = uuid {
-                                statistics_data.lock().await.query_by_uuid(uid)
-                            } else {
-                                log::info!("api2:  stream identifier: {:?}", statistics_data);
-                                statistics_data.lock().await.clone()
-                            };
-
-                            if let Err(err) = sender.send(statistic_data) {
-                                log::info!("Transmitter send avstatistic data err: {}", err);
+                        match sender {
+                            DataSender::Frame {
+                                sender: frame_sender,
+                            } => {
+                                frame_senders.lock().await.insert(info.id, frame_sender);
+                            }
+                            DataSender::Packet {
+                                sender: packet_sender,
+                            } => {
+                                packet_senders.lock().await.insert(info.id, packet_sender);
                             }
                         }
-                        TransceiverEvent::Request { sender } => {
-                            stream_handler.send_information(sender).await;
+
+                        if let Err(err) = result_sender.send(statistic_sender.clone()) {
+                            log::error!("receive_event_loop:send statistic send err :{:?} ", err)
                         }
+
+                        let mut statistics_data = statistics_data.lock().await;
+                        statistics_data.subscriber_count += 1;
+                    }
+                    TransceiverEvent::UnSubscribe { info } => {
+                        match info.sub_type {
+                            SubscribeType::RtpPull | SubscribeType::WhepPull => {
+                                packet_senders.lock().await.remove(&info.id);
+                            }
+                            _ => {
+                                frame_senders.lock().await.remove(&info.id);
+                            }
+                        }
+                        let mut statistics_data = statistics_data.lock().await;
+                        let subscribers = &mut statistics_data.subscribers;
+                        subscribers.remove(&info.id);
+
+                        statistics_data.subscriber_count -= 1;
+                    }
+                    TransceiverEvent::UnPublish {} => {
+                        if let Err(err) = exit.send(()) {
+                            log::error!("TransmitterEvent::UnPublish send error: {}", err);
+                        }
+                        break;
+                    }
+                    TransceiverEvent::Api { sender, uuid } => {
+                        log::info!("api:  stream identifier: {:?}", uuid);
+                        let statistic_data = if let Some(uid) = uuid {
+                            statistics_data.lock().await.query_by_uuid(uid)
+                        } else {
+                            log::info!("api2:  stream identifier: {:?}", statistics_data);
+                            statistics_data.lock().await.clone()
+                        };
+
+                        if let Err(err) = sender.send(statistic_data) {
+                            log::info!("Transmitter send avstatistic data err: {}", err);
+                        }
+                    }
+                    TransceiverEvent::Request { sender } => {
+                        stream_handler.send_information(sender).await;
                     }
                 }
             }
@@ -640,10 +645,7 @@ impl StreamsHub {
                     }
                 }
 
-                StreamHubEvent::UnPublish {
-                    identifier,
-                    info: _,
-                } => {
+                StreamHubEvent::UnPublish { identifier, info } => {
                     if let Err(err) = self.unpublish(&identifier) {
                         log::error!(
                             "event_loop Unpublish err: {} with identifier: {}",
@@ -651,6 +653,8 @@ impl StreamsHub {
                             identifier
                         );
                     }
+
+                    self.un_pub_sub_events.remove(&info.id);
 
                     if let Some(notifier) = &self.notifier {
                         notifier.on_unpublish_notify(&message).await;
@@ -713,11 +717,14 @@ impl StreamsHub {
                     }
                 }
                 StreamHubEvent::UnSubscribe { identifier, info } => {
+                    let info_id = info.id;
                     if self.unsubscribe(&identifier, info).is_ok()
                         && let Some(notifier) = &self.notifier
                     {
                         notifier.on_stop_notify(&message).await;
                     }
+
+                    self.un_pub_sub_events.remove(&info_id);
                 }
 
                 StreamHubEvent::ApiStatistic {

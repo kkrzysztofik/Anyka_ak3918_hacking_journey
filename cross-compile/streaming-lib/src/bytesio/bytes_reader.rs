@@ -45,8 +45,8 @@ impl BytesReader {
             });
         }
 
-        //here maybe optimised
-        Ok(self.buffer.clone().split_to(bytes_num))
+        // Use split_to directly without cloning to avoid unnecessary memory copy
+        Ok(self.buffer.split_to(bytes_num))
     }
 
     pub fn read_bytes_cursor(
@@ -130,7 +130,9 @@ impl BytesReader {
             });
         }
 
-        Ok(*self.buffer.get(index).unwrap())
+        self.buffer.get(index).copied().ok_or(BytesReadError {
+            value: BytesReadErrorValue::IndexOutofRange,
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -1048,5 +1050,107 @@ mod tests {
         assert_eq!(reader.read_u32::<BigEndian>().unwrap(), 0x0708090A);
         assert_eq!(reader.read_u8().unwrap(), 0x0B);
         assert!(reader.is_empty());
+    }
+
+    // ============================================
+    // Cursor Method Tests
+    // ============================================
+
+    #[test]
+    fn test_bytes_reader_read_bytes_cursor() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[1, 2, 3, 4, 5]);
+        let mut reader = BytesReader::new(buf);
+
+        let cursor = reader.read_bytes_cursor(3).unwrap();
+        let inner = cursor.into_inner();
+        assert_eq!(&inner[..], &[1, 2, 3]);
+        assert_eq!(reader.len(), 2); // consumed 3 bytes
+    }
+
+    #[test]
+    fn test_bytes_reader_read_bytes_cursor_not_enough() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[1, 2]);
+        let mut reader = BytesReader::new(buf);
+
+        let result = reader.read_bytes_cursor(5);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bytes_reader_advance_bytes_cursor() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[1, 2, 3, 4, 5]);
+        let mut reader = BytesReader::new(buf);
+
+        let cursor = reader.advance_bytes_cursor(3).unwrap();
+        let inner = cursor.into_inner();
+        assert_eq!(&inner[..], &[1, 2, 3]);
+        assert_eq!(reader.len(), 5); // advance doesn't consume
+    }
+
+    #[test]
+    fn test_bytes_reader_advance_bytes_cursor_not_enough() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[1]);
+        let mut reader = BytesReader::new(buf);
+
+        let result = reader.advance_bytes_cursor(5);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bytes_reader_advance_u24_not_enough() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[1, 2]); // Only 2 bytes
+        let mut reader = BytesReader::new(buf);
+
+        let result = reader.advance_u24::<BigEndian>();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bytes_reader_read_u32_not_enough() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[1, 2, 3]); // Only 3 bytes
+        let mut reader = BytesReader::new(buf);
+
+        let result = reader.read_u32::<BigEndian>();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bytes_reader_read_u64_not_enough() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7]); // Only 7 bytes
+        let mut reader = BytesReader::new(buf);
+
+        let result = reader.read_u64::<BigEndian>();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bytes_reader_get_remaining_bytes_empty() {
+        let reader = BytesReader::new(BytesMut::new());
+        let remaining = reader.get_remaining_bytes();
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_reader_extend_after_partial_read() {
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&[1, 2, 3]);
+        let mut reader = BytesReader::new(buf);
+
+        // Read some bytes
+        reader.read_u8().unwrap();
+
+        // Extend with more data
+        reader.extend_from_slice(&[4, 5, 6]);
+
+        // Should have 5 bytes now (2 remaining + 3 new)
+        assert_eq!(reader.len(), 5);
+        assert_eq!(reader.read_u8().unwrap(), 2);
     }
 }

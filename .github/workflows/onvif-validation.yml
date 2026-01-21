@@ -1,0 +1,99 @@
+name: ONVIF Validation Tests
+
+on:
+  push:
+    branches: [main, hw-int-pt1]
+    paths:
+      - 'cross-compile/onvif-rust/**'
+      - 'cross-compile/streaming-lib/**'
+      - '.github/workflows/onvif-validation.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cross-compile/onvif-rust/**'
+      - 'cross-compile/streaming-lib/**'
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-unknown-linux-gnu
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: cross-compile/onvif-rust/target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Format check
+        run: |
+          cd cross-compile/onvif-rust
+          cargo fmt --check
+
+      - name: Lint with clippy
+        run: |
+          cd cross-compile/onvif-rust
+          cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+
+      - name: Build with validation mode
+        run: |
+          cd cross-compile/onvif-rust
+          cargo build --release --features validation-mode --target x86_64-unknown-linux-gnu
+
+      - name: Run unit tests
+        run: |
+          cd cross-compile/onvif-rust
+          cargo test --target x86_64-unknown-linux-gnu --lib -- --nocapture
+
+      - name: Run integration tests
+        run: |
+          cd cross-compile/onvif-rust
+          cargo test --target x86_64-unknown-linux-gnu --test h264_playback_validation -- --nocapture
+
+      - name: Run performance benchmarks
+        run: |
+          cd cross-compile/onvif-rust
+          cargo test --target x86_64-unknown-linux-gnu --benches --features validation-mode -- --nocapture
+
+      - name: Generate documentation
+        run: |
+          cd cross-compile/onvif-rust
+          cargo doc --no-deps --document-private-items
+
+      - name: Check streaming-lib tests
+        run: |
+          cd cross-compile/streaming-lib
+          cargo test --target x86_64-unknown-linux-gnu -- --nocapture
+
+      - name: Validation status
+        run: |
+          echo "✓ Format check passed"
+          echo "✓ Clippy lint passed"
+          echo "✓ Unit tests passed"
+          echo "✓ Integration tests passed"
+          echo "✓ Performance benchmarks passed"
+          echo ""
+          echo "All validation tests completed successfully!"

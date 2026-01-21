@@ -32,7 +32,7 @@ impl RtspPullClientManager {
     }
 
     pub async fn run(&mut self) -> Result<(), RelayError> {
-        log::info!("push client run...");
+        log::info!("pull client run...");
 
         loop {
             let val = self.client_event_consumer.recv().await?;
@@ -44,7 +44,16 @@ impl RtspPullClientManager {
                     server_address,
                     result_sender,
                 } => {
-                    let sender = result_sender.unwrap();
+                    let sender = match result_sender {
+                        Some(sender) => sender,
+                        None => {
+                            log::error!("missing result sender for subscribe event");
+                            return Err(RelayError {
+                                value: super::errors::PushClientErrorValue::SendError,
+                            });
+                        }
+                    };
+                    let sender_for_task = sender.clone();
 
                     if let StreamIdentifier::Rtsp { stream_path } = identifier {
                         if let Some(server_address) = server_address {
@@ -85,18 +94,17 @@ impl RtspPullClientManager {
                                             arc_client_session.lock().await.run().await
                                         {
                                             log::error!(
-                                                "client_session as push client run error: {}",
+                                                "client_session as pull client run error: {}",
                                                 err
                                             );
-
-                                            //let err = Err(StreamHubError {
-                                            //    value: StreamHubErrorValue::RtspClientSessionError(
-                                            //        err.to_string(),
-                                            //    ),
-                                            //});
-                                            //if let Err(send_err) = sender.send(err).await {
-                                            //    log::error!("sender error: {}", send_err);
-                                            //}
+                                            let err = Err(StreamHubError {
+                                                value: StreamHubErrorValue::RtspClientSessionError(
+                                                    err.to_string(),
+                                                ),
+                                            });
+                                            if let Err(send_err) = sender_for_task.send(err).await {
+                                                log::error!("sender error: {}", send_err);
+                                            }
                                         }
                                     });
 
@@ -138,11 +146,20 @@ impl RtspPullClientManager {
                 }
 
                 BroadcastEvent::UnSubscribe { id, result_sender } => {
-                    let sender = result_sender.unwrap();
+                    let sender = match result_sender {
+                        Some(sender) => sender,
+                        None => {
+                            log::error!("missing result sender for unsubscribe event");
+                            continue;
+                        }
+                    };
                     /* judge if the server address / stream path exists */
                     if let Some(client) = self.clients.get_mut(&id) {
                         client.store(false, std::sync::atomic::Ordering::Release);
                         self.clients.remove(&id);
+                        if let Err(send_err) = sender.send(Ok(())).await {
+                            log::error!("sender error: {}", send_err);
+                        }
                     } else {
                         log::warn!("the client session with id:{} not exists", id);
 
@@ -158,7 +175,7 @@ impl RtspPullClientManager {
                 }
 
                 _ => {
-                    log::info!("push client receive other events");
+                    log::info!("pull client receive other events");
                 }
             }
         }

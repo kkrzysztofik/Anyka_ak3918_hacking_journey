@@ -194,15 +194,22 @@ capture_from_rtsp() {
 # Capture raw NAL units from stream
 capture_from_stream() {
     local rtsp_url="$1"
-    local temp_file="/tmp/capture_$$.h264"
+    local temp_file
+    temp_file="$(mktemp /tmp/capture_XXXXXX.h264)"
+    local ffmpeg_log
+    ffmpeg_log="$(mktemp /tmp/ffmpeg_capture_XXXXXX.log)"
     
     log_info "Capturing raw stream for NAL extraction..."
     
     # Capture 2 seconds of stream
-    ffmpeg -y -i "$rtsp_url" -t 2 -c:v copy -an -f h264 "$temp_file" 2>/dev/null || {
-        log_error "Failed to capture stream"
+    if ! ffmpeg -y -i "$rtsp_url" -t 2 -c:v copy -an -f h264 "$temp_file" 2>"$ffmpeg_log"; then
+        local ffmpeg_exit=$?
+        log_error "Failed to capture stream (ffmpeg exit code: ${ffmpeg_exit})"
+        log_error "ffmpeg stderr: $(cat "$ffmpeg_log")"
+        rm -f "$temp_file" "$ffmpeg_log"
         exit 1
-    }
+    fi
+    rm -f "$ffmpeg_log"
     
     # Extract SPS/PPS NAL units (type 7 and 8)
     # NAL start code: 00 00 00 01 or 00 00 01
@@ -430,10 +437,6 @@ main() {
     # Associative arrays for collected data
     declare -A SPS_DATA
     declare -A PPS_DATA
-    
-    # Export for use in functions
-    export -A SPS_DATA
-    export -A PPS_DATA
     
     if [[ -n "$PCAP_FILE" ]]; then
         capture_from_pcap

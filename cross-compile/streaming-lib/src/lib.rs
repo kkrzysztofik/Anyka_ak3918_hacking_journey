@@ -80,6 +80,12 @@ pub struct Frame {
     pub frame_type: FrameType,
 }
 
+// SAFETY: `Frame` holds a read-only pointer to immutable frame data that remains valid
+// for `size` bytes during its use across threads. The data is not mutated or freed
+// while shared, so it is safe to mark `Frame` as Send + Sync.
+unsafe impl Send for Frame {}
+unsafe impl Sync for Frame {}
+
 /// Frame type for video and audio
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameType {

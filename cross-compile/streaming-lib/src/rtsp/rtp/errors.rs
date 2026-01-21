@@ -1,39 +1,20 @@
-#![allow(non_local_definitions)]
-use {
-    failure::{Backtrace, Fail},
-    std::fmt,
-};
+use thiserror::Error;
 
 use crate::bytesio::bytes_errors::BytesReadError;
 use crate::bytesio::bytes_errors::BytesWriteError;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct PackerError {
     pub value: PackerErrorValue,
 }
 
-impl Fail for PackerError {
-    fn cause(&self) -> Option<&dyn Fail> {
-        self.value.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.value.backtrace()
-    }
-}
-
-impl fmt::Display for PackerError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum PackerErrorValue {
-    #[fail(display = "bytes read error: {}", _0)]
-    BytesReadError(BytesReadError),
-    #[fail(display = "bytes write error: {}", _0)]
-    BytesWriteError(#[cause] BytesWriteError),
+    #[error("bytes read error: {0}")]
+    BytesReadError(#[source] BytesReadError),
+    #[error("bytes write error: {}", _0)]
+    BytesWriteError(#[from] BytesWriteError),
 }
 
 impl From<BytesReadError> for PackerError {
@@ -52,17 +33,20 @@ impl From<BytesWriteError> for PackerError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct UnPackerError {
     pub value: UnPackerErrorValue,
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum UnPackerErrorValue {
-    #[fail(display = "bytes read error: {}", _0)]
-    BytesReadError(BytesReadError),
-    #[fail(display = "bytes write error: {}", _0)]
-    BytesWriteError(#[cause] BytesWriteError),
+    #[error("bytes read error: {0}")]
+    BytesReadError(#[source] BytesReadError),
+    #[error("bytes write error: {}", _0)]
+    BytesWriteError(#[from] BytesWriteError),
+    #[error("invalid timestamp in RTP payload")]
+    InvalidTimestamp,
 }
 
 impl From<BytesReadError> for UnPackerError {
@@ -78,22 +62,6 @@ impl From<BytesWriteError> for UnPackerError {
         UnPackerError {
             value: UnPackerErrorValue::BytesWriteError(error),
         }
-    }
-}
-
-impl fmt::Display for UnPackerError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-impl Fail for UnPackerError {
-    fn cause(&self) -> Option<&dyn Fail> {
-        self.value.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.value.backtrace()
     }
 }
 

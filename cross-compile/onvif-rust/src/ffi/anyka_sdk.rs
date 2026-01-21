@@ -601,6 +601,7 @@ mod stub_impl {
     /// This function is marked as `unsafe` because it accepts a raw pointer. However, since this is a stub
     /// implementation that does not dereference the pointer, it is safe to call with any pointer value,
     /// including null pointers.
+    #[allow(dead_code)]
     pub unsafe fn video_input_close(_handle: *mut std::ffi::c_void) -> AnykaResult<()> {
         Ok(())
     }
@@ -612,6 +613,7 @@ mod stub_impl {
     }
 
     /// Close PTZ motor control (stub).
+    #[allow(dead_code)]
     pub fn ptz_close() -> AnykaResult<()> {
         Ok(())
     }
@@ -629,6 +631,7 @@ mod stub_impl {
     }
 
     /// Get PTZ motor step position (stub).
+    #[allow(dead_code)]
     pub fn ptz_get_position(_motor: PtzMotor) -> AnykaResult<i32> {
         Ok(0)
     }

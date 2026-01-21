@@ -10,7 +10,7 @@ Consolidate Anyka SDK headers and static libraries into the vendor directory str
 - Create `onvif-rust/vendor/include/` directory
 - Symlink or copy headers from `cross-compile/onvif/include/`
 - Create `onvif-rust/vendor/lib/` directory
-- Copy static libraries (.a files) from `anyka_reference/IOT-ANYKA-PTZdaemon/libs/`:
+- Copy static libraries (.a files) from `cross-compile/anyka_reference/IOT-ANYKA-PTZdaemon/libs/`:
   - `libplat_common.a`, `libplat_vi.a`, `libplat_ai.a`
   - `libmpi_venc.a`, `libmpi_aenc.a`
   - `libplat_drv.a` (PTZ control)
@@ -29,7 +29,7 @@ Consolidate Anyka SDK headers and static libraries into the vendor directory str
 - Verify completeness against reference code
 
 **Library Sources:**
-- Static libraries from `IOT-ANYKA-PTZdaemon/libs/`
+- Static libraries from `cross-compile/anyka_reference/IOT-ANYKA-PTZdaemon/libs/`
 - Required for static linking (as configured in build.rs)
 
 ## Spec References

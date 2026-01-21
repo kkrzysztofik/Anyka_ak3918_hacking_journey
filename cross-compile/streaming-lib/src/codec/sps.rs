@@ -56,7 +56,6 @@ pub struct Sps {
 }
 
 pub struct SpsParser {
-    pub bytes_reader: BytesReader,
     pub bits_reader: BitsReader,
     pub sps: Sps,
 }
@@ -64,7 +63,6 @@ pub struct SpsParser {
 impl SpsParser {
     pub fn new(reader: BytesReader) -> SpsParser {
         Self {
-            bytes_reader: BytesReader::new(BytesMut::new()),
             bits_reader: BitsReader::new(reader),
             sps: Sps::default(),
         }
@@ -174,12 +172,14 @@ impl SpsParser {
         // Calculate width: only apply crop offsets if frame_cropping_flag is set
         let mut width = (self.sps.pic_width_in_mbs_minus1 + 1) * 16;
         if self.sps.frame_cropping_flag > 0 {
-            // crop_unit_x = 2 for chroma_format_idc = 1 (4:2:0, default for Baseline)
-            // For other chroma formats, this would need to be adjusted
-            let crop_unit_x = if self.sps.chroma_format_idc == 0 {
-                1
-            } else {
-                2
+            // crop_unit_x depends on chroma format:
+            // - 0 or 3: crop_unit_x = 1
+            // - 1: crop_unit_x = 2
+            // - 2: crop_unit_x = 2
+            let crop_unit_x = match self.sps.chroma_format_idc {
+                0 | 3 => 1,
+                1 | 2 => 2,
+                _ => 2, // Default to 2 for unknown formats
             };
             width -=
                 (self.sps.frame_crop_left_offset + self.sps.frame_crop_right_offset) * crop_unit_x;
@@ -190,12 +190,15 @@ impl SpsParser {
             * (self.sps.pic_height_in_map_units_minus1 + 1)
             * 16;
         if self.sps.frame_cropping_flag > 0 {
-            // crop_unit_y = 2 for chroma_format_idc = 1 (4:2:0, default for Baseline)
-            // For other chroma formats, this would need to be adjusted
-            let crop_unit_y = if self.sps.chroma_format_idc == 0 {
-                1
-            } else {
-                2
+            // crop_unit_y depends on chroma format:
+            // - 0 or 3: crop_unit_y = 1
+            // - 1: crop_unit_y = 2
+            // - 2: crop_unit_y = 1
+            let crop_unit_y = match self.sps.chroma_format_idc {
+                0 | 3 => 1,
+                1 => 2,
+                2 => 1,
+                _ => 2, // Default to 2 for unknown formats
             };
             height -=
                 (self.sps.frame_crop_top_offset + self.sps.frame_crop_bottom_offset) * crop_unit_y;

@@ -4,12 +4,12 @@
 use streaming_lib::rtsp::global_trait::{Marshal, Unmarshal};
 use streaming_lib::rtsp::rtsp_codec::RtspCodecId;
 use streaming_lib::rtsp::rtsp_transport::{CastType, ProtocolType, RtspTransport};
-use streaming_lib::rtsp::sdp::fmtp::{Fmtp, H264Fmtp};
+use streaming_lib::rtsp::sdp::fmtp::Fmtp;
 use streaming_lib::rtsp::sdp::rtpmap::RtpMap;
 
+/// Tests SDP offer/answer negotiation basics for RTSP sessions.
 #[tokio::test]
 async fn test_rtsp_session_sdp_negotiation() {
-    // Test SDP offer/answer negotiation
     let rtpmap_str = "96 H264/90000";
     let rtpmap = RtpMap::unmarshal(rtpmap_str).unwrap();
     assert_eq!(rtpmap.encoding_name, "H264");
@@ -26,20 +26,20 @@ async fn test_rtsp_session_sdp_negotiation() {
     }
 }
 
+/// Tests RTSP transport header parsing for UDP unicast.
 #[tokio::test]
 async fn test_rtsp_transport_setup() {
-    // Test RTSP transport header parsing and setup
     let transport_str = "RTP/AVP/UDP;unicast;client_port=5000-5001";
-    let transport = RtspTransport::unmarshal(transport_str).unwrap();
+    let transport = RtspTransport::unmarshal(transport_str).expect("transport header should parse");
 
     assert_eq!(transport.protocol_type, ProtocolType::UDP);
     assert_eq!(transport.cast_type, CastType::Unicast);
     assert_eq!(transport.client_port, Some([5000, 5001]));
 }
 
+/// Tests codec ID/name mappings for RTSP codec tables.
 #[tokio::test]
 async fn test_rtsp_codec_mapping() {
-    // Test codec ID to name mapping
     let codec_id = RtspCodecId::H264;
     let codec_name = streaming_lib::rtsp::rtsp_codec::RTSP_CODEC_ID_2_NAME
         .get(&codec_id)
@@ -52,9 +52,9 @@ async fn test_rtsp_codec_mapping() {
     assert_eq!(*mapped_id, codec_id);
 }
 
+/// Tests basic RTSP session flow round-trip for SDP and transport.
 #[tokio::test]
 async fn test_rtsp_session_round_trip() {
-    // Test complete RTSP session flow
     // 1. Parse SDP
     let rtpmap_str = "96 H264/90000";
     let rtpmap = RtpMap::unmarshal(rtpmap_str).unwrap();
@@ -65,7 +65,7 @@ async fn test_rtsp_session_round_trip() {
 
     // 2. Parse transport
     let transport_str = "RTP/AVP/UDP;unicast;client_port=5000-5001;server_port=5002-5003";
-    let transport = RtspTransport::unmarshal(transport_str).unwrap();
+    let transport = RtspTransport::unmarshal(transport_str).expect("transport header should parse");
     let marshaled_transport = transport.marshal();
     assert!(marshaled_transport.contains("client_port=5000-5001"));
     assert!(marshaled_transport.contains("server_port=5002-5003"));

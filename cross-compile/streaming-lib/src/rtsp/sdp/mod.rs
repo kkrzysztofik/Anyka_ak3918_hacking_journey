@@ -15,7 +15,7 @@ pub struct Bandwidth {
 
 impl Unmarshal for Bandwidth {
     //   b=AS:284\r\n\
-    fn unmarshal(raw_data: &str) -> Option<Self> {
+    fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut sdp_bandwidth = Bandwidth::default();
 
         let parameters: Vec<&str> = raw_data.split(':').collect();
@@ -29,7 +29,7 @@ impl Unmarshal for Bandwidth {
             sdp_bandwidth.bandwidth = bandwidth;
         }
 
-        Some(sdp_bandwidth)
+        Ok(sdp_bandwidth)
     }
 }
 
@@ -98,7 +98,7 @@ pub struct Sdp {
 impl Unmarshal for SdpMediaInfo {
     //m=audio 11704 RTP/AVP 96 97 98 0 8 18 101 99 100 */
     //m=video 20003 RTP/AVP 97
-    fn unmarshal(raw_data: &str) -> Option<Self> {
+    fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut sdp_media = SdpMediaInfo::default();
         let parameters: Vec<&str> = raw_data.split(' ').collect();
 
@@ -125,7 +125,7 @@ impl Unmarshal for SdpMediaInfo {
             cur_param_idx += 1;
         }
 
-        Some(sdp_media)
+        Ok(sdp_media)
     }
 }
 
@@ -178,7 +178,7 @@ impl Marshal for SdpMediaInfo {
 }
 
 impl Unmarshal for Sdp {
-    fn unmarshal(raw_data: &str) -> Option<Self> {
+    fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut sdp = Sdp {
             raw_string: raw_data.to_string(),
             ..Default::default()
@@ -233,13 +233,15 @@ impl Unmarshal for Sdp {
                     sdp.timing = kv[1].to_string();
                 }
                 "m" => {
-                    if let Some(sdp_media) = SdpMediaInfo::unmarshal(kv[1]) {
+                    if let Ok(sdp_media) = SdpMediaInfo::unmarshal(kv[1]) {
                         sdp.medias.push(sdp_media);
                     }
                 }
                 "b" => {
                     if let Some(cur_media) = sdp.medias.last_mut() {
-                        cur_media.bandwidth = Some(Bandwidth::unmarshal(kv[1]).unwrap());
+                        if let Ok(bandwidth) = Bandwidth::unmarshal(kv[1]) {
+                            cur_media.bandwidth = Some(bandwidth);
+                        }
                     } else {
                         continue;
                     }
@@ -261,14 +263,17 @@ impl Unmarshal for Sdp {
                         if attribute.len() == 2 {
                             match attr_name {
                                 "rtpmap" => {
-                                    if let Some(rtpmap) = RtpMap::unmarshal(attr_value) {
+                                    if let Ok(rtpmap) = RtpMap::unmarshal(attr_value) {
                                         cur_media.rtpmap = rtpmap;
                                         continue;
                                     }
                                 }
                                 "fmtp" => {
-                                    cur_media.fmtp =
-                                        Fmtp::new(&cur_media.rtpmap.encoding_name, attr_value);
+                                    if let Ok(fmtp) =
+                                        Fmtp::new(&cur_media.rtpmap.encoding_name, attr_value)
+                                    {
+                                        cur_media.fmtp = Some(fmtp);
+                                    }
                                     continue;
                                 }
                                 _ => {}
@@ -289,7 +294,7 @@ impl Unmarshal for Sdp {
             }
         }
 
-        Some(sdp)
+        Ok(sdp)
     }
 }
 

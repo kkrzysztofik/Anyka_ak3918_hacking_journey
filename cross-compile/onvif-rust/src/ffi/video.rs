@@ -202,7 +202,7 @@ fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
 /// The underlying SDK uses internal mutexes for thread safety, so this handle
 /// is safe to send and share between threads.
 pub struct VideoInputHandle {
-    handle: *mut c_void,
+    handle: Option<*mut c_void>,
 }
 
 // SAFETY: VideoInputHandle is thread-safe - SDK uses internal mutexes.
@@ -212,8 +212,10 @@ unsafe impl Sync for VideoInputHandle {}
 
 impl Drop for VideoInputHandle {
     fn drop(&mut self) {
-        if !self.handle.is_null() {
-            let _ = REAL_VIDEO_FFI.vi_close(self.handle);
+        if let Some(handle) = self.handle
+            && !handle.is_null()
+        {
+            let _ = REAL_VIDEO_FFI.vi_close(handle);
         }
     }
 }
@@ -221,12 +223,51 @@ impl Drop for VideoInputHandle {
 impl VideoInputHandle {
     /// Get the raw handle pointer.
     ///
+    /// Get the underlying FFI handle as a raw pointer.
+    ///
+    /// When `self.handle` is `None` (which occurs when created via `test_handle()` for testing),
+    /// this returns `std::ptr::null_mut()`. Callers must NOT pass this null pointer to FFI
+    /// functions expecting a valid handle, as this would result in undefined behavior.
+    ///
+    /// # Examples
+    ///
+    /// The test helpers `from_raw_unchecked()` and `test_handle()` can produce null handles
+    /// for testing scenarios where mock FFI backends are used:
+    ///
+    /// ```no_run
+    /// # #[cfg(test)]
+    /// # {
+    /// let test_handle = VideoInputHandle::test_handle();
+    /// let ptr = test_handle.as_ptr();
+    /// // ptr is now std::ptr::null_mut() - never pass this to actual FFI functions!
+    /// # }
+    /// ```
+    ///
     /// # Safety
     ///
     /// The returned pointer is only valid while the handle is alive.
     /// Do not use after the handle is dropped.
     pub(crate) fn as_ptr(&self) -> *mut c_void {
-        self.handle
+        self.handle.unwrap_or(std::ptr::null_mut())
+    }
+
+    /// Create a test handle from a raw pointer without cleanup.
+    ///
+    /// # Safety
+    ///
+    /// This is only for testing - the handle will NOT be closed on drop.
+    /// Used to create handles with dangling pointers for mock FFI testing.
+    #[cfg(test)]
+    pub(crate) unsafe fn from_raw_unchecked(ptr: *mut c_void) -> Self {
+        Self { handle: Some(ptr) }
+    }
+
+    /// Create a test handle that will not be closed on drop.
+    ///
+    /// Used for testing with mock FFI backends.
+    #[cfg(test)]
+    pub(crate) fn test_handle() -> Self {
+        Self { handle: None }
     }
 }
 
@@ -252,7 +293,9 @@ pub(crate) fn video_input_open_internal(
             "Video input device".to_string(),
         ))
     } else {
-        Ok(VideoInputHandle { handle })
+        Ok(VideoInputHandle {
+            handle: Some(handle),
+        })
     }
 }
 
@@ -293,10 +336,13 @@ pub(crate) fn video_input_get_sensor_resolution_internal(
 
     check_result(ret, "ak_vi_get_sensor_resolution")?;
 
-    Ok(Resolution {
-        width: res.width as u32,
-        height: res.height as u32,
-    })
+    // Validate resolution values are non-negative before casting to u32
+    let width = u32::try_from(res.width)
+        .map_err(|_| PlatformError::InvalidParameter("width must be non-negative".to_string()))?;
+    let height = u32::try_from(res.height)
+        .map_err(|_| PlatformError::InvalidParameter("height must be non-negative".to_string()))?;
+
+    Ok(Resolution { width, height })
 }
 
 /// Get sensor resolution.
@@ -351,7 +397,7 @@ pub fn video_input_set_channel_attr(
 /// The underlying SDK uses internal mutexes for thread safety, so this handle
 /// is safe to send and share between threads.
 pub struct VideoEncoderHandle {
-    handle: *mut c_void,
+    handle: Option<*mut c_void>,
 }
 
 // SAFETY: VideoEncoderHandle is thread-safe - SDK uses internal mutexes.
@@ -361,8 +407,10 @@ unsafe impl Sync for VideoEncoderHandle {}
 
 impl Drop for VideoEncoderHandle {
     fn drop(&mut self) {
-        if !self.handle.is_null() {
-            let _ = REAL_VIDEO_FFI.venc_close(self.handle);
+        if let Some(handle) = self.handle
+            && !handle.is_null()
+        {
+            let _ = REAL_VIDEO_FFI.venc_close(handle);
         }
     }
 }
@@ -375,7 +423,7 @@ impl VideoEncoderHandle {
     /// The returned pointer is only valid while the handle is alive.
     /// Do not use after the handle is dropped.
     pub(crate) fn as_ptr(&self) -> *mut c_void {
-        self.handle
+        self.handle.unwrap_or(std::ptr::null_mut())
     }
 }
 
@@ -391,7 +439,9 @@ pub(crate) fn video_encoder_open_internal(
             "Video encoder".to_string(),
         ))
     } else {
-        Ok(VideoEncoderHandle { handle })
+        Ok(VideoEncoderHandle {
+            handle: Some(handle),
+        })
     }
 }
 
@@ -422,6 +472,11 @@ pub(crate) fn video_encoder_set_rc_internal(
     bps: i32,
     ffi: &dyn VideoFfiTrait,
 ) -> PlatformResult<()> {
+    if bps <= 0 {
+        return Err(PlatformError::InvalidParameter(
+            "bitrate must be positive".to_string(),
+        ));
+    }
     let ret = ffi.venc_set_rc(handle.as_ptr(), bps);
     check_result(ret, "ak_venc_set_rc")
 }
@@ -650,15 +705,13 @@ mod tests {
     #[test]
     fn test_video_input_get_sensor_resolution_internal_calls_ffi_and_returns_resolution() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let vi_handle = VideoInputHandle {
-            handle: test_handle,
+            handle: None, // Use None to prevent Drop from calling vi_close on dangling pointer
         };
 
-        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_vi_get_sensor_resolution()
-            .withf(move |handle, _| *handle as usize == test_handle_usize)
+            .withf(|handle, _| handle.is_null())
             .times(1)
             .returning(|_, res| {
                 unsafe {
@@ -680,15 +733,13 @@ mod tests {
     #[test]
     fn test_video_input_get_sensor_resolution_internal_propagates_error() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let vi_handle = VideoInputHandle {
-            handle: test_handle,
+            handle: None, // Use None to prevent Drop from calling vi_close on dangling pointer
         };
 
-        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_vi_get_sensor_resolution()
-            .withf(move |handle, _| *handle as usize == test_handle_usize)
+            .withf(|handle, _| handle.is_null())
             .times(1)
             .returning(|_, _| AK_FAILED);
 
@@ -705,16 +756,14 @@ mod tests {
     #[test]
     fn test_video_input_set_channel_attr_internal_calls_ffi() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let vi_handle = VideoInputHandle {
-            handle: test_handle,
+            handle: None, // Use None to prevent Drop from calling vi_close on dangling pointer
         };
         let attr = video_channel_attr::default();
 
-        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_vi_set_channel_attr()
-            .withf(move |handle, _| *handle as usize == test_handle_usize)
+            .withf(|handle, _| handle.is_null())
             .times(1)
             .returning(|_, _| AK_SUCCESS);
 
@@ -725,16 +774,14 @@ mod tests {
     #[test]
     fn test_video_input_set_channel_attr_internal_propagates_error() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let vi_handle = VideoInputHandle {
-            handle: test_handle,
+            handle: None, // Use None to prevent Drop from calling vi_close on dangling pointer
         };
         let attr = video_channel_attr::default();
 
-        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_vi_set_channel_attr()
-            .withf(move |handle, _| *handle as usize == test_handle_usize)
+            .withf(|handle, _| handle.is_null())
             .times(1)
             .returning(|_, _| AK_FAILED);
 
@@ -813,15 +860,13 @@ mod tests {
     #[test]
     fn test_video_encoder_set_rc_internal_calls_ffi() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let enc_handle = VideoEncoderHandle {
-            handle: test_handle,
+            handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
         };
 
-        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_venc_set_rc()
-            .withf(move |handle, bps| *handle as usize == test_handle_usize && *bps == 3000000)
+            .withf(|handle, bps| handle.is_null() && *bps == 3000000)
             .times(1)
             .returning(|_, _| AK_SUCCESS);
 
@@ -832,15 +877,13 @@ mod tests {
     #[test]
     fn test_video_encoder_set_rc_internal_propagates_error() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let enc_handle = VideoEncoderHandle {
-            handle: test_handle,
+            handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
         };
 
-        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_venc_set_rc()
-            .withf(move |handle, _| *handle as usize == test_handle_usize)
+            .withf(|handle, _| handle.is_null())
             .times(1)
             .returning(|_, _| AK_FAILED);
 
@@ -857,15 +900,13 @@ mod tests {
     #[test]
     fn test_video_encoder_request_idr_internal_calls_ffi() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let enc_handle = VideoEncoderHandle {
-            handle: test_handle,
+            handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
         };
 
-        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_venc_set_iframe()
-            .withf(move |handle| *handle as usize == test_handle_usize)
+            .withf(|handle| handle.is_null())
             .times(1)
             .returning(|_| AK_SUCCESS);
 
@@ -876,15 +917,13 @@ mod tests {
     #[test]
     fn test_video_encoder_request_idr_internal_propagates_error() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let enc_handle = VideoEncoderHandle {
-            handle: test_handle,
+            handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
         };
 
-        let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_venc_set_iframe()
-            .withf(move |handle| *handle as usize == test_handle_usize)
+            .withf(|handle| handle.is_null())
             .times(1)
             .returning(|_| AK_FAILED);
 

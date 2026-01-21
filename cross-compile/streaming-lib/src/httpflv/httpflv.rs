@@ -20,6 +20,9 @@ use {
     tokio::sync::mpsc,
 };
 
+/// Upper bound on frames to wait before assuming missing audio/video.
+const MAX_AV_FRAME_NUM_TO_GUESS_AV: usize = 10;
+
 pub struct HttpFlv {
     app_name: String,
     stream_name: String,
@@ -110,7 +113,9 @@ impl HttpFlv {
                         _ => {}
                     }
 
-                    if (self.has_audio && self.has_video) || max_av_frame_num_to_guess_av > 10 {
+                    if (self.has_audio && self.has_video)
+                        || max_av_frame_num_to_guess_av > MAX_AV_FRAME_NUM_TO_GUESS_AV
+                    {
                         self.has_send_header = true;
                         self.muxer
                             .write_flv_header(self.has_audio, self.has_video)?;
@@ -151,7 +156,10 @@ impl HttpFlv {
 
     //used for the http-flv protocol
 
-    pub fn write_flv_tag(&mut self, channel_data: FrameData) -> Result<(), HttpFLvError> {
+    fn extract_flv_tag_data(
+        &mut self,
+        channel_data: FrameData,
+    ) -> Result<(BytesMut, u32, u32), HttpFLvError> {
         let (common_data, common_timestamp, tag_type) = match channel_data {
             FrameData::Audio { timestamp, data } => {
                 if let Some(sender) = &self.statistic_data_sender {
@@ -193,15 +201,22 @@ impl HttpFlv {
                 (BytesMut::from(right), timestamp, tag_type::SCRIPT_DATA_AMF)
             }
             _ => {
-                log::error!("should not be here!!!");
-                (BytesMut::new(), 0, 0)
+                return Err(HttpFLvError {
+                    value: HttpFLvErrorValue::UnexpectedFrameData(format!("{:?}", channel_data)),
+                });
             }
         };
+
+        Ok((common_data, common_timestamp, tag_type as u32))
+    }
+
+    pub fn write_flv_tag(&mut self, channel_data: FrameData) -> Result<(), HttpFLvError> {
+        let (common_data, common_timestamp, tag_type) = self.extract_flv_tag_data(channel_data)?;
 
         let common_data_len = common_data.len() as u32;
 
         self.muxer
-            .write_flv_tag_header(tag_type, common_data_len, common_timestamp)?;
+            .write_flv_tag_header(tag_type as u8, common_data_len, common_timestamp)?;
         self.muxer.write_flv_tag_body(common_data)?;
         self.muxer
             .write_previous_tag_size(common_data_len + HEADER_LENGTH)?;
@@ -277,7 +292,9 @@ impl HttpFlv {
         }
 
         let result_receiver = event_result_receiver.await??;
-        let receiver = result_receiver.0.frame_receiver.unwrap();
+        let receiver = result_receiver.0.frame_receiver.ok_or(HttpFLvError {
+            value: HttpFLvErrorValue::MissingFrameReceiver,
+        })?;
         self.data_receiver = receiver;
         self.statistic_data_sender = result_receiver.1;
 

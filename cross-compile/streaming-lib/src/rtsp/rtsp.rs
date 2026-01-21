@@ -40,7 +40,12 @@ impl RtspServer for DefaultRtspServer {
     }
 
     async fn run(&mut self) -> Result<(), Error> {
-        let socket_addr: &SocketAddr = &self.address.parse().unwrap();
+        let socket_addr: SocketAddr =
+            self.address
+                .parse()
+                .map_err(|e: std::net::AddrParseError| {
+                    Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
+                })?;
         let listener = TcpListener::bind(socket_addr).await?;
 
         log::info!("Rtsp server listening on tcp://{}", socket_addr);

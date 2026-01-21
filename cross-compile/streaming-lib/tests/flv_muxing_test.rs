@@ -6,9 +6,9 @@ use streaming_lib::container::define::tag_type;
 use streaming_lib::container::demuxer::FlvDemuxer;
 use streaming_lib::container::muxer::FlvMuxer;
 
+/// Tests FLV header generation for audio/video flag combinations.
 #[tokio::test]
 async fn test_flv_header_generation() {
-    // Test FLV header generation with different configurations
     let mut muxer = FlvMuxer::new();
 
     // Test header with audio and video
@@ -33,9 +33,9 @@ async fn test_flv_header_generation() {
     assert_eq!(header_video[4] & 0x05, 0x01); // Video flag only
 }
 
+/// Tests FLV tag header/body writing for audio and video tags.
 #[tokio::test]
 async fn test_flv_tag_writing() {
-    // Test FLV tag writing
     let mut muxer = FlvMuxer::new();
 
     // Write video tag
@@ -68,9 +68,9 @@ async fn test_flv_tag_writing() {
     assert_eq!(tag_audio[0], tag_type::AUDIO);
 }
 
+/// Tests previous tag size serialization is correct.
 #[tokio::test]
 async fn test_flv_previous_tag_size() {
-    // Test previous tag size calculation
     let mut muxer = FlvMuxer::new();
 
     let data = BytesMut::from(&[0x01, 0x02, 0x03, 0x04][..]);
@@ -94,9 +94,9 @@ async fn test_flv_previous_tag_size() {
     assert_eq!(size, tag.len() as u32);
 }
 
+/// Tests FLV demuxer header parsing for a minimal FLV stream.
 #[tokio::test]
 async fn test_flv_demuxing() {
-    // Test FLV demuxing
     let mut muxer = FlvMuxer::new();
 
     // Create FLV file structure
@@ -144,9 +144,9 @@ async fn test_flv_demuxing() {
     assert!(result.is_ok());
 }
 
+/// Tests FLV timestamp encoding differences across tags.
 #[tokio::test]
 async fn test_flv_timestamp_handling() {
-    // Test FLV timestamp handling
     let mut muxer = FlvMuxer::new();
 
     let data = BytesMut::from(&[0x01, 0x02, 0x03][..]);
@@ -178,9 +178,9 @@ async fn test_flv_timestamp_handling() {
     assert_ne!(tag2, tag3);
 }
 
+/// Tests basic FLV muxing round-trip structure creation.
 #[tokio::test]
 async fn test_flv_round_trip() {
-    // Test round-trip muxing and demuxing
     let mut muxer = FlvMuxer::new();
 
     // Create original data

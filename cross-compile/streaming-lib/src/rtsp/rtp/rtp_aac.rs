@@ -16,6 +16,9 @@ use bytes::{BufMut, BytesMut};
 
 use crate::bytesio::TNetIO;
 use crate::bytesio::bytes_reader::BytesReader;
+use crate::bytesio::bytes_writer::BytesWriter;
+use crate::bytesio::bits_writer::BitsWriter;
+use crate::bytesio::bytes_errors::{BytesWriteError, BytesWriteErrorValue};
 use crate::streamhub::define::FrameData;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -57,10 +60,53 @@ impl TPacker for RtpAacPacker {
         self.header.timestamp = timestamp;
 
         let data_len = data.len();
-        let mut packet = RtpPacket::new(self.header.clone());
-        packet.payload.put_u16(16);
-        packet.payload.put_u8((data_len >> 5) as u8);
-        packet.payload.put_u8(((data_len & 0x1F) << 3) as u8);
+        let mut packet = RtpPacket {
+            header: self.header.clone(),
+            ..Default::default()
+        };
+
+        // Use BitsWriter for proper AU-headers-length encoding with bit-level precision
+        let bytes_writer = BytesWriter::new();
+        let mut bits_writer = BitsWriter::new(bytes_writer);
+
+        // AU-headers-length: 16 bits containing the number of bits in AU header section
+        // Each AU header is 16 bits (13 bits size + 3 bits index)
+        let au_headers_length_bits = 16u16; // Single AU header
+        bits_writer.write_n_bits(au_headers_length_bits as u64, 16)
+            .map_err(|_| {
+                let err = BytesWriteError {
+                    value: BytesWriteErrorValue::Timeout,
+                };
+                PackerError::from(err)
+            })?;
+
+        // AU header: 13 bits size + 3 bits index
+        bits_writer.write_n_bits((data_len as u64) << 3, 13)
+            .map_err(|_| {
+                let err = BytesWriteError {
+                    value: BytesWriteErrorValue::Timeout,
+                };
+                PackerError::from(err)
+            })?;
+        bits_writer.write_n_bits(0, 3) // index = 0
+            .map_err(|_| {
+                let err = BytesWriteError {
+                    value: BytesWriteErrorValue::Timeout,
+                };
+                PackerError::from(err)
+            })?;
+
+        // Flush any remaining bits (padding) and get the bytes
+        bits_writer.bits_alignment_8()
+            .map_err(|_| {
+                let err = BytesWriteError {
+                    value: BytesWriteErrorValue::Timeout,
+                };
+                PackerError::from(err)
+            })?;
+        let au_headers_data = bits_writer.get_current_bytes();
+
+        packet.payload.put(au_headers_data);
         packet.payload.put(data);
 
         if let Some(f) = &self.on_packet_for_rtcp_handler {
@@ -131,9 +177,10 @@ impl TUnPacker for RtpAacUnPacker {
 
         let mut au_lengths = Vec::new();
         for _ in 0..aus_number {
-            let au_length = (((reader_payload.read_u8()? as u16) << 8)
-                | ((reader_payload.read_u8()? as u16) & 0xF8)) as usize;
-            au_lengths.push(au_length / 8);
+            let au_size_high = reader_payload.read_u8()? as usize;
+            let au_size_low = reader_payload.read_u8()? as usize;
+            let au_length = (au_size_high << 5) | (au_size_low >> 3);
+            au_lengths.push(au_length);
         }
 
         log::debug!(
@@ -303,8 +350,50 @@ mod tests {
         // Verify AU header encoding
         let au_size_high = payload[2];
         let au_size_low = payload[3];
-        let decoded_size = (((au_size_high as u16) << 8) | ((au_size_low as u16) & 0xF8)) / 8;
+        let decoded_size = ((au_size_high as usize) << 5) | ((au_size_low as usize) >> 3);
         assert_eq!(decoded_size as usize, data_len);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_aac_unpacker_au_header_rfc_example() {
+        let mut unpacker = RtpAacUnPacker::new();
+        let frame_sizes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sizes_clone = frame_sizes.clone();
+
+        unpacker.on_frame_handler(Box::new(move |frame| {
+            if let FrameData::Audio { data, .. } = frame {
+                sizes_clone.lock().unwrap().push(data.len());
+            }
+            Ok(())
+        }));
+
+        let mut packet = RtpPacket {
+            header: RtpHeader {
+                payload_type: 97,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
+                version: 2,
+                marker: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // AU-headers-length: 16 bits (one AU header)
+        packet.payload.put_u16(16);
+        // AU size 0x123 (291 bytes): high=0x09, low=0x18
+        packet.payload.put_u8(0x09);
+        packet.payload.put_u8(0x18);
+        packet.payload.extend_from_slice(&vec![0u8; 0x123]);
+
+        let packet_bytes = packet.marshal().unwrap();
+        let mut reader = BytesReader::new(packet_bytes);
+        unpacker.unpack(&mut reader).await.unwrap();
+
+        let sizes = frame_sizes.lock().unwrap();
+        assert_eq!(sizes.len(), 1);
+        assert_eq!(sizes[0], 0x123);
     }
 
     #[tokio::test]

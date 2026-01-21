@@ -1,6 +1,5 @@
 extern crate byteorder;
 extern crate bytes;
-extern crate failure;
 
 pub mod bits_errors;
 pub mod bits_reader;

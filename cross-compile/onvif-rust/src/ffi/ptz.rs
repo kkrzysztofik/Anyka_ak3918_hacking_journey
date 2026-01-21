@@ -252,8 +252,17 @@ pub fn validate_tilt_range(tilt: f32) -> PlatformResult<()> {
 /// # Returns
 ///
 /// Motor steps corresponding to the given angle
-pub fn degrees_to_steps(degrees: f32, cycle_steps: i32) -> i32 {
-    ((degrees / 360.0) * cycle_steps as f32).round() as i32
+///
+/// # Errors
+///
+/// Returns `PlatformError::InvalidParameter` if `cycle_steps` is zero
+pub fn degrees_to_steps(degrees: f32, cycle_steps: i32) -> PlatformResult<i32> {
+    if cycle_steps == 0 {
+        return Err(PlatformError::InvalidParameter(
+            "cycle_steps must be non-zero".into(),
+        ));
+    }
+    Ok(((degrees / 360.0) * cycle_steps as f32).round() as i32)
 }
 
 /// Convert motor steps to degrees.
@@ -266,8 +275,17 @@ pub fn degrees_to_steps(degrees: f32, cycle_steps: i32) -> i32 {
 /// # Returns
 ///
 /// Angle in degrees corresponding to the given step position
-pub fn steps_to_degrees(steps: i32, cycle_steps: i32) -> f32 {
-    (steps as f32 / cycle_steps as f32) * 360.0
+///
+/// # Errors
+///
+/// Returns `PlatformError::InvalidParameter` if `cycle_steps` is zero
+pub fn steps_to_degrees(steps: i32, cycle_steps: i32) -> PlatformResult<f32> {
+    if cycle_steps == 0 {
+        return Err(PlatformError::InvalidParameter(
+            "cycle_steps must be non-zero".into(),
+        ));
+    }
+    Ok((steps as f32 / cycle_steps as f32) * 360.0)
 }
 
 /// Internal helper that takes FFI trait for testability.
@@ -457,25 +475,37 @@ mod tests {
     #[test]
     fn test_degrees_to_steps() {
         // 360 degrees should equal cycle_steps
-        assert_eq!(degrees_to_steps(360.0, 2000), 2000);
+        assert_eq!(degrees_to_steps(360.0, 2000).unwrap(), 2000);
         // 180 degrees should equal half cycle_steps
-        assert_eq!(degrees_to_steps(180.0, 2000), 1000);
+        assert_eq!(degrees_to_steps(180.0, 2000).unwrap(), 1000);
         // 90 degrees should equal quarter cycle_steps
-        assert_eq!(degrees_to_steps(90.0, 2000), 500);
+        assert_eq!(degrees_to_steps(90.0, 2000).unwrap(), 500);
         // 0 degrees should equal 0 steps
-        assert_eq!(degrees_to_steps(0.0, 2000), 0);
+        assert_eq!(degrees_to_steps(0.0, 2000).unwrap(), 0);
     }
 
     #[test]
     fn test_steps_to_degrees() {
         // cycle_steps should equal 360 degrees
-        assert!((steps_to_degrees(2000, 2000) - 360.0).abs() < 0.01);
+        assert!((steps_to_degrees(2000, 2000).unwrap() - 360.0).abs() < 0.01);
         // Half cycle_steps should equal 180 degrees
-        assert!((steps_to_degrees(1000, 2000) - 180.0).abs() < 0.01);
+        assert!((steps_to_degrees(1000, 2000).unwrap() - 180.0).abs() < 0.01);
         // Quarter cycle_steps should equal 90 degrees
-        assert!((steps_to_degrees(500, 2000) - 90.0).abs() < 0.01);
+        assert!((steps_to_degrees(500, 2000).unwrap() - 90.0).abs() < 0.01);
         // 0 steps should equal 0 degrees
-        assert!((steps_to_degrees(0, 2000) - 0.0).abs() < 0.01);
+        assert!((steps_to_degrees(0, 2000).unwrap() - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_degrees_to_steps_zero_cycle_steps() {
+        // Should return error for zero cycle_steps
+        assert!(degrees_to_steps(90.0, 0).is_err());
+    }
+
+    #[test]
+    fn test_steps_to_degrees_zero_cycle_steps() {
+        // Should return error for zero cycle_steps
+        assert!(steps_to_degrees(500, 0).is_err());
     }
 
     #[test]

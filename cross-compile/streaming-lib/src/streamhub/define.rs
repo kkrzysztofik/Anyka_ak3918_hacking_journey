@@ -118,20 +118,20 @@ impl Serialize for PublisherInfo {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum VideoCodecType {
     H264,
     H265,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MediaInfo {
     pub audio_clock_rate: u32,
     pub video_clock_rate: u32,
     pub vcodec: VideoCodecType,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum FrameData {
     Video { timestamp: u32, data: BytesMut },
     Audio { timestamp: u32, data: BytesMut },

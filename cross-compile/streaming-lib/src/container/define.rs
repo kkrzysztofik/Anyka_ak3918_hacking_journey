@@ -381,4 +381,104 @@ mod tests {
         assert_eq!(h264_nal_type::H264_NAL_PPS, 8);
         assert_eq!(h264_nal_type::H264_NAL_AUD, 9);
     }
+
+    // ========== Additional AVC Level Tests ==========
+
+    #[test]
+    fn test_u8_2_avc_level_12() {
+        let level = u8_2_avc_level(12);
+        assert!(matches!(level, AvcLevel::Level12));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_13() {
+        let level = u8_2_avc_level(13);
+        assert!(matches!(level, AvcLevel::Level13));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_2() {
+        let level = u8_2_avc_level(20);
+        assert!(matches!(level, AvcLevel::Level2));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_22() {
+        let level = u8_2_avc_level(22);
+        assert!(matches!(level, AvcLevel::Level22));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_3() {
+        let level = u8_2_avc_level(30);
+        assert!(matches!(level, AvcLevel::Level3));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_32() {
+        let level = u8_2_avc_level(32);
+        assert!(matches!(level, AvcLevel::Level32));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_4() {
+        let level = u8_2_avc_level(40);
+        assert!(matches!(level, AvcLevel::Level4));
+    }
+
+    #[test]
+    fn test_u8_2_avc_level_5() {
+        let level = u8_2_avc_level(50);
+        assert!(matches!(level, AvcLevel::Level5));
+    }
+
+    // ========== FlvData Tests ==========
+
+    #[test]
+    fn test_flv_data_video() {
+        let data = BytesMut::from(&b"video data"[..]);
+        let flv = FlvData::Video {
+            timestamp: 1000,
+            data: data.clone(),
+        };
+        match flv {
+            FlvData::Video { timestamp, data: d } => {
+                assert_eq!(timestamp, 1000);
+                assert_eq!(d, data);
+            }
+            _ => panic!("Expected FlvData::Video"),
+        }
+    }
+
+    #[test]
+    fn test_flv_data_audio() {
+        let data = BytesMut::from(&b"audio data"[..]);
+        let flv = FlvData::Audio {
+            timestamp: 2000,
+            data: data.clone(),
+        };
+        match flv {
+            FlvData::Audio { timestamp, data: d } => {
+                assert_eq!(timestamp, 2000);
+                assert_eq!(d, data);
+            }
+            _ => panic!("Expected FlvData::Audio"),
+        }
+    }
+
+    #[test]
+    fn test_flv_data_metadata() {
+        let data = BytesMut::from(&b"metadata"[..]);
+        let flv = FlvData::MetaData {
+            timestamp: 0,
+            data: data.clone(),
+        };
+        match flv {
+            FlvData::MetaData { timestamp, data: d } => {
+                assert_eq!(timestamp, 0);
+                assert_eq!(d, data);
+            }
+            _ => panic!("Expected FlvData::MetaData"),
+        }
+    }
 }

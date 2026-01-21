@@ -217,17 +217,20 @@ impl AsyncBytesWriter {
         .await;
 
         match message {
-            Ok(_) => {
+            // Handle successful write
+            Ok(Ok(_)) => {
                 self.bytes_writer.bytes.clear();
+                Ok(())
             }
-            Err(_) => {
-                return Err(BytesWriteError {
-                    value: BytesWriteErrorValue::Timeout,
-                });
-            }
+            // Handle I/O error from write operation
+            Ok(Err(io_err)) => Err(BytesWriteError {
+                value: BytesWriteErrorValue::BytesIOError(io_err),
+            }),
+            // Handle timeout
+            Err(_) => Err(BytesWriteError {
+                value: BytesWriteErrorValue::Timeout,
+            }),
         }
-
-        Ok(())
     }
 }
 
@@ -1164,5 +1167,252 @@ mod tests {
         let b12 = ((pts & 0x7fff) << 1) | 1; /* PTS 7-14 */
         println!("=======b12{}=======", b12 >> 8_u8);
         println!("=======b13{}=======", b12 as u8);
+    }
+
+    // ============================================
+    // Additional Edge Case Tests for Coverage
+    // ============================================
+
+    #[test]
+    fn test_bytes_writer_add_u8_at_wrapping() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(250).unwrap();
+
+        // Add 10 to 250, should wrap to 4 (250 + 10 = 260, 260 % 256 = 4)
+        writer.add_u8_at(0, 10).unwrap();
+        assert_eq!(writer.bytes[0], 4);
+    }
+
+    #[test]
+    fn test_bytes_writer_or_u8_at_no_change() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0xFF).unwrap();
+
+        // OR with anything on 0xFF stays 0xFF
+        writer.or_u8_at(0, 0x42).unwrap();
+        assert_eq!(writer.bytes[0], 0xFF);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u8_at_first_position() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[0x01, 0x02, 0x03]).unwrap();
+
+        writer.write_u8_at(0, 0xFF).unwrap();
+        assert_eq!(writer.bytes, vec![0xFF, 0x02, 0x03]);
+    }
+
+    #[test]
+    fn test_bytes_writer_write_u8_at_last_position() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[0x01, 0x02, 0x03]).unwrap();
+
+        writer.write_u8_at(2, 0xFF).unwrap();
+        assert_eq!(writer.bytes, vec![0x01, 0x02, 0xFF]);
+    }
+
+    #[test]
+    fn test_bytes_writer_get_empty() {
+        let mut writer = BytesWriter::new();
+        assert_eq!(writer.get(0), None);
+    }
+
+    #[test]
+    fn test_bytes_writer_pop_bytes_more_than_available() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[1, 2, 3]).unwrap();
+
+        // Pop more than available - should just pop until empty
+        writer.pop_bytes(10);
+        assert!(writer.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_extract_empty() {
+        let mut writer = BytesWriter::new();
+        let bytes = writer.extract_current_bytes();
+        assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_get_current_bytes_empty() {
+        let writer = BytesWriter::new();
+        let bytes = writer.get_current_bytes();
+        assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_clear_empty() {
+        let mut writer = BytesWriter::new();
+        writer.clear(); // Should not panic
+        assert!(writer.is_empty());
+    }
+
+    #[test]
+    fn test_bytes_writer_prepend_multiple() {
+        let mut writer = BytesWriter::new();
+        writer.write(&[5, 6]).unwrap();
+        writer.prepend(&[3, 4]).unwrap();
+        writer.prepend(&[1, 2]).unwrap();
+
+        assert_eq!(writer.bytes, vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn test_bytes_writer_append_to_empty() {
+        let mut writer1 = BytesWriter::new();
+        let mut writer2 = BytesWriter::new();
+        writer2.write(&[1, 2, 3]).unwrap();
+
+        writer1.append(&mut writer2);
+
+        assert_eq!(writer1.bytes, vec![1, 2, 3]);
+        assert!(writer2.is_empty());
+    }
+
+    // ============================================
+    // AsyncBytesWriter Tests
+    // ============================================
+
+    use crate::bytesio::NetType;
+    use crate::bytesio::bytesio_errors::BytesIOError;
+    use async_trait::async_trait;
+    use bytes::Bytes;
+    use mockall::mock;
+
+    mock! {
+        NetIO {}
+
+        #[async_trait]
+        impl TNetIO for NetIO {
+            async fn write(&mut self, bytes: Bytes) -> Result<(), BytesIOError>;
+            async fn read(&mut self) -> Result<BytesMut, BytesIOError>;
+            async fn read_timeout(&mut self, duration: Duration) -> Result<BytesMut, BytesIOError>;
+            fn get_net_type(&self) -> NetType;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_writer_new() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let writer = AsyncBytesWriter::new(mock_io);
+        assert!(writer.bytes_writer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_writer_write_u8() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut writer = AsyncBytesWriter::new(mock_io);
+        writer.write_u8(0x42).unwrap();
+        assert_eq!(writer.bytes_writer.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_writer_write_u16() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut writer = AsyncBytesWriter::new(mock_io);
+        writer.write_u16::<BigEndian>(0x1234).unwrap();
+        assert_eq!(writer.bytes_writer.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_writer_write_u24() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut writer = AsyncBytesWriter::new(mock_io);
+        writer.write_u24::<BigEndian>(0x123456).unwrap();
+        assert_eq!(writer.bytes_writer.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_writer_write_u32() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut writer = AsyncBytesWriter::new(mock_io);
+        writer.write_u32::<BigEndian>(0x12345678).unwrap();
+        assert_eq!(writer.bytes_writer.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_writer_write_f64() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut writer = AsyncBytesWriter::new(mock_io);
+        writer.write_f64::<BigEndian>(3.14159).unwrap();
+        assert_eq!(writer.bytes_writer.len(), 8);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_writer_write() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut writer = AsyncBytesWriter::new(mock_io);
+        writer.write(&[1, 2, 3, 4, 5]).unwrap();
+        assert_eq!(writer.bytes_writer.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_writer_write_random_bytes() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut writer = AsyncBytesWriter::new(mock_io);
+        writer.write_random_bytes(10).unwrap();
+        assert_eq!(writer.bytes_writer.len(), 10);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_writer_extract_current_bytes() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut writer = AsyncBytesWriter::new(mock_io);
+        writer.write(&[1, 2, 3]).unwrap();
+
+        let bytes = writer.extract_current_bytes();
+        assert_eq!(bytes.len(), 3);
+        assert!(writer.bytes_writer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_writer_flush() {
+        let mut mock_io = MockNetIO::new();
+        mock_io.expect_write().times(1).returning(|_| Ok(()));
+
+        let io = Arc::new(Mutex::new(
+            Box::new(mock_io) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut writer = AsyncBytesWriter::new(io);
+        writer.write(&[1, 2, 3]).unwrap();
+
+        let result = writer.flush().await;
+        assert!(result.is_ok());
+        assert!(writer.bytes_writer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_writer_flush_timeout_success() {
+        let mut mock_io = MockNetIO::new();
+        mock_io.expect_write().times(1).returning(|_| Ok(()));
+
+        let io = Arc::new(Mutex::new(
+            Box::new(mock_io) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut writer = AsyncBytesWriter::new(io);
+        writer.write(&[1, 2, 3]).unwrap();
+
+        let result = writer.flush_timeout(Duration::from_secs(5)).await;
+        assert!(result.is_ok());
+        assert!(writer.bytes_writer.is_empty());
     }
 }

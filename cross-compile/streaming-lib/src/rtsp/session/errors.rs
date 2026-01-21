@@ -1,52 +1,67 @@
-#![allow(non_local_definitions)]
 use {
     crate::bytesio::bytes_errors::BytesReadError,
     crate::bytesio::{bytes_errors::BytesWriteError, bytesio_errors::BytesIOError},
     crate::common::errors::AuthError,
     crate::rtsp::rtp::errors::{PackerError, UnPackerError},
     crate::streamhub::errors::StreamHubError,
-    failure::{Backtrace, Fail},
-    std::fmt,
     std::io::Error,
     std::str::Utf8Error,
+    thiserror::Error,
     tokio::sync::oneshot::error::RecvError,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+pub enum SessionErrorValue {
+    #[error("net io error: {}", _0)]
+    BytesIOError(#[from] BytesIOError),
+    #[error("bytes read error: {}", _0)]
+    BytesReadError(#[from] BytesReadError),
+    #[error("bytes write error: {}", _0)]
+    BytesWriteError(#[from] BytesWriteError),
+    #[error("Utf8Error: {}", _0)]
+    Utf8Error(#[from] Utf8Error),
+    #[error("UnPackerError: {}", _0)]
+    UnPackerError(#[from] UnPackerError),
+    #[error("stream hub event send error")]
+    StreamHubEventSendErr,
+    #[error("cannot receive frame data from stream hub")]
+    CannotReceiveFrameData,
+    #[error("pack error: {}", _0)]
+    PackerError(#[from] PackerError),
+    #[error("event execute error: {}", _0)]
+    ChannelError(#[from] StreamHubError),
+    #[error("tokio: oneshot receiver err: {}", _0)]
+    RecvError(#[from] RecvError),
+    #[error("auth err: {}", _0)]
+    AuthError(#[from] AuthError),
+    #[error("Channel receive error")]
+    ChannelRecvError,
+    #[error("io error: {}", _0)]
+    IOError(#[from] Error),
+    #[error("RTSP response status error")]
+    RtspResponseStatusError,
+    #[error("missing frame sender")]
+    MissingFrameSender,
+    #[error("missing frame receiver")]
+    MissingFrameReceiver,
+    #[error("missing client ports")]
+    MissingClientPort,
+    #[error("missing session id")]
+    MissingSessionId,
+    #[error("corrupted rtsp message: {0}")]
+    RtspMessageCorrupted(String),
+}
+
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct SessionError {
     pub value: SessionErrorValue,
 }
 
-#[derive(Debug, Fail)]
-pub enum SessionErrorValue {
-    #[fail(display = "net io error: {}", _0)]
-    BytesIOError(#[cause] BytesIOError),
-    #[fail(display = "bytes read error: {}", _0)]
-    BytesReadError(#[cause] BytesReadError),
-    #[fail(display = "bytes write error: {}", _0)]
-    BytesWriteError(#[cause] BytesWriteError),
-    #[fail(display = "Utf8Error: {}", _0)]
-    Utf8Error(#[cause] Utf8Error),
-    #[fail(display = "UnPackerError: {}", _0)]
-    UnPackerError(#[cause] UnPackerError),
-    #[fail(display = "stream hub event send error")]
-    StreamHubEventSendErr,
-    #[fail(display = "cannot receive frame data from stream hub")]
-    CannotReceiveFrameData,
-    #[fail(display = "pack error: {}", _0)]
-    PackerError(#[cause] PackerError),
-    #[fail(display = "event execute error: {}", _0)]
-    ChannelError(#[cause] StreamHubError),
-    #[fail(display = "tokio: oneshot receiver err: {}", _0)]
-    RecvError(#[cause] RecvError),
-    #[fail(display = "auth err: {}", _0)]
-    AuthError(#[cause] AuthError),
-    #[fail(display = "Channel receive error")]
-    ChannelRecvError,
-    #[fail(display = "io error")]
-    IOError(#[cause] Error),
-    #[fail(display = "RTSP response status error")]
-    RtspResponseStatusError,
+impl From<SessionErrorValue> for SessionError {
+    fn from(val: SessionErrorValue) -> Self {
+        SessionError { value: val }
+    }
 }
 
 impl From<BytesIOError> for SessionError {
@@ -129,22 +144,6 @@ impl From<Error> for SessionError {
     }
 }
 
-impl fmt::Display for SessionError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
-    }
-}
-
-impl Fail for SessionError {
-    fn cause(&self) -> Option<&dyn Fail> {
-        self.value.cause()
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        self.value.backtrace()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,6 +175,12 @@ mod tests {
     fn test_session_error_value_rtsp_response_status_error() {
         let error = SessionErrorValue::RtspResponseStatusError;
         assert_eq!(format!("{}", error), "RTSP response status error");
+    }
+
+    #[test]
+    fn test_session_error_value_missing_frame_sender() {
+        let error = SessionErrorValue::MissingFrameSender;
+        assert_eq!(format!("{}", error), "missing frame sender");
     }
 
     // ========== SessionError Display Tests ==========
@@ -293,8 +298,7 @@ mod tests {
         let error = SessionError {
             value: SessionErrorValue::StreamHubEventSendErr,
         };
-        // For simple variants without a cause, this should return None or the underlying cause
-        let _ = error.cause();
+        assert!(std::error::Error::source(&error).is_none());
     }
 
     #[test]
@@ -302,7 +306,7 @@ mod tests {
         let error = SessionError {
             value: SessionErrorValue::ChannelRecvError,
         };
-        let _ = error.backtrace();
+        assert!(std::error::Error::backtrace(&error).is_none());
     }
 
     // ========== Error Variant Coverage ==========

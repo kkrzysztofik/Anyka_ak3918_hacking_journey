@@ -59,14 +59,14 @@ Validate all hardware integrations on actual AK3918 hardware with comprehensive 
 
 ## Acceptance Criteria
 
-- ✅ All hardware components initialize successfully
-- ✅ Dual video encoders produce valid H.264 streams
-- ✅ Audio encoder produces valid AAC stream
-- ✅ PTZ responds within 200ms
-- ✅ Imaging settings apply correctly
-- ✅ ONVIF protocol tests pass (GetCapabilities, GetProfiles, etc.)
-- ✅ RTSP streaming works (VLC playback)
-- ✅ HTTP-FLV streaming works (browser playback)
-- ✅ 4 concurrent clients supported
-- ✅ Error recovery works (graceful degradation)
-- ✅ No resource leaks detected
+- [ ] All hardware components initialize successfully
+- [ ] Dual video encoders produce valid H.264 streams
+- [ ] Audio encoder produces valid AAC stream
+- [ ] PTZ responds within 200ms
+- [ ] Imaging settings apply correctly
+- [ ] ONVIF protocol tests pass (GetCapabilities, GetProfiles, etc.)
+- [ ] RTSP streaming works (VLC playback)
+- [ ] HTTP-FLV streaming works (browser playback)
+- [ ] 4 concurrent clients supported
+- [ ] Error recovery works (graceful degradation)
+- [ ] No resource leaks detected

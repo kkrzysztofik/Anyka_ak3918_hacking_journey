@@ -12,7 +12,7 @@ impl Unmarshal for RtpMap {
     // a=rtpmap:96 H264/90000\r\n\
     // a=rtpmap:97 MPEG4-GENERIC/48000/2\r\n\
 
-    fn unmarshal(raw_data: &str) -> Option<Self> {
+    fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut rtpmap = RtpMap::default();
 
         let parts: Vec<&str> = raw_data.split(' ').collect();
@@ -40,7 +40,7 @@ impl Unmarshal for RtpMap {
             }
         }
 
-        Some(rtpmap)
+        Ok(rtpmap)
     }
 }
 

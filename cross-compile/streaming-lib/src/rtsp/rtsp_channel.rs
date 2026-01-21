@@ -34,6 +34,8 @@ use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+const DEFAULT_MAX_RTP_PAYLOAD_SIZE: usize = 1400;
+
 pub trait TRtpFunc {
     fn create_packer(&mut self, writer: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>);
     fn create_unpacker(&mut self);
@@ -123,7 +125,9 @@ impl TRtpFunc for RtpChannel {
             RtspCodecId::AAC => {
                 self.rtp_unpacker = Some(Box::new(RtpAacUnPacker::new()));
             }
-            RtspCodecId::G711A => {}
+            RtspCodecId::G711A => {
+                // TODO: implement G711A decoding/encoding and add tests
+            }
         }
     }
     fn create_packer(&mut self, io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>) {
@@ -133,7 +137,7 @@ impl TRtpFunc for RtpChannel {
                     self.codec_info.payload_type,
                     self.ssrc,
                     self.init_sequence,
-                    1400,
+                    DEFAULT_MAX_RTP_PAYLOAD_SIZE,
                     io,
                 )));
             }
@@ -142,7 +146,7 @@ impl TRtpFunc for RtpChannel {
                     self.codec_info.payload_type,
                     self.ssrc,
                     self.init_sequence,
-                    1400,
+                    DEFAULT_MAX_RTP_PAYLOAD_SIZE,
                     io,
                 )));
             }
@@ -154,7 +158,9 @@ impl TRtpFunc for RtpChannel {
                     io,
                 )));
             }
-            RtspCodecId::G711A => {}
+            RtspCodecId::G711A => {
+                // TODO: implement G711A decoding/encoding and add tests
+            }
         }
     }
 }

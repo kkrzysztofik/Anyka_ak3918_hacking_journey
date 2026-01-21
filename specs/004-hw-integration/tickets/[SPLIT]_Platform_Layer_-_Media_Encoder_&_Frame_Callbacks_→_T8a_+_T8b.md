@@ -74,18 +74,28 @@ let sub_config = VideoEncoderConfig {
 
 **Extended Frame Lifetime:**
 ```rust
-struct FrameHandle {
-    sdk_buffer: *const u8,
-    ref_count: Arc<AtomicUsize>,
+struct FrameInner {
+  // SAFETY: sdk_buffer is a non-null pointer returned by the SDK and must be
+  // released exactly once via ak_venc_release_frame.
+  sdk_buffer: NonNull<u8>,
 }
 
-impl Drop for FrameHandle {
-    fn drop(&mut self) {
-        if self.ref_count.fetch_sub(1, Ordering::Release) == 1 {
-            unsafe { ak_venc_release_frame(self.sdk_buffer); }
-        }
-    }
+impl Drop for FrameInner {
+  fn drop(&mut self) {
+    // SAFETY: sdk_buffer is valid for release and owned by FrameInner.
+    unsafe { ak_venc_release_frame(self.sdk_buffer.as_ptr()); }
+  }
 }
+
+#[derive(Clone)]
+struct FrameHandle {
+  inner: Arc<FrameInner>,
+}
+
+// SAFETY: FrameInner releases the SDK buffer on last drop; NonNull<u8> is Send/Sync
+// when the underlying SDK buffer can be shared read-only across threads.
+unsafe impl Send for FrameHandle {}
+unsafe impl Sync for FrameHandle {}
 ```
 
 ## Spec References

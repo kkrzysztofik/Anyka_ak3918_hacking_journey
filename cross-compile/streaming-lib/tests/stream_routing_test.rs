@@ -1,13 +1,13 @@
 // Integration tests for stream routing
 // Tests end-to-end stream hub operations, publisher/subscriber routing, and data flow
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use streaming_lib::streamhub::define::{PublishType, SubscribeType};
 use streaming_lib::streamhub::stream::StreamIdentifier;
 
+/// Tests stream identifier creation for different protocols.
 #[tokio::test]
 async fn test_stream_identifier_creation() {
-    // Test stream identifier creation for different protocols
     let rtmp_id = StreamIdentifier::Rtmp {
         app_name: "live".to_string(),
         stream_name: "test".to_string(),
@@ -52,9 +52,9 @@ async fn test_stream_identifier_creation() {
     }
 }
 
+/// Tests stream identifier usage as HashMap keys.
 #[tokio::test]
 async fn test_stream_identifier_hashmap_usage() {
-    // Test stream identifier in HashMap (for stream hub)
     let mut streams: HashMap<StreamIdentifier, u32> = HashMap::new();
 
     let id1 = StreamIdentifier::Rtmp {
@@ -80,9 +80,9 @@ async fn test_stream_identifier_hashmap_usage() {
     assert_eq!(streams.get(&id3), None);
 }
 
+/// Tests all SubscribeType variants are distinct.
 #[tokio::test]
 async fn test_subscribe_type_variants() {
-    // Test all subscribe type variants
     let subscribe_types = vec![
         SubscribeType::RtmpPull,
         SubscribeType::RtmpRemux2HttpFlv,
@@ -107,9 +107,9 @@ async fn test_subscribe_type_variants() {
     }
 }
 
+/// Tests all PublishType variants are distinct.
 #[tokio::test]
 async fn test_publish_type_variants() {
-    // Test all publish type variants
     let publish_types = vec![
         PublishType::RtmpPush,
         PublishType::RtmpRelay,
@@ -130,9 +130,9 @@ async fn test_publish_type_variants() {
     }
 }
 
+/// Tests StreamIdentifier serialization/deserialization round-trip.
 #[tokio::test]
 async fn test_stream_identifier_serialization() {
-    // Test stream identifier serialization (for API/notifications)
     let id = StreamIdentifier::Rtmp {
         app_name: "live".to_string(),
         stream_name: "test".to_string(),
@@ -147,9 +147,9 @@ async fn test_stream_identifier_serialization() {
     assert_eq!(id, deserialized);
 }
 
+/// Tests Display formatting for StreamIdentifier variants.
 #[tokio::test]
 async fn test_stream_identifier_display() {
-    // Test stream identifier Display implementation
     let rtmp_id = StreamIdentifier::Rtmp {
         app_name: "live".to_string(),
         stream_name: "test".to_string(),
@@ -167,4 +167,30 @@ async fn test_stream_identifier_display() {
     let display_str2 = format!("{}", rtsp_id);
     assert!(display_str2.contains("RTSP"));
     assert!(display_str2.contains("/stream1"));
+}
+
+/// Tests StreamIdentifier uniqueness in HashSet collections.
+#[tokio::test]
+async fn test_stream_identifier_hashset_uniqueness() {
+    let mut set = HashSet::new();
+    let id1 = StreamIdentifier::Rtmp {
+        app_name: "live".to_string(),
+        stream_name: "test".to_string(),
+    };
+    let id2 = StreamIdentifier::Rtmp {
+        app_name: "live".to_string(),
+        stream_name: "test".to_string(),
+    };
+    let id3 = StreamIdentifier::Rtmp {
+        app_name: "live".to_string(),
+        stream_name: "other".to_string(),
+    };
+
+    set.insert(id1.clone());
+    set.insert(id2);
+    set.insert(id3.clone());
+
+    assert_eq!(set.len(), 2);
+    assert!(set.contains(&id1));
+    assert!(set.contains(&id3));
 }

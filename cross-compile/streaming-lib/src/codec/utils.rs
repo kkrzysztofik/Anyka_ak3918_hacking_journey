@@ -8,7 +8,7 @@ use crate::bytesio::bits_reader::BitsReader;
 //      for( b = 0; !b; leadingZeroBits++ )
 //          b = read_bits( 1 )
 // The variable codeNum is then assigned as follows:
-//      codeNum = (2<<leadingZeroBits) - 1 + read_bits( leadingZeroBits )
+//      codeNum = (1 << leadingZeroBits) - 1 + read_bits( leadingZeroBits )
 pub fn read_uev(bit_reader: &mut BitsReader) -> Result<u32, H264Error> {
     let mut leading_zeros_bits: usize = 0;
 
@@ -34,7 +34,7 @@ pub fn read_sev(bit_reader: &mut BitsReader) -> Result<i32, H264Error> {
 #[cfg(test)]
 mod tests {
 
-    use super::read_uev;
+    use super::{read_sev, read_uev};
     use crate::bytesio::bits_reader::BitsReader;
     use crate::bytesio::bytes_reader::BytesReader;
     use bytes::BytesMut;
@@ -108,5 +108,25 @@ mod tests {
         let v9 = read_uev(&mut bits_reader).unwrap();
         println!("=={v9}==");
         assert!(v9 == 8);
+    }
+
+    #[test]
+    fn test_read_sev() {
+        // code_num 0 -> "1" -> se(v) = 0
+        // code_num 1 -> "010" -> se(v) = 1
+        // code_num 2 -> "011" -> se(v) = -1
+        // bitstream: 1 010 011 0 (pad)
+        let mut bytes_reader = BytesReader::new(BytesMut::new());
+        bytes_reader.extend_from_slice(&[0b1010_0110]);
+
+        let mut bits_reader = BitsReader::new(bytes_reader);
+
+        let v1 = read_sev(&mut bits_reader).unwrap();
+        let v2 = read_sev(&mut bits_reader).unwrap();
+        let v3 = read_sev(&mut bits_reader).unwrap();
+
+        assert_eq!(v1, 0);
+        assert_eq!(v2, 1);
+        assert_eq!(v3, -1);
     }
 }

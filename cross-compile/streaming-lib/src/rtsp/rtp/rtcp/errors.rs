@@ -1,33 +1,43 @@
-#![allow(non_local_definitions)]
 use crate::bytesio::bytes_errors::BytesReadError;
 use crate::bytesio::bytes_errors::BytesWriteError;
-use failure::Fail;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct RtcpError {
     pub value: RtcpErrorValue,
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum RtcpErrorValue {
-    #[fail(display = "bytes read error: {}", _0)]
-    BytesReadError(BytesReadError),
-    #[fail(display = "bytes write error: {}", _0)]
-    BytesWriteError(BytesWriteError),
+    #[error(transparent)]
+    BytesReadError(#[from] BytesReadError),
+    #[error(transparent)]
+    BytesWriteError(#[from] BytesWriteError),
+    #[error("cumulative packets lost exceeds 24-bit range: {value}")]
+    InvalidPacketLoss { value: u32 },
+    #[error("invalid RTCP APP length: {length}")]
+    InvalidAppLength { length: u16 },
+}
+
+impl From<RtcpErrorValue> for RtcpError {
+    fn from(value: RtcpErrorValue) -> Self {
+        RtcpError { value }
+    }
 }
 
 impl From<BytesReadError> for RtcpError {
-    fn from(error: BytesReadError) -> Self {
+    fn from(err: BytesReadError) -> Self {
         RtcpError {
-            value: RtcpErrorValue::BytesReadError(error),
+            value: RtcpErrorValue::BytesReadError(err),
         }
     }
 }
 
 impl From<BytesWriteError> for RtcpError {
-    fn from(error: BytesWriteError) -> Self {
+    fn from(err: BytesWriteError) -> Self {
         RtcpError {
-            value: RtcpErrorValue::BytesWriteError(error),
+            value: RtcpErrorValue::BytesWriteError(err),
         }
     }
 }

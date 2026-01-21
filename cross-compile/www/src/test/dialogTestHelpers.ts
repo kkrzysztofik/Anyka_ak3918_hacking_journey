@@ -31,38 +31,52 @@ export function testDialogClosed(dialogTestId: string): void {
  * @param dialogTestId - Test ID of the dialog to verify it closed
  * @param onOpenChangeMock - Optional mock function to verify was called with false
  */
+export async function testDialogCancelByButton(
+  user: ReturnType<typeof userEvent.setup>,
+  cancelButtonTestId: string,
+  onOpenChangeMock?: Mock,
+): Promise<void> {
+  const cancelButton = screen.getByTestId(cancelButtonTestId);
+  await user.click(cancelButton);
+
+  if (onOpenChangeMock) {
+    expect(onOpenChangeMock).toHaveBeenCalledWith(false);
+  }
+}
+
+export async function assertDialogClosed(
+  dialogTestId: string,
+  dialogContentTestId?: string,
+): Promise<void> {
+  // Wait for dialog to close (may take a moment for state update)
+  await waitFor(
+    () => {
+      const dialog = screen.queryByTestId(dialogTestId);
+      const contentTestId = dialogContentTestId ?? 'dialog-content';
+      const dialogContent = screen.queryByTestId(contentTestId);
+
+      expect(dialog).not.toBeInTheDocument();
+      if (contentTestId !== dialogTestId) {
+        expect(dialogContent).not.toBeInTheDocument();
+      }
+    },
+    { timeout: 3000 },
+  );
+}
+
 export async function testDialogCancel(
   user: ReturnType<typeof userEvent.setup>,
   cancelButtonTestId: string,
   dialogTestId: string,
   onOpenChangeMock?: Mock,
 ): Promise<void> {
-  const cancelButton = screen.getByTestId(cancelButtonTestId);
-  await user.click(cancelButton);
+  await testDialogCancelByButton(user, cancelButtonTestId, onOpenChangeMock);
 
-  // First verify onOpenChange was called (this happens immediately)
-  if (onOpenChangeMock) {
-    expect(onOpenChangeMock).toHaveBeenCalledWith(false);
-  }
-
-  // Then wait for dialog to close (may take a moment for state update)
-  // Note: Some dialogs may use dialog-content testId, so we check for that too
   const dialogContentTestId = dialogTestId.includes('dialog-content')
     ? dialogTestId
-    : 'dialog-content';
+    : undefined;
 
-  await waitFor(
-    () => {
-      const dialog = screen.queryByTestId(dialogTestId);
-      const dialogContent = screen.queryByTestId(dialogContentTestId);
-      // Dialog should not be in document (check both testIds)
-      expect(dialog).not.toBeInTheDocument();
-      if (dialogContentTestId !== dialogTestId) {
-        expect(dialogContent).not.toBeInTheDocument();
-      }
-    },
-    { timeout: 3000 },
-  );
+  await assertDialogClosed(dialogTestId, dialogContentTestId);
 }
 
 /**

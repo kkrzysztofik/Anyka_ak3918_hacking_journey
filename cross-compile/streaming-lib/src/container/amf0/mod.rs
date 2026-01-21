@@ -6,4 +6,3 @@ pub mod errors;
 
 pub use self::define::{Amf0IndexMap, Amf0ValueType};
 pub use self::errors::{Amf0ReadError, Amf0WriteError};
-//pub use self::amf0_markers::;

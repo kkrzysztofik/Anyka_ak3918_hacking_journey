@@ -42,11 +42,23 @@ rtsp_server.run().await?;
 
 ### HTTP-FLV Server
 
+**Note:** The HTTP-FLV server implementation is currently a stub pending full implementation. The API is not yet stabilized and may change in future releases.
+
+The following example shows the basic structure for initializing an HTTP-FLV server (API subject to change):
+
 ```rust
 use streaming_lib::HttpFlvServer;
+use std::net::SocketAddr;
 
-let httpflv_server = HttpFlvServer::new(/* ... */);
-// Start server
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // HttpFlvServer::new() API is pending implementation
+    // let httpflv_server = HttpFlvServer::new(config)?;
+    // httpflv_server.start().await?;
+    
+    println!("HTTP-FLV server implementation pending");
+    Ok(())
+}
 ```
 
 ## Dependencies

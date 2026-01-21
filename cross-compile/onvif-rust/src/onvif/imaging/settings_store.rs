@@ -918,4 +918,271 @@ mod tests {
         let result = store.set_settings("VideoSource_1", &settings, false).await;
         assert!(result.is_err());
     }
+
+    // ========================================================================
+    // Conversion Function Tests
+    // ========================================================================
+
+    #[test]
+    fn test_onvif_to_platform_settings() {
+        use crate::onvif::types::common::{
+            BacklightCompensation20, BacklightCompensationMode, ImagingSettings20, IrCutFilterMode,
+            WideDynamicMode, WideDynamicRange20,
+        };
+
+        let onvif_settings = ImagingSettings20 {
+            brightness: Some(75.0),
+            contrast: Some(60.0),
+            color_saturation: Some(80.0),
+            sharpness: Some(45.0),
+            ir_cut_filter: Some(IrCutFilterMode::ON),
+            wide_dynamic_range: Some(WideDynamicRange20 {
+                mode: WideDynamicMode::ON,
+                level: Some(50.0),
+            }),
+            backlight_compensation: Some(BacklightCompensation20 {
+                mode: BacklightCompensationMode::ON,
+                level: Some(30.0),
+            }),
+            ..Default::default()
+        };
+
+        let platform = ImagingSettingsStore::onvif_to_platform_settings(&onvif_settings);
+        assert_eq!(platform.brightness, 75.0);
+        assert_eq!(platform.contrast, 60.0);
+        assert_eq!(platform.saturation, 80.0);
+        assert_eq!(platform.sharpness, 45.0);
+        assert!(platform.ir_cut_filter);
+        assert!(platform.wdr);
+        assert!(platform.backlight_compensation);
+    }
+
+    #[test]
+    fn test_onvif_to_platform_settings_defaults() {
+        use crate::onvif::types::common::ImagingSettings20;
+
+        let onvif_settings = ImagingSettings20::default();
+        let platform = ImagingSettingsStore::onvif_to_platform_settings(&onvif_settings);
+        assert_eq!(platform.brightness, 50.0);
+        assert_eq!(platform.contrast, 50.0);
+        assert!(platform.ir_cut_filter); // Default is true
+        assert!(!platform.wdr);
+        assert!(!platform.backlight_compensation);
+    }
+
+    #[test]
+    fn test_onvif_to_platform_settings_off_modes() {
+        use crate::onvif::types::common::{
+            BacklightCompensation20, BacklightCompensationMode, ImagingSettings20, IrCutFilterMode,
+            WideDynamicMode, WideDynamicRange20,
+        };
+
+        let onvif_settings = ImagingSettings20 {
+            ir_cut_filter: Some(IrCutFilterMode::OFF),
+            wide_dynamic_range: Some(WideDynamicRange20 {
+                mode: WideDynamicMode::OFF,
+                level: None,
+            }),
+            backlight_compensation: Some(BacklightCompensation20 {
+                mode: BacklightCompensationMode::OFF,
+                level: None,
+            }),
+            ..Default::default()
+        };
+
+        let platform = ImagingSettingsStore::onvif_to_platform_settings(&onvif_settings);
+        assert!(!platform.ir_cut_filter);
+        assert!(!platform.wdr);
+        assert!(!platform.backlight_compensation);
+    }
+
+    #[test]
+    fn test_onvif_to_persisted() {
+        use crate::onvif::types::common::{ImagingSettings20, IrCutFilterMode};
+
+        let settings = ImagingSettings20 {
+            brightness: Some(80.0),
+            contrast: Some(40.0),
+            color_saturation: Some(70.0),
+            sharpness: Some(55.0),
+            ir_cut_filter: Some(IrCutFilterMode::AUTO),
+            ..Default::default()
+        };
+
+        let persisted = ImagingSettingsStore::onvif_to_persisted(&settings);
+        assert_eq!(persisted.brightness, Some(80.0));
+        assert_eq!(persisted.contrast, Some(40.0));
+        assert_eq!(persisted.color_saturation, Some(70.0));
+        assert_eq!(persisted.sharpness, Some(55.0));
+        assert!(persisted.ir_cut_filter.is_some());
+    }
+
+    #[test]
+    fn test_persisted_to_onvif() {
+        let persisted = PersistedImagingSettings {
+            brightness: Some(90.0),
+            contrast: Some(30.0),
+            color_saturation: Some(65.0),
+            sharpness: Some(48.0),
+            ir_cut_filter: Some("ON".to_string()),
+            wide_dynamic_range_mode: Some("ON".to_string()),
+            wide_dynamic_range_level: Some(60.0),
+            backlight_compensation_mode: Some("ON".to_string()),
+            backlight_compensation_level: Some(40.0),
+        };
+
+        let onvif = ImagingSettingsStore::persisted_to_onvif(&persisted);
+        assert_eq!(onvif.brightness, Some(90.0));
+        assert_eq!(onvif.contrast, Some(30.0));
+        assert!(onvif.ir_cut_filter.is_some());
+        assert!(onvif.wide_dynamic_range.is_some());
+        assert!(onvif.backlight_compensation.is_some());
+    }
+
+    #[test]
+    fn test_persisted_to_onvif_off_modes() {
+        let persisted = PersistedImagingSettings {
+            brightness: Some(50.0),
+            contrast: None,
+            color_saturation: None,
+            sharpness: None,
+            ir_cut_filter: Some("OFF".to_string()),
+            wide_dynamic_range_mode: Some("OFF".to_string()),
+            wide_dynamic_range_level: None,
+            backlight_compensation_mode: Some("OFF".to_string()),
+            backlight_compensation_level: None,
+        };
+
+        let onvif = ImagingSettingsStore::persisted_to_onvif(&persisted);
+        use crate::onvif::types::common::{
+            BacklightCompensationMode, IrCutFilterMode, WideDynamicMode,
+        };
+
+        assert_eq!(onvif.ir_cut_filter, Some(IrCutFilterMode::OFF));
+        assert!(onvif.wide_dynamic_range.is_some());
+        let wdr = onvif.wide_dynamic_range.unwrap();
+        assert!(matches!(wdr.mode, WideDynamicMode::OFF));
+        assert!(onvif.backlight_compensation.is_some());
+        let blc = onvif.backlight_compensation.unwrap();
+        assert!(matches!(blc.mode, BacklightCompensationMode::OFF));
+    }
+
+    #[test]
+    fn test_validate_parameter_all_types() {
+        let store = ImagingSettingsStore::new();
+        let options = ImagingSettingsStore::default_options();
+
+        // Test all parameter types
+        assert!(
+            store
+                .validate_parameter("Brightness", 50.0, &options)
+                .is_ok()
+        );
+        assert!(store.validate_parameter("Contrast", 50.0, &options).is_ok());
+        assert!(
+            store
+                .validate_parameter("ColorSaturation", 50.0, &options)
+                .is_ok()
+        );
+        assert!(
+            store
+                .validate_parameter("Sharpness", 50.0, &options)
+                .is_ok()
+        );
+
+        // Unknown parameter should be okay (no range to check)
+        assert!(store.validate_parameter("Unknown", 200.0, &options).is_ok());
+    }
+
+    #[test]
+    fn test_validate_parameter_boundary_values() {
+        let store = ImagingSettingsStore::new();
+        let options = ImagingSettingsStore::default_options();
+
+        // Min boundary
+        assert!(
+            store
+                .validate_parameter("Brightness", 0.0, &options)
+                .is_ok()
+        );
+        // Max boundary
+        assert!(
+            store
+                .validate_parameter("Brightness", 100.0, &options)
+                .is_ok()
+        );
+        // Below min
+        assert!(
+            store
+                .validate_parameter("Brightness", -1.0, &options)
+                .is_err()
+        );
+        // Above max
+        assert!(
+            store
+                .validate_parameter("Brightness", 101.0, &options)
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_settings_all_params_invalid() {
+        let store = ImagingSettingsStore::new();
+        use crate::onvif::types::common::ImagingSettings20;
+
+        // Test contrast out of range
+        let mut settings = ImagingSettings20::default();
+        settings.contrast = Some(200.0);
+        let result = store.validate_settings("VideoSource_1", &settings).await;
+        assert!(result.is_err());
+
+        // Test saturation out of range
+        let mut settings = ImagingSettings20::default();
+        settings.color_saturation = Some(-10.0);
+        let result = store.validate_settings("VideoSource_1", &settings).await;
+        assert!(result.is_err());
+
+        // Test sharpness out of range
+        let mut settings = ImagingSettings20::default();
+        settings.sharpness = Some(150.0);
+        let result = store.validate_settings("VideoSource_1", &settings).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_status_invalid_token() {
+        let store = ImagingSettingsStore::new();
+        let result = store.get_status("InvalidToken").await;
+        assert!(result.is_err());
+        match result {
+            Err(ImagingSettingsError::InvalidToken(t)) => assert_eq!(t, "InvalidToken"),
+            _ => panic!("Expected InvalidToken error"),
+        }
+    }
+
+    #[test]
+    fn test_with_persistence() {
+        let store = ImagingSettingsStore::with_persistence("/tmp/test_imaging.toml");
+        assert!(store.persistence_path.is_some());
+    }
+
+    #[test]
+    fn test_set_persistence_path() {
+        let mut store = ImagingSettingsStore::new();
+        assert!(store.persistence_path.is_none());
+        store.set_persistence_path("/tmp/new_path.toml");
+        assert!(store.persistence_path.is_some());
+    }
+
+    #[test]
+    fn test_imaging_settings_error_from_platform_error() {
+        use crate::platform::PlatformError;
+
+        let platform_err = PlatformError::NotSupported("test error".to_string());
+        let imaging_err: ImagingSettingsError = platform_err.into();
+        assert!(matches!(
+            imaging_err,
+            ImagingSettingsError::PlatformError(_)
+        ));
+    }
 }

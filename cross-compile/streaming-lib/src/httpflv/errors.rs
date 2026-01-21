@@ -1,45 +1,50 @@
-#![allow(non_local_definitions)]
 use crate::streamhub::errors::StreamHubError;
 
 use {
     crate::container::amf0::errors::Amf0WriteError, crate::container::errors::FlvMuxerError,
-    failure::Fail, futures::channel::mpsc::SendError, std::fmt,
-    tokio::sync::oneshot::error::RecvError,
+    futures::channel::mpsc::SendError, thiserror::Error, tokio::sync::oneshot::error::RecvError,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct ServerError {
     pub value: ServerErrorValue,
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum ServerErrorValue {
-    #[fail(display = "server error")]
+    #[error("server error")]
     Error,
 }
 
+#[derive(Debug, Error)]
+#[error("{value}")]
 pub struct HttpFLvError {
     pub value: HttpFLvErrorValue,
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug, Error)]
 pub enum HttpFLvErrorValue {
-    #[fail(display = "server error")]
+    #[error("server error")]
     Error,
-    #[fail(display = "flv muxer error")]
+    #[error("flv muxer error: {}", _0)]
     MuxerError(FlvMuxerError),
-    #[fail(display = "amf write error")]
+    #[error("amf write error: {}", _0)]
     Amf0WriteError(Amf0WriteError),
-    #[fail(display = "metadata error")]
+    #[error("metadata error: {}", _0)]
     MpscSendError(SendError),
-    #[fail(display = "event execute error: {}", _0)]
+    #[error("event execute error: {}", _0)]
     ChannelError(StreamHubError),
-    #[fail(display = "tokio: oneshot receiver err: {}", _0)]
-    RecvError(#[cause] RecvError),
-    #[fail(display = "channel recv error")]
+    #[error("tokio: oneshot receiver err: {}", _0)]
+    RecvError(RecvError),
+    #[error("channel recv error")]
     ChannelRecvError,
-    #[fail(display = "send frame data error")]
+    #[error("send frame data error")]
     SendFrameDataErr,
+    #[error("unexpected frame data: {0}")]
+    UnexpectedFrameData(String),
+    #[error("missing frame receiver")]
+    MissingFrameReceiver,
 }
 
 impl From<FlvMuxerError> for HttpFLvError {
@@ -79,12 +84,6 @@ impl From<RecvError> for HttpFLvError {
         HttpFLvError {
             value: HttpFLvErrorValue::RecvError(error),
         }
-    }
-}
-
-impl fmt::Display for HttpFLvError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.value, f)
     }
 }
 
@@ -169,11 +168,9 @@ mod tests {
     #[test]
     fn test_httpflv_error_from_amf0_write_error() {
         use crate::container::amf0::errors::{Amf0WriteError, Amf0WriteErrorValue};
-        let amf_error = Amf0WriteError {
-            value: Amf0WriteErrorValue::NormalStringTooLong,
-        };
+        let amf_error = Amf0WriteError(Amf0WriteErrorValue::NormalStringTooLong);
         let http_error: HttpFLvError = amf_error.into();
-        match http_error.value {
+        match &http_error.value {
             HttpFLvErrorValue::Amf0WriteError(_) => {}
             _ => panic!("Expected Amf0WriteError variant"),
         }
@@ -196,10 +193,23 @@ mod tests {
 
     #[test]
     fn test_all_httpflv_error_variants() {
-        // Test that all variants can be created
-        let _ = HttpFLvErrorValue::Error;
-        let _ = HttpFLvErrorValue::ChannelRecvError;
-        let _ = HttpFLvErrorValue::SendFrameDataErr;
+        assert!(matches!(HttpFLvErrorValue::Error, HttpFLvErrorValue::Error));
+        assert!(matches!(
+            HttpFLvErrorValue::ChannelRecvError,
+            HttpFLvErrorValue::ChannelRecvError
+        ));
+        assert!(matches!(
+            HttpFLvErrorValue::SendFrameDataErr,
+            HttpFLvErrorValue::SendFrameDataErr
+        ));
+        assert!(matches!(
+            HttpFLvErrorValue::UnexpectedFrameData("x".to_string()),
+            HttpFLvErrorValue::UnexpectedFrameData(_)
+        ));
+        assert!(matches!(
+            HttpFLvErrorValue::MissingFrameReceiver,
+            HttpFLvErrorValue::MissingFrameReceiver
+        ));
         // Variants with wrapped errors are tested via From traits above
     }
 }

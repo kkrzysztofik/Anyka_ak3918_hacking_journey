@@ -1975,56 +1975,6 @@ This Tech Plan defines the architecture for integrating Anyka AK3918 hardware wi
 
 1. **Modular FFI Layer**: Organized by subsystem (video, audio, ptz, imaging) with safe RAII wrappers
 2. **streaming-lib**: Library-only workspace member forked from xiu with minimal components
-3. **Zero-Copy Frames**: Synchronous callbacks with read-only pointers (< 1ms processing)
-4. **Hybrid Memory Management**: Custom pools for hot paths + global monitoring with `cap`
-5. **Always-On Streaming**: Servers and encoders always running for ONVIF compliance
-6. **Manual Vendor Setup**: One-time header consolidation via setup script
-
-The architecture supports the severe 24MB memory constraint through zero-copy strategies, pre-allocated buffer pools, and continuous monitoring. The modular design enables parallel development and clear separation of concerns.
-
-**Next Steps:** Create implementation tickets for each component (FFI wrappers, streaming-lib creation, platform implementations, integration).f0
-    style F fill:#d0d0d0
-    style G fill:#ffe1f0
-```
-
-#### Build Dependencies
-
-**onvif-rust/Cargo.toml:**
-
-```toml
-[dependencies]
-streaming-lib = { path = "../streaming-lib" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
-cap = "0.1"
-# ... other dependencies
-```
-
-**streaming-lib/Cargo.toml:**
-
-```toml
-[dependencies]
-portable-atomic = { version = "1.11", features = ["std"] }
-tokio = { version = "1", features = ["rt-multi-thread", "net"] }
-bytes = "1.11"
-# ... other dependencies
-
-[patch.crates-io]
-webrtc-util = { path = "../xiu/patches/webrtc-util-0.7.0-full" }
-webrtc-ice = { path = "../xiu/patches/webrtc-ice-0.9.1-full" }
-webrtc-sctp = { path = "../xiu/patches/webrtc-sctp-0.8.0-full" }
-rtp = { path = "../xiu/patches/rtp-0.8.0-full" }
-tokio-metrics = { path = "../xiu/patches/tokio-metrics-0.2.2-full" }
-openssl-src = { path = "../xiu/patches/openssl-src-300.2.3+3.2.1" }
-```
-
----
-
-## Summary
-
-This Tech Plan defines the architecture for integrating Anyka AK3918 hardware with the ONVIF Rust implementation and adding streaming protocols. Key architectural decisions:
-
-1. **Modular FFI Layer**: Organized by subsystem (video, audio, ptz, imaging) with safe RAII wrappers
-2. **streaming-lib**: Library-only workspace member forked from xiu with minimal components
 3. **Relaxed Callback Timing**: Synchronous callbacks with < 2ms processing (relaxed for embedded hardware)
 4. **Bounded Send Queues**: 16-frame limit with oldest-frame eviction (prevents memory explosion)
 5. **Hybrid Memory Management**: Custom pools for hot paths + faster monitoring (100ms intervals)
@@ -2057,4 +2007,3 @@ The modular design enables parallel development and clear separation of concerns
 - ✅ Static libraries available (IOT-ANYKA-PTZdaemon/libs/)
 
 **Next Steps:** Create implementation tickets for each component (vendor setup, workspace root, FFI wrappers, streaming-lib creation, platform implementations, integration).
-</()></HttpFlvServer></HttpFlvServer></RtpPacket></RtspServer></RtspServer></Self></dyn></CallbackHandle></HttpFlvServer></RtspServer></i32></()></Self></()></Self></Self></()></()></F></()></Self></(u32,></Self></()></HashMap<usize,></Arc<AnykaNetworkInfo></Arc<AnykaImagingControl></Arc<AnykaPTZControl></AnykaAudioEncoder></AnykaAudioInput></AnykaVideoEncoder></AnykaVideoInput></dyn></AnykaPlatform></Response></()></()></usize></'_></'a></BufferHandle></Mutex<Vec<usize></Box<[u8;></Self></dyn></dyn></(),></T,></Self,>

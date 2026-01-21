@@ -1,17 +1,16 @@
 // Integration tests for RTP streaming
 // Tests end-to-end RTP packetization, transmission, and depacketization
 
-use bytes::BytesMut;
 use streaming_lib::bytesio::bytes_reader::BytesReader;
+use streaming_lib::rtsp::rtp::RtpPacket;
 use streaming_lib::rtsp::rtp::rtp_header::RtpHeader;
 use streaming_lib::rtsp::rtp::utils::Marshal;
 use streaming_lib::rtsp::rtp::utils::Unmarshal;
-use streaming_lib::rtsp::rtp::{RtpPacket, define};
 
+/// Tests RTP packet marshaling/unmarshaling round-trip integrity.
 #[tokio::test]
 async fn test_rtp_packet_round_trip() {
-    // Test RTP packet marshaling and unmarshaling
-    let mut header = RtpHeader {
+    let header = RtpHeader {
         version: 2,
         padding_flag: 0,
         extension_flag: 0,
@@ -24,11 +23,7 @@ async fn test_rtp_packet_round_trip() {
         csrcs: vec![],
     };
 
-    // Create RtpPacket manually since new() is private
-    let mut packet = RtpPacket {
-        header: header.clone(),
-        ..Default::default()
-    };
+    let mut packet = RtpPacket::new(header.clone());
     packet
         .payload
         .extend_from_slice(&[0x67, 0x42, 0x00, 0x1e, 0x9a]);
@@ -46,10 +41,10 @@ async fn test_rtp_packet_round_trip() {
     assert_eq!(unmarshaled_packet.payload, packet.payload);
 }
 
+/// Tests sequence number wrapping behavior for RTP headers.
 #[tokio::test]
 async fn test_rtp_sequence_number_wrapping() {
-    // Test RTP sequence number wrapping
-    let mut header = RtpHeader {
+    let header = RtpHeader {
         seq_number: 65535,
         ..Default::default()
     };
@@ -65,18 +60,18 @@ async fn test_rtp_sequence_number_wrapping() {
     assert_eq!(next_seq, 0);
 }
 
+/// Tests timestamp increments for 90kHz video clock.
 #[tokio::test]
 async fn test_rtp_timestamp_increment() {
-    // Test RTP timestamp increment for video (90kHz clock)
     let base_timestamp = 1000000u32;
     let frame_duration_90khz = 3000u32; // ~33ms at 90kHz
 
-    let mut header1 = RtpHeader {
+    let header1 = RtpHeader {
         timestamp: base_timestamp,
         ..Default::default()
     };
 
-    let mut header2 = RtpHeader {
+    let header2 = RtpHeader {
         timestamp: base_timestamp + frame_duration_90khz,
         ..Default::default()
     };
@@ -97,28 +92,27 @@ async fn test_rtp_timestamp_increment() {
     assert_eq!(timestamp_diff, frame_duration_90khz);
 }
 
+/// Tests marker-bit round-trip after marshaling/unmarshaling.
 #[tokio::test]
-async fn test_rtp_marker_bit() {
-    // Test RTP marker bit setting for end of frame
-    let mut header = RtpHeader {
-        marker: 0,
+async fn test_rtp_marker_bit_round_trip() {
+    let header = RtpHeader {
+        marker: 1,
         ..Default::default()
     };
 
-    let mut packet = RtpPacket {
-        header,
-        ..Default::default()
-    };
-    packet.header.marker = 1; // Set marker for end of frame
+    let packet = RtpPacket::new(header.clone());
+    let packet_bytes = packet.marshal().unwrap();
+    let mut reader = BytesReader::new(packet_bytes);
+    let unmarshaled_packet = RtpPacket::unmarshal(&mut reader).unwrap();
 
-    assert_eq!(packet.header.marker, 1);
+    assert_eq!(unmarshaled_packet.header.marker, header.marker);
 }
 
+/// Tests CSRC list handling and count derivation.
 #[tokio::test]
 async fn test_rtp_csrc_handling() {
-    // Test RTP CSRC list handling
-    let mut header = RtpHeader {
-        cc: 2,
+    let header = RtpHeader {
+        cc: 0,
         csrcs: vec![0x11111111, 0x22222222],
         ..Default::default()
     };

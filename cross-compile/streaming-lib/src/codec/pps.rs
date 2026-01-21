@@ -63,12 +63,18 @@ impl PpsParser {
                     }
                 }
                 3..=5 => {
-                    // Slice group map units
-                    let num_slice_group_map_units_minus1 = utils::read_uev(&mut self.bits_reader)?;
+                    // For slice_group_map_type 3, 4, 5:
+                    // Read slice_group_change_direction_flag (1 bit)
+                    let slice_group_change_direction_flag = self.bits_reader.read_bit()?;
                     self.pps
                         .slice_group_info
-                        .push(num_slice_group_map_units_minus1);
-                    // Additional parsing would be needed for full implementation
+                        .push(slice_group_change_direction_flag as u32);
+
+                    // Read slice_group_change_rate_minus1 (ue(v))
+                    let slice_group_change_rate_minus1 = utils::read_uev(&mut self.bits_reader)?;
+                    self.pps
+                        .slice_group_info
+                        .push(slice_group_change_rate_minus1);
                 }
                 6 => {
                     // Explicit slice group map
@@ -76,9 +82,19 @@ impl PpsParser {
                     self.pps
                         .slice_group_info
                         .push(num_slice_group_map_units_minus1);
+
+                    // slice_group_id[i] is u(v) where v = ceil(log2(num_slice_groups_minus1 + 1))
+                    let num_slice_groups = self.pps.num_slice_groups_minus1 + 1;
+                    // Calculate v = ceil(log2(num_slice_groups))
+                    let v = if num_slice_groups <= 1 {
+                        1
+                    } else {
+                        (num_slice_groups - 1).ilog2() + 1
+                    } as usize;
+
                     for _ in 0..=num_slice_group_map_units_minus1 {
-                        let slice_group_id = utils::read_uev(&mut self.bits_reader)?;
-                        self.pps.slice_group_info.push(slice_group_id);
+                        let slice_group_id = self.bits_reader.read_n_bits(v)?;
+                        self.pps.slice_group_info.push(slice_group_id as u32);
                     }
                 }
                 _ => {

@@ -1,9 +1,10 @@
-use super::server::{DefaultHttpFlvServer, HttpFlvServer};
+use super::server::{DefaultHttpFlvServer, HttpFlvServer, handle_connection};
 use crate::common::auth::Auth;
 use crate::streamhub::define::{StreamHubEvent, StreamHubEventSender};
 use crate::streamhub::stream::StreamIdentifier;
 use axum::{
     body::Body,
+    extract::{ConnectInfo, State},
     http::{Request, Uri},
 };
 use std::net::SocketAddr;
@@ -121,11 +122,11 @@ async fn test_handle_connection_auth_success() {
     let stream_name = "test_stream".to_string();
     let secret = Some(SecretCarrier::Query("token=test_secret".to_string()));
 
-    let result = auth.authenticate(&stream_name, &secret, true);
+    let result = auth.authenticate(stream_name.as_str(), &secret, true);
 
     // Note: This depends on the actual auth implementation
     // Adjust based on how Auth::authenticate works
-    assert!(result.is_ok() || result.is_err()); // Just verify it doesn't panic
+    assert!(result.is_ok());
 }
 
 #[tokio::test]
@@ -142,17 +143,21 @@ async fn test_handle_connection_auth_failure() {
     let stream_name = "test_stream".to_string();
     let secret = Some(SecretCarrier::Query("token=wrong_secret".to_string()));
 
-    let result = auth.authenticate(&stream_name, &secret, true);
+    let result = auth.authenticate(stream_name.as_str(), &secret, true);
 
     // Should fail with wrong token
     // Adjust based on actual auth implementation
-    assert!(result.is_ok() || result.is_err()); // Just verify it doesn't panic
+    assert!(result.is_err());
 }
 
 #[tokio::test]
 async fn test_httpflv_server_address_parsing() {
-    let event_sender = create_test_event_sender();
-    let server = DefaultHttpFlvServer::new("127.0.0.1:8080".to_string(), event_sender, None);
+    let _event_sender = create_test_event_sender();
+    let _server = DefaultHttpFlvServer::new(
+        "127.0.0.1:8080".to_string(),
+        create_test_event_sender(),
+        None,
+    );
 
     // address is private, test by trying to run (would fail if address invalid)
     // For now, just verify server creation
@@ -168,8 +173,9 @@ async fn test_httpflv_server_address_parsing() {
 
 #[tokio::test]
 async fn test_httpflv_server_address_parsing_ipv6() {
-    let event_sender = create_test_event_sender();
-    let server = DefaultHttpFlvServer::new("[::1]:8080".to_string(), event_sender, None);
+    let _event_sender = create_test_event_sender();
+    let _server =
+        DefaultHttpFlvServer::new("[::1]:8080".to_string(), create_test_event_sender(), None);
 
     // address is private, test parsing directly
     let sock_addr: SocketAddr = "[::1]:8080".parse().unwrap();
@@ -178,8 +184,12 @@ async fn test_httpflv_server_address_parsing_ipv6() {
 
 #[tokio::test]
 async fn test_httpflv_server_address_parsing_invalid() {
-    let event_sender = create_test_event_sender();
-    let server = DefaultHttpFlvServer::new("invalid_address".to_string(), event_sender, None);
+    let _event_sender = create_test_event_sender();
+    let _server = DefaultHttpFlvServer::new(
+        "invalid_address".to_string(),
+        create_test_event_sender(),
+        None,
+    );
 
     // address is private, test invalid address parsing directly
     let result: Result<SocketAddr, _> = "invalid_address".parse();
@@ -188,10 +198,21 @@ async fn test_httpflv_server_address_parsing_invalid() {
 
 #[tokio::test]
 async fn test_response_headers() {
-    // Test that responses include CORS headers
-    // This is tested indirectly through the handle_connection function
-    // which sets "Access-Control-Allow-Origin: *"
-    assert!(true); // Placeholder - actual test would require full server setup
+    let (event_sender, _event_receiver) = tokio_mpsc::unbounded_channel();
+    let uri = Uri::from_static("http://localhost/live/test.flv");
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let remote_addr = SocketAddr::from(([127, 0, 0, 1], 1234));
+
+    let response =
+        handle_connection(State((event_sender, None)), ConnectInfo(remote_addr), req).await;
+
+    assert_eq!(
+        response
+            .headers()
+            .get("Access-Control-Allow-Origin")
+            .unwrap(),
+        "*"
+    );
 }
 
 #[tokio::test]

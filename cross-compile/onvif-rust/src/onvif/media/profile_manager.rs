@@ -2426,15 +2426,27 @@ mod tests {
     #[test]
     fn test_max_profiles_limit() {
         let manager = ProfileManager::new();
-        // Try to create more than MAX_PROFILES
-        for i in 0..MAX_PROFILES {
-            let _result = manager.create_profile(format!("Profile{}", i), None);
+        // Verify manager starts with 2 default profiles
+        assert_eq!(
+            manager.profiles.len(),
+            2,
+            "expected 2 default profiles at startup"
+        );
+        // Manager starts with 2 default profiles, so we can create MAX_PROFILES - 2 more
+        for i in 0..(MAX_PROFILES - 2) {
+            let result = manager.create_profile(format!("Profile{}", i), None);
+            assert!(
+                result.is_ok(),
+                "Failed to create profile {} when under limit",
+                i
+            );
         }
-        // Should fail when at limit (2 defaults + MAX_PROFILES attempts)
+        // Now at MAX_PROFILES, next create should fail
         let result = manager.create_profile("OneMoreProfile".to_string(), None);
-        // Depending on MAX_PROFILES value, this may or may not fail
-        // Just ensure no panic occurs
-        let _ = result;
+        assert!(
+            result.is_err(),
+            "Expected error when creating profile beyond MAX_PROFILES limit"
+        );
     }
 
     #[test]
