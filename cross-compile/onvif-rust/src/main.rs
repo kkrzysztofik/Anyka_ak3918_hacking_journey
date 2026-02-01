@@ -10,7 +10,6 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
-use std::sync::Arc;
 
 /// ONVIF daemon with optional H.264 playback validation mode
 #[derive(Parser, Debug)]

@@ -49,7 +49,7 @@ async fn test_default_httpflv_server_new_with_auth() {
 
 #[tokio::test]
 async fn test_handle_connection_valid_flv_path() {
-    let event_sender = create_test_event_sender();
+    let _event_sender = create_test_event_sender();
     let uri = Uri::from_static("http://localhost/live/test.flv");
     let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
 

@@ -135,7 +135,7 @@ impl H264FileReader {
         // Find the next start code
         // Returns (offset_in_buffer, start_code_length)
         // File pointer is positioned just before the start code
-        let (offset, start_code_len) = self.find_next_start_code()?;
+        let (_offset, start_code_len) = self.find_next_start_code()?;
 
         // If start_code_len == 0, we've reached EOF without finding a start code
         if start_code_len == 0 {

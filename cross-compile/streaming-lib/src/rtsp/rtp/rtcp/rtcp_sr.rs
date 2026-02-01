@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn test_marshal_sender_report_with_report_blocks() {
-        let mut sr = RtcpSenderReport {
+        let sr = RtcpSenderReport {
             header: RtcpHeader {
                 version: 2,
                 payload_type: 200,

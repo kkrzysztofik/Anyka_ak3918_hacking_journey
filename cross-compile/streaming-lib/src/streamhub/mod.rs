@@ -1112,8 +1112,7 @@ impl StreamsHub {
 mod tests {
     use super::*;
     use crate::streamhub::define::{
-        DataReceiver, DataSender, FrameData, FrameDataSender, Information, NotifyInfo, PacketData,
-        PacketDataSender, PubDataType, PublishType, PublisherInfo, StatisticData, SubDataType,
+        DataReceiver, DataSender, FrameData, NotifyInfo, PacketData, PubDataType, PublishType, PublisherInfo, StatisticData, SubDataType,
         SubscribeType, SubscriberInfo,
     };
     use async_trait::async_trait;
@@ -1489,7 +1488,7 @@ mod tests {
             packet_receiver: None,
         };
 
-        let mut transceiver =
+        let transceiver =
             StreamDataTransceiver::new(receiver, event_receiver, identifier.clone(), mock_handler);
 
         // Run transceiver in background
@@ -1558,7 +1557,7 @@ mod tests {
             packet_receiver: Some(packet_receiver),
         };
 
-        let mut transceiver =
+        let transceiver =
             StreamDataTransceiver::new(receiver, event_receiver, identifier.clone(), mock_handler);
 
         tokio::spawn(async move {

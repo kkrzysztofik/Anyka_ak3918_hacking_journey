@@ -444,7 +444,7 @@ impl RtpH264UnPacker {
             // read dond
             payload_reader.read_u8()?;
             // read TS offs - can be 0 (same timestamp as base) or any positive value
-            let (ts, ts_bytes) = if t == define::MTAP_16 {
+            let (_ts, ts_bytes) = if t == define::MTAP_16 {
                 (payload_reader.read_u16::<BigEndian>()? as u32, 2_usize)
             } else if t == define::MTAP_24 {
                 (payload_reader.read_u24::<BigEndian>()?, 3_usize)
@@ -480,11 +480,11 @@ impl TRtpReceiverForRtcp for RtpH264UnPacker {
 mod tests {
     use super::*;
     use crate::bytesio::bytes_reader::BytesReader;
-    use crate::bytesio::bytes_writer::BytesWriter;
+    
     use crate::rtsp::rtp::utils::Marshal;
     use crate::streamhub::define::FrameData;
     use async_trait::async_trait;
-    use byteorder::BigEndian;
+    
     use bytes::BytesMut;
     use mockall::mock;
     use tokio::sync::Mutex;
@@ -540,7 +540,7 @@ mod tests {
         ));
         let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
 
-        let mut packet_count = 0;
+        let _packet_count = 0;
         let packet_count_clone = std::sync::Arc::new(std::sync::Mutex::new(0));
         let packet_count_clone2 = packet_count_clone.clone();
         packer.on_packet_handler(Box::new(move |_io, packet| {
@@ -627,7 +627,7 @@ mod tests {
 
         let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
         let packet_count_clone = packet_count.clone();
-        packer.on_packet_handler(Box::new(move |_io, packet| {
+        packer.on_packet_handler(Box::new(move |_io, _packet| {
             *packet_count_clone.lock().unwrap() += 1;
             Box::pin(async move { Ok(()) })
         }));

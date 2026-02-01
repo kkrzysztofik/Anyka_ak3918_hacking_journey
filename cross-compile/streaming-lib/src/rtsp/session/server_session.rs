@@ -1339,7 +1339,7 @@ mod tests {
     #[tokio::test]
     async fn test_rtsp_server_session_teardown() {
         let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let mut mock_io = MockNetIO::new();
+        let mock_io = MockNetIO::new();
 
         let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
         let remote_addr = "127.0.0.1:0".parse().unwrap();
@@ -1349,7 +1349,7 @@ mod tests {
 
         // Mock event receiver to handle UnSubscribe/UnPublish
         tokio::spawn(async move {
-            if let Some(event) = event_receiver.recv().await {
+            if let Some(_event) = event_receiver.recv().await {
                 // Just consume the event
             }
         });

@@ -392,11 +392,11 @@ impl TRtpReceiverForRtcp for RtpH265UnPacker {
 mod tests {
     use super::*;
     use crate::bytesio::bytes_reader::BytesReader;
-    use crate::bytesio::bytes_writer::BytesWriter;
+    
     use crate::rtsp::rtp::utils::Marshal;
     use crate::streamhub::define::FrameData;
     use async_trait::async_trait;
-    use byteorder::BigEndian;
+    
     use bytes::BytesMut;
     use mockall::mock;
     use tokio::sync::Mutex;
@@ -495,7 +495,7 @@ mod tests {
             // Verify FU structure (PayloadHdr + FU header)
             if packet.payload.len() >= 3 {
                 let payload_hdr_1st = packet.payload[0];
-                let payload_hdr_2nd = packet.payload[1];
+                let _payload_hdr_2nd = packet.payload[1];
                 let fu_header = packet.payload[2];
                 // Check that PayloadHdr has FU type (49)
                 assert_eq!((payload_hdr_1st >> 1) & 0x3F, define::FU);
@@ -548,7 +548,7 @@ mod tests {
 
         let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
         let packet_count_clone = packet_count.clone();
-        packer.on_packet_handler(Box::new(move |_io, packet| {
+        packer.on_packet_handler(Box::new(move |_io, _packet| {
             *packet_count_clone.lock().unwrap() += 1;
             Box::pin(async move { Ok(()) })
         }));

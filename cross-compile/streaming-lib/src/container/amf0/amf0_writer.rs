@@ -138,7 +138,7 @@ mod tests {
     use super::*;
     use crate::bytesio::bytes_reader::BytesReader;
     use crate::container::amf0::amf0_reader::Amf0Reader;
-    use bytes::BytesMut;
+    
 
     // ============================================
     // Construction Tests
@@ -468,7 +468,7 @@ mod tests {
         writer.write_number(&value).unwrap();
 
         let written_bytes = writer.extract_current_bytes();
-        let mut bytes_reader = BytesReader::new(written_bytes);
+        let bytes_reader = BytesReader::new(written_bytes);
         let mut amf_reader = Amf0Reader::new(bytes_reader);
         let read_value = amf_reader.read_with_type(amf0_markers::NUMBER).unwrap();
         assert_eq!(read_value, Amf0ValueType::Number(value));
@@ -481,7 +481,7 @@ mod tests {
         writer.write_bool(&value).unwrap();
 
         let written_bytes = writer.extract_current_bytes();
-        let mut bytes_reader = BytesReader::new(written_bytes);
+        let bytes_reader = BytesReader::new(written_bytes);
         let mut amf_reader = Amf0Reader::new(bytes_reader);
         let read_value = amf_reader.read_with_type(amf0_markers::BOOLEAN).unwrap();
         assert_eq!(read_value, Amf0ValueType::Boolean(value));
@@ -494,7 +494,7 @@ mod tests {
         writer.write_string(&value).unwrap();
 
         let written_bytes = writer.extract_current_bytes();
-        let mut bytes_reader = BytesReader::new(written_bytes);
+        let bytes_reader = BytesReader::new(written_bytes);
         let mut amf_reader = Amf0Reader::new(bytes_reader);
         let read_value = amf_reader.read_with_type(amf0_markers::STRING).unwrap();
         assert_eq!(read_value, Amf0ValueType::UTF8String(value));
@@ -514,7 +514,7 @@ mod tests {
         writer.write_object(&props).unwrap();
 
         let written_bytes = writer.extract_current_bytes();
-        let mut bytes_reader = BytesReader::new(written_bytes);
+        let bytes_reader = BytesReader::new(written_bytes);
         let mut amf_reader = Amf0Reader::new(bytes_reader);
         let read_value = amf_reader.read_with_type(amf0_markers::OBJECT).unwrap();
 
@@ -547,7 +547,7 @@ mod tests {
         writer.write_ecma_array(&props).unwrap();
 
         let written_bytes = writer.extract_current_bytes();
-        let mut bytes_reader = BytesReader::new(written_bytes);
+        let bytes_reader = BytesReader::new(written_bytes);
         let mut amf_reader = Amf0Reader::new(bytes_reader);
         let read_value = amf_reader.read_with_type(amf0_markers::ECMA_ARRAY).unwrap();
 
@@ -584,7 +584,7 @@ mod tests {
         writer.write_object(&outer_props).unwrap();
 
         let written_bytes = writer.extract_current_bytes();
-        let mut bytes_reader = BytesReader::new(written_bytes);
+        let bytes_reader = BytesReader::new(written_bytes);
         let mut amf_reader = Amf0Reader::new(bytes_reader);
         let read_value = amf_reader.read_with_type(amf0_markers::OBJECT).unwrap();
 
@@ -614,7 +614,7 @@ mod tests {
             writer.write_number(&val).unwrap();
 
             let written_bytes = writer.extract_current_bytes();
-            let mut bytes_reader = BytesReader::new(written_bytes);
+            let bytes_reader = BytesReader::new(written_bytes);
             let mut amf_reader = Amf0Reader::new(bytes_reader);
             let read_value = amf_reader.read_with_type(amf0_markers::NUMBER).unwrap();
 
@@ -639,7 +639,7 @@ mod tests {
                 writer.write_string(&val).unwrap();
 
                 let written_bytes = writer.extract_current_bytes();
-                let mut bytes_reader = BytesReader::new(written_bytes);
+                let bytes_reader = BytesReader::new(written_bytes);
                 let mut amf_reader = Amf0Reader::new(bytes_reader);
                 let read_value = amf_reader.read_with_type(amf0_markers::STRING).unwrap();
 
