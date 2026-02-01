@@ -1,9 +1,11 @@
 {
   // Rust-analyzer configuration for cross-compilation project
-  // Use system rustc for IDE features while keeping custom toolchain for builds
+  // Use system rustc and x86_64 target for IDE analysis
   "rust-analyzer.server.extraEnv": {
     // Override RUSTC to use system rustc for rust-analyzer
-    "RUSTC": "rustc"
+    "RUSTC": "rustc",
+    // Prevent using custom toolchain for analysis
+    "RUSTUP_TOOLCHAIN": ""
   },
   "rust-analyzer.cargo.extraEnv": {
     // Override RUSTC for cargo check operations
@@ -11,22 +13,26 @@
   },
   // Use system rustc path for rust-analyzer operations
   "rust-analyzer.rustc.source": "discover",
-  // Keep using the project's target for analysis
-  "rust-analyzer.cargo.target": "armv5te-unknown-linux-uclibceabi",
-  // Memory management - limit rust-analyzer to prevent WSL crashes
-  "rust-analyzer.server.memoryLimit": 2048,
-  "rust-analyzer.checkOnSave.timeout": 30000,
-  // Disable expensive features to reduce memory footprint
-  "rust-analyzer.cargo.allFeatures": false,
-  "rust-analyzer.inlayHints.enable": false,
+  // Use x86_64 target for analysis (not ARM) as per project standards
+  "rust-analyzer.cargo.target": "x86_64-unknown-linux-gnu",
+  // Set explicit workspace location
+  "rust-analyzer.linkedProjects": [
+    "/home/azureuser/anyka-dev/cross-compile/Cargo.toml"
+  ],
+  // Specify target explicitly in cargo commands
+  "rust-analyzer.cargo.extraArgs": [
+    "--target",
+    "x86_64-unknown-linux-gnu"
+  ],
+  "rust-analyzer.check.extraArgs": [
+    "--target",
+    "x86_64-unknown-linux-gnu"
+  ],
   "rust-analyzer.inlayHints.chainingHints.enable": false,
   "rust-analyzer.inlayHints.closingBraceHints.enable": false,
-  "rust-analyzer.inlayHints.lifetimeElisionHints.enable": false,
   "rust-analyzer.inlayHints.typeHints.enable": false,
   "rust-analyzer.procMacro.enable": false,
   "rust-analyzer.completion.autoimport.enable": false,
-  "rust-analyzer.completion.privateEditable": false,
-  "rust-analyzer.semanticTokens.enable": false,
   // Use cargo check for faster feedback
   "rust-analyzer.check.command": "check",
   // Additional helpful settings
