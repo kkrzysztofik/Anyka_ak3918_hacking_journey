@@ -138,7 +138,6 @@ mod tests {
     use super::*;
     use crate::bytesio::bytes_reader::BytesReader;
     use crate::container::amf0::amf0_reader::Amf0Reader;
-    
 
     // ============================================
     // Construction Tests

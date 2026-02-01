@@ -316,7 +316,6 @@ fn base64_encode(data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    
 
     #[tokio::test]
     async fn test_mock_publisher_creation() {

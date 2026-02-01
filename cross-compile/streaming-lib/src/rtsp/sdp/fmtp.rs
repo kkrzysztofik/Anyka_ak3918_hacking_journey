@@ -322,7 +322,6 @@ mod tests {
     use super::Mpeg4Fmtp;
     use crate::rtsp::global_trait::Marshal;
     use crate::rtsp::global_trait::Unmarshal;
-    
 
     #[test]
     fn test_parse_h264fmtpsdp() {

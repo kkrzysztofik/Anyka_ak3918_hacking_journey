@@ -1112,8 +1112,8 @@ impl StreamsHub {
 mod tests {
     use super::*;
     use crate::streamhub::define::{
-        DataReceiver, DataSender, FrameData, NotifyInfo, PacketData, PubDataType, PublishType, PublisherInfo, StatisticData, SubDataType,
-        SubscribeType, SubscriberInfo,
+        DataReceiver, DataSender, FrameData, NotifyInfo, PacketData, PubDataType, PublishType,
+        PublisherInfo, StatisticData, SubDataType, SubscribeType, SubscriberInfo,
     };
     use async_trait::async_trait;
     use bytes::BytesMut;
