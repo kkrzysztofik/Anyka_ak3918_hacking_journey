@@ -345,7 +345,9 @@ mod tests {
     fn test_normal_mode_config_path() {
         // Test: when no --validation-mode flag, config_path uses default and validation_config is None
         // We test this by calling parse_arguments with mocked args via env
-        std::env::set_var("RUST_LOG", "info");
+        unsafe {
+            std::env::set_var("RUST_LOG", "info");
+        }
 
         // Simulate parsing with empty args (just program name)
         let (validation_config, config_path) = parse_arguments();

@@ -1,19 +1,27 @@
 /// Integration tests for H264 playback with ONVIF and streaming
 #[cfg(test)]
 mod tests {
+    use onvif_rust::platform::{Platform, ValidationPlatform};
+    use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
     use std::fs;
     use std::path::Path;
     use std::sync::Arc;
     use std::time::Duration;
+    use streaming_lib::TStreamHandler;
 
     fn setup_test_h264_file() -> String {
-        let test_file = "/tmp/test_h264_integration.h264";
+        // Use UUID to ensure unique file per test (prevents race conditions)
+        let uuid = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_file = format!("/tmp/test_h264_integration_{}.h264", uuid);
 
         // Clean up if exists
-        let _ = fs::remove_file(test_file);
+        let _ = fs::remove_file(&test_file);
 
         // Create minimal test H264 file
-        let mut file = fs::File::create(test_file).unwrap();
+        let mut file = fs::File::create(&test_file).unwrap();
         use std::io::Write;
 
         let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
@@ -54,7 +62,7 @@ mod tests {
     #[test]
     fn test_validation_configuration() {
         // Real test: verify the validation configuration can be created
-        let config = crate::tests::fixtures::H264PlaybackTestConfig {
+        let config = super::fixtures::H264PlaybackTestConfig {
             file_path: setup_test_h264_file(),
             frame_rate: 25,
             loop_playback: true,
@@ -78,7 +86,8 @@ mod tests {
         let test_file = setup_test_h264_file();
 
         // Create publisher
-        let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25).await;
+        let publisher =
+            MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false).await;
 
         assert!(publisher.is_ok());
         let pub_instance = publisher.unwrap();
@@ -99,7 +108,7 @@ mod tests {
 
         let test_file = setup_test_h264_file();
 
-        let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25)
+        let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false)
             .await
             .unwrap();
 
@@ -139,14 +148,13 @@ mod tests {
     #[tokio::test]
     async fn test_tstream_handler_prior_data() {
         // Real test: verify TStreamHandler sends prior data (MediaInfo + SDP)
-        use streaming_lib::streamhub::TStreamHandler;
         use streaming_lib::streamhub::define::{DataSender, FrameData, SubscribeType};
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
         use tokio::sync::mpsc;
 
         let test_file = setup_test_h264_file();
 
-        let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25)
+        let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false)
             .await
             .unwrap();
 
@@ -184,14 +192,13 @@ mod tests {
     #[tokio::test]
     async fn test_tstream_handler_sdp_generation() {
         // Real test: verify TStreamHandler sends proper SDP information
-        use streaming_lib::streamhub::TStreamHandler;
         use streaming_lib::streamhub::define::{Information, InformationSender};
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
         use tokio::sync::mpsc;
 
         let test_file = setup_test_h264_file();
 
-        let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25)
+        let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false)
             .await
             .unwrap();
 
@@ -233,15 +240,15 @@ mod tests {
         // Real test: verify multiple concurrent publishers can be created
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
 
-        let test_file1 = "/tmp/test_h264_1.h264";
-        let test_file2 = "/tmp/test_h264_2.h264";
-
-        // Clean up
-        let _ = fs::remove_file(test_file1);
-        let _ = fs::remove_file(test_file2);
+        let uuid = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_file1 = format!("/tmp/test_h264_1_{}.h264", uuid);
+        let test_file2 = format!("/tmp/test_h264_2_{}.h264", uuid);
 
         // Create test files
-        for file_path in &[test_file1, test_file2] {
+        for file_path in &[&test_file1, &test_file2] {
             let mut file = fs::File::create(file_path).unwrap();
             use std::io::Write;
             let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
@@ -254,8 +261,8 @@ mod tests {
         }
 
         // Create multiple publishers concurrently
-        let pub1 = MockVideoPublisher::new("stream1".to_string(), test_file1, 25);
-        let pub2 = MockVideoPublisher::new("stream2".to_string(), test_file2, 30);
+        let pub1 = MockVideoPublisher::new("stream1".to_string(), &test_file1, 25, false);
+        let pub2 = MockVideoPublisher::new("stream2".to_string(), &test_file2, 30, false);
 
         let (pub1_result, pub2_result) = tokio::join!(pub1, pub2);
 
@@ -269,8 +276,8 @@ mod tests {
         assert_eq!(pub2_inst.stream_name(), "stream2");
 
         // Clean up
-        let _ = fs::remove_file(test_file1);
-        let _ = fs::remove_file(test_file2);
+        let _ = fs::remove_file(&test_file1);
+        let _ = fs::remove_file(&test_file2);
     }
 
     #[tokio::test]
@@ -281,7 +288,7 @@ mod tests {
 
         let test_file = setup_test_h264_file();
 
-        let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25)
+        let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false)
             .await
             .unwrap();
 
@@ -311,7 +318,6 @@ mod tests {
     #[tokio::test]
     async fn test_validation_platform_initialization() {
         // E2E Test: Verify ValidationPlatform initializes correctly
-        use onvif_rust::platform::{Platform, ValidationPlatform};
 
         let platform = ValidationPlatform::new();
         let device_info = platform.get_device_info().await.unwrap();
@@ -334,8 +340,6 @@ mod tests {
     #[tokio::test]
     async fn test_validation_platform_with_playback_mode() {
         // E2E Test: Verify ValidationPlatform works with H264PlaybackMode
-        use onvif_rust::platform::{Platform, ValidationPlatform};
-        use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
         use std::sync::Arc;
 
         let test_file = setup_test_h264_file();
@@ -346,7 +350,9 @@ mod tests {
 
         let config = H264PlaybackConfig {
             file_path: test_file.clone(),
+            audio_file_path: None,
             frame_rate: 25,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8554,
             httpflv_port: 8080,
@@ -380,11 +386,16 @@ mod tests {
     #[tokio::test]
     async fn test_sdp_generation_with_correct_profile_level_id() {
         // E2E Test: Verify SDP generation uses correct profile-level-id from RBSP bytes
-        use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
 
+        let uuid = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let config = H264PlaybackConfig {
-            file_path: "/tmp/dummy.h264".to_string(),
+            file_path: format!("/tmp/dummy_{}.h264", uuid),
+            audio_file_path: None,
             frame_rate: 25,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8554,
             httpflv_port: 8080,
@@ -397,7 +408,7 @@ mod tests {
         let sps = vec![0x67, 0x42, 0xe0, 0x1e, 0xd9];
         let pps = vec![0x68, 0xce, 0x38, 0x80];
 
-        let sdp = playback_mode.generate_sdp(&sps, &pps);
+        let sdp = playback_mode.generate_sdp(&sps, &pps, None);
 
         // Verify correct profile-level-id extraction (bytes 1,2,3 of SPS = 0x42, 0xe0, 0x1e)
         assert!(
@@ -416,15 +427,17 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_concurrent_playback_streams() {
         // E2E Test: Verify multiple concurrent playback streams work correctly
-        use onvif_rust::platform::{Platform, ValidationPlatform};
-        use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
         use std::sync::Arc;
 
-        let test_file1 = "/tmp/test_stream_1.h264";
-        let test_file2 = "/tmp/test_stream_2.h264";
+        let uuid = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_file1 = format!("/tmp/test_stream_1_{}.h264", uuid);
+        let test_file2 = format!("/tmp/test_stream_2_{}.h264", uuid);
 
         // Create test files
-        for file_path in &[test_file1, test_file2] {
+        for file_path in &[&test_file1, &test_file2] {
             let mut file = fs::File::create(file_path).unwrap();
             use std::io::Write;
             let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
@@ -444,16 +457,20 @@ mod tests {
         platform2.initialize().await.unwrap();
 
         let config1 = H264PlaybackConfig {
-            file_path: test_file1.to_string(),
+            file_path: test_file1.clone(),
+            audio_file_path: None,
             frame_rate: 25,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8554,
             httpflv_port: 8080,
         };
 
         let config2 = H264PlaybackConfig {
-            file_path: test_file2.to_string(),
+            file_path: test_file2.clone(),
+            audio_file_path: None,
             frame_rate: 30,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8555,
             httpflv_port: 8081,
@@ -488,15 +505,13 @@ mod tests {
         assert!(stop2.is_ok());
 
         // Cleanup
-        let _ = fs::remove_file(test_file1);
-        let _ = fs::remove_file(test_file2);
+        let _ = fs::remove_file(&test_file1);
+        let _ = fs::remove_file(&test_file2);
     }
 
     #[tokio::test]
     async fn test_validation_config_variations() {
         // E2E Test: Verify validation works with different port configurations
-        use onvif_rust::platform::{Platform, ValidationPlatform};
-        use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
         use std::sync::Arc;
 
         let test_file = setup_test_h264_file();
@@ -513,7 +528,9 @@ mod tests {
 
             let config = H264PlaybackConfig {
                 file_path: test_file.clone(),
+                audio_file_path: None,
                 frame_rate,
+                audio_sample_rate: 48000,
                 loop_playback,
                 rtsp_port,
                 httpflv_port,
@@ -565,7 +582,9 @@ mod tests {
 
         let config = H264PlaybackConfig {
             file_path: test_file.clone(),
+            audio_file_path: None,
             frame_rate: 25,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8554,
             httpflv_port: 8080,
@@ -605,7 +624,9 @@ mod tests {
 
         let config = H264PlaybackConfig {
             file_path: test_file.clone(),
+            audio_file_path: None,
             frame_rate: 25,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8554,
             httpflv_port: 8080,
@@ -639,11 +660,15 @@ mod tests {
         // Expected: Multiple streams initialize and run without conflicts
         // Verifies: Stream multiplexing, resource allocation, isolation
 
-        let test_file1 = "/tmp/test_e2e_concurrent_1.h264";
-        let test_file2 = "/tmp/test_e2e_concurrent_2.h264";
+        let uuid = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_file1 = format!("/tmp/test_e2e_concurrent_1_{}.h264", uuid);
+        let test_file2 = format!("/tmp/test_e2e_concurrent_2_{}.h264", uuid);
 
         // Setup test files
-        for file_path in &[test_file1, test_file2] {
+        for file_path in &[&test_file1, &test_file2] {
             let mut file = fs::File::create(file_path).unwrap();
             use std::io::Write;
             let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
@@ -656,13 +681,16 @@ mod tests {
         }
 
         // Create concurrent validation streams
-        let stream1_task = async {
+        let test_file1_clone = test_file1.clone();
+        let stream1_task = async move {
             let platform = Arc::new(ValidationPlatform::new());
             platform.initialize().await.unwrap();
 
             let config = H264PlaybackConfig {
-                file_path: test_file1.to_string(),
+                file_path: test_file1_clone,
+                audio_file_path: None,
                 frame_rate: 25,
+                audio_sample_rate: 48000,
                 loop_playback: false,
                 rtsp_port: 8554,
                 httpflv_port: 8080,
@@ -672,13 +700,16 @@ mod tests {
             playback.initialize(platform.clone()).await.is_ok()
         };
 
-        let stream2_task = async {
+        let test_file2_clone = test_file2.clone();
+        let stream2_task = async move {
             let platform = Arc::new(ValidationPlatform::new());
             platform.initialize().await.unwrap();
 
             let config = H264PlaybackConfig {
-                file_path: test_file2.to_string(),
+                file_path: test_file2_clone,
+                audio_file_path: None,
                 frame_rate: 30,
+                audio_sample_rate: 48000,
                 loop_playback: false,
                 rtsp_port: 8555,
                 httpflv_port: 8081,
@@ -694,8 +725,8 @@ mod tests {
         assert!(result2, "Stream 2 initialization failed");
 
         // Cleanup
-        let _ = fs::remove_file(test_file1);
-        let _ = fs::remove_file(test_file2);
+        let _ = fs::remove_file(&test_file1);
+        let _ = fs::remove_file(&test_file2);
     }
 
     #[tokio::test]
@@ -720,7 +751,9 @@ mod tests {
 
         let config = H264PlaybackConfig {
             file_path: test_file.clone(),
+            audio_file_path: None,
             frame_rate: 25,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8554,
             httpflv_port: 8080,
@@ -796,7 +829,9 @@ mod tests {
         // Create configuration
         let config = H264PlaybackConfig {
             file_path: test_file.clone(),
+            audio_file_path: None,
             frame_rate: 25,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8554,
             httpflv_port: 8080,
@@ -1010,7 +1045,9 @@ mod tests {
 
         let config = H264PlaybackConfig {
             file_path: test_file.clone(),
+            audio_file_path: None,
             frame_rate: 25,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8554,
             httpflv_port: 8080,
@@ -1022,7 +1059,7 @@ mod tests {
         // Generate SDP for RTSP responses
         let sps = vec![0x67, 0x42, 0xe0, 0x1e];
         let pps = vec![0x68, 0xce, 0x38, 0x80];
-        let sdp = playback.generate_sdp(&sps, &pps);
+        let sdp = playback.generate_sdp(&sps, &pps, None);
 
         // Spawn minimal RTSP server
         let sdp_clone = sdp.clone();
@@ -1168,7 +1205,9 @@ mod tests {
 
         let config = H264PlaybackConfig {
             file_path: test_file.clone(),
+            audio_file_path: None,
             frame_rate: 25,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8556,
             httpflv_port: 8082,
@@ -1179,7 +1218,7 @@ mod tests {
 
         let sps = vec![0x67, 0x42, 0xe0, 0x1e];
         let pps = vec![0x68, 0xce, 0x38, 0x80];
-        let sdp = playback.generate_sdp(&sps, &pps);
+        let sdp = playback.generate_sdp(&sps, &pps, None);
 
         // Spawn RTSP server that accepts multiple connections
         let sdp_clone1 = sdp.clone();
@@ -1298,7 +1337,9 @@ mod tests {
 
         let config = H264PlaybackConfig {
             file_path: test_file.clone(),
+            audio_file_path: None,
             frame_rate: 25,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8558,
             httpflv_port: 8083,
@@ -1384,7 +1425,9 @@ mod tests {
 
         let config = H264PlaybackConfig {
             file_path: test_file.clone(),
+            audio_file_path: None,
             frame_rate: 25,
+            audio_sample_rate: 48000,
             loop_playback: false,
             rtsp_port: 8560,
             httpflv_port: 8084,

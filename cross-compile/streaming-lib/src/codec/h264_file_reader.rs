@@ -163,7 +163,15 @@ impl H264FileReader {
             return Ok(None);
         }
 
-        // Read NAL unit data
+        // CRITICAL FIX: After find_next_start_code(), the file pointer is positioned
+        // AT the next start code. We need to seek backward to read the NAL data
+        // that comes BEFORE the next start code (from current_pos to next_start_code).
+        if next_start_len != 0 {
+            self.file.seek(SeekFrom::Current(-(nal_data_len as i64)))?;
+            self.current_pos -= nal_data_len as u64;
+        }
+
+        // Read NAL unit data from the correct position
         let mut nal_data = vec![0u8; nal_data_len];
         let bytes_read = self.file.read(&mut nal_data)?;
         if bytes_read != nal_data_len {
