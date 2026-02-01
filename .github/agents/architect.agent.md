@@ -1,7 +1,7 @@
 ---
 description: "Plan architecture and design for Rust embedded systems and ONVIF services"
 name: "architect"
-tools: ["search/codebase", "web/fetch", "search", "search/usages", "web/githubRepo", "search/changes", "read/problems"]
+tools: ['vscode', 'execute', 'read', 'agent', 'search', 'web', 'github/*', 'oraios/serena/*', 'sonarqube/*', 'context7/*', 'mcp_docker/*', 'todo', 'github.vscode-pull-request-github/copilotCodingAgent', 'github.vscode-pull-request-github/issue_fetch', 'github.vscode-pull-request-github/suggest-fix', 'github.vscode-pull-request-github/searchSyntax', 'github.vscode-pull-request-github/doSearch', 'github.vscode-pull-request-github/renderIssues', 'github.vscode-pull-request-github/activePullRequest', 'github.vscode-pull-request-github/openPullRequest']
 ---
 
 # Architecture Planning Mode

@@ -1,7 +1,7 @@
 ---
 description: "Review code against project standards for Rust and embedded systems"
 name: "reviewer"
-tools: ["search/codebase", "search", "search/usages", "search/changes", "read/problems", "terminal", "web/githubRepo", "findTestFiles"]
+tools: ['execute', 'read/problems', 'read/readFile', 'agent', 'search', 'web', 'github/*', 'oraios/serena/*', 'context7/*', 'mcp_docker/*', 'todo', 'github.vscode-pull-request-github/copilotCodingAgent', 'github.vscode-pull-request-github/issue_fetch', 'github.vscode-pull-request-github/suggest-fix', 'github.vscode-pull-request-github/searchSyntax', 'github.vscode-pull-request-github/doSearch', 'github.vscode-pull-request-github/renderIssues', 'github.vscode-pull-request-github/activePullRequest', 'github.vscode-pull-request-github/openPullRequest']
 ---
 
 # Code Review Mode
