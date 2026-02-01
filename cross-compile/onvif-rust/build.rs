@@ -196,20 +196,21 @@ fn generate_anyka_bindings() {
     let lib_path_abs = vendor_lib.canonicalize().unwrap_or(vendor_lib);
     println!("cargo:rustc-link-search=native={}", lib_path_abs.display());
 
+    // Group static libraries to resolve circular dependencies
+    println!("cargo:rustc-link-arg=-Wl,--start-group");
+
+    // MPI libraries (from libmpi) - static linking
+    println!("cargo:rustc-link-lib=static=mpi_venc");
+    println!("cargo:rustc-link-lib=static=mpi_aenc");
+    println!("cargo:rustc-link-lib=static=mpi_aed");
+
     // Platform libraries (from libplat) - static linking
-    println!("cargo:rustc-link-lib=static=plat_common");
-    println!("cargo:rustc-link-lib=static=plat_thread");
     println!("cargo:rustc-link-lib=static=plat_vi");
     println!("cargo:rustc-link-lib=static=plat_vpss");
     println!("cargo:rustc-link-lib=static=plat_ipcsrv");
     println!("cargo:rustc-link-lib=static=plat_venc_cb");
     println!("cargo:rustc-link-lib=static=plat_ai");
     println!("cargo:rustc-link-lib=static=plat_drv");
-
-    // MPI libraries (from libmpi) - static linking
-    println!("cargo:rustc-link-lib=static=mpi_venc");
-    println!("cargo:rustc-link-lib=static=mpi_aenc");
-    println!("cargo:rustc-link-lib=static=mpi_aed");
 
     // SDK component libraries - static linking
     println!("cargo:rustc-link-lib=static=akuio");
@@ -219,6 +220,16 @@ fn generate_anyka_bindings() {
     println!("cargo:rustc-link-lib=static=akaudiocodec");
     println!("cargo:rustc-link-lib=static=akmedialib");
     println!("cargo:rustc-link-lib=static=akae");
+
+    // Platform core libraries last to satisfy dependencies
+    println!("cargo:rustc-link-lib=static=plat_common");
+    println!("cargo:rustc-link-lib=static=plat_thread");
+
+    println!("cargo:rustc-link-arg=-Wl,--end-group");
+
+    // Application libraries (dynamic only)
+    println!("cargo:rustc-link-lib=app_net");
+    println!("cargo:rustc-link-lib=app_rtsp");
 
     // System libraries - dynamic linking (from toolchain sysroot)
     println!("cargo:rustc-link-lib=pthread");

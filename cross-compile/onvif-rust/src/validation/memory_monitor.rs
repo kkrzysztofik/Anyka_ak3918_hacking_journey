@@ -63,7 +63,7 @@ impl MemoryMonitor {
                 // Update all state fields in a single lock acquisition
                 let mut s = state.write().await;
                 s.current_mb = usage_mb;
-                
+
                 // Update peak if needed
                 if usage_mb > s.peak_mb {
                     s.peak_mb = usage_mb;
@@ -73,7 +73,7 @@ impl MemoryMonitor {
                 s.total_mb += usage_mb;
                 s.sample_count += 1;
 
-                let avg = s.total_mb / (s.sample_count as f64);
+                let _avg = s.total_mb / (s.sample_count as f64);
 
                 // Warn if approaching threshold
                 if usage_mb > max_threshold * 0.8 {
@@ -202,20 +202,11 @@ mod tests {
 
         // Simulate memory readings
         {
-            let mut current = monitor.current_mb.write().await;
-            *current = 10.0;
-        }
-        {
-            let mut peak = monitor.peak_mb.write().await;
-            *peak = 10.0;
-        }
-        {
-            let mut total = monitor.total_mb.write().await;
-            *total = 10.0;
-        }
-        {
-            let mut count = monitor.sample_count.write().await;
-            *count = 1;
+            let mut state = monitor.state.write().await;
+            state.current_mb = 10.0;
+            state.peak_mb = 10.0;
+            state.total_mb = 10.0;
+            state.sample_count = 1;
         }
 
         assert_eq!(monitor.get_current_usage_mb().await, 10.0);
@@ -228,15 +219,15 @@ mod tests {
         let monitor = MemoryMonitor::new(24.0);
 
         {
-            let mut current = monitor.current_mb.write().await;
-            *current = 20.0;
+            let mut state = monitor.state.write().await;
+            state.current_mb = 20.0;
         }
 
         assert!(monitor.is_within_budget().await);
 
         {
-            let mut current = monitor.current_mb.write().await;
-            *current = 25.0;
+            let mut state = monitor.state.write().await;
+            state.current_mb = 25.0;
         }
 
         assert!(!monitor.is_within_budget().await);

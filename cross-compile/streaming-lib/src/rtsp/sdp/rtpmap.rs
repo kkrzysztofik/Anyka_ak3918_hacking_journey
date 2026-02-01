@@ -207,14 +207,14 @@ mod tests {
     fn test_unmarshal_empty_string() {
         let rtpmap = RtpMap::unmarshal("");
         // Should return default
-        assert!(rtpmap.is_some());
+        assert!(rtpmap.is_ok());
     }
 
     #[test]
     fn test_unmarshal_malformed() {
         let rtpmap = RtpMap::unmarshal("invalid");
         // Should handle gracefully
-        assert!(rtpmap.is_some());
+        assert!(rtpmap.is_ok());
     }
 
     #[test]

@@ -34,7 +34,7 @@ use crate::ffi::generated::{encode_param, video_channel_attr, video_dev_type, vi
 #[cfg(use_stubs)]
 use crate::ffi::{encode_param, video_channel_attr, video_dev_type, video_resolution};
 
-use crate::ffi::{AK_FAILED, AK_SUCCESS, Resolution, VideoDevice};
+use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32, Resolution, VideoDevice};
 
 /// Internal trait for abstracting video FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]
@@ -76,7 +76,7 @@ impl VideoFfiTrait for RealVideoFfi {
 
     #[cfg(use_stubs)]
     fn vi_close(&self, _handle: *mut c_void) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -95,7 +95,7 @@ impl VideoFfiTrait for RealVideoFfi {
             (*res).max_width = 1920;
             (*res).max_height = 1080;
         }
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -108,7 +108,7 @@ impl VideoFfiTrait for RealVideoFfi {
 
     #[cfg(use_stubs)]
     fn vi_set_channel_attr(&self, _handle: *mut c_void, _attr: *const video_channel_attr) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -134,7 +134,7 @@ impl VideoFfiTrait for RealVideoFfi {
 
     #[cfg(use_stubs)]
     fn venc_close(&self, _handle: *mut c_void) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -147,7 +147,7 @@ impl VideoFfiTrait for RealVideoFfi {
 
     #[cfg(use_stubs)]
     fn venc_set_rc(&self, _enc_handle: *mut c_void, _bps: i32) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -160,7 +160,7 @@ impl VideoFfiTrait for RealVideoFfi {
 
     #[cfg(use_stubs)]
     fn venc_set_iframe(&self, _enc_handle: *mut c_void) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 }
 
@@ -180,8 +180,8 @@ static REAL_VIDEO_FFI: RealVideoFfi = RealVideoFfi;
 /// * `Err(PlatformError::HardwareFailure(...))` otherwise
 fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
     match ret {
-        AK_SUCCESS => Ok(()),
-        AK_FAILED => Err(PlatformError::HardwareFailure(format!(
+        AK_SUCCESS_I32 => Ok(()),
+        AK_FAILED_I32 => Err(PlatformError::HardwareFailure(format!(
             "{} failed",
             context
         ))),
@@ -529,13 +529,13 @@ mod tests {
 
     #[test]
     fn test_check_result_success() {
-        let result = check_result(AK_SUCCESS, "test_function");
+        let result = check_result(AK_SUCCESS_I32, "test_function");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_check_result_failed() {
-        let result = check_result(AK_FAILED, "test_function");
+        let result = check_result(AK_FAILED_I32, "test_function");
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -646,17 +646,27 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    fn video_dev0() -> video_dev_type {
+        #[cfg(use_stubs)]
+        {
+            video_dev_type::Dev0
+        }
+        #[cfg(not(use_stubs))]
+        {
+            video_dev_type::VIDEO_DEV0
+        }
+    }
+
     // Mockall-based tests for wrapper functions
     #[test]
     fn test_video_input_open_internal_calls_ffi_and_returns_handle() {
-        use crate::ffi::stubs::VideoDevType;
         let mut mock_ffi = MockVideoFfiTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
 
         let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_vi_open()
-            .with(eq(VideoDevType::Dev0))
+            .with(eq(video_dev0()))
             .times(1)
             .returning(move |_| test_handle_usize as *mut c_void);
 
@@ -668,12 +678,11 @@ mod tests {
 
     #[test]
     fn test_video_input_open_internal_returns_error_on_null_handle() {
-        use crate::ffi::stubs::VideoDevType;
         let mut mock_ffi = MockVideoFfiTrait::new();
 
         mock_ffi
             .expect_vi_open()
-            .with(eq(VideoDevType::Dev0))
+            .with(eq(video_dev0()))
             .times(1)
             .returning(|_| std::ptr::null_mut());
 
@@ -720,7 +729,7 @@ mod tests {
                     (*res).max_width = 1920;
                     (*res).max_height = 1080;
                 }
-                AK_SUCCESS
+                AK_SUCCESS_I32
             });
 
         let result = video_input_get_sensor_resolution_internal(&vi_handle, &mock_ffi);
@@ -741,7 +750,7 @@ mod tests {
             .expect_vi_get_sensor_resolution()
             .withf(|handle, _| handle.is_null())
             .times(1)
-            .returning(|_, _| AK_FAILED);
+            .returning(|_, _| AK_FAILED_I32);
 
         let result = video_input_get_sensor_resolution_internal(&vi_handle, &mock_ffi);
         assert!(result.is_err());
@@ -765,7 +774,7 @@ mod tests {
             .expect_vi_set_channel_attr()
             .withf(|handle, _| handle.is_null())
             .times(1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
 
         let result = video_input_set_channel_attr_internal(&vi_handle, &attr, &mock_ffi);
         assert!(result.is_ok());
@@ -783,7 +792,7 @@ mod tests {
             .expect_vi_set_channel_attr()
             .withf(|handle, _| handle.is_null())
             .times(1)
-            .returning(|_, _| AK_FAILED);
+            .returning(|_, _| AK_FAILED_I32);
 
         let result = video_input_set_channel_attr_internal(&vi_handle, &attr, &mock_ffi);
         assert!(result.is_err());
@@ -799,20 +808,14 @@ mod tests {
     fn test_video_encoder_open_internal_calls_ffi_and_returns_handle() {
         let mut mock_ffi = MockVideoFfiTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
-        let param = encode_param {
-            width: 1920,
-            height: 1080,
-            minqp: 10,
-            maxqp: 51,
-            fps: 30,
-            goplen: 30,
-            bps: 2000000,
-            profile: 0,
-            use_chn: 0,
-            enc_grp: 0,
-            br_mode: 0,
-            enc_out_type: 0,
-        };
+        let mut param = encode_param::default();
+        param.width = 1920;
+        param.height = 1080;
+        param.minqp = 10;
+        param.maxqp = 51;
+        param.fps = 30;
+        param.goplen = 30;
+        param.bps = 2000000;
 
         let test_handle_usize = test_handle as usize;
         mock_ffi
@@ -829,20 +832,14 @@ mod tests {
     #[test]
     fn test_video_encoder_open_internal_returns_error_on_null_handle() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let param = encode_param {
-            width: 1920,
-            height: 1080,
-            minqp: 10,
-            maxqp: 51,
-            fps: 30,
-            goplen: 30,
-            bps: 2000000,
-            profile: 0,
-            use_chn: 0,
-            enc_grp: 0,
-            br_mode: 0,
-            enc_out_type: 0,
-        };
+        let mut param = encode_param::default();
+        param.width = 1920;
+        param.height = 1080;
+        param.minqp = 10;
+        param.maxqp = 51;
+        param.fps = 30;
+        param.goplen = 30;
+        param.bps = 2000000;
 
         mock_ffi
             .expect_venc_open()
@@ -868,7 +865,7 @@ mod tests {
             .expect_venc_set_rc()
             .withf(|handle, bps| handle.is_null() && *bps == 3000000)
             .times(1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
 
         let result = video_encoder_set_rc_internal(&enc_handle, 3000000, &mock_ffi);
         assert!(result.is_ok());
@@ -885,7 +882,7 @@ mod tests {
             .expect_venc_set_rc()
             .withf(|handle, _| handle.is_null())
             .times(1)
-            .returning(|_, _| AK_FAILED);
+            .returning(|_, _| AK_FAILED_I32);
 
         let result = video_encoder_set_rc_internal(&enc_handle, 3000000, &mock_ffi);
         assert!(result.is_err());
@@ -908,7 +905,7 @@ mod tests {
             .expect_venc_set_iframe()
             .withf(|handle| handle.is_null())
             .times(1)
-            .returning(|_| AK_SUCCESS);
+            .returning(|_| AK_SUCCESS_I32);
 
         let result = video_encoder_request_idr_internal(&enc_handle, &mock_ffi);
         assert!(result.is_ok());
@@ -925,7 +922,7 @@ mod tests {
             .expect_venc_set_iframe()
             .withf(|handle| handle.is_null())
             .times(1)
-            .returning(|_| AK_FAILED);
+            .returning(|_| AK_FAILED_I32);
 
         let result = video_encoder_request_idr_internal(&enc_handle, &mock_ffi);
         assert!(result.is_err());

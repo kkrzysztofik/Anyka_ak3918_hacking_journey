@@ -33,6 +33,13 @@ pub use video::{
     video_input_set_channel_attr,
 };
 
+/// Anyka SDK success code as i32 for consistent comparisons.
+#[allow(clippy::unnecessary_cast)]
+pub const AK_SUCCESS_I32: i32 = AK_SUCCESS as i32;
+/// Anyka SDK failure code as i32 for consistent comparisons.
+#[allow(clippy::unnecessary_cast)]
+pub const AK_FAILED_I32: i32 = AK_FAILED as i32;
+
 // Re-export common types
 #[cfg(not(use_stubs))]
 // NOSONAR: Wildcard re-export of generated bindings is standard pattern.

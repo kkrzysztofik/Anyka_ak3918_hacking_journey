@@ -149,9 +149,7 @@ mod tests {
     #[test]
     fn test_decoder_configuration_record_load_truncated_after_constraint() {
         // Version + profile + compatibility flags, but missing constraint flags (6 bytes)
-        let data = BytesMut::from(
-            &[0x01, 0xBA, 0x11, 0x22, 0x33, 0x44][..],
-        );
+        let data = BytesMut::from(&[0x01, 0xBA, 0x11, 0x22, 0x33, 0x44][..]);
         let mut reader = BytesReader::new(data);
         let mut processor = Mpeg4HevcProcessor::default();
 

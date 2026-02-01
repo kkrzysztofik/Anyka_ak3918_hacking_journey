@@ -35,7 +35,7 @@ use crate::ffi::generated::{aenc_attr, audio_param, pcm_param};
 #[cfg(use_stubs)]
 use crate::ffi::{aenc_attr, audio_param, pcm_param};
 
-use crate::ffi::{AK_FAILED, AK_SUCCESS};
+use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32};
 
 /// Internal trait for abstracting audio FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]
@@ -76,7 +76,7 @@ impl AudioFfiTrait for RealAudioFfi {
 
     #[cfg(use_stubs)]
     fn ai_close(&self, _handle: *mut c_void) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -89,7 +89,7 @@ impl AudioFfiTrait for RealAudioFfi {
 
     #[cfg(use_stubs)]
     fn ai_set_adc_volume(&self, _handle: *mut c_void, _vol: i32) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -102,7 +102,7 @@ impl AudioFfiTrait for RealAudioFfi {
 
     #[cfg(use_stubs)]
     fn ai_set_aslc_volume(&self, _handle: *mut c_void, _vol: i32) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -128,7 +128,7 @@ impl AudioFfiTrait for RealAudioFfi {
 
     #[cfg(use_stubs)]
     fn aenc_close(&self, _handle: *mut c_void) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -141,7 +141,7 @@ impl AudioFfiTrait for RealAudioFfi {
 
     #[cfg(use_stubs)]
     fn aenc_set_attr(&self, _enc_handle: *mut c_void, _attr: *const aenc_attr) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 }
 
@@ -161,8 +161,8 @@ static REAL_AUDIO_FFI: RealAudioFfi = RealAudioFfi;
 /// * `Err(PlatformError::HardwareFailure(...))` otherwise
 fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
     match ret {
-        AK_SUCCESS => Ok(()),
-        AK_FAILED => Err(PlatformError::HardwareFailure(format!(
+        AK_SUCCESS_I32 => Ok(()),
+        AK_FAILED_I32 => Err(PlatformError::HardwareFailure(format!(
             "{} failed",
             context
         ))),
@@ -270,7 +270,7 @@ pub(crate) fn audio_input_set_volume_internal(
     let aslc_ret = ffi.ai_set_aslc_volume(handle.as_ptr(), aslc_vol);
 
     // Both must succeed (matching SDK macro behavior)
-    if adc_ret == AK_SUCCESS && aslc_ret == AK_SUCCESS {
+    if adc_ret == AK_SUCCESS_I32 && aslc_ret == AK_SUCCESS_I32 {
         Ok(())
     } else {
         Err(PlatformError::HardwareFailure(
@@ -415,13 +415,13 @@ mod tests {
 
     #[test]
     fn test_check_result_success() {
-        let result = check_result(AK_SUCCESS, "test_function");
+        let result = check_result(AK_SUCCESS_I32, "test_function");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_check_result_failed() {
-        let result = check_result(AK_FAILED, "test_function");
+        let result = check_result(AK_FAILED_I32, "test_function");
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -476,12 +476,10 @@ mod tests {
     #[test]
     #[cfg(use_stubs)]
     fn test_audio_encoder_open_success() {
-        let param = audio_param {
-            sample_rate: 8000,
-            channel_num: 1,
-            sample_bits: 16,
-            type_: 0,
-        };
+        let mut param = audio_param::default();
+        param.sample_rate = 8000;
+        param.channel_num = 1;
+        param.sample_bits = 16;
         let result = audio_encoder_open(&param);
         assert!(result.is_ok());
         let handle = result.unwrap();
@@ -491,14 +489,12 @@ mod tests {
     #[test]
     #[cfg(use_stubs)]
     fn test_audio_encoder_set_config_success() {
-        let param = audio_param {
-            sample_rate: 8000,
-            channel_num: 1,
-            sample_bits: 16,
-            type_: 0,
-        };
+        let mut param = audio_param::default();
+        param.sample_rate = 8000;
+        param.channel_num = 1;
+        param.sample_bits = 16;
         let handle = audio_encoder_open(&param).unwrap();
-        let attr = aenc_attr { aac_head: 0 };
+        let attr = aenc_attr::default();
         let result = audio_encoder_set_config(&handle, &attr);
         assert!(result.is_ok());
     }
@@ -562,13 +558,13 @@ mod tests {
             .expect_ai_set_adc_volume()
             .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 8)
             .times(1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
 
         mock_ffi
             .expect_ai_set_aslc_volume()
             .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 2)
             .times(1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
 
         let result = audio_input_set_volume_internal(&ai_handle, 10, &mock_ffi);
         assert!(result.is_ok());
@@ -588,13 +584,13 @@ mod tests {
             .expect_ai_set_adc_volume()
             .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 5)
             .times(1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
 
         mock_ffi
             .expect_ai_set_aslc_volume()
             .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 0)
             .times(1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
 
         let result = audio_input_set_volume_internal(&ai_handle, 5, &mock_ffi);
         assert!(result.is_ok());
@@ -613,13 +609,13 @@ mod tests {
             .expect_ai_set_adc_volume()
             .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
-            .returning(|_, _| AK_FAILED);
+            .returning(|_, _| AK_FAILED_I32);
 
         // ASLC may or may not be called, but we expect failure from ADC
         mock_ffi
             .expect_ai_set_aslc_volume()
             .times(0..=1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
 
         let result = audio_input_set_volume_internal(&ai_handle, 10, &mock_ffi);
         assert!(result.is_err());
@@ -644,13 +640,13 @@ mod tests {
             .expect_ai_set_adc_volume()
             .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
 
         mock_ffi
             .expect_ai_set_aslc_volume()
             .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
-            .returning(|_, _| AK_FAILED);
+            .returning(|_, _| AK_FAILED_I32);
 
         let result = audio_input_set_volume_internal(&ai_handle, 10, &mock_ffi);
         assert!(result.is_err());
@@ -689,12 +685,12 @@ mod tests {
             .expect_ai_set_adc_volume()
             .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 8)
             .times(1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
         mock_ffi_valid
             .expect_ai_set_aslc_volume()
             .withf(move |handle, vol| *handle as usize == test_handle_usize && *vol == 7)
             .times(1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
 
         let result = audio_input_set_volume_internal(&ai_handle, 15, &mock_ffi_valid);
         assert!(result.is_ok());
@@ -704,12 +700,10 @@ mod tests {
     fn test_audio_encoder_open_internal_calls_ffi_and_returns_handle() {
         let mut mock_ffi = MockAudioFfiTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
-        let param = audio_param {
-            sample_rate: 8000,
-            channel_num: 1,
-            sample_bits: 16,
-            type_: 0,
-        };
+        let mut param = audio_param::default();
+        param.sample_rate = 8000;
+        param.channel_num = 1;
+        param.sample_bits = 16;
 
         let test_handle_usize = test_handle as usize;
         mock_ffi
@@ -726,12 +720,10 @@ mod tests {
     #[test]
     fn test_audio_encoder_open_internal_returns_error_on_null_handle() {
         let mut mock_ffi = MockAudioFfiTrait::new();
-        let param = audio_param {
-            sample_rate: 8000,
-            channel_num: 1,
-            sample_bits: 16,
-            type_: 0,
-        };
+        let mut param = audio_param::default();
+        param.sample_rate = 8000;
+        param.channel_num = 1;
+        param.sample_bits = 16;
 
         mock_ffi
             .expect_aenc_open()
@@ -753,14 +745,14 @@ mod tests {
         let enc_handle = AudioEncoderHandle {
             handle: test_handle,
         };
-        let attr = aenc_attr { aac_head: 0 };
+        let attr = aenc_attr::default();
 
         let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_aenc_set_attr()
             .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
 
         let result = audio_encoder_set_config_internal(&enc_handle, &attr, &mock_ffi);
         assert!(result.is_ok());
@@ -773,14 +765,14 @@ mod tests {
         let enc_handle = AudioEncoderHandle {
             handle: test_handle,
         };
-        let attr = aenc_attr { aac_head: 0 };
+        let attr = aenc_attr::default();
 
         let test_handle_usize = test_handle as usize;
         mock_ffi
             .expect_aenc_set_attr()
             .withf(move |handle, _| *handle as usize == test_handle_usize)
             .times(1)
-            .returning(|_, _| AK_FAILED);
+            .returning(|_, _| AK_FAILED_I32);
 
         let result = audio_encoder_set_config_internal(&enc_handle, &attr, &mock_ffi);
         assert!(result.is_err());

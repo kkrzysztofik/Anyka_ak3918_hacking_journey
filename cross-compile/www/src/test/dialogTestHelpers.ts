@@ -72,9 +72,7 @@ export async function testDialogCancel(
 ): Promise<void> {
   await testDialogCancelByButton(user, cancelButtonTestId, onOpenChangeMock);
 
-  const dialogContentTestId = dialogTestId.includes('dialog-content')
-    ? dialogTestId
-    : undefined;
+  const dialogContentTestId = dialogTestId.includes('dialog-content') ? dialogTestId : undefined;
 
   await assertDialogClosed(dialogTestId, dialogContentTestId);
 }

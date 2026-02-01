@@ -15,10 +15,10 @@ use byteorder::BigEndian;
 use bytes::{BufMut, BytesMut};
 
 use crate::bytesio::TNetIO;
-use crate::bytesio::bytes_reader::BytesReader;
-use crate::bytesio::bytes_writer::BytesWriter;
 use crate::bytesio::bits_writer::BitsWriter;
 use crate::bytesio::bytes_errors::{BytesWriteError, BytesWriteErrorValue};
+use crate::bytesio::bytes_reader::BytesReader;
+use crate::bytesio::bytes_writer::BytesWriter;
 use crate::streamhub::define::FrameData;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -72,7 +72,8 @@ impl TPacker for RtpAacPacker {
         // AU-headers-length: 16 bits containing the number of bits in AU header section
         // Each AU header is 16 bits (13 bits size + 3 bits index)
         let au_headers_length_bits = 16u16; // Single AU header
-        bits_writer.write_n_bits(au_headers_length_bits as u64, 16)
+        bits_writer
+            .write_n_bits(au_headers_length_bits as u64, 16)
             .map_err(|_| {
                 let err = BytesWriteError {
                     value: BytesWriteErrorValue::Timeout,
@@ -81,14 +82,16 @@ impl TPacker for RtpAacPacker {
             })?;
 
         // AU header: 13 bits size + 3 bits index
-        bits_writer.write_n_bits((data_len as u64) << 3, 13)
+        bits_writer
+            .write_n_bits((data_len as u64) << 3, 13)
             .map_err(|_| {
                 let err = BytesWriteError {
                     value: BytesWriteErrorValue::Timeout,
                 };
                 PackerError::from(err)
             })?;
-        bits_writer.write_n_bits(0, 3) // index = 0
+        bits_writer
+            .write_n_bits(0, 3) // index = 0
             .map_err(|_| {
                 let err = BytesWriteError {
                     value: BytesWriteErrorValue::Timeout,
@@ -97,13 +100,12 @@ impl TPacker for RtpAacPacker {
             })?;
 
         // Flush any remaining bits (padding) and get the bytes
-        bits_writer.bits_alignment_8()
-            .map_err(|_| {
-                let err = BytesWriteError {
-                    value: BytesWriteErrorValue::Timeout,
-                };
-                PackerError::from(err)
-            })?;
+        bits_writer.bits_alignment_8().map_err(|_| {
+            let err = BytesWriteError {
+                value: BytesWriteErrorValue::Timeout,
+            };
+            PackerError::from(err)
+        })?;
         let au_headers_data = bits_writer.get_current_bytes();
 
         packet.payload.put(au_headers_data);

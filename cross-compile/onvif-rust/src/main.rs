@@ -141,7 +141,9 @@ async fn run_validation_mode(config: H264PlaybackConfig) -> Result<()> {
     use streaming_lib::StreamIdentifier;
     use streaming_lib::streamhub::define::DataReceiver;
     use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
-    use streaming_lib::{DefaultHttpFlvServer, DefaultRtspServer, HttpFlvServer, RtspServer, StreamsHub};
+    use streaming_lib::{
+        DefaultHttpFlvServer, DefaultRtspServer, HttpFlvServer, RtspServer, StreamsHub,
+    };
     use tokio::sync::mpsc;
 
     // Initialize logging
@@ -166,9 +168,14 @@ async fn run_validation_mode(config: H264PlaybackConfig) -> Result<()> {
 
     // 1. Create MockVideoPublisher from H.264 file for frame reading
     let publisher = Arc::new(
-        MockVideoPublisher::new("stream1".to_string(), &config.file_path, config.frame_rate, config.loop_playback)
-            .await
-            .context("Failed to create MockVideoPublisher from H.264 file")?,
+        MockVideoPublisher::new(
+            "stream1".to_string(),
+            &config.file_path,
+            config.frame_rate,
+            config.loop_playback,
+        )
+        .await
+        .context("Failed to create MockVideoPublisher from H.264 file")?,
     );
     tracing::info!("MockVideoPublisher created");
 
@@ -241,13 +248,21 @@ async fn run_validation_mode(config: H264PlaybackConfig) -> Result<()> {
     tracing::info!("ValidationPlatform initialized");
 
     // 7. Start ONVIF Application with the validation platform
-    let app = match Application::start_with_platform(DEFAULT_CONFIG_PATH, platform.clone() as Arc<dyn Platform>).await {
+    let app = match Application::start_with_platform(
+        DEFAULT_CONFIG_PATH,
+        platform.clone() as Arc<dyn Platform>,
+    )
+    .await
+    {
         Ok(app) => {
             tracing::info!("ONVIF Application started with ValidationPlatform");
             Some(app)
         }
         Err(e) => {
-            tracing::warn!("Failed to start ONVIF Application: {}. Continuing with streaming only.", e);
+            tracing::warn!(
+                "Failed to start ONVIF Application: {}. Continuing with streaming only.",
+                e
+            );
             None
         }
     };
@@ -322,12 +337,15 @@ mod tests {
         // Test: when no --validation-mode flag, config_path uses default and validation_config is None
         // We test this by calling parse_arguments with mocked args via env
         std::env::set_var("RUST_LOG", "info");
-        
+
         // Simulate parsing with empty args (just program name)
         let (validation_config, config_path) = parse_arguments();
-        
+
         // Verify defaults
-        assert!(validation_config.is_none(), "Expected validation_config to be None in normal mode");
+        assert!(
+            validation_config.is_none(),
+            "Expected validation_config to be None in normal mode"
+        );
         assert_eq!(
             config_path, DEFAULT_CONFIG_PATH,
             "Expected default config path"

@@ -107,16 +107,23 @@ impl MockVideoPublisher {
                     match nal.unit_type {
                         NalUnitType::SequenceParameterSet => {
                             let data = BytesMut::from(nal.data.as_slice());
-                            let frame = FrameData::Video { timestamp: timestamp_offset, data };
+                            let frame = FrameData::Video {
+                                timestamp: timestamp_offset,
+                                data,
+                            };
                             let _ = sender.send(frame);
                         }
                         NalUnitType::PictureParameterSet => {
                             let data = BytesMut::from(nal.data.as_slice());
-                            let frame = FrameData::Video { timestamp: timestamp_offset, data };
+                            let frame = FrameData::Video {
+                                timestamp: timestamp_offset,
+                                data,
+                            };
                             let _ = sender.send(frame);
                         }
                         NalUnitType::IdrSlice | NalUnitType::NonIdrSlice => {
-                            let timestamp = timestamp_offset.saturating_add(frame_count * frame_duration_ms);
+                            let timestamp =
+                                timestamp_offset.saturating_add(frame_count * frame_duration_ms);
                             let data = BytesMut::from(nal.data.as_slice());
 
                             let frame = FrameData::Video { timestamp, data };

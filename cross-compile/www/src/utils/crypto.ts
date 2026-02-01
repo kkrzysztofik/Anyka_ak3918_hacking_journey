@@ -110,12 +110,12 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
     const encoder = new TextEncoder();
     const data = encoder.encode(plaintext);
 
-  // Convert IV to ArrayBuffer
-  const ivBuffer = new ArrayBuffer(iv.byteLength);
-  const ivView = new Uint8Array(ivBuffer);
-  ivView.set(iv);
+    // Convert IV to ArrayBuffer
+    const ivBuffer = new ArrayBuffer(iv.byteLength);
+    const ivView = new Uint8Array(ivBuffer);
+    ivView.set(iv);
 
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBuffer }, key, data);
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBuffer }, key, data);
 
     return {
       data: btoa(Array.from(new Uint8Array(ciphertext), (b) => String.fromCodePoint(b)).join('')),

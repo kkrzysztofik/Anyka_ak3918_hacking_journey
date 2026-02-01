@@ -32,7 +32,7 @@ use crate::ffi::generated::{ptz_device, ptz_turn_direction};
 #[cfg(use_stubs)]
 use crate::ffi::{ptz_device, ptz_turn_direction};
 
-use crate::ffi::{AK_FAILED, AK_SUCCESS, PtzDirection, PtzMotor};
+use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32, PtzDirection, PtzMotor};
 
 /// Internal trait for abstracting PTZ FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]
@@ -58,7 +58,7 @@ impl PtzFfiTrait for RealPtzFfi {
 
     #[cfg(use_stubs)]
     fn ptz_open(&self) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -71,7 +71,7 @@ impl PtzFfiTrait for RealPtzFfi {
 
     #[cfg(use_stubs)]
     fn ptz_close(&self) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -84,7 +84,7 @@ impl PtzFfiTrait for RealPtzFfi {
 
     #[cfg(use_stubs)]
     fn ptz_turn(&self, _direction: ptz_turn_direction, _degree: i32) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -110,7 +110,7 @@ impl PtzFfiTrait for RealPtzFfi {
 
     #[cfg(use_stubs)]
     fn ptz_stop(&self) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 }
 
@@ -130,8 +130,8 @@ static REAL_PTZ_FFI: RealPtzFfi = RealPtzFfi;
 /// * `Err(PlatformError::HardwareFailure(...))` otherwise
 fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
     match ret {
-        AK_SUCCESS => Ok(()),
-        AK_FAILED => Err(PlatformError::HardwareFailure(format!(
+        AK_SUCCESS_I32 => Ok(()),
+        AK_FAILED_I32 => Err(PlatformError::HardwareFailure(format!(
             "{} failed",
             context
         ))),
@@ -400,13 +400,13 @@ mod tests {
 
     #[test]
     fn test_check_result_success() {
-        let result = check_result(AK_SUCCESS, "test_function");
+        let result = check_result(AK_SUCCESS_I32, "test_function");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_check_result_failed() {
-        let result = check_result(AK_FAILED, "test_function");
+        let result = check_result(AK_FAILED_I32, "test_function");
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -521,7 +521,10 @@ mod tests {
     fn test_ptz_open_internal_calls_ffi_and_returns_handle() {
         let mut mock_ffi = MockPtzFfiTrait::new();
 
-        mock_ffi.expect_ptz_open().times(1).returning(|| AK_SUCCESS);
+        mock_ffi
+            .expect_ptz_open()
+            .times(1)
+            .returning(|| AK_SUCCESS_I32);
 
         let result = ptz_open_internal(&mock_ffi);
         assert!(result.is_ok());
@@ -533,7 +536,10 @@ mod tests {
     fn test_ptz_open_internal_returns_error_on_failure() {
         let mut mock_ffi = MockPtzFfiTrait::new();
 
-        mock_ffi.expect_ptz_open().times(1).returning(|| AK_FAILED);
+        mock_ffi
+            .expect_ptz_open()
+            .times(1)
+            .returning(|| AK_FAILED_I32);
 
         let result = ptz_open_internal(&mock_ffi);
         assert!(result.is_err());
@@ -558,7 +564,7 @@ mod tests {
                 dir_val == 1 && *deg == 45 // Left direction, 45 degrees
             })
             .times(1)
-            .returning(|_, _| AK_SUCCESS);
+            .returning(|_, _| AK_SUCCESS_I32);
 
         let result = ptz_turn_internal(&handle, PtzDirection::Left, 45.0, &mock_ffi);
         assert!(result.is_ok());
@@ -604,7 +610,7 @@ mod tests {
         mock_ffi
             .expect_ptz_turn()
             .times(1)
-            .returning(|_, _| AK_FAILED);
+            .returning(|_, _| AK_FAILED_I32);
 
         let result = ptz_turn_internal(&handle, PtzDirection::Right, 30.0, &mock_ffi);
         assert!(result.is_err());
@@ -660,7 +666,10 @@ mod tests {
         let mut mock_ffi = MockPtzFfiTrait::new();
         let handle = PTZHandle { opened: true };
 
-        mock_ffi.expect_ptz_stop().times(1).returning(|| AK_SUCCESS);
+        mock_ffi
+            .expect_ptz_stop()
+            .times(1)
+            .returning(|| AK_SUCCESS_I32);
 
         let result = ptz_stop_internal(&handle, PtzDirection::Right, &mock_ffi);
         assert!(result.is_ok());
@@ -671,7 +680,10 @@ mod tests {
         let mut mock_ffi = MockPtzFfiTrait::new();
         let handle = PTZHandle { opened: true };
 
-        mock_ffi.expect_ptz_stop().times(1).returning(|| AK_FAILED);
+        mock_ffi
+            .expect_ptz_stop()
+            .times(1)
+            .returning(|| AK_FAILED_I32);
 
         let result = ptz_stop_internal(&handle, PtzDirection::Down, &mock_ffi);
         assert!(result.is_err());

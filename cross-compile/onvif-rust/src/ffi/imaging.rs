@@ -18,7 +18,7 @@
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 
-use crate::ffi::{AK_FAILED, AK_SUCCESS};
+use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32};
 
 /// Default maximum value for SDK imaging parameters (typically 255 for 8-bit registers).
 const SDK_MAX_VALUE: i32 = 255;
@@ -54,7 +54,7 @@ impl ImagingFfiTrait for RealImagingFfi {
 
     #[cfg(use_stubs)]
     fn set_brightness(&self, _value: i32) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -67,7 +67,7 @@ impl ImagingFfiTrait for RealImagingFfi {
 
     #[cfg(use_stubs)]
     fn set_contrast(&self, _value: i32) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -80,7 +80,7 @@ impl ImagingFfiTrait for RealImagingFfi {
 
     #[cfg(use_stubs)]
     fn set_saturation(&self, _value: i32) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -93,7 +93,7 @@ impl ImagingFfiTrait for RealImagingFfi {
 
     #[cfg(use_stubs)]
     fn set_sharpness(&self, _value: i32) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -106,7 +106,7 @@ impl ImagingFfiTrait for RealImagingFfi {
 
     #[cfg(use_stubs)]
     fn set_ir_filter(&self, _enabled: bool) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 
     #[cfg(not(use_stubs))]
@@ -119,7 +119,7 @@ impl ImagingFfiTrait for RealImagingFfi {
 
     #[cfg(use_stubs)]
     fn set_wdr(&self, _enabled: bool) -> i32 {
-        AK_SUCCESS
+        AK_SUCCESS_I32
     }
 }
 
@@ -139,8 +139,8 @@ static REAL_IMAGING_FFI: RealImagingFfi = RealImagingFfi;
 /// * `Err(PlatformError::HardwareFailure(...))` otherwise
 fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
     match ret {
-        AK_SUCCESS => Ok(()),
-        AK_FAILED => Err(PlatformError::HardwareFailure(format!(
+        AK_SUCCESS_I32 => Ok(()),
+        AK_FAILED_I32 => Err(PlatformError::HardwareFailure(format!(
             "{} failed",
             context
         ))),
@@ -400,13 +400,13 @@ mod tests {
 
     #[test]
     fn test_check_result_success() {
-        let result = check_result(AK_SUCCESS, "test_function");
+        let result = check_result(AK_SUCCESS_I32, "test_function");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_check_result_failed() {
-        let result = check_result(AK_FAILED, "test_function");
+        let result = check_result(AK_FAILED_I32, "test_function");
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -476,7 +476,7 @@ mod tests {
             .expect_set_brightness()
             .with(eq(128)) // 50.0 maps to 128
             .times(1)
-            .returning(|_| AK_SUCCESS);
+            .returning(|_| AK_SUCCESS_I32);
 
         let result = imaging_set_brightness_internal(50.0, &mock_ffi);
         assert!(result.is_ok());
@@ -504,7 +504,7 @@ mod tests {
         mock_ffi
             .expect_set_brightness()
             .times(1)
-            .returning(|_| AK_FAILED);
+            .returning(|_| AK_FAILED_I32);
 
         let result = imaging_set_brightness_internal(50.0, &mock_ffi);
         assert!(result.is_err());
@@ -524,7 +524,7 @@ mod tests {
             .expect_set_contrast()
             .with(eq(255)) // 100.0 maps to 255
             .times(1)
-            .returning(|_| AK_SUCCESS);
+            .returning(|_| AK_SUCCESS_I32);
 
         let result = imaging_set_contrast_internal(100.0, &mock_ffi);
         assert!(result.is_ok());
@@ -538,7 +538,7 @@ mod tests {
             .expect_set_saturation()
             .with(eq(0)) // 0.0 maps to 0
             .times(1)
-            .returning(|_| AK_SUCCESS);
+            .returning(|_| AK_SUCCESS_I32);
 
         let result = imaging_set_saturation_internal(0.0, &mock_ffi);
         assert!(result.is_ok());
@@ -552,7 +552,7 @@ mod tests {
             .expect_set_sharpness()
             .with(eq(64)) // 25.0 maps to approximately 64
             .times(1)
-            .returning(|_| AK_SUCCESS);
+            .returning(|_| AK_SUCCESS_I32);
 
         let result = imaging_set_sharpness_internal(25.0, &mock_ffi);
         assert!(result.is_ok());
@@ -566,7 +566,7 @@ mod tests {
             .expect_set_ir_filter()
             .with(eq(true))
             .times(1)
-            .returning(|_| AK_SUCCESS);
+            .returning(|_| AK_SUCCESS_I32);
 
         let result = imaging_set_ir_filter_internal(true, &mock_ffi);
         assert!(result.is_ok());
@@ -580,7 +580,7 @@ mod tests {
             .expect_set_ir_filter()
             .with(eq(false))
             .times(1)
-            .returning(|_| AK_SUCCESS);
+            .returning(|_| AK_SUCCESS_I32);
 
         let result = imaging_set_ir_filter_internal(false, &mock_ffi);
         assert!(result.is_ok());
@@ -593,7 +593,7 @@ mod tests {
         mock_ffi
             .expect_set_ir_filter()
             .times(1)
-            .returning(|_| AK_FAILED);
+            .returning(|_| AK_FAILED_I32);
 
         let result = imaging_set_ir_filter_internal(true, &mock_ffi);
         assert!(result.is_err());
@@ -613,7 +613,7 @@ mod tests {
             .expect_set_wdr()
             .with(eq(true))
             .times(1)
-            .returning(|_| AK_SUCCESS);
+            .returning(|_| AK_SUCCESS_I32);
 
         let result = imaging_set_wdr_internal(true, &mock_ffi);
         assert!(result.is_ok());
@@ -627,7 +627,7 @@ mod tests {
             .expect_set_wdr()
             .with(eq(false))
             .times(1)
-            .returning(|_| AK_SUCCESS);
+            .returning(|_| AK_SUCCESS_I32);
 
         let result = imaging_set_wdr_internal(false, &mock_ffi);
         assert!(result.is_ok());
@@ -637,7 +637,10 @@ mod tests {
     fn test_imaging_set_wdr_internal_propagates_error() {
         let mut mock_ffi = MockImagingFfiTrait::new();
 
-        mock_ffi.expect_set_wdr().times(1).returning(|_| AK_FAILED);
+        mock_ffi
+            .expect_set_wdr()
+            .times(1)
+            .returning(|_| AK_FAILED_I32);
 
         let result = imaging_set_wdr_internal(true, &mock_ffi);
         assert!(result.is_err());

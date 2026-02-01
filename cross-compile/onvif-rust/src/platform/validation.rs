@@ -9,8 +9,8 @@ use super::traits::{
     VideoEncoderConfig, VideoEncoderOptions, VideoEncoding, VideoInput, VideoSourceConfig,
 };
 use async_trait::async_trait;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Stub implementation for VideoInput trait
 pub struct StubVideoInput;

@@ -2428,7 +2428,7 @@ mod tests {
         let manager = ProfileManager::new();
         // Verify manager starts with 2 default profiles
         assert_eq!(
-            manager.profiles.len(),
+            manager.get_profiles().len(),
             2,
             "expected 2 default profiles at startup"
         );

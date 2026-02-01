@@ -301,13 +301,7 @@ mod tests {
         assert!(std::error::Error::source(&error).is_none());
     }
 
-    #[test]
-    fn test_session_error_backtrace() {
-        let error = SessionError {
-            value: SessionErrorValue::ChannelRecvError,
-        };
-        assert!(std::error::Error::backtrace(&error).is_none());
-    }
+    // Note: backtrace() is a nightly-only feature, removed test_session_error_backtrace
 
     // ========== Error Variant Coverage ==========
 

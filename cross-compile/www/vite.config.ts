@@ -160,7 +160,10 @@ export default defineConfig(({ mode }) => ({
           }
 
           // Device management components (from src)
-          if ((id.includes('DeviceService') || id.includes('SystemInfo')) && !id.includes('node_modules')) {
+          if (
+            (id.includes('DeviceService') || id.includes('SystemInfo')) &&
+            !id.includes('node_modules')
+          ) {
             return 'device-components';
           }
 

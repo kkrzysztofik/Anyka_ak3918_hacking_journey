@@ -388,7 +388,8 @@ mod tests {
         let ss = hex::decode(s).unwrap();
         let b = BytesMut::from(&ss[..]);
 
-        rtsp_utils::print("test", b);
+        // Test passes if hex decoding works - rtsp_utils::print removed as function doesn't exist
+        assert!(!b.is_empty());
     }
 
     // H.264 FMTP comprehensive tests

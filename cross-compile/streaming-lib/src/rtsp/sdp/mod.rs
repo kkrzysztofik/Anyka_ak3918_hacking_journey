@@ -372,10 +372,11 @@ mod tests {
         // m=audio 0 RTP/AVP 97：媒体类型(audio)、媒体格式(RTP/AVP)、媒体格式编号(97)和媒体流的传输地址。
         // b=AS:128：音频流所使用的带宽大小。
         // a=rtpmap:97 MPEG4-GENERIC/48000/2：音频流所使用的编码方式(MPEG4-GENERIC)、采样率(48000Hz)、和通道数(2)。
+        // a=rtpmap:97 MPEG4-GENERIC/48000/2：音频流所使用的编码方式(MPEG4-GENERIC)、采样率(48000Hz)、和通道数(2)。
         // a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=119056E500：音频流的格式参数，如编码方式、采样长度、索引长度等。
         // a=control:streamid=1：指定音频流的流ID。
 
-        if let Some(sdp) = Sdp::unmarshal(data2) {
+        if let Ok(sdp) = Sdp::unmarshal(data2) {
             println!("sdp : {sdp:?}");
 
             println!("sdp str : {}", sdp.marshal());
