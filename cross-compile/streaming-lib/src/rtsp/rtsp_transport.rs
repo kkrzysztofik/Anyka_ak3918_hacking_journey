@@ -59,15 +59,17 @@ impl Unmarshal for RtspTransport {
                     }
                     let ports = scanf!(kv[1], '-', u16, u16);
 
-                    let mut client_ports: [u16; 2] = [0, 0];
-                    if let Some(port) = ports.0 {
-                        client_ports[0] = port;
+                    // Only set client_port if at least one port was successfully parsed
+                    if ports.0.is_some() || ports.1.is_some() {
+                        let mut client_ports: [u16; 2] = [0, 0];
+                        if let Some(port) = ports.0 {
+                            client_ports[0] = port;
+                        }
+                        if let Some(port) = ports.1 {
+                            client_ports[1] = port;
+                        }
+                        rtsp_transport.client_port = Some(client_ports);
                     }
-                    if let Some(port) = ports.1 {
-                        client_ports[1] = port;
-                    }
-
-                    rtsp_transport.client_port = Some(client_ports);
                 }
                 "server_port" => {
                     if kv.len() < 2 {

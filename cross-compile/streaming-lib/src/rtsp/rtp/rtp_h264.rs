@@ -13,6 +13,7 @@ use super::utils::TUnPacker;
 use super::utils::TVideoPacker;
 use super::utils::Unmarshal;
 use crate::bytesio::TNetIO;
+use crate::bytesio::bytes_errors::{BytesReadError, BytesReadErrorValue};
 use crate::bytesio::bytes_reader::BytesReader;
 use crate::streamhub::define::FrameData;
 use async_trait::async_trait;
@@ -453,6 +454,13 @@ impl RtpH264UnPacker {
                 (0, 0)
             };
             // Note: ts can be 0 (indicates same timestamp as base), so no validation needed
+            // Validate that nalu_size is large enough to contain ts_bytes + dond (1 byte)
+            if nalu_size < ts_bytes + 1 {
+                return Err(BytesReadError {
+                    value: BytesReadErrorValue::NotEnoughBytes,
+                }
+                .into());
+            }
             let nalu = payload_reader.read_bytes(nalu_size - ts_bytes - 1)?;
 
             let mut payload = BytesMut::new();
@@ -1087,14 +1095,14 @@ mod tests {
         // DON Base (16-bit)
         packet.payload.put_u16(0x1000);
 
-        // NALU 1
-        packet.payload.put_u16(2); // Size
+        // NALU 1 (size includes DOND(1) + TS offset(2) + NALU data(2) = 5)
+        packet.payload.put_u16(5); // Size
         packet.payload.put_u8(0); // DOND
         packet.payload.put_u16(100); // TS offset (Must be non-zero for test assertion)
         packet.payload.extend_from_slice(&[0x01, 0x01]);
 
-        // NALU 2
-        packet.payload.put_u16(2); // Size
+        // NALU 2 (size includes DOND(1) + TS offset(2) + NALU data(2) = 5)
+        packet.payload.put_u16(5); // Size
         packet.payload.put_u8(1); // DOND
         packet.payload.put_u16(200); // TS offset
         packet.payload.extend_from_slice(&[0x02, 0x02]);
@@ -1132,8 +1140,8 @@ mod tests {
         // DON Base (16-bit)
         packet.payload.put_u16(0x1000);
 
-        // NALU 1
-        packet.payload.put_u16(2); // Size
+        // NALU 1 (size includes DOND(1) + TS offset(3) + NALU data(2) = 6)
+        packet.payload.put_u16(6); // Size
         packet.payload.put_u8(0); // DOND
         // TS Offset (24-bit)
         packet.payload.put_u8(0);

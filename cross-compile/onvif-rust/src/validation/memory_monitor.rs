@@ -159,14 +159,13 @@ impl MemoryMonitor {
 
             if let Ok(status) = fs::read_to_string("/proc/self/status") {
                 for line in status.lines() {
-                    if line.starts_with("VmRSS:") {
-                        if let Some(kb) = line
+                    if line.starts_with("VmRSS:")
+                        && let Some(kb) = line
                             .split_whitespace()
                             .nth(1)
                             .and_then(|s| s.parse::<f64>().ok())
-                        {
-                            return kb / 1024.0;
-                        }
+                    {
+                        return kb / 1024.0;
                     }
                 }
             }

@@ -47,13 +47,13 @@ impl From<BytesIOError> for BytesReadError {
 
 #[derive(Debug, Error)]
 pub enum BytesWriteErrorValue {
-    #[error("io error: {}", _0)]
+    #[error("io error")]
     IO(#[from] io::Error),
     #[error("bytes io error: {}", _0)]
     BytesIOError(BytesIOError),
     #[error("write time out")]
     Timeout,
-    #[error("out of index")]
+    #[error("outof index")]
     OutofIndex,
 }
 

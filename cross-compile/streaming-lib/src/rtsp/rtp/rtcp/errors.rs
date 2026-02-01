@@ -57,7 +57,8 @@ mod tests {
         };
         let err = RtcpErrorValue::BytesReadError(read_err);
         let display = format!("{}", err);
-        assert!(display.contains("bytes read error"));
+        // transparent errors forward to underlying error display
+        assert!(display.contains("not enough bytes"));
     }
 
     #[test]
@@ -67,7 +68,8 @@ mod tests {
         };
         let err = RtcpErrorValue::BytesWriteError(write_err);
         let display = format!("{}", err);
-        assert!(display.contains("bytes write error"));
+        // transparent errors forward to underlying error display
+        assert!(display.contains("write time out"));
     }
 
     // ========== RtcpError From Trait Tests ==========

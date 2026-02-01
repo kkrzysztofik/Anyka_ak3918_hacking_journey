@@ -4,7 +4,7 @@
 //! lifecycle pattern for clean startup and shutdown.
 //!
 //! Optional validation mode for H.264 playback testing:
-//! `--validation-mode --h264-file <path> [--rtsp-port 8554] [--httpflv-port 8080] [--loop-playback]`
+//! `--validation-mode --h264-file <path> [--aac-file <path>] [--audio-sample-rate 48000] [--rtsp-port 8554] [--httpflv-port 8080] [--loop-playback]`
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -23,6 +23,14 @@ struct CliArgs {
     /// Path to H.264 file (required in validation mode)
     #[arg(long)]
     h264_file: Option<String>,
+
+    /// Path to AAC audio file (optional)
+    #[arg(long)]
+    aac_file: Option<String>,
+
+    /// Audio sample rate in Hz
+    #[arg(long, default_value = "48000")]
+    audio_sample_rate: u32,
 
     /// RTSP server port
     #[arg(long, default_value = "8554")]
@@ -53,6 +61,8 @@ fn parse_arguments() -> (Option<H264PlaybackConfig>, String) {
                 loop_playback: cli.loop_playback,
                 rtsp_port: cli.rtsp_port,
                 httpflv_port: cli.httpflv_port,
+                audio_file_path: cli.aac_file,
+                audio_sample_rate: cli.audio_sample_rate,
             })
         } else {
             eprintln!("error: --validation-mode requires --h264-file <path>");

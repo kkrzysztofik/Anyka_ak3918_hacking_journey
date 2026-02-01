@@ -24,12 +24,12 @@ impl From<RecvError> for RelayError {
 
 #[derive(Debug, Error)]
 pub enum PushClientErrorValue {
-    #[error("receive error: {0}")]
+    #[error("receive error")]
     ReceiveError(#[from] RecvError),
 
     #[error("send error")]
     SendError,
-    #[error("io error: {0}")]
+    #[error("io error")]
     IOError(#[from] Error),
 }
 

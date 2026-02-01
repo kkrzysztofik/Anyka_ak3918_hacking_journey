@@ -271,7 +271,8 @@ mod tests {
             value: BytesWriteErrorValue::Timeout,
         };
         let err = MuxerErrorValue::BytesWriteError(write_err);
-        assert_eq!(format!("{}", err), "bytes write error");
+        // transparent errors forward to underlying error display
+        assert_eq!(format!("{}", err), "write time out");
     }
 
     // ========== FlvMuxerError From Trait Tests ==========
@@ -295,7 +296,8 @@ mod tests {
         let err = FlvMuxerError {
             value: MuxerErrorValue::BytesWriteError(write_err),
         };
-        assert_eq!(format!("{}", err), "bytes write error");
+        // FlvMuxerError displays the MuxerErrorValue which is transparent
+        assert_eq!(format!("{}", err), "write time out");
     }
 
     // ========== DemuxerErrorValue Display Tests ==========
@@ -306,7 +308,8 @@ mod tests {
             value: BytesReadErrorValue::EmptyStream,
         };
         let err = DemuxerErrorValue::BytesReadError(read_err);
-        assert!(format!("{}", err).contains("bytes read error"));
+        // transparent errors forward to underlying error display
+        assert!(format!("{}", err).contains("empty stream"));
     }
 
     #[test]
@@ -315,7 +318,8 @@ mod tests {
             value: BytesWriteErrorValue::Timeout,
         };
         let err = DemuxerErrorValue::BytesWriteError(write_err);
-        assert!(format!("{}", err).contains("bytes write error"));
+        // transparent errors forward to underlying error display
+        assert!(format!("{}", err).contains("write time out"));
     }
 
     // ========== FlvDemuxerError From Trait Tests ==========

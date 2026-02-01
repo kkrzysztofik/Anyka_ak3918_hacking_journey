@@ -11,6 +11,7 @@ use define::PacketData;
 
 pub mod define;
 pub mod errors;
+pub mod mock_audio_publisher;
 pub mod mock_publisher;
 pub mod notify;
 pub mod statistics;

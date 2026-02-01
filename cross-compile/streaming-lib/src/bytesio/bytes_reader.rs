@@ -45,8 +45,9 @@ impl BytesReader {
             });
         }
 
-        // Use split_to directly without cloning to avoid unnecessary memory copy
-        Ok(self.buffer.split_to(bytes_num))
+        // advance should peek without consuming - create a copy of the bytes
+        let bytes = BytesMut::from(&self.buffer[..bytes_num]);
+        Ok(bytes)
     }
 
     pub fn read_bytes_cursor(

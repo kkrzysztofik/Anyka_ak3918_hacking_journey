@@ -22,11 +22,9 @@ impl BitsWriter {
     }
 
     pub fn write_bytes(&mut self, data: BytesMut) -> Result<(), BitError> {
-        // Enforce byte alignment: cannot write raw bytes if we have pending bits
+        // Flush any pending bits before writing bytes to maintain correct byte alignment
         if self.cur_bit_num != 0 {
-            return Err(BitError {
-                value: BitErrorValue::CannotWrite8Bit,
-            });
+            self.flush()?;
         }
         self.writer.write(&data[..])?;
         Ok(())
@@ -836,16 +834,19 @@ mod tests {
         // Write some bits
         bits_writer.write_n_bits(0b111, 3).unwrap();
 
-        // Write bytes goes directly to underlying writer (bypasses bit buffer)
+        // Write bytes requires byte alignment, so partial bits are flushed first
         let mut data = BytesMut::new();
         data.extend_from_slice(&[0xAB, 0xCD]);
         bits_writer.write_bytes(data).unwrap();
 
         let bytes = bits_writer.get_current_bytes();
-        // write_bytes writes directly to writer, partial bits still in cur_byte
-        // Only the 2 bytes written via write_bytes are in the output
-        assert_eq!(bytes.len(), 2);
-        assert_eq!(bits_writer.cur_bit_num, 3); // partial bits still pending
+        // Partial bits flushed (1 byte) + 2 bytes written = 3 bytes total
+        assert_eq!(bytes.len(), 3);
+        assert_eq!(bits_writer.cur_bit_num, 0); // no partial bits remain after flush
+        // First byte has 3 bits in MSB positions: 0b111xxxxx = 0xE0
+        assert_eq!(bytes[0], 0xE0);
+        assert_eq!(bytes[1], 0xAB);
+        assert_eq!(bytes[2], 0xCD);
     }
 
     #[test]

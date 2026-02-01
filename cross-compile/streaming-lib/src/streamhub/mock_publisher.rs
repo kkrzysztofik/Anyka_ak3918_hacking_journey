@@ -101,7 +101,6 @@ impl MockVideoPublisher {
                 let mut reader = reader.lock().await;
                 let mut frame_count = 0;
                 let frame_duration_ms = reader.frame_duration_ms();
-                let mut file_finished = false;
 
                 while let Ok(Some(nal)) = reader.read_next_nal() {
                     match nal.unit_type {
@@ -143,9 +142,6 @@ impl MockVideoPublisher {
                         _ => {}
                     }
                 }
-
-                // File finished - handle looping
-                file_finished = true;
 
                 if !loop_playback {
                     // Stop playback if looping is disabled

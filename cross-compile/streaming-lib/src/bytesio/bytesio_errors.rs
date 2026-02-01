@@ -8,7 +8,7 @@ pub enum BytesIOErrorValue {
     NotEnoughBytes,
     #[error("empty stream")]
     EmptyStream,
-    #[error("io error: {}", _0)]
+    #[error("io error")]
     IOError(io::Error),
     #[error("time out error: {}", _0)]
     TimeoutError(tokio::time::error::Elapsed),
