@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
 
     if let Some(config) = validation_config {
         // Validation mode: initialize H.264 playback pipeline
-        run_validation_mode(config).await
+        run_validation_mode(config, &config_path).await
     } else {
         // Normal mode: start standard ONVIF application
         run_normal_mode(&config_path).await
@@ -143,7 +143,8 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
 }
 
 /// Run the daemon in H.264 playback validation mode
-async fn run_validation_mode(config: H264PlaybackConfig) -> Result<()> {
+async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> Result<()> {
+    use onvif_rust::config::{ConfigRuntime, ConfigStorage};
     use onvif_rust::platform::{Platform, ValidationPlatform};
     use std::path::Path;
     use std::sync::Arc;
@@ -155,8 +156,23 @@ async fn run_validation_mode(config: H264PlaybackConfig) -> Result<()> {
     };
     use tokio::sync::mpsc;
 
-    // Initialize logging
-    tracing_subscriber::fmt::init();
+    // Initialize logging early so validation-mode startup and streaming logs are visible.
+    //
+    // NOTE: Do NOT use `tracing_subscriber::fmt::init()` here. The application startup path
+    // uses `onvif_rust::logging::init_logging()` which also installs a global subscriber.
+    // If we install one first, application logging initialization will fail with:
+    // "a global default trace dispatcher has already been set".
+    if let Ok(app_config) = ConfigStorage::load_or_default(config_path) {
+        let config_runtime = ConfigRuntime::new(app_config);
+        if let Err(e) = onvif_rust::logging::init_logging(&config_runtime) {
+            eprintln!("Failed to initialize logging: {}", e);
+        } else {
+            config_runtime.log_loaded_config();
+        }
+    } else {
+        // Fall back to no-op: application startup will still attempt to initialize logging.
+        // (We avoid a hard failure here to keep validation-mode usable even with a missing config.)
+    }
 
     // Verify H.264 file exists
     if !Path::new(&config.file_path).exists() {
@@ -257,24 +273,22 @@ async fn run_validation_mode(config: H264PlaybackConfig) -> Result<()> {
     tracing::info!("ValidationPlatform initialized");
 
     // 7. Start ONVIF Application with the validation platform
-    let app = match Application::start_with_platform(
-        DEFAULT_CONFIG_PATH,
-        platform.clone() as Arc<dyn Platform>,
-    )
-    .await
-    {
-        Ok(app) => {
-            tracing::info!("ONVIF Application started with ValidationPlatform");
-            Some(app)
-        }
-        Err(e) => {
-            tracing::warn!(
-                "Failed to start ONVIF Application: {}. Continuing with streaming only.",
-                e
-            );
-            None
-        }
-    };
+    let app =
+        match Application::start_with_platform(config_path, platform.clone() as Arc<dyn Platform>)
+            .await
+        {
+            Ok(app) => {
+                tracing::info!("ONVIF Application started with ValidationPlatform");
+                Some(app)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to start ONVIF Application: {}. Continuing with streaming only.",
+                    e
+                );
+                None
+            }
+        };
 
     // 8. Create playback mode instance
     let playback_mode = H264PlaybackMode::new(config.clone());
