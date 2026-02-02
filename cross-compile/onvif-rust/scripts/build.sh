@@ -98,35 +98,34 @@ log_info "Project directory: ${PROJECT_DIR}"
 log_info "Target: ${TARGET}"
 log_info "Build mode: ${BUILD_MODE}"
 
-# Check if cargo is available
-if ! command -v cargo &> /dev/null; then
-  log_error "cargo not found. Please ensure Rust toolchain is installed and in PATH."
+# Use vendored toolchain cargo by default (per project requirements)
+REPO_ROOT="$(cd "${PROJECT_DIR}/../.." && pwd)"
+DEFAULT_CARGO="${REPO_ROOT}/toolchain/arm-anykav200-crosstool-ng/bin/cargo"
+export CARGO="${CARGO:-${DEFAULT_CARGO}}"
+
+if [[ ! -x "${CARGO}" ]]; then
+  log_error "cargo not found or not executable at: ${CARGO}"
+  log_error "Set CARGO to the vendored toolchain cargo, e.g.:"
+  log_error "  export CARGO=${DEFAULT_CARGO}"
   exit 1
 fi
 
-# Check if rustc is available
-if ! command -v rustc &> /dev/null; then
-  log_error "rustc not found. Please ensure Rust toolchain is installed and in PATH."
-  exit 1
-fi
-
-log_info "Using cargo: $(which cargo)"
-log_info "Using rustc: $(which rustc)"
+log_info "Using cargo: ${CARGO}"
 
 # Clean if requested
 if [[ "${CLEAN}" = true ]]; then
   log_info "Cleaning build artifacts..."
-  cargo clean
+  "${CARGO}" clean
 fi
 
 # Build the project
 log_info "Building for target ${TARGET} in ${BUILD_MODE} mode..."
 
 if [[ "${BUILD_MODE}" = "release" ]]; then
-  cargo build --release --target "${TARGET}"
+  "${CARGO}" build --release --target "${TARGET}"
   BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/release/onvif-rust"
 else
-  cargo build --target "${TARGET}"
+  "${CARGO}" build --target "${TARGET}"
   BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/debug/onvif-rust"
 fi
 
@@ -143,10 +142,16 @@ log_info "Binary size: $(du -h "${BINARY_PATH}" | cut -f1)"
 # Show binary information
 if command -v file &> /dev/null; then
   log_info "Binary type: $(file "${BINARY_PATH}")"
+  if ! file "${BINARY_PATH}" | grep -q "ELF 32-bit.*ARM"; then
+    log_error "Refusing to deploy: produced binary does not look like an ARMv5 32-bit ELF."
+    log_error "This often happens if you built for the host (x86_64) and then copied it to the camera."
+    exit 1
+  fi
 fi
 
 # Copy binary to deployment directory
-DEPLOY_DIR="/home/kmk/anyka-dev/SD_card_contents/anyka_hack/onvif"
+DEPLOY_DIR="${REPO_ROOT}/SD_card_contents/anyka_hack/onvif"
+mkdir -p "${DEPLOY_DIR}"
 cp "${BINARY_PATH}" "${DEPLOY_DIR}/onvif-rust"
 chmod 755 "${DEPLOY_DIR}/onvif-rust"
 log_success "Binary copied to deployment directory: ${DEPLOY_DIR}/onvif-rust"

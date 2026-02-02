@@ -9,13 +9,27 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CARGO_CONFIG_DIR="${PROJECT_DIR}/.cargo"
 CARGO_CONFIG="${CARGO_CONFIG_DIR}/config.toml"
 
-# Detect environment
-if [[ -d "/opt/arm-anykav200-crosstool-ng" ]]; then
-    # Docker environment
-    TOOLCHAIN_BASE="/opt/arm-anykav200-crosstool-ng"
+# Detect toolchain location
+#
+# Priority:
+# 1) Repo-vendored toolchain (preferred)
+# 2) Docker-mounted toolchain (legacy)
+REPO_ROOT="$(cd "${PROJECT_DIR}/../.." && pwd)"
+VENDORED_TOOLCHAIN_BASE="${REPO_ROOT}/toolchain/arm-anykav200-crosstool-ng"
+DOCKER_TOOLCHAIN_BASE="/opt/arm-anykav200-crosstool-ng"
+
+if [[ -d "${VENDORED_TOOLCHAIN_BASE}" ]]; then
+    TOOLCHAIN_BASE="${VENDORED_TOOLCHAIN_BASE}"
+    ENV_TYPE="Vendored"
+elif [[ -d "${DOCKER_TOOLCHAIN_BASE}" ]]; then
+    TOOLCHAIN_BASE="${DOCKER_TOOLCHAIN_BASE}"
+    ENV_TYPE="Docker"
 else
-    # Local environment
-    TOOLCHAIN_BASE="/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng"
+    echo "ERROR: toolchain not found."
+    echo "Expected one of:"
+    echo "  - ${VENDORED_TOOLCHAIN_BASE}"
+    echo "  - ${DOCKER_TOOLCHAIN_BASE}"
+    exit 1
 fi
 
 # Create .cargo directory if it doesn't exist
@@ -49,10 +63,20 @@ rustflags = [
 ]
 
 [env]
+SYSROOT_armv5te_unknown_linux_uclibceabi = "${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot"
+
 # ARM target compiler configuration
 CC_armv5te_unknown_linux_uclibceabi = "${TOOLCHAIN_BASE}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
 CXX_armv5te_unknown_linux_uclibceabi = "${TOOLCHAIN_BASE}/bin/arm-unknown-linux-uclibcgnueabi-g++"
 AR_armv5te_unknown_linux_uclibceabi = "${TOOLCHAIN_BASE}/bin/arm-unknown-linux-uclibcgnueabi-ar"
+
+# Ensure C/C++ build scripts (cc/cmake) use the toolchain sysroot.
+# Without this, crates like aws-lc-sys may fail with missing headers (stdlib.h)
+# and missing CRT objects (crt1.o, crti.o) during try-compile/link steps.
+CFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot"
+CXXFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot"
+CPPFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot"
+LDFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot"
 
 # Host build linker configuration
 # Custom rustc defaults to gnu-lld-cc which requires CRT files we don't have
@@ -61,9 +85,4 @@ AR_armv5te_unknown_linux_uclibceabi = "${TOOLCHAIN_BASE}/bin/arm-unknown-linux-u
 linker = "/usr/bin/gcc"
 EOF
 
-if [[ -d /opt/arm-anykav200-crosstool-ng ]]; then
-    ENV_TYPE="Docker"
-else
-    ENV_TYPE="Local"
-fi
 echo "Generated ${CARGO_CONFIG} for environment: ${ENV_TYPE}"
