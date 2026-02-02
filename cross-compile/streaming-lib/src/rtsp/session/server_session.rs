@@ -1183,12 +1183,7 @@ mod tests {
 
         // Should receive SDP information
         if let Some(info) = receiver.recv().await {
-            match info {
-                Information::Sdp { data: _ } => {
-                    // Correct type received
-                }
-                _ => panic!("Expected Sdp information"),
-            }
+            let Information::Sdp { data: _ } = info;
         } else {
             panic!("Expected to receive information");
         }

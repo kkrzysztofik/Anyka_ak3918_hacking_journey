@@ -164,7 +164,7 @@ mod tests {
 
         /// Get the encoded bytes, flushing any remaining bits
         fn build(mut self) -> BytesMut {
-            self.writer.bits_aligment_8().unwrap();
+            self.writer.bits_alignment_8().unwrap();
             self.writer.get_current_bytes()
         }
     }

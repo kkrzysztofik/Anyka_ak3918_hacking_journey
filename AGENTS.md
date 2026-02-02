@@ -6,7 +6,14 @@
 
 **CRITICAL MANDATE**: You MUST follow the project's established patterns, standards, and documentation. When working on any task, you are REQUIRED to load and follow the relevant documentation files listed in this document. Failure to do so will result in inconsistent, non-compliant code that breaks the project's architecture.
 
-**⚠️ TOOLCHAIN REQUIREMENT**: This project uses a **custom Rust toolchain** located at `/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/`. You MUST use the cargo binary from this toolchain for ALL cargo commands: `/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo`. Using system cargo will cause compilation errors due to version mismatches.
+**⚠️ TOOLCHAIN REQUIREMENT**: This project uses a **custom Rust toolchain** vendored in this repo at `toolchain/arm-anykav200-crosstool-ng/`.
+
+You MUST use the cargo binary from this toolchain for ALL cargo commands:
+
+- Repo-relative: `toolchain/arm-anykav200-crosstool-ng/bin/cargo`
+- Absolute (example): `/home/<user>/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo`
+
+Using system `cargo` may cause compilation errors due to version/target mismatches.
 
 ## Project Overview
 
@@ -34,15 +41,15 @@ The project focuses on creating a fully ONVIF 24.12 compliant implementation whi
 
 ```bash
 # Define custom cargo path (use this in all commands)
-export CARGO=/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo
+export CARGO=toolchain/arm-anykav200-crosstool-ng/bin/cargo
 
 # Build & Test
 cd cross-compile/onvif-rust && $CARGO build --release  # Build
-$CARGO test                                            # All tests
-$CARGO test --lib                                      # Unit tests only
+$CARGO test --target x86_64-unknown-linux-gnu           # All tests (host-side)
+$CARGO test --target x86_64-unknown-linux-gnu --lib     # Unit tests only (host-side)
 
 # Code Quality
-$CARGO clippy -- -D warnings                          # Linting
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings  # Linting (host-side)
 $CARGO fmt --check                                     # Formatting check
 $CARGO fmt                                             # Format code
 
@@ -52,9 +59,9 @@ $CARGO doc --no-deps --open                           # Generate docs
 
 **Direct paths (alternative)**:
 ```bash
-/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo build --release
-/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo clippy -- -D warnings
-/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo test
+toolchain/arm-anykav200-crosstool-ng/bin/cargo build --release
+toolchain/arm-anykav200-crosstool-ng/bin/cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+toolchain/arm-anykav200-crosstool-ng/bin/cargo test --target x86_64-unknown-linux-gnu
 ```
 
 ### Mock Pattern (mockall)
@@ -143,6 +150,21 @@ This documentation is organized into focused modules to reduce context usage and
 - **`cross-compile/onvif-rust/tests/`** — **MANDATORY** - Unit and integration testing framework using Rust's built-in testing and `mockall`
 - **`SD_card_contents/anyka_hack/`** — SD card payload system for runtime testing
 - **`cross-compile/anyka_reference/akipc/`** — Authoritative vendor reference code
+- **`cross-compile/www/`** — React WebUI (shadcn/ui + TanStack Query + Vitest)
+
+## Codex Instruction Mapping (from `.github/`)
+
+This repo also contains GitHub Copilot configuration under `.github/` (instructions, prompts, and agent profiles). Codex uses `AGENTS.md` for instruction scoping.
+
+Codex-equivalent scoped instruction files:
+
+- `cross-compile/onvif-rust/AGENTS.md` — Rust backend rules (coding/testing/security/perf/docs)
+- `cross-compile/www/AGENTS.md` — WebUI rules (design system/testing/quality gates)
+
+Reusable checklists/prompts (manual reference):
+
+- `.github/instructions/` — topic-specific guidelines (legacy Copilot format)
+- `.github/prompts/` — task templates (code review, debugging, docs generation)
 
 ## ⚡ MANDATORY DEVELOPMENT WORKFLOW
 

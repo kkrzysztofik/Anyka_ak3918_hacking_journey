@@ -749,11 +749,8 @@ mod tests {
         let info = Information::Sdp {
             data: "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n".to_string(),
         };
-        if let Information::Sdp { data } = info {
-            assert!(data.contains("v=0"));
-        } else {
-            panic!("Expected Sdp variant");
-        }
+        let Information::Sdp { data } = info;
+        assert!(data.contains("v=0"));
     }
 
     // ========== RelayType Tests ==========

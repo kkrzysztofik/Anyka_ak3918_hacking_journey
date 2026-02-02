@@ -26,6 +26,19 @@ pub struct MemoryMonitor {
     max_threshold_mb: f64,
 }
 
+/// RAII guard for a background monitoring task.
+///
+/// Dropping this guard aborts the background task to avoid leaking tasks across tests.
+pub struct MonitoringGuard {
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for MonitoringGuard {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
 impl MemoryMonitor {
     /// Create a new memory monitor with specified threshold
     ///
@@ -46,18 +59,18 @@ impl MemoryMonitor {
 
     /// Start memory monitoring in background task
     ///
-    /// Returns a join handle for the monitoring task
-    pub fn start_monitoring(&self) -> tokio::task::JoinHandle<()> {
+    /// Returns a guard that aborts the monitoring task on drop.
+    pub fn start_monitoring(&self) -> MonitoringGuard {
         let state = Arc::clone(&self.state);
         let max_threshold = self.max_threshold_mb;
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
 
             loop {
                 interval.tick().await;
 
-                // Get current memory usage (simulated)
+                // Get current heap usage via the crate's global allocator tracking.
                 let usage_mb = Self::get_current_memory_mb();
 
                 // Update all state fields in a single lock acquisition
@@ -90,7 +103,9 @@ impl MemoryMonitor {
                     );
                 }
             }
-        })
+        });
+
+        MonitoringGuard { handle }
     }
 
     /// Get current memory usage in MB
@@ -132,7 +147,7 @@ impl MemoryMonitor {
 
     /// Check if memory usage is within budget
     pub async fn is_within_budget(&self) -> bool {
-        self.state.read().await.current_mb <= self.max_threshold_mb
+        self.state.read().await.peak_mb <= self.max_threshold_mb
     }
 
     /// Get memory usage percentage of threshold
@@ -150,28 +165,13 @@ impl MemoryMonitor {
         );
     }
 
-    /// Get current memory usage using /proc/self/status (Linux)
-    /// Falls back to 0 on non-Linux platforms
+    /// Get current heap usage in MB using the crate's allocation tracking.
+    ///
+    /// This is intentionally based on heap allocations (via `cap::Cap`) rather than RSS.
+    /// RSS includes code segments, thread stacks, and instrumentation overhead (e.g. coverage),
+    /// which makes CI runs (tarpaulin) non-representative of the embedded target budget.
     fn get_current_memory_mb() -> f64 {
-        #[cfg(target_os = "linux")]
-        {
-            use std::fs;
-
-            if let Ok(status) = fs::read_to_string("/proc/self/status") {
-                for line in status.lines() {
-                    if line.starts_with("VmRSS:")
-                        && let Some(kb) = line
-                            .split_whitespace()
-                            .nth(1)
-                            .and_then(|s| s.parse::<f64>().ok())
-                    {
-                        return kb / 1024.0;
-                    }
-                }
-            }
-        }
-
-        0.0 // Default if not on Linux or unable to read
+        (crate::allocated() as f64) / 1024.0 / 1024.0
     }
 }
 
@@ -220,6 +220,7 @@ mod tests {
         {
             let mut state = monitor.state.write().await;
             state.current_mb = 20.0;
+            state.peak_mb = 20.0;
         }
 
         assert!(monitor.is_within_budget().await);
@@ -227,6 +228,7 @@ mod tests {
         {
             let mut state = monitor.state.write().await;
             state.current_mb = 25.0;
+            state.peak_mb = 25.0;
         }
 
         assert!(!monitor.is_within_budget().await);

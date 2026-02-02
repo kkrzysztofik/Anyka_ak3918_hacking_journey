@@ -411,7 +411,7 @@ mod tests {
         assert!(bit_reader.read_bit().unwrap() == 0);
         assert!(bit_reader.read_bit().unwrap() == 0);
 
-        bit_reader.bits_aligment_8();
+        bit_reader.bits_alignment_8();
 
         assert!(bit_reader.read_bit().unwrap() == 0);
         assert!(bit_reader.read_bit().unwrap() == 0);
@@ -434,7 +434,7 @@ mod tests {
         bits_reader.read_n_bits(8).unwrap();
 
         // Already aligned, should be a no-op
-        bits_reader.bits_aligment_8();
+        bits_reader.bits_alignment_8();
 
         // Should still read from second byte
         assert_eq!(bits_reader.read_n_bits(8).unwrap(), 0x00);
@@ -450,7 +450,7 @@ mod tests {
         bits_reader.read_n_bits(3).unwrap();
 
         // Align - should skip remaining 5 bits of first byte
-        bits_reader.bits_aligment_8();
+        bits_reader.bits_alignment_8();
 
         // Now should read from second byte
         assert_eq!(bits_reader.read_byte().unwrap(), 0xAB);
@@ -542,7 +542,7 @@ mod tests {
         assert_eq!(bits_reader.read_n_bits(4).unwrap(), 0x0A);
 
         // Align to byte boundary
-        bits_reader.bits_aligment_8();
+        bits_reader.bits_alignment_8();
 
         // Read full byte
         assert_eq!(bits_reader.read_byte().unwrap(), 0xCD);
@@ -681,9 +681,9 @@ mod tests {
         let mut bits_reader = BitsReader::new(bytes_reader);
 
         bits_reader.read_n_bits(3).unwrap();
-        bits_reader.bits_aligment_8();
-        bits_reader.bits_aligment_8(); // Should be no-op
-        bits_reader.bits_aligment_8(); // Should be no-op
+        bits_reader.bits_alignment_8();
+        bits_reader.bits_alignment_8(); // Should be no-op
+        bits_reader.bits_alignment_8(); // Should be no-op
 
         // Should read from second byte
         assert_eq!(bits_reader.read_byte().unwrap(), 0x00);

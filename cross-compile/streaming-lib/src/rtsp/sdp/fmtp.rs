@@ -98,31 +98,6 @@ impl Unmarshal for H264Fmtp {
                 log::warn!("H264FmtpSdp parse key=value err: {}", parameter);
                 continue;
             }
-            #[test]
-            fn test_parse_h264fmtp_invalid_base64() {
-                let parser = H264Fmtp::unmarshal(
-                        "96 packetization-mode=1; sprop-parameter-sets=!!invalid!!,??bad??; profile-level-id=640016",
-                    )
-                    .unwrap();
-
-                assert_eq!(parser.payload_type, 96);
-                assert_eq!(parser.packetization_mode, 1);
-                assert_eq!(parser.profile_level_id, "640016");
-                assert!(parser.sps.is_empty());
-                assert!(parser.pps.is_empty());
-            }
-
-            #[test]
-            fn test_parse_mpeg4fmtp_invalid_hex() {
-                let parser = Mpeg4Fmtp::unmarshal(
-                        "97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=23; config=zzzz",
-                    )
-                    .unwrap();
-
-                assert_eq!(parser.payload_type, 97);
-                assert_eq!(parser.profile_level_id, "1");
-                assert!(parser.asc.is_empty());
-            }
 
             match kv[0] {
                 "packetization-mode" => {
@@ -155,6 +130,37 @@ impl Unmarshal for H264Fmtp {
         }
 
         Ok(h264_fmtp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_h264fmtp_invalid_base64() {
+        let parser = H264Fmtp::unmarshal(
+            "96 packetization-mode=1; sprop-parameter-sets=!!invalid!!,??bad??; profile-level-id=640016",
+        )
+        .unwrap();
+
+        assert_eq!(parser.payload_type, 96);
+        assert_eq!(parser.packetization_mode, 1);
+        assert_eq!(parser.profile_level_id, "640016");
+        assert!(parser.sps.is_empty());
+        assert!(parser.pps.is_empty());
+    }
+
+    #[test]
+    fn test_parse_mpeg4fmtp_invalid_hex() {
+        let parser = Mpeg4Fmtp::unmarshal(
+            "97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=23; config=zzzz",
+        )
+        .unwrap();
+
+        assert_eq!(parser.payload_type, 97);
+        assert_eq!(parser.profile_level_id, "1");
+        assert!(parser.asc.is_empty());
     }
 }
 

@@ -121,9 +121,8 @@ mod tests {
         // Collect emitted frames
         let mut frame_count = 0;
         let timeout = std::time::Duration::from_secs(2);
-        let start = tokio::time::Instant::now();
 
-        while let Ok(Some(frame)) = tokio::time::timeout(timeout, receiver.recv()).await {
+        while let Ok(Some(_frame)) = tokio::time::timeout(timeout, receiver.recv()).await {
             frame_count += 1;
             // Stop after receiving enough frames
             if frame_count >= 10 {
@@ -192,7 +191,7 @@ mod tests {
     #[tokio::test]
     async fn test_tstream_handler_sdp_generation() {
         // Real test: verify TStreamHandler sends proper SDP information
-        use streaming_lib::streamhub::define::{Information, InformationSender};
+        use streaming_lib::streamhub::define::Information;
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
         use tokio::sync::mpsc;
 
@@ -213,21 +212,17 @@ mod tests {
         let timeout = std::time::Duration::from_millis(500);
 
         while let Ok(Some(info)) = tokio::time::timeout(timeout, receiver.recv()).await {
-            match info {
-                Information::Sdp { data } => {
-                    received_sdp = true;
-                    // Verify SDP format
-                    assert!(data.contains("v=0"));
-                    assert!(data.contains("o="));
-                    assert!(data.contains("s="));
-                    assert!(data.contains("m=video"));
-                    assert!(data.contains("a=rtpmap:96 H264/90000"));
-                    assert!(data.contains("profile-level-id="));
-                    assert!(data.contains("sprop-parameter-sets="));
-                    break;
-                }
-                _ => {}
-            }
+            let Information::Sdp { data } = info;
+            received_sdp = true;
+            // Verify SDP format
+            assert!(data.contains("v=0"));
+            assert!(data.contains("o="));
+            assert!(data.contains("s="));
+            assert!(data.contains("m=video"));
+            assert!(data.contains("a=rtpmap:96 H264/90000"));
+            assert!(data.contains("profile-level-id="));
+            assert!(data.contains("sprop-parameter-sets="));
+            break;
         }
 
         assert!(received_sdp, "Did not receive SDP information");
@@ -882,7 +877,7 @@ mod tests {
     /// Helper: Minimal RTSP protocol handler for testing
     /// Implements basic RTSP DESCRIBE/SETUP/PLAY sequence
     async fn handle_rtsp_client(
-        mut socket: tokio::net::TcpStream,
+        socket: tokio::net::TcpStream,
         sdp_content: String,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -890,8 +885,8 @@ mod tests {
         let (reader, mut writer) = socket.into_split();
         let mut lines = BufReader::new(reader).lines();
 
-        let mut session_id = "1234567890".to_string();
-        let mut cseq = 1;
+        let session_id = "1234567890".to_string();
+        let cseq = 1;
 
         while let Ok(Some(line)) = lines.next_line().await {
             let line = line.trim();
@@ -921,7 +916,7 @@ mod tests {
                      Session: {}\r\n\
                      Transport: RTP/AVP;unicast;client_port=5000-5001;server_port=6000-6001\r\n\
                      \r\n",
-                    cseq, session_id
+                    cseq, &session_id
                 );
                 writer.write_all(response.as_bytes()).await?;
                 writer.flush().await?;
@@ -932,7 +927,7 @@ mod tests {
                      Session: {}\r\n\
                      Range: npt=0-\r\n\
                      \r\n",
-                    cseq, session_id
+                    cseq, &session_id
                 );
                 writer.write_all(response.as_bytes()).await?;
                 writer.flush().await?;
@@ -957,7 +952,7 @@ mod tests {
 
     /// Helper: Minimal HTTP-FLV protocol handler for testing
     async fn handle_httpflv_client(
-        mut socket: tokio::net::TcpStream,
+        socket: tokio::net::TcpStream,
         flv_data: Vec<u8>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -1075,7 +1070,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         // Connect as RTSP client
-        if let Ok(mut stream) = tokio::net::TcpStream::connect("127.0.0.1:8554").await {
+        if let Ok(stream) = tokio::net::TcpStream::connect("127.0.0.1:8554").await {
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
             let (reader, mut writer) = stream.into_split();
@@ -1248,7 +1243,7 @@ mod tests {
 
         // Connect two concurrent RTSP clients
         let client1_task = async {
-            if let Ok(mut stream) = tokio::net::TcpStream::connect("127.0.0.1:8556").await {
+            if let Ok(stream) = tokio::net::TcpStream::connect("127.0.0.1:8556").await {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
                 let (reader, mut writer) = stream.into_split();
@@ -1274,7 +1269,7 @@ mod tests {
 
         let client2_task = async {
             tokio::time::sleep(Duration::from_millis(5)).await;
-            if let Ok(mut stream) = tokio::net::TcpStream::connect("127.0.0.1:8556").await {
+            if let Ok(stream) = tokio::net::TcpStream::connect("127.0.0.1:8556").await {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
                 let (reader, mut writer) = stream.into_split();
@@ -1333,7 +1328,7 @@ mod tests {
         platform.initialize().await.unwrap();
 
         let monitor = MemoryMonitor::new(24.0);
-        let _monitor_handle = monitor.start_monitoring();
+        let _monitor_guard = monitor.start_monitoring();
 
         let config = H264PlaybackConfig {
             file_path: test_file.clone(),
@@ -1476,8 +1471,6 @@ mod tests {
 
 // Test configuration and utilities
 pub mod fixtures {
-    use std::fs;
-
     #[derive(Clone, Debug)]
     pub struct H264PlaybackTestConfig {
         pub file_path: String,
@@ -1486,23 +1479,4 @@ pub mod fixtures {
         pub rtsp_port: u16,
         pub httpflv_port: u16,
     }
-
-    pub fn create_minimal_h264_file(path: &str) -> std::io::Result<()> {
-        use std::io::Write;
-
-        let mut file = fs::File::create(path)?;
-        let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
-        let sps: &[u8] = &[0x27, 0x42, 0xc0, 0x28, 0xd9, 0x05, 0x05, 0x14, 0x11, 0x00];
-        let pps: &[u8] = &[0x28, 0xce, 0x06, 0xe2];
-
-        file.write_all(start_code)?;
-        file.write_all(sps)?;
-        file.write_all(start_code)?;
-        file.write_all(pps)?;
-
-        Ok(())
-    }
 }
-
-// Re-export test configuration for use in crate tests
-use fixtures::H264PlaybackTestConfig;

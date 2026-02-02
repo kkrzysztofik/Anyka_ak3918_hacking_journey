@@ -487,7 +487,7 @@ mod tests {
         bit_writer.write_bit(1).unwrap();
         bit_writer.write_bit(0).unwrap();
 
-        bit_writer.bits_aligment_8().unwrap();
+        bit_writer.bits_alignment_8().unwrap();
 
         let byte = bit_writer.get_current_bytes();
         assert!(byte.to_vec()[0] == 0xC0); //0x11000000
@@ -509,7 +509,7 @@ mod tests {
         bits_writer.write_n_bits(0b111, 3).unwrap();
 
         // Align - should pad with zeros to make a full byte
-        bits_writer.bits_aligment_8().unwrap();
+        bits_writer.bits_alignment_8().unwrap();
 
         let bytes = bits_writer.get_current_bytes();
         // 111 + 00000 padding = 11100000 = 0xE0
@@ -525,7 +525,7 @@ mod tests {
         bits_writer.write_n_bits(0xFF, 8).unwrap();
 
         // Already aligned - should be no-op
-        bits_writer.bits_aligment_8().unwrap();
+        bits_writer.bits_alignment_8().unwrap();
 
         let bytes = bits_writer.get_current_bytes();
         assert_eq!(bytes.to_vec(), vec![0xFF]);
@@ -599,7 +599,7 @@ mod tests {
         bits_writer.write_n_bits(0b11, 2).unwrap(); // 2 bits
         bits_writer.write_n_bits(0b010, 3).unwrap(); // 3 bits
         bits_writer.write_n_bits(0xABCD, 16).unwrap(); // 16 bits
-        bits_writer.bits_aligment_8().unwrap(); // Align remaining
+        bits_writer.bits_alignment_8().unwrap(); // Align remaining
 
         // Read back
         let written_bytes = bits_writer.get_current_bytes();
@@ -660,7 +660,7 @@ mod tests {
         bits_writer.write_n_bits(0x0F, 4).unwrap();
 
         // Align
-        bits_writer.bits_aligment_8().unwrap();
+        bits_writer.bits_alignment_8().unwrap();
 
         // Write full byte
         bits_writer.write_8bit(0xAB).unwrap();
@@ -755,7 +755,7 @@ mod tests {
             let bytes_writer = BytesWriter::new();
             let mut bits_writer = BitsWriter::new(bytes_writer);
             bits_writer.write_n_bits(masked_value, bit_count).unwrap();
-            bits_writer.bits_aligment_8().unwrap();
+            bits_writer.bits_alignment_8().unwrap();
 
             // Read back
             let written_bytes = bits_writer.get_current_bytes();
@@ -803,7 +803,7 @@ mod tests {
 
         // Write maximum 64 bits
         bits_writer.write_n_bits(0xFFFFFFFFFFFFFFFF, 64).unwrap();
-        bits_writer.bits_aligment_8().unwrap();
+        bits_writer.bits_alignment_8().unwrap();
 
         let bytes = bits_writer.get_current_bytes();
         assert_eq!(bytes.len(), 8);
@@ -858,7 +858,7 @@ mod tests {
         bits_writer.write_n_bits(0xFF, 8).unwrap();
 
         // Align (should be no-op)
-        bits_writer.bits_aligment_8().unwrap();
+        bits_writer.bits_alignment_8().unwrap();
 
         let bytes = bits_writer.get_current_bytes();
         assert_eq!(bytes.to_vec(), vec![0xFF]);
@@ -878,7 +878,7 @@ mod tests {
         // 1 bit + 8 bits = 9 bits, first byte flushed, 1 partial bit remaining
         assert_eq!(bits_writer.len(), 9);
 
-        bits_writer.bits_aligment_8().unwrap();
+        bits_writer.bits_alignment_8().unwrap();
         // After alignment, partial byte (1 bit + 7 zero padding) is flushed
         // Total: 2 bytes = 16 bits
         assert_eq!(bits_writer.len(), 16);
@@ -894,7 +894,7 @@ mod tests {
 
         // Clear underlying writer
         bits_writer.writer.clear();
-        bits_writer.bits_aligment_8().unwrap();
+        bits_writer.bits_alignment_8().unwrap();
 
         // Should be empty if no partial bits
         assert!(bits_writer.is_empty());

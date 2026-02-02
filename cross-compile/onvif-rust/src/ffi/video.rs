@@ -231,8 +231,8 @@ impl VideoInputHandle {
     ///
     /// # Examples
     ///
-    /// The test helpers `from_raw_unchecked()` and `test_handle()` can produce null handles
-    /// for testing scenarios where mock FFI backends are used:
+    /// The test helper `test_handle()` can produce null handles for testing scenarios where
+    /// mock FFI backends are used:
     ///
     /// ```no_run
     /// # #[cfg(test)]
@@ -249,17 +249,6 @@ impl VideoInputHandle {
     /// Do not use after the handle is dropped.
     pub(crate) fn as_ptr(&self) -> *mut c_void {
         self.handle.unwrap_or(std::ptr::null_mut())
-    }
-
-    /// Create a test handle from a raw pointer without cleanup.
-    ///
-    /// # Safety
-    ///
-    /// This is only for testing - the handle will NOT be closed on drop.
-    /// Used to create handles with dangling pointers for mock FFI testing.
-    #[cfg(test)]
-    pub(crate) unsafe fn from_raw_unchecked(ptr: *mut c_void) -> Self {
-        Self { handle: Some(ptr) }
     }
 
     /// Create a test handle that will not be closed on drop.
@@ -714,9 +703,7 @@ mod tests {
     #[test]
     fn test_video_input_get_sensor_resolution_internal_calls_ffi_and_returns_resolution() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let vi_handle = VideoInputHandle {
-            handle: None, // Use None to prevent Drop from calling vi_close on dangling pointer
-        };
+        let vi_handle = VideoInputHandle::test_handle();
 
         mock_ffi
             .expect_vi_get_sensor_resolution()
@@ -742,9 +729,7 @@ mod tests {
     #[test]
     fn test_video_input_get_sensor_resolution_internal_propagates_error() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let vi_handle = VideoInputHandle {
-            handle: None, // Use None to prevent Drop from calling vi_close on dangling pointer
-        };
+        let vi_handle = VideoInputHandle::test_handle();
 
         mock_ffi
             .expect_vi_get_sensor_resolution()
@@ -765,9 +750,7 @@ mod tests {
     #[test]
     fn test_video_input_set_channel_attr_internal_calls_ffi() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let vi_handle = VideoInputHandle {
-            handle: None, // Use None to prevent Drop from calling vi_close on dangling pointer
-        };
+        let vi_handle = VideoInputHandle::test_handle();
         let attr = video_channel_attr::default();
 
         mock_ffi
@@ -783,9 +766,7 @@ mod tests {
     #[test]
     fn test_video_input_set_channel_attr_internal_propagates_error() {
         let mut mock_ffi = MockVideoFfiTrait::new();
-        let vi_handle = VideoInputHandle {
-            handle: None, // Use None to prevent Drop from calling vi_close on dangling pointer
-        };
+        let vi_handle = VideoInputHandle::test_handle();
         let attr = video_channel_attr::default();
 
         mock_ffi

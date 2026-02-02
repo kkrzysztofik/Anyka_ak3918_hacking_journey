@@ -1145,18 +1145,6 @@ mod tests {
         }
     }
 
-    fn create_test_publisher_info() -> PublisherInfo {
-        PublisherInfo {
-            id: Uuid::new(crate::streamhub::utils::RandomDigitCount::Four),
-            pub_type: PublishType::RtmpPush,
-            pub_data_type: PubDataType::Frame,
-            notify_info: NotifyInfo {
-                request_url: "rtmp://localhost/live/test".to_string(),
-                remote_addr: "127.0.0.1:1935".to_string(),
-            },
-        }
-    }
-
     fn create_test_subscriber_info() -> SubscriberInfo {
         SubscriberInfo {
             id: Uuid::new(crate::streamhub::utils::RandomDigitCount::Four),
