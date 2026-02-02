@@ -8,6 +8,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Go up 1 level: scripts -> onvif-rust
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# Workspace root: onvif-rust -> cross-compile
+WORKSPACE_DIR="$(cd "${PROJECT_DIR}/.." && pwd)"
 
 # Default values
 BUILD_MODE="release"
@@ -123,15 +125,31 @@ log_info "Building for target ${TARGET} in ${BUILD_MODE} mode..."
 
 if [[ "${BUILD_MODE}" = "release" ]]; then
   "${CARGO}" build --release --target "${TARGET}"
-  BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/release/onvif-rust"
+  WORKSPACE_BINARY_PATH="${WORKSPACE_DIR}/target/${TARGET}/release/onvif-rust"
+  CRATE_BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/release/onvif-rust"
 else
   "${CARGO}" build --target "${TARGET}"
-  BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/debug/onvif-rust"
+  WORKSPACE_BINARY_PATH="${WORKSPACE_DIR}/target/${TARGET}/debug/onvif-rust"
+  CRATE_BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/debug/onvif-rust"
+fi
+
+# Resolve actual binary location.
+# When building as part of the `cross-compile` workspace, Cargo places artifacts in `${WORKSPACE_DIR}/target`.
+# Older standalone builds may place artifacts in `${PROJECT_DIR}/target`.
+if [[ -f "${WORKSPACE_BINARY_PATH}" ]]; then
+  BINARY_PATH="${WORKSPACE_BINARY_PATH}"
+elif [[ -f "${CRATE_BINARY_PATH}" ]]; then
+  BINARY_PATH="${CRATE_BINARY_PATH}"
+else
+  BINARY_PATH=""
 fi
 
 # Check if build succeeded
 if [[ ! -f "${BINARY_PATH}" ]]; then
   log_error "Build failed - binary not found at expected location: ${BINARY_PATH}"
+  log_error "Searched:"
+  log_error "  - ${WORKSPACE_BINARY_PATH}"
+  log_error "  - ${CRATE_BINARY_PATH}"
   exit 1
 fi
 
