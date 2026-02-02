@@ -319,7 +319,7 @@ impl Marshal for Mpeg4Fmtp {
 }
 
 #[cfg(test)]
-mod tests {
+mod marshal_tests {
 
     use bytes::BytesMut;
 
