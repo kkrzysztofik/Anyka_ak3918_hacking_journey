@@ -149,7 +149,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     use std::path::Path;
     use std::sync::Arc;
     use streaming_lib::StreamIdentifier;
-    use streaming_lib::streamhub::define::DataReceiver;
+    use streaming_lib::streamhub::define::{DataReceiver, FrameData};
     use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
     use streaming_lib::{
         DefaultHttpFlvServer, DefaultRtspServer, HttpFlvServer, RtspServer, StreamsHub,
@@ -206,28 +206,68 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     // 2. Initialize StreamHub for frame distribution
     let mut streamhub = StreamsHub::new(None);
-    let stream_id = StreamIdentifier::Rtsp {
-        stream_path: "/stream1".to_string(),
+    let app_name = "live".to_string();
+    let stream_name = "stream1".to_string();
+
+    // IMPORTANT: streaming-lib's RTSP URI parser stores `uri.path` without the leading '/'.
+    // Example: `rtsp://host:8554/stream1` -> `uri.path == "stream1"`.
+    // If we publish "/stream1" here, RTSP subscribe/unpublish will not match and streaming fails.
+    let rtsp_stream_id = StreamIdentifier::Rtsp {
+        stream_path: stream_name.clone(),
+    };
+    let httpflv_stream_id = StreamIdentifier::Rtmp {
+        app_name: app_name.clone(),
+        stream_name: stream_name.clone(),
     };
 
-    // Create frame channel for publisher to StreamHub
-    let (frame_tx, frame_rx) = mpsc::unbounded_channel();
+    // Create a single publisher output channel, then fan-out to protocol-specific StreamHub streams.
+    // This allows RTSP (StreamIdentifier::Rtsp) and HTTP-FLV (StreamIdentifier::Rtmp) to subscribe
+    // to the same underlying H.264 frame source.
+    let (frame_tx_for_publisher, mut frame_rx_from_publisher) =
+        mpsc::unbounded_channel::<FrameData>();
+    let (frame_tx_rtsp, frame_rx_rtsp) = mpsc::unbounded_channel::<FrameData>();
+    let (frame_tx_httpflv, frame_rx_httpflv) = mpsc::unbounded_channel::<FrameData>();
 
-    // Create DataReceiver wrapping the frame channel
-    let data_receiver = DataReceiver {
-        frame_receiver: Some(frame_rx),
+    let fanout_handle = tokio::spawn(async move {
+        while let Some(frame) = frame_rx_from_publisher.recv().await {
+            let _ = frame_tx_rtsp.send(frame.clone());
+            let _ = frame_tx_httpflv.send(frame);
+        }
+    });
+
+    // Publish RTSP stream
+    let rtsp_data_receiver = DataReceiver {
+        frame_receiver: Some(frame_rx_rtsp),
         packet_receiver: None,
     };
-
-    // Publish stream to StreamHub (uses MockVideoPublisher as stream handler)
     streamhub
-        .publish(stream_id.clone(), data_receiver, publisher.clone())
+        .publish(
+            rtsp_stream_id.clone(),
+            rtsp_data_receiver,
+            publisher.clone(),
+        )
         .await
-        .context("Failed to publish stream to StreamHub")?;
+        .context("Failed to publish RTSP stream to StreamHub")?;
 
-    let frame_tx_for_publisher = frame_tx;
+    // Publish HTTP-FLV stream (HTTP-FLV server subscribes using RTMP-style identifiers)
+    let httpflv_data_receiver = DataReceiver {
+        frame_receiver: Some(frame_rx_httpflv),
+        packet_receiver: None,
+    };
+    streamhub
+        .publish(
+            httpflv_stream_id.clone(),
+            httpflv_data_receiver,
+            publisher.clone(),
+        )
+        .await
+        .context("Failed to publish HTTP-FLV stream to StreamHub")?;
 
-    tracing::info!("StreamHub initialized with stream: {}", stream_id);
+    tracing::info!(
+        "StreamHub initialized with streams: {} and {}",
+        rtsp_stream_id,
+        httpflv_stream_id
+    );
 
     // Start MockVideoPublisher frame emission
     let pub_handle = publisher.start_publishing(frame_tx_for_publisher);
@@ -345,6 +385,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     flv_handle.abort();
     streamhub_handle.abort();
     pub_handle.abort();
+    fanout_handle.abort();
 
     tracing::info!("All servers and tasks shutdown");
     tracing::info!("H.264 Validation mode stopped");
