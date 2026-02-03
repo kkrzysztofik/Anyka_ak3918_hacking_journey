@@ -70,6 +70,10 @@ impl RtpChannel {
         rtp_channel
     }
 
+    pub fn clock_rate(&self) -> u32 {
+        self.codec_info.sample_rate
+    }
+
     //Receive av frame from network -> pack AV frame to RTP packet -> send to stream hub
     pub async fn on_packet(&mut self, reader: &mut BytesReader) -> Result<(), UnPackerError> {
         if let Some(unpacker) = &mut self.rtp_unpacker {

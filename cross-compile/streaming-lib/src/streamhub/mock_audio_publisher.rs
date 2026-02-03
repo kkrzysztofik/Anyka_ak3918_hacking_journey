@@ -7,6 +7,7 @@ use crate::streamhub::{StatisticsStream, StreamHubError};
 use async_trait::async_trait;
 use bytes::BytesMut;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -98,12 +99,13 @@ impl MockAudioPublisher {
 
                 // Read and send AAC frames
                 let mut reader = reader.lock().await;
-                let mut frame_count = 0;
+                let mut frame_count: u32 = 0;
                 let frame_duration_ms = reader.frame_duration_ms();
+                let loop_start = Instant::now();
 
                 while let Ok(Some(frame)) = reader.read_next_frame() {
-                    let timestamp =
-                        timestamp_offset.saturating_add(frame_count * frame_duration_ms);
+                    let timestamp = timestamp_offset
+                        .saturating_add(frame_count.saturating_mul(frame_duration_ms));
                     let data = BytesMut::from(frame.data.as_slice());
 
                     let frame_data = FrameData::Audio { timestamp, data };
@@ -112,13 +114,15 @@ impl MockAudioPublisher {
                         return;
                     }
 
-                    frame_count += 1;
+                    frame_count = frame_count.saturating_add(1);
 
-                    // Frame rate control (AAC frames: ~21-23ms @ 48kHz)
-                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                        frame_duration_ms as u64,
-                    ))
-                    .await;
+                    // Frame rate control: align to target schedule to avoid drift.
+                    let target_elapsed_ms = frame_count.saturating_mul(frame_duration_ms) as u64;
+                    let target_elapsed = Duration::from_millis(target_elapsed_ms);
+                    let elapsed = loop_start.elapsed();
+                    if let Some(remaining) = target_elapsed.checked_sub(elapsed) {
+                        tokio::time::sleep(remaining).await;
+                    }
                 }
 
                 if !loop_playback {

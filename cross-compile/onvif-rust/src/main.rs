@@ -7,9 +7,17 @@
 //! `--validation-mode --h264-file <path> [--aac-file <path>] [--audio-sample-rate 48000] [--rtsp-port 8554] [--httpflv-port 8080] [--loop-playback]`
 
 use anyhow::{Context, Result};
+use async_trait::async_trait;
+use bytes::BytesMut;
 use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
+use streaming_lib::streamhub::define::{Information, InformationSender};
+use streaming_lib::streamhub::errors::StreamHubError;
+use streaming_lib::streamhub::statistics::StatisticsStream;
+use streaming_lib::{
+    DataSender, FrameData, MediaInfo, SubscribeType, TStreamHandler, VideoCodecType,
+};
 
 /// ONVIF daemon with optional H.264 playback validation mode
 #[derive(Parser, Debug)]
@@ -142,6 +150,160 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
     Ok(())
 }
 
+struct ValidationAvStreamHandler {
+    sps: Vec<u8>,
+    pps: Vec<u8>,
+    audio_config: Option<Vec<u8>>,
+    audio_sample_rate: u32,
+}
+
+impl ValidationAvStreamHandler {
+    fn new(
+        sps: Vec<u8>,
+        pps: Vec<u8>,
+        audio_config: Option<Vec<u8>>,
+        audio_sample_rate: u32,
+    ) -> Self {
+        Self {
+            sps,
+            pps,
+            audio_config,
+            audio_sample_rate,
+        }
+    }
+}
+
+#[async_trait]
+impl TStreamHandler for ValidationAvStreamHandler {
+    async fn send_prior_data(
+        &self,
+        sender: DataSender,
+        _sub_type: SubscribeType,
+    ) -> Result<(), StreamHubError> {
+        if let DataSender::Frame {
+            sender: frame_sender,
+        } = sender
+        {
+            let audio_clock_rate = if self.audio_config.is_some() {
+                self.audio_sample_rate
+            } else {
+                0
+            };
+
+            let media_info = MediaInfo {
+                audio_clock_rate,
+                video_clock_rate: 90000,
+                vcodec: VideoCodecType::H264,
+            };
+            let _ = frame_sender.send(FrameData::MediaInfo { media_info });
+
+            let _ = frame_sender.send(FrameData::Video {
+                timestamp: 0,
+                data: BytesMut::from(self.sps.as_slice()),
+            });
+            let _ = frame_sender.send(FrameData::Video {
+                timestamp: 0,
+                data: BytesMut::from(self.pps.as_slice()),
+            });
+
+            if let Some(config) = self.audio_config.as_ref() {
+                let _ = frame_sender.send(FrameData::Audio {
+                    timestamp: 0,
+                    data: BytesMut::from(config.as_slice()),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn get_statistic_data(&self) -> Option<StatisticsStream> {
+        None
+    }
+
+    async fn send_information(&self, sender: InformationSender) {
+        let sdp = generate_av_sdp(
+            &self.sps,
+            &self.pps,
+            self.audio_config.as_deref(),
+            self.audio_sample_rate,
+        );
+        let _ = sender.send(Information::Sdp { data: sdp });
+    }
+}
+
+fn generate_av_sdp(
+    sps: &[u8],
+    pps: &[u8],
+    audio_config: Option<&[u8]>,
+    audio_sample_rate: u32,
+) -> String {
+    let profile_level_id = if sps.len() >= 4 {
+        format!("{:02x}{:02x}{:02x}", sps[1], sps[2], sps[3])
+    } else {
+        "42e01e".to_string()
+    };
+
+    let mut sdp = String::new();
+    sdp.push_str("v=0\r\n");
+    sdp.push_str("o=- 0 0 IN IP4 0.0.0.0\r\n");
+    sdp.push_str("s=H264 Validation Stream\r\n");
+    sdp.push_str("c=IN IP4 0.0.0.0\r\n");
+    sdp.push_str("t=0 0\r\n");
+    sdp.push_str("a=tool:onvif-validation\r\n");
+    sdp.push_str("a=control:*\r\n");
+    sdp.push_str("m=video 0 RTP/AVP 96\r\n");
+    sdp.push_str("a=rtpmap:96 H264/90000\r\n");
+    sdp.push_str(&format!(
+        "a=fmtp:96 profile-level-id={};sprop-parameter-sets={},{}\r\n",
+        profile_level_id,
+        base64_encode(sps),
+        base64_encode(pps)
+    ));
+    sdp.push_str("a=control:trackID=0\r\n");
+    sdp.push_str("a=sendonly\r\n");
+
+    if let Some(config) = audio_config {
+        let channels = audio_channels_from_config(config);
+        let config_hex = audio_config_hex(config);
+
+        sdp.push_str("m=audio 0 RTP/AVP 97\r\n");
+        sdp.push_str(&format!(
+            "a=rtpmap:97 MPEG4-GENERIC/{}/{}\r\n",
+            audio_sample_rate, channels
+        ));
+        sdp.push_str(&format!(
+            "a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config={}\r\n",
+            config_hex
+        ));
+        sdp.push_str("a=control:trackID=1\r\n");
+        sdp.push_str("a=sendonly\r\n");
+    }
+
+    sdp
+}
+
+fn audio_channels_from_config(audio_config: &[u8]) -> u32 {
+    if audio_config.len() >= 2 {
+        ((audio_config[1] >> 3) & 0x0F) as u32
+    } else {
+        2
+    }
+}
+
+fn audio_config_hex(audio_config: &[u8]) -> String {
+    audio_config
+        .iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<String>()
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD as BASE64;
+    BASE64.encode(data)
+}
+
 /// Run the daemon in H.264 playback validation mode
 async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> Result<()> {
     use onvif_rust::config::{ConfigRuntime, ConfigStorage};
@@ -149,7 +311,8 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     use std::path::Path;
     use std::sync::Arc;
     use streaming_lib::StreamIdentifier;
-    use streaming_lib::streamhub::define::{DataReceiver, FrameData};
+    use streaming_lib::streamhub::define::DataReceiver;
+    use streaming_lib::streamhub::mock_audio_publisher::MockAudioPublisher;
     use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
     use streaming_lib::{
         DefaultHttpFlvServer, DefaultRtspServer, HttpFlvServer, RtspServer, StreamsHub,
@@ -178,6 +341,11 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     if !Path::new(&config.file_path).exists() {
         anyhow::bail!("H.264 file not found: {}", config.file_path);
     }
+    if let Some(audio_path) = &config.audio_file_path
+        && !Path::new(audio_path).exists()
+    {
+        anyhow::bail!("AAC file not found: {}", audio_path);
+    }
 
     tracing::info!(
         "H.264 Validation mode starting: {} @ {}fps (RTSP: {}, HTTP-FLV: {})",
@@ -192,7 +360,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     }
 
     // 1. Create MockVideoPublisher from H.264 file for frame reading
-    let publisher = Arc::new(
+    let video_publisher = Arc::new(
         MockVideoPublisher::new(
             "stream1".to_string(),
             &config.file_path,
@@ -203,6 +371,33 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         .context("Failed to create MockVideoPublisher from H.264 file")?,
     );
     tracing::info!("MockVideoPublisher created");
+
+    let audio_publisher = if let Some(audio_path) = config.audio_file_path.as_deref() {
+        let publisher = MockAudioPublisher::new(
+            "stream1".to_string(),
+            audio_path,
+            config.audio_sample_rate,
+            config.loop_playback,
+        )
+        .await
+        .context("Failed to create MockAudioPublisher from AAC file")?;
+        tracing::info!("MockAudioPublisher created");
+        Some(Arc::new(publisher))
+    } else {
+        None
+    };
+
+    let audio_sample_rate = audio_publisher
+        .as_ref()
+        .map_or(0, |publisher| publisher.sample_rate());
+    let rtsp_stream_handler = Arc::new(ValidationAvStreamHandler::new(
+        video_publisher.sps().to_vec(),
+        video_publisher.pps().to_vec(),
+        audio_publisher
+            .as_ref()
+            .map(|publisher| publisher.audio_config().to_vec()),
+        audio_sample_rate,
+    ));
 
     // 2. Initialize StreamHub for frame distribution
     let mut streamhub = StreamsHub::new(None);
@@ -230,8 +425,15 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     let fanout_handle = tokio::spawn(async move {
         while let Some(frame) = frame_rx_from_publisher.recv().await {
-            let _ = frame_tx_rtsp.send(frame.clone());
-            let _ = frame_tx_httpflv.send(frame);
+            match frame {
+                FrameData::Audio { .. } => {
+                    let _ = frame_tx_rtsp.send(frame);
+                }
+                _ => {
+                    let _ = frame_tx_rtsp.send(frame.clone());
+                    let _ = frame_tx_httpflv.send(frame);
+                }
+            }
         }
     });
 
@@ -244,7 +446,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         .publish(
             rtsp_stream_id.clone(),
             rtsp_data_receiver,
-            publisher.clone(),
+            rtsp_stream_handler.clone(),
         )
         .await
         .context("Failed to publish RTSP stream to StreamHub")?;
@@ -258,7 +460,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         .publish(
             httpflv_stream_id.clone(),
             httpflv_data_receiver,
-            publisher.clone(),
+            video_publisher.clone(),
         )
         .await
         .context("Failed to publish HTTP-FLV stream to StreamHub")?;
@@ -270,8 +472,16 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     );
 
     // Start MockVideoPublisher frame emission
-    let pub_handle = publisher.start_publishing(frame_tx_for_publisher);
+    let pub_handle = video_publisher.start_publishing(frame_tx_for_publisher.clone());
     tracing::info!("MockVideoPublisher started emitting frames");
+
+    let audio_pub_handle = if let Some(audio_publisher) = audio_publisher.as_ref() {
+        let handle = audio_publisher.start_publishing(frame_tx_for_publisher);
+        tracing::info!("MockAudioPublisher started emitting frames");
+        Some(handle)
+    } else {
+        None
+    };
 
     // Get hub event sender for servers
     let hub_event_sender = streamhub.get_hub_event_sender();
@@ -377,14 +587,21 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     tracing::info!("ValidationPlatform shutdown");
 
     // Stop publisher
-    publisher.stop_publishing().await;
+    video_publisher.stop_publishing().await;
     tracing::info!("MockVideoPublisher stopped");
+    if let Some(audio_publisher) = audio_publisher.as_ref() {
+        audio_publisher.stop_publishing().await;
+        tracing::info!("MockAudioPublisher stopped");
+    }
 
     // Cancel server tasks
     rtsp_handle.abort();
     flv_handle.abort();
     streamhub_handle.abort();
     pub_handle.abort();
+    if let Some(handle) = audio_pub_handle {
+        handle.abort();
+    }
     fanout_handle.abort();
 
     tracing::info!("All servers and tasks shutdown");
@@ -466,6 +683,31 @@ mod tests {
         if let Some(idx) = httpflv_port_idx {
             assert_eq!(sample_args[idx + 1], "9001");
         }
+    }
+
+    #[test]
+    fn test_generate_av_sdp_includes_audio() {
+        let sps = vec![0x67, 0x42, 0x00, 0x1e];
+        let pps = vec![0x68, 0xce, 0x06, 0xe2];
+        let audio_config = vec![0x12, 0x10];
+
+        let sdp = generate_av_sdp(&sps, &pps, Some(&audio_config), 48000);
+
+        assert!(sdp.contains("m=video 0 RTP/AVP 96"));
+        assert!(sdp.contains("a=control:trackID=0"));
+        assert!(sdp.contains("m=audio 0 RTP/AVP 97"));
+        assert!(sdp.contains("a=control:trackID=1"));
+    }
+
+    #[test]
+    fn test_generate_av_sdp_without_audio() {
+        let sps = vec![0x67, 0x42, 0x00, 0x1e];
+        let pps = vec![0x68, 0xce, 0x06, 0xe2];
+
+        let sdp = generate_av_sdp(&sps, &pps, None, 48000);
+
+        assert!(sdp.contains("m=video 0 RTP/AVP 96"));
+        assert!(!sdp.contains("m=audio 0 RTP/AVP 97"));
     }
 
     #[test]

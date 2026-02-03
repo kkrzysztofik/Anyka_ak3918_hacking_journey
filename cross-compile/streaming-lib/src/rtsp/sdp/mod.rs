@@ -170,7 +170,11 @@ impl Marshal for SdpMediaInfo {
         }
 
         for (k, v) in &self.attributes {
-            sdp_media_info = format!("{sdp_media_info}a={k}:{v}\r\n");
+            if v.is_empty() {
+                sdp_media_info = format!("{sdp_media_info}a={k}\r\n");
+            } else {
+                sdp_media_info = format!("{sdp_media_info}a={k}:{v}\r\n");
+            }
         }
 
         sdp_media_info
@@ -313,7 +317,11 @@ impl Marshal for Sdp {
         );
 
         for (k, v) in &self.attributes {
-            sdp_str = format!("{sdp_str}a={k}:{v}\r\n");
+            if v.is_empty() {
+                sdp_str = format!("{sdp_str}a={k}\r\n");
+            } else {
+                sdp_str = format!("{sdp_str}a={k}:{v}\r\n");
+            }
         }
 
         for media_info in &self.medias {
@@ -381,6 +389,25 @@ mod tests {
 
             println!("sdp str : {}", sdp.marshal());
         }
+    }
+
+    #[test]
+    fn test_marshal_attribute_without_value() {
+        let data = "v=0\r\n\
+        o=- 0 0 IN IP4 0.0.0.0\r\n\
+        s=Test\r\n\
+        c=IN IP4 0.0.0.0\r\n\
+        t=0 0\r\n\
+        a=sendonly\r\n\
+        m=video 0 RTP/AVP 96\r\n\
+        a=rtpmap:96 H264/90000\r\n\
+        a=control:trackID=0\r\n";
+
+        let sdp = Sdp::unmarshal(data).expect("SDP should parse");
+        let marshaled = sdp.marshal();
+
+        assert!(marshaled.contains("a=sendonly\r\n"));
+        assert!(!marshaled.contains("a=sendonly:\r\n"));
     }
     #[test]
     fn test_str() {

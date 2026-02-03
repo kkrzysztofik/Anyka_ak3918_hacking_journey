@@ -7,6 +7,7 @@ use crate::streamhub::{StatisticsStream, StreamHubError};
 use async_trait::async_trait;
 use bytes::BytesMut;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -89,6 +90,8 @@ impl MockVideoPublisher {
             }
 
             let mut timestamp_offset = 0u32;
+            let mut frames_since_report: u64 = 0;
+            let mut last_report = Instant::now();
 
             loop {
                 let is_running_check = is_running.lock().await;
@@ -99,8 +102,9 @@ impl MockVideoPublisher {
 
                 // Read and send NAL units
                 let mut reader = reader.lock().await;
-                let mut frame_count = 0;
+                let mut frame_count: u32 = 0;
                 let frame_duration_ms = reader.frame_duration_ms();
+                let loop_start = Instant::now();
 
                 while let Ok(Some(nal)) = reader.read_next_nal() {
                     match nal.unit_type {
@@ -121,8 +125,8 @@ impl MockVideoPublisher {
                             let _ = sender.send(frame);
                         }
                         NalUnitType::IdrSlice | NalUnitType::NonIdrSlice => {
-                            let timestamp =
-                                timestamp_offset.saturating_add(frame_count * frame_duration_ms);
+                            let timestamp = timestamp_offset
+                                .saturating_add(frame_count.saturating_mul(frame_duration_ms));
                             let data = BytesMut::from(nal.data.as_slice());
 
                             let frame = FrameData::Video { timestamp, data };
@@ -131,13 +135,30 @@ impl MockVideoPublisher {
                                 return;
                             }
 
-                            frame_count += 1;
+                            frame_count = frame_count.saturating_add(1);
+                            frames_since_report += 1;
 
-                            // Frame rate control
-                            tokio::time::sleep(tokio::time::Duration::from_millis(
-                                frame_duration_ms as u64,
-                            ))
-                            .await;
+                            let elapsed = last_report.elapsed();
+                            if elapsed >= Duration::from_secs(1) {
+                                let fps = compute_fps(frames_since_report, elapsed);
+                                log::info!(
+                                    "mock_publisher: sent {} frames in {:.2}s ({:.2} fps)",
+                                    frames_since_report,
+                                    elapsed.as_secs_f64(),
+                                    fps
+                                );
+                                frames_since_report = 0;
+                                last_report = Instant::now();
+                            }
+
+                            // Frame rate control: align to target schedule to avoid drift.
+                            let target_elapsed_ms =
+                                frame_count.saturating_mul(frame_duration_ms) as u64;
+                            let target_elapsed = Duration::from_millis(target_elapsed_ms);
+                            let elapsed = loop_start.elapsed();
+                            if let Some(remaining) = target_elapsed.checked_sub(elapsed) {
+                                tokio::time::sleep(remaining).await;
+                            }
                         }
                         _ => {}
                     }
@@ -261,18 +282,23 @@ fn generate_sdp_from_sps_pps(sps: &[u8], pps: &[u8]) -> String {
     let sps_b64 = base64_encode(sps);
     let pps_b64 = base64_encode(pps);
 
-    format!(
-        "v=0\r\n\
-         o=- 0 0 IN IP4 0.0.0.0\r\n\
-         s=Mock H264 Stream\r\n\
-         c=IN IP4 0.0.0.0\r\n\
-         t=0 0\r\n\
-         a=tool:streaming-lib-mock\r\n\
-         m=video 0 RTP/AVP 96\r\n\
-         a=rtpmap:96 H264/90000\r\n\
-         a=fmtp:96 profile-level-id={};sprop-parameter-sets={},{}\r\n",
+    let mut sdp = String::new();
+    sdp.push_str("v=0\r\n");
+    sdp.push_str("o=- 0 0 IN IP4 0.0.0.0\r\n");
+    sdp.push_str("s=Mock H264 Stream\r\n");
+    sdp.push_str("c=IN IP4 0.0.0.0\r\n");
+    sdp.push_str("t=0 0\r\n");
+    sdp.push_str("a=tool:streaming-lib-mock\r\n");
+    sdp.push_str("a=control:*\r\n");
+    sdp.push_str("m=video 0 RTP/AVP 96\r\n");
+    sdp.push_str("a=rtpmap:96 H264/90000\r\n");
+    sdp.push_str(&format!(
+        "a=fmtp:96 profile-level-id={};sprop-parameter-sets={},{}\r\n",
         profile_level_id, sps_b64, pps_b64
-    )
+    ));
+    sdp.push_str("a=control:trackID=0\r\n");
+    sdp.push_str("a=sendonly\r\n");
+    sdp
 }
 
 /// Base64 encode helper for SPS/PPS data
@@ -310,12 +336,67 @@ fn base64_encode(data: &[u8]) -> String {
     result
 }
 
+fn compute_fps(frames: u64, elapsed: Duration) -> f64 {
+    let seconds = elapsed.as_secs_f64();
+    if seconds <= 0.0 {
+        0.0
+    } else {
+        frames as f64 / seconds
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::{compute_fps, generate_sdp_from_sps_pps};
+    use std::time::Duration;
+
+    #[test]
+    fn test_generate_sdp_includes_controls() {
+        let sps = [0x67, 0x42, 0xE0, 0x1E, 0x89];
+        let pps = [0x68, 0xCE, 0x06, 0xE2];
+        let sdp = generate_sdp_from_sps_pps(&sps, &pps);
+
+        assert!(sdp.contains("a=control:*"));
+        assert!(sdp.contains("a=control:trackID=0"));
+        assert!(sdp.contains("a=rtpmap:96 H264/90000"));
+    }
+
+    #[test]
+    fn test_generate_sdp_profile_level_id_from_sps() {
+        let sps = [0x67, 0x42, 0xE0, 0x1E];
+        let pps = [0x68, 0xCE, 0x06, 0xE2];
+        let sdp = generate_sdp_from_sps_pps(&sps, &pps);
+
+        assert!(sdp.contains("profile-level-id=42e01e"));
+    }
+
+    #[test]
+    fn test_generate_sdp_has_no_indented_lines() {
+        let sps = [0x67, 0x42, 0xE0, 0x1E];
+        let pps = [0x68, 0xCE, 0x06, 0xE2];
+        let sdp = generate_sdp_from_sps_pps(&sps, &pps);
+
+        for line in sdp.lines() {
+            assert!(!line.starts_with(' '));
+            assert!(!line.starts_with('\t'));
+        }
+    }
 
     #[tokio::test]
     async fn test_mock_publisher_creation() {
         // This test verifies the publisher structure can be created
         // In a real test, we would need a valid H264 file
+    }
+
+    #[test]
+    fn test_compute_fps_basic() {
+        let fps = compute_fps(30, Duration::from_secs(2));
+        assert!((fps - 15.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compute_fps_zero_elapsed() {
+        let fps = compute_fps(10, Duration::from_secs(0));
+        assert_eq!(fps, 0.0);
     }
 }

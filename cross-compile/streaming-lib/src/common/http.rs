@@ -89,6 +89,8 @@ impl Unmarshal for Uri {
                         let (host_val, port_val) = scanf!(host_with_port, ':', String, u16);
                         if let Some(host) = host_val {
                             uri.host = host;
+                        } else {
+                            uri.host = host_with_port.to_string();
                         }
                         if let Some(port) = port_val {
                             uri.port = Some(port);
@@ -96,8 +98,18 @@ impl Unmarshal for Uri {
 
                         path_with_query
                     } else {
-                        log::error!("cannot find split '/' for host:port and path?query.");
-                        return None;
+                        /*no path provided, treat as root and parse host:port only*/
+                        let host_with_port = rtsp_url_without_prefix;
+                        let (host_val, port_val) = scanf!(host_with_port, ':', String, u16);
+                        if let Some(host) = host_val {
+                            uri.host = host;
+                        } else {
+                            uri.host = host_with_port.to_string();
+                        }
+                        if let Some(port) = port_val {
+                            uri.port = Some(port);
+                        }
+                        ""
                     }
                 } else {
                     log::error!("cannot find RTSP prefix.");
@@ -360,6 +372,7 @@ mod tests {
 
     use super::HttpRequest;
     use super::HttpResponse;
+    use super::Schema;
 
     use super::HttpIndexMap;
     use std::io::BufRead;
@@ -750,5 +763,19 @@ mod tests {
             print!("marshal result: =={marshal_result}==");
             assert_eq!(data2, marshal_result);
         }
+    }
+
+    #[test]
+    fn test_parse_rtsp_request_without_path() {
+        let data = "OPTIONS rtsp://127.0.0.1:8554 RTSP/1.0\r\n\
+        CSeq: 1\r\n\
+        \r\n";
+
+        let parser = HttpRequest::unmarshal(data).expect("should parse rtsp uri without path");
+        assert!(matches!(parser.uri.schema, Schema::RTSP));
+        assert_eq!(parser.uri.host, "127.0.0.1");
+        assert_eq!(parser.uri.port, Some(8554));
+        assert_eq!(parser.uri.path, "");
+        assert!(parser.uri.query.is_none());
     }
 }

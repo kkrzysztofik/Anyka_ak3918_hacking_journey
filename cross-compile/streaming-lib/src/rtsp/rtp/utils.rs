@@ -104,6 +104,12 @@ pub async fn split_annexb_and_process<T: TVideoPacker>(
             let nalu = nalu_with_start_code.split_off(first_pos + 3);
             packer.pack_nalu(nalu).await?;
         } else {
+            // If the buffer contains a single raw NAL unit (no Annex-B start code),
+            // treat the entire buffer as one NAL for robustness.
+            let raw_nalu = nalus.split_to(nalus.len());
+            if !raw_nalu.is_empty() {
+                packer.pack_nalu(raw_nalu).await?;
+            }
             break;
         }
     }
@@ -126,6 +132,37 @@ pub fn current_time() -> u64 {
 mod tests {
     use super::*;
     use bytes::BytesMut;
+    use std::sync::{Arc, Mutex};
+
+    struct CapturePacker {
+        nalus: Arc<Mutex<Vec<BytesMut>>>,
+    }
+
+    #[async_trait]
+    impl TRtpReceiverForRtcp for CapturePacker {
+        fn on_packet_for_rtcp_handler(&mut self, _f: OnRtpPacketFn2) {}
+    }
+
+    #[async_trait]
+    impl TPacker for CapturePacker {
+        async fn pack(
+            &mut self,
+            _nalus: &mut BytesMut,
+            _timestamp: u32,
+        ) -> Result<(), PackerError> {
+            Ok(())
+        }
+
+        fn on_packet_handler(&mut self, _f: OnRtpPacketFn) {}
+    }
+
+    #[async_trait]
+    impl TVideoPacker for CapturePacker {
+        async fn pack_nalu(&mut self, nalu: BytesMut) -> Result<(), PackerError> {
+            self.nalus.lock().unwrap().push(nalu);
+            Ok(())
+        }
+    }
 
     // ========== find_start_code Tests ==========
 
@@ -318,5 +355,20 @@ mod tests {
         let nalus = [0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x65];
         assert_eq!(find_start_code(&nalus), Some(0));
         assert_eq!(find_start_code(&nalus[3..]), Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_split_annexb_raw_nalu_fallback() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let mut packer = CapturePacker {
+            nalus: Arc::clone(&captured),
+        };
+
+        let mut nalus = BytesMut::from(&[0x65, 0x88, 0x84][..]);
+        let result = split_annexb_and_process(&mut nalus, &mut packer).await;
+        assert!(result.is_ok());
+        let stored = captured.lock().unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0], BytesMut::from(&[0x65, 0x88, 0x84][..]));
     }
 }
