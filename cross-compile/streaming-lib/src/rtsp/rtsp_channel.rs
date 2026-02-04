@@ -74,6 +74,11 @@ impl RtpChannel {
         self.codec_info.sample_rate
     }
 
+    /// Initial RTP sequence number for this channel (used in RTP-Info header on PLAY).
+    pub fn initial_sequence(&self) -> u16 {
+        self.init_sequence
+    }
+
     //Receive av frame from network -> pack AV frame to RTP packet -> send to stream hub
     pub async fn on_packet(&mut self, reader: &mut BytesReader) -> Result<(), UnPackerError> {
         if let Some(unpacker) = &mut self.rtp_unpacker {
@@ -330,6 +335,24 @@ mod tests {
     // ========================================================================
     // TRtpFunc Trait Tests
     // ========================================================================
+
+    #[test]
+    fn test_rtp_channel_initial_sequence() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0,
+            init_sequence: 42,
+        };
+        assert_eq!(channel.initial_sequence(), 42);
+    }
 
     #[test]
     fn test_create_unpacker_h264() {

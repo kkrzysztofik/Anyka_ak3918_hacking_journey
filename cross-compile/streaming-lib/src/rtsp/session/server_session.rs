@@ -290,6 +290,8 @@ impl RtspServerSession {
             }
             rtsp_method_name::TEARDOWN => {
                 self.handle_teardown(&rtsp_request)?;
+                let response = Self::gen_response(http::StatusCode::OK, &rtsp_request);
+                self.send_response(&response).await?;
             }
             rtsp_method_name::PAUSE => {}
             rtsp_method_name::GET_PARAMETER => {}
@@ -729,7 +731,46 @@ impl RtspServerSession {
         }
 
         let status_code = http::StatusCode::OK;
-        let response = Self::gen_response(status_code, rtsp_request);
+        let mut response = Self::gen_response(status_code, rtsp_request);
+
+        if let Some(content_base) = self.build_content_base(rtsp_request)
+            && !self.tracks.is_empty()
+        {
+            const INITIAL_RTPTIME: u32 = 0;
+            let mut rtp_info_parts = Vec::new();
+            for track_type in [
+                TrackType::Video,
+                TrackType::Audio,
+                TrackType::Application,
+            ] {
+                if let Some(track) = self.tracks.get(&track_type) {
+                    let seq = track.rtp_channel.lock().await.initial_sequence();
+                    let track_url = format!("{}{}", content_base, track.media_control);
+                    rtp_info_parts.push(format!(
+                        "url={};seq={};rtptime={}",
+                        track_url, seq, INITIAL_RTPTIME
+                    ));
+                }
+            }
+            if !rtp_info_parts.is_empty() {
+                response
+                    .headers
+                    .insert("RTP-Info".to_string(), rtp_info_parts.join(", "));
+            }
+        }
+
+        if let Some(range_str) = rtsp_request.headers.get(&String::from("Range")) {
+            match RtspRange::unmarshal(range_str) {
+                Ok(range) => {
+                    response
+                        .headers
+                        .insert(String::from("Range"), range.marshal());
+                }
+                Err(err) => {
+                    log::warn!("handle_play: invalid Range header ignored: {err}");
+                }
+            }
+        }
 
         self.send_response(&response).await?;
 
@@ -1614,6 +1655,57 @@ mod tests {
         assert!(session.is_normal_exit);
     }
 
+    /// Drives the TEARDOWN branch in on_rtsp_message via run() to assert the server sends RTSP 200 OK.
+    #[tokio::test]
+    async fn test_rtsp_server_session_teardown_sends_response() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        const TEARDOWN_REQ: &str =
+            "TEARDOWN rtsp://localhost/stream1 RTSP/1.0\r\nCSeq: 4\r\nSession: 1\r\n\r\n";
+
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+
+        let read_count = AtomicUsize::new(0);
+        let teardown_bytes = BytesMut::from(TEARDOWN_REQ);
+        mock_io
+            .expect_read()
+            .times(2)
+            .returning(move || {
+                if read_count.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Ok(teardown_bytes.clone())
+                } else {
+                    Err(BytesIOError::from(std::io::Error::new(
+                        std::io::ErrorKind::ConnectionAborted,
+                        "eof",
+                    )))
+                }
+            });
+
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 200 OK")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let run_handle = tokio::spawn(async move {
+            let _ = session.run().await;
+        });
+
+        run_handle.await.expect("run task panicked");
+    }
+
     #[tokio::test]
     async fn test_rtsp_server_session_play() {
         let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -1739,6 +1831,73 @@ mod tests {
         });
 
         let content = "PLAY rtsp://localhost/live/test/trackID=0 RTSP/1.0\r\nCSeq: 5\r\nRange: npt=0.000-\r\n\r\n";
+        let request = RtspRequest::unmarshal(content).unwrap();
+
+        let result = session.handle_play(&request).await;
+        assert!(result.is_err());
+
+        subscribe_handle
+            .await
+            .expect("Subscribe handler task panicked");
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_play_includes_rtp_info() {
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 200 OK")
+                    && s.contains("RTP-Info")
+                    && s.contains("rtptime=")
+                    && s.contains("url=")
+                    && s.contains("seq=")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let codec_info = RtspCodecInfo {
+            codec_id: crate::rtsp::rtsp_codec::RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            channel_count: 0,
+        };
+        let track = RtspTrack::new(TrackType::Video, codec_info, "trackID=0".to_string());
+        session.tracks.insert(TrackType::Video, track);
+        session.stream_identifier = Some(StreamIdentifier::Rtsp {
+            stream_path: "live/test".to_string(),
+        });
+
+        let subscribe_handle = tokio::spawn(async move {
+            use crate::streamhub::define::DataReceiver;
+            if let Some(event) = event_receiver.recv().await {
+                if let StreamHubEvent::Subscribe {
+                    result_sender,
+                    ..
+                } = event
+                {
+                    let (_frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                    drop(_frame_sender);
+                    let data_receiver = DataReceiver {
+                        frame_receiver: Some(frame_receiver),
+                        packet_receiver: None,
+                    };
+                    let _ = result_sender.send(Ok((data_receiver, None)));
+                }
+            }
+        });
+
+        let content = "PLAY rtsp://127.0.0.1:8554/live/test/trackID=0 RTSP/1.0\r\nCSeq: 5\r\nRange: npt=0.000-\r\n\r\n";
         let request = RtspRequest::unmarshal(content).unwrap();
 
         let result = session.handle_play(&request).await;
