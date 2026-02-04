@@ -44,5 +44,7 @@
   "chat.tools.terminal.autoApprove": {
     "/home/azureuser/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
     "/home/azureuser/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-nm": true
-  }
+  },
+  "cursorpyright.analysis.typeCheckingMode": "strict",
+  "cursorpyright.analysis.diagnosticMode": "workspace"
 }
