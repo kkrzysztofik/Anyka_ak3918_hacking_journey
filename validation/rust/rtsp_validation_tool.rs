@@ -187,6 +187,9 @@ pub struct CaptureSection {
 pub struct LoggingSection {
     #[serde(default)]
     pub level: String,
+    /// Log level for the retina RTSP client library (e.g. "debug", "trace"). Empty = same as level.
+    #[serde(default)]
+    pub retina_level: String,
     #[serde(default)]
     pub file: String,
 }
@@ -714,6 +717,8 @@ struct Summary {
 
 /// Initialize tracing from env RUST_LOG or config [logging] (level and optional file).
 /// Call after loading config so configured level and file are respected.
+/// The `log` crate (used by retina) is bridged via tracing-log so RUST_LOG=retina=debug
+/// or RUST_LOG=retina=trace shows detailed library output.
 fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
     let filter = env::var("RUST_LOG")
         .ok()
@@ -723,9 +728,25 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
                 .map(|c| c.logging.level.as_str())
                 .filter(|s| !s.is_empty())
                 .unwrap_or("info");
-            EnvFilter::try_new(level).ok()
+            let retina_level = config.and_then(|c| {
+                let s = c.logging.retina_level.trim();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
+            });
+            let filter_str = if let Some(r) = retina_level {
+                format!("{},retina={}", level, r)
+            } else {
+                level.to_string()
+            };
+            EnvFilter::try_new(&filter_str).ok()
         })
         .unwrap_or_else(|| EnvFilter::new("info"));
+
+    // Bridge log crate (retina) into tracing so EnvFilter applies to dependency logs.
+    let _ = tracing_log::LogTracer::init();
 
     let stdout_layer = fmt::layer()
         .with_writer(std::io::stdout)
@@ -899,7 +920,14 @@ async fn main() -> Result<()> {
 
     let run_validation_and_harness = async {
         let mut report = run_validation(&args, &effective).await?;
-        run_harness(&args, &effective, &mut report.tests).await?;
+        if critical_proto_failed(&report.tests) {
+            report.tests.push(TestResult::Fail {
+                name: "harness_skipped".to_string(),
+                reason: "protocol validation failed (describe/setup/play); skipping harness".to_string(),
+            });
+        } else {
+            run_harness(&args, &effective, &mut report.tests).await?;
+        }
         if effective.launch_on_device && effective.collect_telemetry {
             let host = effective.device_host.clone();
             let port = effective.device_telnet_port;
@@ -957,10 +985,21 @@ async fn main() -> Result<()> {
         overall_pass: failed == 0,
     };
 
+    if failed > 0 {
+        for t in &report.tests {
+            if let TestResult::Fail { name, reason } = t {
+                warn!(test = %name, reason = %reason, "test failed");
+            }
+        }
+    }
+
     let json = serde_json::to_string_pretty(&report).context("failed to serialize JSON report")?;
     std::fs::write(&effective.output, json)
         .with_context(|| format!("failed to write {}", effective.output))?;
     info!(path = %effective.output, "RTSP validation report written");
+    if !report.summary.overall_pass {
+        return Err(anyhow!("{} test(s) failed", report.summary.failed));
+    }
     Ok(())
 }
 
@@ -980,12 +1019,14 @@ async fn run_harness(
         &effective.rtsp_stream,
     );
     let timeout_sec = effective.rtsp_timeout_sec;
+    let step_cap_short = Duration::from_secs(timeout_sec.saturating_add(15));
+    let step_cap_long = Duration::from_secs(effective.short_duration_sec.saturating_add(30));
     info!(url = %url, "running harness scenarios");
 
     // 1. Basic connectivity
     debug!("harness: basic connectivity");
-    match harness_basic_connectivity(&url, timeout_sec).await {
-        Ok(ok) => {
+    match timeout(step_cap_short, harness_basic_connectivity(&url, timeout_sec)).await {
+        Ok(Ok(ok)) => {
             tests.push(if ok {
                 TestResult::Pass {
                     name: "harness_basic_connectivity".to_string(),
@@ -997,18 +1038,29 @@ async fn run_harness(
                 }
             });
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tests.push(TestResult::Fail {
                 name: "harness_basic_connectivity".to_string(),
                 reason: e.to_string(),
+            });
+        }
+        Err(_) => {
+            tests.push(TestResult::Fail {
+                name: "harness_basic_connectivity".to_string(),
+                reason: format!("harness step timed out after {}s", step_cap_short.as_secs()),
             });
         }
     }
 
     // 2. Stream startup latency
     debug!("harness: startup latency");
-    match harness_startup_latency(&url, timeout_sec, effective.video_startup_latency_ms).await {
-        Ok(Some(ms)) => {
+    match timeout(
+        step_cap_short,
+        harness_startup_latency(&url, timeout_sec, effective.video_startup_latency_ms),
+    )
+    .await
+    {
+        Ok(Ok(Some(ms))) => {
             let pass = ms <= effective.video_startup_latency_ms;
             tests.push(TestResult::Metric {
                 name: "harness_startup_latency_ms".to_string(),
@@ -1016,24 +1068,35 @@ async fn run_harness(
                 pass,
             });
         }
-        Ok(None) => {
+        Ok(Ok(None)) => {
             tests.push(TestResult::Fail {
                 name: "harness_startup_latency_ms".to_string(),
                 reason: "no frame decoded".to_string(),
             });
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tests.push(TestResult::Fail {
                 name: "harness_startup_latency_ms".to_string(),
                 reason: e.to_string(),
+            });
+        }
+        Err(_) => {
+            tests.push(TestResult::Fail {
+                name: "harness_startup_latency_ms".to_string(),
+                reason: format!("harness step timed out after {}s", step_cap_short.as_secs()),
             });
         }
     }
 
     // 3. Bitrate / FPS stability
     debug!("harness: bitrate/fps");
-    match harness_bitrate_fps(&url, effective.short_duration_sec, effective).await {
-        Ok((bitrate, fps)) => {
+    match timeout(
+        step_cap_long,
+        harness_bitrate_fps(&url, effective.short_duration_sec, effective),
+    )
+    .await
+    {
+        Ok(Ok((bitrate, fps))) => {
             let bitrate_pass = effective
                 .expected_bitrate_kbps
                 .map(|e| {
@@ -1059,18 +1122,24 @@ async fn run_harness(
                 pass: fps_pass,
             });
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tests.push(TestResult::Fail {
                 name: "harness_bitrate_fps".to_string(),
                 reason: e.to_string(),
+            });
+        }
+        Err(_) => {
+            tests.push(TestResult::Fail {
+                name: "harness_bitrate_fps".to_string(),
+                reason: format!("harness step timed out after {}s", step_cap_long.as_secs()),
             });
         }
     }
 
     // 4. SDP validation (ffprobe)
     debug!("harness: SDP validation");
-    match harness_sdp_validation(&url, timeout_sec).await {
-        Ok((video_count, audio_count, has_h264)) => {
+    match timeout(step_cap_short, harness_sdp_validation(&url, timeout_sec)).await {
+        Ok(Ok((video_count, audio_count, has_h264))) => {
             tests.push(TestResult::Metric {
                 name: "harness_sdp_video_streams".to_string(),
                 value: serde_json::json!(video_count),
@@ -1092,18 +1161,24 @@ async fn run_harness(
                 }
             });
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tests.push(TestResult::Fail {
                 name: "harness_sdp_validation".to_string(),
                 reason: e.to_string(),
+            });
+        }
+        Err(_) => {
+            tests.push(TestResult::Fail {
+                name: "harness_sdp_validation".to_string(),
+                reason: format!("harness step timed out after {}s", step_cap_short.as_secs()),
             });
         }
     }
 
     // 5. RTSP protocol sequence (tshark + rtshark)
     debug!("harness: RTSP protocol sequence");
-    match harness_rtsp_protocol_sequence(&url, effective, args).await {
-        Ok((describe, setup, play, teardown, status_200, status_err)) => {
+    match timeout(step_cap_long, harness_rtsp_protocol_sequence(&url, effective, args)).await {
+        Ok(Ok((describe, setup, play, teardown, status_200, status_err))) => {
             let pass = describe > 0 && setup > 0 && play > 0 && status_err == 0 && status_200 > 0;
             tests.push(TestResult::Metric {
                 name: "harness_protocol_sequence".to_string(),
@@ -1118,18 +1193,24 @@ async fn run_harness(
                 pass,
             });
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tests.push(TestResult::Fail {
                 name: "harness_protocol_sequence".to_string(),
                 reason: e.to_string(),
+            });
+        }
+        Err(_) => {
+            tests.push(TestResult::Fail {
+                name: "harness_protocol_sequence".to_string(),
+                reason: format!("harness step timed out after {}s", step_cap_long.as_secs()),
             });
         }
     }
 
     // 6. Packet loss (UDP + rtshark)
     debug!("harness: packet loss");
-    match harness_packet_loss(&url, effective, args).await {
-        Ok((rtp_packets, packet_loss, loss_percent)) => {
+    match timeout(step_cap_long, harness_packet_loss(&url, effective, args)).await {
+        Ok(Ok((rtp_packets, packet_loss, loss_percent))) => {
             let pass = loss_percent <= effective.packet_loss_tolerance_percent;
             tests.push(TestResult::Metric {
                 name: "harness_packet_loss_percent".to_string(),
@@ -1137,10 +1218,16 @@ async fn run_harness(
                 pass,
             });
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tests.push(TestResult::Fail {
                 name: "harness_packet_loss".to_string(),
                 reason: e.to_string(),
+            });
+        }
+        Err(_) => {
+            tests.push(TestResult::Fail {
+                name: "harness_packet_loss".to_string(),
+                reason: format!("harness step timed out after {}s", step_cap_long.as_secs()),
             });
         }
     }
@@ -1148,14 +1235,17 @@ async fn run_harness(
     // 7. Concurrent clients
     if effective.concurrent_clients > 0 {
         debug!(concurrent = effective.concurrent_clients, "harness: concurrent clients");
-        match harness_concurrent_clients(
-            &url,
-            effective.short_duration_sec,
-            effective.concurrent_clients,
+        match timeout(
+            step_cap_long,
+            harness_concurrent_clients(
+                &url,
+                effective.short_duration_sec,
+                effective.concurrent_clients,
+            ),
         )
         .await
         {
-            Ok(failed) => {
+            Ok(Ok(failed)) => {
                 let pass = failed == 0;
                 tests.push(TestResult::Metric {
                     name: "harness_concurrent_clients".to_string(),
@@ -1163,10 +1253,16 @@ async fn run_harness(
                     pass,
                 });
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 tests.push(TestResult::Fail {
                     name: "harness_concurrent_clients".to_string(),
                     reason: e.to_string(),
+                });
+            }
+            Err(_) => {
+                tests.push(TestResult::Fail {
+                    name: "harness_concurrent_clients".to_string(),
+                    reason: format!("harness step timed out after {}s", step_cap_long.as_secs()),
                 });
             }
         }
@@ -1174,9 +1270,16 @@ async fn run_harness(
 
     // 8. Long duration (optional)
     if args.long_duration {
+        let step_cap_long_duration =
+            Duration::from_secs(effective.long_duration_sec.saturating_add(30));
         debug!(duration_sec = effective.long_duration_sec, "harness: long duration");
-        match harness_long_duration(&url, effective.long_duration_sec).await {
-            Ok(degradation_pct) => {
+        match timeout(
+            step_cap_long_duration,
+            harness_long_duration(&url, effective.long_duration_sec),
+        )
+        .await
+        {
+            Ok(Ok(degradation_pct)) => {
                 let pass = degradation_pct < 20;
                 tests.push(TestResult::Metric {
                     name: "harness_long_duration_degradation_pct".to_string(),
@@ -1184,10 +1287,19 @@ async fn run_harness(
                     pass,
                 });
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 tests.push(TestResult::Fail {
                     name: "harness_long_duration".to_string(),
                     reason: e.to_string(),
+                });
+            }
+            Err(_) => {
+                tests.push(TestResult::Fail {
+                    name: "harness_long_duration".to_string(),
+                    reason: format!(
+                        "harness step timed out after {}s",
+                        step_cap_long_duration.as_secs()
+                    ),
                 });
             }
         }
@@ -1196,15 +1308,18 @@ async fn run_harness(
     // 9. Error handling (optional)
     if !args.skip_error_handling {
         debug!("harness: error handling");
-        match harness_error_handling(
-            &effective.rtsp_host,
-            effective.rtsp_port,
-            &effective.rtsp_stream,
-            timeout_sec,
+        match timeout(
+            step_cap_short,
+            harness_error_handling(
+                &effective.rtsp_host,
+                effective.rtsp_port,
+                &effective.rtsp_stream,
+                timeout_sec,
+            ),
         )
         .await
         {
-            Ok((invalid_creds_ok, bogus_url_ok)) => {
+            Ok(Ok((invalid_creds_ok, bogus_url_ok))) => {
                 tests.push(TestResult::Metric {
                     name: "harness_error_invalid_creds".to_string(),
                     value: serde_json::json!(invalid_creds_ok),
@@ -1216,10 +1331,16 @@ async fn run_harness(
                     pass: bogus_url_ok,
                 });
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 tests.push(TestResult::Fail {
                     name: "harness_error_handling".to_string(),
                     reason: e.to_string(),
+                });
+            }
+            Err(_) => {
+                tests.push(TestResult::Fail {
+                    name: "harness_error_handling".to_string(),
+                    reason: format!("harness step timed out after {}s", step_cap_short.as_secs()),
                 });
             }
         }
@@ -1807,6 +1928,19 @@ fn result_ok(r: &TestResult) -> bool {
     }
 }
 
+/// Returns true if any critical protocol test (describe_ok, play_ok, setup_stream_*) failed.
+fn critical_proto_failed(tests: &[TestResult]) -> bool {
+    tests.iter().any(|t| {
+        if let TestResult::Fail { name, .. } = t {
+            name == "describe_ok"
+                || name == "play_ok"
+                || name.starts_with("setup_stream_")
+        } else {
+            false
+        }
+    })
+}
+
 fn validate_args(args: &Args, effective: &EffectiveConfig) -> Result<()> {
     if effective.launch_on_device && !effective.no_launch {
         bail!(
@@ -2286,6 +2420,7 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
         pass: setup_ok,
     });
     if !setup_ok {
+        tokio::spawn(async move { drop(session); });
         return Ok(empty_report(test_run, tests));
     }
     debug!("SETUP ok");

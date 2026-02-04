@@ -69,6 +69,32 @@ $CARGO build --target x86_64-unknown-linux-gnu --features validation-mode
 cat rtsp_validation.json | jq .
 ```
 
+### Logging and debugging
+
+Logging is controlled by `RUST_LOG` (overrides config) or `[logging]` in the TOML config. The tool bridges the **retina** library’s `log` crate output into tracing.
+
+**Config (rtsp_validation.toml):**
+
+```toml
+[logging]
+level = "debug"
+# Retina RTSP client level: "debug", "trace", or leave empty to use level above
+retina-level = "debug"
+file = "rtsp_validation.log"
+```
+
+**Environment (overrides config):**
+
+```bash
+# More detail from the RTSP client library (e.g. PLAY/RTP-Info, SETUP, TEARDOWN)
+RUST_LOG=retina=debug ./validation/rtsp_validation_tool --no-launch --rtsp-port 554
+
+# Maximum verbosity from retina (trace)
+RUST_LOG=retina=trace,rtsp_validation_tool=info ./validation/rtsp_validation_tool --no-launch
+```
+
+Use `retina=debug` (or `retina-level = "debug"` in config) to see what the library is sending/receiving and why it might reject a response (e.g. missing `rtptime` on PLAY). Use `trace` for full protocol dumps.
+
 ## Running against the camera (device validation)
 
 When the camera is on the network with telnet available (e.g. port 24), you can start `onvif-rust` on the device and run validation against it. The tool will start the server in `/mnt/anyka_hack/onvif` on the device, run all tests, collect system telemetry (RAM, CPU, onvif-rust memory), then stop the server.
