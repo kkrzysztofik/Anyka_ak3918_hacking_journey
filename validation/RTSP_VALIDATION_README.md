@@ -145,9 +145,24 @@ loop_playback = true
 
 Configuration is read from TOML. Search order: `--config <path>`, env `RTSP_VALIDATION_CONFIG`, then `./rtsp_validation.toml`, then `validation/rtsp_validation.toml`. CLI overrides config.
 
+**Config-only run:** With a complete `rtsp_validation.toml` (including `[run]` with `no_launch`, `launch_on_device`, and optionally `output`, `update_baseline`, `compare_baseline`), you can run the full test without any CLI arguments:
+
+```bash
+./validation/rtsp_validation_tool
+# Or with an explicit config path:
+./validation/rtsp_validation_tool --config /path/to/rtsp_validation.toml
+```
+
 Example `validation/rtsp_validation.toml`:
 
 ```toml
+[run]
+no_launch = true
+launch_on_device = true
+output = "rtsp_validation.json"
+update_baseline = false
+compare_baseline = false
+
 [rtsp]
 host = "127.0.0.1"
 port = 554

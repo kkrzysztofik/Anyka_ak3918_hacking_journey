@@ -54,6 +54,31 @@ pub struct RtspValidationConfig {
     pub logging: LoggingSection,
     #[serde(default)]
     pub device: DeviceSection,
+    #[serde(default)]
+    pub run: RunSection,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RunSection {
+    /// Do not launch server; connect to existing server.
+    #[serde(default)]
+    pub no_launch: bool,
+    /// Start onvif-rust on the device via telnet (implies no_launch).
+    #[serde(default)]
+    pub launch_on_device: bool,
+    /// Path to H.264 file for local server launch (when !no_launch && !launch_on_device).
+    #[serde(default)]
+    pub h264_file: Option<String>,
+    /// Output JSON report path.
+    #[serde(default)]
+    pub output: Option<String>,
+    /// Update baseline files from this run.
+    #[serde(default)]
+    pub update_baseline: bool,
+    /// Compare metrics against baseline and fail on regression.
+    #[serde(default)]
+    pub compare_baseline: bool,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -222,6 +247,11 @@ pub struct EffectiveConfig {
     pub device_h264_file: Option<String>,
     pub device_aac_file: Option<String>,
     pub device_loop_playback: bool,
+    pub no_launch: bool,
+    pub h264_file: Option<String>,
+    pub output: String,
+    pub update_baseline: bool,
+    pub compare_baseline: bool,
 }
 
 impl EffectiveConfig {
@@ -252,7 +282,8 @@ impl EffectiveConfig {
             .or(Some(c.device.telnet_port))
             .filter(|&p| p != 0)
             .unwrap_or(24);
-        let launch_on_device = args.launch_on_device;
+        let launch_on_device = args.launch_on_device || c.run.launch_on_device;
+        let no_launch = args.no_launch || c.run.no_launch || launch_on_device;
         let collect_telemetry = launch_on_device && !args.no_telemetry && c.device.telemetry;
         let device_h264_file = args
             .device_h264_file
@@ -267,13 +298,38 @@ impl EffectiveConfig {
         let device_loop_playback = args.device_loop_playback || c.device.loop_playback;
         let rtsp_host = if launch_on_device {
             device_host.clone()
+        } else if !c.rtsp.host.is_empty() {
+            c.rtsp.host.clone()
         } else {
             args.rtsp_host.clone()
         };
+        let rtsp_port = if c.rtsp.port != 0 {
+            c.rtsp.port
+        } else {
+            args.rtsp_port
+        };
+        let rtsp_stream = if !c.rtsp.stream.is_empty() {
+            c.rtsp.stream.clone()
+        } else {
+            args.rtsp_stream.clone()
+        };
+        let h264_file = args
+            .h264_file
+            .clone()
+            .or_else(|| c.run.h264_file.clone())
+            .filter(|s| !s.is_empty());
+        let output = c
+            .run
+            .output
+            .clone()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| args.output.clone());
+        let update_baseline = c.run.update_baseline || args.update_baseline;
+        let compare_baseline = c.run.compare_baseline || args.compare_baseline;
         Self {
             rtsp_host,
-            rtsp_port: args.rtsp_port,
-            rtsp_stream: args.rtsp_stream.clone(),
+            rtsp_port,
+            rtsp_stream,
             rtsp_timeout_sec: c.rtsp.timeout_sec,
             short_duration_sec: if args.duration > 0 {
                 args.duration
@@ -302,6 +358,11 @@ impl EffectiveConfig {
             device_h264_file,
             device_aac_file,
             device_loop_playback,
+            no_launch,
+            h264_file,
+            output,
+            update_baseline,
+            compare_baseline,
         }
     }
 
@@ -661,8 +722,6 @@ async fn main() -> Result<()> {
     init_tracing();
 
     let args = Args::parse();
-    validate_args(&args)?;
-
     let config_path = args
         .config
         .clone()
@@ -670,8 +729,9 @@ async fn main() -> Result<()> {
     let config = load_config(config_path.as_deref())?;
     let mut effective = EffectiveConfig::from_config_and_args(config.as_ref(), &args);
     effective.resolve_capture_interface();
+    validate_args(&args, &effective)?;
 
-    let child = maybe_launch_server(&args).context("failed to launch onvif-rust")?;
+    let child = maybe_launch_server(&args, &effective).context("failed to launch onvif-rust")?;
     if child.is_some() {
         wait_for_server(&effective.rtsp_host, effective.rtsp_port)
             .await
@@ -732,7 +792,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    if args.update_baseline || args.compare_baseline {
+    if effective.update_baseline || effective.compare_baseline {
         apply_baseline_ops(&args, &effective, &mut report)?;
     }
 
@@ -751,9 +811,9 @@ async fn main() -> Result<()> {
     };
 
     let json = serde_json::to_string_pretty(&report).context("failed to serialize JSON report")?;
-    std::fs::write(&args.output, json)
-        .with_context(|| format!("failed to write {}", args.output))?;
-    info!(path = %args.output, "RTSP validation report written");
+    std::fs::write(&effective.output, json)
+        .with_context(|| format!("failed to write {}", effective.output))?;
+    info!(path = %effective.output, "RTSP validation report written");
     Ok(())
 }
 
@@ -1527,7 +1587,7 @@ fn telemetry_baseline_metrics(t: &DeviceTelemetry) -> Vec<(String, f64)> {
 }
 
 fn apply_baseline_ops(
-    args: &Args,
+    _args: &Args,
     effective: &EffectiveConfig,
     report: &mut ValidationReport,
 ) -> Result<()> {
@@ -1554,11 +1614,11 @@ fn apply_baseline_ops(
         metrics.extend(telemetry_baseline_metrics(telemetry));
     }
     for (name, value) in metrics {
-        if args.update_baseline {
+        if effective.update_baseline {
             let dir = baseline_direction_for(&name);
             update_baseline(baseline_dir, &name, value, dir)?;
         }
-        if args.compare_baseline {
+        if effective.compare_baseline {
             let dir = baseline_direction_for(&name);
             let within = compare_against_baseline(baseline_dir, &name, value, Some(dir))?;
             if !within {
@@ -1580,14 +1640,16 @@ fn result_ok(r: &TestResult) -> bool {
     }
 }
 
-fn validate_args(args: &Args) -> Result<()> {
-    if args.launch_on_device && !args.no_launch {
+fn validate_args(args: &Args, effective: &EffectiveConfig) -> Result<()> {
+    if effective.launch_on_device && !effective.no_launch {
         bail!(
-            "when using --launch-on-device, also pass --no-launch (server is started on device, not locally)"
+            "when using launch_on_device (config or --launch-on-device), no_launch must be true (server is started on device)"
         );
     }
-    if !args.no_launch && !args.launch_on_device && args.h264_file.is_none() {
-        bail!("when not using --no-launch, --h264-file <path> is required");
+    if !effective.no_launch && !effective.launch_on_device && effective.h264_file.is_none() {
+        bail!(
+            "when launching locally (no no_launch, no launch_on_device), h264_file is required (config [run] h264_file or --h264-file)"
+        );
     }
 
     match (&args.username, &args.password) {
@@ -1607,12 +1669,15 @@ fn validate_args(args: &Args) -> Result<()> {
     Ok(())
 }
 
-fn maybe_launch_server(args: &Args) -> Result<Option<Child>> {
-    if args.no_launch || args.launch_on_device {
+fn maybe_launch_server(args: &Args, effective: &EffectiveConfig) -> Result<Option<Child>> {
+    if effective.no_launch || effective.launch_on_device {
         return Ok(None);
     }
 
-    let h264_file = args.h264_file.as_ref().context("missing --h264-file")?;
+    let h264_file = effective
+        .h264_file
+        .as_ref()
+        .context("missing h264_file (config [run] h264_file or --h264-file)")?;
 
     let bin = args.onvif_binary.clone().unwrap_or_else(|| {
         // Keep the same heuristic as before, but avoid panicking if cwd is unavailable.
@@ -1867,7 +1932,7 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
         rtsp_host: effective.rtsp_host.clone(),
         rtsp_port: effective.rtsp_port,
         rtsp_stream: effective.rtsp_stream.clone(),
-        test_duration_seconds: args.duration,
+        test_duration_seconds: effective.short_duration_sec,
     };
 
     let mut tests: Vec<TestResult> = Vec::new();
@@ -2050,7 +2115,7 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
     let mut h264_length_prefix_ok: bool = true;
     let mut h264_length_prefix_error: Option<String> = None;
 
-    let probe_duration = Duration::from_secs(args.duration);
+    let probe_duration = Duration::from_secs(effective.short_duration_sec);
     let probe_res: Result<()> = timeout(probe_duration, async {
         while let Some(item) = demuxed.next().await {
             let item = item.context("demuxed stream error")?;
