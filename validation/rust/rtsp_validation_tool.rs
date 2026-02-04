@@ -2830,6 +2830,9 @@ const DEVICE_ONVIF_DIR: &str = "/mnt/anyka_hack/onvif";
 const DEVICE_ONVIF_LOG_GLOB: &str = "onvif.log*";
 const DEVICE_TELNET_CONNECT_TIMEOUT_SEC: u64 = 15;
 const DEVICE_TELNET_READ_TIMEOUT_SEC: u64 = 8;
+const DEVICE_TELNET_LOG_COPY_READ_TIMEOUT_SEC: u64 = 45;
+const DEVICE_MARKER_BEGIN: &str = "__ANYKA_BEGIN__";
+const DEVICE_MARKER_END: &str = "__ANYKA_END__";
 
 /// Run a single command on the device via telnet (blocking). Returns accumulated output.
 fn run_telnet_command_blocking(
@@ -2885,6 +2888,30 @@ fn sanitize_filename_component(s: &str) -> String {
     }
 }
 
+fn sh_single_quote(s: &str) -> String {
+    // POSIX shell safe single-quoting: wrap in '...' and escape internal ' as '\''.
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for ch in s.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
+}
+
+fn extract_between_markers(s: &str) -> Option<String> {
+    let start = s.find(DEVICE_MARKER_BEGIN)?;
+    let rest = &s[start + DEVICE_MARKER_BEGIN.len()..];
+    let end = rest.rfind(DEVICE_MARKER_END)?;
+    let between = &rest[..end];
+    let between = between.trim_matches(['\r', '\n', ' ']);
+    Some(between.to_string())
+}
+
 fn device_cleanup_onvif_logs_blocking(host: &str, port: u16) -> Result<()> {
     let cmd = format!(
         "cd {} && rm -f {} 2>/dev/null",
@@ -2899,17 +2926,27 @@ fn device_copy_onvif_logs_blocking(host: &str, port: u16, artifacts_dir: &Path) 
     std::fs::create_dir_all(artifacts_dir)
         .with_context(|| format!("create artifacts dir {}", artifacts_dir.display()))?;
 
+    // Avoid `ls` because interactive shells may colorize / alias it. Use glob expansion.
+    // If the glob doesn't match, $1 remains literal "onvif.log*" → treat as no logs.
     let list_cmd = format!(
-        "cd {} && ls -1 {} 2>/dev/null",
-        DEVICE_ONVIF_DIR, DEVICE_ONVIF_LOG_GLOB
+        "cd {dir} && echo {b} && set -- {glob}; if [ \"$1\" = \"{glob}\" ]; then :; else for f in \"$@\"; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done; fi; echo {e}",
+        dir = DEVICE_ONVIF_DIR,
+        glob = DEVICE_ONVIF_LOG_GLOB,
+        b = DEVICE_MARKER_BEGIN,
+        e = DEVICE_MARKER_END
     );
-    let listing =
-        run_telnet_command_blocking(host, port, &list_cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
+    let listing_raw = run_telnet_command_blocking(
+        host,
+        port,
+        &list_cmd,
+        DEVICE_TELNET_LOG_COPY_READ_TIMEOUT_SEC,
+    )?;
+    let listing = extract_between_markers(&listing_raw).unwrap_or(listing_raw);
     let files: Vec<String> = listing
         .lines()
-        .map(|l| l.trim())
+        .map(|l| l.trim_matches(['\r', '\n', ' ']))
         .filter(|l| !l.is_empty())
-        .filter(|l| !l.contains('/'))
+        .filter(|l| l.starts_with("onvif.log"))
         .map(|l| l.to_string())
         .collect();
 
@@ -2923,12 +2960,22 @@ fn device_copy_onvif_logs_blocking(host: &str, port: u16, artifacts_dir: &Path) 
         let out_path = artifacts_dir.join(format!("device_{}", safe));
 
         // Prefer tail by bytes; fall back to tail by lines; then cat.
+        let q = sh_single_quote(&f);
         let read_cmd = format!(
-            "cd {} && (tail -c {} '{}' 2>/dev/null || tail -n 20000 '{}' 2>/dev/null || cat '{}' 2>/dev/null)",
-            DEVICE_ONVIF_DIR, MAX_TOOL_LOG_BYTES, f, f, f
+            "cd {dir} && echo {b} && (tail -c {bytes} {q} 2>/dev/null || tail -n 20000 {q} 2>/dev/null || cat {q} 2>/dev/null) && echo {e}",
+            dir = DEVICE_ONVIF_DIR,
+            b = DEVICE_MARKER_BEGIN,
+            e = DEVICE_MARKER_END,
+            bytes = MAX_TOOL_LOG_BYTES,
+            q = q
         );
-        let content =
-            run_telnet_command_blocking(host, port, &read_cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
+        let raw = run_telnet_command_blocking(
+            host,
+            port,
+            &read_cmd,
+            DEVICE_TELNET_LOG_COPY_READ_TIMEOUT_SEC,
+        )?;
+        let content = extract_between_markers(&raw).unwrap_or(raw);
         write_bytes_tail(&out_path, content.as_bytes())
             .with_context(|| format!("write {}", out_path.display()))?;
         info!(path = %out_path.display(), device_file = %f, "copied device onvif log");
@@ -3588,5 +3635,18 @@ mod tests {
         let out = std::fs::read(&path).unwrap();
         assert!(out.starts_with(b"[truncated:"));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_sh_single_quote() {
+        assert_eq!(super::sh_single_quote("abc"), "'abc'");
+        assert_eq!(super::sh_single_quote("a'b"), "'a'\\''b'");
+    }
+
+    #[test]
+    fn test_extract_between_markers() {
+        let s = "noise\n__ANYKA_BEGIN__\nhello\nworld\n__ANYKA_END__\nmore";
+        let extracted = super::extract_between_markers(s).unwrap();
+        assert_eq!(extracted, "hello\nworld");
     }
 }
