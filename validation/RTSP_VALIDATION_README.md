@@ -67,6 +67,9 @@ $CARGO build --target x86_64-unknown-linux-gnu --features validation-mode
 
 # View results
 cat rtsp_validation.json | jq .
+
+# Or convert to Markdown
+python3 validation/rtsp_validation_json_to_md.py -o rtsp_validation.md
 ```
 
 ### Logging and debugging

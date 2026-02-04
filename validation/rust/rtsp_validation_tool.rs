@@ -715,6 +715,16 @@ struct Summary {
     overall_pass: bool,
 }
 
+/// If init failed because logging was already initialized, treat as success.
+fn accept_already_initialized(e: impl std::error::Error + Send + Sync + 'static) -> Result<()> {
+    let msg = e.to_string();
+    if msg.contains("already") || msg.contains("set a logger") {
+        Ok(())
+    } else {
+        Err(anyhow::Error::from(e))
+    }
+}
+
 /// Initialize tracing from env RUST_LOG or config [logging] (level and optional file).
 /// Call after loading config so configured level and file are respected.
 /// The `log` crate (used by retina) is bridged via tracing-log so RUST_LOG=retina=debug
@@ -746,7 +756,10 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
         .unwrap_or_else(|| EnvFilter::new("info"));
 
     // Bridge log crate (retina) into tracing so EnvFilter applies to dependency logs.
-    let _ = tracing_log::LogTracer::init();
+    // If the log crate was already initialized by a dependency, skip the bridge.
+    if tracing_log::LogTracer::init().is_err() {
+        // Already initialized; continue without bridging log -> tracing.
+    }
 
     let stdout_layer = fmt::layer()
         .with_writer(std::io::stdout)
@@ -772,6 +785,7 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
                         .with(stdout_layer)
                         .with(file_layer)
                         .try_init()
+                        .or_else(accept_already_initialized)
                         .context("init tracing")?;
                     Some(path)
                 }
@@ -781,6 +795,7 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
                         .with(filter)
                         .with(stdout_layer)
                         .try_init()
+                        .or_else(accept_already_initialized)
                         .context("init tracing")?;
                     None
                 }
@@ -790,6 +805,7 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
                 .with(filter)
                 .with(stdout_layer)
                 .try_init()
+                .or_else(accept_already_initialized)
                 .context("init tracing")?;
             None
         }
@@ -798,6 +814,7 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
             .with(filter)
             .with(stdout_layer)
             .try_init()
+            .or_else(accept_already_initialized)
             .context("init tracing")?;
         None
     };
