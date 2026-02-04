@@ -163,7 +163,8 @@ Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--duration
 ./validation/rtsp_validation_tool --no-launch --rtsp-port 8554 --compare-baseline
 
 # Baselines stored under config baseline.dir (default rtsp_results/baselines/)
-# e.g. harness_startup_latency_ms_baseline.json, harness_bitrate_kbps_baseline.json, etc.
+# Harness: harness_startup_latency_ms, harness_bitrate_kbps, harness_fps, harness_packet_loss_percent
+# Device telemetry (when using --launch-on-device): telemetry_mem_*_kib, telemetry_load_avg_*, telemetry_onvif_rss_kib, telemetry_onvif_vmsize_kib
 ```
 
 ## CI/CD

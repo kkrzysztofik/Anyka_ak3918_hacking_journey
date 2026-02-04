@@ -309,6 +309,15 @@ fn baseline_direction_for(test_name: &str) -> &'static str {
         | "packet_loss_percent"
         | "harness_packet_loss_percent" => "lower",
         "bitrate_kbps" | "harness_bitrate_kbps" | "fps" | "harness_fps" => "higher",
+        // Device telemetry: free/available/total RAM higher is better; load and process memory lower is better
+        "telemetry_mem_free_kib"
+        | "telemetry_mem_available_kib"
+        | "telemetry_mem_total_kib" => "higher",
+        "telemetry_load_avg_1m"
+        | "telemetry_load_avg_5m"
+        | "telemetry_load_avg_15m"
+        | "telemetry_onvif_rss_kib"
+        | "telemetry_onvif_vmsize_kib" => "lower",
         _ => "lower",
     }
 }
@@ -673,7 +682,7 @@ async fn main() -> Result<()> {
     }
 
     if args.update_baseline || args.compare_baseline {
-        apply_baseline_ops(&args, &effective, &mut report.tests)?;
+        apply_baseline_ops(&args, &effective, &mut report)?;
     }
 
     if let Some(mut c) = child {
@@ -1436,12 +1445,43 @@ async fn harness_error_handling(
     Ok((invalid_ok, bogus_ok))
 }
 
+/// Collect (name, value) for baseline from device telemetry.
+fn telemetry_baseline_metrics(t: &DeviceTelemetry) -> Vec<(String, f64)> {
+    let mut out = Vec::new();
+    if let Some(v) = t.mem_total_kib {
+        out.push(("telemetry_mem_total_kib".to_string(), v as f64));
+    }
+    if let Some(v) = t.mem_free_kib {
+        out.push(("telemetry_mem_free_kib".to_string(), v as f64));
+    }
+    if let Some(v) = t.mem_available_kib {
+        out.push(("telemetry_mem_available_kib".to_string(), v as f64));
+    }
+    if let Some(v) = t.load_avg_1m {
+        out.push(("telemetry_load_avg_1m".to_string(), v));
+    }
+    if let Some(v) = t.load_avg_5m {
+        out.push(("telemetry_load_avg_5m".to_string(), v));
+    }
+    if let Some(v) = t.load_avg_15m {
+        out.push(("telemetry_load_avg_15m".to_string(), v));
+    }
+    if let Some(v) = t.onvif_rss_kib {
+        out.push(("telemetry_onvif_rss_kib".to_string(), v as f64));
+    }
+    if let Some(v) = t.onvif_vmsize_kib {
+        out.push(("telemetry_onvif_vmsize_kib".to_string(), v as f64));
+    }
+    out
+}
+
 fn apply_baseline_ops(
     args: &Args,
     effective: &EffectiveConfig,
-    tests: &mut Vec<TestResult>,
+    report: &mut ValidationReport,
 ) -> Result<()> {
     let baseline_dir = &effective.baseline_dir;
+    let tests = &mut report.tests;
     let mut metrics: Vec<(String, f64)> = Vec::new();
     for t in tests.iter() {
         if let TestResult::Metric { name, value, .. } = t {
@@ -1458,6 +1498,9 @@ fn apply_baseline_ops(
                 metrics.push((name.clone(), f));
             }
         }
+    }
+    if let Some(ref telemetry) = report.telemetry {
+        metrics.extend(telemetry_baseline_metrics(telemetry));
     }
     for (name, value) in metrics {
         if args.update_baseline {
