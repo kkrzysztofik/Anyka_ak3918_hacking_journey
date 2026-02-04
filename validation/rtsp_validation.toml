@@ -59,6 +59,14 @@ level = "debug"
 retina-level = "debug"
 file = "rtsp_validation.log"
 
+[artifacts]
+# Root directory where the tool writes per-run artifacts:
+# - ffmpeg/ffprobe/tshark stdout/stderr logs
+# - pcap captures (kept by default)
+dir = "rtsp_results/runs"
+capture-tool-output = true
+keep-pcaps = true
+
 # Device (camera) validation: telnet and telemetry when using launch-on-device
 [device]
 host = "192.168.2.198"

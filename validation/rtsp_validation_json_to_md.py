@@ -28,7 +28,7 @@ def format_value(val: Any) -> str:
     return cell(str(val))
 
 
-def _render_test_run(run: dict[str, Any], lines: list[str]) -> None:
+def _render_test_run(run: dict[str, Any], artifacts_dir: str | None, lines: list[str]) -> None:
     lines.append("# RTSP Validation Report\n")
     lines.append("## Test run\n")
     lines.append(f"- **Timestamp:** {run.get('timestamp', '—')}")
@@ -36,7 +36,10 @@ def _render_test_run(run: dict[str, Any], lines: list[str]) -> None:
     port = run.get("rtsp_port", "")
     stream = run.get("rtsp_stream", "")
     lines.append(f"- **RTSP:** `rtsp://{host}:{port}{stream}`")
-    lines.append(f"- **Duration:** {run.get('test_duration_seconds', '—')} s\n")
+    lines.append(f"- **Duration:** {run.get('test_duration_seconds', '—')} s")
+    if artifacts_dir:
+        lines.append(f"- **Artifacts:** `{cell(artifacts_dir)}`")
+    lines.append("")
 
 
 def _render_summary(summary: dict[str, Any], lines: list[str]) -> None:
@@ -103,7 +106,11 @@ def main() -> int:
         data: dict[str, Any] = json.load(f)
 
     lines: list[str] = []
-    _render_test_run(cast(dict[str, Any], data.get("test_run") or {}), lines)
+    _render_test_run(
+        cast(dict[str, Any], data.get("test_run") or {}),
+        cast(str | None, data.get("artifacts_dir")),
+        lines,
+    )
     _render_summary(cast(dict[str, Any], data.get("summary") or {}), lines)
     _render_tests(cast(list[dict[str, Any]], data.get("tests") or []), lines)
     telemetry = data.get("telemetry")

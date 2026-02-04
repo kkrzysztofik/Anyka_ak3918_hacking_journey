@@ -16,6 +16,8 @@ use retina::codec::{CodecItem, ParametersRef};
 use rtshark::RTSharkBuilder;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::fs::File;
+use std::io::Write;
 use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -24,7 +26,7 @@ use telnet::{Event, Telnet};
 use tokio::net::TcpStream;
 use tokio::time::{Instant, sleep, timeout};
 use tracing::{debug, info, trace, warn};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use url::Url;
 
 const DEFAULT_VIDEO_STARTUP_TARGET_MS: u64 = 1500;
@@ -35,6 +37,7 @@ const DEFAULT_DURATION_SEC: u64 = 30;
 const DEFAULT_LONG_DURATION_SEC: u64 = 600;
 const DEFAULT_CONCURRENT_CLIENTS: u32 = 4;
 const DEFAULT_BASELINE_DIR: &str = "rtsp_results/baselines";
+const DEFAULT_ARTIFACTS_ROOT_DIR: &str = "rtsp_results/runs";
 
 /// TOML config file schema (rtsp_validation.toml).
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -52,6 +55,8 @@ pub struct RtspValidationConfig {
     pub capture: CaptureSection,
     #[serde(default)]
     pub logging: LoggingSection,
+    #[serde(default)]
+    pub artifacts: ArtifactsSection,
     #[serde(default)]
     pub device: DeviceSection,
     #[serde(default)]
@@ -182,6 +187,35 @@ pub struct CaptureSection {
     pub interface: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ArtifactsSection {
+    #[serde(default = "default_artifacts_root_dir")]
+    pub dir: String,
+    #[serde(default = "default_true")]
+    pub capture_tool_output: bool,
+    #[serde(default = "default_true")]
+    pub keep_pcaps: bool,
+}
+
+impl Default for ArtifactsSection {
+    fn default() -> Self {
+        Self {
+            dir: default_artifacts_root_dir(),
+            capture_tool_output: true,
+            keep_pcaps: true,
+        }
+    }
+}
+
+fn default_artifacts_root_dir() -> String {
+    DEFAULT_ARTIFACTS_ROOT_DIR.to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct LoggingSection {
@@ -243,6 +277,10 @@ pub struct EffectiveConfig {
     pub expected_fps: Option<f64>,
     pub baseline_dir: PathBuf,
     pub capture_interface: String,
+    pub artifacts_root_dir: PathBuf,
+    pub artifacts_dir: PathBuf,
+    pub capture_tool_output: bool,
+    pub keep_pcaps: bool,
     pub launch_on_device: bool,
     pub device_host: String,
     pub device_telnet_port: u16,
@@ -268,6 +306,14 @@ impl EffectiveConfig {
             PathBuf::from(&c.baseline.dir)
         };
         let capture_interface = c.capture.interface.clone().unwrap_or_default();
+        let artifacts_root_dir = args
+            .artifacts_dir
+            .clone()
+            .or_else(|| Some(c.artifacts.dir.clone()))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(default_artifacts_root_dir);
+        let capture_tool_output = c.artifacts.capture_tool_output;
+        let keep_pcaps = c.artifacts.keep_pcaps;
         let (expected_bitrate, expected_fps) = c
             .thresholds
             .expected
@@ -354,6 +400,10 @@ impl EffectiveConfig {
             expected_fps,
             baseline_dir,
             capture_interface,
+            artifacts_root_dir: PathBuf::from(artifacts_root_dir),
+            artifacts_dir: PathBuf::new(),
+            capture_tool_output,
+            keep_pcaps,
             launch_on_device,
             device_host,
             device_telnet_port,
@@ -574,6 +624,10 @@ struct Args {
     #[arg(long)]
     config: Option<String>,
 
+    /// Root directory for per-run artifacts (tool logs, pcaps).
+    #[arg(long)]
+    artifacts_dir: Option<String>,
+
     /// Update baseline files for metrics (e.g. startup_latency_ms, bitrate_kbps).
     #[arg(long)]
     update_baseline: bool,
@@ -687,6 +741,8 @@ struct ValidationReport {
     tests: Vec<TestResult>,
     summary: Summary,
     #[serde(skip_serializing_if = "Option::is_none")]
+    artifacts_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     telemetry: Option<DeviceTelemetry>,
 }
 
@@ -740,11 +796,7 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
                 .unwrap_or("info");
             let retina_level = config.and_then(|c| {
                 let s = c.logging.retina_level.trim();
-                if s.is_empty() {
-                    None
-                } else {
-                    Some(s)
-                }
+                if s.is_empty() { None } else { Some(s) }
             });
             let filter_str = if let Some(r) = retina_level {
                 format!("{},retina={}", level, r)
@@ -881,6 +933,10 @@ async fn main() -> Result<()> {
     effective.resolve_capture_interface();
     validate_args(&args, &effective)?;
 
+    effective.artifacts_dir =
+        create_run_artifacts_dir(&effective.artifacts_root_dir).context("create artifacts dir")?;
+    info!(path = %effective.artifacts_dir.display(), "artifacts directory");
+
     let run_mode = if effective.launch_on_device {
         "device"
     } else if effective.no_launch {
@@ -902,7 +958,8 @@ async fn main() -> Result<()> {
         "effective config"
     );
 
-    let mut child = maybe_launch_server(&args, &effective).context("failed to launch onvif-rust")?;
+    let mut child =
+        maybe_launch_server(&args, &effective).context("failed to launch onvif-rust")?;
     if child.is_some() {
         wait_for_server(&effective.rtsp_host, effective.rtsp_port)
             .await
@@ -940,7 +997,8 @@ async fn main() -> Result<()> {
         if critical_proto_failed(&report.tests) {
             report.tests.push(TestResult::Fail {
                 name: "harness_skipped".to_string(),
-                reason: "protocol validation failed (describe/setup/play); skipping harness".to_string(),
+                reason: "protocol validation failed (describe/setup/play); skipping harness"
+                    .to_string(),
             });
         } else {
             run_harness(&args, &effective, &mut report.tests).await?;
@@ -971,6 +1029,7 @@ async fn main() -> Result<()> {
             return Err(anyhow!("interrupted by signal (Ctrl-C or SIGTERM)"));
         }
     };
+    report.artifacts_dir = Some(effective.artifacts_dir.to_string_lossy().to_string());
 
     if effective.launch_on_device {
         let host = effective.device_host.clone();
@@ -1020,6 +1079,106 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn create_run_artifacts_dir(root: &Path) -> Result<PathBuf> {
+    std::fs::create_dir_all(root)
+        .with_context(|| format!("create artifacts root dir {}", root.display()))?;
+    let ts = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let pid = std::process::id();
+    let dir = root.join(run_artifacts_dir_name(&ts, pid));
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("create artifacts dir {}", dir.display()))?;
+    Ok(dir)
+}
+
+fn run_artifacts_dir_name(timestamp_utc: &str, pid: u32) -> String {
+    format!("{}_pid{}", timestamp_utc, pid)
+}
+
+const MAX_TOOL_LOG_BYTES: usize = 2_000_000; // 2MB per log file (tail kept if exceeded)
+
+fn tail_lossy(s: &str, max_chars: usize) -> String {
+    let mut truncated = false;
+    let mut seen = 0usize;
+    for _ in s.chars() {
+        seen += 1;
+        if seen > max_chars {
+            truncated = true;
+            break;
+        }
+    }
+    if !truncated {
+        return s.to_string();
+    }
+    let mut it = s.chars().rev().take(max_chars).collect::<Vec<char>>();
+    it.reverse();
+    let tail: String = it.into_iter().collect();
+    format!("…{}", tail)
+}
+
+fn write_bytes_tail(path: &Path, bytes: &[u8]) -> Result<()> {
+    let mut f = File::create(path).with_context(|| format!("create {}", path.display()))?;
+    if bytes.len() <= MAX_TOOL_LOG_BYTES {
+        f.write_all(bytes)
+            .with_context(|| format!("write {}", path.display()))?;
+        return Ok(());
+    }
+    let tail = &bytes[bytes.len().saturating_sub(MAX_TOOL_LOG_BYTES)..];
+    writeln!(
+        f,
+        "[truncated: wrote last {} bytes of {}]\n",
+        tail.len(),
+        bytes.len()
+    )
+    .with_context(|| format!("write {}", path.display()))?;
+    f.write_all(tail)
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+struct BoundedLogWriter {
+    file: File,
+    written: usize,
+    truncated: bool,
+}
+
+impl BoundedLogWriter {
+    fn create(path: &Path) -> Result<Self> {
+        let file = File::create(path).with_context(|| format!("create {}", path.display()))?;
+        Ok(Self {
+            file,
+            written: 0,
+            truncated: false,
+        })
+    }
+
+    fn write_line(&mut self, line: &str) -> Result<()> {
+        if self.truncated {
+            return Ok(());
+        }
+        let bytes = line.as_bytes();
+        let remaining = MAX_TOOL_LOG_BYTES.saturating_sub(self.written);
+        if remaining == 0 {
+            self.truncated = true;
+            return Ok(());
+        }
+        if bytes.len() < remaining {
+            self.file.write_all(bytes)?;
+            self.file.write_all(b"\n")?;
+            self.written += bytes.len() + 1;
+            return Ok(());
+        }
+        // Write what we can, then mark truncated.
+        let take = remaining.saturating_sub(1);
+        if take > 0 {
+            self.file.write_all(&bytes[..take])?;
+            self.file.write_all(b"\n")?;
+            self.written += take + 1;
+        }
+        self.truncated = true;
+        Ok(())
+    }
+}
+
 fn rtsp_url(host: &str, port: u16, stream: &str) -> String {
     format!("rtsp://{}:{}{}", host, port, stream)
 }
@@ -1038,11 +1197,18 @@ async fn run_harness(
     let timeout_sec = effective.rtsp_timeout_sec;
     let step_cap_short = Duration::from_secs(timeout_sec.saturating_add(15));
     let step_cap_long = Duration::from_secs(effective.short_duration_sec.saturating_add(30));
+    let artifacts_dir = effective.artifacts_dir.clone();
+    let capture_tool_output = effective.capture_tool_output;
     info!(url = %url, "running harness scenarios");
 
     // 1. Basic connectivity
     debug!("harness: basic connectivity");
-    match timeout(step_cap_short, harness_basic_connectivity(&url, timeout_sec)).await {
+    match timeout(
+        step_cap_short,
+        harness_basic_connectivity(&url, timeout_sec, &artifacts_dir, capture_tool_output),
+    )
+    .await
+    {
         Ok(Ok(ok)) => {
             tests.push(if ok {
                 TestResult::Pass {
@@ -1070,10 +1236,20 @@ async fn run_harness(
     }
 
     // 2. Stream startup latency
-    debug!("harness: startup latency");
+    debug!(
+        url = %url,
+        target_ms = effective.video_startup_latency_ms,
+        "harness: startup latency"
+    );
     match timeout(
         step_cap_short,
-        harness_startup_latency(&url, timeout_sec, effective.video_startup_latency_ms),
+        harness_startup_latency(
+            &url,
+            timeout_sec,
+            effective.video_startup_latency_ms,
+            &artifacts_dir,
+            capture_tool_output,
+        ),
     )
     .await
     {
@@ -1084,32 +1260,55 @@ async fn run_harness(
                 value: serde_json::json!(ms),
                 pass,
             });
+            debug!(latency_ms = ms, pass, "harness: startup latency result");
         }
         Ok(Ok(None)) => {
             tests.push(TestResult::Fail {
                 name: "harness_startup_latency_ms".to_string(),
                 reason: "no frame decoded".to_string(),
             });
+            debug!(
+                reason = "no frame decoded",
+                "harness: startup latency result"
+            );
         }
         Ok(Err(e)) => {
             tests.push(TestResult::Fail {
                 name: "harness_startup_latency_ms".to_string(),
                 reason: e.to_string(),
             });
+            debug!(error = %e, "harness: startup latency result");
         }
         Err(_) => {
             tests.push(TestResult::Fail {
                 name: "harness_startup_latency_ms".to_string(),
                 reason: format!("harness step timed out after {}s", step_cap_short.as_secs()),
             });
+            debug!(
+                reason = "timeout",
+                step_secs = step_cap_short.as_secs(),
+                "harness: startup latency result"
+            );
         }
     }
 
     // 3. Bitrate / FPS stability
-    debug!("harness: bitrate/fps");
+    debug!(
+        url = %url,
+        duration_sec = effective.short_duration_sec,
+        expected_bitrate_kbps = ?effective.expected_bitrate_kbps,
+        expected_fps = ?effective.expected_fps,
+        "harness: bitrate/fps"
+    );
     match timeout(
         step_cap_long,
-        harness_bitrate_fps(&url, effective.short_duration_sec, effective),
+        harness_bitrate_fps(
+            &url,
+            effective.short_duration_sec,
+            effective,
+            &artifacts_dir,
+            capture_tool_output,
+        ),
     )
     .await
     {
@@ -1138,24 +1337,38 @@ async fn run_harness(
                 value: serde_json::json!(fps),
                 pass: fps_pass,
             });
+            debug!(
+                bitrate_kbps = bitrate,
+                fps = fps,
+                bitrate_pass,
+                fps_pass,
+                "harness: bitrate/fps result"
+            );
         }
         Ok(Err(e)) => {
             tests.push(TestResult::Fail {
                 name: "harness_bitrate_fps".to_string(),
                 reason: e.to_string(),
             });
+            debug!(error = %e, "harness: bitrate/fps result");
         }
         Err(_) => {
             tests.push(TestResult::Fail {
                 name: "harness_bitrate_fps".to_string(),
                 reason: format!("harness step timed out after {}s", step_cap_long.as_secs()),
             });
+            debug!(reason = "timeout", "harness: bitrate/fps result");
         }
     }
 
     // 4. SDP validation (ffprobe)
-    debug!("harness: SDP validation");
-    match timeout(step_cap_short, harness_sdp_validation(&url, timeout_sec)).await {
+    debug!(url = %url, "harness: SDP validation");
+    match timeout(
+        step_cap_short,
+        harness_sdp_validation(&url, timeout_sec, &artifacts_dir, capture_tool_output),
+    )
+    .await
+    {
         Ok(Ok((video_count, audio_count, has_h264))) => {
             tests.push(TestResult::Metric {
                 name: "harness_sdp_video_streams".to_string(),
@@ -1177,24 +1390,35 @@ async fn run_harness(
                     reason: "no H.264 video stream".to_string(),
                 }
             });
+            debug!(
+                video_count,
+                audio_count, has_h264, "harness: SDP validation result"
+            );
         }
         Ok(Err(e)) => {
             tests.push(TestResult::Fail {
                 name: "harness_sdp_validation".to_string(),
                 reason: e.to_string(),
             });
+            debug!(error = %e, "harness: SDP validation result");
         }
         Err(_) => {
             tests.push(TestResult::Fail {
                 name: "harness_sdp_validation".to_string(),
                 reason: format!("harness step timed out after {}s", step_cap_short.as_secs()),
             });
+            debug!(reason = "timeout", "harness: SDP validation result");
         }
     }
 
     // 5. RTSP protocol sequence (tshark + rtshark)
-    debug!("harness: RTSP protocol sequence");
-    match timeout(step_cap_long, harness_rtsp_protocol_sequence(&url, effective, args)).await {
+    debug!(url = %url, "harness: RTSP protocol sequence");
+    match timeout(
+        step_cap_long,
+        harness_rtsp_protocol_sequence(&url, effective, args),
+    )
+    .await
+    {
         Ok(Ok((describe, setup, play, teardown, status_200, status_err))) => {
             let pass = describe > 0 && setup > 0 && play > 0 && status_err == 0 && status_200 > 0;
             tests.push(TestResult::Metric {
@@ -1209,23 +1433,38 @@ async fn run_harness(
                 }),
                 pass,
             });
+            debug!(
+                describe,
+                setup,
+                play,
+                teardown,
+                status_200,
+                status_4xx = status_err,
+                "harness: RTSP protocol sequence result"
+            );
         }
         Ok(Err(e)) => {
             tests.push(TestResult::Fail {
                 name: "harness_protocol_sequence".to_string(),
                 reason: e.to_string(),
             });
+            debug!(error = %e, "harness: RTSP protocol sequence result");
         }
         Err(_) => {
             tests.push(TestResult::Fail {
                 name: "harness_protocol_sequence".to_string(),
                 reason: format!("harness step timed out after {}s", step_cap_long.as_secs()),
             });
+            debug!(reason = "timeout", "harness: RTSP protocol sequence result");
         }
     }
 
     // 6. Packet loss (UDP + rtshark)
-    debug!("harness: packet loss");
+    debug!(
+        url = %url,
+        tolerance_percent = effective.packet_loss_tolerance_percent,
+        "harness: packet loss"
+    );
     match timeout(step_cap_long, harness_packet_loss(&url, effective, args)).await {
         Ok(Ok((rtp_packets, packet_loss, loss_percent))) => {
             let pass = loss_percent <= effective.packet_loss_tolerance_percent;
@@ -1234,30 +1473,43 @@ async fn run_harness(
                 value: serde_json::json!({ "rtp_packets": rtp_packets, "packet_loss": packet_loss, "loss_percent": loss_percent }),
                 pass,
             });
+            debug!(
+                rtp_packets,
+                packet_loss, loss_percent, pass, "harness: packet loss result"
+            );
         }
         Ok(Err(e)) => {
             tests.push(TestResult::Fail {
                 name: "harness_packet_loss".to_string(),
                 reason: e.to_string(),
             });
+            debug!(error = %e, "harness: packet loss result");
         }
         Err(_) => {
             tests.push(TestResult::Fail {
                 name: "harness_packet_loss".to_string(),
                 reason: format!("harness step timed out after {}s", step_cap_long.as_secs()),
             });
+            debug!(reason = "timeout", "harness: packet loss result");
         }
     }
 
     // 7. Concurrent clients
     if effective.concurrent_clients > 0 {
-        debug!(concurrent = effective.concurrent_clients, "harness: concurrent clients");
+        debug!(
+            url = %url,
+            concurrent = effective.concurrent_clients,
+            duration_sec = effective.short_duration_sec,
+            "harness: concurrent clients"
+        );
         match timeout(
             step_cap_long,
             harness_concurrent_clients(
                 &url,
                 effective.short_duration_sec,
                 effective.concurrent_clients,
+                &artifacts_dir,
+                capture_tool_output,
             ),
         )
         .await
@@ -1269,18 +1521,24 @@ async fn run_harness(
                     value: serde_json::json!({ "requested": effective.concurrent_clients, "failed": failed }),
                     pass,
                 });
+                debug!(
+                    requested = effective.concurrent_clients,
+                    failed, pass, "harness: concurrent clients result"
+                );
             }
             Ok(Err(e)) => {
                 tests.push(TestResult::Fail {
                     name: "harness_concurrent_clients".to_string(),
                     reason: e.to_string(),
                 });
+                debug!(error = %e, "harness: concurrent clients result");
             }
             Err(_) => {
                 tests.push(TestResult::Fail {
                     name: "harness_concurrent_clients".to_string(),
                     reason: format!("harness step timed out after {}s", step_cap_long.as_secs()),
                 });
+                debug!(reason = "timeout", "harness: concurrent clients result");
             }
         }
     }
@@ -1289,10 +1547,19 @@ async fn run_harness(
     if args.long_duration {
         let step_cap_long_duration =
             Duration::from_secs(effective.long_duration_sec.saturating_add(30));
-        debug!(duration_sec = effective.long_duration_sec, "harness: long duration");
+        debug!(
+            url = %url,
+            duration_sec = effective.long_duration_sec,
+            "harness: long duration"
+        );
         match timeout(
             step_cap_long_duration,
-            harness_long_duration(&url, effective.long_duration_sec),
+            harness_long_duration(
+                &url,
+                effective.long_duration_sec,
+                &artifacts_dir,
+                capture_tool_output,
+            ),
         )
         .await
         {
@@ -1303,12 +1570,14 @@ async fn run_harness(
                     value: serde_json::json!(degradation_pct),
                     pass,
                 });
+                debug!(degradation_pct, pass, "harness: long duration result");
             }
             Ok(Err(e)) => {
                 tests.push(TestResult::Fail {
                     name: "harness_long_duration".to_string(),
                     reason: e.to_string(),
                 });
+                debug!(error = %e, "harness: long duration result");
             }
             Err(_) => {
                 tests.push(TestResult::Fail {
@@ -1318,13 +1587,19 @@ async fn run_harness(
                         step_cap_long_duration.as_secs()
                     ),
                 });
+                debug!(reason = "timeout", "harness: long duration result");
             }
         }
     }
 
     // 9. Error handling (optional)
     if !args.skip_error_handling {
-        debug!("harness: error handling");
+        debug!(
+            host = %effective.rtsp_host,
+            port = effective.rtsp_port,
+            stream = %effective.rtsp_stream,
+            "harness: error handling"
+        );
         match timeout(
             step_cap_short,
             harness_error_handling(
@@ -1332,6 +1607,8 @@ async fn run_harness(
                 effective.rtsp_port,
                 &effective.rtsp_stream,
                 timeout_sec,
+                &artifacts_dir,
+                capture_tool_output,
             ),
         )
         .await
@@ -1347,18 +1624,24 @@ async fn run_harness(
                     value: serde_json::json!(bogus_url_ok),
                     pass: bogus_url_ok,
                 });
+                debug!(
+                    invalid_creds_ok,
+                    bogus_url_ok, "harness: error handling result"
+                );
             }
             Ok(Err(e)) => {
                 tests.push(TestResult::Fail {
                     name: "harness_error_handling".to_string(),
                     reason: e.to_string(),
                 });
+                debug!(error = %e, "harness: error handling result");
             }
             Err(_) => {
                 tests.push(TestResult::Fail {
                     name: "harness_error_handling".to_string(),
                     reason: format!("harness step timed out after {}s", step_cap_short.as_secs()),
                 });
+                debug!(reason = "timeout", "harness: error handling result");
             }
         }
     }
@@ -1366,9 +1649,25 @@ async fn run_harness(
     Ok(())
 }
 
-async fn harness_basic_connectivity(url: &str, _timeout_sec: u64) -> Result<bool> {
+async fn harness_basic_connectivity(
+    url: &str,
+    _timeout_sec: u64,
+    artifacts_dir: &Path,
+    capture_tool_output: bool,
+) -> Result<bool> {
+    debug!(url = %url, "ffmpeg: basic connectivity start");
     let url = url.to_string();
+    let log_path = artifacts_dir.join("ffmpeg_basic_connectivity.log");
     let ok = tokio::task::spawn_blocking(move || {
+        let mut log = if capture_tool_output {
+            Some(BoundedLogWriter::create(&log_path)?)
+        } else {
+            None
+        };
+        if let Some(l) = log.as_mut() {
+            l.write_line("=== ffmpeg basic connectivity ===")?;
+            l.write_line(&format!("url={}", url))?;
+        }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
             .arg("-rtsp_transport")
@@ -1381,13 +1680,43 @@ async fn harness_basic_connectivity(url: &str, _timeout_sec: u64) -> Result<bool
         let iter = child.iter().context("ffmpeg iter")?;
         let mut saw_stream = false;
         for event in iter {
+            if let Some(l) = log.as_mut() {
+                match &event {
+                    FfmpegEvent::Log(_, msg) => {
+                        l.write_line(msg)?;
+                    }
+                    FfmpegEvent::Progress(p) => {
+                        l.write_line(&format!(
+                            "progress frame={} fps={} bitrate_kbps={} time={} speed={}",
+                            p.frame, p.fps, p.bitrate_kbps, p.time, p.speed
+                        ))?;
+                    }
+                    FfmpegEvent::Done => {
+                        l.write_line("done")?;
+                    }
+                    other => {
+                        l.write_line(&format!("event={:?}", other))?;
+                    }
+                }
+            }
             if let FfmpegEvent::Log(_, msg) = &event
                 && msg.contains("Stream #")
             {
+                debug!(msg = %msg, "ffmpeg: stream detected");
                 saw_stream = true;
                 break;
             }
-            if matches!(event, FfmpegEvent::Progress(_) | FfmpegEvent::Done) {
+            if let FfmpegEvent::Progress(p) = &event {
+                debug!(
+                    frame = p.frame,
+                    fps = p.fps,
+                    "ffmpeg: basic connectivity progress"
+                );
+                saw_stream = true;
+                break;
+            }
+            if matches!(event, FfmpegEvent::Done) {
+                debug!("ffmpeg: basic connectivity done");
                 saw_stream = true;
                 break;
             }
@@ -1396,6 +1725,7 @@ async fn harness_basic_connectivity(url: &str, _timeout_sec: u64) -> Result<bool
     })
     .await
     .context("spawn_blocking")??;
+    debug!(saw_stream = ok, "ffmpeg: basic connectivity result");
     Ok(ok)
 }
 
@@ -1403,9 +1733,22 @@ async fn harness_startup_latency(
     url: &str,
     _timeout_sec: u64,
     _threshold_ms: u64,
+    artifacts_dir: &Path,
+    capture_tool_output: bool,
 ) -> Result<Option<u64>> {
+    debug!(url = %url, "ffmpeg: startup latency start");
     let url = url.to_string();
+    let log_path = artifacts_dir.join("ffmpeg_startup_latency.log");
     let ms = tokio::task::spawn_blocking(move || {
+        let mut log = if capture_tool_output {
+            Some(BoundedLogWriter::create(&log_path)?)
+        } else {
+            None
+        };
+        if let Some(l) = log.as_mut() {
+            l.write_line("=== ffmpeg startup latency ===")?;
+            l.write_line(&format!("url={}", url))?;
+        }
         let start = std::time::Instant::now();
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
@@ -1419,13 +1762,27 @@ async fn harness_startup_latency(
         let iter = child.iter().context("ffmpeg iter")?;
         let mut first_frame_ms = None;
         for event in iter {
+            if let Some(l) = log.as_mut() {
+                match &event {
+                    FfmpegEvent::Log(_, msg) => l.write_line(msg)?,
+                    FfmpegEvent::Progress(p) => l.write_line(&format!(
+                        "progress frame={} fps={} bitrate_kbps={} time={} speed={}",
+                        p.frame, p.fps, p.bitrate_kbps, p.time, p.speed
+                    ))?,
+                    FfmpegEvent::Done => l.write_line("done")?,
+                    other => l.write_line(&format!("event={:?}", other))?,
+                }
+            }
             if let FfmpegEvent::Progress(FfmpegProgress { frame: f, .. }) = &event
                 && *f > 0
             {
-                first_frame_ms = Some(start.elapsed().as_millis() as u64);
+                let latency_ms = start.elapsed().as_millis();
+                debug!(latency_ms = latency_ms, frame = f, "ffmpeg: first frame");
+                first_frame_ms = Some(latency_ms as u64);
                 break;
             }
             if matches!(event, FfmpegEvent::Done) {
+                debug!("ffmpeg: startup latency done, no frame");
                 break;
             }
         }
@@ -1433,6 +1790,7 @@ async fn harness_startup_latency(
     })
     .await
     .context("spawn_blocking")??;
+    debug!(first_frame_ms = ?ms, "ffmpeg: startup latency result");
     Ok(ms)
 }
 
@@ -1440,10 +1798,24 @@ async fn harness_bitrate_fps(
     url: &str,
     duration_sec: u64,
     _effective: &EffectiveConfig,
+    artifacts_dir: &Path,
+    capture_tool_output: bool,
 ) -> Result<(f64, f64)> {
+    debug!(url = %url, duration_sec = duration_sec, "ffmpeg: bitrate/fps start");
     let url = url.to_string();
     let dur = duration_sec;
+    let log_path = artifacts_dir.join("ffmpeg_bitrate_fps.log");
     let (bitrate, fps) = tokio::task::spawn_blocking(move || {
+        let mut log = if capture_tool_output {
+            Some(BoundedLogWriter::create(&log_path)?)
+        } else {
+            None
+        };
+        if let Some(l) = log.as_mut() {
+            l.write_line("=== ffmpeg bitrate/fps ===")?;
+            l.write_line(&format!("url={}", url))?;
+            l.write_line(&format!("duration_sec={}", dur))?;
+        }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
             .arg("-rtsp_transport")
@@ -1456,21 +1828,52 @@ async fn harness_bitrate_fps(
         let iter = child.iter().context("ffmpeg iter")?;
         let mut last_bitrate = 0.0_f64;
         let mut last_fps = 0.0_f64;
+        let mut progress_count: u32 = 0;
         for event in iter {
+            if let Some(l) = log.as_mut() {
+                match &event {
+                    FfmpegEvent::Log(_, msg) => l.write_line(msg)?,
+                    FfmpegEvent::Progress(p) => l.write_line(&format!(
+                        "progress frame={} fps={} bitrate_kbps={} time={} speed={}",
+                        p.frame, p.fps, p.bitrate_kbps, p.time, p.speed
+                    ))?,
+                    FfmpegEvent::Done => l.write_line("done")?,
+                    other => l.write_line(&format!("event={:?}", other))?,
+                }
+            }
             if let FfmpegEvent::Progress(FfmpegProgress {
-                bitrate_kbps: b,
+                frame,
                 fps: f,
+                bitrate_kbps: b,
+                time,
+                speed,
                 ..
             }) = &event
             {
                 last_bitrate = *b as f64;
                 last_fps = *f as f64;
+                progress_count += 1;
+                if progress_count == 1 || progress_count.is_multiple_of(100) {
+                    debug!(
+                        frame = *frame,
+                        fps = *f,
+                        bitrate_kbps = *b,
+                        time = %time,
+                        speed = *speed,
+                        "ffmpeg: bitrate/fps progress"
+                    );
+                }
             }
         }
         Ok::<_, anyhow::Error>((last_bitrate, last_fps))
     })
     .await
     .context("spawn_blocking")??;
+    debug!(
+        bitrate_kbps = bitrate,
+        fps = fps,
+        "ffmpeg: bitrate/fps result"
+    );
     Ok((bitrate, fps))
 }
 
@@ -1485,8 +1888,16 @@ struct FfprobeStream {
     codec_name: Option<String>,
 }
 
-async fn harness_sdp_validation(url: &str, timeout_sec: u64) -> Result<(usize, usize, bool)> {
+async fn harness_sdp_validation(
+    url: &str,
+    timeout_sec: u64,
+    artifacts_dir: &Path,
+    capture_tool_output: bool,
+) -> Result<(usize, usize, bool)> {
+    debug!(url = %url, "ffprobe: SDP validation start");
     let url = url.to_string();
+    let stdout_path = artifacts_dir.join("ffprobe_sdp_validation.stdout.log");
+    let stderr_path = artifacts_dir.join("ffprobe_sdp_validation.stderr.log");
     let result = tokio::task::spawn_blocking(move || {
         let out = Command::new("ffprobe")
             .args([
@@ -1500,11 +1911,21 @@ async fn harness_sdp_validation(url: &str, timeout_sec: u64) -> Result<(usize, u
                 &url,
             ])
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .output()
             .context("ffprobe spawn")?;
+        if capture_tool_output {
+            write_bytes_tail(&stdout_path, &out.stdout).context("write ffprobe stdout")?;
+            write_bytes_tail(&stderr_path, &out.stderr).context("write ffprobe stderr")?;
+        }
         if !out.status.success() {
-            bail!("ffprobe failed: {}", String::from_utf8_lossy(&out.stderr));
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            debug!(stderr = %stderr, "ffprobe: SDP validation failed");
+            bail!(
+                "ffprobe failed (code={:?}): {}",
+                out.status.code(),
+                tail_lossy(stderr.trim(), 1200)
+            );
         }
         let v: FfprobeStreams =
             serde_json::from_slice(&out.stdout).context("parse ffprobe json")?;
@@ -1520,6 +1941,13 @@ async fn harness_sdp_validation(url: &str, timeout_sec: u64) -> Result<(usize, u
         let has_h264 = video
             .iter()
             .any(|s| s.codec_name.as_deref() == Some("h264"));
+        debug!(
+            stream_count = streams.len(),
+            video_count = video.len(),
+            audio_count = audio.len(),
+            has_h264,
+            "ffprobe: SDP validation result"
+        );
         Ok::<_, anyhow::Error>((video.len(), audio.len(), has_h264))
     })
     .await
@@ -1533,12 +1961,33 @@ async fn harness_rtsp_protocol_sequence(
     effective: &EffectiveConfig,
     _args: &Args,
 ) -> Result<(u32, u32, u32, u32, u32, u32)> {
-    let pcap_path = std::env::temp_dir().join(format!("rtsp_capture_{}.pcap", std::process::id()));
     let iface = effective.capture_interface.clone();
     let port = effective.rtsp_port;
     let url = url.to_string();
+    let artifacts_dir = effective.artifacts_dir.clone();
+    let capture_tool_output = effective.capture_tool_output;
+    let keep_pcaps = effective.keep_pcaps;
+    let pcap_path = artifacts_dir.join(format!("rtsp_protocol_sequence_tcp_port{}.pcap", port));
 
-    let pcap_str = pcap_path.to_str().unwrap_or("/tmp/rtsp.pcap").to_string();
+    let pcap_str = pcap_path.to_string_lossy().to_string();
+    let tshark_stdout_path = artifacts_dir.join("tshark_rtsp_protocol_sequence.stdout.log");
+    let tshark_stderr_path = artifacts_dir.join("tshark_rtsp_protocol_sequence.stderr.log");
+    let tshark_stdout = if capture_tool_output {
+        Stdio::from(
+            File::create(&tshark_stdout_path)
+                .with_context(|| format!("create {}", tshark_stdout_path.display()))?,
+        )
+    } else {
+        Stdio::null()
+    };
+    let tshark_stderr = if capture_tool_output {
+        Stdio::from(
+            File::create(&tshark_stderr_path)
+                .with_context(|| format!("create {}", tshark_stderr_path.display()))?,
+        )
+    } else {
+        Stdio::null()
+    };
     let mut tshark_handle = Command::new("tshark")
         .args([
             "-i",
@@ -1548,16 +1997,38 @@ async fn harness_rtsp_protocol_sequence(
             "-w",
             &pcap_str,
         ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(tshark_stdout)
+        .stderr(tshark_stderr)
         .spawn()
         .context("spawn tshark")?;
+    info!(
+        pcap = %pcap_path.display(),
+        stdout_log = %tshark_stdout_path.display(),
+        stderr_log = %tshark_stderr_path.display(),
+        "tshark capture started (rtsp protocol sequence)"
+    );
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
+    debug!(
+        url = %url,
+        duration_sec = effective.short_duration_sec,
+        "ffmpeg: protocol sequence capture start"
+    );
     let url2 = url.clone();
     let short_dur = effective.short_duration_sec;
+    let ffmpeg_log_path = artifacts_dir.join("ffmpeg_protocol_sequence_capture.log");
     let ffmpeg_handle = tokio::task::spawn_blocking(move || {
+        let mut log = if capture_tool_output {
+            Some(BoundedLogWriter::create(&ffmpeg_log_path)?)
+        } else {
+            None
+        };
+        if let Some(l) = log.as_mut() {
+            l.write_line("=== ffmpeg protocol sequence capture ===")?;
+            l.write_line(&format!("url={}", url2))?;
+            l.write_line(&format!("duration_sec={}", short_dur))?;
+        }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
             .arg("-rtsp_transport")
@@ -1568,7 +2039,37 @@ async fn harness_rtsp_protocol_sequence(
             .output("-");
         let mut child = cmd.spawn().context("spawn ffmpeg")?;
         let iter = child.iter().context("ffmpeg iter")?;
-        for _ in iter {}
+        let mut progress_count: u32 = 0;
+        for event in iter {
+            if let Some(l) = log.as_mut() {
+                match &event {
+                    FfmpegEvent::Log(_, msg) => l.write_line(msg)?,
+                    FfmpegEvent::Progress(p) => l.write_line(&format!(
+                        "progress frame={} fps={} bitrate_kbps={} time={} speed={}",
+                        p.frame, p.fps, p.bitrate_kbps, p.time, p.speed
+                    ))?,
+                    FfmpegEvent::Done => l.write_line("done")?,
+                    other => l.write_line(&format!("event={:?}", other))?,
+                }
+            }
+            if let FfmpegEvent::Progress(FfmpegProgress {
+                frame, fps, time, ..
+            }) = &event
+            {
+                progress_count += 1;
+                if progress_count == 1 || progress_count.is_multiple_of(50) {
+                    debug!(
+                        frame = *frame,
+                        fps = *fps,
+                        time = %time,
+                        "ffmpeg: protocol sequence capture progress"
+                    );
+                }
+            }
+            if matches!(event, FfmpegEvent::Done) {
+                debug!("ffmpeg: protocol sequence capture done");
+            }
+        }
         Ok::<_, anyhow::Error>(())
     });
     ffmpeg_handle.await.context("ffmpeg join")??;
@@ -1618,7 +2119,9 @@ async fn harness_rtsp_protocol_sequence(
                     }
                 }
             }
-            let _ = std::fs::remove_file(&pcap_path_str);
+            if !keep_pcaps {
+                let _ = std::fs::remove_file(&pcap_path_str);
+            }
             Ok::<_, anyhow::Error>((describe, setup, play, teardown, status_200, status_err))
         })
         .await
@@ -1632,10 +2135,13 @@ async fn harness_packet_loss(
     effective: &EffectiveConfig,
     _args: &Args,
 ) -> Result<(u32, u32, f64)> {
-    let pcap_path = std::env::temp_dir().join(format!("rtp_capture_{}.pcap", std::process::id()));
     let iface = effective.capture_interface.clone();
     let url = url.to_string();
     let _duration = effective.short_duration_sec + 5;
+    let artifacts_dir = effective.artifacts_dir.clone();
+    let capture_tool_output = effective.capture_tool_output;
+    let keep_pcaps = effective.keep_pcaps;
+    let pcap_path = artifacts_dir.join("rtp_packet_loss_capture.pcap");
 
     let filter = if effective.rtsp_host.parse::<std::net::IpAddr>().is_ok() {
         format!("udp and host {}", effective.rtsp_host)
@@ -1643,19 +2149,61 @@ async fn harness_packet_loss(
         "udp".to_string()
     };
 
-    let pcap_str_rtp = pcap_path.to_str().unwrap_or("/tmp/rtp.pcap").to_string();
+    let pcap_str_rtp = pcap_path.to_string_lossy().to_string();
+    let tshark_stdout_path = artifacts_dir.join("tshark_packet_loss.stdout.log");
+    let tshark_stderr_path = artifacts_dir.join("tshark_packet_loss.stderr.log");
+    let tshark_stdout = if capture_tool_output {
+        Stdio::from(
+            File::create(&tshark_stdout_path)
+                .with_context(|| format!("create {}", tshark_stdout_path.display()))?,
+        )
+    } else {
+        Stdio::null()
+    };
+    let tshark_stderr = if capture_tool_output {
+        Stdio::from(
+            File::create(&tshark_stderr_path)
+                .with_context(|| format!("create {}", tshark_stderr_path.display()))?,
+        )
+    } else {
+        Stdio::null()
+    };
     let mut tshark_handle_rtp = Command::new("tshark")
         .args(["-i", &iface, "-f", &filter, "-w", &pcap_str_rtp])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(tshark_stdout)
+        .stderr(tshark_stderr)
         .spawn()
         .context("spawn tshark")?;
+    info!(
+        pcap = %pcap_path.display(),
+        stdout_log = %tshark_stdout_path.display(),
+        stderr_log = %tshark_stderr_path.display(),
+        "tshark capture started (packet loss)"
+    );
 
     tokio::time::sleep(Duration::from_secs(1)).await;
 
+    debug!(
+        url = %url,
+        duration_sec = effective.short_duration_sec,
+        transport = "udp",
+        "ffmpeg: packet loss capture start"
+    );
     let url2 = url.clone();
     let short_dur_rtp = effective.short_duration_sec;
+    let ffmpeg_log_path = artifacts_dir.join("ffmpeg_packet_loss_capture.log");
     tokio::task::spawn_blocking(move || {
+        let mut log = if capture_tool_output {
+            Some(BoundedLogWriter::create(&ffmpeg_log_path)?)
+        } else {
+            None
+        };
+        if let Some(l) = log.as_mut() {
+            l.write_line("=== ffmpeg packet loss capture ===")?;
+            l.write_line(&format!("url={}", url2))?;
+            l.write_line(&format!("duration_sec={}", short_dur_rtp))?;
+            l.write_line("transport=udp")?;
+        }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
             .arg("-rtsp_transport")
@@ -1666,7 +2214,37 @@ async fn harness_packet_loss(
             .output("-");
         let mut child = cmd.spawn().context("spawn ffmpeg")?;
         let iter = child.iter().context("ffmpeg iter")?;
-        for _ in iter {}
+        let mut progress_count: u32 = 0;
+        for event in iter {
+            if let Some(l) = log.as_mut() {
+                match &event {
+                    FfmpegEvent::Log(_, msg) => l.write_line(msg)?,
+                    FfmpegEvent::Progress(p) => l.write_line(&format!(
+                        "progress frame={} fps={} bitrate_kbps={} time={} speed={}",
+                        p.frame, p.fps, p.bitrate_kbps, p.time, p.speed
+                    ))?,
+                    FfmpegEvent::Done => l.write_line("done")?,
+                    other => l.write_line(&format!("event={:?}", other))?,
+                }
+            }
+            if let FfmpegEvent::Progress(FfmpegProgress {
+                frame, fps, time, ..
+            }) = &event
+            {
+                progress_count += 1;
+                if progress_count == 1 || progress_count.is_multiple_of(100) {
+                    debug!(
+                        frame = *frame,
+                        fps = *fps,
+                        time = %time,
+                        "ffmpeg: packet loss capture progress"
+                    );
+                }
+            }
+            if matches!(event, FfmpegEvent::Done) {
+                debug!("ffmpeg: packet loss capture done");
+            }
+        }
         Ok::<_, anyhow::Error>(())
     })
     .await
@@ -1698,7 +2276,9 @@ async fn harness_packet_loss(
                 }
             }
         }
-        let _ = std::fs::remove_file(&pcap_path_str);
+        if !keep_pcaps {
+            let _ = std::fs::remove_file(&pcap_path_str);
+        }
         seqs.sort();
         let mut loss = 0u32;
         for w in seqs.windows(2) {
@@ -1721,12 +2301,31 @@ async fn harness_packet_loss(
     Ok((rtp_packets, packet_loss, loss_percent))
 }
 
-async fn harness_concurrent_clients(url: &str, duration_sec: u64, count: u32) -> Result<u32> {
+async fn harness_concurrent_clients(
+    url: &str,
+    duration_sec: u64,
+    count: u32,
+    artifacts_dir: &Path,
+    capture_tool_output: bool,
+) -> Result<u32> {
     let mut handles = Vec::new();
-    for _ in 0..count {
+    for i in 0..count {
+        trace!(url = %url, client_index = i, "ffmpeg: concurrent client start");
         let url = url.to_string();
         let dur = duration_sec;
+        let log_path = artifacts_dir.join(format!("ffmpeg_concurrent_client_{}.log", i));
         handles.push(tokio::task::spawn_blocking(move || {
+            let mut log = if capture_tool_output {
+                Some(BoundedLogWriter::create(&log_path)?)
+            } else {
+                None
+            };
+            if let Some(l) = log.as_mut() {
+                l.write_line("=== ffmpeg concurrent client ===")?;
+                l.write_line(&format!("client_index={}", i))?;
+                l.write_line(&format!("url={}", url))?;
+                l.write_line(&format!("duration_sec={}", dur))?;
+            }
             let mut cmd = FfmpegCommand::new();
             cmd.hide_banner()
                 .arg("-rtsp_transport")
@@ -1737,23 +2336,62 @@ async fn harness_concurrent_clients(url: &str, duration_sec: u64, count: u32) ->
                 .output("-");
             let mut child = cmd.spawn().context("spawn ffmpeg")?;
             let iter = child.iter().context("ffmpeg iter")?;
-            for _ in iter {}
+            for event in iter {
+                if let Some(l) = log.as_mut() {
+                    match &event {
+                        FfmpegEvent::Log(_, msg) => l.write_line(msg)?,
+                        FfmpegEvent::Progress(p) => l.write_line(&format!(
+                            "progress frame={} fps={} bitrate_kbps={} time={} speed={}",
+                            p.frame, p.fps, p.bitrate_kbps, p.time, p.speed
+                        ))?,
+                        FfmpegEvent::Done => l.write_line("done")?,
+                        other => l.write_line(&format!("event={:?}", other))?,
+                    }
+                }
+            }
             Ok::<_, anyhow::Error>(())
         }));
     }
     let mut failed = 0u32;
-    for h in handles {
-        if h.await.context("join")?.is_err() {
+    for (i, h) in handles.into_iter().enumerate() {
+        if let Err(e) = h.await.context("join")? {
             failed += 1;
+            debug!(
+                client_index = i,
+                error = ?e,
+                "ffmpeg: concurrent client failed"
+            );
         }
     }
+    debug!(total = count, failed, "ffmpeg: concurrent clients result");
     Ok(failed)
 }
 
-async fn harness_long_duration(url: &str, long_duration_sec: u64) -> Result<u32> {
+async fn harness_long_duration(
+    url: &str,
+    long_duration_sec: u64,
+    artifacts_dir: &Path,
+    capture_tool_output: bool,
+) -> Result<u32> {
+    debug!(
+        url = %url,
+        duration_sec = long_duration_sec,
+        "ffmpeg: long duration start"
+    );
     let url = url.to_string();
     let dur = long_duration_sec;
+    let log_path = artifacts_dir.join("ffmpeg_long_duration.log");
     let degradation = tokio::task::spawn_blocking(move || {
+        let mut log = if capture_tool_output {
+            Some(BoundedLogWriter::create(&log_path)?)
+        } else {
+            None
+        };
+        if let Some(l) = log.as_mut() {
+            l.write_line("=== ffmpeg long duration ===")?;
+            l.write_line(&format!("url={}", url))?;
+            l.write_line(&format!("duration_sec={}", dur))?;
+        }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
             .arg("-rtsp_transport")
@@ -1766,15 +2404,44 @@ async fn harness_long_duration(url: &str, long_duration_sec: u64) -> Result<u32>
         let iter = child.iter().context("ffmpeg iter")?;
         let mut first_bitrate = None::<f32>;
         let mut last_bitrate = None::<f32>;
+        let mut progress_count: u32 = 0;
         for event in iter {
+            if let Some(l) = log.as_mut() {
+                match &event {
+                    FfmpegEvent::Log(_, msg) => l.write_line(msg)?,
+                    FfmpegEvent::Progress(p) => l.write_line(&format!(
+                        "progress frame={} fps={} bitrate_kbps={} time={} speed={}",
+                        p.frame, p.fps, p.bitrate_kbps, p.time, p.speed
+                    ))?,
+                    FfmpegEvent::Done => l.write_line("done")?,
+                    other => l.write_line(&format!("event={:?}", other))?,
+                }
+            }
             if let FfmpegEvent::Progress(FfmpegProgress {
-                bitrate_kbps: b, ..
+                frame,
+                fps,
+                bitrate_kbps: b,
+                ..
             }) = &event
             {
                 if first_bitrate.is_none() {
                     first_bitrate = Some(*b);
+                    debug!(
+                        frame = *frame,
+                        fps = *fps,
+                        bitrate_kbps = *b,
+                        "ffmpeg: long duration first progress"
+                    );
                 }
                 last_bitrate = Some(*b);
+                progress_count += 1;
+                if progress_count.is_multiple_of(500) {
+                    debug!(
+                        frame = *frame,
+                        bitrate_kbps = *b,
+                        "ffmpeg: long duration progress"
+                    );
+                }
             }
         }
         let (f, l) = match (first_bitrate, last_bitrate) {
@@ -1782,6 +2449,12 @@ async fn harness_long_duration(url: &str, long_duration_sec: u64) -> Result<u32>
             _ => return Ok::<_, anyhow::Error>(0u32),
         };
         let deg = (100.0_f64 * (1.0 - l / f)) as u32;
+        debug!(
+            degradation_pct = deg,
+            first_bitrate = f,
+            last_bitrate = l,
+            "ffmpeg: long duration result"
+        );
         Ok(deg)
     })
     .await
@@ -1794,11 +2467,24 @@ async fn harness_error_handling(
     port: u16,
     stream: &str,
     _timeout_sec: u64,
+    artifacts_dir: &Path,
+    capture_tool_output: bool,
 ) -> Result<(bool, bool)> {
     let invalid_url = format!("rtsp://invalid:invalid@{}:{}{}", host, port, stream);
     let bogus_url = format!("rtsp://{}:{}/bogus_stream", host, port);
 
+    debug!(url = %invalid_url, "ffmpeg: error handling invalid creds start");
+    let invalid_log_path = artifacts_dir.join("ffmpeg_error_invalid_creds.log");
     let invalid_ok = tokio::task::spawn_blocking(move || {
+        let mut log = if capture_tool_output {
+            Some(BoundedLogWriter::create(&invalid_log_path)?)
+        } else {
+            None
+        };
+        if let Some(l) = log.as_mut() {
+            l.write_line("=== ffmpeg error handling: invalid creds ===")?;
+            l.write_line(&format!("url={}", invalid_url))?;
+        }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
             .arg("-rtsp_transport")
@@ -1811,9 +2497,21 @@ async fn harness_error_handling(
         let iter = child.iter().context("ffmpeg iter")?;
         let mut saw_401 = false;
         for event in iter {
+            if let Some(l) = log.as_mut() {
+                match &event {
+                    FfmpegEvent::Log(_, msg) => l.write_line(msg)?,
+                    FfmpegEvent::Progress(p) => l.write_line(&format!(
+                        "progress frame={} fps={} bitrate_kbps={} time={} speed={}",
+                        p.frame, p.fps, p.bitrate_kbps, p.time, p.speed
+                    ))?,
+                    FfmpegEvent::Done => l.write_line("done")?,
+                    other => l.write_line(&format!("event={:?}", other))?,
+                }
+            }
             if let FfmpegEvent::Log(_, msg) = &event
                 && (msg.contains("401") || msg.contains("Unauthorized"))
             {
+                debug!(msg = %msg, "ffmpeg: saw 401/Unauthorized");
                 saw_401 = true;
                 break;
             }
@@ -1822,8 +2520,20 @@ async fn harness_error_handling(
     })
     .await
     .context("spawn_blocking")??;
+    debug!(saw_401 = invalid_ok, "ffmpeg: invalid creds result");
 
+    debug!(url = %bogus_url, "ffmpeg: error handling bogus URL start");
+    let bogus_log_path = artifacts_dir.join("ffmpeg_error_bogus_url.log");
     let bogus_ok = tokio::task::spawn_blocking(move || {
+        let mut log = if capture_tool_output {
+            Some(BoundedLogWriter::create(&bogus_log_path)?)
+        } else {
+            None
+        };
+        if let Some(l) = log.as_mut() {
+            l.write_line("=== ffmpeg error handling: bogus url ===")?;
+            l.write_line(&format!("url={}", bogus_url))?;
+        }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
             .arg("-rtsp_transport")
@@ -1836,9 +2546,21 @@ async fn harness_error_handling(
         let iter = child.iter().context("ffmpeg iter")?;
         let mut saw_404 = false;
         for event in iter {
+            if let Some(l) = log.as_mut() {
+                match &event {
+                    FfmpegEvent::Log(_, msg) => l.write_line(msg)?,
+                    FfmpegEvent::Progress(p) => l.write_line(&format!(
+                        "progress frame={} fps={} bitrate_kbps={} time={} speed={}",
+                        p.frame, p.fps, p.bitrate_kbps, p.time, p.speed
+                    ))?,
+                    FfmpegEvent::Done => l.write_line("done")?,
+                    other => l.write_line(&format!("event={:?}", other))?,
+                }
+            }
             if let FfmpegEvent::Log(_, msg) = &event
                 && (msg.contains("404") || msg.contains("Not Found"))
             {
+                debug!(msg = %msg, "ffmpeg: saw 404/Not Found");
                 saw_404 = true;
                 break;
             }
@@ -1847,6 +2569,7 @@ async fn harness_error_handling(
     })
     .await
     .context("spawn_blocking")??;
+    debug!(saw_404 = bogus_ok, "ffmpeg: bogus URL result");
 
     Ok((invalid_ok, bogus_ok))
 }
@@ -1949,9 +2672,7 @@ fn result_ok(r: &TestResult) -> bool {
 fn critical_proto_failed(tests: &[TestResult]) -> bool {
     tests.iter().any(|t| {
         if let TestResult::Fail { name, .. } = t {
-            name == "describe_ok"
-                || name == "play_ok"
-                || name.starts_with("setup_stream_")
+            name == "describe_ok" || name == "play_ok" || name.starts_with("setup_stream_")
         } else {
             false
         }
@@ -2030,6 +2751,21 @@ fn maybe_launch_server(args: &Args, effective: &EffectiveConfig) -> Result<Optio
         .stderr(Stdio::null());
     if args.loop_playback {
         cmd.arg("--loop-playback");
+    }
+    if effective.capture_tool_output {
+        let stdout_path = effective.artifacts_dir.join("onvif_rust.stdout.log");
+        let stderr_path = effective.artifacts_dir.join("onvif_rust.stderr.log");
+        let stdout = File::create(&stdout_path)
+            .with_context(|| format!("create {}", stdout_path.display()))?;
+        let stderr = File::create(&stderr_path)
+            .with_context(|| format!("create {}", stderr_path.display()))?;
+        cmd.stdout(Stdio::from(stdout));
+        cmd.stderr(Stdio::from(stderr));
+        info!(
+            stdout_log = %stdout_path.display(),
+            stderr_log = %stderr_path.display(),
+            "capturing onvif-rust output"
+        );
     }
     trace!(%bin, h264 = %h264_file, rtsp_port = args.rtsp_port, "spawning onvif-rust");
 
@@ -2437,7 +3173,9 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
         pass: setup_ok,
     });
     if !setup_ok {
-        tokio::spawn(async move { drop(session); });
+        tokio::spawn(async move {
+            drop(session);
+        });
         return Ok(empty_report(test_run, tests));
     }
     debug!("SETUP ok");
@@ -2628,10 +3366,7 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
     let passed = tests.iter().filter(|t| result_ok(t)).count();
     info!(
         total_tests = tests.len(),
-        passed,
-        video_frames,
-        audio_frames,
-        "RTSP validation complete"
+        passed, video_frames, audio_frames, "RTSP validation complete"
     );
 
     Ok(ValidationReport {
@@ -2643,6 +3378,7 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
             failed: 0,
             overall_pass: false,
         },
+        artifacts_dir: None,
         telemetry: None,
     })
 }
@@ -2657,6 +3393,7 @@ fn empty_report(test_run: TestRun, tests: Vec<TestResult>) -> ValidationReport {
             failed: 0,
             overall_pass: false,
         },
+        artifacts_dir: None,
         telemetry: None,
     }
 }
@@ -2701,7 +3438,10 @@ fn validate_h264_length_prefixed_nals(data: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_h264_length_prefixed_nals;
+    use super::{
+        MAX_TOOL_LOG_BYTES, run_artifacts_dir_name, tail_lossy, validate_h264_length_prefixed_nals,
+        write_bytes_tail,
+    };
 
     #[test]
     fn test_validate_h264_length_prefixed_nals_ok_single() {
@@ -2714,5 +3454,42 @@ mod tests {
     fn test_validate_h264_length_prefixed_nals_rejects_truncated() {
         let data = [0, 0, 0, 2, 0x65];
         assert!(validate_h264_length_prefixed_nals(&data).is_err());
+    }
+
+    #[test]
+    fn test_run_artifacts_dir_name_format() {
+        assert_eq!(
+            run_artifacts_dir_name("20260205T120102Z", 12345),
+            "20260205T120102Z_pid12345"
+        );
+    }
+
+    #[test]
+    fn test_tail_lossy_no_truncation() {
+        assert_eq!(tail_lossy("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_tail_lossy_truncation_adds_ellipsis() {
+        assert_eq!(tail_lossy("abcdef", 3), "…def");
+    }
+
+    #[test]
+    fn test_tail_lossy_unicode_safe() {
+        let s = "aé🙂b";
+        assert_eq!(tail_lossy(s, 2), "…🙂b");
+    }
+
+    #[test]
+    fn test_write_bytes_tail_truncates() {
+        let path = std::env::temp_dir().join(format!(
+            "rtsp_validation_tool_test_{}.log",
+            std::process::id()
+        ));
+        let bytes = vec![b'a'; MAX_TOOL_LOG_BYTES + 16];
+        write_bytes_tail(&path, &bytes).unwrap();
+        let out = std::fs::read(&path).unwrap();
+        assert!(out.starts_with(b"[truncated:"));
+        let _ = std::fs::remove_file(&path);
     }
 }

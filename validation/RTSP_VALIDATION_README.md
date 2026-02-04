@@ -98,6 +98,26 @@ RUST_LOG=retina=trace,rtsp_validation_tool=info ./validation/rtsp_validation_too
 
 Use `retina=debug` (or `retina-level = "debug"` in config) to see what the library is sending/receiving and why it might reject a response (e.g. missing `rtptime` on PLAY). Use `trace` for full protocol dumps.
 
+### Harness artifacts (ffmpeg/ffprobe/tshark output, pcaps)
+
+Each run creates a **per-run artifacts directory** and logs its path at startup. The JSON report also includes `artifacts_dir` so you can jump straight to it.
+
+Configure with `[artifacts]` in `rtsp_validation.toml`:
+
+```toml
+[artifacts]
+dir = "rtsp_results/runs"
+capture-tool-output = true
+keep-pcaps = true
+```
+
+Artifacts include (filenames are stable within a run directory):
+
+- `ffmpeg_*.log`: captured ffmpeg-sidecar log events and progress
+- `ffprobe_sdp_validation.stdout.log`, `ffprobe_sdp_validation.stderr.log`
+- `tshark_*.stdout.log`, `tshark_*.stderr.log`
+- `rtsp_protocol_sequence_*.pcap`, `rtp_packet_loss_capture.pcap` (pcaps are kept by default)
+
 ## Running against the camera (device validation)
 
 When the camera is on the network with telnet available (e.g. port 24), you can start `onvif-rust` on the device and run validation against it. The tool will start the server in `/mnt/anyka_hack/onvif` on the device, run all tests, collect system telemetry (RAM, CPU, onvif-rust memory), then stop the server.
