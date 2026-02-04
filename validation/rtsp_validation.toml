@@ -1,0 +1,42 @@
+# RTSP validation tool configuration
+# Override via CLI args or env RTSP_VALIDATION_CONFIG for path to this file
+
+[rtsp]
+host = "127.0.0.1"
+port = 554
+stream = "/vs0"
+timeout_sec = 10
+
+[test]
+short_duration_sec = 30
+long_duration_sec = 600
+concurrent_clients = 4
+
+[thresholds]
+video_startup_latency_ms = 1500
+audio_startup_latency_ms = 2000
+bitrate_tolerance_percent = 15
+fps_tolerance_percent = 10
+packet_loss_tolerance_percent = 1
+
+# Optional expected values; if unset, baseline comparison used when available
+# [thresholds.expected]
+# bitrate_kbps = 2000
+# fps = 25
+
+[baseline]
+dir = "rtsp_results/baselines"
+
+[capture]
+# Empty = auto (lo for localhost, any for remote)
+interface = ""
+
+[logging]
+level = "info"
+file = "rtsp_validation.log"
+
+# Device (camera) validation: telnet and telemetry when using --launch-on-device
+[device]
+host = "192.168.2.198"
+telnet_port = 24
+telemetry = true

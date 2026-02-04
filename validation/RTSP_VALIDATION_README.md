@@ -1,45 +1,46 @@
 # RTSP Validation Tool
 
-Host-side tool for testing RTSP performance and conformity without physical camera hardware. Can launch `onvif-rust` in validation mode with a test H.264 file and run tests using ffmpeg, ffprobe, and tshark.
+Host-side tool for testing RTSP performance and protocol conformance without physical camera hardware. A single Rust binary launches `onvif-rust` in validation mode (optional), runs protocol checks (Retina), and harness scenarios (ffmpeg, ffprobe, tshark), writing one JSON report.
 
 ## Overview
 
 - **Purpose**: Test RTSP performance and protocol conformance without hardware.
-- **Approach**: Optionally start onvif-rust with `--validation-mode --h264-file <path>`, then run tests against the RTSP endpoint.
-- **Tools**: ffmpeg, ffprobe, tshark for capture and metrics.
-- **Output**: Structured JSON report with metrics and pass/fail.
+- **Approach**: Optionally start onvif-rust with `--validation-mode --h264-file <path>`, then run protocol validation and harness (connectivity, latency, bitrate/fps, SDP, protocol sequence, packet loss, concurrent, long-duration, error handling) against the RTSP endpoint.
+- **Tools**: ffmpeg, ffprobe, tshark (invoked by the binary; must be installed).
+- **Config**: TOML file `rtsp_validation.toml` with CLI overrides.
+- **Output**: Single structured JSON report with metrics and pass/fail.
 
-## How the pieces fit together (current flow)
-
-The validation harness is intentionally split into a **config**, a **bash test runner**, and an **optional Rust validator**:
+## How it works
 
 ```mermaid
 flowchart TD
-  conf["rtsp_validation_tool.conf or env"] --> sh["rtsp_validation_tool.sh"]
-  sh -->|optional| launch["Launch onvif-rust validation-mode"]
-  sh --> ffmpeg["ffmpeg pulls stream for timing/bitrate/fps"]
-  sh --> ffprobe["ffprobe checks streams/SDP-derived metadata"]
-  sh --> tshark["tshark captures RTSP/RTP for protocol checks"]
-  sh --> report["rtsp_validation.json"]
-  sh --> baseline["scripts/rtsp_results/baselines/*.json"]
-  rust["rtsp_validation_tool - Rust"] -.->|optional| report
+  subgraph load [Load config]
+    TOML[rtsp_validation.toml]
+    CLI[CLI overrides]
+    Config[Effective config]
+  end
+  TOML --> Config
+  CLI --> Config
+
+  subgraph run [Run]
+    Launch[Maybe launch onvif-rust]
+    Proto[Protocol validation - Retina]
+    Harness[Harness - ffmpeg/ffprobe/tshark]
+    Merge[Single tests and summary]
+    Write[rtsp_validation.json]
+  end
+  Config --> Launch
+  Launch --> Proto
+  Proto --> Harness
+  Harness --> Merge
+  Merge --> Write
 ```
-
-- **Configuration**: `rtsp_validation_tool.sh` reads defaults from environment and then sources `scripts/rtsp_validation_tool.conf` when present.
-- **Primary runner**: `rtsp_validation_tool.sh` executes a fixed suite of scenarios and writes a single JSON report.
-- **Optional server launch**: With `--launch-server --h264-file <path>`, the script starts `onvif-rust` in `--validation-mode` and then tests `rtsp://127.0.0.1:<port>/stream1`.
-- **Baselines**: `--update-baseline` writes baseline JSON files; `--compare-baseline` compares current metrics against them to detect regressions.
-
-## Bash vs Rust tool (how they differ)
-
-- **`rtsp_validation_tool.sh` (bash)**: Source of truth for **performance metrics** and broad scenarios (concurrency, long-duration, tshark-assisted protocol counts). It depends on ffmpeg/ffprobe/tshark being installed.
-- **`rtsp_validation_tool` (Rust binary)**: Optional **protocol-level validator**. Use it when you want deterministic RTSP/SDP/RTP assertions without scraping ffmpeg logs.
 
 ## Prerequisites
 
 ```bash
-# Install required tools
-sudo apt-get install ffmpeg tshark jq
+# Install required tools (used by the binary)
+sudo apt-get install ffmpeg tshark
 
 # This repo uses a vendored Rust toolchain. Always use its cargo.
 export CARGO=toolchain/arm-anykav200-crosstool-ng/bin/cargo
@@ -48,7 +49,7 @@ export CARGO=toolchain/arm-anykav200-crosstool-ng/bin/cargo
 cd cross-compile/onvif-rust
 $CARGO build --target x86_64-unknown-linux-gnu --features validation-mode
 
-# Build the Rust protocol validator into validation/
+# Build the RTSP validation tool
 ./validation/build_rtsp_validation_tool.sh
 ```
 
@@ -59,104 +60,118 @@ $CARGO build --target x86_64-unknown-linux-gnu --features validation-mode
 ./validation/generate_test_h264.sh test_video.h264 30 25 1920x1080
 
 # Run validation against an already-running server (e.g. onvif-rust on port 8554)
-RTSP_PORT=8554 RTSP_STREAM=/stream1 ./validation/rtsp_validation_tool.sh
+./validation/rtsp_validation_tool --no-launch --rtsp-port 8554 --rtsp-stream /stream1
 
-# Or launch onvif-rust and run tests
-./validation/rtsp_validation_tool.sh --launch-server --h264-file test_video.h264
+# Or launch onvif-rust and run all tests
+./validation/rtsp_validation_tool --h264-file test_video.h264 --rtsp-port 8554 --rtsp-stream /stream1
 
 # View results
 cat rtsp_validation.json | jq .
 ```
 
+## Running against the camera (device validation)
+
+When the camera is on the network with telnet available (e.g. port 24), you can start `onvif-rust` on the device and run validation against it. The tool will start the server in `/mnt/anyka_hack/onvif` on the device, run all tests, collect system telemetry (RAM, CPU, onvif-rust memory), then stop the server.
+
+```bash
+# Device at 192.168.2.198, telnet on port 24 (default)
+./validation/rtsp_validation_tool --launch-on-device --no-launch
+
+# Explicit device host and telnet port
+./validation/rtsp_validation_tool --launch-on-device --no-launch --device-host 192.168.2.198 --device-telnet-port 24
+
+# Skip telemetry collection
+./validation/rtsp_validation_tool --launch-on-device --no-launch --no-telemetry
+```
+
+Requirements:
+
+- Telnet must be enabled on the device (default port 24).
+- `onvif-rust` and `config.toml` must be present at `/mnt/anyka_hack/onvif/` on the device.
+- RTSP port on device (default 554) must match `--rtsp-port` if you override it.
+
+When `--launch-on-device` is used, the JSON report may include a **telemetry** object with `mem_total_kib`, `mem_free_kib`, `mem_available_kib`, `load_avg_1m`, `load_avg_5m`, `load_avg_15m`, `onvif_rss_kib`, `onvif_vmsize_kib`, and `onvif_pid` (and optionally `error` if a command failed).
+
 ## Test Scenarios
 
-1. **Basic connectivity** – DESCRIBE request and SDP parsing.
-2. **Stream startup** – Time to first frame (target: video &lt;1500 ms, audio &lt;2000 ms).
-3. **Bitrate stability** – 30 s stream measurement (±15% tolerance).
-4. **Frame rate stability** – FPS consistency (±10% tolerance).
-5. **SDP validation** – Codec parameters and media tracks (ffprobe).
-6. **RTSP protocol sequence** – DESCRIBE → SETUP → PLAY → TEARDOWN (tshark).
-7. **Packet loss** – RTP sequence gap detection (target &lt;1%).
-8. **Concurrent clients** – Multiple clients (e.g. 2 or 4) streaming in parallel.
-9. **Long duration** – 10-minute stability (optional, `--long-duration`).
-10. **Error handling** – Invalid credentials, bogus URL (optional, can skip with `--skip-error-handling`).
+1. **Protocol (Retina)**: DESCRIBE, SDP streams, SETUP, PLAY, first-frame latency, RTP loss, H.264 length-prefix.
+2. **Basic connectivity** – ffmpeg quick probe.
+3. **Stream startup latency** – Time to first frame (threshold from config).
+4. **Bitrate / FPS stability** – Steady-state from ffmpeg progress.
+5. **SDP validation** – ffprobe stream/codec checks.
+6. **RTSP protocol sequence** – tshark capture + rtshark analysis (DESCRIBE/SETUP/PLAY/TEARDOWN, status codes).
+7. **Packet loss** – UDP capture and RTP seq gaps.
+8. **Concurrent clients** – Multiple ffmpeg clients in parallel (config or `--concurrent N`).
+9. **Long duration** – Optional `--long-duration` (config long_duration_sec).
+10. **Error handling** – Invalid credentials, bogus URL (optional, skip with `--skip-error-handling`).
 
 ## Configuration
 
-Edit `validation/rtsp_validation_tool.conf` or override via environment:
+Configuration is read from TOML. Search order: `--config <path>`, env `RTSP_VALIDATION_CONFIG`, then `./rtsp_validation.toml`, then `validation/rtsp_validation.toml`. CLI overrides config.
 
-- Common knobs:
-  - `RTSP_HOST`, `RTSP_PORT`, `RTSP_STREAM`
-  - `TEST_DURATION` (defaults to `SHORT_TEST_DURATION` from the config)
-  - `CAPTURE_IFACE` (tshark interface; defaults to `lo` for localhost targets, otherwise `any`)
-  - Thresholds: `VIDEO_STARTUP_LATENCY_MS`, `BITRATE_TOLERANCE_PERCENT`, `FPS_TOLERANCE_PERCENT`, `PACKET_LOSS_TOLERANCE_PERCENT`
+Example `validation/rtsp_validation.toml`:
 
-```bash
-source validation/rtsp_validation_tool.conf
+```toml
+[rtsp]
+host = "127.0.0.1"
+port = 554
+stream = "/vs0"
+timeout_sec = 10
 
-# Override
-RTSP_HOST=192.168.1.100 \
-RTSP_PORT=554 \
-RTSP_STREAM=/stream1 \
-TEST_DURATION=60 \
-OUTPUT_FILE=results.json \
-./validation/rtsp_validation_tool.sh
+[test]
+short_duration_sec = 30
+long_duration_sec = 600
+concurrent_clients = 4
+
+[thresholds]
+video_startup_latency_ms = 1500
+audio_startup_latency_ms = 2000
+bitrate_tolerance_percent = 15
+fps_tolerance_percent = 10
+packet_loss_tolerance_percent = 1
+
+[baseline]
+dir = "rtsp_results/baselines"
+
+[capture]
+# Empty = auto (lo for localhost, any for remote)
+interface = ""
+
+# Optional: device validation (--launch-on-device)
+[device]
+host = "192.168.2.198"
+telnet_port = 24
+telemetry = true
 ```
 
-When testing **onvif-rust validation mode**, use `RTSP_STREAM=/stream1` and default RTSP port from the server (e.g. 8554).
+Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--duration`, `--config`, `--update-baseline`, `--compare-baseline`, `--concurrent`, `--long-duration`, `--skip-error-handling`, `--output`. For device validation: `--launch-on-device`, `--no-launch`, `--device-host`, `--device-telnet-port`, `--no-telemetry`.
 
 ## Metrics
 
-- **startup_latency_ms** – Time to first decoded video frame (threshold: `VIDEO_STARTUP_LATENCY_MS`).
-- **bitrate_kbps / fps** – Steady-state estimates from ffmpeg logs (validated via expected values or baselines).
-- **packet_loss_percent** – UDP-mode RTP loss estimate from tshark capture (threshold: `PACKET_LOSS_TOLERANCE_PERCENT`).
-- **protocol_sequence** – RTSP method counts plus a basic “no RTSP >=400 responses” check from tshark capture.
+- **startup_latency_ms** / **harness_startup_latency_ms** – Time to first decoded video frame.
+- **harness_bitrate_kbps**, **harness_fps** – From ffmpeg progress; validated via config expected values or baselines.
+- **harness_packet_loss_percent** – RTP loss from capture (threshold in config).
+- **harness_protocol_sequence** – RTSP method counts and status codes from pcap.
 
 ## Baseline Management
 
 ```bash
 # Create baseline from current run
-./validation/rtsp_validation_tool.sh --update-baseline
+./validation/rtsp_validation_tool --no-launch --rtsp-port 8554 --update-baseline
 
-# Compare against baseline
-./validation/rtsp_validation_tool.sh --compare-baseline
+# Compare against baseline (adds baseline_regression_* fail if over tolerance)
+./validation/rtsp_validation_tool --no-launch --rtsp-port 8554 --compare-baseline
 
-# Baselines stored under
-cat validation/rtsp_results/baselines/startup_latency_ms_baseline.json
-# Other common baselines:
-# - validation/rtsp_results/baselines/bitrate_kbps_baseline.json
-# - validation/rtsp_results/baselines/fps_baseline.json
-# - validation/rtsp_results/baselines/packet_loss_percent_baseline.json
+# Baselines stored under config baseline.dir (default rtsp_results/baselines/)
+# e.g. harness_startup_latency_ms_baseline.json, harness_bitrate_kbps_baseline.json, etc.
 ```
 
 ## CI/CD
 
 ```bash
 # Fail on any test failure
-./validation/rtsp_validation_tool.sh && \
+./validation/rtsp_validation_tool --no-launch --rtsp-port 8554 && \
   jq -e '.summary.overall_pass' rtsp_validation.json
-```
-
-## Rust validation tool (optional)
-
-A Rust binary can launch the server and run protocol-level RTSP/SDP/RTP checks with a JSON report.
-It is **feature-gated** behind `rtsp-validation-tool`.
-
-```bash
-./validation/build_rtsp_validation_tool.sh
-
-# Run (starts server if --h264-file given)
-./validation/rtsp_validation_tool \
-  --h264-file ./test_video.h264 \
-  --rtsp-host 127.0.0.1 \
-  --rtsp-port 8554 \
-  --rtsp-stream /stream1 \
-  --duration 60 \
-  --output validation/rtsp_validation_rust.json
-
-# Connect to existing server only
-./validation/rtsp_validation_tool \
-  --no-launch --rtsp-host 127.0.0.1 --rtsp-port 8554 --rtsp-stream /vs0 --duration 10 --output validation/rtsp_validation_rust.json
 ```
 
 ## Troubleshooting
@@ -164,6 +179,7 @@ It is **feature-gated** behind `rtsp-validation-tool`.
 - **ffmpeg not found** – `sudo apt-get install ffmpeg`
 - **tshark not found** – `sudo apt-get install tshark`
 - **Permission denied for tshark** – Run with `sudo` or add user to the `wireshark` group.
-- **Server not starting** – Check `/tmp/onvif_server.log`.
-- **Port in use** – Set `RTSP_PORT` in config or stop the process using the port.
-- **Stream not found** – For onvif-rust use `RTSP_STREAM=/stream1` and the port the server reports (e.g. 8554).
+- **Server not starting** – Check that onvif-rust is built with `--features validation-mode` and H.264 file path is valid.
+- **Port in use** – Set `--rtsp-port` or stop the process using the port.
+- **Stream not found** – For onvif-rust use `--rtsp-stream /stream1` and the port the server reports (e.g. 8554).
+- **Device unreachable** – With `--launch-on-device`, ensure the device IP is correct (`--device-host`), telnet is on (port 24 by default), and `/mnt/anyka_hack/onvif/onvif-rust` and `config.toml` exist on the device.
