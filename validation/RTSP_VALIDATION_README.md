@@ -92,6 +92,42 @@ Requirements:
 
 When `--launch-on-device` is used, the JSON report may include a **telemetry** object with `mem_total_kib`, `mem_free_kib`, `mem_available_kib`, `load_avg_1m`, `load_avg_5m`, `load_avg_15m`, `onvif_rss_kib`, `onvif_vmsize_kib`, and `onvif_pid` (and optionally `error` if a command failed).
 
+### H.264/AAC files on device (validation mode)
+
+To run validation against a **file** (H.264 and optional AAC) instead of the live camera, the files must be on the device and the device `onvif-rust` binary must be built with the **validation-mode** feature.
+
+**Getting files onto the device:**
+
+1. **SD card** – Copy H.264/AAC into the SD card folder `anyka_hack/onvif/` (e.g. `validation/rtsp_results/test.h264` → `SD_card_contents/anyka_hack/onvif/test.h264`). After boot, they appear at `/mnt/anyka_hack/onvif/test.h264` on the device.
+2. **SCP** – If the device runs SSH (e.g. Dropbear), copy with `scp test.h264 root@192.168.2.198:/mnt/anyka_hack/onvif/`.
+
+**Running with device-side files:**
+
+```bash
+# H.264 only (path is on the device)
+./validation/rtsp_validation_tool --launch-on-device --no-launch \
+  --device-h264-file /mnt/anyka_hack/onvif/test.h264
+
+# H.264 + AAC, loop playback
+./validation/rtsp_validation_tool --launch-on-device --no-launch \
+  --device-h264-file /mnt/anyka_hack/onvif/test.h264 \
+  --device-aac-file /mnt/anyka_hack/onvif/test.aac \
+  --device-loop-playback
+```
+
+You can set paths in config instead of argv:
+
+```toml
+[device]
+host = "192.168.2.198"
+telnet_port = 24
+h264_file = "/mnt/anyka_hack/onvif/test.h264"
+aac_file = "/mnt/anyka_hack/onvif/test.aac"
+loop_playback = true
+```
+
+**Requirement:** The `onvif-rust` binary deployed to `/mnt/anyka_hack/onvif/` must be built with `--features validation-mode` so that `--validation-mode --h264-file` is supported.
+
 ## Test Scenarios
 
 1. **Protocol (Retina)**: DESCRIBE, SDP streams, SETUP, PLAY, first-frame latency, RTP loss, H.264 length-prefix.

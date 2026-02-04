@@ -175,6 +175,15 @@ pub struct DeviceSection {
     pub telnet_port: u16,
     #[serde(default = "default_telemetry_enabled")]
     pub telemetry: bool,
+    /// Path on device to H.264 file for validation mode (e.g. /mnt/anyka_hack/onvif/test.h264).
+    #[serde(default)]
+    pub h264_file: Option<String>,
+    /// Path on device to AAC file for validation mode (optional).
+    #[serde(default)]
+    pub aac_file: Option<String>,
+    /// Loop H.264/AAC playback in validation mode.
+    #[serde(default)]
+    pub loop_playback: bool,
 }
 
 fn default_device_host() -> String {
@@ -210,6 +219,9 @@ pub struct EffectiveConfig {
     pub device_host: String,
     pub device_telnet_port: u16,
     pub collect_telemetry: bool,
+    pub device_h264_file: Option<String>,
+    pub device_aac_file: Option<String>,
+    pub device_loop_playback: bool,
 }
 
 impl EffectiveConfig {
@@ -242,6 +254,17 @@ impl EffectiveConfig {
             .unwrap_or(24);
         let launch_on_device = args.launch_on_device;
         let collect_telemetry = launch_on_device && !args.no_telemetry && c.device.telemetry;
+        let device_h264_file = args
+            .device_h264_file
+            .clone()
+            .or_else(|| c.device.h264_file.clone())
+            .filter(|s| !s.is_empty());
+        let device_aac_file = args
+            .device_aac_file
+            .clone()
+            .or_else(|| c.device.aac_file.clone())
+            .filter(|s| !s.is_empty());
+        let device_loop_playback = args.device_loop_playback || c.device.loop_playback;
         let rtsp_host = if launch_on_device {
             device_host.clone()
         } else {
@@ -276,6 +299,9 @@ impl EffectiveConfig {
             device_host,
             device_telnet_port,
             collect_telemetry,
+            device_h264_file,
+            device_aac_file,
+            device_loop_playback,
         }
     }
 
@@ -310,9 +336,9 @@ fn baseline_direction_for(test_name: &str) -> &'static str {
         | "harness_packet_loss_percent" => "lower",
         "bitrate_kbps" | "harness_bitrate_kbps" | "fps" | "harness_fps" => "higher",
         // Device telemetry: free/available/total RAM higher is better; load and process memory lower is better
-        "telemetry_mem_free_kib"
-        | "telemetry_mem_available_kib"
-        | "telemetry_mem_total_kib" => "higher",
+        "telemetry_mem_free_kib" | "telemetry_mem_available_kib" | "telemetry_mem_total_kib" => {
+            "higher"
+        }
         "telemetry_load_avg_1m"
         | "telemetry_load_avg_5m"
         | "telemetry_load_avg_15m"
@@ -519,6 +545,18 @@ struct Args {
     /// Disable telemetry collection when using --launch-on-device.
     #[arg(long)]
     no_telemetry: bool,
+
+    /// Path on device to H.264 file for validation mode (e.g. /mnt/anyka_hack/onvif/test.h264).
+    #[arg(long)]
+    device_h264_file: Option<String>,
+
+    /// Path on device to AAC file for validation mode (optional).
+    #[arg(long)]
+    device_aac_file: Option<String>,
+
+    /// Loop H.264/AAC playback when using device validation mode.
+    #[arg(long)]
+    device_loop_playback: bool,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -643,10 +681,23 @@ async fn main() -> Result<()> {
     if effective.launch_on_device {
         let host = effective.device_host.clone();
         let port = effective.device_telnet_port;
-        tokio::task::spawn_blocking(move || device_start_onvif_blocking(&host, port))
-            .await
-            .context("spawn_blocking device start")?
-            .context("device start onvif-rust")?;
+        let rtsp_port = effective.rtsp_port;
+        let h264 = effective.device_h264_file.clone();
+        let aac = effective.device_aac_file.clone();
+        let loop_playback = effective.device_loop_playback;
+        tokio::task::spawn_blocking(move || {
+            device_start_onvif_blocking(
+                &host,
+                port,
+                rtsp_port,
+                h264.as_deref(),
+                aac.as_deref(),
+                loop_playback,
+            )
+        })
+        .await
+        .context("spawn_blocking device start")?
+        .context("device start onvif-rust")?;
         sleep(Duration::from_secs(2)).await;
         wait_for_server(&effective.rtsp_host, effective.rtsp_port)
             .await
@@ -1663,12 +1714,35 @@ fn run_telnet_command_blocking(
     Ok(s)
 }
 
-/// Start onvif-rust on the device (blocking).
-fn device_start_onvif_blocking(host: &str, port: u16) -> Result<()> {
-    let cmd = format!(
-        "cd {} && nohup ./onvif-rust {}/config.toml &",
-        DEVICE_ONVIF_DIR, DEVICE_ONVIF_DIR
-    );
+/// Start onvif-rust on the device (blocking). If h264_file is Some, runs in validation mode.
+fn device_start_onvif_blocking(
+    host: &str,
+    port: u16,
+    rtsp_port: u16,
+    h264_file: Option<&str>,
+    aac_file: Option<&str>,
+    loop_playback: bool,
+) -> Result<()> {
+    let cmd = if let Some(h264) = h264_file {
+        // Validation mode: serve H.264 (and optional AAC) from device paths.
+        let mut c = format!(
+            "cd {} && nohup ./onvif-rust --validation-mode --h264-file '{}' --rtsp-port {}",
+            DEVICE_ONVIF_DIR, h264, rtsp_port
+        );
+        if let Some(aac) = aac_file {
+            c.push_str(&format!(" --aac-file '{}'", aac));
+        }
+        if loop_playback {
+            c.push_str(" --loop-playback");
+        }
+        c.push_str(&format!(" {}/config.toml &", DEVICE_ONVIF_DIR));
+        c
+    } else {
+        format!(
+            "cd {} && nohup ./onvif-rust {}/config.toml &",
+            DEVICE_ONVIF_DIR, DEVICE_ONVIF_DIR
+        )
+    };
     run_telnet_command_blocking(host, port, &cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
     Ok(())
 }

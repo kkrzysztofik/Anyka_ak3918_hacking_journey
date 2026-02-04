@@ -40,3 +40,7 @@ file = "rtsp_validation.log"
 host = "192.168.2.198"
 telnet_port = 24
 telemetry = true
+# Optional: paths on device for H.264/AAC validation mode (device binary must be built with validation-mode)
+# h264_file = "/mnt/anyka_hack/onvif/test.h264"
+# aac_file = "/mnt/anyka_hack/onvif/test.aac"
+# loop_playback = false
