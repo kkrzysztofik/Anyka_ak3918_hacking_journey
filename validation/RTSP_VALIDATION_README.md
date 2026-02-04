@@ -117,6 +117,7 @@ Artifacts include (filenames are stable within a run directory):
 - `ffprobe_sdp_validation.stdout.log`, `ffprobe_sdp_validation.stderr.log`
 - `tshark_*.stdout.log`, `tshark_*.stderr.log`
 - `rtsp_protocol_sequence_*.pcap`, `rtp_packet_loss_capture.pcap` (pcaps are kept by default)
+- `device_onvif.log*` copies (pulled from `/mnt/anyka_hack/onvif/onvif.log.*` when using `--launch-on-device`)
 
 ## Running against the camera (device validation)
 

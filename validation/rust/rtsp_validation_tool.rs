@@ -900,16 +900,30 @@ async fn cleanup_on_signal(
     launch_on_device: bool,
     device_host: &str,
     device_telnet_port: u16,
+    artifacts_dir: &Path,
     child: &mut Option<Child>,
 ) {
     info!("interrupted by signal, cleaning up");
     if launch_on_device {
         let host = device_host.to_string();
         let port = device_telnet_port;
-        match tokio::task::spawn_blocking(move || device_stop_onvif_blocking(&host, port)).await {
+        let artifacts_dir = artifacts_dir.to_path_buf();
+        let host_for_stop = host.clone();
+        match tokio::task::spawn_blocking(move || device_stop_onvif_blocking(&host_for_stop, port))
+            .await
+        {
             Ok(Ok(())) => {}
             Ok(Err(e)) => warn!(error = %e, "device stop onvif-rust during cleanup"),
             Err(e) => warn!(error = %e, "spawn_blocking device stop during cleanup"),
+        }
+        match tokio::task::spawn_blocking(move || {
+            device_copy_onvif_logs_blocking(&host, port, &artifacts_dir)
+        })
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => warn!(error = %e, "device log copy during cleanup"),
+            Err(e) => warn!(error = %e, "spawn_blocking device log copy during cleanup"),
         }
     }
     if let Some(c) = child {
@@ -1023,6 +1037,7 @@ async fn main() -> Result<()> {
                 effective.launch_on_device,
                 &effective.device_host,
                 effective.device_telnet_port,
+                &effective.artifacts_dir,
                 &mut child,
             )
             .await;
@@ -1040,6 +1055,19 @@ async fn main() -> Result<()> {
                 .context("spawn_blocking device stop");
         if let Err(e) = stop_result.and_then(|r| r) {
             warn!(error = %e, "device stop onvif-rust failed");
+        }
+
+        let host = effective.device_host.clone();
+        let port = effective.device_telnet_port;
+        let artifacts_dir = effective.artifacts_dir.clone();
+        match tokio::task::spawn_blocking(move || {
+            device_copy_onvif_logs_blocking(&host, port, &artifacts_dir)
+        })
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => warn!(error = %e, "device onvif log copy failed"),
+            Err(e) => warn!(error = %e, "spawn_blocking device onvif log copy failed"),
         }
     }
 
@@ -2799,6 +2827,7 @@ async fn wait_for_server(host: &str, port: u16) -> Result<()> {
 // -----------------------------------------------------------------------------
 
 const DEVICE_ONVIF_DIR: &str = "/mnt/anyka_hack/onvif";
+const DEVICE_ONVIF_LOG_GLOB: &str = "onvif.log*";
 const DEVICE_TELNET_CONNECT_TIMEOUT_SEC: u64 = 15;
 const DEVICE_TELNET_READ_TIMEOUT_SEC: u64 = 8;
 
@@ -2843,6 +2872,71 @@ fn run_telnet_command_blocking(
     Ok(s)
 }
 
+fn sanitize_filename_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len().min(128));
+    for ch in s.chars().take(128) {
+        let ok = ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-');
+        out.push(if ok { ch } else { '_' });
+    }
+    if out.is_empty() {
+        "unknown".to_string()
+    } else {
+        out
+    }
+}
+
+fn device_cleanup_onvif_logs_blocking(host: &str, port: u16) -> Result<()> {
+    let cmd = format!(
+        "cd {} && rm -f {} 2>/dev/null",
+        DEVICE_ONVIF_DIR, DEVICE_ONVIF_LOG_GLOB
+    );
+    debug!(command = %cmd, "device cleanup onvif logs");
+    let _ = run_telnet_command_blocking(host, port, &cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
+    Ok(())
+}
+
+fn device_copy_onvif_logs_blocking(host: &str, port: u16, artifacts_dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(artifacts_dir)
+        .with_context(|| format!("create artifacts dir {}", artifacts_dir.display()))?;
+
+    let list_cmd = format!(
+        "cd {} && ls -1 {} 2>/dev/null",
+        DEVICE_ONVIF_DIR, DEVICE_ONVIF_LOG_GLOB
+    );
+    let listing =
+        run_telnet_command_blocking(host, port, &list_cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
+    let files: Vec<String> = listing
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .filter(|l| !l.contains('/'))
+        .map(|l| l.to_string())
+        .collect();
+
+    if files.is_empty() {
+        debug!("no device onvif logs found");
+        return Ok(());
+    }
+
+    for f in files {
+        let safe = sanitize_filename_component(&f);
+        let out_path = artifacts_dir.join(format!("device_{}", safe));
+
+        // Prefer tail by bytes; fall back to tail by lines; then cat.
+        let read_cmd = format!(
+            "cd {} && (tail -c {} '{}' 2>/dev/null || tail -n 20000 '{}' 2>/dev/null || cat '{}' 2>/dev/null)",
+            DEVICE_ONVIF_DIR, MAX_TOOL_LOG_BYTES, f, f, f
+        );
+        let content =
+            run_telnet_command_blocking(host, port, &read_cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
+        write_bytes_tail(&out_path, content.as_bytes())
+            .with_context(|| format!("write {}", out_path.display()))?;
+        info!(path = %out_path.display(), device_file = %f, "copied device onvif log");
+    }
+
+    Ok(())
+}
+
 /// Start onvif-rust on the device (blocking). If h264_file is Some, runs in validation mode.
 fn device_start_onvif_blocking(
     host: &str,
@@ -2861,6 +2955,9 @@ fn device_start_onvif_blocking(
         loop_playback,
         "starting onvif-rust on device"
     );
+    if let Err(e) = device_cleanup_onvif_logs_blocking(host, port) {
+        warn!(error = %e, "failed to cleanup device onvif logs before start");
+    }
     let cmd = if let Some(h264) = h264_file {
         // Validation mode: serve H.264 (and optional AAC) from device paths.
         let mut c = format!(
