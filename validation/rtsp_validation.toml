@@ -8,17 +8,17 @@
 # -----------------------------------------------------------------------------
 [run]
 # Connect to existing server (no local/device launch)
-no_launch = true
-# Start onvif-rust on the device via telnet (implies no_launch)
-launch_on_device = true
-# For local launch only (no_launch=false, launch_on_device=false): path to H.264 file
-# h264_file = "test_video.h264"
+no-launch = false
+# Start onvif-rust on the device via telnet (implies no-launch)
+launch-on-device = true
+# For local launch only (no-launch=false, launch-on-device=false): path to H.264 file
+# h264-file = "test_video.h264"
 # Output report path
 output = "rtsp_validation.json"
 # Update baseline files from this run
-update_baseline = false
+update-baseline = false
 # Compare against baselines and fail on regression
-compare_baseline = false
+compare-baseline = false
 
 # -----------------------------------------------------------------------------
 # RTSP endpoint (used when no_launch; host/port/stream when launch_on_device come from [device])
@@ -27,19 +27,19 @@ compare_baseline = false
 host = "192.168.2.198"
 port = 554
 stream = "/stream1"
-timeout_sec = 10
+timeout-sec = 10
 
 [test]
-short_duration_sec = 30
-long_duration_sec = 600
-concurrent_clients = 4
+short-duration-sec = 30
+long-duration-sec = 600
+concurrent-clients = 4
 
 [thresholds]
-video_startup_latency_ms = 1500
-audio_startup_latency_ms = 2000
-bitrate_tolerance_percent = 15
-fps_tolerance_percent = 10
-packet_loss_tolerance_percent = 1
+video-startup-latency-ms = 1500
+audio-startup-latency-ms = 2000
+bitrate-tolerance-percent = 15
+fps-tolerance-percent = 10
+packet-loss-tolerance-percent = 1
 
 # Optional expected values; if unset, baseline comparison used when available
 # [thresholds.expected]
@@ -54,15 +54,15 @@ dir = "rtsp_results/baselines"
 interface = ""
 
 [logging]
-level = "info"
+level = "debug"
 file = "rtsp_validation.log"
 
-# Device (camera) validation: telnet and telemetry when using launch_on_device
+# Device (camera) validation: telnet and telemetry when using launch-on-device
 [device]
 host = "192.168.2.198"
-telnet_port = 24
+telnet-port = 24
 telemetry = true
 # Paths on device for H.264/AAC validation mode (device binary must be built with validation-mode)
-h264_file = "/mnt/anyka_hack/onvif/test.h264"
-aac_file = "/mnt/anyka_hack/onvif/test_audio.aac"
-loop_playback = true
+h264-file = "/mnt/anyka_hack/onvif/test.h264"
+aac-file = "/mnt/anyka_hack/onvif/test_audio.aac"
+loop-playback = true

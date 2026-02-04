@@ -23,8 +23,8 @@ use std::time::Duration;
 use telnet::{Event, Telnet};
 use tokio::net::TcpStream;
 use tokio::time::{Instant, sleep, timeout};
-use tracing::{debug, info, warn};
-use tracing_subscriber::EnvFilter;
+use tracing::{debug, info, trace, warn};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use url::Url;
 
 const DEFAULT_VIDEO_STARTUP_TARGET_MS: u64 = 1500;
@@ -712,26 +712,159 @@ struct Summary {
     overall_pass: bool,
 }
 
-fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+/// Initialize tracing from env RUST_LOG or config [logging] (level and optional file).
+/// Call after loading config so configured level and file are respected.
+fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
+    let filter = env::var("RUST_LOG")
+        .ok()
+        .and_then(|s| EnvFilter::try_new(s).ok())
+        .or_else(|| {
+            let level = config
+                .map(|c| c.logging.level.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("info");
+            EnvFilter::try_new(level).ok()
+        })
+        .unwrap_or_else(|| EnvFilter::new("info"));
+
+    let stdout_layer = fmt::layer()
+        .with_writer(std::io::stdout)
+        .with_target(true)
+        .with_level(true);
+
+    let log_file_path: Option<String> = if let Some(c) = config {
+        if !c.logging.file.is_empty() {
+            match std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&c.logging.file)
+            {
+                Ok(file) => {
+                    let path = c.logging.file.clone();
+                    let file_layer = fmt::layer()
+                        .with_writer(file)
+                        .with_ansi(false)
+                        .with_target(true)
+                        .with_level(true);
+                    tracing_subscriber::registry()
+                        .with(filter)
+                        .with(stdout_layer)
+                        .with(file_layer)
+                        .try_init()
+                        .context("init tracing")?;
+                    Some(path)
+                }
+                Err(e) => {
+                    eprintln!("Failed to open log file {}: {}", c.logging.file, e);
+                    tracing_subscriber::registry()
+                        .with(filter)
+                        .with(stdout_layer)
+                        .try_init()
+                        .context("init tracing")?;
+                    None
+                }
+            }
+        } else {
+            tracing_subscriber::registry()
+                .with(filter)
+                .with(stdout_layer)
+                .try_init()
+                .context("init tracing")?;
+            None
+        }
+    } else {
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(stdout_layer)
+            .try_init()
+            .context("init tracing")?;
+        None
+    };
+
+    if let Some(ref path) = log_file_path {
+        info!(path = %path, "logging to file");
+    }
+    Ok(())
+}
+
+/// Future that completes when the process receives SIGINT (Ctrl-C) or SIGTERM (Unix).
+async fn wait_for_signal() {
+    #[cfg(unix)]
+    {
+        let ctrl_c = tokio::signal::ctrl_c();
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("register SIGTERM");
+        tokio::select! {
+            _ = ctrl_c => {}
+            _ = sigterm.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await.ok();
+    }
+}
+
+/// Clean up on interrupt: stop onvif-rust on device (if started) and kill local server child (if any).
+async fn cleanup_on_signal(
+    launch_on_device: bool,
+    device_host: &str,
+    device_telnet_port: u16,
+    child: &mut Option<Child>,
+) {
+    info!("interrupted by signal, cleaning up");
+    if launch_on_device {
+        let host = device_host.to_string();
+        let port = device_telnet_port;
+        match tokio::task::spawn_blocking(move || device_stop_onvif_blocking(&host, port)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => warn!(error = %e, "device stop onvif-rust during cleanup"),
+            Err(e) => warn!(error = %e, "spawn_blocking device stop during cleanup"),
+        }
+    }
+    if let Some(c) = child {
+        let _ = c.kill();
+        let _ = c.wait();
+        debug!("local server process terminated");
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_tracing();
-
     let args = Args::parse();
     let config_path = args
         .config
         .clone()
         .or_else(|| env::var("RTSP_VALIDATION_CONFIG").ok());
     let config = load_config(config_path.as_deref())?;
+    init_tracing(config.as_ref())?;
+
     let mut effective = EffectiveConfig::from_config_and_args(config.as_ref(), &args);
     effective.resolve_capture_interface();
     validate_args(&args, &effective)?;
 
-    let child = maybe_launch_server(&args, &effective).context("failed to launch onvif-rust")?;
+    let run_mode = if effective.launch_on_device {
+        "device"
+    } else if effective.no_launch {
+        "no-launch"
+    } else {
+        "local"
+    };
+    info!(
+        run_mode,
+        rtsp = %rtsp_url(&effective.rtsp_host, effective.rtsp_port, &effective.rtsp_stream),
+        output = %effective.output,
+        "RTSP validation run"
+    );
+    debug!(
+        duration_sec = effective.short_duration_sec,
+        capture_interface = %effective.capture_interface,
+        update_baseline = effective.update_baseline,
+        compare_baseline = effective.compare_baseline,
+        "effective config"
+    );
+
+    let mut child = maybe_launch_server(&args, &effective).context("failed to launch onvif-rust")?;
     if child.is_some() {
         wait_for_server(&effective.rtsp_host, effective.rtsp_port)
             .await
@@ -764,21 +897,35 @@ async fn main() -> Result<()> {
             .context("device RTSP server did not become ready")?;
     }
 
-    let mut report = run_validation(&args, &effective)
-        .await
-        .context("RTSP validation run failed")?;
+    let run_validation_and_harness = async {
+        let mut report = run_validation(&args, &effective).await?;
+        run_harness(&args, &effective, &mut report.tests).await?;
+        if effective.launch_on_device && effective.collect_telemetry {
+            let host = effective.device_host.clone();
+            let port = effective.device_telnet_port;
+            let telemetry =
+                tokio::task::spawn_blocking(move || device_collect_telemetry_blocking(&host, port))
+                    .await
+                    .context("spawn_blocking telemetry")?;
+            report.telemetry = Some(telemetry);
+        }
+        Ok::<_, anyhow::Error>(report)
+    };
 
-    run_harness(&args, &effective, &mut report.tests).await?;
-
-    if effective.launch_on_device && effective.collect_telemetry {
-        let host = effective.device_host.clone();
-        let port = effective.device_telnet_port;
-        let telemetry =
-            tokio::task::spawn_blocking(move || device_collect_telemetry_blocking(&host, port))
-                .await
-                .context("spawn_blocking telemetry")?;
-        report.telemetry = Some(telemetry);
-    }
+    let mut report = tokio::select! {
+        biased;
+        res = run_validation_and_harness => res?,
+        _ = wait_for_signal() => {
+            cleanup_on_signal(
+                effective.launch_on_device,
+                &effective.device_host,
+                effective.device_telnet_port,
+                &mut child,
+            )
+            .await;
+            return Err(anyhow!("interrupted by signal (Ctrl-C or SIGTERM)"));
+        }
+    };
 
     if effective.launch_on_device {
         let host = effective.device_host.clone();
@@ -796,7 +943,7 @@ async fn main() -> Result<()> {
         apply_baseline_ops(&args, &effective, &mut report)?;
     }
 
-    if let Some(mut c) = child {
+    if let Some(ref mut c) = child {
         let _ = c.kill();
         let _ = c.wait();
     }
@@ -833,8 +980,10 @@ async fn run_harness(
         &effective.rtsp_stream,
     );
     let timeout_sec = effective.rtsp_timeout_sec;
+    info!(url = %url, "running harness scenarios");
 
     // 1. Basic connectivity
+    debug!("harness: basic connectivity");
     match harness_basic_connectivity(&url, timeout_sec).await {
         Ok(ok) => {
             tests.push(if ok {
@@ -857,6 +1006,7 @@ async fn run_harness(
     }
 
     // 2. Stream startup latency
+    debug!("harness: startup latency");
     match harness_startup_latency(&url, timeout_sec, effective.video_startup_latency_ms).await {
         Ok(Some(ms)) => {
             let pass = ms <= effective.video_startup_latency_ms;
@@ -881,6 +1031,7 @@ async fn run_harness(
     }
 
     // 3. Bitrate / FPS stability
+    debug!("harness: bitrate/fps");
     match harness_bitrate_fps(&url, effective.short_duration_sec, effective).await {
         Ok((bitrate, fps)) => {
             let bitrate_pass = effective
@@ -917,6 +1068,7 @@ async fn run_harness(
     }
 
     // 4. SDP validation (ffprobe)
+    debug!("harness: SDP validation");
     match harness_sdp_validation(&url, timeout_sec).await {
         Ok((video_count, audio_count, has_h264)) => {
             tests.push(TestResult::Metric {
@@ -949,6 +1101,7 @@ async fn run_harness(
     }
 
     // 5. RTSP protocol sequence (tshark + rtshark)
+    debug!("harness: RTSP protocol sequence");
     match harness_rtsp_protocol_sequence(&url, effective, args).await {
         Ok((describe, setup, play, teardown, status_200, status_err)) => {
             let pass = describe > 0 && setup > 0 && play > 0 && status_err == 0 && status_200 > 0;
@@ -974,6 +1127,7 @@ async fn run_harness(
     }
 
     // 6. Packet loss (UDP + rtshark)
+    debug!("harness: packet loss");
     match harness_packet_loss(&url, effective, args).await {
         Ok((rtp_packets, packet_loss, loss_percent)) => {
             let pass = loss_percent <= effective.packet_loss_tolerance_percent;
@@ -993,6 +1147,7 @@ async fn run_harness(
 
     // 7. Concurrent clients
     if effective.concurrent_clients > 0 {
+        debug!(concurrent = effective.concurrent_clients, "harness: concurrent clients");
         match harness_concurrent_clients(
             &url,
             effective.short_duration_sec,
@@ -1019,6 +1174,7 @@ async fn run_harness(
 
     // 8. Long duration (optional)
     if args.long_duration {
+        debug!(duration_sec = effective.long_duration_sec, "harness: long duration");
         match harness_long_duration(&url, effective.long_duration_sec).await {
             Ok(degradation_pct) => {
                 let pass = degradation_pct < 20;
@@ -1039,6 +1195,7 @@ async fn run_harness(
 
     // 9. Error handling (optional)
     if !args.skip_error_handling {
+        debug!("harness: error handling");
         match harness_error_handling(
             &effective.rtsp_host,
             effective.rtsp_port,
@@ -1591,6 +1748,14 @@ fn apply_baseline_ops(
     effective: &EffectiveConfig,
     report: &mut ValidationReport,
 ) -> Result<()> {
+    if !effective.update_baseline && !effective.compare_baseline {
+        return Ok(());
+    }
+    info!(
+        update_baseline = effective.update_baseline,
+        compare_baseline = effective.compare_baseline,
+        "applying baseline ops"
+    );
     let baseline_dir = &effective.baseline_dir;
     let tests = &mut report.tests;
     let mut metrics: Vec<(String, f64)> = Vec::new();
@@ -1617,11 +1782,13 @@ fn apply_baseline_ops(
         if effective.update_baseline {
             let dir = baseline_direction_for(&name);
             update_baseline(baseline_dir, &name, value, dir)?;
+            debug!(metric = %name, value, "baseline updated");
         }
         if effective.compare_baseline {
             let dir = baseline_direction_for(&name);
             let within = compare_against_baseline(baseline_dir, &name, value, Some(dir))?;
             if !within {
+                debug!(metric = %name, value, "baseline regression");
                 tests.push(TestResult::Fail {
                     name: format!("baseline_regression_{}", name),
                     reason: format!("{} value {} exceeds baseline tolerance", name, value),
@@ -1671,6 +1838,11 @@ fn validate_args(args: &Args, effective: &EffectiveConfig) -> Result<()> {
 
 fn maybe_launch_server(args: &Args, effective: &EffectiveConfig) -> Result<Option<Child>> {
     if effective.no_launch || effective.launch_on_device {
+        debug!(
+            no_launch = effective.no_launch,
+            launch_on_device = effective.launch_on_device,
+            "skipping local server launch"
+        );
         return Ok(None);
     }
 
@@ -1708,6 +1880,7 @@ fn maybe_launch_server(args: &Args, effective: &EffectiveConfig) -> Result<Optio
     if args.loop_playback {
         cmd.arg("--loop-playback");
     }
+    trace!(%bin, h264 = %h264_file, rtsp_port = args.rtsp_port, "spawning onvif-rust");
 
     let child = cmd
         .spawn()
@@ -1717,14 +1890,16 @@ fn maybe_launch_server(args: &Args, effective: &EffectiveConfig) -> Result<Optio
 
 async fn wait_for_server(host: &str, port: u16) -> Result<()> {
     let addr = format!("{}:{}", host, port);
+    info!(%addr, "waiting for RTSP server");
     for attempt in 1..=30u32 {
         match TcpStream::connect(&addr).await {
             Ok(_) => {
                 sleep(Duration::from_millis(200)).await;
+                info!(attempt, %addr, "RTSP server ready");
                 return Ok(());
             }
             Err(e) => {
-                debug!(attempt, error = %e, "RTSP port not ready yet");
+                trace!(attempt, error = %e, "RTSP port not ready yet");
                 sleep(Duration::from_secs(1)).await;
             }
         }
@@ -1747,6 +1922,7 @@ fn run_telnet_command_blocking(
     command: &str,
     read_timeout_sec: u64,
 ) -> Result<String> {
+    debug!(%host, port, command = %command, "telnet command");
     let addr = (host, port)
         .to_socket_addrs()
         .context("resolve device address")?
@@ -1776,6 +1952,7 @@ fn run_telnet_command_blocking(
         }
     }
     let s = String::from_utf8_lossy(&out).into_owned();
+    trace!(output_len = s.len(), "telnet output");
     Ok(s)
 }
 
@@ -1788,6 +1965,15 @@ fn device_start_onvif_blocking(
     aac_file: Option<&str>,
     loop_playback: bool,
 ) -> Result<()> {
+    info!(
+        %host,
+        port,
+        rtsp_port,
+        h264 = ?h264_file,
+        aac = ?aac_file,
+        loop_playback,
+        "starting onvif-rust on device"
+    );
     let cmd = if let Some(h264) = h264_file {
         // Validation mode: serve H.264 (and optional AAC) from device paths.
         let mut c = format!(
@@ -1808,12 +1994,14 @@ fn device_start_onvif_blocking(
             DEVICE_ONVIF_DIR, DEVICE_ONVIF_DIR
         )
     };
+    debug!(command = %cmd, "device start command");
     run_telnet_command_blocking(host, port, &cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
     Ok(())
 }
 
 /// Stop onvif-rust on the device (blocking).
 fn device_stop_onvif_blocking(host: &str, port: u16) -> Result<()> {
+    debug!(%host, port, "stopping onvif-rust on device");
     run_telnet_command_blocking(
         host,
         port,
@@ -1826,6 +2014,7 @@ fn device_stop_onvif_blocking(host: &str, port: u16) -> Result<()> {
 /// Collect device telemetry (blocking). Parses /proc/meminfo, /proc/loadavg, pgrep, /proc/PID/status.
 fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemetry {
     let mut t = DeviceTelemetry::default();
+    debug!(%host, port, "collecting device telemetry");
 
     let meminfo = match run_telnet_command_blocking(
         host,
@@ -1889,7 +2078,10 @@ fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemetry {
     };
     let pid_str = pgrep_out.lines().next().and_then(|l| l.trim().parse().ok());
     let pid = match pid_str {
-        Some(p) => p,
+        Some(p) => {
+            trace!(pid = p, "onvif-rust process found");
+            p
+        }
         None => return t,
     };
     t.onvif_pid = Some(pid);
@@ -1922,10 +2114,27 @@ fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemetry {
             }
         }
     }
+    debug!(
+        mem_available_kib = ?t.mem_available_kib,
+        load_avg_1m = ?t.load_avg_1m,
+        onvif_rss_kib = ?t.onvif_rss_kib,
+        onvif_pid = ?t.onvif_pid,
+        "telemetry collected"
+    );
     t
 }
 
 async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<ValidationReport> {
+    let url_str = format!(
+        "rtsp://{}:{}{}",
+        effective.rtsp_host, effective.rtsp_port, effective.rtsp_stream
+    );
+    info!(
+        url = %url_str,
+        duration_sec = effective.short_duration_sec,
+        "running RTSP validation"
+    );
+
     let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
     let test_run = TestRun {
         timestamp,
@@ -1937,10 +2146,6 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
 
     let mut tests: Vec<TestResult> = Vec::new();
 
-    let url_str = format!(
-        "rtsp://{}:{}{}",
-        effective.rtsp_host, effective.rtsp_port, effective.rtsp_stream
-    );
     let url = Url::parse(&url_str).with_context(|| format!("invalid RTSP URL: {}", url_str))?;
 
     let creds = match (&args.username, &args.password) {
@@ -1954,6 +2159,7 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
         .user_agent("anyka-rtsp-validation-tool".to_string())
         .creds(creds);
 
+    debug!("DESCRIBE request");
     let describe_start = Instant::now();
     let mut session = match Session::describe(url, options).await {
         Ok(s) => {
@@ -1963,6 +2169,7 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
             s
         }
         Err(e) => {
+            warn!(error = %e, "DESCRIBE failed");
             tests.push(TestResult::Fail {
                 name: "describe_ok".to_string(),
                 reason: e.to_string(),
@@ -1971,6 +2178,7 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
         }
     };
     let describe_ms = describe_start.elapsed().as_millis() as u64;
+    debug!(describe_ms, "DESCRIBE ok");
     tests.push(TestResult::Metric {
         name: "describe_latency_ms".to_string(),
         value: serde_json::json!(describe_ms),
@@ -2041,6 +2249,7 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
     }
 
     let setup_transport = args.transport.to_retina_transport();
+    debug!(stream_count = stream_infos.len(), "SETUP streams");
     let mut setup_ok = true;
     for (i, s) in stream_infos.iter().enumerate() {
         let setup_start = Instant::now();
@@ -2079,8 +2288,10 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
     if !setup_ok {
         return Ok(empty_report(test_run, tests));
     }
+    debug!("SETUP ok");
 
     let play_opts = PlayOptions::default();
+    debug!("PLAY request");
     let play_start = Instant::now();
     let playing = match session.play(play_opts).await {
         Ok(s) => {
@@ -2090,6 +2301,7 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
             s
         }
         Err(e) => {
+            warn!(error = %e, "PLAY failed");
             tests.push(TestResult::Fail {
                 name: "play_ok".to_string(),
                 reason: e.to_string(),
@@ -2098,6 +2310,7 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
         }
     };
     let play_rtt_ms = play_start.elapsed().as_millis() as u64;
+    debug!(play_rtt_ms, "PLAY ok");
     tests.push(TestResult::Metric {
         name: "play_rtt_ms".to_string(),
         value: serde_json::json!(play_rtt_ms),
@@ -2124,7 +2337,9 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
                     video_frames = video_frames.saturating_add(1);
                     total_loss_packets = total_loss_packets.saturating_add(frame.loss() as u64);
                     if first_video_latency_ms.is_none() {
-                        first_video_latency_ms = Some(play_start.elapsed().as_millis() as u64);
+                        let latency_ms = play_start.elapsed().as_millis() as u64;
+                        first_video_latency_ms = Some(latency_ms);
+                        trace!(first_video_latency_ms = latency_ms, "first video frame");
                         if let Err(e) = validate_h264_length_prefixed_nals(frame.data()) {
                             h264_length_prefix_ok = false;
                             h264_length_prefix_error = Some(e.to_string());
@@ -2257,6 +2472,15 @@ async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<Vali
         value: serde_json::json!(audio_params_ok),
         pass: !has_audio || audio_params_ok,
     });
+
+    let passed = tests.iter().filter(|t| result_ok(t)).count();
+    info!(
+        total_tests = tests.len(),
+        passed,
+        video_frames,
+        audio_frames,
+        "RTSP validation complete"
+    );
 
     Ok(ValidationReport {
         test_run,

@@ -20,7 +20,7 @@ retina = "0.4.15"
 rtshark = "4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
 telnet = "0.2"
 toml = "0.8"
 tracing = "0.1"
