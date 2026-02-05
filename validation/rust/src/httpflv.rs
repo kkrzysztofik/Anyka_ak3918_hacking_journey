@@ -17,3 +17,31 @@ pub async fn run_httpflv_harness(
 ) -> Result<()> {
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{run_httpflv_harness, run_httpflv_validation};
+    use crate::config::{Args, EffectiveConfig};
+    use clap::Parser;
+
+    #[tokio::test]
+    async fn test_run_httpflv_validation_returns_empty() {
+        let effective = EffectiveConfig::from_config_and_args(
+            None,
+            &Args::parse_from(["rtsp_validation_tool"]),
+        );
+        let result = run_httpflv_validation(&effective).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_run_httpflv_harness_no_mutation() {
+        let effective = EffectiveConfig::from_config_and_args(
+            None,
+            &Args::parse_from(["rtsp_validation_tool"]),
+        );
+        let mut tests = vec![];
+        run_httpflv_harness(&effective, &mut tests).await.unwrap();
+        assert!(tests.is_empty());
+    }
+}

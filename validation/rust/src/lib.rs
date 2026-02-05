@@ -10,8 +10,10 @@ pub mod report;
 pub mod rtsp;
 pub mod util;
 
-pub use baseline::{apply_baseline_ops, baseline_direction_for, compare_against_baseline, update_baseline};
-pub use config::{load_config, Args, EffectiveConfig, RtspValidationConfig};
+pub use baseline::{
+    apply_baseline_ops, baseline_direction_for, compare_against_baseline, update_baseline,
+};
+pub use config::{Args, EffectiveConfig, RtspValidationConfig, load_config};
 pub use device::DeviceTelemetry;
-pub use report::{StreamInfo, Summary, TestResult, TestRun, ValidationReport};
+pub use report::{StreamInfo, Summary, TestResult, TestRun, ValidationReport, compute_summary};
 pub use rtsp::{critical_proto_failed, result_ok, run_harness, run_validation};

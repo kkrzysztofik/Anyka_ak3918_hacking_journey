@@ -87,11 +87,7 @@ pub fn compare_against_baseline(
         "lower" => 100.0 * (current_value - baseline_value) / baseline_value,
         "higher" => {
             let d = 100.0 * (baseline_value - current_value) / baseline_value;
-            if d < 0.0 {
-                0.0
-            } else {
-                d
-            }
+            if d < 0.0 { 0.0 } else { d }
         }
         _ => 100.0 * (current_value - baseline_value) / baseline_value,
     };
@@ -109,7 +105,8 @@ pub fn compare_against_baseline(
     }
 }
 
-fn telemetry_baseline_metrics(t: &DeviceTelemetry) -> Vec<(String, f64)> {
+/// Exposed for unit tests (telemetry baseline metric names and values).
+pub(crate) fn telemetry_baseline_metrics(t: &DeviceTelemetry) -> Vec<(String, f64)> {
     let mut out = Vec::new();
     if let Some(v) = t.mem_total_kib {
         out.push(("telemetry_mem_total_kib".to_string(), v as f64));
@@ -192,4 +189,186 @@ pub fn apply_baseline_ops(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        apply_baseline_ops, baseline_direction_for, compare_against_baseline,
+        telemetry_baseline_metrics, update_baseline,
+    };
+    use crate::config::{Args, EffectiveConfig, RtspValidationConfig};
+    use crate::device::DeviceTelemetry;
+    use crate::report::{TestResult, TestRun, ValidationReport};
+    use clap::Parser;
+
+    #[test]
+    fn test_baseline_direction_for_lower_metrics() {
+        assert_eq!(baseline_direction_for("startup_latency_ms"), "lower");
+        assert_eq!(
+            baseline_direction_for("harness_startup_latency_ms"),
+            "lower"
+        );
+        assert_eq!(baseline_direction_for("packet_loss_percent"), "lower");
+        assert_eq!(
+            baseline_direction_for("harness_packet_loss_percent"),
+            "lower"
+        );
+        assert_eq!(baseline_direction_for("telemetry_load_avg_1m"), "lower");
+        assert_eq!(baseline_direction_for("telemetry_onvif_rss_kib"), "lower");
+        assert_eq!(baseline_direction_for("unknown_metric"), "lower");
+    }
+
+    #[test]
+    fn test_baseline_direction_for_higher_metrics() {
+        assert_eq!(baseline_direction_for("bitrate_kbps"), "higher");
+        assert_eq!(baseline_direction_for("harness_bitrate_kbps"), "higher");
+        assert_eq!(baseline_direction_for("fps"), "higher");
+        assert_eq!(baseline_direction_for("harness_fps"), "higher");
+        assert_eq!(baseline_direction_for("telemetry_mem_free_kib"), "higher");
+        assert_eq!(
+            baseline_direction_for("telemetry_mem_available_kib"),
+            "higher"
+        );
+        assert_eq!(baseline_direction_for("telemetry_mem_total_kib"), "higher");
+    }
+
+    #[test]
+    fn test_update_baseline_creates_file_with_expected_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let baseline_dir = dir.path();
+        update_baseline(baseline_dir, "my_metric", 100.5, "lower").unwrap();
+        let path = baseline_dir.join("my_metric_baseline.json");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(json["test"], "my_metric");
+        assert_eq!(json["baseline_value"], 100.5);
+        assert_eq!(json["tolerance_percent"], 20);
+        assert_eq!(json["direction"], "lower");
+    }
+
+    #[test]
+    fn test_compare_against_baseline_no_file_returns_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = compare_against_baseline(dir.path(), "nonexistent", 50.0, None).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_compare_against_baseline_lower_direction_within_tolerance() {
+        let dir = tempfile::tempdir().unwrap();
+        update_baseline(dir.path(), "latency", 100.0, "lower").unwrap();
+        // current 110 = 10% higher -> regression 10%; tolerance 20% -> ok
+        assert!(compare_against_baseline(dir.path(), "latency", 110.0, None).unwrap());
+        // current 130 = 30% higher -> regression 30% > 20% -> fail
+        assert!(!compare_against_baseline(dir.path(), "latency", 130.0, None).unwrap());
+    }
+
+    #[test]
+    fn test_compare_against_baseline_higher_direction_within_tolerance() {
+        let dir = tempfile::tempdir().unwrap();
+        update_baseline(dir.path(), "bitrate", 1000.0, "higher").unwrap();
+        // current 900 = 10% lower -> regression 10%; tolerance 20% -> ok
+        assert!(compare_against_baseline(dir.path(), "bitrate", 900.0, None).unwrap());
+        // current 700 = 30% lower -> regression 30% > 20% -> fail
+        assert!(!compare_against_baseline(dir.path(), "bitrate", 700.0, None).unwrap());
+    }
+
+    #[test]
+    fn test_compare_against_baseline_zero_baseline_returns_true() {
+        let dir = tempfile::tempdir().unwrap();
+        update_baseline(dir.path(), "zero_metric", 0.0, "lower").unwrap();
+        assert!(compare_against_baseline(dir.path(), "zero_metric", 100.0, None).unwrap());
+    }
+
+    #[test]
+    fn test_compare_against_baseline_direction_override() {
+        let dir = tempfile::tempdir().unwrap();
+        update_baseline(dir.path(), "m", 100.0, "lower").unwrap();
+        // override to "higher": 90 is "regression" when direction is higher (baseline - current) / baseline = 10%
+        assert!(compare_against_baseline(dir.path(), "m", 90.0, Some("higher")).unwrap());
+    }
+
+    #[test]
+    fn test_telemetry_baseline_metrics() {
+        let mut t = DeviceTelemetry::default();
+        assert!(telemetry_baseline_metrics(&t).is_empty());
+        t.mem_total_kib = Some(64);
+        t.load_avg_1m = Some(0.5);
+        let metrics = telemetry_baseline_metrics(&t);
+        assert_eq!(metrics.len(), 2);
+        assert!(metrics.iter().any(|(k, _)| k == "telemetry_mem_total_kib"));
+        assert!(metrics.iter().any(|(k, _)| k == "telemetry_load_avg_1m"));
+    }
+
+    #[test]
+    fn test_apply_baseline_ops_no_flags_no_op() {
+        let args = Args::parse_from(["rtsp_validation_tool"]);
+        let effective = EffectiveConfig::from_config_and_args(None, &args);
+        let mut report = ValidationReport {
+            test_run: TestRun {
+                timestamp: String::new(),
+                rtsp_host: String::new(),
+                rtsp_port: 554,
+                rtsp_stream: String::new(),
+                test_duration_seconds: 30,
+            },
+            tests: vec![],
+            summary: crate::report::Summary {
+                total_tests: 0,
+                passed: 0,
+                failed: 0,
+                overall_pass: true,
+            },
+            artifacts_dir: None,
+            telemetry: None,
+        };
+        apply_baseline_ops(&args, &effective, &mut report).unwrap();
+        assert!(report.tests.is_empty());
+    }
+
+    #[test]
+    fn test_apply_baseline_ops_update_and_compare() {
+        let dir = tempfile::tempdir().unwrap();
+        let baseline_dir = dir.path().to_path_buf();
+        let mut args = Args::parse_from(["rtsp_validation_tool"]);
+        args.update_baseline = true;
+        args.compare_baseline = true;
+        let mut cfg = RtspValidationConfig::default();
+        cfg.run.update_baseline = true;
+        cfg.run.compare_baseline = true;
+        cfg.baseline.dir = baseline_dir.to_string_lossy().to_string();
+        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &args);
+        let mut report = ValidationReport {
+            test_run: TestRun {
+                timestamp: String::new(),
+                rtsp_host: String::new(),
+                rtsp_port: 554,
+                rtsp_stream: String::new(),
+                test_duration_seconds: 30,
+            },
+            tests: vec![TestResult::metric(
+                "harness_bitrate_kbps",
+                serde_json::json!(1000.0),
+                true,
+            )],
+            summary: crate::report::Summary {
+                total_tests: 1,
+                passed: 1,
+                failed: 0,
+                overall_pass: true,
+            },
+            artifacts_dir: None,
+            telemetry: None,
+        };
+        apply_baseline_ops(&args, &effective, &mut report).unwrap();
+        assert!(
+            dir.path()
+                .join("harness_bitrate_kbps_baseline.json")
+                .exists()
+        );
+        // run again with compare: same value should pass
+        apply_baseline_ops(&args, &effective, &mut report).unwrap();
+        assert_eq!(report.tests.len(), 1);
+    }
 }

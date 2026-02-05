@@ -1,0 +1,314 @@
+{
+  "test_run": {
+    "timestamp": "2026-02-05T21:41:42Z",
+    "rtsp_host": "192.168.2.198",
+    "rtsp_port": 554,
+    "rtsp_stream": "/stream1",
+    "test_duration_seconds": 60
+  },
+  "tests": [
+    {
+      "type": "Pass",
+      "value": {
+        "name": "describe_ok",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "describe_latency_ms",
+        "value": 34,
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "stream_count",
+        "value": 2,
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "sdp_streams",
+        "value": [
+          {
+            "control_present": true,
+            "encoding_name": "h264",
+            "media": "video"
+          },
+          {
+            "control_present": true,
+            "encoding_name": "mpeg4-generic",
+            "media": "audio"
+          }
+        ],
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Pass",
+      "value": {
+        "name": "sdp_has_video",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Pass",
+      "value": {
+        "name": "video_encoding_h264",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "sdp_has_audio",
+        "value": true,
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Pass",
+      "value": {
+        "name": "multitrack_controls_present",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "setup_stream_0_latency_ms",
+        "value": 12,
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "setup_stream_1_latency_ms",
+        "value": 12,
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "setup_all_streams_ok",
+        "value": true,
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Pass",
+      "value": {
+        "name": "play_ok",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "play_rtt_ms",
+        "value": 24,
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Fail",
+      "value": {
+        "name": "probe_loop",
+        "reason": "demuxed stream error",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "video_frames_observed",
+        "value": 0,
+        "pass": false,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "audio_frames_observed",
+        "value": 0,
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Fail",
+      "value": {
+        "name": "first_video_frame_latency_ms",
+        "reason": "no video frames observed during probe window",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "rtp_loss_packets_total",
+        "value": 0,
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "random_access_point_seen",
+        "value": false,
+        "pass": false,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Pass",
+      "value": {
+        "name": "h264_length_prefix_ok",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "video_parameters_available",
+        "value": true,
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "audio_parameters_available",
+        "value": true,
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Pass",
+      "value": {
+        "name": "harness_basic_connectivity",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Fail",
+      "value": {
+        "name": "harness_startup_latency_ms",
+        "reason": "harness step timed out after 25s",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Fail",
+      "value": {
+        "name": "harness_bitrate_fps",
+        "reason": "harness step timed out after 90s",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Fail",
+      "value": {
+        "name": "harness_sdp_validation",
+        "reason": "harness step timed out after 25s",
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "harness_protocol_sequence",
+        "value": {
+          "describe": 0,
+          "play": 0,
+          "setup": 0,
+          "status_200": 0,
+          "status_4xx": 0,
+          "teardown": 0
+        },
+        "pass": false,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "harness_packet_loss_percent",
+        "value": {
+          "loss_percent": 0.0,
+          "packet_loss": 0,
+          "rtp_packets": 0
+        },
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "harness_concurrent_clients",
+        "value": {
+          "failed": 0,
+          "requested": 4
+        },
+        "pass": true,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "harness_error_invalid_creds",
+        "value": false,
+        "pass": false,
+        "protocol": "rtsp"
+      }
+    },
+    {
+      "type": "Metric",
+      "value": {
+        "name": "harness_error_bogus_url",
+        "value": false,
+        "pass": false,
+        "protocol": "rtsp"
+      }
+    }
+  ],
+  "summary": {
+    "total_tests": 31,
+    "passed": 21,
+    "failed": 10,
+    "overall_pass": false
+  },
+  "artifacts_dir": "rtsp_results/runs/20260205T214125Z_pid278652",
+  "telemetry": {
+    "mem-total-kib": 36540,
+    "mem-free-kib": 13700,
+    "mem-available-kib": 13700,
+    "load-avg-1m": 2.21,
+    "load-avg-5m": 2.06,
+    "load-avg-15m": 2.27,
+    "onvif-rss-kib": 3504,
+    "onvif-vmsize-kib": 8680,
+    "onvif-pid": 19366
+  }
+}

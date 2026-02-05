@@ -3,13 +3,13 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use rtsp_validation_tool::baseline::apply_baseline_ops;
-use rtsp_validation_tool::config::{load_config, Args, EffectiveConfig, RtspValidationConfig};
+use rtsp_validation_tool::config::{Args, EffectiveConfig, RtspValidationConfig, load_config};
 use rtsp_validation_tool::device::{
     device_collect_telemetry_blocking, device_copy_onvif_logs_blocking,
     device_start_onvif_blocking, device_stop_onvif_blocking,
 };
-use rtsp_validation_tool::report::{Summary, TestResult, ValidationReport};
-use rtsp_validation_tool::rtsp::{critical_proto_failed, result_ok, run_harness, run_validation};
+use rtsp_validation_tool::report::{TestResult, ValidationReport, compute_summary};
+use rtsp_validation_tool::rtsp::{critical_proto_failed, run_harness, run_validation};
 use rtsp_validation_tool::util::run_artifacts_dir_name;
 use std::env;
 use std::fs::File;
@@ -19,7 +19,7 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 use tracing::{debug, info, trace, warn};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 fn accept_already_initialized(e: impl std::error::Error + Send + Sync + 'static) -> Result<()> {
     let msg = e.to_string();
@@ -41,11 +41,7 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
                 .unwrap_or("info");
             let retina_level = config.and_then(|c| {
                 let s = c.logging.retina_level.trim();
-                if s.is_empty() {
-                    None
-                } else {
-                    Some(s)
-                }
+                if s.is_empty() { None } else { Some(s) }
             });
             let filter_str = if let Some(r) = retina_level {
                 format!("{},retina={}", level, r)
@@ -56,7 +52,7 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
         })
         .unwrap_or_else(|| EnvFilter::new("info"));
 
-    if tracing_log::LogTracer::init().is_err() {}
+    let _ = tracing_log::LogTracer::init();
 
     let stdout_layer = fmt::layer()
         .with_writer(std::io::stdout)
@@ -126,9 +122,8 @@ async fn wait_for_signal() {
     #[cfg(unix)]
     {
         let ctrl_c = tokio::signal::ctrl_c();
-        let mut sigterm =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("register SIGTERM");
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("register SIGTERM");
         tokio::select! {
             _ = ctrl_c => {}
             _ = sigterm.recv() => {}
@@ -153,10 +148,8 @@ async fn cleanup_on_signal(
         let port = device_telnet_port;
         let artifacts_dir = artifacts_dir.to_path_buf();
         let host_for_stop = host.clone();
-        match tokio::task::spawn_blocking(move || {
-            device_stop_onvif_blocking(&host_for_stop, port)
-        })
-        .await
+        match tokio::task::spawn_blocking(move || device_stop_onvif_blocking(&host_for_stop, port))
+            .await
         {
             Ok(Ok(())) => {}
             Ok(Err(e)) => warn!(error = %e, "device stop onvif-rust during cleanup"),
@@ -264,10 +257,10 @@ fn maybe_launch_server(args: &Args, effective: &EffectiveConfig) -> Result<Optio
     if effective.capture_tool_output {
         let stdout_path = effective.artifacts_dir.join("onvif_rust.stdout.log");
         let stderr_path = effective.artifacts_dir.join("onvif_rust.stderr.log");
-        let stdout =
-            File::create(&stdout_path).with_context(|| format!("create {}", stdout_path.display()))?;
-        let stderr =
-            File::create(&stderr_path).with_context(|| format!("create {}", stderr_path.display()))?;
+        let stdout = File::create(&stdout_path)
+            .with_context(|| format!("create {}", stdout_path.display()))?;
+        let stderr = File::create(&stderr_path)
+            .with_context(|| format!("create {}", stderr_path.display()))?;
         cmd.stdout(Stdio::from(stdout));
         cmd.stderr(Stdio::from(stderr));
         info!(
@@ -452,16 +445,9 @@ async fn main() -> Result<()> {
         let _ = c.wait();
     }
 
-    let passed = report.tests.iter().filter(|t| result_ok(t)).count();
-    let failed = report.tests.len().saturating_sub(passed);
-    report.summary = Summary {
-        total_tests: report.tests.len(),
-        passed,
-        failed,
-        overall_pass: failed == 0,
-    };
+    report.summary = compute_summary(&report.tests);
 
-    if failed > 0 {
+    if report.summary.failed > 0 {
         for t in &report.tests {
             if let TestResult::Fail { name, reason, .. } = t {
                 warn!(test = %name, reason = %reason, "test failed");

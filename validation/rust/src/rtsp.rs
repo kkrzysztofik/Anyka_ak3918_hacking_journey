@@ -20,13 +20,13 @@ use url::Url;
 
 use crate::config::{Args, EffectiveConfig, TransportArg};
 use crate::report::{StreamInfo, TestResult, TestRun, ValidationReport};
-use crate::util::{tail_lossy, write_bytes_tail, MAX_TOOL_LOG_BYTES};
+use crate::util::{MAX_TOOL_LOG_BYTES, tail_lossy, write_bytes_tail};
 
-fn rtsp_url(host: &str, port: u16, stream: &str) -> String {
+pub(crate) fn rtsp_url(host: &str, port: u16, stream: &str) -> String {
     format!("rtsp://{}:{}{}", host, port, stream)
 }
 
-fn to_retina_transport(arg: TransportArg) -> Transport {
+pub(crate) fn to_retina_transport(arg: TransportArg) -> Transport {
     match arg {
         TransportArg::Tcp => Transport::Tcp(Default::default()),
         TransportArg::Udp => Transport::Udp(Default::default()),
@@ -74,6 +74,90 @@ pub fn empty_report(test_run: TestRun, tests: Vec<TestResult>) -> ValidationRepo
     }
 }
 
+/// Returns true if measured bitrate is within tolerance_percent of expected.
+pub fn bitrate_within_tolerance(
+    measured_kbps: f64,
+    expected_kbps: f64,
+    tolerance_percent: u32,
+) -> bool {
+    if expected_kbps <= 0.0 {
+        return true;
+    }
+    let tol = tolerance_percent as f64 / 100.0;
+    (measured_kbps - expected_kbps).abs() / expected_kbps <= tol
+}
+
+/// Returns true if measured fps is within tolerance_percent of expected.
+pub fn fps_within_tolerance(measured: f64, expected: f64, tolerance_percent: u32) -> bool {
+    if expected <= 0.0 {
+        return true;
+    }
+    let tol = tolerance_percent as f64 / 100.0;
+    (measured - expected).abs() / expected <= tol
+}
+
+/// Returns true if loss_percent is within max_percent (i.e. loss_percent <= max_percent).
+pub fn packet_loss_within_tolerance(loss_percent: f64, max_percent: f64) -> bool {
+    loss_percent <= max_percent
+}
+
+/// Build SDP/stream structural test results from stream info (unit-testable without a live RTSP server).
+pub fn build_sdp_test_results(stream_infos: &[StreamInfo]) -> Vec<TestResult> {
+    let mut tests = Vec::new();
+    tests.push(TestResult::metric(
+        "stream_count",
+        serde_json::json!(stream_infos.len()),
+        !stream_infos.is_empty(),
+    ));
+    tests.push(TestResult::metric(
+        "sdp_streams",
+        serde_json::json!(stream_infos),
+        true,
+    ));
+
+    let has_video = stream_infos.iter().any(|s| s.media == "video");
+    tests.push(if has_video {
+        TestResult::pass("sdp_has_video")
+    } else {
+        TestResult::fail("sdp_has_video", "no SDP stream with media=video")
+    });
+
+    let video_is_h264 = stream_infos
+        .iter()
+        .any(|s| s.media == "video" && s.encoding_name == "h264");
+    tests.push(if !has_video || video_is_h264 {
+        TestResult::pass("video_encoding_h264")
+    } else {
+        TestResult::fail(
+            "video_encoding_h264",
+            "no video stream advertised encoding_name=h264",
+        )
+    });
+
+    let has_audio = stream_infos.iter().any(|s| s.media == "audio");
+    tests.push(TestResult::metric(
+        "sdp_has_audio",
+        serde_json::json!(has_audio),
+        true,
+    ));
+
+    if stream_infos.len() > 1 {
+        let all_have_control = stream_infos.iter().all(|s| s.control_present);
+        tests.push(if all_have_control {
+            TestResult::pass("multitrack_controls_present")
+        } else {
+            TestResult::fail(
+                "multitrack_controls_present",
+                "multiple streams advertised but at least one lacks a=control",
+            )
+        });
+    } else {
+        tests.push(TestResult::pass("multitrack_controls_present"));
+    }
+
+    tests
+}
+
 struct BoundedLogWriter {
     file: File,
     written: usize,
@@ -81,7 +165,7 @@ struct BoundedLogWriter {
 }
 
 impl BoundedLogWriter {
-    fn create(path: &Path) -> Result<Self> {
+    pub(crate) fn create(path: &Path) -> Result<Self> {
         let file = File::create(path).with_context(|| format!("create {}", path.display()))?;
         Ok(Self {
             file,
@@ -90,7 +174,7 @@ impl BoundedLogWriter {
         })
     }
 
-    fn write_line(&mut self, line: &str) -> Result<()> {
+    pub(crate) fn write_line(&mut self, line: &str) -> Result<()> {
         if self.truncated {
             return Ok(());
         }
@@ -205,60 +289,31 @@ pub async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<
     };
     let describe_ms = describe_start.elapsed().as_millis() as u64;
     debug!(describe_ms, "DESCRIBE ok");
-    tests.push(TestResult::metric("describe_latency_ms", serde_json::json!(describe_ms), true));
+    tests.push(TestResult::metric(
+        "describe_latency_ms",
+        serde_json::json!(describe_ms),
+        true,
+    ));
 
     let stream_infos: Vec<StreamInfo> = session
         .streams()
         .iter()
         .map(stream_info_from_retina)
         .collect();
-    tests.push(TestResult::metric(
-        "stream_count",
-        serde_json::json!(stream_infos.len()),
-        !stream_infos.is_empty(),
-    ));
-    tests.push(TestResult::metric("sdp_streams", serde_json::json!(stream_infos), true));
+    tests.extend(build_sdp_test_results(&stream_infos));
 
     let has_video = stream_infos.iter().any(|s| s.media == "video");
-    tests.push(if has_video {
-        TestResult::pass("sdp_has_video")
-    } else {
-        TestResult::fail("sdp_has_video", "no SDP stream with media=video")
-    });
-
-    let video_is_h264 = stream_infos
-        .iter()
-        .any(|s| s.media == "video" && s.encoding_name == "h264");
-    tests.push(if !has_video || video_is_h264 {
-        TestResult::pass("video_encoding_h264")
-    } else {
-        TestResult::fail("video_encoding_h264", "no video stream advertised encoding_name=h264")
-    });
-
     let has_audio = stream_infos.iter().any(|s| s.media == "audio");
-    tests.push(TestResult::metric("sdp_has_audio", serde_json::json!(has_audio), true));
-
-    if stream_infos.len() > 1 {
-        let all_have_control = stream_infos.iter().all(|s| s.control_present);
-        tests.push(if all_have_control {
-            TestResult::pass("multitrack_controls_present")
-        } else {
-            TestResult::fail(
-                "multitrack_controls_present",
-                "multiple streams advertised but at least one lacks a=control",
-            )
-        });
-    } else {
-        tests.push(TestResult::pass("multitrack_controls_present"));
-    }
-
     let setup_transport = to_retina_transport(args.transport);
     debug!(stream_count = stream_infos.len(), "SETUP streams");
     let mut setup_ok = true;
     for (i, s) in stream_infos.iter().enumerate() {
         let setup_start = Instant::now();
         match session
-            .setup(i, SetupOptions::default().transport(setup_transport.clone()))
+            .setup(
+                i,
+                SetupOptions::default().transport(setup_transport.clone()),
+            )
             .await
         {
             Ok(()) => {
@@ -310,7 +365,11 @@ pub async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<
     };
     let play_rtt_ms = play_start.elapsed().as_millis() as u64;
     debug!(play_rtt_ms, "PLAY ok");
-    tests.push(TestResult::metric("play_rtt_ms", serde_json::json!(play_rtt_ms), true));
+    tests.push(TestResult::metric(
+        "play_rtt_ms",
+        serde_json::json!(play_rtt_ms),
+        true,
+    ));
 
     let mut demuxed = playing.demuxed().context("failed to demux/depacketize")?;
 
@@ -525,7 +584,10 @@ pub async fn run_harness(
                 TestResult::fail("harness_basic_connectivity", "no stream in output")
             });
         }
-        Ok(Err(e)) => tests.push(TestResult::fail("harness_basic_connectivity", e.to_string())),
+        Ok(Err(e)) => tests.push(TestResult::fail(
+            "harness_basic_connectivity",
+            e.to_string(),
+        )),
         Err(_) => tests.push(TestResult::fail(
             "harness_basic_connectivity",
             format!("harness step timed out after {}s", step_cap_short.as_secs()),
@@ -548,10 +610,20 @@ pub async fn run_harness(
     {
         Ok(Ok(Some(ms))) => {
             let pass = ms <= effective.video_startup_latency_ms;
-            tests.push(TestResult::metric("harness_startup_latency_ms", serde_json::json!(ms), pass));
+            tests.push(TestResult::metric(
+                "harness_startup_latency_ms",
+                serde_json::json!(ms),
+                pass,
+            ));
         }
-        Ok(Ok(None)) => tests.push(TestResult::fail("harness_startup_latency_ms", "no frame decoded")),
-        Ok(Err(e)) => tests.push(TestResult::fail("harness_startup_latency_ms", e.to_string())),
+        Ok(Ok(None)) => tests.push(TestResult::fail(
+            "harness_startup_latency_ms",
+            "no frame decoded",
+        )),
+        Ok(Err(e)) => tests.push(TestResult::fail(
+            "harness_startup_latency_ms",
+            e.to_string(),
+        )),
         Err(_) => tests.push(TestResult::fail(
             "harness_startup_latency_ms",
             format!("harness step timed out after {}s", step_cap_short.as_secs()),
@@ -575,20 +647,22 @@ pub async fn run_harness(
         Ok(Ok((bitrate, fps))) => {
             let bitrate_pass = effective
                 .expected_bitrate_kbps
-                .map(|e| {
-                    let tol = effective.bitrate_tolerance_percent as f64 / 100.0;
-                    (bitrate - e).abs() / e <= tol
-                })
+                .map(|e| bitrate_within_tolerance(bitrate, e, effective.bitrate_tolerance_percent))
                 .unwrap_or(true);
             let fps_pass = effective
                 .expected_fps
-                .map(|e| {
-                    let tol = effective.fps_tolerance_percent as f64 / 100.0;
-                    (fps - e).abs() / e <= tol
-                })
+                .map(|e| fps_within_tolerance(fps, e, effective.fps_tolerance_percent))
                 .unwrap_or(true);
-            tests.push(TestResult::metric("harness_bitrate_kbps", serde_json::json!(bitrate), bitrate_pass));
-            tests.push(TestResult::metric("harness_fps", serde_json::json!(fps), fps_pass));
+            tests.push(TestResult::metric(
+                "harness_bitrate_kbps",
+                serde_json::json!(bitrate),
+                bitrate_pass,
+            ));
+            tests.push(TestResult::metric(
+                "harness_fps",
+                serde_json::json!(fps),
+                fps_pass,
+            ));
         }
         Ok(Err(e)) => tests.push(TestResult::fail("harness_bitrate_fps", e.to_string())),
         Err(_) => tests.push(TestResult::fail(
@@ -605,8 +679,16 @@ pub async fn run_harness(
     .await
     {
         Ok(Ok((video_count, audio_count, has_h264))) => {
-            tests.push(TestResult::metric("harness_sdp_video_streams", serde_json::json!(video_count), video_count > 0));
-            tests.push(TestResult::metric("harness_sdp_audio_streams", serde_json::json!(audio_count), true));
+            tests.push(TestResult::metric(
+                "harness_sdp_video_streams",
+                serde_json::json!(video_count),
+                video_count > 0,
+            ));
+            tests.push(TestResult::metric(
+                "harness_sdp_audio_streams",
+                serde_json::json!(audio_count),
+                true,
+            ));
             tests.push(if has_h264 {
                 TestResult::pass("harness_sdp_video_h264")
             } else {
@@ -621,7 +703,12 @@ pub async fn run_harness(
     }
 
     debug!(url = %url, "harness: RTSP protocol sequence");
-    match timeout(step_cap_long, harness_rtsp_protocol_sequence(&url, effective, args)).await {
+    match timeout(
+        step_cap_long,
+        harness_rtsp_protocol_sequence(&url, effective, args),
+    )
+    .await
+    {
         Ok(Ok((describe, setup, play, teardown, status_200, status_err))) => {
             let pass = describe > 0 && setup > 0 && play > 0 && status_err == 0 && status_200 > 0;
             tests.push(TestResult::metric(
@@ -647,7 +734,8 @@ pub async fn run_harness(
     debug!(url = %url, "harness: packet loss");
     match timeout(step_cap_long, harness_packet_loss(&url, effective, args)).await {
         Ok(Ok((rtp_packets, packet_loss, loss_percent))) => {
-            let pass = loss_percent <= effective.packet_loss_tolerance_percent;
+            let pass =
+                packet_loss_within_tolerance(loss_percent, effective.packet_loss_tolerance_percent);
             tests.push(TestResult::metric(
                 "harness_packet_loss_percent",
                 serde_json::json!({ "rtp_packets": rtp_packets, "packet_loss": packet_loss, "loss_percent": loss_percent }),
@@ -682,7 +770,10 @@ pub async fn run_harness(
                     failed == 0,
                 ));
             }
-            Ok(Err(e)) => tests.push(TestResult::fail("harness_concurrent_clients", e.to_string())),
+            Ok(Err(e)) => tests.push(TestResult::fail(
+                "harness_concurrent_clients",
+                e.to_string(),
+            )),
             Err(_) => tests.push(TestResult::fail(
                 "harness_concurrent_clients",
                 format!("harness step timed out after {}s", step_cap_long.as_secs()),
@@ -691,7 +782,8 @@ pub async fn run_harness(
     }
 
     if args.long_duration {
-        let step_cap_long_duration = Duration::from_secs(effective.long_duration_sec.saturating_add(30));
+        let step_cap_long_duration =
+            Duration::from_secs(effective.long_duration_sec.saturating_add(30));
         debug!(url = %url, duration_sec = effective.long_duration_sec, "harness: long duration");
         match timeout(
             step_cap_long_duration,
@@ -714,7 +806,10 @@ pub async fn run_harness(
             Ok(Err(e)) => tests.push(TestResult::fail("harness_long_duration", e.to_string())),
             Err(_) => tests.push(TestResult::fail(
                 "harness_long_duration",
-                format!("harness step timed out after {}s", step_cap_long_duration.as_secs()),
+                format!(
+                    "harness step timed out after {}s",
+                    step_cap_long_duration.as_secs()
+                ),
             )),
         }
     }
@@ -735,8 +830,16 @@ pub async fn run_harness(
         .await
         {
             Ok(Ok((invalid_creds_ok, bogus_url_ok))) => {
-                tests.push(TestResult::metric("harness_error_invalid_creds", serde_json::json!(invalid_creds_ok), invalid_creds_ok));
-                tests.push(TestResult::metric("harness_error_bogus_url", serde_json::json!(bogus_url_ok), bogus_url_ok));
+                tests.push(TestResult::metric(
+                    "harness_error_invalid_creds",
+                    serde_json::json!(invalid_creds_ok),
+                    invalid_creds_ok,
+                ));
+                tests.push(TestResult::metric(
+                    "harness_error_bogus_url",
+                    serde_json::json!(bogus_url_ok),
+                    bogus_url_ok,
+                ));
             }
             Ok(Err(e)) => tests.push(TestResult::fail("harness_error_handling", e.to_string())),
             Err(_) => tests.push(TestResult::fail(
@@ -794,11 +897,11 @@ async fn harness_basic_connectivity(
                     other => l.write_line(&format!("event={:?}", other))?,
                 }
             }
-            if let FfmpegEvent::Log(_, msg) = &event {
-                if msg.contains("Stream #") {
-                    saw_stream = true;
-                    break;
-                }
+            if let FfmpegEvent::Log(_, msg) = &event
+                && msg.contains("Stream #")
+            {
+                saw_stream = true;
+                break;
             }
             if let FfmpegEvent::Progress(_) = &event {
                 saw_stream = true;
@@ -863,11 +966,11 @@ async fn harness_startup_latency(
                     other => l.write_line(&format!("event={:?}", other))?,
                 }
             }
-            if let FfmpegEvent::Progress(FfmpegProgress { frame: f, .. }) = &event {
-                if *f > 0 {
-                    first_frame_ms = Some(start.elapsed().as_millis() as u64);
-                    break;
-                }
+            if let FfmpegEvent::Progress(FfmpegProgress { frame: f, .. }) = &event
+                && *f > 0
+            {
+                first_frame_ms = Some(start.elapsed().as_millis() as u64);
+                break;
             }
             if matches!(event, FfmpegEvent::Done) {
                 break;
@@ -942,7 +1045,7 @@ async fn harness_bitrate_fps(
                 last_bitrate = *b as f64;
                 last_fps = *f as f64;
                 progress_count += 1;
-                if progress_count == 1 || (progress_count % 100 == 0) {
+                if progress_count == 1 || progress_count.is_multiple_of(100) {
                     debug!(frame = *frame, fps = *f, bitrate_kbps = *b, time = %time, speed = *speed, "ffmpeg: bitrate/fps progress");
                 }
             }
@@ -966,7 +1069,14 @@ async fn harness_sdp_validation(
     let result = tokio::task::spawn_blocking(move || {
         let out = Command::new("ffprobe")
             .args([
-                "-v", "error", "-rtsp_transport", "tcp", "-show_streams", "-of", "json", &url,
+                "-v",
+                "error",
+                "-rtsp_transport",
+                "tcp",
+                "-show_streams",
+                "-of",
+                "json",
+                &url,
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -984,11 +1094,20 @@ async fn harness_sdp_validation(
                 tail_lossy(stderr.trim(), 1200)
             );
         }
-        let v: FfprobeStreams = serde_json::from_slice(&out.stdout).context("parse ffprobe json")?;
+        let v: FfprobeStreams =
+            serde_json::from_slice(&out.stdout).context("parse ffprobe json")?;
         let streams = v.streams.unwrap_or_default();
-        let video: Vec<_> = streams.iter().filter(|s| s.codec_type.as_deref() == Some("video")).collect();
-        let audio: Vec<_> = streams.iter().filter(|s| s.codec_type.as_deref() == Some("audio")).collect();
-        let has_h264 = video.iter().any(|s| s.codec_name.as_deref() == Some("h264"));
+        let video: Vec<_> = streams
+            .iter()
+            .filter(|s| s.codec_type.as_deref() == Some("video"))
+            .collect();
+        let audio: Vec<_> = streams
+            .iter()
+            .filter(|s| s.codec_type.as_deref() == Some("audio"))
+            .collect();
+        let has_h264 = video
+            .iter()
+            .any(|s| s.codec_name.as_deref() == Some("h264"));
         Ok::<_, anyhow::Error>((video.len(), audio.len(), has_h264))
     })
     .await
@@ -1013,17 +1132,30 @@ async fn harness_rtsp_protocol_sequence(
     let tshark_stdout_path = artifacts_dir.join("tshark_rtsp_protocol_sequence.stdout.log");
     let tshark_stderr_path = artifacts_dir.join("tshark_rtsp_protocol_sequence.stderr.log");
     let tshark_stdout = if capture_tool_output {
-        Stdio::from(File::create(&tshark_stdout_path).with_context(|| format!("create {}", tshark_stdout_path.display()))?)
+        Stdio::from(
+            File::create(&tshark_stdout_path)
+                .with_context(|| format!("create {}", tshark_stdout_path.display()))?,
+        )
     } else {
         Stdio::null()
     };
     let tshark_stderr = if capture_tool_output {
-        Stdio::from(File::create(&tshark_stderr_path).with_context(|| format!("create {}", tshark_stderr_path.display()))?)
+        Stdio::from(
+            File::create(&tshark_stderr_path)
+                .with_context(|| format!("create {}", tshark_stderr_path.display()))?,
+        )
     } else {
         Stdio::null()
     };
     let mut tshark_handle = Command::new("tshark")
-        .args(["-i", &iface, "-f", &format!("tcp port {}", port), "-w", &pcap_str])
+        .args([
+            "-i",
+            &iface,
+            "-f",
+            &format!("tcp port {}", port),
+            "-w",
+            &pcap_str,
+        ])
         .stdout(tshark_stdout)
         .stderr(tshark_stderr)
         .spawn()
@@ -1083,7 +1215,10 @@ async fn harness_rtsp_protocol_sequence(
     let (describe, setup, play, teardown, status_200, status_err) =
         tokio::task::spawn_blocking(move || {
             let mut builder = RTSharkBuilder::builder();
-            let mut rtshark = builder.input_path(&pcap_path_str).spawn().context("rtshark spawn")?;
+            let mut rtshark = builder
+                .input_path(&pcap_path_str)
+                .spawn()
+                .context("rtshark spawn")?;
             let mut describe = 0u32;
             let mut setup = 0u32;
             let mut play = 0u32;
@@ -1104,13 +1239,13 @@ async fn harness_rtsp_protocol_sequence(
                                     _ => {}
                                 }
                             }
-                            if meta.name() == "rtsp.status_code" {
-                                if let Ok(n) = meta.value().parse::<u32>() {
-                                    if n == 200 {
-                                        status_200 += 1;
-                                    } else if n >= 400 {
-                                        status_err += 1;
-                                    }
+                            if meta.name() == "rtsp.status_code"
+                                && let Ok(n) = meta.value().parse::<u32>()
+                            {
+                                if n == 200 {
+                                    status_200 += 1;
+                                } else if n >= 400 {
+                                    status_err += 1;
                                 }
                             }
                         }
@@ -1150,12 +1285,18 @@ async fn harness_packet_loss(
     let tshark_stdout_path = artifacts_dir.join("tshark_packet_loss.stdout.log");
     let tshark_stderr_path = artifacts_dir.join("tshark_packet_loss.stderr.log");
     let tshark_stdout = if capture_tool_output {
-        Stdio::from(File::create(&tshark_stdout_path).with_context(|| format!("create {}", tshark_stdout_path.display()))?)
+        Stdio::from(
+            File::create(&tshark_stdout_path)
+                .with_context(|| format!("create {}", tshark_stdout_path.display()))?,
+        )
     } else {
         Stdio::null()
     };
     let tshark_stderr = if capture_tool_output {
-        Stdio::from(File::create(&tshark_stderr_path).with_context(|| format!("create {}", tshark_stderr_path.display()))?)
+        Stdio::from(
+            File::create(&tshark_stderr_path)
+                .with_context(|| format!("create {}", tshark_stderr_path.display()))?,
+        )
     } else {
         Stdio::null()
     };
@@ -1217,7 +1358,10 @@ async fn harness_packet_loss(
     let pcap_path_str = pcap_path.to_string_lossy().to_string();
     let (rtp_packets, packet_loss, loss_percent) = tokio::task::spawn_blocking(move || {
         let mut builder = RTSharkBuilder::builder();
-        let mut rtshark = builder.input_path(&pcap_path_str).spawn().context("rtshark spawn")?;
+        let mut rtshark = builder
+            .input_path(&pcap_path_str)
+            .spawn()
+            .context("rtshark spawn")?;
         let mut seqs: Vec<u16> = Vec::new();
         while let Some(packet) = rtshark.read().context("rtshark read")? {
             for layer in packet {
@@ -1375,8 +1519,12 @@ async fn harness_long_duration(
                 }
                 last_bitrate = Some(*b);
                 progress_count += 1;
-                if progress_count % 500 == 0 {
-                    debug!(frame = *frame, bitrate_kbps = *b, "ffmpeg: long duration progress");
+                if progress_count.is_multiple_of(500) {
+                    debug!(
+                        frame = *frame,
+                        bitrate_kbps = *b,
+                        "ffmpeg: long duration progress"
+                    );
                 }
             }
         }
@@ -1437,11 +1585,11 @@ async fn harness_error_handling(
                     other => l.write_line(&format!("event={:?}", other))?,
                 }
             }
-            if let FfmpegEvent::Log(_, msg) = &event {
-                if msg.contains("401") || msg.contains("Unauthorized") {
-                    saw_401 = true;
-                    break;
-                }
+            if let FfmpegEvent::Log(_, msg) = &event
+                && (msg.contains("401") || msg.contains("Unauthorized"))
+            {
+                saw_401 = true;
+                break;
             }
         }
         Ok::<_, anyhow::Error>(saw_401)
@@ -1483,11 +1631,11 @@ async fn harness_error_handling(
                     other => l.write_line(&format!("event={:?}", other))?,
                 }
             }
-            if let FfmpegEvent::Log(_, msg) = &event {
-                if msg.contains("404") || msg.contains("Not Found") {
-                    saw_404 = true;
-                    break;
-                }
+            if let FfmpegEvent::Log(_, msg) = &event
+                && (msg.contains("404") || msg.contains("Not Found"))
+            {
+                saw_404 = true;
+                break;
             }
         }
         Ok::<_, anyhow::Error>(saw_404)
@@ -1500,7 +1648,110 @@ async fn harness_error_handling(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_h264_length_prefixed_nals;
+    use super::{
+        BoundedLogWriter, bitrate_within_tolerance, build_sdp_test_results, critical_proto_failed,
+        empty_report, fps_within_tolerance, packet_loss_within_tolerance, result_ok, rtsp_url,
+        to_retina_transport, validate_h264_length_prefixed_nals,
+    };
+    use crate::config::TransportArg;
+    use crate::report::{StreamInfo, TestResult, TestRun};
+    use crate::util::MAX_TOOL_LOG_BYTES;
+
+    #[test]
+    fn test_result_ok_pass() {
+        assert!(result_ok(&TestResult::pass("x")));
+    }
+
+    #[test]
+    fn test_result_ok_fail() {
+        assert!(!result_ok(&TestResult::fail("x", "reason")));
+    }
+
+    #[test]
+    fn test_result_ok_metric_pass() {
+        assert!(result_ok(&TestResult::metric(
+            "m",
+            serde_json::json!(1),
+            true
+        )));
+    }
+
+    #[test]
+    fn test_result_ok_metric_fail() {
+        assert!(!result_ok(&TestResult::metric(
+            "m",
+            serde_json::json!(1),
+            false
+        )));
+    }
+
+    #[test]
+    fn test_critical_proto_failed_no_fail() {
+        let tests = vec![
+            TestResult::pass("a"),
+            TestResult::metric("b", serde_json::json!(1), true),
+        ];
+        assert!(!critical_proto_failed(&tests));
+    }
+
+    #[test]
+    fn test_critical_proto_failed_describe_ok() {
+        let tests = vec![TestResult::fail("describe_ok", "err")];
+        assert!(critical_proto_failed(&tests));
+    }
+
+    #[test]
+    fn test_critical_proto_failed_play_ok() {
+        let tests = vec![TestResult::fail("play_ok", "err")];
+        assert!(critical_proto_failed(&tests));
+    }
+
+    #[test]
+    fn test_critical_proto_failed_setup_stream() {
+        let tests = vec![TestResult::fail("setup_stream_0", "err")];
+        assert!(critical_proto_failed(&tests));
+    }
+
+    #[test]
+    fn test_critical_proto_failed_other_fail_ignored() {
+        let tests = vec![TestResult::fail("other_test", "err")];
+        assert!(!critical_proto_failed(&tests));
+    }
+
+    #[test]
+    fn test_empty_report() {
+        let test_run = TestRun {
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+            rtsp_host: "127.0.0.1".to_string(),
+            rtsp_port: 554,
+            rtsp_stream: "/stream1".to_string(),
+            test_duration_seconds: 30,
+        };
+        let tests = vec![TestResult::pass("a")];
+        let report = empty_report(test_run, tests);
+        assert_eq!(report.test_run.rtsp_host, "127.0.0.1");
+        assert_eq!(report.tests.len(), 1);
+        assert_eq!(report.summary.total_tests, 0);
+        assert_eq!(report.summary.passed, 0);
+        assert_eq!(report.summary.failed, 0);
+        assert!(!report.summary.overall_pass);
+    }
+
+    #[test]
+    fn test_rtsp_url() {
+        assert_eq!(
+            rtsp_url("192.168.1.1", 8554, "/live"),
+            "rtsp://192.168.1.1:8554/live"
+        );
+    }
+
+    #[test]
+    fn test_to_retina_transport() {
+        let tcp = to_retina_transport(TransportArg::Tcp);
+        assert!(matches!(tcp, retina::client::Transport::Tcp(_)));
+        let udp = to_retina_transport(TransportArg::Udp);
+        assert!(matches!(udp, retina::client::Transport::Udp(_)));
+    }
 
     #[test]
     fn test_validate_h264_length_prefixed_nals_ok_single() {
@@ -1512,5 +1763,165 @@ mod tests {
     fn test_validate_h264_length_prefixed_nals_rejects_truncated() {
         let data = [0, 0, 0, 2, 0x65];
         assert!(validate_h264_length_prefixed_nals(&data).is_err());
+    }
+
+    #[test]
+    fn test_validate_h264_length_prefixed_nals_empty_ok() {
+        validate_h264_length_prefixed_nals(&[]).unwrap();
+    }
+
+    #[test]
+    fn test_validate_h264_length_prefixed_nals_trailing_bytes_rejected() {
+        let data = [0, 0, 0, 1, 0x65, 0x00]; // 1 trailing byte
+        assert!(validate_h264_length_prefixed_nals(&data).is_err());
+    }
+
+    #[test]
+    fn test_validate_h264_length_prefixed_nals_zero_length_nal_rejected() {
+        let data = [0, 0, 0, 0, 0x65]; // length 0
+        assert!(validate_h264_length_prefixed_nals(&data).is_err());
+    }
+
+    #[test]
+    fn test_validate_h264_length_prefixed_nals_nal_type_zero_rejected() {
+        let data = [0, 0, 0, 1, 0x00]; // NAL type 0
+        assert!(validate_h264_length_prefixed_nals(&data).is_err());
+    }
+
+    #[test]
+    fn test_validate_h264_length_prefixed_nals_multiple_nals_ok() {
+        let data = [
+            0, 0, 0, 1, 0x67, // NAL 1
+            0, 0, 0, 1, 0x68, // NAL 2
+        ];
+        validate_h264_length_prefixed_nals(&data).unwrap();
+    }
+
+    #[test]
+    fn test_bounded_log_writer_writes_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("log.txt");
+        let mut w = BoundedLogWriter::create(&path).unwrap();
+        w.write_line("line1").unwrap();
+        w.write_line("line2").unwrap();
+        drop(w);
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "line1\nline2\n");
+    }
+
+    fn stream_info(media: &str, encoding: &str, control: bool) -> StreamInfo {
+        StreamInfo {
+            media: media.to_string(),
+            encoding_name: encoding.to_string(),
+            control_present: control,
+        }
+    }
+
+    #[test]
+    fn test_build_sdp_test_results_empty() {
+        let results = build_sdp_test_results(&[]);
+        assert_eq!(results.len(), 6);
+        // stream_count 0 -> fail, sdp_streams, sdp_has_video fail, video_encoding_h264 pass (no video), sdp_has_audio, multitrack pass
+        let names: Vec<_> = results.iter().map(|r| r.name()).collect();
+        assert!(names.contains(&"stream_count"));
+        assert!(names.contains(&"sdp_has_video"));
+        assert!(names.contains(&"multitrack_controls_present"));
+    }
+
+    #[test]
+    fn test_build_sdp_test_results_video_h264() {
+        let infos = vec![stream_info("video", "h264", true)];
+        let results = build_sdp_test_results(&infos);
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name() == "sdp_has_video" && result_ok(r))
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name() == "video_encoding_h264" && result_ok(r))
+        );
+        assert!(results.iter().any(|r| r.name() == "sdp_has_audio")); // metric false
+    }
+
+    #[test]
+    fn test_build_sdp_test_results_video_not_h264() {
+        let infos = vec![stream_info("video", "mpeg4", true)];
+        let results = build_sdp_test_results(&infos);
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name() == "video_encoding_h264" && !result_ok(r))
+        );
+    }
+
+    #[test]
+    fn test_build_sdp_test_results_multitrack_control_missing() {
+        let infos = vec![
+            stream_info("video", "h264", true),
+            stream_info("audio", "aac", false),
+        ];
+        let results = build_sdp_test_results(&infos);
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name() == "multitrack_controls_present" && !result_ok(r))
+        );
+    }
+
+    #[test]
+    fn test_build_sdp_test_results_multitrack_all_control() {
+        let infos = vec![
+            stream_info("video", "h264", true),
+            stream_info("audio", "aac", true),
+        ];
+        let results = build_sdp_test_results(&infos);
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name() == "multitrack_controls_present" && result_ok(r))
+        );
+    }
+
+    #[test]
+    fn test_bitrate_within_tolerance() {
+        assert!(bitrate_within_tolerance(1000.0, 1000.0, 15));
+        assert!(bitrate_within_tolerance(1150.0, 1000.0, 15));
+        assert!(bitrate_within_tolerance(850.0, 1000.0, 15));
+        assert!(!bitrate_within_tolerance(1200.0, 1000.0, 15));
+        assert!(bitrate_within_tolerance(100.0, 0.0, 15));
+    }
+
+    #[test]
+    fn test_fps_within_tolerance() {
+        assert!(fps_within_tolerance(30.0, 30.0, 10));
+        assert!(fps_within_tolerance(33.0, 30.0, 10));
+        assert!(fps_within_tolerance(27.0, 30.0, 10));
+        assert!(!fps_within_tolerance(25.0, 30.0, 10));
+    }
+
+    #[test]
+    fn test_packet_loss_within_tolerance() {
+        assert!(packet_loss_within_tolerance(0.5, 1.0));
+        assert!(packet_loss_within_tolerance(1.0, 1.0));
+        assert!(!packet_loss_within_tolerance(1.5, 1.0));
+    }
+
+    #[test]
+    fn test_bounded_log_writer_truncates_at_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("log.txt");
+        let mut w = BoundedLogWriter::create(&path).unwrap();
+        let line = "x".repeat(1000);
+        let mut written = 0;
+        while written <= MAX_TOOL_LOG_BYTES {
+            w.write_line(&line).unwrap();
+            written += line.len() + 1;
+        }
+        drop(w);
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.len() <= MAX_TOOL_LOG_BYTES + 1024);
+        assert!(content.trim_end().ends_with('x'));
     }
 }

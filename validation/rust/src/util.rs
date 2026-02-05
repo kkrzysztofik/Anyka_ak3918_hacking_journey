@@ -52,7 +52,7 @@ pub fn run_artifacts_dir_name(timestamp_utc: &str, pid: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{run_artifacts_dir_name, tail_lossy, write_bytes_tail, MAX_TOOL_LOG_BYTES};
+    use super::{MAX_TOOL_LOG_BYTES, run_artifacts_dir_name, tail_lossy, write_bytes_tail};
 
     #[test]
     fn test_run_artifacts_dir_name_format() {

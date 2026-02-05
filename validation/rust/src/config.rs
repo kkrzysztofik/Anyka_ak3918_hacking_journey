@@ -472,20 +472,12 @@ pub fn load_config(path_override: Option<&str>) -> Result<Option<RtspValidationC
         .or_else(|| {
             let cwd = env::current_dir().ok()?;
             let p = cwd.join("rtsp_validation.toml");
-            if p.is_file() {
-                Some(p)
-            } else {
-                None
-            }
+            if p.is_file() { Some(p) } else { None }
         })
         .or_else(|| {
             let cwd = env::current_dir().ok()?;
             let p = cwd.join("validation").join("rtsp_validation.toml");
-            if p.is_file() {
-                Some(p)
-            } else {
-                None
-            }
+            if p.is_file() { Some(p) } else { None }
         });
     let path = match path {
         Some(p) => p,
@@ -602,7 +594,12 @@ pub enum TransportArg {
 
 #[cfg(test)]
 mod tests {
-    use super::{EffectiveConfig, LoggingSection, RtspValidationConfig};
+    use super::{
+        DEFAULT_ARTIFACTS_ROOT_DIR, DEFAULT_BASELINE_DIR, DEFAULT_RTSP_HOST, DEFAULT_RTSP_PORT,
+        DEFAULT_RTSP_STREAM, EffectiveConfig, LoggingSection, RtspValidationConfig, load_config,
+    };
+    use clap::Parser;
+    use std::path::PathBuf;
 
     #[test]
     fn test_ffmpeg_log_level_resolution_prefers_cli_then_config_then_default() {
@@ -629,5 +626,148 @@ mod tests {
             EffectiveConfig::ffmpeg_log_level_from_config(Some(&empty_cfg), None),
             "verbose".to_string()
         );
+    }
+
+    #[test]
+    fn test_from_config_and_args_defaults() {
+        let args = super::Args::parse_from(["rtsp_validation_tool"]);
+        let effective = EffectiveConfig::from_config_and_args(None, &args);
+        assert_eq!(effective.rtsp_host, DEFAULT_RTSP_HOST);
+        assert_eq!(effective.rtsp_port, DEFAULT_RTSP_PORT);
+        assert_eq!(effective.rtsp_stream, DEFAULT_RTSP_STREAM);
+        assert_eq!(effective.short_duration_sec, 60); // args.duration default 60
+        assert_eq!(effective.baseline_dir, PathBuf::from(DEFAULT_BASELINE_DIR));
+        assert_eq!(
+            effective.artifacts_root_dir,
+            PathBuf::from(DEFAULT_ARTIFACTS_ROOT_DIR)
+        );
+        assert!(!effective.launch_on_device);
+        assert!(!effective.update_baseline);
+        assert!(!effective.compare_baseline);
+    }
+
+    #[test]
+    fn test_from_config_and_args_cli_overrides() {
+        let args = super::Args::parse_from([
+            "rtsp_validation_tool",
+            "--rtsp-host",
+            "10.0.0.1",
+            "--rtsp-port",
+            "8554",
+            "--duration",
+            "5",
+            "--artifacts-dir",
+            "/tmp/artifacts",
+            "--ffmpeg-log-level",
+            "warning",
+            "--update-baseline",
+            "--device-host",
+            "192.168.1.1",
+        ]);
+        let effective = EffectiveConfig::from_config_and_args(None, &args);
+        assert_eq!(effective.rtsp_host, "10.0.0.1");
+        assert_eq!(effective.rtsp_port, 8554);
+        assert_eq!(effective.short_duration_sec, 5);
+        assert_eq!(
+            effective.artifacts_root_dir,
+            PathBuf::from("/tmp/artifacts")
+        );
+        assert_eq!(effective.ffmpeg_log_level, "warning");
+        assert!(effective.update_baseline);
+        assert_eq!(effective.device_host, "192.168.1.1");
+    }
+
+    #[test]
+    fn test_from_config_and_args_launch_on_device_uses_device_host() {
+        let args = super::Args::parse_from([
+            "rtsp_validation_tool",
+            "--launch-on-device",
+            "--device-host",
+            "192.168.2.100",
+        ]);
+        let effective = EffectiveConfig::from_config_and_args(None, &args);
+        assert!(effective.launch_on_device);
+        assert_eq!(effective.rtsp_host, "192.168.2.100");
+        assert_eq!(effective.device_host, "192.168.2.100");
+    }
+
+    #[test]
+    fn test_resolve_capture_interface_non_empty_unchanged() {
+        let args = super::Args::parse_from(["rtsp_validation_tool"]);
+        let mut effective = EffectiveConfig::from_config_and_args(None, &args);
+        effective.capture_interface = "eth0".to_string();
+        effective.resolve_capture_interface();
+        assert_eq!(effective.capture_interface, "eth0");
+    }
+
+    #[test]
+    fn test_resolve_capture_interface_empty_localhost_lo() {
+        let args = super::Args::parse_from(["rtsp_validation_tool", "--rtsp-host", "127.0.0.1"]);
+        let mut effective = EffectiveConfig::from_config_and_args(None, &args);
+        effective.capture_interface = String::new();
+        effective.resolve_capture_interface();
+        assert_eq!(effective.capture_interface, "lo");
+    }
+
+    #[test]
+    fn test_resolve_capture_interface_empty_localhost_string() {
+        let args = super::Args::parse_from(["rtsp_validation_tool"]);
+        let mut cfg = RtspValidationConfig::default();
+        cfg.rtsp.host = "localhost".to_string();
+        let mut effective = EffectiveConfig::from_config_and_args(Some(&cfg), &args);
+        effective.capture_interface = String::new();
+        effective.resolve_capture_interface();
+        assert_eq!(effective.capture_interface, "lo");
+    }
+
+    #[test]
+    fn test_resolve_capture_interface_empty_ipv6_localhost_lo() {
+        let args = super::Args::parse_from(["rtsp_validation_tool"]);
+        let mut cfg = RtspValidationConfig::default();
+        cfg.rtsp.host = "::1".to_string();
+        let mut effective = EffectiveConfig::from_config_and_args(Some(&cfg), &args);
+        effective.capture_interface = String::new();
+        effective.resolve_capture_interface();
+        assert_eq!(effective.capture_interface, "lo");
+    }
+
+    #[test]
+    fn test_resolve_capture_interface_empty_remote_any() {
+        let args = super::Args::parse_from(["rtsp_validation_tool"]);
+        let mut cfg = RtspValidationConfig::default();
+        cfg.rtsp.host = "10.0.0.1".to_string();
+        let mut effective = EffectiveConfig::from_config_and_args(Some(&cfg), &args);
+        effective.capture_interface = String::new();
+        effective.resolve_capture_interface();
+        assert_eq!(effective.capture_interface, "any");
+    }
+
+    #[test]
+    fn test_load_config_path_override_valid_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rtsp_validation.toml");
+        std::fs::write(
+            &path,
+            r#"
+[rtsp]
+host = "192.168.1.100"
+port = 8554
+
+[thresholds]
+video-startup-latency-ms = 2000
+"#,
+        )
+        .unwrap();
+        let result = load_config(Some(path.to_str().unwrap())).unwrap();
+        let config = result.expect("some config");
+        assert_eq!(config.rtsp.host, "192.168.1.100");
+        assert_eq!(config.rtsp.port, 8554);
+        assert_eq!(config.thresholds.video_startup_latency_ms, 2000);
+    }
+
+    #[test]
+    fn test_load_config_path_override_missing_file_error() {
+        let result = load_config(Some("/nonexistent/path/rtsp_validation.toml"));
+        assert!(result.is_err());
     }
 }
