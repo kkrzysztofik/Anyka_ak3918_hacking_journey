@@ -58,6 +58,7 @@ level = "debug"
 # Retina RTSP client library level (e.g. "debug", "trace"). Omit or leave empty to use level above.
 retina-level = "debug"
 file = "rtsp_validation.log"
+ffmpeg-level = "debug"
 
 [artifacts]
 # Root directory where the tool writes per-run artifacts:

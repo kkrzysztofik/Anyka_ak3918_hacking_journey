@@ -5,9 +5,13 @@ edition = "2024"
 description = "Host-side RTSP protocol conformance validator for Anyka"
 license = "MIT OR Apache-2.0"
 
+[lib]
+name = "rtsp_validation_tool"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rtsp_validation_tool"
-path = "rtsp_validation_tool.rs"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"

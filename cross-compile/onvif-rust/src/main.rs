@@ -319,6 +319,31 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     };
     use tokio::sync::mpsc;
 
+    // Configure RTP packet sampling for RTSP validation runs.
+    //
+    // This is intentionally controlled by an environment variable so that
+    // validation tooling (like `rtsp_validation_tool`) can tune log volume
+    // without changing CLI arguments or config files.
+    //
+    // ONVIF_RTSP_RTP_SAMPLE_INTERVAL:
+    //   - When unset or invalid: defaults to 100 (log every 100th packet).
+    //   - When set to "0": disables RTP sampling logs.
+    //   - Otherwise: parsed as u32 and applied as-is.
+    let rtp_sample_interval = std::env::var("ONVIF_RTSP_RTP_SAMPLE_INTERVAL")
+        .ok()
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .unwrap_or(100);
+    if rtp_sample_interval > 0 {
+        streaming_lib::rtsp::session::server_session::set_rtp_sample_interval(rtp_sample_interval);
+        tracing::info!(
+            "RTSP RTP sampling enabled for validation mode: interval={} packets",
+            rtp_sample_interval
+        );
+    } else {
+        streaming_lib::rtsp::session::server_session::set_rtp_sample_interval(0);
+        tracing::info!("RTSP RTP sampling disabled for validation mode");
+    }
+
     // Initialize logging early so validation-mode startup and streaming logs are visible.
     //
     // NOTE: Do NOT use `tracing_subscriber::fmt::init()` here. The application startup path

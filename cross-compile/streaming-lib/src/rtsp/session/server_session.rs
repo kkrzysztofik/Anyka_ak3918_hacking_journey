@@ -50,8 +50,9 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 use crate::common::auth::Auth;
@@ -67,6 +68,90 @@ use crate::streamhub::{
 };
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+
+/// Global RTP sample interval (in packets) used for validation-style logging.
+///
+/// When set to a non-zero value, every Nth RTP packet per track will emit a
+/// `event=rtp_packet_sample` debug log with sequence number, timestamp and size.
+/// This defaults to 0 (disabled) for normal operation and can be enabled by
+/// callers such as the onvif-rust validation mode.
+static RTP_SAMPLE_INTERVAL: AtomicU32 = AtomicU32::new(0);
+
+/// Configure the RTP packet sampling interval for RTSP sessions.
+///
+/// A value of 0 disables sampling (default). A small value like 10 will log
+/// very frequently, while larger values (e.g. 100 or 1000) are better suited
+/// for validation runs.
+pub fn set_rtp_sample_interval(interval: u32) {
+    RTP_SAMPLE_INTERVAL.store(interval, Ordering::Relaxed);
+}
+
+fn rtp_sample_interval() -> u32 {
+    RTP_SAMPLE_INTERVAL.load(Ordering::Relaxed)
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Lightweight per-track RTP counters for logging.
+///
+/// These use atomics so they can be safely updated from async contexts
+/// without introducing additional locking on the hot path.
+struct RtpTrackCounters {
+    packet_count: AtomicU64,
+    byte_count: AtomicU64,
+    first_send_ms: AtomicU64,
+    last_send_ms: AtomicU64,
+}
+
+impl RtpTrackCounters {
+    fn new() -> Self {
+        Self {
+            packet_count: AtomicU64::new(0),
+            byte_count: AtomicU64::new(0),
+            first_send_ms: AtomicU64::new(0),
+            last_send_ms: AtomicU64::new(0),
+        }
+    }
+
+    /// Record a sent RTP packet and return the updated (packet_count, byte_count).
+    fn on_packet_sent(&self, payload_len: usize) -> (u64, u64) {
+        let now = now_millis();
+
+        // First-send timestamp (best-effort, race-safe).
+        let _ = self
+            .first_send_ms
+            .compare_exchange(0, now, Ordering::Relaxed, Ordering::Relaxed);
+        self.last_send_ms.store(now, Ordering::Relaxed);
+
+        let packets = self.packet_count.fetch_add(1, Ordering::Relaxed) + 1;
+        let bytes = self
+            .byte_count
+            .fetch_add(payload_len as u64, Ordering::Relaxed)
+            + payload_len as u64;
+
+        (packets, bytes)
+    }
+
+    fn snapshot(&self) -> (u64, u64, Option<u64>) {
+        let packets = self.packet_count.load(Ordering::Relaxed);
+        let bytes = self.byte_count.load(Ordering::Relaxed);
+        let first = self.first_send_ms.load(Ordering::Relaxed);
+        let last = self.last_send_ms.load(Ordering::Relaxed);
+        let duration_ms = if first > 0 && last >= first {
+            Some(last - first)
+        } else {
+            None
+        };
+        (packets, bytes, duration_ms)
+    }
+}
+
+type RtpCountersHandle = Arc<RtpTrackCounters>;
 
 pub struct RtspServerSession {
     io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
@@ -89,6 +174,14 @@ pub struct RtspServerSession {
     pub is_normal_exit: bool,
     remote_addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
+
+    /// Packet-level RTP logging configuration and counters.
+    ///
+    /// `rtp_sample_interval` is copied from the global `RTP_SAMPLE_INTERVAL`
+    /// at session creation time so that each session has a consistent view
+    /// even if the global is changed later.
+    rtp_sample_interval: u32,
+    rtp_counters: HashMap<TrackType, RtpCountersHandle>,
 }
 
 pub struct InterleavedBinaryData {
@@ -141,6 +234,7 @@ impl RtspServerSession {
         auth: Option<Auth>,
         remote_addr: SocketAddr,
     ) -> Self {
+        let sample_interval = rtp_sample_interval();
         let io = Arc::new(Mutex::new(io));
         Self {
             io: io.clone(),
@@ -159,6 +253,8 @@ impl RtspServerSession {
             is_normal_exit: false,
             remote_addr,
             shutdown: Arc::new(AtomicBool::new(false)),
+            rtp_sample_interval: sample_interval,
+            rtp_counters: HashMap::new(),
         }
     }
 
@@ -310,6 +406,20 @@ impl RtspServerSession {
         response.headers.insert("Public".to_string(), public_str);
         self.send_response(&response).await?;
 
+        let cseq = rtsp_request.get_header("CSeq").cloned().unwrap_or_default();
+        let session_id = self
+            .session_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        log::info!(
+            "event=rtsp_request method=OPTIONS cseq={} session_id={} remote_addr={} stream_path={} session_type={}",
+            cseq,
+            session_id,
+            self.remote_addr,
+            rtsp_request.uri.path,
+            self.session_type,
+        );
+
         Ok(())
     }
 
@@ -352,6 +462,22 @@ impl RtspServerSession {
                 .insert("Content-Base".to_string(), content_base);
         }
         self.send_response(&response).await?;
+
+        let cseq = rtsp_request.get_header("CSeq").cloned().unwrap_or_default();
+        let session_id = self
+            .session_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let media_count = self.sdp.medias.len();
+        log::info!(
+            "event=rtsp_request method=DESCRIBE cseq={} session_id={} remote_addr={} stream_path={} session_type={} sdp_media_count={}",
+            cseq,
+            session_id,
+            self.remote_addr,
+            rtsp_request.uri.path,
+            self.session_type,
+            media_count,
+        );
 
         Ok(())
     }
@@ -556,6 +682,26 @@ impl RtspServerSession {
 
         self.send_response(&response).await?;
 
+        let cseq = rtsp_request.get_header("CSeq").cloned().unwrap_or_default();
+        let session_id = self
+            .session_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let transport_hdr = rtsp_request
+            .get_header("Transport")
+            .cloned()
+            .unwrap_or_default();
+        log::info!(
+            "event=rtsp_request method=SETUP cseq={} session_id={} remote_addr={} stream_path={} session_type={} track_type={:?} transport_req=\"{}\"",
+            cseq,
+            session_id,
+            self.remote_addr,
+            rtsp_request.uri.path,
+            self.session_type,
+            track_type,
+            transport_hdr,
+        );
+
         Ok(())
     }
 
@@ -685,8 +831,32 @@ impl RtspServerSession {
             )?;
         }
 
-        for track in self.tracks.values_mut() {
+        let cseq = rtsp_request.get_header("CSeq").cloned().unwrap_or_default();
+        let session_id = self
+            .session_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        log::info!(
+            "event=rtsp_request method=PLAY cseq={} session_id={} remote_addr={} stream_path={} session_type={}",
+            cseq,
+            session_id,
+            self.remote_addr,
+            rtsp_request.uri.path,
+            self.session_type,
+        );
+
+        let sample_interval = self.rtp_sample_interval;
+        let session_id_for_rtp = session_id.clone();
+        let remote_for_rtp = self.remote_addr;
+        let stream_identifier = self.stream_identifier.clone();
+
+        for (track_type, track) in self.tracks.iter_mut() {
             let protocol_type = track.transport.protocol_type.clone();
+            let counters = self
+                .rtp_counters
+                .entry(track_type.clone())
+                .or_insert_with(|| Arc::new(RtpTrackCounters::new()))
+                .clone();
 
             match protocol_type {
                 ProtocolType::TCP => {
@@ -698,10 +868,42 @@ impl RtspServerSession {
                         0
                     };
 
+                    let track_label = format!("{:?}", track_type);
+                    let session_id_for_rtp = session_id_for_rtp.clone();
+                    let stream_identifier = stream_identifier.clone();
                     track.rtp_channel.lock().await.on_packet_handler(Box::new(
                         move |io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>, packet: RtpPacket| {
+                            let counters = counters.clone();
+                            let stream_identifier = stream_identifier.clone();
+                            let track_label = track_label.clone();
+                            let session_id = session_id_for_rtp.clone();
                             Box::pin(async move {
                                 let msg = packet.marshal()?;
+                                let payload_len = msg.len();
+
+                                if sample_interval > 0 {
+                                    let (packets, bytes) = counters.on_packet_sent(payload_len);
+                                    if packets % sample_interval as u64 == 0 {
+                                        let stream_path = stream_identifier
+                                            .as_ref()
+                                            .map(|id| id.to_string())
+                                            .unwrap_or_else(|| "unknown".to_string());
+                                        log::debug!(
+                                            "event=rtp_packet_sample protocol=TCP track={} session_id={} remote_addr={} stream_path={} seq={} timestamp={} marker={} size_bytes={} packets_sent={} bytes_sent={}",
+                                            track_label,
+                                            session_id,
+                                            remote_for_rtp,
+                                            stream_path,
+                                            packet.header.seq_number,
+                                            packet.header.timestamp,
+                                            packet.header.marker,
+                                            payload_len,
+                                            packets,
+                                            bytes,
+                                        );
+                                    }
+                                }
+
                                 let mut bytes_writer = AsyncBytesWriter::new(io);
                                 bytes_writer.write_u8(0x24)?;
                                 bytes_writer.write_u8(channel_identifer)?;
@@ -714,12 +916,44 @@ impl RtspServerSession {
                     ));
                 }
                 ProtocolType::UDP => {
+                    let track_label = format!("{:?}", track_type);
+                    let session_id_for_rtp = session_id_for_rtp.clone();
+                    let stream_identifier = stream_identifier.clone();
                     track.rtp_channel.lock().await.on_packet_handler(Box::new(
                         move |io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>, packet: RtpPacket| {
+                            let counters = counters.clone();
+                            let stream_identifier = stream_identifier.clone();
+                            let track_label = track_label.clone();
+                            let session_id = session_id_for_rtp.clone();
                             Box::pin(async move {
+                                let msg = packet.marshal()?;
+                                let payload_len = msg.len();
+
+                                if sample_interval > 0 {
+                                    let (packets, bytes) = counters.on_packet_sent(payload_len);
+                                    if packets % sample_interval as u64 == 0 {
+                                        let stream_path = stream_identifier
+                                            .as_ref()
+                                            .map(|id| id.to_string())
+                                            .unwrap_or_else(|| "unknown".to_string());
+                                        log::debug!(
+                                            "event=rtp_packet_sample protocol=UDP track={} session_id={} remote_addr={} stream_path={} seq={} timestamp={} marker={} size_bytes={} packets_sent={} bytes_sent={}",
+                                            track_label,
+                                            session_id,
+                                            remote_for_rtp,
+                                            stream_path,
+                                            packet.header.seq_number,
+                                            packet.header.timestamp,
+                                            packet.header.marker,
+                                            payload_len,
+                                            packets,
+                                            bytes,
+                                        );
+                                    }
+                                }
+
                                 let mut bytes_writer = AsyncBytesWriter::new(io);
 
-                                let msg = packet.marshal()?;
                                 bytes_writer.write(&msg)?;
                                 bytes_writer.flush().await?;
                                 Ok(())
@@ -738,11 +972,7 @@ impl RtspServerSession {
         {
             const INITIAL_RTPTIME: u32 = 0;
             let mut rtp_info_parts = Vec::new();
-            for track_type in [
-                TrackType::Video,
-                TrackType::Audio,
-                TrackType::Application,
-            ] {
+            for track_type in [TrackType::Video, TrackType::Audio, TrackType::Application] {
                 if let Some(track) = self.tracks.get(&track_type) {
                     let seq = track.rtp_channel.lock().await.initial_sequence();
                     let track_url = format!("{}{}", content_base, track.media_control);
@@ -881,7 +1111,45 @@ impl RtspServerSession {
         let identifier = StreamIdentifier::Rtsp {
             stream_path: rtsp_request.uri.path.clone(),
         };
-        log::info!("handle_teardown...");
+        log::info!(
+            "event=rtsp_teardown session_id={} remote_addr={} stream_path={} session_type={}",
+            self.session_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            self.remote_addr,
+            rtsp_request.uri.path,
+            self.session_type,
+        );
+
+        // Best-effort per-track RTP summary at session teardown.
+        for (track_type, counters) in &self.rtp_counters {
+            let (packets, bytes, duration_ms) = counters.snapshot();
+            if packets == 0 {
+                continue;
+            }
+            let bitrate_kbps = duration_ms
+                .filter(|d| *d > 0)
+                .map(|d| ((bytes.saturating_mul(8) as u128 * 1000) / d as u128 / 1000) as u64)
+                .unwrap_or(0);
+            let stream_path = self
+                .stream_identifier
+                .as_ref()
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            log::info!(
+                "event=rtp_session_summary reason=teardown track={:?} session_id={} remote_addr={} stream_path={} packets={} bytes={} duration_ms={} bitrate_kbps={}",
+                track_type,
+                self.session_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+                self.remote_addr,
+                stream_path,
+                packets,
+                bytes,
+                duration_ms.unwrap_or(0),
+                bitrate_kbps,
+            );
+        }
         self.exit(identifier)
     }
 
@@ -975,6 +1243,9 @@ impl RtspServerSession {
 
                     let track = RtspTrack::new(TrackType::Audio, codec_info, media_control);
                     self.tracks.insert(TrackType::Audio, track);
+                    self.rtp_counters
+                        .entry(TrackType::Audio)
+                        .or_insert_with(|| Arc::new(RtpTrackCounters::new()));
                 }
                 "video" => {
                     let codec_name = media.rtpmap.encoding_name.to_lowercase();
@@ -995,6 +1266,9 @@ impl RtspServerSession {
                     };
                     let track = RtspTrack::new(TrackType::Video, codec_info, media_control);
                     self.tracks.insert(TrackType::Video, track);
+                    self.rtp_counters
+                        .entry(TrackType::Video)
+                        .or_insert_with(|| Arc::new(RtpTrackCounters::new()));
                 }
                 _ => {}
             }
@@ -1670,19 +1944,16 @@ mod tests {
 
         let read_count = AtomicUsize::new(0);
         let teardown_bytes = BytesMut::from(TEARDOWN_REQ);
-        mock_io
-            .expect_read()
-            .times(2)
-            .returning(move || {
-                if read_count.fetch_add(1, Ordering::SeqCst) == 0 {
-                    Ok(teardown_bytes.clone())
-                } else {
-                    Err(BytesIOError::from(std::io::Error::new(
-                        std::io::ErrorKind::ConnectionAborted,
-                        "eof",
-                    )))
-                }
-            });
+        mock_io.expect_read().times(2).returning(move || {
+            if read_count.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(teardown_bytes.clone())
+            } else {
+                Err(BytesIOError::from(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionAborted,
+                    "eof",
+                )))
+            }
+        });
 
         mock_io
             .expect_write()
@@ -1881,11 +2152,7 @@ mod tests {
         let subscribe_handle = tokio::spawn(async move {
             use crate::streamhub::define::DataReceiver;
             if let Some(event) = event_receiver.recv().await {
-                if let StreamHubEvent::Subscribe {
-                    result_sender,
-                    ..
-                } = event
-                {
+                if let StreamHubEvent::Subscribe { result_sender, .. } = event {
                     let (_frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
                     drop(_frame_sender);
                     let data_receiver = DataReceiver {

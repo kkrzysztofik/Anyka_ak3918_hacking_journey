@@ -48,9 +48,14 @@ impl RtspServer for DefaultRtspServer {
                 })?;
         let listener = TcpListener::bind(socket_addr).await?;
 
-        log::info!("Rtsp server listening on tcp://{}", socket_addr);
+        log::info!("event=rtsp_server_start address=tcp://{}", socket_addr);
         loop {
-            let (tcp_stream, _) = listener.accept().await?;
+            let (tcp_stream, peer_addr) = listener.accept().await?;
+            log::info!(
+                "event=rtsp_connection_start remote_addr={} local_addr={}",
+                peer_addr,
+                socket_addr
+            );
             let mut session =
                 RtspServerSession::new(tcp_stream, self.event_producer.clone(), self.auth.clone());
             tokio::spawn(async move {
