@@ -10,7 +10,7 @@ use rtsp_validation_tool::device::{
 };
 use rtsp_validation_tool::report::{TestResult, ValidationReport, compute_summary};
 use rtsp_validation_tool::rtsp::{critical_proto_failed, run_harness, run_validation};
-use rtsp_validation_tool::util::run_artifacts_dir_name;
+use rtsp_validation_tool::util::{report_output_path_in_run_dir, run_artifacts_dir_name};
 use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -311,6 +311,9 @@ async fn main() -> Result<()> {
 
     effective.artifacts_dir =
         create_run_artifacts_dir(&effective.artifacts_root_dir).context("create artifacts dir")?;
+    effective.output = report_output_path_in_run_dir(&effective.artifacts_dir, &effective.output)
+        .to_string_lossy()
+        .to_string();
     info!(path = %effective.artifacts_dir.display(), "artifacts directory");
 
     let run_mode = if effective.launch_on_device {

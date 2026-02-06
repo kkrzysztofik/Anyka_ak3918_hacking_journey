@@ -26,6 +26,105 @@ pub(crate) fn rtsp_url(host: &str, port: u16, stream: &str) -> String {
     format!("rtsp://{}:{}{}", host, port, stream)
 }
 
+fn regex_escape_for_pgrep(raw: &str) -> String {
+    let mut escaped = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        match ch {
+            '.' | '\\' | '+' | '*' | '?' | '[' | ']' | '^' | '$' | '(' | ')' | '{' | '}' | '|' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn process_match_needle(rtsp_url: &str) -> String {
+    if let Ok(parsed) = Url::parse(rtsp_url) {
+        let host = parsed.host_str().unwrap_or_default();
+        let port = parsed.port_or_known_default().unwrap_or(554);
+        return format!("{}:{}{}", host, port, parsed.path());
+    }
+    rtsp_url.to_string()
+}
+
+fn terminate_processes_by_pattern(pattern: &str) -> Result<u32> {
+    let output = Command::new("pgrep")
+        .arg("-f")
+        .arg(pattern)
+        .output()
+        .with_context(|| format!("pgrep -f {}", pattern))?;
+
+    if !output.status.success() {
+        if output.status.code() == Some(1) {
+            return Ok(0);
+        }
+        bail!(
+            "pgrep failed for pattern={} status={:?}",
+            pattern,
+            output.status.code()
+        );
+    }
+
+    let mut killed = 0u32;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        let pid = line.trim();
+        if pid.is_empty() {
+            continue;
+        }
+        match Command::new("kill").arg("-TERM").arg(pid).status() {
+            Ok(status) if status.success() => {
+                killed = killed.saturating_add(1);
+            }
+            Ok(status) => {
+                warn!(pid = %pid, status = ?status.code(), "failed to terminate stale process");
+            }
+            Err(e) => {
+                warn!(pid = %pid, error = %e, "failed to execute kill for stale process");
+            }
+        }
+    }
+
+    Ok(killed)
+}
+
+fn cleanup_timed_out_media_processes(rtsp_url: &str, step_name: &str) {
+    let needle = process_match_needle(rtsp_url);
+    for process_name in ["ffmpeg", "ffprobe"] {
+        let pattern = format!("{}.*{}", process_name, regex_escape_for_pgrep(&needle));
+        match terminate_processes_by_pattern(&pattern) {
+            Ok(killed) if killed > 0 => {
+                warn!(
+                    step = %step_name,
+                    process = %process_name,
+                    killed,
+                    needle = %needle,
+                    "terminated stale media processes after harness timeout"
+                );
+            }
+            Ok(_) => {
+                debug!(
+                    step = %step_name,
+                    process = %process_name,
+                    needle = %needle,
+                    "no stale media processes found after harness timeout"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    step = %step_name,
+                    process = %process_name,
+                    needle = %needle,
+                    error = %e,
+                    "failed stale process cleanup after harness timeout"
+                );
+            }
+        }
+    }
+}
+
 pub(crate) fn to_retina_transport(arg: TransportArg) -> Transport {
     match arg {
         TransportArg::Tcp => Transport::Tcp(Default::default()),
@@ -588,10 +687,13 @@ pub async fn run_harness(
             "harness_basic_connectivity",
             e.to_string(),
         )),
-        Err(_) => tests.push(TestResult::fail(
-            "harness_basic_connectivity",
-            format!("harness step timed out after {}s", step_cap_short.as_secs()),
-        )),
+        Err(_) => {
+            cleanup_timed_out_media_processes(&url, "harness_basic_connectivity");
+            tests.push(TestResult::fail(
+                "harness_basic_connectivity",
+                format!("harness step timed out after {}s", step_cap_short.as_secs()),
+            ));
+        }
     }
 
     debug!(url = %url, target_ms = effective.video_startup_latency_ms, "harness: startup latency");
@@ -624,10 +726,13 @@ pub async fn run_harness(
             "harness_startup_latency_ms",
             e.to_string(),
         )),
-        Err(_) => tests.push(TestResult::fail(
-            "harness_startup_latency_ms",
-            format!("harness step timed out after {}s", step_cap_short.as_secs()),
-        )),
+        Err(_) => {
+            cleanup_timed_out_media_processes(&url, "harness_startup_latency_ms");
+            tests.push(TestResult::fail(
+                "harness_startup_latency_ms",
+                format!("harness step timed out after {}s", step_cap_short.as_secs()),
+            ));
+        }
     }
 
     debug!(url = %url, duration_sec = effective.short_duration_sec, "harness: bitrate/fps");
@@ -665,10 +770,13 @@ pub async fn run_harness(
             ));
         }
         Ok(Err(e)) => tests.push(TestResult::fail("harness_bitrate_fps", e.to_string())),
-        Err(_) => tests.push(TestResult::fail(
-            "harness_bitrate_fps",
-            format!("harness step timed out after {}s", step_cap_long.as_secs()),
-        )),
+        Err(_) => {
+            cleanup_timed_out_media_processes(&url, "harness_bitrate_fps");
+            tests.push(TestResult::fail(
+                "harness_bitrate_fps",
+                format!("harness step timed out after {}s", step_cap_long.as_secs()),
+            ));
+        }
     }
 
     debug!(url = %url, "harness: SDP validation");
@@ -696,10 +804,13 @@ pub async fn run_harness(
             });
         }
         Ok(Err(e)) => tests.push(TestResult::fail("harness_sdp_validation", e.to_string())),
-        Err(_) => tests.push(TestResult::fail(
-            "harness_sdp_validation",
-            format!("harness step timed out after {}s", step_cap_short.as_secs()),
-        )),
+        Err(_) => {
+            cleanup_timed_out_media_processes(&url, "harness_sdp_validation");
+            tests.push(TestResult::fail(
+                "harness_sdp_validation",
+                format!("harness step timed out after {}s", step_cap_short.as_secs()),
+            ));
+        }
     }
 
     debug!(url = %url, "harness: RTSP protocol sequence");
@@ -725,10 +836,13 @@ pub async fn run_harness(
             ));
         }
         Ok(Err(e)) => tests.push(TestResult::fail("harness_protocol_sequence", e.to_string())),
-        Err(_) => tests.push(TestResult::fail(
-            "harness_protocol_sequence",
-            format!("harness step timed out after {}s", step_cap_long.as_secs()),
-        )),
+        Err(_) => {
+            cleanup_timed_out_media_processes(&url, "harness_protocol_sequence");
+            tests.push(TestResult::fail(
+                "harness_protocol_sequence",
+                format!("harness step timed out after {}s", step_cap_long.as_secs()),
+            ));
+        }
     }
 
     debug!(url = %url, "harness: packet loss");
@@ -743,10 +857,13 @@ pub async fn run_harness(
             ));
         }
         Ok(Err(e)) => tests.push(TestResult::fail("harness_packet_loss", e.to_string())),
-        Err(_) => tests.push(TestResult::fail(
-            "harness_packet_loss",
-            format!("harness step timed out after {}s", step_cap_long.as_secs()),
-        )),
+        Err(_) => {
+            cleanup_timed_out_media_processes(&url, "harness_packet_loss");
+            tests.push(TestResult::fail(
+                "harness_packet_loss",
+                format!("harness step timed out after {}s", step_cap_long.as_secs()),
+            ));
+        }
     }
 
     if effective.concurrent_clients > 0 {
@@ -774,10 +891,13 @@ pub async fn run_harness(
                 "harness_concurrent_clients",
                 e.to_string(),
             )),
-            Err(_) => tests.push(TestResult::fail(
-                "harness_concurrent_clients",
-                format!("harness step timed out after {}s", step_cap_long.as_secs()),
-            )),
+            Err(_) => {
+                cleanup_timed_out_media_processes(&url, "harness_concurrent_clients");
+                tests.push(TestResult::fail(
+                    "harness_concurrent_clients",
+                    format!("harness step timed out after {}s", step_cap_long.as_secs()),
+                ));
+            }
         }
     }
 
@@ -804,13 +924,16 @@ pub async fn run_harness(
                 ));
             }
             Ok(Err(e)) => tests.push(TestResult::fail("harness_long_duration", e.to_string())),
-            Err(_) => tests.push(TestResult::fail(
-                "harness_long_duration",
-                format!(
-                    "harness step timed out after {}s",
-                    step_cap_long_duration.as_secs()
-                ),
-            )),
+            Err(_) => {
+                cleanup_timed_out_media_processes(&url, "harness_long_duration");
+                tests.push(TestResult::fail(
+                    "harness_long_duration",
+                    format!(
+                        "harness step timed out after {}s",
+                        step_cap_long_duration.as_secs()
+                    ),
+                ));
+            }
         }
     }
 
@@ -842,10 +965,13 @@ pub async fn run_harness(
                 ));
             }
             Ok(Err(e)) => tests.push(TestResult::fail("harness_error_handling", e.to_string())),
-            Err(_) => tests.push(TestResult::fail(
-                "harness_error_handling",
-                format!("harness step timed out after {}s", step_cap_short.as_secs()),
-            )),
+            Err(_) => {
+                cleanup_timed_out_media_processes(&url, "harness_error_handling");
+                tests.push(TestResult::fail(
+                    "harness_error_handling",
+                    format!("harness step timed out after {}s", step_cap_short.as_secs()),
+                ));
+            }
         }
     }
 

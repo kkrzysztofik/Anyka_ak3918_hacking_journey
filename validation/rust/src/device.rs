@@ -168,7 +168,7 @@ pub fn parse_pgrep_output(content: &str) -> Option<u32> {
     })
 }
 
-/// Parse /proc/<pid>/status for VmRSS and VmSize (KiB).
+/// Parse `/proc/<pid>/status` for `VmRSS` and `VmSize` (KiB).
 pub fn parse_status_vmrss_vmsize(content: &str) -> (Option<u64>, Option<u64>) {
     let mut rss = None;
     let mut vmsize = None;

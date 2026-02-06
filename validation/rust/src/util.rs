@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const MAX_TOOL_LOG_BYTES: usize = 2_000_000; // 2MB per log file (tail kept if exceeded)
 
@@ -50,9 +50,21 @@ pub fn run_artifacts_dir_name(timestamp_utc: &str, pid: u32) -> String {
     format!("{}_pid{}", timestamp_utc, pid)
 }
 
+pub fn report_output_path_in_run_dir(artifacts_dir: &Path, output: &str) -> PathBuf {
+    let output_path = Path::new(output);
+    let filename = output_path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("rtsp_validation.json"));
+    artifacts_dir.join(filename)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{MAX_TOOL_LOG_BYTES, run_artifacts_dir_name, tail_lossy, write_bytes_tail};
+    use super::{
+        MAX_TOOL_LOG_BYTES, report_output_path_in_run_dir, run_artifacts_dir_name, tail_lossy,
+        write_bytes_tail,
+    };
+    use std::path::Path;
 
     #[test]
     fn test_run_artifacts_dir_name_format() {
@@ -89,5 +101,25 @@ mod tests {
         let out = std::fs::read(&path).unwrap();
         assert!(out.starts_with(b"[truncated:"));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_report_output_path_in_run_dir_uses_filename() {
+        let artifacts = Path::new("rtsp_results/runs/20260205T120102Z_pid12345");
+        let path = report_output_path_in_run_dir(artifacts, "nested/custom_report.json");
+        assert_eq!(
+            path,
+            Path::new("rtsp_results/runs/20260205T120102Z_pid12345/custom_report.json")
+        );
+    }
+
+    #[test]
+    fn test_report_output_path_in_run_dir_handles_default_filename() {
+        let artifacts = Path::new("rtsp_results/runs/20260205T120102Z_pid12345");
+        let path = report_output_path_in_run_dir(artifacts, "rtsp_validation.json");
+        assert_eq!(
+            path,
+            Path::new("rtsp_results/runs/20260205T120102Z_pid12345/rtsp_validation.json")
+        );
     }
 }

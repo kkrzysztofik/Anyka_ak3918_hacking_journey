@@ -1,6 +1,6 @@
 # RTSP Validation Tool
 
-Host-side tool for testing RTSP performance and protocol conformance without physical camera hardware. A single Rust binary launches `onvif-rust` in validation mode (optional), runs protocol checks (Retina), and harness scenarios (ffmpeg, ffprobe, tshark), writing one JSON report.
+Host-side tool for testing RTSP performance and protocol conformance without physical camera hardware. A single Rust binary launches `onvif-rust` in validation mode (optional), runs protocol checks (Retina), and harness scenarios (ffmpeg, ffprobe, tshark), writing one JSON report in the per-run artifacts directory.
 
 ## Overview
 
@@ -27,7 +27,7 @@ flowchart TD
     Proto[Protocol validation - Retina]
     Harness[Harness - ffmpeg/ffprobe/tshark]
     Merge[Single tests and summary]
-    Write[rtsp_validation.json]
+    Write[run_dir slash rtsp_validation.json]
   end
   Config --> Launch
   Launch --> Proto
@@ -65,8 +65,9 @@ $CARGO build --target x86_64-unknown-linux-gnu --features validation-mode
 # Or launch onvif-rust and run all tests
 ./validation/rtsp_validation_tool --h264-file test_video.h264 --rtsp-port 8554 --rtsp-stream /stream1
 
-# View results
-cat rtsp_validation.json | jq .
+# View results from the most recent run directory
+LATEST_RUN="$(ls -1dt rtsp_results/runs/* | head -n1)"
+cat "${LATEST_RUN}/rtsp_validation.json" | jq .
 
 # Or convert to Markdown
 python3 validation/rtsp_validation_json_to_md.py -o rtsp_validation.md
@@ -118,6 +119,7 @@ Artifacts include (filenames are stable within a run directory):
 - `tshark_*.stdout.log`, `tshark_*.stderr.log`
 - `rtsp_protocol_sequence_*.pcap`, `rtp_packet_loss_capture.pcap` (pcaps are kept by default)
 - `device_onvif.log*` copies (pulled from `/mnt/anyka_hack/onvif/onvif.log*` when using `--launch-on-device`)
+- `rtsp_validation.json` report output
 
 ## Running against the camera (device validation)
 
@@ -209,7 +211,7 @@ Example `validation/rtsp_validation.toml`:
 [run]
 no_launch = true
 launch_on_device = true
-output = "rtsp_validation.json"
+output = "rtsp_validation.json" # filename written inside each run artifacts directory
 update_baseline = false
 compare_baseline = false
 
@@ -273,7 +275,8 @@ Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--duration
 ```bash
 # Fail on any test failure
 ./validation/rtsp_validation_tool --no-launch --rtsp-port 8554 && \
-  jq -e '.summary.overall_pass' rtsp_validation.json
+  LATEST_RUN="$(ls -1dt rtsp_results/runs/* | head -n1)" && \
+  jq -e '.summary.overall_pass' "${LATEST_RUN}/rtsp_validation.json"
 ```
 
 ## Troubleshooting

@@ -13,7 +13,7 @@ no-launch = false
 launch-on-device = true
 # For local launch only (no-launch=false, launch-on-device=false): path to H.264 file
 # h264-file = "test_video.h264"
-# Output report path
+# Output report filename (written inside each per-run artifacts directory)
 output = "rtsp_validation.json"
 # Update baseline files from this run
 update-baseline = false
