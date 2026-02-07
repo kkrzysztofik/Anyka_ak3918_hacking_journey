@@ -9,8 +9,10 @@ use futures::SinkExt;
 use futures::StreamExt;
 use tokio::net::TcpStream;
 use tokio::net::UdpSocket;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio_util::codec::BytesCodec;
 use tokio_util::codec::Framed;
+use tokio_util::codec::{FramedRead, FramedWrite};
 
 use super::bytesio_errors::{BytesIOError, BytesIOErrorValue};
 
@@ -226,6 +228,101 @@ impl TNetIO for TcpIO {
                 value: BytesIOErrorValue::NoneReturn,
             }),
         }
+    }
+}
+
+pub struct TcpReadIO {
+    stream: FramedRead<OwnedReadHalf, BytesCodec>,
+}
+
+impl TcpReadIO {
+    pub fn new(stream: OwnedReadHalf) -> Self {
+        Self {
+            stream: FramedRead::new(stream, BytesCodec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl TNetIO for TcpReadIO {
+    fn get_net_type(&self) -> NetType {
+        NetType::TCP
+    }
+
+    async fn write(&mut self, _bytes: Bytes) -> Result<(), BytesIOError> {
+        Err(BytesIOError {
+            value: BytesIOErrorValue::IOError(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "write not supported on TcpReadIO",
+            )),
+        })
+    }
+
+    async fn read_timeout(&mut self, duration: Duration) -> Result<BytesMut, BytesIOError> {
+        match tokio::time::timeout(duration, self.read()).await {
+            Ok(data) => data,
+            Err(err) => Err(BytesIOError {
+                value: BytesIOErrorValue::TimeoutError(err),
+            }),
+        }
+    }
+
+    async fn read(&mut self) -> Result<BytesMut, BytesIOError> {
+        let message = self.stream.next().await;
+
+        match message {
+            Some(data) => match data {
+                Ok(bytes) => Ok(bytes),
+                Err(err) => Err(BytesIOError {
+                    value: BytesIOErrorValue::IOError(err),
+                }),
+            },
+            None => Err(BytesIOError {
+                value: BytesIOErrorValue::NoneReturn,
+            }),
+        }
+    }
+}
+
+pub struct TcpWriteIO {
+    stream: FramedWrite<OwnedWriteHalf, BytesCodec>,
+}
+
+impl TcpWriteIO {
+    pub fn new(stream: OwnedWriteHalf) -> Self {
+        Self {
+            stream: FramedWrite::new(stream, BytesCodec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl TNetIO for TcpWriteIO {
+    fn get_net_type(&self) -> NetType {
+        NetType::TCP
+    }
+
+    async fn write(&mut self, bytes: Bytes) -> Result<(), BytesIOError> {
+        self.stream.send(bytes).await?;
+        Ok(())
+    }
+
+    async fn read_timeout(&mut self, duration: Duration) -> Result<BytesMut, BytesIOError> {
+        match tokio::time::timeout(duration, self.read()).await {
+            Ok(data) => data,
+            Err(err) => Err(BytesIOError {
+                value: BytesIOErrorValue::TimeoutError(err),
+            }),
+        }
+    }
+
+    async fn read(&mut self) -> Result<BytesMut, BytesIOError> {
+        Err(BytesIOError {
+            value: BytesIOErrorValue::IOError(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "read not supported on TcpWriteIO",
+            )),
+        })
     }
 }
 

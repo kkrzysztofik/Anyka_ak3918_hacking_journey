@@ -12,4 +12,4 @@ pub mod bytesio_errors;
 // Include bytesio module from bytesio.rs (avoiding module inception)
 #[path = "bytesio.rs"]
 mod bytesio_impl;
-pub use bytesio_impl::{NetType, TNetIO, TcpIO, UdpIO, new_udpio_pair};
+pub use bytesio_impl::{NetType, TNetIO, TcpIO, TcpReadIO, TcpWriteIO, UdpIO, new_udpio_pair};

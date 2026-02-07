@@ -43,7 +43,7 @@ use crate::rtsp::sdp::Sdp;
 use super::define;
 use super::define::rtsp_method_name;
 use crate::bytesio::TNetIO;
-use crate::bytesio::TcpIO;
+use crate::bytesio::{TcpReadIO, TcpWriteIO};
 use async_trait::async_trait;
 use portable_atomic::AtomicU64;
 
@@ -258,7 +258,8 @@ impl RtpTrackCounters {
 type RtpCountersHandle = Arc<RtpTrackCounters>;
 
 pub struct RtspServerSession {
-    io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
+    io_reader: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
+    io_writer: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
     reader: BytesReader,
     writer: AsyncBytesWriter,
 
@@ -329,9 +330,11 @@ impl RtspServerSession {
             .peer_addr()
             .or_else(|_| stream.local_addr())
             .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], 0)));
-        let net_io: Box<dyn TNetIO + Send + Sync> = Box::new(TcpIO::new(stream));
+        let (read_half, write_half) = stream.into_split();
+        let read_io: Box<dyn TNetIO + Send + Sync> = Box::new(TcpReadIO::new(read_half));
+        let write_io: Box<dyn TNetIO + Send + Sync> = Box::new(TcpWriteIO::new(write_half));
 
-        Self::new_with_io(net_io, event_producer, auth, remote_addr)
+        Self::new_with_io_pair(read_io, write_io, event_producer, auth, remote_addr)
     }
 
     pub fn new_with_io(
@@ -340,12 +343,45 @@ impl RtspServerSession {
         auth: Option<Auth>,
         remote_addr: SocketAddr,
     ) -> Self {
-        let sample_interval = rtp_sample_interval();
+        // Tests and in-memory sessions can share one IO object for both read and write.
         let io = Arc::new(Mutex::new(io));
+        Self::new_with_shared_io(io, event_producer, auth, remote_addr)
+    }
+
+    pub fn new_with_io_pair(
+        read_io: Box<dyn TNetIO + Send + Sync>,
+        write_io: Box<dyn TNetIO + Send + Sync>,
+        event_producer: StreamHubEventSender,
+        auth: Option<Auth>,
+        remote_addr: SocketAddr,
+    ) -> Self {
+        let read_io = Arc::new(Mutex::new(read_io));
+        let write_io = Arc::new(Mutex::new(write_io));
+        Self::new_with_reader_writer_io(read_io, write_io, event_producer, auth, remote_addr)
+    }
+
+    fn new_with_shared_io(
+        io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
+        event_producer: StreamHubEventSender,
+        auth: Option<Auth>,
+        remote_addr: SocketAddr,
+    ) -> Self {
+        Self::new_with_reader_writer_io(io.clone(), io, event_producer, auth, remote_addr)
+    }
+
+    fn new_with_reader_writer_io(
+        io_reader: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
+        io_writer: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
+        event_producer: StreamHubEventSender,
+        auth: Option<Auth>,
+        remote_addr: SocketAddr,
+    ) -> Self {
+        let sample_interval = rtp_sample_interval();
         Self {
-            io: io.clone(),
+            io_reader,
+            io_writer: io_writer.clone(),
             reader: BytesReader::new(BytesMut::default()),
-            writer: AsyncBytesWriter::new(io),
+            writer: AsyncBytesWriter::new(io_writer),
             tracks: HashMap::new(),
             sdp: Sdp::default(),
             session_id: None,
@@ -373,7 +409,7 @@ impl RtspServerSession {
                     break;
                 }
                 while self.reader.len() < 4 {
-                    let data = self.io.lock().await.read().await?;
+                    let data = self.io_reader.lock().await.read().await?;
                     self.reader.extend_from_slice(&data[..]);
                 }
                 // If delivering media data using RTP over RTSP(TCP), then it should use InterleavedBinaryData
@@ -386,7 +422,7 @@ impl RtspServerSession {
                     match data {
                         Some(a) => {
                             while self.reader.len() < a.length as usize {
-                                let data = self.io.lock().await.read().await?;
+                                let data = self.io_reader.lock().await.read().await?;
                                 self.reader.extend_from_slice(&data[..]);
                             }
                             self.on_rtp_over_rtsp_message(a.channel_identifier, a.length as usize)
@@ -450,7 +486,7 @@ impl RtspServerSession {
                 if channel_identifier == rtp_identifier {
                     track.on_rtp(&mut cur_reader).await?;
                 } else if channel_identifier == rtcp_identifier {
-                    track.on_rtcp(&mut cur_reader, self.io.clone()).await;
+                    track.on_rtcp(&mut cur_reader, self.io_writer.clone()).await;
                 }
             }
         }
@@ -484,7 +520,7 @@ impl RtspServerSession {
                         });
                     }
                     retry_count += 1;
-                    let data_recv = self.io.lock().await.read().await?;
+                    let data_recv = self.io_reader.lock().await.read().await?;
                     self.reader.extend_from_slice(&data_recv[..]);
                     continue;
                 }
@@ -769,7 +805,7 @@ impl RtspServerSession {
 
                 match trans.protocol_type {
                     ProtocolType::TCP => {
-                        track.create_packer(self.io.clone()).await;
+                        track.create_packer(self.io_writer.clone()).await;
                     }
                     ProtocolType::UDP => {
                         let (rtp_port, rtcp_port) = trans
