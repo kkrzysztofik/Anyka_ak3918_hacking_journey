@@ -208,6 +208,7 @@ pub fn empty_report(test_run: TestRun, tests: Vec<TestResult>) -> ValidationRepo
         },
         artifacts_dir: None,
         telemetry: None,
+        telemetry_before_shutdown: None,
     }
 }
 
@@ -675,6 +676,7 @@ pub async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<
         },
         artifacts_dir: None,
         telemetry: None,
+        telemetry_before_shutdown: None,
     })
 }
 

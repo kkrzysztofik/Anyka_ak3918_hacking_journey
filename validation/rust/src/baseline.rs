@@ -322,6 +322,7 @@ mod tests {
             },
             artifacts_dir: None,
             telemetry: None,
+            telemetry_before_shutdown: None,
         };
         apply_baseline_ops(&args, &effective, &mut report).unwrap();
         assert!(report.tests.is_empty());
@@ -361,6 +362,7 @@ mod tests {
             },
             artifacts_dir: None,
             telemetry: None,
+            telemetry_before_shutdown: None,
         };
         apply_baseline_ops(&args, &effective, &mut report).unwrap();
         assert!(

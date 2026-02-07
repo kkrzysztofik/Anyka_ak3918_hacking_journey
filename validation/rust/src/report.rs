@@ -119,6 +119,8 @@ pub struct ValidationReport {
     pub artifacts_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<crate::device::DeviceTelemetry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telemetry_before_shutdown: Option<crate::device::DeviceTelemetry>,
 }
 
 #[cfg(test)]
@@ -197,11 +199,40 @@ mod tests {
             summary: summary.clone(),
             artifacts_dir: None,
             telemetry: None,
+            telemetry_before_shutdown: None,
         };
         assert_eq!(report.summary.total_tests, 3);
         assert_eq!(report.summary.passed, 2);
         assert_eq!(report.summary.failed, 1);
         assert!(!report.summary.overall_pass);
+    }
+
+    #[test]
+    fn test_report_serializes_telemetry_before_shutdown_when_present() {
+        let report = ValidationReport {
+            test_run: TestRun {
+                timestamp: "2025-01-01T00:00:00Z".to_string(),
+                rtsp_host: "127.0.0.1".to_string(),
+                rtsp_port: 554,
+                rtsp_stream: "/stream1".to_string(),
+                test_duration_seconds: 30,
+            },
+            tests: vec![],
+            summary: Summary {
+                total_tests: 0,
+                passed: 0,
+                failed: 0,
+                overall_pass: true,
+            },
+            artifacts_dir: None,
+            telemetry: None,
+            telemetry_before_shutdown: Some(crate::device::DeviceTelemetry {
+                mem_free_kib: Some(1234),
+                ..Default::default()
+            }),
+        };
+        let json = serde_json::to_value(report).expect("serialize report");
+        assert!(json.get("telemetry_before_shutdown").is_some());
     }
 
     #[test]

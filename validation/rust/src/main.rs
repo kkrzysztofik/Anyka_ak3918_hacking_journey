@@ -430,6 +430,19 @@ async fn main() -> Result<()> {
     report.artifacts_dir = Some(effective.artifacts_dir.to_string_lossy().to_string());
 
     if effective.launch_on_device {
+        if effective.collect_telemetry {
+            let host = effective.device_host.clone();
+            let port = effective.device_telnet_port;
+            match tokio::task::spawn_blocking(move || {
+                device_collect_telemetry_blocking(&host, port)
+            })
+            .await
+            {
+                Ok(telemetry) => report.telemetry_before_shutdown = Some(telemetry),
+                Err(e) => warn!(error = %e, "spawn_blocking telemetry before shutdown failed"),
+            }
+        }
+
         let host = effective.device_host.clone();
         let port = effective.device_telnet_port;
         let stop_result =
