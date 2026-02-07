@@ -37,7 +37,11 @@ long-duration-sec = 600
 concurrent-clients = 4
 
 [thresholds]
+# Protocol check (`first_video_frame_latency_ms`) measured directly from RTSP demux.
 video-startup-latency-ms = 1500
+# Harness check (`harness_startup_latency_ms`) includes FFmpeg startup + first decode.
+# For external sources (e.g. FFmpeg->MediaMTX), 2500-4000ms is common.
+harness-startup-latency-ms = 3000
 audio-startup-latency-ms = 2000
 bitrate-tolerance-percent = 15
 fps-tolerance-percent = 10

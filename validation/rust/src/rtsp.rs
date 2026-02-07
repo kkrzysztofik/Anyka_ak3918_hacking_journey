@@ -144,6 +144,32 @@ fn to_retina_initial_timestamp_policy(arg: InitialTimestampPolicyArg) -> Initial
     }
 }
 
+fn parse_rtsp_method_from_meta<'a>(meta_name: &str, meta_value: &'a str) -> Option<&'a str> {
+    if meta_name == "rtsp.method" {
+        return Some(meta_value);
+    }
+    if meta_name == "rtsp.request" {
+        return meta_value.split_whitespace().next();
+    }
+    None
+}
+
+fn parse_status_code(value: &str) -> Option<u32> {
+    value
+        .split_whitespace()
+        .find_map(|token| token.parse::<u32>().ok())
+}
+
+fn parse_rtsp_status_code_from_meta(meta_name: &str, meta_value: &str) -> Option<u32> {
+    if meta_name == "rtsp.status_code" || meta_name == "rtsp.status" {
+        return parse_status_code(meta_value);
+    }
+    if meta_name == "rtsp.response" {
+        return parse_status_code(meta_value);
+    }
+    None
+}
+
 fn stream_info_from_retina(s: &retina::client::Stream) -> StreamInfo {
     StreamInfo {
         media: s.media().to_string(),
@@ -713,13 +739,16 @@ pub async fn run_harness(
         }
     }
 
-    debug!(url = %url, target_ms = effective.video_startup_latency_ms, "harness: startup latency");
+    debug!(
+        url = %url,
+        target_ms = effective.harness_startup_latency_ms,
+        "harness: startup latency"
+    );
     match timeout(
         step_cap_short,
         harness_startup_latency(
             &url,
             timeout_sec,
-            effective.video_startup_latency_ms,
             &artifacts_dir,
             capture_tool_output,
             &effective.ffmpeg_log_level,
@@ -728,7 +757,7 @@ pub async fn run_harness(
     .await
     {
         Ok(Ok(Some(ms))) => {
-            let pass = ms <= effective.video_startup_latency_ms;
+            let pass = ms <= effective.harness_startup_latency_ms;
             tests.push(TestResult::metric(
                 "harness_startup_latency_ms",
                 serde_json::json!(ms),
@@ -1065,7 +1094,6 @@ async fn harness_basic_connectivity(
 async fn harness_startup_latency(
     url: &str,
     _timeout_sec: u64,
-    _threshold_ms: u64,
     artifacts_dir: &Path,
     capture_tool_output: bool,
     ffmpeg_log_level: &str,
@@ -1371,25 +1399,36 @@ async fn harness_rtsp_protocol_sequence(
             while let Some(packet) = rtshark.read().context("rtshark read")? {
                 for layer in packet {
                     let name = layer.name().to_string();
-                    for meta in layer {
-                        if name == "rtsp" {
-                            if meta.name() == "rtsp.method" {
-                                match meta.value() {
+                    if name == "rtsp" {
+                        let mut counted_method = false;
+                        let mut counted_status = false;
+                        for meta in layer {
+                            if !counted_method
+                                && let Some(method) =
+                                    parse_rtsp_method_from_meta(meta.name(), meta.value())
+                            {
+                                match method {
                                     "DESCRIBE" => describe += 1,
                                     "SETUP" => setup += 1,
                                     "PLAY" => play += 1,
                                     "TEARDOWN" => teardown += 1,
                                     _ => {}
                                 }
+                                counted_method = true;
                             }
-                            if meta.name() == "rtsp.status_code"
-                                && let Ok(n) = meta.value().parse::<u32>()
+                            if !counted_status
+                                && let Some(status) =
+                                    parse_rtsp_status_code_from_meta(meta.name(), meta.value())
                             {
-                                if n == 200 {
+                                if status == 200 {
                                     status_200 += 1;
-                                } else if n >= 400 {
+                                } else if status >= 400 {
                                     status_err += 1;
                                 }
+                                counted_status = true;
+                            }
+                            if counted_method && counted_status {
+                                break;
                             }
                         }
                     }
@@ -1793,7 +1832,8 @@ async fn harness_error_handling(
 mod tests {
     use super::{
         BoundedLogWriter, bitrate_within_tolerance, build_sdp_test_results, critical_proto_failed,
-        empty_report, fps_within_tolerance, packet_loss_within_tolerance, result_ok, rtsp_url,
+        empty_report, fps_within_tolerance, packet_loss_within_tolerance,
+        parse_rtsp_method_from_meta, parse_rtsp_status_code_from_meta, result_ok, rtsp_url,
         to_retina_initial_timestamp_policy, to_retina_transport,
         validate_h264_length_prefixed_nals,
     };
@@ -1915,6 +1955,50 @@ mod tests {
             to_retina_initial_timestamp_policy(InitialTimestampPolicyArg::Permissive),
             retina::client::InitialTimestampPolicy::Permissive
         ));
+    }
+
+    #[test]
+    fn test_parse_rtsp_method_from_meta_primary_field() {
+        assert_eq!(
+            parse_rtsp_method_from_meta("rtsp.method", "DESCRIBE"),
+            Some("DESCRIBE")
+        );
+    }
+
+    #[test]
+    fn test_parse_rtsp_method_from_meta_request_line_fallback() {
+        assert_eq!(
+            parse_rtsp_method_from_meta("rtsp.request", "PLAY rtsp://x RTSP/1.0\r\n"),
+            Some("PLAY")
+        );
+    }
+
+    #[test]
+    fn test_parse_rtsp_status_code_from_meta_legacy_and_current_fields() {
+        assert_eq!(
+            parse_rtsp_status_code_from_meta("rtsp.status_code", "200"),
+            Some(200)
+        );
+        assert_eq!(
+            parse_rtsp_status_code_from_meta("rtsp.status", "404"),
+            Some(404)
+        );
+        assert_eq!(
+            parse_rtsp_status_code_from_meta("rtsp.status", "404 Not Found"),
+            Some(404)
+        );
+    }
+
+    #[test]
+    fn test_parse_rtsp_status_code_from_meta_response_line_fallback() {
+        assert_eq!(
+            parse_rtsp_status_code_from_meta("rtsp.response", "RTSP/1.0 200 OK\r\n"),
+            Some(200)
+        );
+        assert_eq!(
+            parse_rtsp_status_code_from_meta("rtsp.response", "RTSP/1.0 503 Busy\r\n"),
+            Some(503)
+        );
     }
 
     #[test]

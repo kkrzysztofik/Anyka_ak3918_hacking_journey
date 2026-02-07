@@ -164,6 +164,8 @@ fn default_concurrent_clients() -> u32 {
 pub struct ThresholdsSection {
     #[serde(default = "default_video_startup_latency_ms")]
     pub video_startup_latency_ms: u64,
+    #[serde(default = "default_harness_startup_latency_ms")]
+    pub harness_startup_latency_ms: u64,
     #[serde(default)]
     pub audio_startup_latency_ms: u64,
     #[serde(default = "default_bitrate_tolerance")]
@@ -180,6 +182,7 @@ impl Default for ThresholdsSection {
     fn default() -> Self {
         Self {
             video_startup_latency_ms: default_video_startup_latency_ms(),
+            harness_startup_latency_ms: default_harness_startup_latency_ms(),
             audio_startup_latency_ms: 0,
             bitrate_tolerance_percent: default_bitrate_tolerance(),
             fps_tolerance_percent: default_fps_tolerance(),
@@ -191,6 +194,9 @@ impl Default for ThresholdsSection {
 
 fn default_video_startup_latency_ms() -> u64 {
     1500
+}
+fn default_harness_startup_latency_ms() -> u64 {
+    3000
 }
 fn default_bitrate_tolerance() -> u32 {
     15
@@ -328,6 +334,7 @@ pub struct EffectiveConfig {
     pub long_duration_sec: u64,
     pub concurrent_clients: u32,
     pub video_startup_latency_ms: u64,
+    pub harness_startup_latency_ms: u64,
     pub audio_startup_latency_ms: u64,
     pub bitrate_tolerance_percent: u32,
     pub fps_tolerance_percent: u32,
@@ -516,6 +523,7 @@ impl EffectiveConfig {
             } else {
                 c.thresholds.video_startup_latency_ms.max(1)
             },
+            harness_startup_latency_ms: c.thresholds.harness_startup_latency_ms.max(1),
             audio_startup_latency_ms: c.thresholds.audio_startup_latency_ms,
             bitrate_tolerance_percent: c.thresholds.bitrate_tolerance_percent,
             fps_tolerance_percent: c.thresholds.fps_tolerance_percent,
@@ -693,7 +701,7 @@ pub struct Args {
         default_value_t = DEFAULT_VIDEO_STARTUP_TARGET_MS,
         value_name = "MS",
         help_heading = "Thresholds",
-        help = "Maximum allowed video startup latency in ms (overrides config when explicitly set)."
+        help = "Maximum allowed protocol first-frame latency in ms (`first_video_frame_latency_ms`; overrides config when explicitly set)."
     )]
     pub max_video_startup_latency_ms: u64,
 
@@ -972,6 +980,7 @@ mod tests {
             InitialTimestampPolicyArg::Permissive
         );
         assert_eq!(effective.short_duration_sec, 30); // DEFAULT_DURATION_SEC
+        assert_eq!(effective.harness_startup_latency_ms, 3000);
         assert_eq!(effective.baseline_dir, PathBuf::from(DEFAULT_BASELINE_DIR));
         assert_eq!(
             effective.artifacts_root_dir,
@@ -1150,6 +1159,7 @@ port = 8554
 
 [thresholds]
 video-startup-latency-ms = 2000
+harness-startup-latency-ms = 3500
 "#,
         )
         .unwrap();
@@ -1158,6 +1168,7 @@ video-startup-latency-ms = 2000
         assert_eq!(config.rtsp.host, "192.168.1.100");
         assert_eq!(config.rtsp.port, 8554);
         assert_eq!(config.thresholds.video_startup_latency_ms, 2000);
+        assert_eq!(config.thresholds.harness_startup_latency_ms, 3500);
     }
 
     #[test]

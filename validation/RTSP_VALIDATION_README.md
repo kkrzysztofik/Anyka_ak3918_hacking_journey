@@ -186,7 +186,7 @@ loop_playback = true
 
 1. **Protocol (Retina)**: DESCRIBE, SDP streams, SETUP, PLAY, first-frame latency, RTP loss, H.264 length-prefix.
 2. **Basic connectivity** – ffmpeg quick probe.
-3. **Stream startup latency** – Time to first frame (threshold from config).
+3. **Stream startup latency** – FFmpeg harness startup to first frame (`harness-startup-latency-ms`).
 4. **Bitrate / FPS stability** – Steady-state from ffmpeg progress.
 5. **SDP validation** – ffprobe stream/codec checks.
 6. **RTSP protocol sequence** – tshark capture + rtshark analysis (DESCRIBE/SETUP/PLAY/TEARDOWN, status codes).
@@ -231,11 +231,14 @@ long_duration_sec = 600
 concurrent_clients = 4
 
 [thresholds]
-video_startup_latency_ms = 1500
-audio_startup_latency_ms = 2000
-bitrate_tolerance_percent = 15
-fps_tolerance_percent = 10
-packet_loss_tolerance_percent = 1
+# Protocol check: `first_video_frame_latency_ms`
+video-startup-latency-ms = 1500
+# Harness check: ffmpeg startup + first decoded frame
+harness-startup-latency-ms = 3000
+audio-startup-latency-ms = 2000
+bitrate-tolerance-percent = 15
+fps-tolerance-percent = 10
+packet-loss-tolerance-percent = 1
 
 [baseline]
 dir = "rtsp_results/baselines"
@@ -255,7 +258,8 @@ Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--duration
 
 ## Metrics
 
-- **startup_latency_ms** / **harness_startup_latency_ms** – Time to first decoded video frame.
+- **first_video_frame_latency_ms** – Protocol path first decoded frame latency (threshold: `video-startup-latency-ms` or `--max-video-startup-latency-ms`).
+- **harness_startup_latency_ms** – Harness startup to first decoded frame (threshold: `harness-startup-latency-ms`; for external FFmpeg/MediaMTX streams, `2500-4000` ms is common).
 - **harness_bitrate_kbps**, **harness_fps** – From ffmpeg progress; validated via config expected values or baselines.
 - **harness_packet_loss_percent** – RTP loss from capture (threshold in config).
 - **harness_protocol_sequence** – RTSP method counts and status codes from pcap.
