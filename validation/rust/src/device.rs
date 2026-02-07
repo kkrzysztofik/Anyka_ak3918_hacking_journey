@@ -104,6 +104,42 @@ pub fn sh_single_quote(s: &str) -> String {
 }
 
 pub fn extract_between_markers(s: &str) -> Option<String> {
+    // Prefer markers that appear on their own line. This avoids accidentally
+    // matching command-echo text such as: `echo __ANYKA_BEGIN__ && ...`.
+    let marker_is_standalone = |idx: usize, marker: &str| -> bool {
+        let line_start = s[..idx].rfind('\n').map_or(0, |p| p + 1);
+        let prefix = &s[line_start..idx];
+        if !prefix
+            .trim_matches(|c: char| matches!(c, ' ' | '\t' | '\r'))
+            .is_empty()
+        {
+            return false;
+        }
+
+        let after = idx + marker.len();
+        let line_end = s[after..].find('\n').map_or(s.len(), |p| after + p);
+        let suffix = &s[after..line_end];
+        suffix
+            .trim_matches(|c: char| matches!(c, ' ' | '\t' | '\r'))
+            .is_empty()
+    };
+
+    for (start, _) in s.match_indices(DEVICE_MARKER_BEGIN) {
+        if !marker_is_standalone(start, DEVICE_MARKER_BEGIN) {
+            continue;
+        }
+        let rest_start = start + DEVICE_MARKER_BEGIN.len();
+        for (rel_end, _) in s[rest_start..].match_indices(DEVICE_MARKER_END) {
+            let end = rest_start + rel_end;
+            if marker_is_standalone(end, DEVICE_MARKER_END) {
+                let between = &s[rest_start..end];
+                let between = between.trim_matches(['\r', '\n', ' ']);
+                return Some(between.to_string());
+            }
+        }
+    }
+
+    // Fallback for older/simple outputs where markers are not line-delimited.
     let start = s.find(DEVICE_MARKER_BEGIN)?;
     let rest = &s[start + DEVICE_MARKER_BEGIN.len()..];
     let end = rest.rfind(DEVICE_MARKER_END)?;
@@ -112,25 +148,40 @@ pub fn extract_between_markers(s: &str) -> Option<String> {
     Some(between.to_string())
 }
 
+fn first_u64_in_text(s: &str) -> Option<u64> {
+    let start =
+        s.char_indices()
+            .find_map(|(i, ch)| if ch.is_ascii_digit() { Some(i) } else { None })?;
+    let end = s[start..]
+        .char_indices()
+        .find_map(|(i, ch)| {
+            if ch.is_ascii_digit() {
+                None
+            } else {
+                Some(start + i)
+            }
+        })
+        .unwrap_or(s.len());
+    s[start..end].parse::<u64>().ok()
+}
+
 /// Parse /proc/meminfo content. Returns (MemTotal, MemFree, MemAvailable) in KiB.
 pub fn parse_meminfo(content: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
     let mut mem_total = None;
     let mut mem_free = None;
     let mut mem_available = None;
     for line in content.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 2 {
-            let key = parts[0].trim_end_matches(':');
-            let value: u64 = match parts[1].parse() {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            match key {
-                "MemTotal" => mem_total = Some(value),
-                "MemFree" => mem_free = Some(value),
-                "MemAvailable" => mem_available = Some(value),
-                _ => {}
-            }
+        if mem_total.is_none() && line.contains("MemTotal:") {
+            mem_total = first_u64_in_text(line);
+        }
+        if mem_free.is_none() && line.contains("MemFree:") {
+            mem_free = first_u64_in_text(line);
+        }
+        if mem_available.is_none() && line.contains("MemAvailable:") {
+            mem_available = first_u64_in_text(line);
+        }
+        if mem_total.is_some() && mem_free.is_some() && mem_available.is_some() {
+            break;
         }
     }
     if mem_available.is_none() {
@@ -158,13 +209,22 @@ pub fn parse_loadavg(content: &str) -> (Option<f64>, Option<f64>, Option<f64>) {
 
 /// Parse pgrep output (one pid per line). Returns first valid pid found.
 pub fn parse_pgrep_output(content: &str) -> Option<u32> {
-    content.lines().find_map(|l| {
-        let l = l.trim();
-        if l.is_empty() || !l.chars().all(|c| c.is_ascii_digit()) {
-            None
-        } else {
-            l.parse::<u32>().ok()
+    content.lines().find_map(|line| {
+        let trimmed = line.trim_matches(|c: char| matches!(c, '\r' | '\n' | ' ' | '\t'));
+        if trimmed.is_empty() {
+            return None;
         }
+        let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+        if tokens
+            .iter()
+            .all(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_digit()))
+        {
+            return tokens
+                .into_iter()
+                .filter_map(|t| t.parse::<u32>().ok())
+                .find(|pid| *pid > 1);
+        }
+        None
     })
 }
 
@@ -173,18 +233,14 @@ pub fn parse_status_vmrss_vmsize(content: &str) -> (Option<u64>, Option<u64>) {
     let mut rss = None;
     let mut vmsize = None;
     for line in content.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 2 {
-            let key = parts[0].trim_end_matches(':');
-            let value: u64 = match parts[1].parse() {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            match key {
-                "VmRSS" => rss = Some(value),
-                "VmSize" => vmsize = Some(value),
-                _ => {}
-            }
+        if rss.is_none() && line.contains("VmRSS:") {
+            rss = first_u64_in_text(line);
+        }
+        if vmsize.is_none() && line.contains("VmSize:") {
+            vmsize = first_u64_in_text(line);
+        }
+        if rss.is_some() && vmsize.is_some() {
+            break;
         }
     }
     (rss, vmsize)
@@ -368,7 +424,7 @@ pub fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemet
         host,
         port,
         &format!(
-            "echo {} && ( pgrep -f onvif-rust; true ) && echo {}",
+            "echo {} && ( pgrep -f onvif-rust 2>/dev/null || pidof onvif-rust 2>/dev/null || ps | grep '[o]nvif-rust' | awk '{{print $1}}'; true ) && echo {}",
             DEVICE_MARKER_BEGIN, DEVICE_MARKER_END
         ),
         DEVICE_TELNET_READ_TIMEOUT_SEC,
@@ -474,6 +530,13 @@ Threads:        1"#;
     }
 
     #[test]
+    fn test_extract_between_markers_ignores_inline_command_echo_markers() {
+        let s = "echo __ANYKA_BEGIN__ && cat /proc/meminfo && echo __ANYKA_END__\n__ANYKA_BEGIN__\nMemTotal: 36540 kB\n__ANYKA_END__\n";
+        let extracted = extract_between_markers(s).unwrap();
+        assert_eq!(extracted, "MemTotal: 36540 kB");
+    }
+
+    #[test]
     fn test_sanitize_filename_component_alphanumeric_kept() {
         assert_eq!(sanitize_filename_component("abc123"), "abc123");
         assert_eq!(sanitize_filename_component("file.log"), "file.log");
@@ -531,6 +594,15 @@ Threads:        1"#;
     }
 
     #[test]
+    fn test_parse_meminfo_with_prompt_noise() {
+        let s = "~ # MemTotal: 36540 kB\n~ # MemFree: 10792 kB\n~ # MemAvailable: 12000 kB";
+        let (total, free, avail) = parse_meminfo(s);
+        assert_eq!(total, Some(36540));
+        assert_eq!(free, Some(10792));
+        assert_eq!(avail, Some(12000));
+    }
+
+    #[test]
     fn test_parse_loadavg() {
         let (a, b, c) = parse_loadavg(FIXTURE_LOADAVG);
         assert_eq!(a, Some(2.0));
@@ -574,6 +646,11 @@ Threads:        1"#;
     }
 
     #[test]
+    fn test_parse_pgrep_output_handles_pidof_space_separated() {
+        assert_eq!(parse_pgrep_output("2689 2710\n"), Some(2689));
+    }
+
+    #[test]
     fn test_parse_status_vmrss_vmsize() {
         let (rss, vmsize) = parse_status_vmrss_vmsize(FIXTURE_PROC_STATUS);
         assert_eq!(rss, Some(12456));
@@ -585,5 +662,13 @@ Threads:        1"#;
         let (rss, vmsize) = parse_status_vmrss_vmsize("");
         assert_eq!(rss, None);
         assert_eq!(vmsize, None);
+    }
+
+    #[test]
+    fn test_parse_status_vmrss_vmsize_with_prompt_noise() {
+        let s = "~ # VmRSS: 3660 kB\n~ # VmSize: 8820 kB\n";
+        let (rss, vmsize) = parse_status_vmrss_vmsize(s);
+        assert_eq!(rss, Some(3660));
+        assert_eq!(vmsize, Some(8820));
     }
 }
