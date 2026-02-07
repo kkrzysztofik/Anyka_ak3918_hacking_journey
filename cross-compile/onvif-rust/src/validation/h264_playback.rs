@@ -125,10 +125,10 @@ impl H264PlaybackMode {
              a=tool:onvif-validation\r\n\
              m=video 0 RTP/AVP 96\r\n\
              a=rtpmap:96 H264/90000\r\n\
-             a=fmtp:96 profile-level-id={};sprop-parameter-sets={},{}\r\n",
-            profile_level_id,
+             a=fmtp:96 packetization-mode=1; sprop-parameter-sets={},{}; profile-level-id={}\r\n",
             base64_encode(sps),
-            base64_encode(pps)
+            base64_encode(pps),
+            profile_level_id
         );
 
         // Add audio section if audio config is provided
@@ -261,6 +261,7 @@ mod tests {
         let sdp = mode.generate_sdp(&sps, &pps, None);
 
         // Should extract bytes [1][2][3] = 0x42, 0xe0, 0x1e -> "42e01e"
+        assert!(sdp.contains("packetization-mode=1"));
         assert!(sdp.contains("profile-level-id=42e01e"));
         assert!(sdp.contains("sprop-parameter-sets="));
         assert!(!sdp.contains("m=audio")); // No audio

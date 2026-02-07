@@ -255,10 +255,10 @@ fn generate_av_sdp(
     sdp.push_str("m=video 0 RTP/AVP 96\r\n");
     sdp.push_str("a=rtpmap:96 H264/90000\r\n");
     sdp.push_str(&format!(
-        "a=fmtp:96 profile-level-id={};sprop-parameter-sets={},{}\r\n",
-        profile_level_id,
+        "a=fmtp:96 packetization-mode=1; sprop-parameter-sets={},{}; profile-level-id={}\r\n",
         base64_encode(sps),
-        base64_encode(pps)
+        base64_encode(pps),
+        profile_level_id
     ));
     sdp.push_str("a=control:trackID=0\r\n");
     sdp.push_str("a=sendonly\r\n");

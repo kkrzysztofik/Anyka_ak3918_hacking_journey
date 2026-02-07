@@ -4,13 +4,27 @@ use bytes::{BufMut, BytesMut};
 
 // pub trait Fmtp: TMsgConverter {}
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct H264Fmtp {
     pub payload_type: u16,
     pub packetization_mode: u8,
     profile_level_id: BytesMut,
     pub sps: BytesMut,
     pub pps: BytesMut,
+}
+
+impl Default for H264Fmtp {
+    fn default() -> Self {
+        Self {
+            payload_type: 0,
+            // Our H.264 packetizer supports FU-A fragmentation which requires packetization-mode=1.
+            // Defaulting to 1 avoids advertising an incompatible mode when a source SDP omits it.
+            packetization_mode: 1,
+            profile_level_id: BytesMut::new(),
+            sps: BytesMut::new(),
+            pps: BytesMut::new(),
+        }
+    }
 }
 #[derive(Debug, Clone, Default)]
 pub struct H265Fmtp {
@@ -470,7 +484,7 @@ mod marshal_tests {
     fn test_h264_fmtp_missing_parameters() {
         let fmtp = H264Fmtp::unmarshal("96").unwrap();
         assert_eq!(fmtp.payload_type, 96);
-        assert_eq!(fmtp.packetization_mode, 0); // default
+        assert_eq!(fmtp.packetization_mode, 1); // default
     }
 
     // H.265 FMTP comprehensive tests

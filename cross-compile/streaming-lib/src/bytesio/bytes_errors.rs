@@ -47,7 +47,7 @@ impl From<BytesIOError> for BytesReadError {
 
 #[derive(Debug, Error)]
 pub enum BytesWriteErrorValue {
-    #[error("io error")]
+    #[error("io error: {0}")]
     IO(#[from] io::Error),
     #[error("bytes io error: {}", _0)]
     BytesIOError(BytesIOError),
@@ -161,7 +161,7 @@ mod tests {
     fn test_bytes_write_error_value_io_display() {
         let io_err = IoError::new(ErrorKind::WriteZero, "write zero");
         let err = BytesWriteErrorValue::IO(io_err);
-        assert_eq!(format!("{}", err), "io error");
+        assert_eq!(format!("{}", err), "io error: write zero");
     }
 
     #[test]

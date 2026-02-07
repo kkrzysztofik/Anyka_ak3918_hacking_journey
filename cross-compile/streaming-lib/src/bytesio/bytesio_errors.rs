@@ -8,7 +8,7 @@ pub enum BytesIOErrorValue {
     NotEnoughBytes,
     #[error("empty stream")]
     EmptyStream,
-    #[error("io error")]
+    #[error("io error: {0}")]
     IOError(io::Error),
     #[error("time out error: {}", _0)]
     TimeoutError(tokio::time::error::Elapsed),
@@ -59,7 +59,7 @@ mod tests {
     fn test_bytesio_error_value_io_error_display() {
         let io_err = IoError::new(ErrorKind::NotFound, "not found");
         let err = BytesIOErrorValue::IOError(io_err);
-        assert_eq!(format!("{}", err), "io error");
+        assert_eq!(format!("{}", err), "io error: not found");
     }
 
     #[test]
