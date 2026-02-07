@@ -59,12 +59,20 @@ pub struct RtcpChannel {
 impl RtpChannel {
     pub fn new(codec_info: RtspCodecInfo) -> Self {
         let ssrc: u32 = rand::rng().random();
+        // Use a non-zero random initial RTP sequence number to avoid ambiguous
+        // PLAY/RTP-Info startup behavior in strict clients.
+        let init_sequence: u16 = loop {
+            let sequence: u16 = rand::rng().random();
+            if sequence != 0 {
+                break sequence;
+            }
+        };
         let mut rtp_channel = RtpChannel {
             codec_info,
             ssrc,
             rtp_packer: None,
             rtp_unpacker: None,
-            init_sequence: 0,
+            init_sequence,
         };
         rtp_channel.create_unpacker();
         rtp_channel
@@ -298,6 +306,13 @@ mod tests {
         let channel2 = RtpChannel::new(codec_info);
         // SSRCs should be different (random)
         assert_ne!(channel1.ssrc, channel2.ssrc);
+    }
+
+    #[test]
+    fn test_rtp_channel_new_initial_sequence_non_zero() {
+        let codec_info = RtspCodecInfo::default();
+        let channel = RtpChannel::new(codec_info);
+        assert_ne!(channel.initial_sequence(), 0);
     }
 
     // ========================================================================

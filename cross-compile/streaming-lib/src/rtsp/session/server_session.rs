@@ -55,6 +55,7 @@ use std::sync::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 use crate::common::auth::Auth;
 use crate::streamhub::{
@@ -112,6 +113,7 @@ struct RtpTrackCounters {
 }
 
 const RTP_TIMESTAMP_WRAP_THRESHOLD: u32 = 0x8000_0000;
+const SESSION_ID_RANDOM_DIGITS: RandomDigitCount = RandomDigitCount::Four;
 
 #[derive(Debug, Clone, Copy)]
 struct RtpTimestampSample {
@@ -284,6 +286,8 @@ pub struct RtspServerSession {
     /// even if the global is changed later.
     rtp_sample_interval: u32,
     rtp_counters: HashMap<TrackType, RtpCountersHandle>,
+    playback_cancel: Option<Arc<AtomicBool>>,
+    playback_task: Option<JoinHandle<()>>,
 }
 
 pub struct InterleavedBinaryData {
@@ -357,46 +361,78 @@ impl RtspServerSession {
             shutdown: Arc::new(AtomicBool::new(false)),
             rtp_sample_interval: sample_interval,
             rtp_counters: HashMap::new(),
+            playback_cancel: None,
+            playback_task: None,
         }
     }
 
     pub async fn run(&mut self) -> Result<(), SessionError> {
-        loop {
-            if self.shutdown.load(Ordering::Acquire) {
-                break;
-            }
-            while self.reader.len() < 4 {
-                let data = self.io.lock().await.read().await?;
-                self.reader.extend_from_slice(&data[..]);
-            }
-            // If delivering media data using RTP over RTSP(TCP), then it should use InterleavedBinaryData
-            // to distinguish RTP from RTSP messges; If delivering media data over UDP, it will establish
-            // separate udp channels for audio RTP data and video RTP data.
+        let run_result: Result<(), SessionError> = async {
+            loop {
+                if self.shutdown.load(Ordering::Acquire) {
+                    break;
+                }
+                while self.reader.len() < 4 {
+                    let data = self.io.lock().await.read().await?;
+                    self.reader.extend_from_slice(&data[..]);
+                }
+                // If delivering media data using RTP over RTSP(TCP), then it should use InterleavedBinaryData
+                // to distinguish RTP from RTSP messges; If delivering media data over UDP, it will establish
+                // separate udp channels for audio RTP data and video RTP data.
 
-            // TODO: Here, some optimizations can be made since it's not necessary to use InterleavedBinaryData
-            // in all cases.
-            if let Ok(data) = InterleavedBinaryData::new(&mut self.reader) {
-                match data {
-                    Some(a) => {
-                        while self.reader.len() < a.length as usize {
-                            let data = self.io.lock().await.read().await?;
-                            self.reader.extend_from_slice(&data[..]);
+                // TODO: Here, some optimizations can be made since it's not necessary to use InterleavedBinaryData
+                // in all cases.
+                if let Ok(data) = InterleavedBinaryData::new(&mut self.reader) {
+                    match data {
+                        Some(a) => {
+                            while self.reader.len() < a.length as usize {
+                                let data = self.io.lock().await.read().await?;
+                                self.reader.extend_from_slice(&data[..]);
+                            }
+                            self.on_rtp_over_rtsp_message(a.channel_identifier, a.length as usize)
+                                .await?;
                         }
-                        self.on_rtp_over_rtsp_message(a.channel_identifier, a.length as usize)
-                            .await?;
-                    }
-                    None => {
-                        self.on_rtsp_message().await?;
+                        None => {
+                            self.on_rtsp_message().await?;
+                        }
                     }
                 }
             }
+            Ok(())
         }
+        .await;
 
-        Ok(())
+        self.stop_playback_task().await;
+        run_result
     }
 
     pub fn shutdown(&self) {
         self.shutdown.store(true, Ordering::Release);
+    }
+
+    fn abort_playback_task(&mut self) {
+        if let Some(cancel) = self.playback_cancel.take() {
+            cancel.store(true, Ordering::Release);
+        }
+        if let Some(handle) = self.playback_task.take() {
+            handle.abort();
+        }
+    }
+
+    async fn stop_playback_task(&mut self) {
+        if let Some(cancel) = self.playback_cancel.take() {
+            cancel.store(true, Ordering::Release);
+        }
+        if let Some(handle) = self.playback_task.take() {
+            handle.abort();
+            match handle.await {
+                Ok(()) => {}
+                Err(err) if err.is_cancelled() => {}
+                Err(err) => {
+                    log::warn!("playback task join error: {err}");
+                }
+            }
+        }
     }
 
     async fn on_rtp_over_rtsp_message(
@@ -487,6 +523,7 @@ impl RtspServerSession {
                 self.handle_record(&rtsp_request).await?;
             }
             rtsp_method_name::TEARDOWN => {
+                self.stop_playback_task().await;
                 self.handle_teardown(&rtsp_request)?;
                 let response = Self::gen_response(http::StatusCode::OK, &rtsp_request);
                 self.send_response(&response).await?;
@@ -526,7 +563,15 @@ impl RtspServerSession {
     }
 
     async fn handle_describe(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
-        let status_code = http::StatusCode::OK;
+        if self.auth.is_none() {
+            let has_authorization_header = rtsp_request.get_header("Authorization").is_some();
+            let has_userinfo_in_uri = rtsp_request.uri.host.contains('@');
+            if has_authorization_header || has_userinfo_in_uri {
+                let response = Self::gen_response(http::StatusCode::UNAUTHORIZED, rtsp_request);
+                self.send_response(&response).await?;
+                return Ok(());
+            }
+        }
 
         // The sender is used for sending sdp information from the server session to client session
         // receiver is used to receive the sdp information
@@ -552,7 +597,13 @@ impl RtspServerSession {
             self.new_tracks()?;
         }
 
-        let mut response = Self::gen_response(status_code, rtsp_request);
+        if self.sdp.medias.is_empty() {
+            let response = Self::gen_response(http::StatusCode::NOT_FOUND, rtsp_request);
+            self.send_response(&response).await?;
+            return Ok(());
+        }
+
+        let mut response = Self::gen_response(http::StatusCode::OK, rtsp_request);
         let sdp = self.sdp.marshal();
         response.body = Some(sdp);
         response
@@ -707,7 +758,7 @@ impl RtspServerSession {
 
         if let Some(transport_data) = rtsp_request.get_header("Transport") {
             if self.session_id.is_none() {
-                self.session_id = Some(Uuid::new(RandomDigitCount::Zero));
+                self.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
             }
 
             let transport = RtspTransport::unmarshal(transport_data);
@@ -1187,82 +1238,119 @@ impl RtspServerSession {
 
         self.has_subscribed = true;
         self.session_type = define::ServerSessionType::Pull;
-        let mut timestamp_normalizers: HashMap<TrackType, RtpTimestampNormalizer> = HashMap::new();
+        let audio_rtp_channel = self
+            .tracks
+            .get(&TrackType::Audio)
+            .map(|track| track.rtp_channel.clone());
+        let video_rtp_channel = self
+            .tracks
+            .get(&TrackType::Video)
+            .map(|track| track.rtp_channel.clone());
+        let remote_addr = self.remote_addr;
+        let request_path = rtsp_request.uri.path.clone();
+        let session_id_for_task = session_id.clone();
+        let shutdown = self.shutdown.clone();
 
-        let mut retry_times = 0;
-        loop {
-            if let Some(frame_data) = receiver.recv().await {
-                match frame_data {
-                    FrameData::Audio {
-                        timestamp,
-                        mut data,
-                    } => {
-                        if let Some(audio_track) = self.tracks.get_mut(&TrackType::Audio) {
-                            let mut channel = audio_track.rtp_channel.lock().await;
-                            let normalized = timestamp_normalizers
-                                .entry(TrackType::Audio)
-                                .or_default()
-                                .normalize(timestamp, channel.clock_rate());
-                            if normalized.non_wrap_regressed {
-                                log::warn!(
-                                    "event=rtp_timestamp_non_wrap_regression track=Audio session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
-                                    session_id,
-                                    self.remote_addr,
-                                    rtsp_request.uri.path,
-                                    normalized.previous_scaled_timestamp.unwrap_or_default(),
-                                    normalized.scaled_timestamp,
-                                    normalized.output_timestamp,
-                                    normalized.non_wrap_regression_count,
-                                );
-                            }
-                            channel
-                                .on_frame(&mut data, normalized.output_timestamp)
-                                .await?;
-                        }
-                    }
-                    FrameData::Video {
-                        timestamp,
-                        mut data,
-                    } => {
-                        if let Some(video_track) = self.tracks.get_mut(&TrackType::Video) {
-                            let mut channel = video_track.rtp_channel.lock().await;
-                            let normalized = timestamp_normalizers
-                                .entry(TrackType::Video)
-                                .or_default()
-                                .normalize(timestamp, channel.clock_rate());
-                            if normalized.non_wrap_regressed {
-                                log::warn!(
-                                    "event=rtp_timestamp_non_wrap_regression track=Video session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
-                                    session_id,
-                                    self.remote_addr,
-                                    rtsp_request.uri.path,
-                                    normalized.previous_scaled_timestamp.unwrap_or_default(),
-                                    normalized.scaled_timestamp,
-                                    normalized.output_timestamp,
-                                    normalized.non_wrap_regression_count,
-                                );
-                            }
-                            channel
-                                .on_frame(&mut data, normalized.output_timestamp)
-                                .await?;
-                        }
-                    }
-                    _ => {}
+        self.stop_playback_task().await;
+        let playback_cancel = Arc::new(AtomicBool::new(false));
+        let playback_cancel_for_task = playback_cancel.clone();
+        self.playback_cancel = Some(playback_cancel);
+
+        self.playback_task = Some(tokio::spawn(async move {
+            let mut timestamp_normalizers: HashMap<TrackType, RtpTimestampNormalizer> =
+                HashMap::new();
+            let mut retry_times = 0;
+
+            loop {
+                if playback_cancel_for_task.load(Ordering::Acquire) {
+                    break;
                 }
-            } else {
-                retry_times += 1;
-                log::info!(
-                    "send_channel_data: no data receives ,retry {} times!",
-                    retry_times
-                );
 
-                if retry_times > 10 {
-                    return Err(SessionError {
-                        value: SessionErrorValue::CannotReceiveFrameData,
-                    });
+                if let Some(frame_data) = receiver.recv().await {
+                    retry_times = 0;
+                    match frame_data {
+                        FrameData::Audio {
+                            timestamp,
+                            mut data,
+                        } => {
+                            if let Some(audio_channel) = &audio_rtp_channel {
+                                let mut channel = audio_channel.lock().await;
+                                let normalized = timestamp_normalizers
+                                    .entry(TrackType::Audio)
+                                    .or_default()
+                                    .normalize(timestamp, channel.clock_rate());
+                                if normalized.non_wrap_regressed {
+                                    log::warn!(
+                                        "event=rtp_timestamp_non_wrap_regression track=Audio session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
+                                        session_id_for_task,
+                                        remote_addr,
+                                        request_path,
+                                        normalized.previous_scaled_timestamp.unwrap_or_default(),
+                                        normalized.scaled_timestamp,
+                                        normalized.output_timestamp,
+                                        normalized.non_wrap_regression_count,
+                                    );
+                                }
+                                if let Err(err) = channel
+                                    .on_frame(&mut data, normalized.output_timestamp)
+                                    .await
+                                {
+                                    log::info!("handle_play error: {err}");
+                                    shutdown.store(true, Ordering::Release);
+                                    break;
+                                }
+                            }
+                        }
+                        FrameData::Video {
+                            timestamp,
+                            mut data,
+                        } => {
+                            if let Some(video_channel) = &video_rtp_channel {
+                                let mut channel = video_channel.lock().await;
+                                let normalized = timestamp_normalizers
+                                    .entry(TrackType::Video)
+                                    .or_default()
+                                    .normalize(timestamp, channel.clock_rate());
+                                if normalized.non_wrap_regressed {
+                                    log::warn!(
+                                        "event=rtp_timestamp_non_wrap_regression track=Video session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
+                                        session_id_for_task,
+                                        remote_addr,
+                                        request_path,
+                                        normalized.previous_scaled_timestamp.unwrap_or_default(),
+                                        normalized.scaled_timestamp,
+                                        normalized.output_timestamp,
+                                        normalized.non_wrap_regression_count,
+                                    );
+                                }
+                                if let Err(err) = channel
+                                    .on_frame(&mut data, normalized.output_timestamp)
+                                    .await
+                                {
+                                    log::info!("handle_play error: {err}");
+                                    shutdown.store(true, Ordering::Release);
+                                    break;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                } else {
+                    retry_times += 1;
+                    log::info!(
+                        "send_channel_data: no data receives ,retry {} times!",
+                        retry_times
+                    );
+
+                    if retry_times > 10 {
+                        shutdown.store(true, Ordering::Release);
+                        break;
+                    }
                 }
             }
-        }
+        }));
+
+        Ok(())
     }
 
     async fn handle_record(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
@@ -1494,7 +1582,7 @@ impl RtspServerSession {
         let id = if let Some(session_id) = &self.session_id {
             *session_id
         } else {
-            Uuid::new(RandomDigitCount::Zero)
+            Uuid::new(SESSION_ID_RANDOM_DIGITS)
         };
 
         SubscriberInfo {
@@ -1512,7 +1600,7 @@ impl RtspServerSession {
         let id = if let Some(session_id) = &self.session_id {
             *session_id
         } else {
-            Uuid::new(RandomDigitCount::Zero)
+            Uuid::new(SESSION_ID_RANDOM_DIGITS)
         };
 
         PublisherInfo {
@@ -1531,6 +1619,12 @@ impl RtspServerSession {
         self.writer.flush().await?;
 
         Ok(())
+    }
+}
+
+impl Drop for RtspServerSession {
+    fn drop(&mut self) {
+        self.abort_playback_task();
     }
 }
 
@@ -1939,8 +2033,8 @@ mod tests {
                     sender,
                 } = event
                 {
-                    // Respond with some dummy SDP
-                    let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n";
+                    // Respond with a minimal valid SDP containing one media block
+                    let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
                     let _ = sender.send(Information::Sdp {
                         data: dummy_sdp.to_string(),
                     });
@@ -1991,7 +2085,7 @@ mod tests {
                         }
                         _ => panic!("unexpected identifier type"),
                     }
-                    let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n";
+                    let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
                     let _ = sender.send(Information::Sdp {
                         data: dummy_sdp.to_string(),
                     });
@@ -2009,6 +2103,80 @@ mod tests {
         request.uri.host = "127.0.0.1".to_string();
         request.uri.port = Some(8554);
         request.uri.path = "live/test/trackID=0".to_string();
+
+        let result = session.handle_describe(&request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_describe_empty_sdp_returns_not_found() {
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 404 Not Found")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        tokio::spawn(async move {
+            if let Some(StreamHubEvent::Request { sender, .. }) = event_receiver.recv().await {
+                // No media blocks -> server should treat as not-found stream.
+                let empty_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n";
+                let _ = sender.send(Information::Sdp {
+                    data: empty_sdp.to_string(),
+                });
+            }
+        });
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let mut request = create_test_request("DESCRIBE", Some("4"));
+        request.uri.schema = crate::common::http::Schema::RTSP;
+        request.uri.host = "127.0.0.1".to_string();
+        request.uri.port = Some(8554);
+        request.uri.path = "bogus_stream".to_string();
+
+        let result = session.handle_describe(&request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_describe_auth_header_without_auth_returns_unauthorized() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 401 Unauthorized")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let mut request = create_test_request("DESCRIBE", Some("5"));
+        request.uri.schema = crate::common::http::Schema::RTSP;
+        request.uri.host = "127.0.0.1".to_string();
+        request.uri.port = Some(8554);
+        request.uri.path = "stream1".to_string();
+        request.headers.insert(
+            "Authorization".to_string(),
+            "Basic aW52YWxpZDppbnZhbGlk".to_string(),
+        );
 
         let result = session.handle_describe(&request).await;
         assert!(result.is_ok());
@@ -2169,6 +2337,146 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_rtsp_server_session_play_then_teardown_sends_two_responses_and_unsubscribes_once()
+    {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        const PLAY_REQ: &str = "PLAY rtsp://localhost/stream1/trackID=0 RTSP/1.0\r\nCSeq: 5\r\nSession: 1\r\nRange: npt=0.000-\r\n\r\n";
+        const TEARDOWN_REQ: &str =
+            "TEARDOWN rtsp://localhost/stream1 RTSP/1.0\r\nCSeq: 6\r\nSession: 1\r\n\r\n";
+
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+
+        let read_count = AtomicUsize::new(0);
+        let play_bytes = BytesMut::from(PLAY_REQ);
+        let teardown_bytes = BytesMut::from(TEARDOWN_REQ);
+        mock_io.expect_read().times(3).returning(move || {
+            match read_count.fetch_add(1, Ordering::SeqCst) {
+                0 => Ok(play_bytes.clone()),
+                1 => Ok(teardown_bytes.clone()),
+                _ => Err(BytesIOError::from(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionAborted,
+                    "eof",
+                ))),
+            }
+        });
+
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 200 OK")
+            })
+            .times(2)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+
+        let unsubscribe_count = Arc::new(AtomicUsize::new(0));
+        let unsubscribe_count_for_task = unsubscribe_count.clone();
+        let event_handle = tokio::spawn(async move {
+            use crate::streamhub::define::DataReceiver;
+
+            let mut held_frame_sender = None;
+            while let Some(event) = event_receiver.recv().await {
+                match event {
+                    StreamHubEvent::Subscribe { result_sender, .. } => {
+                        let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                        held_frame_sender = Some(frame_sender);
+                        let data_receiver = DataReceiver {
+                            frame_receiver: Some(frame_receiver),
+                            packet_receiver: None,
+                        };
+                        let _ = result_sender.send(Ok((data_receiver, None)));
+                    }
+                    StreamHubEvent::UnSubscribe { .. } => {
+                        unsubscribe_count_for_task.fetch_add(1, Ordering::SeqCst);
+                        drop(held_frame_sender);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let run_result = session.run().await;
+        assert!(run_result.is_err());
+        assert!(session.playback_task.is_none());
+        assert!(session.playback_cancel.is_none());
+
+        event_handle.await.expect("event task panicked");
+        assert_eq!(unsubscribe_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_run_eof_stops_playback_task() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        const PLAY_REQ: &str = "PLAY rtsp://localhost/stream1/trackID=0 RTSP/1.0\r\nCSeq: 5\r\nSession: 1\r\nRange: npt=0.000-\r\n\r\n";
+
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+
+        let read_count = AtomicUsize::new(0);
+        let play_bytes = BytesMut::from(PLAY_REQ);
+        mock_io.expect_read().times(2).returning(move || {
+            if read_count.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(play_bytes.clone())
+            } else {
+                Err(BytesIOError::from(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionAborted,
+                    "eof",
+                )))
+            }
+        });
+
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 200 OK")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let event_handle = tokio::spawn(async move {
+            use crate::streamhub::define::DataReceiver;
+            if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
+                event_receiver.recv().await
+            {
+                let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                let _hold_sender = frame_sender;
+                let data_receiver = DataReceiver {
+                    frame_receiver: Some(frame_receiver),
+                    packet_receiver: None,
+                };
+                let _ = result_sender.send(Ok((data_receiver, None)));
+            }
+        });
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let run_result = session.run().await;
+        assert!(run_result.is_err());
+        assert!(session.playback_task.is_none());
+        assert!(session.playback_cancel.is_none());
+
+        event_handle.await.expect("event task panicked");
+    }
+
+    #[tokio::test]
     async fn test_rtsp_server_session_play() {
         let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
         let mut mock_io = MockNetIO::new();
@@ -2235,9 +2543,9 @@ mod tests {
         let request = RtspRequest::unmarshal(content).unwrap();
 
         let result = session.handle_play(&request).await;
-        // EXPECT ERROR: CannotReceiveFrameData because we closed the channel immediately
-        // and logic retries 10 times then errors.
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        session.stop_playback_task().await;
+        assert!(session.playback_task.is_none());
 
         subscribe_handle
             .await
@@ -2296,7 +2604,9 @@ mod tests {
         let request = RtspRequest::unmarshal(content).unwrap();
 
         let result = session.handle_play(&request).await;
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        session.stop_playback_task().await;
+        assert!(session.playback_task.is_none());
 
         subscribe_handle
             .await
@@ -2359,7 +2669,9 @@ mod tests {
         let request = RtspRequest::unmarshal(content).unwrap();
 
         let result = session.handle_play(&request).await;
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        session.stop_playback_task().await;
+        assert!(session.playback_task.is_none());
 
         subscribe_handle
             .await

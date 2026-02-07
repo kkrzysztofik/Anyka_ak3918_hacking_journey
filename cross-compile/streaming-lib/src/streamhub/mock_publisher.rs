@@ -230,6 +230,16 @@ impl MockVideoPublisher {
     pub fn pps(&self) -> &[u8] {
         &self.pps
     }
+
+    /// Get a shared handle to the publisher's most recently emitted video timestamp.
+    pub fn last_timestamp_handle(&self) -> Arc<AtomicU32> {
+        Arc::clone(&self.last_timestamp_ms)
+    }
+
+    /// Get a bootstrap IDR NAL (if available) for fast decoder synchronization.
+    pub fn bootstrap_idr(&self) -> Option<Vec<u8>> {
+        self.bootstrap_idr.clone()
+    }
 }
 
 /// TStreamHandler implementation for MockVideoPublisher

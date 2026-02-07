@@ -12,6 +12,8 @@ use bytes::BytesMut;
 use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
+use portable_atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use streaming_lib::streamhub::define::{Information, InformationSender};
 use streaming_lib::streamhub::errors::StreamHubError;
 use streaming_lib::streamhub::statistics::StatisticsStream;
@@ -153,6 +155,8 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
 struct ValidationAvStreamHandler {
     sps: Vec<u8>,
     pps: Vec<u8>,
+    bootstrap_idr: Option<Vec<u8>>,
+    last_video_timestamp_ms: Arc<AtomicU32>,
     audio_config: Option<Vec<u8>>,
     audio_sample_rate: u32,
 }
@@ -161,12 +165,16 @@ impl ValidationAvStreamHandler {
     fn new(
         sps: Vec<u8>,
         pps: Vec<u8>,
+        bootstrap_idr: Option<Vec<u8>>,
+        last_video_timestamp_ms: Arc<AtomicU32>,
         audio_config: Option<Vec<u8>>,
         audio_sample_rate: u32,
     ) -> Self {
         Self {
             sps,
             pps,
+            bootstrap_idr,
+            last_video_timestamp_ms,
             audio_config,
             audio_sample_rate,
         }
@@ -184,6 +192,7 @@ impl TStreamHandler for ValidationAvStreamHandler {
             sender: frame_sender,
         } = sender
         {
+            let timestamp = self.last_video_timestamp_ms.load(Ordering::Relaxed);
             let audio_clock_rate = if self.audio_config.is_some() {
                 self.audio_sample_rate
             } else {
@@ -198,13 +207,19 @@ impl TStreamHandler for ValidationAvStreamHandler {
             let _ = frame_sender.send(FrameData::MediaInfo { media_info });
 
             let _ = frame_sender.send(FrameData::Video {
-                timestamp: 0,
+                timestamp,
                 data: BytesMut::from(self.sps.as_slice()),
             });
             let _ = frame_sender.send(FrameData::Video {
-                timestamp: 0,
+                timestamp,
                 data: BytesMut::from(self.pps.as_slice()),
             });
+            if let Some(idr) = self.bootstrap_idr.as_ref() {
+                let _ = frame_sender.send(FrameData::Video {
+                    timestamp,
+                    data: BytesMut::from(idr.as_slice()),
+                });
+            }
 
             if let Some(config) = self.audio_config.as_ref() {
                 let _ = frame_sender.send(FrameData::Audio {
@@ -309,7 +324,6 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     use onvif_rust::config::{ConfigRuntime, ConfigStorage};
     use onvif_rust::platform::{Platform, ValidationPlatform};
     use std::path::Path;
-    use std::sync::Arc;
     use streaming_lib::StreamIdentifier;
     use streaming_lib::streamhub::define::DataReceiver;
     use streaming_lib::streamhub::mock_audio_publisher::MockAudioPublisher;
@@ -418,6 +432,8 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     let rtsp_stream_handler = Arc::new(ValidationAvStreamHandler::new(
         video_publisher.sps().to_vec(),
         video_publisher.pps().to_vec(),
+        video_publisher.bootstrap_idr(),
+        video_publisher.last_timestamp_handle(),
         audio_publisher
             .as_ref()
             .map(|publisher| publisher.audio_config().to_vec()),

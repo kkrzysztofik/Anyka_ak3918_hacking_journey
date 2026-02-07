@@ -31,6 +31,11 @@ pub struct RtpH264Packer {
 }
 
 impl RtpH264Packer {
+    #[inline]
+    fn is_vcl_nalu_header(nalu_header: u8) -> bool {
+        matches!(nalu_header & 0x1F, 1..=5)
+    }
+
     pub fn new(
         payload_type: u8,
         ssrc: u32,
@@ -53,7 +58,11 @@ impl RtpH264Packer {
         }
     }
 
-    pub async fn pack_fu_a(&mut self, nalu: BytesMut) -> Result<(), PackerError> {
+    async fn pack_fu_a_with_marker(
+        &mut self,
+        nalu: BytesMut,
+        mark_end_of_access_unit: bool,
+    ) -> Result<(), PackerError> {
         let mut nalu_reader = BytesReader::new(nalu);
         let byte_1st = nalu_reader.read_u8()?;
 
@@ -82,7 +91,11 @@ impl RtpH264Packer {
             }
 
             packet.payload.put(fu_payload);
-            packet.header.marker = if fu_header & define::FU_END > 0 { 1 } else { 0 };
+            packet.header.marker = if mark_end_of_access_unit && fu_header & define::FU_END > 0 {
+                1
+            } else {
+                0
+            };
 
             if let Some(f) = &self.on_packet_for_rtcp_handler {
                 f(packet.clone()).await;
@@ -100,9 +113,14 @@ impl RtpH264Packer {
 
         Ok(())
     }
-    pub async fn pack_single(&mut self, nalu: BytesMut) -> Result<(), PackerError> {
+
+    async fn pack_single_with_marker(
+        &mut self,
+        nalu: BytesMut,
+        mark_end_of_access_unit: bool,
+    ) -> Result<(), PackerError> {
         let mut packet = RtpPacket::new(self.header.clone());
-        packet.header.marker = 1;
+        packet.header.marker = u8::from(mark_end_of_access_unit);
         packet.payload.put(nalu);
 
         // let packet_bytesmut = packet.marshal()?;
@@ -118,6 +136,69 @@ impl RtpH264Packer {
 
         Ok(())
     }
+
+    pub async fn pack_fu_a(&mut self, nalu: BytesMut) -> Result<(), PackerError> {
+        let mark_end_of_access_unit = nalu
+            .first()
+            .is_some_and(|header| Self::is_vcl_nalu_header(*header));
+        self.pack_fu_a_with_marker(nalu, mark_end_of_access_unit)
+            .await
+    }
+
+    pub async fn pack_single(&mut self, nalu: BytesMut) -> Result<(), PackerError> {
+        let mark_end_of_access_unit = nalu
+            .first()
+            .is_some_and(|header| Self::is_vcl_nalu_header(*header));
+        self.pack_single_with_marker(nalu, mark_end_of_access_unit)
+            .await
+    }
+
+    fn extract_nalus_from_frame(frame: &mut BytesMut) -> Vec<BytesMut> {
+        let mut nal_units = Vec::new();
+
+        while !frame.is_empty() {
+            if let Some(first_pos) = utils::find_start_code(&frame[..]) {
+                let mut nalu_with_start_code = if let Some(distance_to_first_pos) =
+                    utils::find_start_code(&frame[first_pos + 3..])
+                {
+                    let mut second_pos = first_pos + 3 + distance_to_first_pos;
+                    while second_pos > 0 && frame[second_pos - 1] == 0 {
+                        second_pos -= 1;
+                    }
+                    frame.split_to(second_pos)
+                } else {
+                    frame.split_to(frame.len())
+                };
+
+                let nalu = nalu_with_start_code.split_off(first_pos + 3);
+                if !nalu.is_empty() {
+                    nal_units.push(nalu);
+                }
+            } else {
+                let raw_nalu = frame.split_to(frame.len());
+                if !raw_nalu.is_empty() {
+                    nal_units.push(raw_nalu);
+                }
+                break;
+            }
+        }
+
+        nal_units
+    }
+
+    async fn pack_nalu_with_marker(
+        &mut self,
+        nalu: BytesMut,
+        mark_end_of_access_unit: bool,
+    ) -> Result<(), PackerError> {
+        if nalu.len() + define::RTP_FIXED_HEADER_LEN <= self.mtu {
+            self.pack_single_with_marker(nalu, mark_end_of_access_unit)
+                .await
+        } else {
+            self.pack_fu_a_with_marker(nalu, mark_end_of_access_unit)
+                .await
+        }
+    }
 }
 
 #[async_trait]
@@ -125,7 +206,17 @@ impl TPacker for RtpH264Packer {
     //pack annexb h264 data
     async fn pack(&mut self, nalus: &mut BytesMut, timestamp: u32) -> Result<(), PackerError> {
         self.header.timestamp = timestamp; // ((timestamp as u64 * self.clock_rate as u64) / 1000) as u32;
-        utils::split_annexb_and_process(nalus, self).await?;
+        let extracted_nalus = Self::extract_nalus_from_frame(nalus);
+        let last_vcl_index = extracted_nalus.iter().rposition(|nalu| {
+            nalu.first()
+                .is_some_and(|header| Self::is_vcl_nalu_header(*header))
+        });
+
+        for (index, nalu) in extracted_nalus.into_iter().enumerate() {
+            let mark_end_of_access_unit = Some(index) == last_vcl_index;
+            self.pack_nalu_with_marker(nalu, mark_end_of_access_unit)
+                .await?;
+        }
         Ok(())
     }
 
@@ -143,12 +234,11 @@ impl TRtpReceiverForRtcp for RtpH264Packer {
 #[async_trait]
 impl TVideoPacker for RtpH264Packer {
     async fn pack_nalu(&mut self, nalu: BytesMut) -> Result<(), PackerError> {
-        if nalu.len() + define::RTP_FIXED_HEADER_LEN <= self.mtu {
-            self.pack_single(nalu).await?;
-        } else {
-            self.pack_fu_a(nalu).await?;
-        }
-        Ok(())
+        let mark_end_of_access_unit = nalu
+            .first()
+            .is_some_and(|header| Self::is_vcl_nalu_header(*header));
+        self.pack_nalu_with_marker(nalu, mark_end_of_access_unit)
+            .await
     }
 }
 
@@ -515,7 +605,15 @@ mod tests {
     }
 
     fn create_test_nalu() -> BytesMut {
-        // Create a simple H.264 NAL unit (SPS type 7)
+        // Create a simple H.264 VCL NAL unit (IDR type 5)
+        let mut nalu = BytesMut::new();
+        nalu.put_u8(0x65); // NAL header: type 5 (IDR), NRI 3
+        nalu.extend_from_slice(&[0x88, 0x84, 0x21, 0xa0, 0x10, 0x04, 0x48, 0x00]);
+        nalu
+    }
+
+    fn create_test_sps_nalu() -> BytesMut {
+        // Create a simple H.264 non-VCL NAL unit (SPS type 7)
         let mut nalu = BytesMut::new();
         nalu.put_u8(0x67); // NAL header: type 7 (SPS), NRI 3
         nalu.extend_from_slice(&[0x42, 0x00, 0x1e, 0x9a, 0x74, 0x90, 0x24, 0x00]);
@@ -525,6 +623,13 @@ mod tests {
     fn create_large_nalu(size: usize) -> BytesMut {
         let mut nalu = BytesMut::new();
         nalu.put_u8(0x65); // NAL header: type 5 (IDR), NRI 3
+        nalu.extend_from_slice(&vec![0x00; size]);
+        nalu
+    }
+
+    fn create_large_sps_nalu(size: usize) -> BytesMut {
+        let mut nalu = BytesMut::new();
+        nalu.put_u8(0x67); // NAL header: type 7 (SPS), NRI 3
         nalu.extend_from_slice(&vec![0x00; size]);
         nalu
     }
@@ -567,6 +672,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_rtp_h264_packer_pack_single_non_vcl_marker_cleared() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
+
+        let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let packet_count_clone = packet_count.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            let mut count = packet_count_clone.lock().unwrap();
+            *count += 1;
+            assert_eq!(packet.header.marker, 0);
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let sps = create_test_sps_nalu();
+        let result = packer.pack_single(sps).await;
+        assert!(result.is_ok());
+        assert_eq!(*packet_count.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
     async fn test_rtp_h264_packer_pack_fu_a_large_nalu() {
         let mock_io = Arc::new(Mutex::new(
             Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
@@ -603,6 +730,32 @@ mod tests {
         assert!(*packet_count.lock().unwrap() > 1); // Should be fragmented
         assert_eq!(*first_packet_marker.lock().unwrap(), 0); // First packet should not have marker
         assert_eq!(*last_packet_marker.lock().unwrap(), 1); // Last packet should have marker
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_packer_pack_fu_a_non_vcl_marker_cleared() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
+
+        let packet_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let last_packet_marker = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let packet_count_clone = packet_count.clone();
+        let last_marker_clone = last_packet_marker.clone();
+
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            let mut count = packet_count_clone.lock().unwrap();
+            *count += 1;
+            *last_marker_clone.lock().unwrap() = packet.header.marker;
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let sps = create_large_sps_nalu(2000);
+        let result = packer.pack_fu_a(sps).await;
+        assert!(result.is_ok());
+        assert!(*packet_count.lock().unwrap() > 1); // Should be fragmented
+        assert_eq!(*last_packet_marker.lock().unwrap(), 0);
     }
 
     #[tokio::test]
@@ -645,6 +798,32 @@ mod tests {
         let result = packer.pack_nalu(nalu).await;
         assert!(result.is_ok());
         assert!(*packet_count.lock().unwrap() > 1); // Should be fragmented
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h264_packer_pack_marks_only_last_vcl_nalu() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
+
+        let markers = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let markers_clone = markers.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            markers_clone.lock().unwrap().push(packet.header.marker);
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let mut frame = BytesMut::new();
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x21]); // IDR
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x22, 0x11]); // non-IDR
+
+        let result = packer.pack(&mut frame, 1000).await;
+        assert!(result.is_ok());
+
+        let recorded_markers = markers.lock().unwrap();
+        assert_eq!(recorded_markers.len(), 2);
+        assert_eq!(*recorded_markers, vec![0, 1]);
     }
 
     #[tokio::test]
