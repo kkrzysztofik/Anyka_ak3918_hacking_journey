@@ -349,6 +349,7 @@ async fn main() -> Result<()> {
     debug!(
         duration_sec = effective.short_duration_sec,
         capture_interface = %effective.capture_interface,
+        initial_timestamp_policy = ?effective.initial_timestamp_policy,
         update_baseline = effective.update_baseline,
         compare_baseline = effective.compare_baseline,
         "effective config"

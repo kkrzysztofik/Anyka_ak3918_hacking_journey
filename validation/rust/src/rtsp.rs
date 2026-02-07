@@ -5,7 +5,10 @@ use chrono::Utc;
 use ffmpeg_sidecar::command::FfmpegCommand;
 use ffmpeg_sidecar::event::{FfmpegEvent, FfmpegProgress};
 use futures_util::StreamExt;
-use retina::client::{Credentials, PlayOptions, Session, SessionOptions, SetupOptions, Transport};
+use retina::client::{
+    Credentials, InitialTimestampPolicy, PlayOptions, Session, SessionOptions, SetupOptions,
+    Transport,
+};
 use retina::codec::{CodecItem, ParametersRef};
 use rtshark::RTSharkBuilder;
 use serde::Deserialize;
@@ -18,7 +21,7 @@ use tokio::time::{Instant, timeout};
 use tracing::{debug, info, trace, warn};
 use url::Url;
 
-use crate::config::{Args, EffectiveConfig, TransportArg};
+use crate::config::{Args, EffectiveConfig, InitialTimestampPolicyArg, TransportArg};
 use crate::report::{StreamInfo, TestResult, TestRun, ValidationReport};
 use crate::util::{MAX_TOOL_LOG_BYTES, tail_lossy, write_bytes_tail};
 
@@ -129,6 +132,15 @@ pub(crate) fn to_retina_transport(arg: TransportArg) -> Transport {
     match arg {
         TransportArg::Tcp => Transport::Tcp(Default::default()),
         TransportArg::Udp => Transport::Udp(Default::default()),
+    }
+}
+
+fn to_retina_initial_timestamp_policy(arg: InitialTimestampPolicyArg) -> InitialTimestampPolicy {
+    match arg {
+        InitialTimestampPolicyArg::Default => InitialTimestampPolicy::Default,
+        InitialTimestampPolicyArg::Require => InitialTimestampPolicy::Require,
+        InitialTimestampPolicyArg::Ignore => InitialTimestampPolicy::Ignore,
+        InitialTimestampPolicyArg::Permissive => InitialTimestampPolicy::Permissive,
     }
 }
 
@@ -448,8 +460,13 @@ pub async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<
     }
     debug!("SETUP ok");
 
-    let play_opts = PlayOptions::default();
-    debug!("PLAY request");
+    let play_opts = PlayOptions::default().initial_timestamp(to_retina_initial_timestamp_policy(
+        effective.initial_timestamp_policy,
+    ));
+    debug!(
+        initial_timestamp_policy = ?effective.initial_timestamp_policy,
+        "PLAY request"
+    );
     let play_start = Instant::now();
     let playing = match session.play(play_opts).await {
         Ok(s) => {
@@ -1777,9 +1794,10 @@ mod tests {
     use super::{
         BoundedLogWriter, bitrate_within_tolerance, build_sdp_test_results, critical_proto_failed,
         empty_report, fps_within_tolerance, packet_loss_within_tolerance, result_ok, rtsp_url,
-        to_retina_transport, validate_h264_length_prefixed_nals,
+        to_retina_initial_timestamp_policy, to_retina_transport,
+        validate_h264_length_prefixed_nals,
     };
-    use crate::config::TransportArg;
+    use crate::config::{InitialTimestampPolicyArg, TransportArg};
     use crate::report::{StreamInfo, TestResult, TestRun};
     use crate::util::MAX_TOOL_LOG_BYTES;
 
@@ -1877,6 +1895,26 @@ mod tests {
         assert!(matches!(tcp, retina::client::Transport::Tcp(_)));
         let udp = to_retina_transport(TransportArg::Udp);
         assert!(matches!(udp, retina::client::Transport::Udp(_)));
+    }
+
+    #[test]
+    fn test_to_retina_initial_timestamp_policy() {
+        assert!(matches!(
+            to_retina_initial_timestamp_policy(InitialTimestampPolicyArg::Default),
+            retina::client::InitialTimestampPolicy::Default
+        ));
+        assert!(matches!(
+            to_retina_initial_timestamp_policy(InitialTimestampPolicyArg::Require),
+            retina::client::InitialTimestampPolicy::Require
+        ));
+        assert!(matches!(
+            to_retina_initial_timestamp_policy(InitialTimestampPolicyArg::Ignore),
+            retina::client::InitialTimestampPolicy::Ignore
+        ));
+        assert!(matches!(
+            to_retina_initial_timestamp_policy(InitialTimestampPolicyArg::Permissive),
+            retina::client::InitialTimestampPolicy::Permissive
+        ));
     }
 
     #[test]

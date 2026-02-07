@@ -95,6 +95,8 @@ pub struct RtspSection {
     pub stream: String,
     #[serde(default = "default_rtsp_timeout")]
     pub timeout_sec: u64,
+    #[serde(default = "default_initial_timestamp_policy")]
+    pub initial_timestamp_policy: InitialTimestampPolicyArg,
 }
 
 impl Default for RtspSection {
@@ -104,6 +106,7 @@ impl Default for RtspSection {
             port: default_rtsp_port(),
             stream: default_rtsp_stream(),
             timeout_sec: default_rtsp_timeout(),
+            initial_timestamp_policy: default_initial_timestamp_policy(),
         }
     }
 }
@@ -119,6 +122,10 @@ fn default_rtsp_stream() -> String {
 }
 fn default_rtsp_timeout() -> u64 {
     10
+}
+
+fn default_initial_timestamp_policy() -> InitialTimestampPolicyArg {
+    InitialTimestampPolicyArg::Permissive
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -316,6 +323,7 @@ pub struct EffectiveConfig {
     pub rtsp_port: u16,
     pub rtsp_stream: String,
     pub rtsp_timeout_sec: u64,
+    pub initial_timestamp_policy: InitialTimestampPolicyArg,
     pub short_duration_sec: u64,
     pub long_duration_sec: u64,
     pub concurrent_clients: u32,
@@ -454,6 +462,11 @@ impl EffectiveConfig {
         } else {
             args.rtsp_stream.clone()
         };
+        let initial_timestamp_policy = if sources.initial_timestamp_policy {
+            args.initial_timestamp_policy
+        } else {
+            c.rtsp.initial_timestamp_policy
+        };
         let h264_file = args
             .h264_file
             .clone()
@@ -490,6 +503,7 @@ impl EffectiveConfig {
             rtsp_port,
             rtsp_stream,
             rtsp_timeout_sec: c.rtsp.timeout_sec,
+            initial_timestamp_policy,
             short_duration_sec: if sources.duration {
                 args.duration.max(1)
             } else {
@@ -646,6 +660,15 @@ pub struct Args {
         help = "RTSP transport for protocol validation (tcp or udp)."
     )]
     pub transport: TransportArg,
+
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = InitialTimestampPolicyArg::Permissive,
+        help_heading = "RTSP",
+        help = "Policy for missing RTP-Info rtptime on PLAY (default, require, ignore, permissive)."
+    )]
+    pub initial_timestamp_policy: InitialTimestampPolicyArg,
 
     #[arg(
         long,
@@ -833,11 +856,21 @@ pub enum TransportArg {
     Udp,
 }
 
+#[derive(ValueEnum, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum InitialTimestampPolicyArg {
+    Default,
+    Require,
+    Ignore,
+    Permissive,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ArgSources {
     pub rtsp_host: bool,
     pub rtsp_port: bool,
     pub rtsp_stream: bool,
+    pub initial_timestamp_policy: bool,
     pub duration: bool,
     pub max_video_startup_latency_ms: bool,
     pub output: bool,
@@ -854,6 +887,7 @@ impl ArgSources {
             rtsp_host: is_cli(matches, "rtsp_host"),
             rtsp_port: is_cli(matches, "rtsp_port"),
             rtsp_stream: is_cli(matches, "rtsp_stream"),
+            initial_timestamp_policy: is_cli(matches, "initial_timestamp_policy"),
             duration: is_cli(matches, "duration"),
             max_video_startup_latency_ms: is_cli(matches, "max_video_startup_latency_ms"),
             output: is_cli(matches, "output"),
@@ -893,8 +927,8 @@ where
 mod tests {
     use super::{
         DEFAULT_ARTIFACTS_ROOT_DIR, DEFAULT_BASELINE_DIR, DEFAULT_RTSP_HOST, DEFAULT_RTSP_PORT,
-        DEFAULT_RTSP_STREAM, EffectiveConfig, LoggingSection, RtspValidationConfig, load_config,
-        parse_args_from,
+        DEFAULT_RTSP_STREAM, EffectiveConfig, InitialTimestampPolicyArg, LoggingSection,
+        RtspValidationConfig, load_config, parse_args_from,
     };
     use clap::CommandFactory;
     use std::path::PathBuf;
@@ -933,6 +967,10 @@ mod tests {
         assert_eq!(effective.rtsp_host, DEFAULT_RTSP_HOST);
         assert_eq!(effective.rtsp_port, DEFAULT_RTSP_PORT);
         assert_eq!(effective.rtsp_stream, DEFAULT_RTSP_STREAM);
+        assert_eq!(
+            effective.initial_timestamp_policy,
+            InitialTimestampPolicyArg::Permissive
+        );
         assert_eq!(effective.short_duration_sec, 30); // DEFAULT_DURATION_SEC
         assert_eq!(effective.baseline_dir, PathBuf::from(DEFAULT_BASELINE_DIR));
         assert_eq!(
@@ -954,6 +992,8 @@ mod tests {
             "8554",
             "--duration",
             "5",
+            "--initial-timestamp-policy",
+            "require",
             "--artifacts-dir",
             "/tmp/artifacts",
             "--ffmpeg-log-level",
@@ -966,6 +1006,10 @@ mod tests {
         let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
         assert_eq!(effective.rtsp_host, "10.0.0.1");
         assert_eq!(effective.rtsp_port, 8554);
+        assert_eq!(
+            effective.initial_timestamp_policy,
+            InitialTimestampPolicyArg::Require
+        );
         assert_eq!(effective.short_duration_sec, 5);
         assert_eq!(
             effective.artifacts_root_dir,
@@ -1064,6 +1108,19 @@ mod tests {
             EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
         assert_eq!(effective.rtsp_host, "10.0.0.2");
         assert_eq!(effective.rtsp_port, 8554);
+    }
+
+    #[test]
+    fn test_from_config_and_args_initial_timestamp_policy_from_config_when_cli_omitted() {
+        let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let mut cfg = RtspValidationConfig::default();
+        cfg.rtsp.initial_timestamp_policy = InitialTimestampPolicyArg::Ignore;
+        let effective =
+            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        assert_eq!(
+            effective.initial_timestamp_policy,
+            InitialTimestampPolicyArg::Ignore
+        );
     }
 
     #[test]

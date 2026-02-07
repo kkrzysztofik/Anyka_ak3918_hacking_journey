@@ -198,6 +198,7 @@ loop_playback = true
 ## Configuration
 
 Configuration is read from TOML. Search order: `--config <path>`, env `RTSP_VALIDATION_CONFIG`, then `./rtsp_validation.toml`, then `validation/rtsp_validation.toml`. CLI overrides config.
+For RTSP servers that omit `RTP-Info rtptime` on `PLAY` (common with MediaMTX), use `initial_timestamp_policy = "permissive"` (default).
 
 **Config-only run:** With a complete `rtsp_validation.toml` (including `[run]` with `no_launch`, `launch_on_device`, and optionally `output`, `update_baseline`, `compare_baseline`), you can run the full test without any CLI arguments:
 
@@ -222,6 +223,7 @@ host = "127.0.0.1"
 port = 554
 stream = "/vs0"
 timeout_sec = 10
+initial_timestamp_policy = "permissive"
 
 [test]
 short_duration_sec = 30

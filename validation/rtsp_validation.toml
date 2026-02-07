@@ -28,6 +28,8 @@ host = "192.168.2.198"
 port = 554
 stream = "/stream1"
 timeout-sec = 10
+# Handles servers (e.g. MediaMTX) that omit RTP-Info rtptime on PLAY.
+initial-timestamp-policy = "permissive"
 
 [test]
 short-duration-sec = 30
