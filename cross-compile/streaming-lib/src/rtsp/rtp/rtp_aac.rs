@@ -81,15 +81,14 @@ impl TPacker for RtpAacPacker {
                 PackerError::from(err)
             })?;
 
-        // AU header: 13 bits size + 3 bits index
-        bits_writer
-            .write_n_bits((data_len as u64) << 3, 13)
-            .map_err(|_| {
-                let err = BytesWriteError {
-                    value: BytesWriteErrorValue::Timeout,
-                };
-                PackerError::from(err)
-            })?;
+        // AU header: 13 bits size (in bytes) + 3 bits index.
+        // RFC 3640 uses AU-size in octets for this payload mode.
+        bits_writer.write_n_bits(data_len as u64, 13).map_err(|_| {
+            let err = BytesWriteError {
+                value: BytesWriteErrorValue::Timeout,
+            };
+            PackerError::from(err)
+        })?;
         bits_writer
             .write_n_bits(0, 3) // index = 0
             .map_err(|_| {
@@ -353,9 +352,7 @@ mod tests {
         let au_size_high = payload[2];
         let au_size_low = payload[3];
         let decoded_size = ((au_size_high as usize) << 5) | ((au_size_low as usize) >> 3);
-        // TODO: Encoder appears to encode size*8 instead of size. Investigate and fix encoder.
-        // For 8 bytes, we get AU-size=64 instead of AU-size=8
-        assert_eq!(decoded_size as usize, data_len * 8);
+        assert_eq!(decoded_size, data_len);
     }
 
     #[tokio::test]

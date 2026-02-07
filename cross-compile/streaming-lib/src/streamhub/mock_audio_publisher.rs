@@ -185,7 +185,7 @@ impl TStreamHandler for MockAudioPublisher {
     async fn send_prior_data(
         &self,
         sender: DataSender,
-        _sub_type: SubscribeType,
+        sub_type: SubscribeType,
     ) -> Result<(), StreamHubError> {
         // Extract frame sender from DataSender
         if let DataSender::Frame {
@@ -204,12 +204,18 @@ impl TStreamHandler for MockAudioPublisher {
 
             let _ = frame_sender.send(FrameData::MediaInfo { media_info });
 
-            // Send AudioSpecificConfig as first audio frame
-            let config_data = BytesMut::from(self.audio_config.as_slice());
-            let _ = frame_sender.send(FrameData::Audio {
-                timestamp: ts,
-                data: config_data,
-            });
+            // RTSP/RTP consumers receive AudioSpecificConfig via SDP fmtp config.
+            // Sending config as an AAC frame can break depacketizers expecting raw AU data.
+            if !matches!(
+                sub_type,
+                SubscribeType::RtspPull | SubscribeType::RtpPull | SubscribeType::WhepPull
+            ) {
+                let config_data = BytesMut::from(self.audio_config.as_slice());
+                let _ = frame_sender.send(FrameData::Audio {
+                    timestamp: ts,
+                    data: config_data,
+                });
+            }
         }
 
         Ok(())
@@ -291,16 +297,13 @@ mod tests {
             .expect("send_prior_data");
 
         // MediaInfo first
-        let _ = rx.recv().await.expect("media_info");
-        let config = rx.recv().await.expect("config");
-
-        match config {
-            FrameData::Audio { timestamp, data } => {
-                assert_eq!(timestamp, 12_345);
-                assert_eq!(data.as_ref(), publisher.audio_config.as_slice());
-            }
-            other => panic!("expected AudioSpecificConfig audio frame, got {other:?}"),
+        match rx.recv().await.expect("media_info") {
+            FrameData::MediaInfo { .. } => {}
+            other => panic!("expected MediaInfo frame, got {other:?}"),
         }
+
+        // No config frame should be injected for RTSP pull subscribers.
+        assert!(rx.recv().await.is_none());
 
         let _ = std::fs::remove_file(&path);
     }

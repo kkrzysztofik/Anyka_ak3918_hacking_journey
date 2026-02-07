@@ -31,6 +31,7 @@ pub struct MockVideoPublisher {
     reader: Arc<Mutex<H264FileReader>>,
     sps: Vec<u8>,
     pps: Vec<u8>,
+    bootstrap_idr: Option<Vec<u8>>,
     is_running: Arc<Mutex<bool>>,
     loop_playback: bool,
     last_timestamp_ms: Arc<AtomicU32>,
@@ -57,16 +58,30 @@ impl MockVideoPublisher {
     ) -> Result<Self, PublisherError> {
         let mut reader = H264FileReader::new(file_path, frame_rate)?;
         let (sps, pps) = reader.extract_sps_pps()?;
+        let bootstrap_idr = Self::extract_first_idr(&mut reader)?;
 
         Ok(Self {
             stream_name,
             reader: Arc::new(Mutex::new(reader)),
             sps,
             pps,
+            bootstrap_idr,
             is_running: Arc::new(Mutex::new(false)),
             loop_playback,
             last_timestamp_ms: Arc::new(AtomicU32::new(0)),
         })
+    }
+
+    fn extract_first_idr(reader: &mut H264FileReader) -> Result<Option<Vec<u8>>, PublisherError> {
+        let mut first_idr = None;
+        while let Some(nal) = reader.read_next_nal()? {
+            if nal.unit_type == NalUnitType::IdrSlice {
+                first_idr = Some(nal.data);
+                break;
+            }
+        }
+        reader.reset()?;
+        Ok(first_idr)
     }
 
     /// Start publishing frames from the H264 file
@@ -257,6 +272,15 @@ impl TStreamHandler for MockVideoPublisher {
                 timestamp: ts,
                 data: pps_data,
             });
+
+            // Ensure new subscribers can decode immediately even when joining mid-GOP.
+            if let Some(idr) = self.bootstrap_idr.as_ref() {
+                let idr_data = BytesMut::from(idr.as_slice());
+                let _ = frame_sender.send(FrameData::Video {
+                    timestamp: ts,
+                    data: idr_data,
+                });
+            }
         }
 
         Ok(())
@@ -420,6 +444,7 @@ mod tests {
         let _ = rx.recv().await.expect("media_info");
         let sps = rx.recv().await.expect("sps");
         let pps = rx.recv().await.expect("pps");
+        let idr = rx.recv().await.expect("idr");
 
         match sps {
             FrameData::Video { timestamp, data } => {
@@ -435,6 +460,15 @@ mod tests {
                 assert!(!data.is_empty());
             }
             other => panic!("expected PPS video frame, got {other:?}"),
+        }
+
+        match idr {
+            FrameData::Video { timestamp, data } => {
+                assert_eq!(timestamp, 12_345);
+                assert!(!data.is_empty());
+                assert_eq!(data[0] & 0x1f, 5); // IDR NAL type
+            }
+            other => panic!("expected IDR video frame, got {other:?}"),
         }
 
         let _ = std::fs::remove_file(&path);
