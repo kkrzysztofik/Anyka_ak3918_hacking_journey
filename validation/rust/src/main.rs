@@ -1,9 +1,10 @@
 //! RTSP validation tool binary: orchestration and main entrypoint.
 
 use anyhow::{Context, Result, anyhow, bail};
-use clap::Parser;
 use rtsp_validation_tool::baseline::apply_baseline_ops;
-use rtsp_validation_tool::config::{Args, EffectiveConfig, RtspValidationConfig, load_config};
+use rtsp_validation_tool::config::{
+    Args, EffectiveConfig, RtspValidationConfig, load_config, parse_args,
+};
 use rtsp_validation_tool::device::{
     device_collect_telemetry_blocking, device_copy_onvif_logs_blocking,
     device_start_onvif_blocking, device_stop_onvif_blocking,
@@ -212,10 +213,10 @@ fn validate_args(args: &Args, effective: &EffectiveConfig) -> Result<()> {
         _ => {}
     }
 
-    if !args.rtsp_stream.starts_with('/') {
+    if !effective.rtsp_stream.starts_with('/') {
         bail!(
             "--rtsp-stream must start with '/' (got {})",
-            args.rtsp_stream
+            effective.rtsp_stream
         );
     }
 
@@ -256,9 +257,9 @@ fn maybe_launch_server(args: &Args, effective: &EffectiveConfig) -> Result<Optio
         .arg("--h264-file")
         .arg(h264_file)
         .arg("--rtsp-port")
-        .arg(args.rtsp_port.to_string())
+        .arg(effective.rtsp_port.to_string())
         .arg("--httpflv-port")
-        .arg(args.httpflv_port.to_string())
+        .arg(effective.httpflv_port.to_string())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     if args.loop_playback {
@@ -307,7 +308,9 @@ async fn wait_for_server(host: &str, port: u16) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse();
+    let parsed = parse_args()?;
+    let args = parsed.args;
+    let arg_sources = parsed.sources;
     let config_path = args
         .config
         .clone()
@@ -315,7 +318,7 @@ async fn main() -> Result<()> {
     let config = load_config(config_path.as_deref())?;
     let log_file_path = init_tracing(config.as_ref())?;
 
-    let mut effective = EffectiveConfig::from_config_and_args(config.as_ref(), &args);
+    let mut effective = EffectiveConfig::from_config_and_args(config.as_ref(), &args, &arg_sources);
     effective.resolve_capture_interface();
     validate_args(&args, &effective)?;
 

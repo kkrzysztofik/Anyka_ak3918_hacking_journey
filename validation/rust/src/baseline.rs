@@ -197,10 +197,9 @@ mod tests {
         apply_baseline_ops, baseline_direction_for, compare_against_baseline,
         telemetry_baseline_metrics, update_baseline,
     };
-    use crate::config::{Args, EffectiveConfig, RtspValidationConfig};
+    use crate::config::{EffectiveConfig, RtspValidationConfig};
     use crate::device::DeviceTelemetry;
     use crate::report::{TestResult, TestRun, ValidationReport};
-    use clap::Parser;
 
     #[test]
     fn test_baseline_direction_for_lower_metrics() {
@@ -303,8 +302,9 @@ mod tests {
 
     #[test]
     fn test_apply_baseline_ops_no_flags_no_op() {
-        let args = Args::parse_from(["rtsp_validation_tool"]);
-        let effective = EffectiveConfig::from_config_and_args(None, &args);
+        let crate::config::ParsedArgs { args, sources } =
+            crate::config::parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let effective = EffectiveConfig::from_config_and_args(None, &args, &sources);
         let mut report = ValidationReport {
             test_run: TestRun {
                 timestamp: String::new(),
@@ -331,14 +331,15 @@ mod tests {
     fn test_apply_baseline_ops_update_and_compare() {
         let dir = tempfile::tempdir().unwrap();
         let baseline_dir = dir.path().to_path_buf();
-        let mut args = Args::parse_from(["rtsp_validation_tool"]);
+        let crate::config::ParsedArgs { mut args, sources } =
+            crate::config::parse_args_from(["rtsp_validation_tool"]).unwrap();
         args.update_baseline = true;
         args.compare_baseline = true;
         let mut cfg = RtspValidationConfig::default();
         cfg.run.update_baseline = true;
         cfg.run.compare_baseline = true;
         cfg.baseline.dir = baseline_dir.to_string_lossy().to_string();
-        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &args);
+        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &args, &sources);
         let mut report = ValidationReport {
             test_run: TestRun {
                 timestamp: String::new(),
