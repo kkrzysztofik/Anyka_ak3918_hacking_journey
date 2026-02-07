@@ -10,7 +10,9 @@ use rtsp_validation_tool::device::{
 };
 use rtsp_validation_tool::report::{TestResult, ValidationReport, compute_summary};
 use rtsp_validation_tool::rtsp::{critical_proto_failed, run_harness, run_validation};
-use rtsp_validation_tool::util::{report_output_path_in_run_dir, run_artifacts_dir_name};
+use rtsp_validation_tool::util::{
+    copy_log_to_artifacts, report_output_path_in_run_dir, run_artifacts_dir_name,
+};
 use std::env;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -30,7 +32,7 @@ fn accept_already_initialized(e: impl std::error::Error + Send + Sync + 'static)
     }
 }
 
-fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
+fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<Option<PathBuf>> {
     let filter = env::var("RUST_LOG")
         .ok()
         .and_then(|s| EnvFilter::try_new(s).ok())
@@ -59,7 +61,7 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
         .with_target(true)
         .with_level(true);
 
-    let log_file_path: Option<String> = if let Some(c) = config {
+    let log_file_path: Option<PathBuf> = if let Some(c) = config {
         if !c.logging.file.is_empty() {
             match std::fs::OpenOptions::new()
                 .create(true)
@@ -67,7 +69,7 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
                 .open(&c.logging.file)
             {
                 Ok(file) => {
-                    let path = c.logging.file.clone();
+                    let path = PathBuf::from(&c.logging.file);
                     let file_layer = fmt::layer()
                         .with_writer(file)
                         .with_ansi(false)
@@ -80,7 +82,7 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
                         .try_init()
                         .or_else(accept_already_initialized)
                         .context("init tracing")?;
-                    Some(path)
+                    Some(path.clone())
                 }
                 Err(e) => {
                     eprintln!("Failed to open log file {}: {}", c.logging.file, e);
@@ -113,9 +115,9 @@ fn init_tracing(config: Option<&RtspValidationConfig>) -> Result<()> {
     };
 
     if let Some(ref path) = log_file_path {
-        info!(path = %path, "logging to file");
+        info!(path = %path.display(), "logging to file");
     }
-    Ok(())
+    Ok(log_file_path)
 }
 
 async fn wait_for_signal() {
@@ -141,6 +143,7 @@ async fn cleanup_on_signal(
     device_telnet_port: u16,
     artifacts_dir: &Path,
     child: &mut Option<Child>,
+    log_file_path: Option<PathBuf>,
 ) {
     info!("interrupted by signal, cleaning up");
     if launch_on_device {
@@ -169,6 +172,13 @@ async fn cleanup_on_signal(
         let _ = c.kill();
         let _ = c.wait();
         debug!("local server process terminated");
+    }
+    if let Some(path) = log_file_path.as_deref() {
+        match copy_log_to_artifacts(path, artifacts_dir) {
+            Ok(Some(dest)) => info!(path = %dest.display(), "copied validator log to artifacts"),
+            Ok(None) => {}
+            Err(e) => warn!(error = %e, "failed to copy validator log to artifacts"),
+        }
     }
 }
 
@@ -303,7 +313,7 @@ async fn main() -> Result<()> {
         .clone()
         .or_else(|| env::var("RTSP_VALIDATION_CONFIG").ok());
     let config = load_config(config_path.as_deref())?;
-    init_tracing(config.as_ref())?;
+    let log_file_path = init_tracing(config.as_ref())?;
 
     let mut effective = EffectiveConfig::from_config_and_args(config.as_ref(), &args);
     effective.resolve_capture_interface();
@@ -407,6 +417,7 @@ async fn main() -> Result<()> {
                 effective.device_telnet_port,
                 &effective.artifacts_dir,
                 &mut child,
+                log_file_path.clone(),
             )
             .await;
             return Err(anyhow!("interrupted by signal (Ctrl-C or SIGTERM)"));
@@ -462,6 +473,13 @@ async fn main() -> Result<()> {
     std::fs::write(&effective.output, json)
         .with_context(|| format!("failed to write {}", effective.output))?;
     info!(path = %effective.output, "RTSP validation report written");
+    if let Some(path) = log_file_path.as_deref() {
+        match copy_log_to_artifacts(path, &effective.artifacts_dir) {
+            Ok(Some(dest)) => info!(path = %dest.display(), "copied validator log to artifacts"),
+            Ok(None) => {}
+            Err(e) => warn!(error = %e, "failed to copy validator log to artifacts"),
+        }
+    }
     if !report.summary.overall_pass {
         return Err(anyhow!("{} test(s) failed", report.summary.failed));
     }

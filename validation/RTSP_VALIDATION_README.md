@@ -76,6 +76,7 @@ python3 validation/rtsp_validation_json_to_md.py -o rtsp_validation.md
 ### Logging and debugging
 
 Logging is controlled by `RUST_LOG` (overrides config) or `[logging]` in the TOML config. The tool bridges the **retina** library’s `log` crate output into tracing.
+When `logging.file` is set, the validator log is copied into the per-run artifacts directory.
 
 **Config (rtsp_validation.toml):**
 
@@ -120,6 +121,7 @@ Artifacts include (filenames are stable within a run directory):
 - `rtsp_protocol_sequence_*.pcap`, `rtp_packet_loss_capture.pcap` (pcaps are kept by default)
 - `device_onvif.log*` copies (pulled from `/mnt/anyka_hack/onvif/onvif.log*` when using `--launch-on-device`)
 - `rtsp_validation.json` report output
+- `rtsp_validation.log` copy (when `[logging].file` is set)
 
 ## Running against the camera (device validation)
 

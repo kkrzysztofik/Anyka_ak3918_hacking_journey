@@ -58,11 +58,25 @@ pub fn report_output_path_in_run_dir(artifacts_dir: &Path, output: &str) -> Path
     artifacts_dir.join(filename)
 }
 
+pub fn copy_log_to_artifacts(log_path: &Path, artifacts_dir: &Path) -> Result<Option<PathBuf>> {
+    let filename = match log_path.file_name() {
+        Some(name) => name,
+        None => return Ok(None),
+    };
+    let dest = artifacts_dir.join(filename);
+    if dest == log_path {
+        return Ok(Some(dest));
+    }
+    std::fs::copy(log_path, &dest)
+        .with_context(|| format!("copy {} to {}", log_path.display(), dest.display()))?;
+    Ok(Some(dest))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_TOOL_LOG_BYTES, report_output_path_in_run_dir, run_artifacts_dir_name, tail_lossy,
-        write_bytes_tail,
+        MAX_TOOL_LOG_BYTES, copy_log_to_artifacts, report_output_path_in_run_dir,
+        run_artifacts_dir_name, tail_lossy, write_bytes_tail,
     };
     use std::path::Path;
 
@@ -121,5 +135,20 @@ mod tests {
             path,
             Path::new("rtsp_results/runs/20260205T120102Z_pid12345/rtsp_validation.json")
         );
+    }
+
+    #[test]
+    fn test_copy_log_to_artifacts_copies_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let artifacts = dir.path().join("artifacts");
+        std::fs::create_dir_all(&artifacts).unwrap();
+        let log_path = dir.path().join("rtsp_validation.log");
+        std::fs::write(&log_path, b"hello").unwrap();
+
+        let dest = copy_log_to_artifacts(&log_path, &artifacts)
+            .unwrap()
+            .unwrap();
+        let content = std::fs::read(&dest).unwrap();
+        assert_eq!(content, b"hello");
     }
 }
