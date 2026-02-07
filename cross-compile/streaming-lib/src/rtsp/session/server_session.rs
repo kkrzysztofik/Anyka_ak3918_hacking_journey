@@ -45,12 +45,13 @@ use super::define::rtsp_method_name;
 use crate::bytesio::TNetIO;
 use crate::bytesio::TcpIO;
 use async_trait::async_trait;
+use portable_atomic::AtomicU64;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU32, Ordering},
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
@@ -106,6 +107,73 @@ struct RtpTrackCounters {
     byte_count: AtomicU64,
     first_send_ms: AtomicU64,
     last_send_ms: AtomicU64,
+    last_seq: AtomicU32,
+    last_timestamp: AtomicU32,
+}
+
+const RTP_TIMESTAMP_WRAP_THRESHOLD: u32 = 0x8000_0000;
+
+#[derive(Debug, Clone, Copy)]
+struct RtpTimestampSample {
+    output_timestamp: u32,
+    scaled_timestamp: u32,
+    previous_scaled_timestamp: Option<u32>,
+    non_wrap_regressed: bool,
+    non_wrap_regression_count: u64,
+}
+
+/// Keeps RTP timestamps monotonic for source-side resets while preserving true RTP wrap.
+#[derive(Debug, Default)]
+struct RtpTimestampNormalizer {
+    previous_scaled_timestamp: Option<u32>,
+    correction: u32,
+    non_wrap_regression_count: u64,
+}
+
+impl RtpTimestampNormalizer {
+    fn normalize(&mut self, source_timestamp_ms: u32, clock_rate: u32) -> RtpTimestampSample {
+        let scaled_timestamp =
+            RtspServerSession::scale_rtp_timestamp(source_timestamp_ms, clock_rate);
+        let previous_scaled_timestamp = self.previous_scaled_timestamp;
+
+        let mut non_wrap_regressed = false;
+        if let Some(previous) = previous_scaled_timestamp
+            && scaled_timestamp < previous
+            && previous.wrapping_sub(scaled_timestamp) <= RTP_TIMESTAMP_WRAP_THRESHOLD
+        {
+            // Source timestamp moved backwards without crossing RTP wrap boundary.
+            // Shift by a correction offset so packet timestamps stay monotonic.
+            let corrected_current = scaled_timestamp.wrapping_add(self.correction);
+            let corrected_previous = previous.wrapping_add(self.correction);
+            let target = corrected_previous.wrapping_add(1);
+            let adjustment = target.wrapping_sub(corrected_current);
+            self.correction = self.correction.wrapping_add(adjustment);
+            self.non_wrap_regression_count += 1;
+            non_wrap_regressed = true;
+        }
+
+        self.previous_scaled_timestamp = Some(scaled_timestamp);
+        RtpTimestampSample {
+            output_timestamp: scaled_timestamp.wrapping_add(self.correction),
+            scaled_timestamp,
+            previous_scaled_timestamp,
+            non_wrap_regressed,
+            non_wrap_regression_count: self.non_wrap_regression_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RtpPacketObservation {
+    packets_sent: u64,
+    bytes_sent: u64,
+    prev_seq: Option<u16>,
+    seq_delta: Option<u16>,
+    prev_timestamp: Option<u32>,
+    timestamp_delta: Option<u32>,
+    seq_gap: bool,
+    seq_regressed: bool,
+    timestamp_regressed: bool,
 }
 
 impl RtpTrackCounters {
@@ -115,11 +183,13 @@ impl RtpTrackCounters {
             byte_count: AtomicU64::new(0),
             first_send_ms: AtomicU64::new(0),
             last_send_ms: AtomicU64::new(0),
+            last_seq: AtomicU32::new(u32::MAX),
+            last_timestamp: AtomicU32::new(u32::MAX),
         }
     }
 
-    /// Record a sent RTP packet and return the updated (packet_count, byte_count).
-    fn on_packet_sent(&self, payload_len: usize) -> (u64, u64) {
+    /// Record a sent RTP packet and return counters plus monotonicity checks.
+    fn on_packet_sent(&self, payload_len: usize, seq: u16, timestamp: u32) -> RtpPacketObservation {
         let now = now_millis();
 
         // First-send timestamp (best-effort, race-safe).
@@ -134,7 +204,39 @@ impl RtpTrackCounters {
             .fetch_add(payload_len as u64, Ordering::Relaxed)
             + payload_len as u64;
 
-        (packets, bytes)
+        let prev_seq_raw = self.last_seq.swap(seq as u32, Ordering::Relaxed);
+        let prev_timestamp_raw = self.last_timestamp.swap(timestamp, Ordering::Relaxed);
+
+        let prev_seq = if prev_seq_raw == u32::MAX {
+            None
+        } else {
+            Some(prev_seq_raw as u16)
+        };
+        let prev_timestamp = if prev_timestamp_raw == u32::MAX {
+            None
+        } else {
+            Some(prev_timestamp_raw)
+        };
+
+        let seq_delta = prev_seq.map(|prev| seq.wrapping_sub(prev));
+        let seq_gap = matches!(seq_delta, Some(delta) if delta > 1 && delta < 0x8000);
+        let seq_regressed = matches!(seq_delta, Some(delta) if delta >= 0x8000);
+
+        let timestamp_delta = prev_timestamp.map(|prev| timestamp.wrapping_sub(prev));
+        let timestamp_regressed =
+            matches!(timestamp_delta, Some(delta) if delta > RTP_TIMESTAMP_WRAP_THRESHOLD);
+
+        RtpPacketObservation {
+            packets_sent: packets,
+            bytes_sent: bytes,
+            prev_seq,
+            seq_delta,
+            prev_timestamp,
+            timestamp_delta,
+            seq_gap,
+            seq_regressed,
+            timestamp_regressed,
+        }
     }
 
     fn snapshot(&self) -> (u64, u64, Option<u64>) {
@@ -880,28 +982,56 @@ impl RtspServerSession {
                             Box::pin(async move {
                                 let msg = packet.marshal()?;
                                 let payload_len = msg.len();
+                                let stream_path = stream_identifier
+                                    .as_ref()
+                                    .map(|id| id.to_string())
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                let stats = counters.on_packet_sent(
+                                    payload_len,
+                                    packet.header.seq_number,
+                                    packet.header.timestamp,
+                                );
 
-                                if sample_interval > 0 {
-                                    let (packets, bytes) = counters.on_packet_sent(payload_len);
-                                    if packets % sample_interval as u64 == 0 {
-                                        let stream_path = stream_identifier
-                                            .as_ref()
-                                            .map(|id| id.to_string())
-                                            .unwrap_or_else(|| "unknown".to_string());
-                                        log::debug!(
-                                            "event=rtp_packet_sample protocol=TCP track={} session_id={} remote_addr={} stream_path={} seq={} timestamp={} marker={} size_bytes={} packets_sent={} bytes_sent={}",
-                                            track_label,
-                                            session_id,
-                                            remote_for_rtp,
-                                            stream_path,
-                                            packet.header.seq_number,
-                                            packet.header.timestamp,
-                                            packet.header.marker,
-                                            payload_len,
-                                            packets,
-                                            bytes,
-                                        );
-                                    }
+                                if stats.seq_gap
+                                    || stats.seq_regressed
+                                    || stats.timestamp_regressed
+                                {
+                                    log::warn!(
+                                        "event=rtp_packet_anomaly protocol=TCP track={} session_id={} remote_addr={} stream_path={} prev_seq={:?} seq={} seq_delta={:?} prev_timestamp={:?} timestamp={} timestamp_delta={:?} seq_gap={} seq_regressed={} timestamp_regressed={}",
+                                        track_label,
+                                        session_id,
+                                        remote_for_rtp,
+                                        stream_path,
+                                        stats.prev_seq,
+                                        packet.header.seq_number,
+                                        stats.seq_delta,
+                                        stats.prev_timestamp,
+                                        packet.header.timestamp,
+                                        stats.timestamp_delta,
+                                        stats.seq_gap,
+                                        stats.seq_regressed,
+                                        stats.timestamp_regressed,
+                                    );
+                                }
+
+                                if sample_interval > 0
+                                    && stats
+                                        .packets_sent
+                                        .is_multiple_of(sample_interval as u64)
+                                {
+                                    log::debug!(
+                                        "event=rtp_packet_sample protocol=TCP track={} session_id={} remote_addr={} stream_path={} seq={} timestamp={} marker={} size_bytes={} packets_sent={} bytes_sent={}",
+                                        track_label,
+                                        session_id,
+                                        remote_for_rtp,
+                                        stream_path,
+                                        packet.header.seq_number,
+                                        packet.header.timestamp,
+                                        packet.header.marker,
+                                        payload_len,
+                                        stats.packets_sent,
+                                        stats.bytes_sent,
+                                    );
                                 }
 
                                 let mut bytes_writer = AsyncBytesWriter::new(io);
@@ -928,28 +1058,56 @@ impl RtspServerSession {
                             Box::pin(async move {
                                 let msg = packet.marshal()?;
                                 let payload_len = msg.len();
+                                let stream_path = stream_identifier
+                                    .as_ref()
+                                    .map(|id| id.to_string())
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                let stats = counters.on_packet_sent(
+                                    payload_len,
+                                    packet.header.seq_number,
+                                    packet.header.timestamp,
+                                );
 
-                                if sample_interval > 0 {
-                                    let (packets, bytes) = counters.on_packet_sent(payload_len);
-                                    if packets % sample_interval as u64 == 0 {
-                                        let stream_path = stream_identifier
-                                            .as_ref()
-                                            .map(|id| id.to_string())
-                                            .unwrap_or_else(|| "unknown".to_string());
-                                        log::debug!(
-                                            "event=rtp_packet_sample protocol=UDP track={} session_id={} remote_addr={} stream_path={} seq={} timestamp={} marker={} size_bytes={} packets_sent={} bytes_sent={}",
-                                            track_label,
-                                            session_id,
-                                            remote_for_rtp,
-                                            stream_path,
-                                            packet.header.seq_number,
-                                            packet.header.timestamp,
-                                            packet.header.marker,
-                                            payload_len,
-                                            packets,
-                                            bytes,
-                                        );
-                                    }
+                                if stats.seq_gap
+                                    || stats.seq_regressed
+                                    || stats.timestamp_regressed
+                                {
+                                    log::warn!(
+                                        "event=rtp_packet_anomaly protocol=UDP track={} session_id={} remote_addr={} stream_path={} prev_seq={:?} seq={} seq_delta={:?} prev_timestamp={:?} timestamp={} timestamp_delta={:?} seq_gap={} seq_regressed={} timestamp_regressed={}",
+                                        track_label,
+                                        session_id,
+                                        remote_for_rtp,
+                                        stream_path,
+                                        stats.prev_seq,
+                                        packet.header.seq_number,
+                                        stats.seq_delta,
+                                        stats.prev_timestamp,
+                                        packet.header.timestamp,
+                                        stats.timestamp_delta,
+                                        stats.seq_gap,
+                                        stats.seq_regressed,
+                                        stats.timestamp_regressed,
+                                    );
+                                }
+
+                                if sample_interval > 0
+                                    && stats
+                                        .packets_sent
+                                        .is_multiple_of(sample_interval as u64)
+                                {
+                                    log::debug!(
+                                        "event=rtp_packet_sample protocol=UDP track={} session_id={} remote_addr={} stream_path={} seq={} timestamp={} marker={} size_bytes={} packets_sent={} bytes_sent={}",
+                                        track_label,
+                                        session_id,
+                                        remote_for_rtp,
+                                        stream_path,
+                                        packet.header.seq_number,
+                                        packet.header.timestamp,
+                                        packet.header.marker,
+                                        payload_len,
+                                        stats.packets_sent,
+                                        stats.bytes_sent,
+                                    );
                                 }
 
                                 let mut bytes_writer = AsyncBytesWriter::new(io);
@@ -1029,6 +1187,7 @@ impl RtspServerSession {
 
         self.has_subscribed = true;
         self.session_type = define::ServerSessionType::Pull;
+        let mut timestamp_normalizers: HashMap<TrackType, RtpTimestampNormalizer> = HashMap::new();
 
         let mut retry_times = 0;
         loop {
@@ -1040,9 +1199,25 @@ impl RtspServerSession {
                     } => {
                         if let Some(audio_track) = self.tracks.get_mut(&TrackType::Audio) {
                             let mut channel = audio_track.rtp_channel.lock().await;
-                            let rtp_timestamp =
-                                Self::scale_rtp_timestamp(timestamp, channel.clock_rate());
-                            channel.on_frame(&mut data, rtp_timestamp).await?;
+                            let normalized = timestamp_normalizers
+                                .entry(TrackType::Audio)
+                                .or_default()
+                                .normalize(timestamp, channel.clock_rate());
+                            if normalized.non_wrap_regressed {
+                                log::warn!(
+                                    "event=rtp_timestamp_non_wrap_regression track=Audio session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
+                                    session_id,
+                                    self.remote_addr,
+                                    rtsp_request.uri.path,
+                                    normalized.previous_scaled_timestamp.unwrap_or_default(),
+                                    normalized.scaled_timestamp,
+                                    normalized.output_timestamp,
+                                    normalized.non_wrap_regression_count,
+                                );
+                            }
+                            channel
+                                .on_frame(&mut data, normalized.output_timestamp)
+                                .await?;
                         }
                     }
                     FrameData::Video {
@@ -1051,9 +1226,25 @@ impl RtspServerSession {
                     } => {
                         if let Some(video_track) = self.tracks.get_mut(&TrackType::Video) {
                             let mut channel = video_track.rtp_channel.lock().await;
-                            let rtp_timestamp =
-                                Self::scale_rtp_timestamp(timestamp, channel.clock_rate());
-                            channel.on_frame(&mut data, rtp_timestamp).await?;
+                            let normalized = timestamp_normalizers
+                                .entry(TrackType::Video)
+                                .or_default()
+                                .normalize(timestamp, channel.clock_rate());
+                            if normalized.non_wrap_regressed {
+                                log::warn!(
+                                    "event=rtp_timestamp_non_wrap_regression track=Video session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
+                                    session_id,
+                                    self.remote_addr,
+                                    rtsp_request.uri.path,
+                                    normalized.previous_scaled_timestamp.unwrap_or_default(),
+                                    normalized.scaled_timestamp,
+                                    normalized.output_timestamp,
+                                    normalized.non_wrap_regression_count,
+                                );
+                            }
+                            channel
+                                .on_frame(&mut data, normalized.output_timestamp)
+                                .await?;
                         }
                     }
                     _ => {}
@@ -2314,5 +2505,38 @@ mod tests {
     fn test_scale_rtp_timestamp_zero_clock() {
         let ts = RtspServerSession::scale_rtp_timestamp(1234, 0);
         assert_eq!(ts, 1234);
+    }
+
+    #[test]
+    fn test_rtp_timestamp_normalizer_corrects_non_wrap_regression() {
+        let mut normalizer = RtpTimestampNormalizer::default();
+
+        let first = normalizer.normalize(1000, 90_000);
+        let second = normalizer.normalize(1033, 90_000);
+        let regressed = normalizer.normalize(0, 90_000);
+        let next = normalizer.normalize(33, 90_000);
+
+        assert_eq!(first.output_timestamp, 90_000);
+        assert_eq!(second.output_timestamp, 92_970);
+        assert!(regressed.non_wrap_regressed);
+        assert_eq!(regressed.non_wrap_regression_count, 1);
+        assert_eq!(
+            regressed.output_timestamp,
+            second.output_timestamp.wrapping_add(1)
+        );
+        assert!(next.output_timestamp > regressed.output_timestamp);
+    }
+
+    #[test]
+    fn test_rtp_timestamp_normalizer_preserves_true_wrap() {
+        let mut normalizer = RtpTimestampNormalizer::default();
+
+        let first = normalizer.normalize(u32::MAX - 10, 0);
+        let wrapped = normalizer.normalize(5, 0);
+
+        assert_eq!(first.output_timestamp, u32::MAX - 10);
+        assert!(!wrapped.non_wrap_regressed);
+        assert_eq!(wrapped.non_wrap_regression_count, 0);
+        assert_eq!(wrapped.output_timestamp, 5);
     }
 }

@@ -130,7 +130,7 @@ impl AacFileReader {
     ///
     /// # Returns
     ///
-    /// Option<AacFrame> if successful, None at EOF, or AacFileError
+    /// `Option<AacFrame>` if successful, None at EOF, or AacFileError
     pub fn read_next_frame(&mut self) -> Result<Option<AacFrame>, AacFileError> {
         if self.current_pos >= self.file_size {
             return Ok(None);

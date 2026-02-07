@@ -1,6 +1,6 @@
 //! streaming-lib: Streaming library for RTSP and HTTP-FLV protocols
 //!
-//! This library is forked from xiu (https://github.com/harlanc/xiu) and provides
+//! This library is forked from xiu (<https://github.com/harlanc/xiu>) and provides
 //! minimal components needed for RTSP and HTTP-FLV streaming on Anyka AK3918 hardware.
 //!
 //! # Components

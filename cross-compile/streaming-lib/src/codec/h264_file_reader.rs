@@ -161,7 +161,7 @@ impl H264FileReader {
     ///
     /// # Returns
     ///
-    /// Option<NalUnit> if successful, None at EOF, or H264FileError
+    /// `Option<NalUnit>` if successful, None at EOF, or H264FileError
     pub fn read_next_nal(&mut self) -> Result<Option<NalUnit>, H264FileError> {
         match self.nal_format {
             NalFormat::AnnexB => self.read_next_nal_annexb(),

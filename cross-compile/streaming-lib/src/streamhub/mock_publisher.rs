@@ -6,6 +6,7 @@ use crate::streamhub::define::{
 use crate::streamhub::{StatisticsStream, StreamHubError};
 use async_trait::async_trait;
 use bytes::BytesMut;
+use portable_atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -32,6 +33,7 @@ pub struct MockVideoPublisher {
     pps: Vec<u8>,
     is_running: Arc<Mutex<bool>>,
     loop_playback: bool,
+    last_timestamp_ms: Arc<AtomicU32>,
 }
 
 impl MockVideoPublisher {
@@ -63,6 +65,7 @@ impl MockVideoPublisher {
             pps,
             is_running: Arc::new(Mutex::new(false)),
             loop_playback,
+            last_timestamp_ms: Arc::new(AtomicU32::new(0)),
         })
     }
 
@@ -82,6 +85,7 @@ impl MockVideoPublisher {
         let _sps = self.sps.clone();
         let _pps = self.pps.clone();
         let loop_playback = self.loop_playback;
+        let last_timestamp_ms = Arc::clone(&self.last_timestamp_ms);
 
         tokio::spawn(async move {
             {
@@ -109,20 +113,20 @@ impl MockVideoPublisher {
                 while let Ok(Some(nal)) = reader.read_next_nal() {
                     match nal.unit_type {
                         NalUnitType::SequenceParameterSet => {
+                            let timestamp = timestamp_offset
+                                .saturating_add(frame_count.saturating_mul(frame_duration_ms));
                             let data = BytesMut::from(nal.data.as_slice());
-                            let frame = FrameData::Video {
-                                timestamp: timestamp_offset,
-                                data,
-                            };
+                            let frame = FrameData::Video { timestamp, data };
                             let _ = sender.send(frame);
+                            last_timestamp_ms.store(timestamp, Ordering::Relaxed);
                         }
                         NalUnitType::PictureParameterSet => {
+                            let timestamp = timestamp_offset
+                                .saturating_add(frame_count.saturating_mul(frame_duration_ms));
                             let data = BytesMut::from(nal.data.as_slice());
-                            let frame = FrameData::Video {
-                                timestamp: timestamp_offset,
-                                data,
-                            };
+                            let frame = FrameData::Video { timestamp, data };
                             let _ = sender.send(frame);
+                            last_timestamp_ms.store(timestamp, Ordering::Relaxed);
                         }
                         NalUnitType::IdrSlice | NalUnitType::NonIdrSlice => {
                             let timestamp = timestamp_offset
@@ -134,6 +138,7 @@ impl MockVideoPublisher {
                             if sender.send(frame).is_err() {
                                 return;
                             }
+                            last_timestamp_ms.store(timestamp, Ordering::Relaxed);
 
                             frame_count = frame_count.saturating_add(1);
                             frames_since_report += 1;
@@ -227,6 +232,9 @@ impl TStreamHandler for MockVideoPublisher {
             sender: frame_sender,
         } = sender
         {
+            // Use last known timestamp to avoid sending regressions (e.g. 0) mid-stream.
+            let ts = self.last_timestamp_ms.load(Ordering::Relaxed);
+
             // Send MediaInfo first
             let media_info = MediaInfo {
                 audio_clock_rate: 48000,
@@ -239,14 +247,14 @@ impl TStreamHandler for MockVideoPublisher {
             // Send SPS as video frame
             let sps_data = BytesMut::from(self.sps.as_slice());
             let _ = frame_sender.send(FrameData::Video {
-                timestamp: 0,
+                timestamp: ts,
                 data: sps_data,
             });
 
             // Send PPS as video frame
             let pps_data = BytesMut::from(self.pps.as_slice());
             let _ = frame_sender.send(FrameData::Video {
-                timestamp: 0,
+                timestamp: ts,
                 data: pps_data,
             });
         }
@@ -347,8 +355,11 @@ fn compute_fps(frames: u64, elapsed: Duration) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_fps, generate_sdp_from_sps_pps};
+    use super::{MockVideoPublisher, compute_fps, generate_sdp_from_sps_pps};
+    use crate::streamhub::define::{DataSender, FrameData, SubscribeType, TStreamHandler};
+    use portable_atomic::Ordering;
     use std::time::Duration;
+    use tokio::sync::mpsc;
 
     #[test]
     fn test_generate_sdp_includes_controls() {
@@ -383,9 +394,105 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mock_publisher_creation() {
-        // This test verifies the publisher structure can be created
-        // In a real test, we would need a valid H264 file
+    async fn test_send_prior_data_uses_last_timestamp() {
+        let path = format!("/tmp/mock_publisher_test_{}.h264", std::process::id());
+        // Minimal Annex-B stream with SPS + PPS so the reader can initialize.
+        let bytes: &[u8] = &[
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xE0, 0x1E, 0x89, 0x00, //
+            0x00, 0x00, 0x00, 0x01, 0x68, 0xCE, 0x06, 0xE2, 0x00, //
+            0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x21, 0xA0, 0x00, //
+        ];
+        std::fs::write(&path, bytes).expect("write test h264");
+
+        let publisher = MockVideoPublisher::new("stream1".to_string(), &path, 25, true)
+            .await
+            .expect("publisher new");
+        publisher.last_timestamp_ms.store(12_345, Ordering::Relaxed);
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sender = DataSender::Frame { sender: tx };
+        publisher
+            .send_prior_data(sender, SubscribeType::RtspPull)
+            .await
+            .expect("send_prior_data");
+
+        // MediaInfo first
+        let _ = rx.recv().await.expect("media_info");
+        let sps = rx.recv().await.expect("sps");
+        let pps = rx.recv().await.expect("pps");
+
+        match sps {
+            FrameData::Video { timestamp, data } => {
+                assert_eq!(timestamp, 12_345);
+                assert!(!data.is_empty());
+            }
+            other => panic!("expected SPS video frame, got {other:?}"),
+        }
+
+        match pps {
+            FrameData::Video { timestamp, data } => {
+                assert_eq!(timestamp, 12_345);
+                assert!(!data.is_empty());
+            }
+            other => panic!("expected PPS video frame, got {other:?}"),
+        }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn test_start_publishing_sps_pps_timestamp_is_monotonic() {
+        let path = format!(
+            "/tmp/mock_publisher_test_monotonic_{}.h264",
+            std::process::id()
+        );
+        // SPS/PPS followed by frames, then SPS/PPS again to ensure timestamps never regress.
+        let bytes: &[u8] = &[
+            // SPS
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xE0, 0x1E, 0x89, 0x00, //
+            // PPS
+            0x00, 0x00, 0x00, 0x01, 0x68, 0xCE, 0x06, 0xE2, 0x00, //
+            // IDR
+            0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x21, 0xA0, 0x00, //
+            // Non-IDR
+            0x00, 0x00, 0x00, 0x01, 0x41, 0x9A, 0x22, 0x11, 0x00, //
+            // SPS again
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xE0, 0x1E, 0x89, 0x00, //
+            // PPS again
+            0x00, 0x00, 0x00, 0x01, 0x68, 0xCE, 0x06, 0xE2, 0x00, //
+            // IDR again
+            0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x21, 0xA0, 0x00, //
+        ];
+        std::fs::write(&path, bytes).expect("write test h264");
+
+        let publisher = MockVideoPublisher::new("stream1".to_string(), &path, 25, false)
+            .await
+            .expect("publisher new");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let _handle = publisher.start_publishing(tx);
+
+        let mut timestamps: Vec<u32> = Vec::new();
+        loop {
+            let item = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+                .await
+                .expect("timeout waiting for video frame");
+            let Some(item) = item else { break };
+
+            match item {
+                FrameData::Video { timestamp, .. } => timestamps.push(timestamp),
+                _ => {}
+            }
+        }
+
+        assert!(!timestamps.is_empty());
+        for window in timestamps.windows(2) {
+            assert!(
+                window[0] <= window[1],
+                "timestamps regressed: {timestamps:?}"
+            );
+        }
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

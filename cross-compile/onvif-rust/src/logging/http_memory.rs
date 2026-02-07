@@ -22,7 +22,7 @@ pub const TYPICAL_REQUEST_SIZE: usize = 64 * 1024; // 64KB
 /// This middleware should be the FIRST in the stack to reject requests early
 /// when under memory pressure, before any other processing occurs.
 ///
-/// Uses Extension<Arc<MemoryMonitor>> for state injection.
+/// Uses `Extension<Arc<MemoryMonitor>>` for state injection.
 pub async fn memory_check_middleware(
     Extension(memory): Extension<Arc<MemoryMonitor>>,
     request: axum::extract::Request,

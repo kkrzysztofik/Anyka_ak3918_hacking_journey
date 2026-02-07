@@ -6,6 +6,7 @@ use crate::streamhub::define::{
 use crate::streamhub::{StatisticsStream, StreamHubError};
 use async_trait::async_trait;
 use bytes::BytesMut;
+use portable_atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -32,6 +33,7 @@ pub struct MockAudioPublisher {
     is_running: Arc<Mutex<bool>>,
     loop_playback: bool,
     sample_rate: u32,
+    last_timestamp_ms: Arc<AtomicU32>,
 }
 
 impl MockAudioPublisher {
@@ -63,6 +65,7 @@ impl MockAudioPublisher {
             is_running: Arc::new(Mutex::new(false)),
             loop_playback,
             sample_rate,
+            last_timestamp_ms: Arc::new(AtomicU32::new(0)),
         })
     }
 
@@ -81,6 +84,7 @@ impl MockAudioPublisher {
         let _stream_name = self.stream_name.clone();
         let _audio_config = self.audio_config.clone();
         let loop_playback = self.loop_playback;
+        let last_timestamp_ms = Arc::clone(&self.last_timestamp_ms);
 
         tokio::spawn(async move {
             {
@@ -113,6 +117,7 @@ impl MockAudioPublisher {
                     if sender.send(frame_data).is_err() {
                         return;
                     }
+                    last_timestamp_ms.store(timestamp, Ordering::Relaxed);
 
                     frame_count = frame_count.saturating_add(1);
 
@@ -187,6 +192,9 @@ impl TStreamHandler for MockAudioPublisher {
             sender: frame_sender,
         } = sender
         {
+            // Use last known timestamp to avoid sending regressions (e.g. 0) mid-stream.
+            let ts = self.last_timestamp_ms.load(Ordering::Relaxed);
+
             // Send MediaInfo first
             let media_info = MediaInfo {
                 audio_clock_rate: self.sample_rate,
@@ -199,7 +207,7 @@ impl TStreamHandler for MockAudioPublisher {
             // Send AudioSpecificConfig as first audio frame
             let config_data = BytesMut::from(self.audio_config.as_slice());
             let _ = frame_sender.send(FrameData::Audio {
-                timestamp: 0,
+                timestamp: ts,
                 data: config_data,
             });
         }
@@ -254,11 +262,47 @@ fn generate_sdp_from_audio_config(audio_config: &[u8], sample_rate: u32) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::streamhub::define::{DataSender, FrameData, SubscribeType, TStreamHandler};
+    use portable_atomic::Ordering;
+    use tokio::sync::mpsc;
 
     #[tokio::test]
-    async fn test_audio_publisher_creation() {
-        // This test verifies the publisher structure can be created
-        // In a real test, we would need a valid AAC file
+    async fn test_send_prior_data_uses_last_timestamp() {
+        let path = format!("/tmp/mock_audio_publisher_test_{}.aac", std::process::id());
+
+        // Minimal ADTS AAC-LC frame (48kHz, stereo).
+        // Frame length = 7-byte header + 4-byte payload = 11 bytes.
+        let bytes: &[u8] = &[
+            0xFF, 0xF1, 0x4C, 0x80, 0x01, 0x7F, 0xFC, // ADTS header
+            0x00, 0x00, 0x00, 0x00, // payload (unused by parser)
+        ];
+        std::fs::write(&path, bytes).expect("write test aac");
+
+        let publisher = MockAudioPublisher::new("stream1".to_string(), &path, 48_000, true)
+            .await
+            .expect("publisher new");
+        publisher.last_timestamp_ms.store(12_345, Ordering::Relaxed);
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sender = DataSender::Frame { sender: tx };
+        publisher
+            .send_prior_data(sender, SubscribeType::RtspPull)
+            .await
+            .expect("send_prior_data");
+
+        // MediaInfo first
+        let _ = rx.recv().await.expect("media_info");
+        let config = rx.recv().await.expect("config");
+
+        match config {
+            FrameData::Audio { timestamp, data } => {
+                assert_eq!(timestamp, 12_345);
+                assert_eq!(data.as_ref(), publisher.audio_config.as_slice());
+            }
+            other => panic!("expected AudioSpecificConfig audio frame, got {other:?}"),
+        }
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

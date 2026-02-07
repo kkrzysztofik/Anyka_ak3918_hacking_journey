@@ -91,12 +91,22 @@ impl StreamDataTransceiver {
                         data: data.clone(),
                     };
 
-                    for (_, v) in frame_senders.lock().await.iter() {
-                        if let Err(audio_err) = v.send(data.clone()).map_err(|_| StreamHubError {
-                            value: StreamHubErrorValue::SendAudioError,
-                        }) {
-                            log::error!("Transmiter send error: {}", audio_err);
+                    let mut senders = frame_senders.lock().await;
+                    let mut to_remove: Vec<Uuid> = Vec::new();
+                    for (id, v) in senders.iter() {
+                        if v.send(data.clone()).is_err() {
+                            to_remove.push(*id);
                         }
+                    }
+                    for id in to_remove {
+                        let _ = senders.remove(&id);
+                        log::warn!(
+                            "Transmiter send error: {} subscriber_id={}",
+                            StreamHubError {
+                                value: StreamHubErrorValue::SendAudioError
+                            },
+                            id
+                        );
                     }
                 }
                 FrameData::Video { timestamp, data } => {
@@ -104,12 +114,22 @@ impl StreamDataTransceiver {
                         timestamp,
                         data: data.clone(),
                     };
-                    for (_, v) in frame_senders.lock().await.iter() {
-                        if let Err(video_err) = v.send(data.clone()).map_err(|_| StreamHubError {
-                            value: StreamHubErrorValue::SendVideoError,
-                        }) {
-                            log::error!("Transmiter send error: {}", video_err);
+                    let mut senders = frame_senders.lock().await;
+                    let mut to_remove: Vec<Uuid> = Vec::new();
+                    for (id, v) in senders.iter() {
+                        if v.send(data.clone()).is_err() {
+                            to_remove.push(*id);
                         }
+                    }
+                    for id in to_remove {
+                        let _ = senders.remove(&id);
+                        log::warn!(
+                            "Transmiter send error: {} subscriber_id={}",
+                            StreamHubError {
+                                value: StreamHubErrorValue::SendVideoError
+                            },
+                            id
+                        );
                     }
                 }
                 FrameData::MediaInfo {
@@ -118,12 +138,22 @@ impl StreamDataTransceiver {
                     let data = FrameData::MediaInfo {
                         media_info: info_value,
                     };
-                    for (_, v) in frame_senders.lock().await.iter() {
-                        if let Err(media_err) = v.send(data.clone()).map_err(|_| StreamHubError {
-                            value: StreamHubErrorValue::SendVideoError,
-                        }) {
-                            log::error!("Transmiter send error: {}", media_err);
+                    let mut senders = frame_senders.lock().await;
+                    let mut to_remove: Vec<Uuid> = Vec::new();
+                    for (id, v) in senders.iter() {
+                        if v.send(data.clone()).is_err() {
+                            to_remove.push(*id);
                         }
+                    }
+                    for id in to_remove {
+                        let _ = senders.remove(&id);
+                        log::warn!(
+                            "Transmiter send error: {} subscriber_id={}",
+                            StreamHubError {
+                                value: StreamHubErrorValue::SendVideoError
+                            },
+                            id
+                        );
                     }
                 }
             }
@@ -164,12 +194,22 @@ impl StreamDataTransceiver {
                         data: data.clone(),
                     };
 
-                    for (_, v) in packet_senders.lock().await.iter() {
-                        if let Err(audio_err) = v.send(data.clone()).map_err(|_| StreamHubError {
-                            value: StreamHubErrorValue::SendAudioError,
-                        }) {
-                            log::error!("Transmiter send error: {}", audio_err);
+                    let mut senders = packet_senders.lock().await;
+                    let mut to_remove: Vec<Uuid> = Vec::new();
+                    for (id, v) in senders.iter() {
+                        if v.send(data.clone()).is_err() {
+                            to_remove.push(*id);
                         }
+                    }
+                    for id in to_remove {
+                        let _ = senders.remove(&id);
+                        log::warn!(
+                            "Transmiter send error: {} subscriber_id={}",
+                            StreamHubError {
+                                value: StreamHubErrorValue::SendAudioError
+                            },
+                            id
+                        );
                     }
                 }
                 PacketData::Video { timestamp, data } => {
@@ -177,12 +217,22 @@ impl StreamDataTransceiver {
                         timestamp,
                         data: data.clone(),
                     };
-                    for (_, v) in packet_senders.lock().await.iter() {
-                        if let Err(video_err) = v.send(data.clone()).map_err(|_| StreamHubError {
-                            value: StreamHubErrorValue::SendVideoError,
-                        }) {
-                            log::error!("Transmiter send error: {}", video_err);
+                    let mut senders = packet_senders.lock().await;
+                    let mut to_remove: Vec<Uuid> = Vec::new();
+                    for (id, v) in senders.iter() {
+                        if v.send(data.clone()).is_err() {
+                            to_remove.push(*id);
                         }
+                    }
+                    for id in to_remove {
+                        let _ = senders.remove(&id);
+                        log::warn!(
+                            "Transmiter send error: {} subscriber_id={}",
+                            StreamHubError {
+                                value: StreamHubErrorValue::SendVideoError
+                            },
+                            id
+                        );
                     }
                 }
             }
@@ -1113,8 +1163,8 @@ impl StreamsHub {
 mod tests {
     use super::*;
     use crate::streamhub::define::{
-        DataReceiver, DataSender, FrameData, NotifyInfo, PacketData, PubDataType, PublishType,
-        PublisherInfo, StatisticData, SubDataType, SubscribeType, SubscriberInfo,
+        DataReceiver, DataSender, FrameData, NotifyInfo, PacketData, StatisticData, SubDataType,
+        SubscribeType, SubscriberInfo,
     };
     use async_trait::async_trait;
     use bytes::BytesMut;
@@ -1597,5 +1647,53 @@ mod tests {
             }
             _ => panic!("Expected Audio packet"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_receive_frame_data_prunes_closed_senders() {
+        let senders: Arc<Mutex<HashMap<Uuid, FrameDataSender>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
+        let (tx, rx) = mpsc::unbounded_channel::<FrameData>();
+        drop(rx);
+
+        {
+            let mut map = senders.lock().await;
+            map.insert(id, tx);
+            assert_eq!(map.len(), 1);
+        }
+
+        let frame = FrameData::Audio {
+            timestamp: 1,
+            data: BytesMut::from(&[0x01][..]),
+        };
+        StreamDataTransceiver::receive_frame_data(Some(frame), &senders).await;
+
+        let map = senders.lock().await;
+        assert!(map.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_receive_packet_data_prunes_closed_senders() {
+        let senders: Arc<Mutex<HashMap<Uuid, PacketDataSender>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
+        let (tx, rx) = mpsc::unbounded_channel::<PacketData>();
+        drop(rx);
+
+        {
+            let mut map = senders.lock().await;
+            map.insert(id, tx);
+            assert_eq!(map.len(), 1);
+        }
+
+        let packet = PacketData::Audio {
+            timestamp: 1,
+            data: BytesMut::from(&[0x01][..]),
+        };
+        StreamDataTransceiver::receive_packet_data(Some(packet), &senders).await;
+
+        let map = senders.lock().await;
+        assert!(map.is_empty());
     }
 }
