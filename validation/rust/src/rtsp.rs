@@ -11,7 +11,7 @@ use retina::client::{
 };
 use retina::codec::{CodecItem, ParametersRef};
 use rtshark::RTSharkBuilder;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -170,12 +170,616 @@ fn parse_rtsp_status_code_from_meta(meta_name: &str, meta_value: &str) -> Option
     None
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+struct RtpPcapRfc6184Stats {
+    payload_type: u8,
+    packets_analyzed: u32,
+    invalid_packets: u32,
+    marker_violations: u32,
+    fu_a_invalid: u32,
+    stap_a_invalid: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct RtpPcapRfc3640Stats {
+    payload_type: u8,
+    packets_analyzed: u32,
+    invalid_packets: u32,
+    au_header_invalid: u32,
+    au_size_invalid: u32,
+    timestamp_anomalies: u32,
+}
+
+#[derive(Debug)]
+struct HarnessPacketLossResult {
+    video: Option<HarnessRtpLossMetric>,
+    audio: Option<HarnessRtpLossMetric>,
+    h264_rfc6184: Option<std::result::Result<RtpPcapRfc6184Stats, String>>,
+    aac_rfc3640: Option<std::result::Result<RtpPcapRfc3640Stats, String>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct HarnessRtpLossMetric {
+    rtp_packets: u32,
+    packet_loss: u32,
+    loss_percent: f64,
+    payload_type: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ssrc: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct RtpStreamKey {
+    payload_type: u8,
+    ssrc: Option<u32>,
+    dst_port: Option<u16>,
+}
+
+#[derive(Debug, Clone)]
+struct RtpStreamStats {
+    key: RtpStreamKey,
+    rows: Vec<RtpTsharkRow>,
+    valid_h264: u32,
+    valid_aac: u32,
+}
+
+fn compute_packet_loss_from_seqs(seqs: &[u16]) -> (u32, u32, f64) {
+    // Compute loss on capture order while ignoring likely reordering.
+    // This is good enough for the short-duration harness capture.
+    let mut total = 0u32;
+    let mut loss = 0u32;
+    let mut prev: Option<u16> = None;
+    for &seq in seqs {
+        total = total.saturating_add(1);
+        let Some(p) = prev else {
+            prev = Some(seq);
+            continue;
+        };
+        let delta = seq.wrapping_sub(p) as u32;
+        if delta == 0 {
+            continue;
+        }
+        if delta < 32768 {
+            if delta > 1 {
+                loss = loss.saturating_add(delta - 1);
+            }
+            prev = Some(seq);
+        } else {
+            // Likely out-of-order delivery. Do not count as loss.
+            continue;
+        }
+    }
+    let loss_percent = if total > 0 {
+        100.0 * (loss as f64) / (total as f64)
+    } else {
+        0.0
+    };
+    (total, loss, loss_percent)
+}
+
+fn compute_stream_loss_metric(stats: &RtpStreamStats) -> HarnessRtpLossMetric {
+    let seqs: Vec<u16> = stats.rows.iter().map(|r| r.seq).collect();
+    let (total, loss, pct) = compute_packet_loss_from_seqs(&seqs);
+    HarnessRtpLossMetric {
+        rtp_packets: total,
+        packet_loss: loss,
+        loss_percent: pct,
+        payload_type: stats.key.payload_type,
+        ssrc: stats.key.ssrc,
+    }
+}
+
+fn is_reasonably_h264(stats: &RtpStreamStats) -> bool {
+    const MIN_PACKETS: u32 = 10;
+    const MIN_VALID_RATIO: f64 = 0.80;
+    let total = stats.rows.len() as u32;
+    total >= MIN_PACKETS && (stats.valid_h264 as f64 / total as f64) >= MIN_VALID_RATIO
+}
+
+fn is_reasonably_aac(stats: &RtpStreamStats) -> bool {
+    const MIN_PACKETS: u32 = 10;
+    const MIN_VALID_RATIO: f64 = 0.80;
+    let total = stats.rows.len() as u32;
+    total >= MIN_PACKETS && (stats.valid_aac as f64 / total as f64) >= MIN_VALID_RATIO
+}
+
+fn pick_primary_video_stream(streams: &[RtpStreamStats]) -> Option<&RtpStreamStats> {
+    streams
+        .iter()
+        .filter(|s| is_reasonably_h264(s))
+        .max_by_key(|s| (s.valid_h264, s.rows.len()))
+        .or_else(|| streams.iter().max_by_key(|s| s.rows.len()))
+}
+
+fn pick_primary_audio_stream(
+    streams: &[RtpStreamStats],
+    video_key: Option<RtpStreamKey>,
+) -> Option<&RtpStreamStats> {
+    let candidates: Vec<&RtpStreamStats> = streams
+        .iter()
+        .filter(|s| Some(s.key) != video_key)
+        .collect();
+
+    candidates
+        .iter()
+        .copied()
+        .filter(|s| is_reasonably_aac(s))
+        .max_by_key(|s| (s.valid_aac, s.rows.len()))
+        .or_else(|| candidates.into_iter().max_by_key(|s| s.rows.len()))
+}
+
+fn group_rtp_rows_by_stream(rows: Vec<RtpTsharkRow>) -> Vec<RtpStreamStats> {
+    use std::collections::HashMap;
+    let mut streams: HashMap<RtpStreamKey, RtpStreamStats> = HashMap::new();
+    for row in rows {
+        let key = RtpStreamKey {
+            payload_type: row.payload_type,
+            ssrc: row.ssrc,
+            dst_port: row.udp_dst_port,
+        };
+        let entry = streams.entry(key).or_insert_with(|| RtpStreamStats {
+            key,
+            rows: Vec::new(),
+            valid_h264: 0,
+            valid_aac: 0,
+        });
+        if validate_h264_rtp_payload_rfc6184(&row.payload, row.marker).0 {
+            entry.valid_h264 = entry.valid_h264.saturating_add(1);
+        }
+        if validate_aac_rtp_payload_rfc3640(&row.payload).0 {
+            entry.valid_aac = entry.valid_aac.saturating_add(1);
+        }
+        entry.rows.push(row);
+    }
+    streams.into_values().collect()
+}
+
 fn stream_info_from_retina(s: &retina::client::Stream) -> StreamInfo {
     StreamInfo {
         media: s.media().to_string(),
         encoding_name: s.encoding_name().to_string(),
         control_present: s.control().is_some(),
     }
+}
+
+fn parse_tshark_hex_bytes(raw: &str) -> Result<Vec<u8>> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "<none>" {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::with_capacity(trimmed.len().saturating_div(2));
+    let mut hi: Option<u8> = None;
+    for ch in trimmed.chars() {
+        if matches!(ch, ':' | ' ' | '\t' | '\r' | '\n') {
+            continue;
+        }
+        let v = ch
+            .to_digit(16)
+            .map(|d| d as u8)
+            .with_context(|| format!("invalid hex in rtp.payload: {}", trimmed))?;
+        if let Some(h) = hi.take() {
+            out.push((h << 4) | v);
+        } else {
+            hi = Some(v);
+        }
+    }
+    if hi.is_some() {
+        bail!("odd-length hex in rtp.payload: {}", trimmed);
+    }
+    Ok(out)
+}
+
+fn is_h264_vcl_nal_type(nal_type: u8) -> bool {
+    matches!(nal_type, 1..=5)
+}
+
+fn validate_h264_rtp_payload_rfc6184(payload: &[u8], marker: bool) -> (bool, bool, bool, bool) {
+    // Returns: (valid, marker_violation, fu_a_invalid, stap_a_invalid)
+    if payload.is_empty() {
+        return (false, false, false, false);
+    }
+    let nal_unit_type = payload[0] & 0x1F;
+    if nal_unit_type == 0 || nal_unit_type == 31 {
+        return (false, false, false, false);
+    }
+
+    let mut marker_violation = false;
+    let mut fu_a_invalid = false;
+    let mut stap_a_invalid = false;
+
+    match nal_unit_type {
+        1..=23 => {
+            if marker && !is_h264_vcl_nal_type(nal_unit_type) {
+                marker_violation = true;
+            }
+            (true, marker_violation, false, false)
+        }
+        24 => {
+            // STAP-A: [STAP-A header][2-byte size][NALU]...
+            let mut i = 1usize;
+            while i + 2 <= payload.len() {
+                let size = u16::from_be_bytes([payload[i], payload[i + 1]]) as usize;
+                i += 2;
+                if size == 0 || i + size > payload.len() {
+                    stap_a_invalid = true;
+                    break;
+                }
+                let nalu_type = payload[i] & 0x1F;
+                if nalu_type == 0 || nalu_type == 31 {
+                    stap_a_invalid = true;
+                    break;
+                }
+                i += size;
+            }
+            if i != payload.len() {
+                stap_a_invalid = true;
+            }
+            (!stap_a_invalid, marker_violation, false, stap_a_invalid)
+        }
+        28 => {
+            // FU-A: [FU indicator][FU header][fragment]
+            if payload.len() < 2 {
+                return (false, false, true, false);
+            }
+            let fu_header = payload[1];
+            let start = (fu_header & 0x80) != 0;
+            let end = (fu_header & 0x40) != 0;
+            let reserved = (fu_header & 0x20) != 0;
+            let original_type = fu_header & 0x1F;
+            if reserved || (start && end) || original_type == 0 || original_type == 31 {
+                fu_a_invalid = true;
+            }
+            if payload.len() < 3 {
+                // Must contain at least one byte of fragment data.
+                fu_a_invalid = true;
+            }
+
+            // Marker is advisory (access unit boundary). Count unexpected patterns but do not fail.
+            if marker && !end {
+                marker_violation = true;
+            }
+
+            (!fu_a_invalid, marker_violation, fu_a_invalid, false)
+        }
+        _ => {
+            // For RFC 6184 completeness: allow other packet types but don't attempt deep validation.
+            // If a server starts emitting these unexpectedly, fail so we can inspect.
+            (false, false, false, false)
+        }
+    }
+}
+
+fn validate_aac_rtp_payload_rfc3640(payload: &[u8]) -> (bool, bool, bool) {
+    // Returns: (valid, au_header_invalid, au_size_invalid)
+    if payload.len() < 4 {
+        return (false, true, false);
+    }
+
+    let au_headers_len_bits = u16::from_be_bytes([payload[0], payload[1]]) as usize;
+    if au_headers_len_bits == 0
+        || !au_headers_len_bits.is_multiple_of(8)
+        || !au_headers_len_bits.is_multiple_of(16)
+    {
+        return (false, true, false);
+    }
+    let au_headers_len_bytes = au_headers_len_bits.div_ceil(8);
+    if payload.len() < 2 + au_headers_len_bytes {
+        return (false, true, false);
+    }
+    let au_count = au_headers_len_bits / 16;
+    if au_count == 0 {
+        return (false, true, false);
+    }
+
+    let mut total_au_bytes = 0usize;
+    for i in 0..au_count {
+        let off = 2 + i * 2;
+        if off + 2 > payload.len() {
+            return (false, true, false);
+        }
+        let b0 = payload[off] as usize;
+        let b1 = payload[off + 1] as usize;
+        let au_size = (b0 << 5) | (b1 >> 3);
+        if au_size == 0 {
+            return (false, false, true);
+        }
+        total_au_bytes = total_au_bytes.saturating_add(au_size);
+    }
+
+    let data_len = payload.len() - (2 + au_headers_len_bytes);
+    if total_au_bytes > data_len {
+        return (false, false, true);
+    }
+
+    (true, false, false)
+}
+
+#[derive(Debug, Clone)]
+struct RtpTsharkRow {
+    payload_type: u8,
+    marker: bool,
+    timestamp: u32,
+    seq: u16,
+    ssrc: Option<u32>,
+    ip_src: String,
+    #[allow(dead_code)]
+    ip_dst: String,
+    #[allow(dead_code)]
+    udp_src_port: Option<u16>,
+    udp_dst_port: Option<u16>,
+    payload: Vec<u8>,
+}
+
+fn parse_tshark_u32(raw: &str) -> Option<u32> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rest) = trimmed.strip_prefix("0x") {
+        return u32::from_str_radix(rest, 16).ok();
+    }
+    if trimmed
+        .chars()
+        .any(|c| c.is_ascii_hexdigit() && c.is_ascii_alphabetic())
+    {
+        return u32::from_str_radix(trimmed, 16).ok();
+    }
+    trimmed.parse::<u32>().ok()
+}
+
+fn parse_tshark_u16(raw: &str) -> Option<u16> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed.parse::<u16>().ok()
+}
+
+fn parse_tshark_rtp_row_line(line: &str, line_no: usize) -> Result<Option<RtpTsharkRow>> {
+    // Field order must match `tshark_extract_rtp_rows`.
+    // Keep this parser separate so unit tests can validate row parsing without invoking tshark.
+    let parts: Vec<&str> = line.split('\t').collect();
+    if parts.len() < 9 {
+        return Ok(None);
+    }
+
+    let Ok(payload_type) = parts[0].trim().parse::<u8>() else {
+        return Ok(None);
+    };
+    let marker = parts[1].trim() == "1";
+    let Ok(timestamp) = parts[2].trim().parse::<u32>() else {
+        return Ok(None);
+    };
+    let Ok(seq) = parts[3].trim().parse::<u16>() else {
+        return Ok(None);
+    };
+    let ssrc = parse_tshark_u32(parts[4]);
+    let ip_src = parts[5].trim().to_string();
+    let ip_dst = parts[6].trim().to_string();
+    let udp_src_port = parse_tshark_u16(parts[7]);
+    let udp_dst_port = parse_tshark_u16(parts[8]);
+
+    let payload = if parts.len() >= 10 {
+        parse_tshark_hex_bytes(parts[9])
+            .with_context(|| format!("parse rtp.payload at line {}", line_no))?
+    } else {
+        Vec::new()
+    };
+    if payload.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(RtpTsharkRow {
+        payload_type,
+        marker,
+        timestamp,
+        seq,
+        ssrc,
+        ip_src,
+        ip_dst,
+        udp_src_port,
+        udp_dst_port,
+        payload,
+    }))
+}
+
+fn tshark_extract_rtp_rows(pcap_path: &Path) -> Result<Vec<RtpTsharkRow>> {
+    let out = Command::new("tshark")
+        .args(["-o", "rtp.heuristic_rtp:TRUE"])
+        .arg("-r")
+        .arg(pcap_path)
+        .args([
+            "-Y",
+            "rtp",
+            "-T",
+            "fields",
+            "-E",
+            "separator=\t",
+            "-E",
+            "occurrence=f",
+            "-e",
+            "rtp.p_type",
+            "-e",
+            "rtp.marker",
+            "-e",
+            "rtp.timestamp",
+            "-e",
+            "rtp.seq",
+            "-e",
+            "rtp.ssrc",
+            "-e",
+            "ip.src",
+            "-e",
+            "ip.dst",
+            "-e",
+            "udp.srcport",
+            "-e",
+            "udp.dstport",
+            "-e",
+            "rtp.payload",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .context("tshark -T fields")?;
+
+    if !out.status.success() {
+        bail!(
+            "tshark parse failed (code={:?}): {}",
+            out.status.code(),
+            tail_lossy(String::from_utf8_lossy(&out.stderr).trim(), 1200)
+        );
+    }
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut rows = Vec::new();
+    for (idx, line) in stdout.lines().enumerate() {
+        if let Some(row) = parse_tshark_rtp_row_line(line, idx + 1)? {
+            rows.push(row);
+        }
+    }
+    Ok(rows)
+}
+
+fn pick_best_payload_type<F>(rows: &[RtpTsharkRow], validator: F) -> Option<(u8, u32, u32)>
+where
+    F: Fn(&RtpTsharkRow) -> bool,
+{
+    use std::collections::HashMap;
+    let mut per_pt: HashMap<u8, (u32, u32)> = HashMap::new(); // (valid, total)
+    for row in rows {
+        let entry = per_pt.entry(row.payload_type).or_insert((0, 0));
+        entry.1 = entry.1.saturating_add(1);
+        if validator(row) {
+            entry.0 = entry.0.saturating_add(1);
+        }
+    }
+
+    per_pt
+        .into_iter()
+        .max_by_key(|(_pt, (valid, total))| (*valid, *total))
+        .map(|(pt, (valid, total))| (pt, valid, total))
+}
+
+fn analyze_h264_rfc6184_from_rows(rows: &[RtpTsharkRow]) -> Result<RtpPcapRfc6184Stats> {
+    const MIN_PACKETS: u32 = 10;
+    const MIN_VALID_RATIO: f64 = 0.80;
+
+    let Some((pt, valid, total)) = pick_best_payload_type(rows, |row| {
+        validate_h264_rtp_payload_rfc6184(&row.payload, row.marker).0
+    }) else {
+        bail!("no RTP packets found in pcap");
+    };
+
+    if total < MIN_PACKETS || valid == 0 {
+        bail!(
+            "insufficient H.264-like RTP packets (pt={}, valid={}, total={})",
+            pt,
+            valid,
+            total
+        );
+    }
+    let ratio = valid as f64 / total as f64;
+    if ratio < MIN_VALID_RATIO {
+        bail!(
+            "could not classify H.264 RTP payload type (pt={}, valid_ratio={:.2}, valid={}, total={})",
+            pt,
+            ratio,
+            valid,
+            total
+        );
+    }
+
+    let mut stats = RtpPcapRfc6184Stats {
+        payload_type: pt,
+        ..Default::default()
+    };
+    let mut last_marker_timestamp: Option<u32> = None;
+    for row in rows.iter().filter(|r| r.payload_type == pt) {
+        let (ok, marker_violation, fu_a_invalid, stap_a_invalid) =
+            validate_h264_rtp_payload_rfc6184(&row.payload, row.marker);
+        stats.packets_analyzed = stats.packets_analyzed.saturating_add(1);
+        if !ok {
+            stats.invalid_packets = stats.invalid_packets.saturating_add(1);
+        }
+        if marker_violation {
+            stats.marker_violations = stats.marker_violations.saturating_add(1);
+        }
+        if row.marker {
+            if last_marker_timestamp == Some(row.timestamp) {
+                stats.marker_violations = stats.marker_violations.saturating_add(1);
+            }
+            last_marker_timestamp = Some(row.timestamp);
+        }
+        if fu_a_invalid {
+            stats.fu_a_invalid = stats.fu_a_invalid.saturating_add(1);
+        }
+        if stap_a_invalid {
+            stats.stap_a_invalid = stats.stap_a_invalid.saturating_add(1);
+        }
+    }
+    Ok(stats)
+}
+
+fn analyze_aac_rfc3640_from_rows(rows: &[RtpTsharkRow]) -> Result<RtpPcapRfc3640Stats> {
+    const MIN_PACKETS: u32 = 10;
+    const MIN_VALID_RATIO: f64 = 0.80;
+
+    let Some((pt, valid, total)) =
+        pick_best_payload_type(rows, |row| validate_aac_rtp_payload_rfc3640(&row.payload).0)
+    else {
+        bail!("no RTP packets found in pcap");
+    };
+
+    if total < MIN_PACKETS || valid == 0 {
+        bail!(
+            "insufficient AAC-like RTP packets (pt={}, valid={}, total={})",
+            pt,
+            valid,
+            total
+        );
+    }
+    let ratio = valid as f64 / total as f64;
+    if ratio < MIN_VALID_RATIO {
+        bail!(
+            "could not classify AAC RTP payload type (pt={}, valid_ratio={:.2}, valid={}, total={})",
+            pt,
+            ratio,
+            valid,
+            total
+        );
+    }
+
+    let mut stats = RtpPcapRfc3640Stats {
+        payload_type: pt,
+        ..Default::default()
+    };
+
+    let mut last_timestamp: Option<u32> = None;
+    for row in rows.iter().filter(|r| r.payload_type == pt) {
+        let (ok, au_header_invalid, au_size_invalid) =
+            validate_aac_rtp_payload_rfc3640(&row.payload);
+        stats.packets_analyzed = stats.packets_analyzed.saturating_add(1);
+        if !ok {
+            stats.invalid_packets = stats.invalid_packets.saturating_add(1);
+        }
+        if au_header_invalid {
+            stats.au_header_invalid = stats.au_header_invalid.saturating_add(1);
+        }
+        if au_size_invalid {
+            stats.au_size_invalid = stats.au_size_invalid.saturating_add(1);
+        }
+
+        if let Some(prev) = last_timestamp {
+            let delta = row.timestamp.wrapping_sub(prev);
+            if delta != 0 && delta % 1024 != 0 {
+                stats.timestamp_anomalies = stats.timestamp_anomalies.saturating_add(1);
+            }
+        }
+        last_timestamp = Some(row.timestamp);
+    }
+    Ok(stats)
 }
 
 pub fn result_ok(r: &TestResult) -> bool {
@@ -707,6 +1311,8 @@ pub async fn run_harness(
     let artifacts_dir = effective.artifacts_dir.clone();
     let capture_tool_output = effective.capture_tool_output;
     info!(url = %url, "running harness scenarios");
+    let mut expect_h264 = false;
+    let mut expect_aac = false;
 
     debug!("harness: basic connectivity");
     match timeout(
@@ -834,7 +1440,9 @@ pub async fn run_harness(
     )
     .await
     {
-        Ok(Ok((video_count, audio_count, has_h264))) => {
+        Ok(Ok((video_count, audio_count, has_h264, has_aac))) => {
+            expect_h264 = has_h264;
+            expect_aac = has_aac;
             tests.push(TestResult::metric(
                 "harness_sdp_video_streams",
                 serde_json::json!(video_count),
@@ -849,6 +1457,11 @@ pub async fn run_harness(
                 TestResult::pass("harness_sdp_video_h264")
             } else {
                 TestResult::fail("harness_sdp_video_h264", "no H.264 video stream")
+            });
+            tests.push(if !has_aac && audio_count > 0 {
+                TestResult::fail("harness_sdp_audio_aac", "no AAC audio stream")
+            } else {
+                TestResult::pass("harness_sdp_audio_aac")
             });
         }
         Ok(Err(e)) => tests.push(TestResult::fail("harness_sdp_validation", e.to_string())),
@@ -893,16 +1506,103 @@ pub async fn run_harness(
         }
     }
 
-    debug!(url = %url, "harness: packet loss");
-    match timeout(step_cap_long, harness_packet_loss(&url, effective, args)).await {
-        Ok(Ok((rtp_packets, packet_loss, loss_percent))) => {
-            let pass =
-                packet_loss_within_tolerance(loss_percent, effective.packet_loss_tolerance_percent);
+    debug!(url = %url, "harness: packet loss + pcap RFC checks");
+    match timeout(
+        step_cap_long,
+        harness_packet_loss(&url, effective, args, expect_h264, expect_aac),
+    )
+    .await
+    {
+        Ok(Ok(res)) => {
+            let (video_metric, pass) = match res.video.clone() {
+                Some(metric) => {
+                    let pass = packet_loss_within_tolerance(
+                        metric.loss_percent,
+                        effective.packet_loss_tolerance_percent,
+                    );
+                    (metric, pass)
+                }
+                None => (HarnessRtpLossMetric::default(), false),
+            };
             tests.push(TestResult::metric(
                 "harness_packet_loss_percent",
-                serde_json::json!({ "rtp_packets": rtp_packets, "packet_loss": packet_loss, "loss_percent": loss_percent }),
+                serde_json::json!({
+                    "rtp_packets": video_metric.rtp_packets,
+                    "packet_loss": video_metric.packet_loss,
+                    "loss_percent": video_metric.loss_percent,
+                    "payload_type": video_metric.payload_type,
+                    "ssrc": video_metric.ssrc,
+                }),
                 pass,
             ));
+
+            if let Some(video) = res.video.clone() {
+                let pass = packet_loss_within_tolerance(
+                    video.loss_percent,
+                    effective.packet_loss_tolerance_percent,
+                );
+                tests.push(TestResult::metric(
+                    "harness_packet_loss_percent_video",
+                    serde_json::json!(video),
+                    pass,
+                ));
+            }
+
+            if let Some(audio) = res.audio.clone() {
+                let pass = packet_loss_within_tolerance(
+                    audio.loss_percent,
+                    effective.packet_loss_tolerance_percent,
+                );
+                tests.push(TestResult::metric(
+                    "harness_packet_loss_percent_audio",
+                    serde_json::json!(audio),
+                    pass,
+                ));
+            }
+
+            if expect_h264 {
+                match res.h264_rfc6184 {
+                    Some(Ok(stats)) => {
+                        let pass = stats.packets_analyzed > 0 && stats.invalid_packets == 0;
+                        tests.push(TestResult::metric(
+                            "harness_pcap_rfc6184_h264",
+                            serde_json::json!(stats),
+                            pass,
+                        ));
+                    }
+                    Some(Err(e)) => {
+                        tests.push(TestResult::fail("harness_pcap_rfc6184_h264", e));
+                    }
+                    None => tests.push(TestResult::fail(
+                        "harness_pcap_rfc6184_h264",
+                        "pcap validation skipped unexpectedly",
+                    )),
+                }
+            } else {
+                tests.push(TestResult::pass("harness_pcap_rfc6184_h264"));
+            }
+
+            if expect_aac {
+                match res.aac_rfc3640 {
+                    Some(Ok(stats)) => {
+                        let pass = stats.packets_analyzed > 0 && stats.invalid_packets == 0;
+                        tests.push(TestResult::metric(
+                            "harness_pcap_rfc3640_aac",
+                            serde_json::json!(stats),
+                            pass,
+                        ));
+                    }
+                    Some(Err(e)) => {
+                        tests.push(TestResult::fail("harness_pcap_rfc3640_aac", e));
+                    }
+                    None => tests.push(TestResult::fail(
+                        "harness_pcap_rfc3640_aac",
+                        "pcap validation skipped unexpectedly",
+                    )),
+                }
+            } else {
+                tests.push(TestResult::pass("harness_pcap_rfc3640_aac"));
+            }
         }
         Ok(Err(e)) => tests.push(TestResult::fail("harness_packet_loss", e.to_string())),
         Err(_) => {
@@ -922,6 +1622,7 @@ pub async fn run_harness(
                 &url,
                 effective.short_duration_sec,
                 effective.concurrent_clients,
+                timeout_sec,
                 &artifacts_dir,
                 capture_tool_output,
             ),
@@ -1235,7 +1936,7 @@ async fn harness_sdp_validation(
     _timeout_sec: u64,
     artifacts_dir: &Path,
     capture_tool_output: bool,
-) -> Result<(usize, usize, bool)> {
+) -> Result<(usize, usize, bool, bool)> {
     let url = url.to_string();
     let stdout_path = artifacts_dir.join("ffprobe_sdp_validation.stdout.log");
     let stderr_path = artifacts_dir.join("ffprobe_sdp_validation.stderr.log");
@@ -1281,7 +1982,8 @@ async fn harness_sdp_validation(
         let has_h264 = video
             .iter()
             .any(|s| s.codec_name.as_deref() == Some("h264"));
-        Ok::<_, anyhow::Error>((video.len(), audio.len(), has_h264))
+        let has_aac = audio.iter().any(|s| s.codec_name.as_deref() == Some("aac"));
+        Ok::<_, anyhow::Error>((video.len(), audio.len(), has_h264, has_aac))
     })
     .await
     .context("spawn_blocking")??;
@@ -1451,13 +2153,20 @@ async fn harness_packet_loss(
     url: &str,
     effective: &EffectiveConfig,
     _args: &Args,
-) -> Result<(u32, u32, f64)> {
+    expect_h264: bool,
+    expect_aac: bool,
+) -> Result<HarnessPacketLossResult> {
     let iface = effective.capture_interface.clone();
     let url = url.to_string();
     let artifacts_dir = effective.artifacts_dir.clone();
     let capture_tool_output = effective.capture_tool_output;
     let keep_pcaps = effective.keep_pcaps;
     let pcap_path = artifacts_dir.join("rtp_packet_loss_capture.pcap");
+    let server_ip = effective
+        .rtsp_host
+        .parse::<std::net::IpAddr>()
+        .ok()
+        .map(|ip| ip.to_string());
 
     let filter = if effective.rtsp_host.parse::<std::net::IpAddr>().is_ok() {
         format!("udp and host {}", effective.rtsp_host)
@@ -1539,64 +2248,81 @@ async fn harness_packet_loss(
     let _ = tshark_handle_rtp.kill();
     let _ = tshark_handle_rtp.wait();
 
-    let pcap_path_str = pcap_path.to_string_lossy().to_string();
-    let (rtp_packets, packet_loss, loss_percent) = tokio::task::spawn_blocking(move || {
-        let mut builder = RTSharkBuilder::builder();
-        let mut rtshark = builder
-            .input_path(&pcap_path_str)
-            .spawn()
-            .context("rtshark spawn")?;
-        let mut seqs: Vec<u16> = Vec::new();
-        while let Some(packet) = rtshark.read().context("rtshark read")? {
-            for layer in packet {
-                if layer.name() == "rtp" {
-                    for meta in layer {
-                        if meta.name() == "rtp.seq" {
-                            if let Ok(n) = meta.value().parse::<u16>() {
-                                seqs.push(n);
-                            }
-                            break;
-                        }
-                    }
+    let pcap_path_for_parse = pcap_path.clone();
+    let (video, audio, h264_rfc6184, aac_rfc3640) =
+        tokio::task::spawn_blocking(move || {
+            let pcap_path_str = pcap_path_for_parse.to_string_lossy().to_string();
+            let mut rows = tshark_extract_rtp_rows(&pcap_path_for_parse)
+                .context("tshark extract rtp rows")?;
+
+            if let Some(server) = server_ip.as_ref() {
+                rows.retain(|r| r.ip_src == *server);
+            }
+
+            if rows.is_empty() {
+                bail!(
+                    "No decodable RTP payload packets in UDP pcap; tshark RTP heuristic may be disabled or capture filter/interface is wrong."
+                );
+            }
+
+            let stream_list = group_rtp_rows_by_stream(rows);
+
+            let video_stream = pick_primary_video_stream(&stream_list);
+            let video_key = video_stream.map(|s| s.key);
+            let audio_stream = pick_primary_audio_stream(&stream_list, video_key);
+
+            let video_metric = video_stream.map(compute_stream_loss_metric);
+            let audio_metric = audio_stream.map(compute_stream_loss_metric);
+
+            let h264_rfc6184 = if expect_h264 {
+                match video_stream {
+                    Some(s) => Some(analyze_h264_rfc6184_from_rows(&s.rows).map_err(|e| e.to_string())),
+                    None => Some(Err("no RTP stream available for H.264 pcap validation".to_string())),
                 }
+            } else {
+                None
+            };
+
+            let aac_rfc3640 = if expect_aac {
+                match audio_stream {
+                    Some(s) => Some(analyze_aac_rfc3640_from_rows(&s.rows).map_err(|e| e.to_string())),
+                    None => Some(Err("no RTP stream available for AAC pcap validation".to_string())),
+                }
+            } else {
+                None
+            };
+
+            if !keep_pcaps {
+                let _ = std::fs::remove_file(&pcap_path_str);
             }
-        }
-        if !keep_pcaps {
-            let _ = std::fs::remove_file(&pcap_path_str);
-        }
-        seqs.sort();
-        let mut loss = 0u32;
-        for w in seqs.windows(2) {
-            let diff = (w[1] as i32 - w[0] as i32).unsigned_abs();
-            if diff > 1 && diff != 65535 {
-                loss += diff - 1;
-            }
-        }
-        let total = seqs.len() as u32;
-        let loss_pct = if total > 0 {
-            100.0 * (loss as f64) / (total as f64)
-        } else {
-            0.0
-        };
-        Ok::<_, anyhow::Error>((total, loss, loss_pct))
+
+            Ok::<_, anyhow::Error>((video_metric, audio_metric, h264_rfc6184, aac_rfc3640))
     })
     .await
     .context("spawn_blocking")??;
 
-    Ok((rtp_packets, packet_loss, loss_percent))
+    Ok(HarnessPacketLossResult {
+        video,
+        audio,
+        h264_rfc6184,
+        aac_rfc3640,
+    })
 }
 
 async fn harness_concurrent_clients(
     url: &str,
     duration_sec: u64,
     count: u32,
+    rtsp_timeout_sec: u64,
     artifacts_dir: &Path,
     capture_tool_output: bool,
 ) -> Result<u32> {
     let mut handles = Vec::new();
+    let timeout_micros = rtsp_timeout_sec.saturating_mul(1_000_000).to_string();
     for i in 0..count {
         let url = url.to_string();
         let dur = duration_sec;
+        let timeout_micros = timeout_micros.clone();
         let log_path = artifacts_dir.join(format!("ffmpeg_concurrent_client_{}.log", i));
         handles.push(tokio::task::spawn_blocking(move || {
             let mut log = if capture_tool_output {
@@ -1612,6 +2338,9 @@ async fn harness_concurrent_clients(
             }
             let mut cmd = FfmpegCommand::new();
             cmd.hide_banner()
+                .arg("-nostdin")
+                .arg("-rw_timeout")
+                .arg(&timeout_micros)
                 .arg("-rtsp_transport")
                 .arg("tcp")
                 .input(&url)
@@ -1728,12 +2457,14 @@ async fn harness_error_handling(
     host: &str,
     port: u16,
     stream: &str,
-    _timeout_sec: u64,
+    timeout_sec: u64,
     artifacts_dir: &Path,
     capture_tool_output: bool,
 ) -> Result<(bool, bool)> {
     let invalid_url = format!("rtsp://invalid:invalid@{}:{}{}", host, port, stream);
     let bogus_url = format!("rtsp://{}:{}/bogus_stream", host, port);
+    let timeout_micros = timeout_sec.saturating_mul(1_000_000).to_string();
+    let invalid_timeout_micros = timeout_micros.clone();
 
     let invalid_log_path = artifacts_dir.join("ffmpeg_error_invalid_creds.log");
     let invalid_ok = tokio::task::spawn_blocking(move || {
@@ -1748,6 +2479,9 @@ async fn harness_error_handling(
         }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
+            .arg("-nostdin")
+            .arg("-rw_timeout")
+            .arg(&invalid_timeout_micros)
             .arg("-rtsp_transport")
             .arg("tcp")
             .input(&invalid_url)
@@ -1782,6 +2516,7 @@ async fn harness_error_handling(
     .context("spawn_blocking")??;
 
     let bogus_log_path = artifacts_dir.join("ffmpeg_error_bogus_url.log");
+    let bogus_timeout_micros = timeout_micros.clone();
     let bogus_ok = tokio::task::spawn_blocking(move || {
         let mut log = if capture_tool_output {
             Some(BoundedLogWriter::create(&bogus_log_path)?)
@@ -1794,6 +2529,9 @@ async fn harness_error_handling(
         }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
+            .arg("-nostdin")
+            .arg("-rw_timeout")
+            .arg(&bogus_timeout_micros)
             .arg("-rtsp_transport")
             .arg("tcp")
             .input(&bogus_url)
@@ -1833,11 +2571,13 @@ async fn harness_error_handling(
 #[cfg(test)]
 mod tests {
     use super::{
-        BoundedLogWriter, bitrate_within_tolerance, build_sdp_test_results, critical_proto_failed,
-        empty_report, fps_within_tolerance, packet_loss_within_tolerance,
-        parse_rtsp_method_from_meta, parse_rtsp_status_code_from_meta, result_ok, rtsp_url,
-        to_retina_initial_timestamp_policy, to_retina_transport,
-        validate_h264_length_prefixed_nals,
+        BoundedLogWriter, RtpTsharkRow, bitrate_within_tolerance, build_sdp_test_results,
+        compute_packet_loss_from_seqs, critical_proto_failed, empty_report, fps_within_tolerance,
+        group_rtp_rows_by_stream, packet_loss_within_tolerance, parse_rtsp_method_from_meta,
+        parse_rtsp_status_code_from_meta, parse_tshark_hex_bytes, parse_tshark_rtp_row_line,
+        pick_primary_audio_stream, pick_primary_video_stream, result_ok, rtsp_url,
+        to_retina_initial_timestamp_policy, to_retina_transport, validate_aac_rtp_payload_rfc3640,
+        validate_h264_length_prefixed_nals, validate_h264_rtp_payload_rfc6184,
     };
     use crate::config::{InitialTimestampPolicyArg, TransportArg};
     use crate::report::{StreamInfo, TestResult, TestRun};
@@ -2001,6 +2741,143 @@ mod tests {
             parse_rtsp_status_code_from_meta("rtsp.response", "RTSP/1.0 503 Busy\r\n"),
             Some(503)
         );
+    }
+
+    #[test]
+    fn test_parse_tshark_hex_bytes_empty_ok() {
+        let out = parse_tshark_hex_bytes("  ").unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_parse_tshark_hex_bytes_colon_separated() {
+        let out = parse_tshark_hex_bytes("7c:85:01:ff").unwrap();
+        assert_eq!(out, vec![0x7c, 0x85, 0x01, 0xff]);
+    }
+
+    #[test]
+    fn test_parse_tshark_hex_bytes_contiguous() {
+        let out = parse_tshark_hex_bytes("7c8501ff").unwrap();
+        assert_eq!(out, vec![0x7c, 0x85, 0x01, 0xff]);
+    }
+
+    #[test]
+    fn test_parse_tshark_rtp_row_line_contiguous_payload_and_hex_ssrc() {
+        let line =
+            "96\t1\t9000\t123\t0x11223344\t192.168.2.198\t192.168.2.10\t5004\t6000\t7c8501ff";
+        let row = parse_tshark_rtp_row_line(line, 1).unwrap().unwrap();
+        assert_eq!(row.payload_type, 96);
+        assert!(row.marker);
+        assert_eq!(row.timestamp, 9000);
+        assert_eq!(row.seq, 123);
+        assert_eq!(row.ssrc, Some(0x11223344));
+        assert_eq!(row.ip_src, "192.168.2.198");
+        assert_eq!(row.ip_dst, "192.168.2.10");
+        assert_eq!(row.udp_src_port, Some(5004));
+        assert_eq!(row.udp_dst_port, Some(6000));
+        assert_eq!(row.payload, vec![0x7c, 0x85, 0x01, 0xff]);
+    }
+
+    #[test]
+    fn test_packet_loss_computation_does_not_mix_streams() {
+        fn mk_row(pt: u8, ssrc: u32, dst_port: u16, seq: u16, payload: &[u8]) -> RtpTsharkRow {
+            RtpTsharkRow {
+                payload_type: pt,
+                marker: true,
+                timestamp: 0,
+                seq,
+                ssrc: Some(ssrc),
+                ip_src: "192.168.2.198".to_string(),
+                ip_dst: "192.168.2.10".to_string(),
+                udp_src_port: Some(5004),
+                udp_dst_port: Some(dst_port),
+                payload: payload.to_vec(),
+            }
+        }
+
+        let h264_payload = [0x65, 0x88, 0x99]; // Single NAL, IDR.
+        let aac_payload = [0x00, 0x10, 0x00, 0x10, 0x11, 0x22]; // RFC 3640 AU header + 2 bytes.
+
+        let rows = vec![
+            mk_row(96, 1, 6000, 100, &h264_payload),
+            mk_row(97, 2, 6002, 200, &aac_payload),
+            mk_row(96, 1, 6000, 101, &h264_payload),
+            mk_row(97, 2, 6002, 201, &aac_payload),
+            mk_row(96, 1, 6000, 102, &h264_payload),
+            mk_row(97, 2, 6002, 202, &aac_payload),
+        ];
+
+        let streams = group_rtp_rows_by_stream(rows);
+        assert_eq!(streams.len(), 2);
+
+        let video = pick_primary_video_stream(&streams).expect("video stream");
+        let audio = pick_primary_audio_stream(&streams, Some(video.key)).expect("audio stream");
+
+        let (video_total, video_loss, _) =
+            compute_packet_loss_from_seqs(&video.rows.iter().map(|r| r.seq).collect::<Vec<_>>());
+        let (audio_total, audio_loss, _) =
+            compute_packet_loss_from_seqs(&audio.rows.iter().map(|r| r.seq).collect::<Vec<_>>());
+
+        assert_eq!(video_total, 3);
+        assert_eq!(video_loss, 0);
+        assert_eq!(audio_total, 3);
+        assert_eq!(audio_loss, 0);
+    }
+
+    #[test]
+    fn test_validate_h264_rfc6184_single_nal_ok() {
+        // NAL type 5 (IDR)
+        let payload = [0x65, 0x88, 0x99];
+        let (ok, _marker_violation, fu_a_invalid, stap_a_invalid) =
+            validate_h264_rtp_payload_rfc6184(&payload, true);
+        assert!(ok);
+        assert!(!fu_a_invalid);
+        assert!(!stap_a_invalid);
+    }
+
+    #[test]
+    fn test_validate_h264_rfc6184_stap_a_ok() {
+        // STAP-A with SPS (type 7) and PPS (type 8)
+        let payload = [
+            0x78, // F=0 NRI=3 Type=24
+            0x00, 0x02, 0x67, 0xAA, // len=2, SPS
+            0x00, 0x02, 0x68, 0xBB, // len=2, PPS
+        ];
+        let (ok, _marker_violation, fu_a_invalid, stap_a_invalid) =
+            validate_h264_rtp_payload_rfc6184(&payload, false);
+        assert!(ok);
+        assert!(!fu_a_invalid);
+        assert!(!stap_a_invalid);
+    }
+
+    #[test]
+    fn test_validate_h264_rfc6184_fu_a_ok() {
+        // FU-A start fragment for NAL type 5 (IDR)
+        let payload = [0x7C, 0x85, 0x11, 0x22];
+        let (ok, _marker_violation, fu_a_invalid, stap_a_invalid) =
+            validate_h264_rtp_payload_rfc6184(&payload, false);
+        assert!(ok);
+        assert!(!fu_a_invalid);
+        assert!(!stap_a_invalid);
+    }
+
+    #[test]
+    fn test_validate_aac_rfc3640_single_au_ok() {
+        // AU-headers-length = 16 bits, AU-size=4 bytes, index=0, then 4 bytes data
+        let payload = [0x00, 0x10, 0x00, 0x20, 0xDE, 0xAD, 0xBE, 0xEF];
+        let (ok, au_header_invalid, au_size_invalid) = validate_aac_rtp_payload_rfc3640(&payload);
+        assert!(ok);
+        assert!(!au_header_invalid);
+        assert!(!au_size_invalid);
+    }
+
+    #[test]
+    fn test_validate_aac_rfc3640_au_size_too_large() {
+        // AU-size=16 bytes but only 1 byte data.
+        let payload = [0x00, 0x10, 0x00, 0x80, 0x00];
+        let (ok, _au_header_invalid, au_size_invalid) = validate_aac_rtp_payload_rfc3640(&payload);
+        assert!(!ok);
+        assert!(au_size_invalid);
     }
 
     #[test]

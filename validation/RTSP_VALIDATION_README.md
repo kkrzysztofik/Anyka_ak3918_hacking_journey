@@ -190,7 +190,7 @@ loop_playback = true
 4. **Bitrate / FPS stability** – Steady-state from ffmpeg progress.
 5. **SDP validation** – ffprobe stream/codec checks.
 6. **RTSP protocol sequence** – tshark capture + rtshark analysis (DESCRIBE/SETUP/PLAY/TEARDOWN, status codes).
-7. **Packet loss** – UDP capture and RTP seq gaps.
+7. **Packet loss + RTP payload conformance** – UDP capture and RTP seq gaps, plus pcap-level RFC checks for H.264 (RFC 6184) and AAC (RFC 3640) payload structure.
 8. **Concurrent clients** – Multiple ffmpeg clients in parallel (config or `--concurrent N`).
 9. **Long duration** – Optional `--long-duration` (config long_duration_sec).
 10. **Error handling** – Invalid credentials, bogus URL (optional, skip with `--skip-error-handling`).
@@ -263,6 +263,8 @@ Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--duration
 - **harness_bitrate_kbps**, **harness_fps** – From ffmpeg progress; validated via config expected values or baselines.
 - **harness_packet_loss_percent** – RTP loss from capture (threshold in config).
 - **harness_protocol_sequence** – RTSP method counts and status codes from pcap.
+- **harness_pcap_rfc6184_h264** – RTP payload structural validation for H.264 per RFC 6184 (Single NAL / STAP-A / FU-A).
+- **harness_pcap_rfc3640_aac** – RTP payload structural validation for AAC MPEG4-GENERIC per RFC 3640 (AU headers length + AU sizes).
 
 ## Baseline Management
 

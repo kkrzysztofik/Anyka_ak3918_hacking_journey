@@ -8,10 +8,11 @@ use std::time::Duration;
 use telnet::{Event, Telnet};
 use tracing::{debug, info, trace, warn};
 
-use crate::util::{MAX_TOOL_LOG_BYTES, write_bytes_tail};
+use crate::util::{MAX_TOOL_LOG_BYTES, tail_lossy, write_bytes_tail};
 
 const DEVICE_ONVIF_DIR: &str = "/mnt/anyka_hack/onvif";
 const DEVICE_ONVIF_LOG_GLOB: &str = "onvif.log*";
+const DEVICE_ONVIF_PIDFILE: &str = "onvif.pid";
 const DEVICE_TELNET_CONNECT_TIMEOUT_SEC: u64 = 15;
 const DEVICE_TELNET_READ_TIMEOUT_SEC: u64 = 8;
 const DEVICE_TELNET_LOG_COPY_READ_TIMEOUT_SEC: u64 = 45;
@@ -149,9 +150,9 @@ pub fn extract_between_markers(s: &str) -> Option<String> {
 }
 
 fn first_u64_in_text(s: &str) -> Option<u64> {
-    let start =
-        s.char_indices()
-            .find_map(|(i, ch)| if ch.is_ascii_digit() { Some(i) } else { None })?;
+    let start = s
+        .char_indices()
+        .find_map(|(i, ch)| if ch.is_ascii_digit() { Some(i) } else { None })?;
     let end = s[start..]
         .char_indices()
         .find_map(|(i, ch)| {
@@ -248,8 +249,8 @@ pub fn parse_status_vmrss_vmsize(content: &str) -> (Option<u64>, Option<u64>) {
 
 fn device_cleanup_onvif_logs_blocking(host: &str, port: u16) -> Result<()> {
     let cmd = format!(
-        "cd {} && rm -f {} 2>/dev/null",
-        DEVICE_ONVIF_DIR, DEVICE_ONVIF_LOG_GLOB
+        "cd {} && rm -f {} nohup.out {} 2>/dev/null",
+        DEVICE_ONVIF_DIR, DEVICE_ONVIF_LOG_GLOB, DEVICE_ONVIF_PIDFILE
     );
     debug!(command = %cmd, "device cleanup onvif logs");
     let _ = run_telnet_command_blocking(host, port, &cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
@@ -262,7 +263,7 @@ pub fn device_copy_onvif_logs_blocking(host: &str, port: u16, artifacts_dir: &Pa
         .with_context(|| format!("create artifacts dir {}", artifacts_dir.display()))?;
 
     let list_cmd = format!(
-        "cd {dir} && echo {b} && set -- {glob}; if [ \"$1\" = \"{glob}\" ]; then :; else for f in \"$@\"; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done; fi; echo {e}",
+        "cd {dir} && echo {b} && (for f in {glob} nohup.out; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done) && echo {e}",
         dir = DEVICE_ONVIF_DIR,
         glob = DEVICE_ONVIF_LOG_GLOB,
         b = DEVICE_MARKER_BEGIN,
@@ -279,7 +280,6 @@ pub fn device_copy_onvif_logs_blocking(host: &str, port: u16, artifacts_dir: &Pa
         .lines()
         .map(|l| l.trim_matches(['\r', '\n', ' ']))
         .filter(|l| !l.is_empty())
-        .filter(|l| l.starts_with("onvif.log"))
         .map(|l| l.to_string())
         .collect();
 
@@ -337,25 +337,31 @@ pub fn device_start_onvif_blocking(
     if let Err(e) = device_cleanup_onvif_logs_blocking(host, port) {
         warn!(error = %e, "failed to cleanup device onvif logs before start");
     }
-    let cmd = if let Some(h264) = h264_file {
+    let config_q = sh_single_quote(&format!("{}/config.toml", DEVICE_ONVIF_DIR));
+    let onvif_cmd = if let Some(h264) = h264_file {
         let mut c = format!(
-            "cd {} && nohup ./onvif-rust --validation-mode --h264-file '{}' --rtsp-port {}",
-            DEVICE_ONVIF_DIR, h264, rtsp_port
+            "./onvif-rust --validation-mode --h264-file {} --rtsp-port {}",
+            sh_single_quote(h264),
+            rtsp_port
         );
         if let Some(aac) = aac_file {
-            c.push_str(&format!(" --aac-file '{}'", aac));
+            c.push_str(&format!(" --aac-file {}", sh_single_quote(aac)));
         }
         if loop_playback {
             c.push_str(" --loop-playback");
         }
-        c.push_str(&format!(" {}/config.toml &", DEVICE_ONVIF_DIR));
+        c.push_str(&format!(" {}", config_q));
         c
     } else {
-        format!(
-            "cd {} && nohup ./onvif-rust {}/config.toml &",
-            DEVICE_ONVIF_DIR, DEVICE_ONVIF_DIR
-        )
+        format!("./onvif-rust {}", config_q)
     };
+
+    let cmd = format!(
+        "cd {dir} && LOG=\"onvif.log.$(date +%Y%m%dT%H%M%S)\"; nohup {onvif_cmd} > \"$LOG\" 2>&1 & echo $! > {pidfile}",
+        dir = DEVICE_ONVIF_DIR,
+        onvif_cmd = onvif_cmd,
+        pidfile = DEVICE_ONVIF_PIDFILE
+    );
     debug!(command = %cmd, "device start command");
     run_telnet_command_blocking(host, port, &cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
     Ok(())
@@ -364,12 +370,12 @@ pub fn device_start_onvif_blocking(
 /// Stop onvif-rust on the device (blocking).
 pub fn device_stop_onvif_blocking(host: &str, port: u16) -> Result<()> {
     debug!(%host, port, "stopping onvif-rust on device");
-    run_telnet_command_blocking(
-        host,
-        port,
-        "pkill -f onvif-rust",
-        DEVICE_TELNET_READ_TIMEOUT_SEC,
-    )?;
+    let cmd = format!(
+        "cd {dir} && if [ -f {pidfile} ]; then pid=\"$(cat {pidfile} 2>/dev/null || true)\"; case \"$pid\" in ''|*[!0-9]*) ;; *) kill \"$pid\" 2>/dev/null ;; esac; fi; pkill -f onvif-rust",
+        dir = DEVICE_ONVIF_DIR,
+        pidfile = DEVICE_ONVIF_PIDFILE
+    );
+    run_telnet_command_blocking(host, port, &cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
     Ok(())
 }
 
@@ -378,47 +384,97 @@ pub fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemet
     let mut t = DeviceTelemetry::default();
     debug!(%host, port, "collecting device telemetry");
 
-    let meminfo_raw = match run_telnet_command_blocking(
-        host,
-        port,
-        &format!(
-            "echo {} && cat /proc/meminfo && echo {}",
-            DEVICE_MARKER_BEGIN, DEVICE_MARKER_END
-        ),
-        DEVICE_TELNET_READ_TIMEOUT_SEC,
-    ) {
-        Ok(s) => s,
-        Err(e) => {
-            t.error = Some(format!("meminfo: {}", e));
-            return t;
+    let meminfo_cmd = format!(
+        "echo {} && cat /proc/meminfo && echo {}",
+        DEVICE_MARKER_BEGIN, DEVICE_MARKER_END
+    );
+    let mut meminfo_raw =
+        match run_telnet_command_blocking(host, port, &meminfo_cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)
+        {
+            Ok(s) => s,
+            Err(e) => {
+                t.error = Some(format!("meminfo: {}", e));
+                return t;
+            }
+        };
+    let mut meminfo = extract_between_markers(&meminfo_raw).unwrap_or(meminfo_raw.clone());
+    let mut parsed = parse_meminfo(&meminfo);
+    if parsed.0.is_none() && parsed.1.is_none() && parsed.2.is_none() {
+        match run_telnet_command_blocking(
+            host,
+            port,
+            &meminfo_cmd,
+            DEVICE_TELNET_READ_TIMEOUT_SEC.saturating_add(10),
+        ) {
+            Ok(s) => {
+                meminfo_raw = s;
+                meminfo = extract_between_markers(&meminfo_raw).unwrap_or(meminfo_raw.clone());
+                parsed = parse_meminfo(&meminfo);
+            }
+            Err(e) => {
+                t.error = Some(format!("meminfo retry: {}", e));
+                return t;
+            }
         }
-    };
-    let meminfo = extract_between_markers(&meminfo_raw).unwrap_or(meminfo_raw);
-    let (mem_total, mem_free, mem_available) = parse_meminfo(&meminfo);
+    }
+    let (mem_total, mem_free, mem_available) = parsed;
     t.mem_total_kib = mem_total;
     t.mem_free_kib = mem_free;
     t.mem_available_kib = mem_available;
+    if t.mem_total_kib.is_none() && t.mem_free_kib.is_none() && t.mem_available_kib.is_none() {
+        t.error = t.error.or_else(|| {
+            Some(format!(
+                "meminfo parse failed: {}",
+                tail_lossy(meminfo.trim(), 300)
+            ))
+        });
+    }
 
-    let loadavg_raw = match run_telnet_command_blocking(
-        host,
-        port,
-        &format!(
-            "echo {} && cat /proc/loadavg && echo {}",
-            DEVICE_MARKER_BEGIN, DEVICE_MARKER_END
-        ),
-        DEVICE_TELNET_READ_TIMEOUT_SEC,
-    ) {
-        Ok(s) => s,
-        Err(e) => {
-            t.error = Some(format!("loadavg: {}", e));
-            return t;
+    let loadavg_cmd = format!(
+        "echo {} && cat /proc/loadavg && echo {}",
+        DEVICE_MARKER_BEGIN, DEVICE_MARKER_END
+    );
+    let mut loadavg_raw =
+        match run_telnet_command_blocking(host, port, &loadavg_cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)
+        {
+            Ok(s) => s,
+            Err(e) => {
+                t.error = Some(format!("loadavg: {}", e));
+                return t;
+            }
+        };
+    let mut loadavg = extract_between_markers(&loadavg_raw).unwrap_or(loadavg_raw.clone());
+    let mut loads = parse_loadavg(&loadavg);
+    if loads.0.is_none() && loads.1.is_none() && loads.2.is_none() {
+        match run_telnet_command_blocking(
+            host,
+            port,
+            &loadavg_cmd,
+            DEVICE_TELNET_READ_TIMEOUT_SEC.saturating_add(10),
+        ) {
+            Ok(s) => {
+                loadavg_raw = s;
+                loadavg = extract_between_markers(&loadavg_raw).unwrap_or(loadavg_raw.clone());
+                loads = parse_loadavg(&loadavg);
+            }
+            Err(e) => {
+                t.error = t.error.or_else(|| Some(format!("loadavg retry: {}", e)));
+                return t;
+            }
         }
-    };
-    let loadavg = extract_between_markers(&loadavg_raw).unwrap_or(loadavg_raw);
-    let (load_1m, load_5m, load_15m) = parse_loadavg(&loadavg);
+    }
+    let (load_1m, load_5m, load_15m) = loads;
     t.load_avg_1m = load_1m;
     t.load_avg_5m = load_5m;
     t.load_avg_15m = load_15m;
+    if t.load_avg_1m.is_none() && t.load_avg_5m.is_none() && t.load_avg_15m.is_none() {
+        t.error = t.error.or_else(|| {
+            Some(format!(
+                "loadavg parse failed: {}",
+                tail_lossy(loadavg.trim(), 200)
+            ))
+        });
+    }
 
     let pgrep_raw = match run_telnet_command_blocking(
         host,
@@ -436,8 +492,21 @@ pub fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemet
         }
     };
     let pgrep_out = extract_between_markers(&pgrep_raw).unwrap_or(pgrep_raw);
-    let Some(pid) = parse_pgrep_output(&pgrep_out) else {
-        debug!("pgrep did not find onvif-rust; skipping process status");
+    let mut pid = parse_pgrep_output(&pgrep_out);
+    if pid.is_none() {
+        let pidfile_cmd = format!(
+            "echo {} && cat {}/{} 2>/dev/null && echo {}",
+            DEVICE_MARKER_BEGIN, DEVICE_ONVIF_DIR, DEVICE_ONVIF_PIDFILE, DEVICE_MARKER_END
+        );
+        if let Ok(raw) =
+            run_telnet_command_blocking(host, port, &pidfile_cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)
+        {
+            let pidfile_out = extract_between_markers(&raw).unwrap_or(raw);
+            pid = parse_pgrep_output(&pidfile_out);
+        }
+    }
+    let Some(pid) = pid else {
+        debug!("could not determine onvif-rust pid; skipping process status");
         return t;
     };
     trace!(pid = pid, "onvif-rust process found");
